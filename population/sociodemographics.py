@@ -1,14 +1,52 @@
 import pandas as pd
 import numpy as np
 import data.constants as c
-import population.hot_deck_matching
 
 def configure(context, require):
-    require.stage("population.sociodemographics")
+    require.stage("population.matching")
+    require.stage("data.statpop.statpop")
+    require.stage("data.microcensus.microcensus")
 
 def execute(context):
-    df_matching = context.stage("population.matching")
+    df_matching, unmatched_ids = context.stage("population.matching")
+    df_statpop = context.stage("data.statpop.statpop")
+    df_mz, df_mz_trips = context.stage("data.microcensus.microcensus")
 
-    print(df_matching)
+    print(len(df_matching), len(unmatched_ids), len(df_statpop), len(df_mz))
+
+    # Merge the matching data set to STATPOP
+    df_persons = pd.merge(
+        df_statpop, df_matching, on = ["person_id", "household_id"]
+    )
+
+    # Merge in household attributes through head of household
+    df_mz["mz_head_id"] = df_mz[["person_id"]]
+    df_persons = pd.merge(
+        df_persons, df_mz[["mz_head_id", "income_class", "number_of_cars_class", "number_of_bikes_class"]],
+        on = "mz_head_id"
+    )
+
+    # Merge in person attributes
+    df_mz["mz_person_id"] = df_mz[["person_id"]]
+    df_persons = pd.merge(
+        df_persons, df_mz[["mz_person_id", "driving_license", "car_availability", "employed"]],
+        on = "mz_person_id", how = "left"
+    )
+
+    # Reset children
+    children_selector = df_persons["age"] < c.MZ_AGE_THRESHOLD
+    df_persons.loc[children_selector, "driving_license"] = False
+    df_persons.loc[children_selector, "employed"] = False
+    df_persons.loc[children_selector, "car_availability"] = c.CAR_AVAILABILITY_NEVER
+    df_persons.loc[children_selector, "marital_status"] = c.MARITAL_STATUS_SINGLE
+
+    print(len(df_persons))
+    print(list(df_persons.columns))
+
+    #df_persons = pd.merge(
+    #    df_statpop
+    #)
+
+    #
 
     return {}

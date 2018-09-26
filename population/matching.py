@@ -39,32 +39,60 @@ def execute(context):
          #, "home_structure"] TODO: Add this again!!!
     )
 
-    # Remove households with unmatchable heads of household
+    # Remove and track unmatchable houesholds (i.e. head of household)
 
-    unmatchable = head_selector & (df_target["hdm_source_id"] == -1)
-    unmatchable_houeshold_ids = np.unique(df_target[unmatchable]["household_id"].values)
-    remove = df_statpop["household_id"].isin(unmatchable_houeshold_ids)
-    df_statpop = df_statpop.loc[~remove, :]
+    initial_statpop_length = len(df_statpop)
+    initial_target_length = len(df_target)
 
-    print("Umatchable heads of houeshold:", sum(unmatchable))
-    print("Removed houesholds:", len(unmatchable_houeshold_ids))
-    print("Removed persons:", sum(remove))
+    unmatchable_household_selector = df_target["hdm_source_id"] == -1
+    umatchable_household_ids = set(df_target.loc[unmatchable_household_selector, "household_id"].values)
+    unmatchable_person_selector = df_statpop["household_id"].isin(umatchable_household_ids)
 
+    removed_ids = set(df_target.loc[unmatchable_person_selector, "person_id"].values)
+
+    df_target = df_target.loc[~unmatchable_household_selector, :]
+    df_statpop = df_statpop.loc[~unmatchable_person_selector, :]
+
+    removed_houesholds_count = sum(unmatchable_household_selector)
+    removed_persons_count = sum(unmatchable_person_selector)
+
+    print("Unmatchable heads of household: ", removed_houesholds_count)
+    print("  Removed households: ", removed_houesholds_count)
+    print("  Removed persons: ", removed_persons_count)
+
+    assert(len(df_target) == initial_target_length - removed_houesholds_count)
+    assert(len(df_statpop) == initial_statpop_length - removed_persons_count)
+
+    # Convert IDs
     df_target["hdm_source_id"] = df_target["hdm_source_id"].astype(np.int)
     df_source["person_id"] = df_source["person_id"].astype(np.int)
 
     # Get the attributes from the MZ for the head of houeshold (and thus for the household)
-    df_household_attributes = pd.merge(df_target[[
-        "household_id", "hdm_source_id"
-    ]], df_source[[
-        "person_id", "income_class", "number_of_cars_class", "number_of_bikes_class"
-    ]], left_on = "hdm_source_id", right_on = "person_id")
+    df_attributes = pd.merge(
+        df_target[[
+            "household_id", "hdm_source_id"
+        ]],
+        df_source[[
+            "person_id", "income_class", "number_of_cars_class", "number_of_bikes_class"
+        ]],
+        left_on = "hdm_source_id", right_on = "person_id"
+    )
 
-    df_household_attributes["mz_head_id"] = df_household_attributes["hdm_source_id"]
-    del df_household_attributes["hdm_source_id"]
-    del df_household_attributes["person_id"]
+    df_attributes["mz_head_id"] = df_attributes["hdm_source_id"]
+    del df_attributes["hdm_source_id"]
+    del df_attributes["person_id"]
 
-    df_statpop = pd.merge(df_statpop, df_household_attributes)
+    assert(len(df_attributes) == len(df_target))
+
+    # Attach attrbiutes to STATPOP for the second matching
+
+    initial_statpop_size = len(df_statpop)
+
+    df_statpop = pd.merge(
+        df_statpop, df_attributes, on = "household_id"
+    )
+
+    assert(len(df_statpop) == initial_statpop_size)
 
     # Match persons
     age_selector = df_statpop["age"] >= c.MZ_AGE_THRESHOLD
@@ -80,23 +108,51 @@ def execute(context):
         #, "home_structure"] TODO: Add this again!!!
     )
 
-    # Remove unmatchable persons
-    unmatchable = df_target["hdm_source_id"] == -1
-    unmatchable_houeshold_ids = np.unique(df_target[unmatchable]["household_id"].values)
-    remove = df_statpop["household_id"].isin(unmatchable_houeshold_ids)
-    df_statpop = df_statpop.loc[~remove, :]
+    # Remove and track unmatchable persons
 
-    print("Umatchable persons:", sum(unmatchable))
-    print("Removed persons:", len(unmatchable_houeshold_ids))
-    print("Removed persons:", sum(remove))
+    initial_statpop_length = len(df_statpop)
+    initial_target_length = len(df_target)
 
-    df_matching = pd.merge(df_statpop[[
-        "person_id", "household_id", "mz_head_id"
-    ]], df_target[[
-        "person_id", "hdm_source_id"
-    ]])
+    unmatchable_person_selector = df_target["hdm_source_id"] == -1
+    umatchable_household_ids = set(df_target.loc[unmatchable_person_selector, "household_id"].values)
+    unmatchable_member_selector = df_statpop["household_id"].isin(umatchable_household_ids)
+
+    removed_ids |= set(df_statpop.loc[unmatchable_member_selector, "person_id"].values)
+
+    df_target = df_target.loc[~unmatchable_person_selector, :]
+    df_statpop = df_statpop.loc[~unmatchable_member_selector, :]
+
+    removed_persons_count = sum(unmatchable_person_selector)
+    removed_houesholds_count = len(umatchable_household_ids)
+    removed_members_count = sum(unmatchable_member_selector)
+
+    print("Unmatchable persons: ", removed_persons_count)
+    print("  Removed households: ", removed_houesholds_count)
+    print("  Removed household members: ", removed_members_count)
+
+    assert(len(df_target) == initial_target_length - removed_persons_count)
+    assert(len(df_statpop) == initial_statpop_length - removed_members_count)
+
+    # Extract only the matching information
+
+    df_matching = pd.merge(
+        df_statpop[[ "person_id", "household_id", "mz_head_id" ]],
+        df_target[[ "person_id", "hdm_source_id" ]],
+        on = "person_id", how = "left")
 
     df_matching["mz_person_id"] = df_matching["hdm_source_id"]
     del df_matching["hdm_source_id"]
 
-    return df_matching
+    assert(len(df_matching) == len(df_statpop))
+
+    # Check that all person who don't have a MZ id now are under age
+    assert(np.all(df_statpop[
+        df_statpop["person_id"].isin(
+            df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
+        )
+    ]["age"] < c.MZ_AGE_THRESHOLD))
+
+    assert(not np.any(df_matching["mz_head_id"] == -1))
+
+    # Return
+    return df_matching, removed_ids

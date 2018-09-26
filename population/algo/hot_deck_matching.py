@@ -104,6 +104,8 @@ def run(df_target, target_id, df_source, source_id, source_weight, mandatory_fie
     chunks = np.array_split(df_target, runners)
     df_target.loc[:, "hdm_source_id"] = np.hstack(pool.map(runner, enumerate(chunks)))
 
+    for i in range(runners + 1): print(" ") # Formatting of output
+
 matcher = None
 def initializer(_matcher):
     global matcher
