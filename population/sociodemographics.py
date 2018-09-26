@@ -7,7 +7,7 @@ def configure(context, require):
     require.stage("population.sociodemographics")
 
 def execute(context):
-    df_matching = context.stage("population.sociodemographics")
+    df_matching = context.stage("population.matching")
 
     print(df_matching)
 
