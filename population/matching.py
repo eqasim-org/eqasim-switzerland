@@ -21,7 +21,7 @@ def execute(context):
         (~is_weekend_scenario & ~df_mz["weekend"]) # and only weekday samples for a weekday
     ])
 
-    df_statpop = context.stage("data.statpop.statpop")[:1000]
+    df_statpop = context.stage("data.statpop.statpop")
 
     # Match houesholds
     age_selector = df_statpop["age"] >= c.MZ_AGE_THRESHOLD
