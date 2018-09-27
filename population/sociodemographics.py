@@ -12,7 +12,7 @@ def execute(context):
     df_statpop = context.stage("data.statpop.statpop")
     df_mz, df_mz_trips = context.stage("data.microcensus.microcensus")
 
-    print(len(df_matching), len(unmatched_ids), len(df_statpop), len(df_mz))
+    assert(len(df_matching) == len(df_statpop) - len(unmatched_ids))
 
     # Merge the matching data set to STATPOP
     df_persons = pd.merge(
@@ -37,16 +37,9 @@ def execute(context):
     children_selector = df_persons["age"] < c.MZ_AGE_THRESHOLD
     df_persons.loc[children_selector, "driving_license"] = False
     df_persons.loc[children_selector, "employed"] = False
-    df_persons.loc[children_selector, "car_availability"] = c.CAR_AVAILABILITY_NEVER
     df_persons.loc[children_selector, "marital_status"] = c.MARITAL_STATUS_SINGLE
+    df_persons.loc[children_selector, "car_availability"] = c.CAR_AVAILABILITY_NEVER
 
-    print(len(df_persons))
-    print(list(df_persons.columns))
-
-    #df_persons = pd.merge(
-    #    df_statpop
-    #)
-
-    #
-
-    return {}
+    # Make sure we have now NaNs included
+    assert(len(df_persons.drop(["mz_person_id", "mz_head_id"], axis = 1).dropna()) == len(df_matching))
+    return df_persons
