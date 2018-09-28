@@ -8,7 +8,7 @@ def execute(context):
     import lzma as xz
     import data.utils
 
-    with xz.open("%s/STATPOP_2012_Link_Pers_HH.csv.xz" % raw_data_path) as f:
+    with xz.open("%s/statpop/STATPOP_2012_Link_Pers_HH.csv.xz" % raw_data_path) as f:
         fields = {
             "personPseudoID" : int,
             "householdIdNum" : int,

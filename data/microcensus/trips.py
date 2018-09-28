@@ -11,7 +11,7 @@ def configure(context, require):
 def execute(context):
     raw_data_path = context.config["raw_data_path"]
 
-    df_mz_trips = pd.read_csv("%s/CH_CSV/wege.csv" % raw_data_path, encoding = "latin1")
+    df_mz_trips = pd.read_csv("%s/microcensus/wege.csv" % raw_data_path, encoding = "latin1")
 
     df_mz_trips = df_mz_trips[[
         "HHNR", "WEGNR", "f51100", "f51400", "wzweck1", "wzweck2", "wmittel",

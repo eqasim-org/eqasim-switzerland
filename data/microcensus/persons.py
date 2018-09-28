@@ -11,7 +11,7 @@ def execute(context):
     raw_data_path = context.config["raw_data_path"]
 
     df_mz_persons = pd.read_csv(
-        "%s/CH_CSV/zielpersonen.csv" % raw_data_path, sep = ",", encoding = "latin1")
+        "%s/microcensus/zielpersonen.csv" % raw_data_path, sep = ",", encoding = "latin1")
 
     df_mz_persons["age"] = df_mz_persons["alter"]
     df_mz_persons["sex"] = df_mz_persons["gesl"] - 1 # Make zero-based

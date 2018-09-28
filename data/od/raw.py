@@ -14,9 +14,9 @@ def execute(context):
     data_frames = []
 
     for path, weight_column, total, sep in [
-        ("%s/BfS.SE.raw/data-raw/se_zpers_2012_CH.csv.xz" % raw_data_path, "WEIGHT2012", 286016, ","),
-        ("%s/BfS.SE.raw/data-raw/se_zpers_2011_CH.csv.xz" % raw_data_path, "WEIGHT2011", 282750, ";"),
-        ("%s/BfS.SE.raw/data-raw/se_zpers_2010_CH.csv.xz" % raw_data_path, "WEIGHT2010", 317222, ","),
+        ("%s/structural_survey/se_zpers_2012_CH.csv.xz" % raw_data_path, "WEIGHT2012", 286016, ","),
+        ("%s/structural_survey/se_zpers_2011_CH.csv.xz" % raw_data_path, "WEIGHT2011", 282750, ";"),
+        ("%s/structural_survey/se_zpers_2010_CH.csv.xz" % raw_data_path, "WEIGHT2010", 317222, ","),
     ]:
         with xz.open(path) as f:
             fields = {

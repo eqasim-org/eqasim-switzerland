@@ -14,7 +14,7 @@ def execute(context):
     df_od = context.stage("data.od.raw")
 
     df_shapes = gpd.read_file(
-        "%s/shape/gd-b-00.03-95-qg17/shp/quart17.shp" % raw_data_path,
+        "%s/statistical_quarter_borders/shp/quart17.shp" % raw_data_path,
         encoding = "utf-8"
     ).to_crs({'init': 'EPSG:2056'})
 

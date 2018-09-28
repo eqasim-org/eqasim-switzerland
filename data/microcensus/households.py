@@ -12,7 +12,7 @@ def execute(context):
     raw_data_path = context.config["raw_data_path"]
 
     df_mz_households = pd.read_csv(
-        "%s/CH_CSV/haushalte.csv" % raw_data_path, sep = ",", encoding = "latin1")
+        "%s/microcensus/haushalte.csv" % raw_data_path, sep = ",", encoding = "latin1")
 
     # Simple attributes
     df_mz_households["home_structure"] = df_mz_households["W_STRUKTUR_AGG_2000"]

@@ -12,16 +12,16 @@ def configure(context, require):
 CURRENT_YEAR = 2018
 
 SHAPEFILES = [
-    (2018, "ggs/gd-b-00.03-875-gg18/ggg_2018-LV95/shp/g1g18.shp", "GMDNR"),
-    (2017, "ggs/gd-b-00.03-875-gg17/ggg_2017/shp/LV95/g1g17.shp", "GMDNR"),
-    (2016, "ggs/gd-b-00.03-875-gg16/ggg_2016/shp/g1g16.shp", "GMDNR"),
-    (2015, "ggs/gd-b-00.03-876-gg15/GGG_15_V161025/shp/g1g15.shp", "GMDNR"),
-    (2014, "ggs/gd-b-00.03-877-gg14/ggg_2014/shp/g1g14.shp", "GMDNR"),
-    (2013, "ggs/gd-b-00.03-877-gg13_r1/ggg_2013/shp/g1g13.shp", "GMDNR"),
-    (2012, "ggs/gd-b-00.03-878-gg12/g1g12_shp_121130/G1G12.shp", "GMDE"),
-    (2011, "ggs/gd-b-00.03-879-gg11/g1g11_shp_121130/G1G11.shp", "GMDE"),
-    (2010, "ggs/gd-b-00.03-880-gg10/g1g10_shp_121130/G1G10.shp", "GMDE"),
-    (2009, "ggs/gd-b-00.03-881-gg09g1/g1g09_shp_090626/G1G09.shp", "GMDE")
+    (2018, "municipality_borders/gd-b-00.03-875-gg18/ggg_2018-LV95/shp/g1g18.shp", "GMDNR"),
+    (2017, "municipality_borders/gd-b-00.03-875-gg17/ggg_2017/shp/LV95/g1g17.shp", "GMDNR"),
+    (2016, "municipality_borders/gd-b-00.03-875-gg16/ggg_2016/shp/g1g16.shp", "GMDNR"),
+    (2015, "municipality_borders/gd-b-00.03-876-gg15/GGG_15_V161025/shp/g1g15.shp", "GMDNR"),
+    (2014, "municipality_borders/gd-b-00.03-877-gg14/ggg_2014/shp/g1g14.shp", "GMDNR"),
+    (2013, "municipality_borders/gd-b-00.03-877-gg13_r1/ggg_2013/shp/g1g13.shp", "GMDNR"),
+    (2012, "municipality_borders/gd-b-00.03-878-gg12/g1g12_shp_121130/G1G12.shp", "GMDE"),
+    (2011, "municipality_borders/gd-b-00.03-879-gg11/g1g11_shp_121130/G1G11.shp", "GMDE"),
+    (2010, "municipality_borders/gd-b-00.03-880-gg10/g1g10_shp_121130/G1G10.shp", "GMDE"),
+    (2009, "municipality_borders/gd-b-00.03-881-gg09g1/g1g09_shp_090626/G1G09.shp", "GMDE")
 ]
 
 def execute(context):
