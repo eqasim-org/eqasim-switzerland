@@ -79,5 +79,4 @@ def execute(context):
         "age_class", "household_size_class"]]
 
     df = data.statpop.head_of_household.impute(df)
-    df = data.statpop.home_structure.impute(df, context.stage("data.microcensus.households"))
     return df

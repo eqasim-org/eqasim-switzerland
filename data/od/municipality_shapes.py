@@ -75,6 +75,9 @@ def execute(context):
     df_ever["geometry"] = df_ever["geometry"].centroid
     df_ever = df_ever[["zone_ever", "geometry"]]
 
+    df_current.crs = df_all.crs
+    df_ever.crs = df_all.crs
+
     # Find the corresponding current shape using "contains"
     df_contains = gpd.sjoin(
         df_current, df_ever, op = "contains", how = "right"

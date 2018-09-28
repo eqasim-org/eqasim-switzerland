@@ -47,12 +47,8 @@ def execute(context):
     # Houeshold size class
     data.utils.assign_household_class(df_mz_households)
 
-    # Fix the home structure. Not sure if this is exactly what KM does (TODO).
-    df_mz_households.loc[df_mz_households["home_structure"] < 1, "home_structure"] = 0
-    df_mz_households["home_structure"] -= 1 # Make it zero-based cass
-
     # Wrap it up
     return df_mz_households[[
-        "person_id", "home_structure", "household_size", "number_of_cars", "number_of_bikes", "income_class",
+        "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight"
     ]]

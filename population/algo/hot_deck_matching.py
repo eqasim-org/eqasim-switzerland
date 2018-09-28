@@ -6,90 +6,82 @@ import multiprocessing as mp
 
 class HotDeckMatcher:
     def __init__(self, df_source, source_id, source_weight, mandatory_fields, preference_fields, default_id):
-        self.source_ids = df_source[source_id].values
+        self.mandatory_fields = mandatory_fields
+        self.preference_fields = preference_fields
+        self.all_fields = self.mandatory_fields + self.preference_fields
         self.default_id = default_id
 
-        if len(mandatory_fields) > len(np.unique(mandatory_fields)):
-            raise RuntimeError("Duplicate mandatory fields")
+        self.values = {
+            field : list(np.unique(df_source[field]))
+            for field in self.all_fields
+        }
 
-        if len(preference_fields) > len(np.unique(preference_fields)):
-            raise RuntimeError("Duplicate preference fields")
-
-        self.all_fields = mandatory_fields + preference_fields
-
-        self.categories = {}
+        self.field_sizes = [len(self.values[field]) for field in self.all_fields]
+        self.field_indices = np.cumsum(self.field_sizes)
 
         for field in self.all_fields:
-            self.categories[field] = set(np.unique(df_source[field]))
-            df_source["__hdm_%s" % field] = pd.Categorical(df_source[field], categories = self.categories[field])
-            print("Found categories for %s:" % field, ", ".join([str(c) for c in self.categories[field]]))
+            print("Found categories for %s:" % field, ", ".join([str(c) for c in self.values[field]]))
 
-        self.source_indices = {}
+        self.source_matrix = self.make_matrix(df_source, source = True)
+        self.source_weights = df_source[source_weight]
+        self.source_ids = df_source[source_id]
 
-        for field in self.all_fields:
-            self.source_indices[field] = {}
+    def make_matrix(self, df, chunk_index = None, source = False):
+        columns = sum(self.field_sizes)
 
-            for value in self.categories[field]:
-                #self.source_indices[field][value] = set(np.where(df_source["__hdm_%s" % field] == value)[0])
-                self.source_indices[field][value] = df_source["__hdm_%s" % field] == value
+        matrix = np.zeros((len(df), columns), dtype = np.bool)
+        column_index = 0
 
-        self.source_weights = df_source[source_weight].values
-
-        self.dimension_selectors = [[True]] * len(mandatory_fields)
-        self.dimension_selectors += [[False, True]] * len(preference_fields)
-
-        self.progress_total = 0
-
-        for dimensions in itertools.product(*self.dimension_selectors):
-            selected_fields = [self.all_fields[i] for i, select in enumerate(dimensions) if select]
-            self.progress_total += np.product([len(self.categories[field]) for field in selected_fields])
-
-        del df_source
-
-    def __call__(self, df_target, chunk_index = 0):
-        for field in self.all_fields:
-            df_target["__hdm_%s" % field] = pd.Categorical(df_target[field], categories = self.categories[field])
-
-        target_indices = {}
-
-        for field in self.all_fields:
-            target_indices[field] = {}
-
-            for value in self.categories[field]:
-                #target_indices[field][value] = set(np.where(df_target["__hdm_%s" % field] == value)[0])
-                target_indices[field][value] = df_target["__hdm_%s" % field] == value
-
-        matched_indices = (np.ones((len(df_target))) * -1).astype(np.int)
-
-        with tqdm(total = self.progress_total, position = chunk_index) as progress:
-            for dimensions in itertools.product(*self.dimension_selectors):
-                selected_fields = [self.all_fields[i] for i, select in enumerate(dimensions) if select]
-
-                for values in itertools.product(*[self.categories[field] for field in selected_fields]):
-                    source_selected_indices = [self.source_indices[field][value] for value, field in zip(values, selected_fields)]
-                    source_selected_indices = functools.reduce(np.logical_and, source_selected_indices)
-
-                    target_selected_indices = [target_indices[field][value] for value, field in zip(values, selected_fields)]
-                    target_selected_indices = functools.reduce(np.logical_and, target_selected_indices)
-
-                    if np.any(source_selected_indices) and np.any(target_selected_indices):
-                        weights = self.source_weights[source_selected_indices]
-                        weights /= np.sum(weights)
-
-                        target_count = np.count_nonzero(target_selected_indices)
-                        selection_count = np.random.multinomial(target_count, weights)
-
-                        indices = []
-                        for index, count in zip(np.where(source_selected_indices)[0], selection_count):
-                            indices += [index] * count
-                        np.random.shuffle(indices)
-
-                        matched_indices[target_selected_indices] = indices
-
+        with tqdm(total = columns, desc = "Reading categories (%s) ..." % ("source" if source else "target"), position = chunk_index) as progress:
+            for field_name in self.all_fields:
+                for field_value in self.values[field_name]:
+                    matrix[:, column_index] = df[field_name] == field_value
+                    column_index += 1
                     progress.update()
 
-        matched_ids = self.source_ids[matched_indices]
-        matched_ids[matched_indices == -1] = self.default_id
+        return matrix
+
+    def __call__(self, df_target, chunk_index = 0):
+        target_matrix = self.make_matrix(df_target, chunk_index = None)
+
+        total = np.product([
+            self.field_sizes[index] + (0 if field in self.mandatory_fields else 1)
+            for index, field in enumerate(self.all_fields)
+        ])
+
+        search_order = [
+            [list(np.arange(size) == k) for k in range(size)] +
+            ([] if field in self.mandatory_fields else [[False] * size])
+            for field, size in zip(self.all_fields, self.field_sizes)
+        ]
+
+        matched_mask = np.zeros((len(df_target),), dtype = np.bool)
+        matched_indices = np.ones((len(df_target), ), dtype = np.int) * -1
+
+        # Note: This speeds things up quite a bit. We generate a random number
+        # for each person which is later on used for the sampling.
+        random = np.array([
+            np.random.random() for _ in tqdm(range(len(df_target)), desc = "Generating random numbers", position = chunk_index)
+        ])
+
+        with tqdm(total = total, position = chunk_index, desc = "Hot Deck Matching") as progress:
+            for field_mask in itertools.product(*search_order):
+                field_mask = np.array(functools.reduce(lambda x, y: x + y, field_mask), dtype = np.bool)
+                source_mask = np.all(self.source_matrix[:, field_mask], axis = 1)
+
+                if np.any(source_mask):
+                    target_mask = np.all(target_matrix[:, field_mask], axis = 1) & ~matched_mask
+                    matched_mask |= target_mask
+
+                    source_indices = np.where(source_mask)[0]
+                    random_indices = np.floor(random[target_mask] * len(source_indices)).astype(np.int)
+                    matched_indices[target_mask] = source_indices[random_indices]
+
+                progress.update()
+
+        matched_ids = np.zeros((len(df_target),), dtype = self.source_ids.dtype)
+        matched_ids[matched_mask] = self.source_ids.iloc[matched_indices[matched_mask]]
+        matched_ids[~matched_mask] = self.default_id
 
         return matched_ids
 

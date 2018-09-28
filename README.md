@@ -44,12 +44,26 @@ for different years.
 - Contract: [Open data][1]
 
 **Statistical Quarters**
-- Content: `statistical_quarter_borders` contains the borders of the Statistische Quartiere,
+- Content: `statistical_quarter_borders/` contains the borders of the Statistische Quartiere,
 which further divide large cities into smaller pieces. The 2017 data set fits exactly into
 the 2018 municipality shape file.
 - Year: 2017
 - Contract: [Open Data][2]
 
+**Municipality Type**
+- Content `municipality_types/` contains a shape file from BfS that assigns a Gemeindetyp
+(municipality type) to each municipality.
+- Year: 2014
+- Contract: [Open Data][3]
+
+**Municipality Type**
+- Content `municipality_types/` contains a shape file from BfS that assigns a Gemeindetyp
+(municipality type) to each municipality.
+- Year: 2014
+- Contract: [Open Data][3]
+
 [1]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/generalisierte-gemeindegrenzen.assetdetail.5247306.html
 
 [2]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/quartiergrenzen-schweizer-staedte.html
+
+[3]: https://opendata.swiss/de/dataset/gemeindetypologie-are
