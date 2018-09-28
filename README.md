@@ -50,10 +50,10 @@ the 2018 municipality shape file.
 - Year: 2017
 - Contract: [Open Data][2]
 
-**Municipality Type**
-- Content `municipality_types/` contains a shape file from BfS that assigns a Gemeindetyp
-(municipality type) to each municipality.
-- Year: 2014
+**Spatial Structure**
+- Content `spatial_structure_2018.xlsx` is an Excel sheet with all kinds of spatial
+classifications for all municipalities in 2018
+- Year: 2018
 - Contract: [Open Data][3]
 
 **Municipality Type**
@@ -66,4 +66,4 @@ the 2018 municipality shape file.
 
 [2]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/quartiergrenzen-schweizer-staedte.html
 
-[3]: https://opendata.swiss/de/dataset/gemeindetypologie-are
+[3]: https://www.bfs.admin.ch/bfs/de/home/statistiken/querschnittsthemen/raeumliche-analysen/raeumliche-gliederungen/raeumliche-typologien.assetdetail.4542638.html
