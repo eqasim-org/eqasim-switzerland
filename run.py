@@ -5,7 +5,7 @@ config = {
     "raw_data_path" : "/run/media/sebastian/shoerl_data/population/raw",
     "target_path" : "/run/media/sebastian/shoerl_data/temp",
     "stages" : [
-        #"population.sociodemographics",
+        "population.sociodemographics",
         "data.od.matrix"
     ]
 }
