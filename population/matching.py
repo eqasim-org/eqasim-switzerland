@@ -26,15 +26,18 @@ def execute(context):
     df_statpop = context.stage("data.statpop.statpop")
 
     # Include spatial informaton
-    #print("Merging in spatial information ...")
-    #df_mz_spatial = context.stage("data.microcensus.spatial_structure")
-    #df_statpop_spatial = context.stage("data.statpop.spatial_structure")
+    print("Merging in spatial information ...")
+    df_mz_spatial = context.stage("data.microcensus.spatial_structure")
+    df_statpop_spatial = context.stage("data.statpop.spatial_structure")
 
-    #df_source = pd.merge(df_source, df_mz_spatial[["person_id", "spatial_type"]], how = "left")
-    #df_statpop = pd.merge(df_statpop, df_statpop_spatial[["household_id", "spatial_type"]], how = "left")
+    df_source = pd.merge(df_source, df_mz_spatial[["person_id", "spatial_type"]], how = "left")
+    df_statpop = pd.merge(df_statpop, df_statpop_spatial[["household_id", "spatial_type"]], how = "left")
 
-    #assert(np.all(~df_source["spatial_type"].isna()))
-    #assert(np.all(~df_statpop["spatial_type"].isna()))
+    assert(np.all(~df_source["spatial_type"].isna()))
+    assert(np.all(~df_statpop["spatial_type"].isna()))
+
+    del df_mz_spatial
+    del df_statpop_spatial
 
     # Match houesholds
     age_selector = df_statpop["age"] >= c.MZ_AGE_THRESHOLD
@@ -47,9 +50,9 @@ def execute(context):
         df_source, "person_id",
         "household_weight",
         ["age_class", "sex", "marital_status"],
-        ["household_size_class"],
-        runners = hdm_runners
-         #, "home_structure"] TODO: Add this again!!!
+        ["household_size_class", "spatial_type"],
+        runners = hdm_runners,
+        minimum_source_samples = 20
     )
 
     # Remove and track unmatchable houesholds (i.e. head of household)
@@ -106,6 +109,7 @@ def execute(context):
     )
 
     assert(len(df_statpop) == initial_statpop_size)
+    del df_attributes
 
     # Match persons
     age_selector = df_statpop["age"] >= c.MZ_AGE_THRESHOLD
@@ -116,9 +120,9 @@ def execute(context):
         df_source, "person_id",
         "person_weight",
         ["age_class", "sex", "marital_status"],
-        ["household_size_class", "income_class", "number_of_cars_class", "number_of_bikes_class"],
-        runners = hdm_runners
-        #, "home_structure"] TODO: Add this again!!!
+        ["household_size_class", "spatial_type", "income_class", "number_of_cars_class", "number_of_bikes_class"],
+        runners = hdm_runners,
+        minimum_source_samples = 20
     )
 
     # Remove and track unmatchable persons
