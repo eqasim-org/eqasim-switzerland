@@ -2,10 +2,12 @@ import pandas as pd
 import numpy as np
 import data.utils
 import data.constants as c
+import data.microcensus.income
 
 def configure(context, require):
     require.config("raw_data_path")
-    # require.cache = False
+    require.stage("data.microcensus.households")
+    require.stage("data.microcensus.trips")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]
@@ -64,7 +66,7 @@ def execute(context):
     df_mz_persons["subscriptions_verbund_class"] = df_mz_persons["f41653"] == 1
     df_mz_persons["subscriptions_strecke_class"] = df_mz_persons["f41654"] == 1
 
-    return df_mz_persons[[
+    df_mz_persons = df_mz_persons[[
         "person_id",
         "age", "sex",
         "marital_status",
@@ -84,3 +86,23 @@ def execute(context):
         "age_class", "person_weight",
         "weekend"
     ]]
+
+    # Merge in the other data sets
+    df_mz_households = context.stage("data.microcensus.households")
+    df_mz_trips = context.stage("data.microcensus.trips")
+
+    df_mz_persons = pd.merge(df_mz_persons, df_mz_households)
+    df_mz_persons = data.microcensus.income.impute(df_mz_persons)
+
+    remove_ids = set(df_mz_persons["person_id"]) - set(df_mz_trips["person_id"])
+    initial_size = len(df_mz_persons)
+
+    df_mz_persons = df_mz_persons[~df_mz_persons["person_id"].isin(remove_ids)]
+
+    # Note: Around 7000 of them are those, which do not even have an activity chain in the first place
+    # because they have not been asked.
+    print("  Removed %d (%.2f%%) persons from MZ because of insufficient trip data" % (
+        len(remove_ids), 100.0 * len(remove_ids) / initial_size
+    ))
+
+    return df_mz_persons

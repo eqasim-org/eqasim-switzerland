@@ -8,12 +8,12 @@ from sklearn.neighbors import KDTree
 
 def configure(context, require):
     require.stage("data.misc.spatial_structure")
-    require.stage("data.microcensus.microcensus")
+    require.stage("data.microcensus.persons")
 
 def execute(context):
     df_structure = context.stage("data.misc.spatial_structure")
 
-    df = context.stage("data.microcensus.microcensus")[0]
+    df = context.stage("data.microcensus.persons")
 
     df["geometry"] = [
         geo.Point(*coord) for coord in tqdm(

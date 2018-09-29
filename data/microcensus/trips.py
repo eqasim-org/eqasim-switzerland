@@ -76,7 +76,30 @@ def execute(context):
     df_mz_trips.loc[:, "destination_x"] = x
     df_mz_trips.loc[:, "destination_y"] = y
 
+    # Add activity durations by joining the trips with themselves
+    df_mz_trips.loc[:, "previous_trip_id"] = df_mz_trips["trip_id"] -1
+
+    df_durations = pd.merge(
+        df_mz_trips[["person_id", "trip_id", "arrival_time"]],
+        df_mz_trips[["person_id", "previous_trip_id", "departure_time"]],
+        left_on = ["person_id", "trip_id"], right_on = ["person_id", "previous_trip_id"])
+
+    df_durations.loc[:, "activity_duration"] = df_durations["departure_time"] - df_durations["arrival_time"]
+
+    df_mz_trips = pd.merge(
+        df_mz_trips, df_durations[["person_id", "trip_id", "activity_duration"]],
+        on = ["person_id", "trip_id"], how = "left"
+    )
+
+    # Filter persons for which we do not have sufficient information
+    unknown_ids = set(df_mz_trips[
+        (df_mz_trips["mode"] == "unknown") | (df_mz_trips["purpose"] == "unknown")
+    ]["person_id"])
+
+    print("  Removed %d persons with trips with unknown mode or unknown purpose" % len(unknown_ids))
+    df_mz_trips = df_mz_trips[~df_mz_trips["person_id"].isin(unknown_ids)]
+
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y",
-        "uses_plane"
+        "uses_plane", "activity_duration"
     ]]

@@ -27,6 +27,8 @@ def execute(context):
                 "COMPANY_CTRY" : int,
                 "MAINMODETRANSPWORK" : int,
                 weight_column : float,
+                "SCHOOL_MUN" : int,
+                "SCHOOL_QUARTER" : int
             }
 
             renames = {
@@ -37,6 +39,8 @@ def execute(context):
                 "COMPANY_CTRY" : "work_country",
                 "MAINMODETRANSPWORK" : "mode",
                 weight_column : "weight",
+                "SCHOOL_MUN" : "education_municipality",
+                "SCHOOL_QUARTER" : "education_quarter"
             }
 
             data_frames.append(data.utils.read_csv(f, fields, renames, total = total, sep = sep))

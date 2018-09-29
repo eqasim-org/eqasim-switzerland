@@ -7,13 +7,13 @@ def configure(context, require):
     require.config("weekend_scenario", False)
     require.config("hot_deck_matching_runners", -1)
     require.config("hot_deck_minimum_source_samples", 20)
-    require.stage("data.microcensus.microcensus")
+    require.stage("data.microcensus.persons")
     require.stage("data.statpop.statpop")
     require.stage("data.statpop.spatial_structure")
     require.stage("data.microcensus.spatial_structure")
 
 def execute(context):
-    df_mz, df_mz_trips = context.stage("data.microcensus.microcensus")
+    df_mz = context.stage("data.microcensus.persons")
     is_weekend_scenario = context.config["weekend_scenario"]
     hdm_runners = context.config["hot_deck_matching_runners"]
     hdm_minimum_source_samples = context.config["hot_deck_minimum_source_samples"]

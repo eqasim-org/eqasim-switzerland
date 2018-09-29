@@ -5,12 +5,12 @@ import data.constants as c
 def configure(context, require):
     require.stage("population.matching")
     require.stage("data.statpop.statpop")
-    require.stage("data.microcensus.microcensus")
+    require.stage("data.microcensus.persons")
 
 def execute(context):
     df_matching, unmatched_ids = context.stage("population.matching")
     df_statpop = context.stage("data.statpop.statpop")
-    df_mz, df_mz_trips = context.stage("data.microcensus.microcensus")
+    df_mz = context.stage("data.microcensus.persons")
 
     assert(len(df_matching) == len(df_statpop) - len(unmatched_ids))
 

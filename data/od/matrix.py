@@ -8,6 +8,10 @@ def configure(context, require):
     require.stage("data.od.municipality_shapes")
     require.stage("data.od.quarter_shapes")
 
+# TODO: Right now we only produce OD matrices for WORK. We have the information
+# from statpop on where the schools are, so we can use this in the future. Also,
+# we have commute information for school already prepared (see population.commute).
+
 def execute(context):
     df_od = context.stage("data.od.raw")
     df_municipalities, df_municipality_mapping = context.stage("data.od.municipality_shapes")
