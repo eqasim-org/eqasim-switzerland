@@ -15,7 +15,7 @@ def configure(context, require):
 # TODO: The matching categories are as they are defined by Kirill here. However,
 # we should discuss about them. Wouldn't it have a big impact on how the activity
 # chains look like if a person is EMPLOYED or has a DRIVING LICENSE? Probably much
-# more than whether the person is employed (or even income?). Whether the person has
+# more than whether the person is married (or even income?). Whether the person has
 # children could also be a factor. Is the numbre of cars or the number of bikes
 # so relevant? Maybe we can replace the age class by {student, working_age, retired}.
 
