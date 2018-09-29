@@ -12,6 +12,8 @@ def execute(context):
     df_statpop = context.stage("data.statpop.statpop")
     df_mz, df_mz_trips = context.stage("data.microcensus.microcensus")
 
+    print(len(df_matching), len(df_statpop), len(unmatched_ids))
+
     assert(len(df_matching) == len(df_statpop) - len(unmatched_ids))
 
     # Merge the matching data set to STATPOP

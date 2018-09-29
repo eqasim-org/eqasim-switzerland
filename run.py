@@ -7,6 +7,7 @@ config = {
     "threads" : 4,
     "stages" : [
         "population.matching",
+        "population.sociodemographics",
         #"data.od.matrix",
         #"data.statpop.statpop",
         #"data.misc.spatial_structure",

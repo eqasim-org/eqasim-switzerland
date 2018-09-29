@@ -6,6 +6,7 @@ import population.algo.hot_deck_matching
 def configure(context, require):
     require.config("weekend_scenario", False)
     require.config("hot_deck_matching_runners", -1)
+    require.config("hot_deck_minimum_source_samples", 20)
     require.stage("data.microcensus.microcensus")
     require.stage("data.statpop.statpop")
     require.stage("data.statpop.spatial_structure")
@@ -15,6 +16,7 @@ def execute(context):
     df_mz, df_mz_trips = context.stage("data.microcensus.microcensus")
     is_weekend_scenario = context.config["weekend_scenario"]
     hdm_runners = context.config["hot_deck_matching_runners"]
+    hdm_minimum_source_samples = context.config["hot_deck_minimum_source_samples"]
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
     df_source = pd.DataFrame(df_mz[
@@ -24,6 +26,8 @@ def execute(context):
     ])
 
     df_statpop = context.stage("data.statpop.statpop")
+    number_of_statpop_persons = len(np.unique(df_statpop["person_id"]))
+    number_of_statpop_households = len(np.unique(df_statpop["household_id"]))
 
     # Include spatial informaton
     print("Merging in spatial information ...")
@@ -52,7 +56,7 @@ def execute(context):
         ["age_class", "sex", "marital_status"],
         ["household_size_class", "spatial_type"],
         runners = hdm_runners,
-        minimum_source_samples = 20
+        minimum_source_samples = hdm_minimum_source_samples
     )
 
     # Remove and track unmatchable houesholds (i.e. head of household)
@@ -64,7 +68,8 @@ def execute(context):
     umatchable_household_ids = set(df_target.loc[unmatchable_household_selector, "household_id"].values)
     unmatchable_person_selector = df_statpop["household_id"].isin(umatchable_household_ids)
 
-    removed_ids = set(df_target.loc[unmatchable_person_selector, "person_id"].values)
+    removed_person_ids = set(df_statpop.loc[unmatchable_person_selector, "person_id"].values)
+    removed_household_ids = set() | umatchable_household_ids
 
     df_target = df_target.loc[~unmatchable_household_selector, :]
     df_statpop = df_statpop.loc[~unmatchable_person_selector, :]
@@ -75,6 +80,7 @@ def execute(context):
     print("Unmatchable heads of household: ", removed_houesholds_count)
     print("  Removed households: ", removed_houesholds_count)
     print("  Removed persons: ", removed_persons_count)
+    print("")
 
     assert(len(df_target) == initial_target_length - removed_houesholds_count)
     assert(len(df_statpop) == initial_statpop_length - removed_persons_count)
@@ -122,7 +128,7 @@ def execute(context):
         ["age_class", "sex", "marital_status"],
         ["household_size_class", "spatial_type", "income_class", "number_of_cars_class", "number_of_bikes_class"],
         runners = hdm_runners,
-        minimum_source_samples = 20
+        minimum_source_samples = hdm_minimum_source_samples
     )
 
     # Remove and track unmatchable persons
@@ -134,7 +140,8 @@ def execute(context):
     umatchable_household_ids = set(df_target.loc[unmatchable_person_selector, "household_id"].values)
     unmatchable_member_selector = df_statpop["household_id"].isin(umatchable_household_ids)
 
-    removed_ids |= set(df_statpop.loc[unmatchable_member_selector, "person_id"].values)
+    removed_person_ids |= set(df_statpop.loc[unmatchable_member_selector, "person_id"].values)
+    removed_household_ids |= umatchable_household_ids
 
     df_target = df_target.loc[~unmatchable_person_selector, :]
     df_statpop = df_statpop.loc[~unmatchable_member_selector, :]
@@ -146,6 +153,7 @@ def execute(context):
     print("Unmatchable persons: ", removed_persons_count)
     print("  Removed households: ", removed_houesholds_count)
     print("  Removed household members: ", removed_members_count)
+    print("")
 
     assert(len(df_target) == initial_target_length - removed_persons_count)
     assert(len(df_statpop) == initial_statpop_length - removed_members_count)
@@ -171,5 +179,9 @@ def execute(context):
 
     assert(not np.any(df_matching["mz_head_id"] == -1))
 
+    print("Matching is done. In total, the following observations were removed from STATPOP: ")
+    print("  Households: %d (%.2f%%)" % ( len(removed_household_ids), 100.0 * len(removed_household_ids) / number_of_statpop_households ))
+    print("  Persons: %d (%.2f%%)" % ( len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_statpop_persons ))
+
     # Return
-    return df_matching, removed_ids
+    return df_matching, removed_person_ids
