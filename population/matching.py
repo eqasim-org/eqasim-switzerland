@@ -19,6 +19,16 @@ def configure(context, require):
 # children could also be a factor. Is the numbre of cars or the number of bikes
 # so relevant? Maybe we can replace the age class by {student, working_age, retired}.
 
+# Shouldn't DRIVING LICENSE even be a required attribute (rather than one that is
+# only preferred for the matching)? The way it is now activity chains with "car"
+# can be matched to people who don't have a license. On the other hand, we need
+# to revise how we handle car. In MZ is believe it can also mean that the person
+# is only a passenger. Not sure if we have information in there whether the person
+# is a driver? Then it would be easy to set up another mode "ride" directly from
+# the MZ. Now we may convert "car" to "ride" later on when there is a person with
+# a car trip but without a license or a car in the household. However, this had
+# not been done in Kirills version.
+
 def execute(context):
     df_mz = context.stage("data.microcensus.persons")
     is_weekend_scenario = context.config["weekend_scenario"]

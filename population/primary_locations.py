@@ -13,15 +13,6 @@ def configure(context, require):
 # would need to be done is to adjust data.od.matrix to produce two kinds of
 # matrices and then we would need to use this information here. In population.commute
 # we already produce information on education commute.
-# Shouldn't DRIVING LICENSE even be a required attribute (rather than one that is
-# only preferred for the matching)? The way it is now activity chains with "car"
-# can be matched to people who don't have a license. On the other hand, we need
-# to revise how we handle car. In MZ is believe it can also mean that the person
-# is only a passenger. Not sure if we have information in there whether the person
-# is a driver? Then it would be easy to set up another mode "ride" directly from
-# the MZ. Now we may convert "car" to "ride" later on when there is a person with
-# a car trip but without a license or a car in the household. However, this had
-# not been done in Kirills version.
 
 # However, for now we will recover the simple scheme from Kirill!
 
