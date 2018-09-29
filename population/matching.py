@@ -12,6 +12,13 @@ def configure(context, require):
     require.stage("data.statpop.spatial_structure")
     require.stage("data.microcensus.spatial_structure")
 
+# TODO: The matching categories are as they are defined by Kirill here. However,
+# we should discuss about them. Wouldn't it have a big impact on how the activity
+# chains look like if a person is EMPLOYED or has a DRIVING LICENSE? Probably much
+# more than whether the person is employed (or even income?). Whether the person has
+# children could also be a factor. Is the numbre of cars or the number of bikes
+# so relevant? Maybe we can replace the age class by {student, working_age, retired}.
+
 def execute(context):
     df_mz = context.stage("data.microcensus.persons")
     is_weekend_scenario = context.config["weekend_scenario"]

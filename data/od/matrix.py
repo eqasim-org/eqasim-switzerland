@@ -81,7 +81,7 @@ def execute(context):
     df_od = df_od[~((df_od["work_type"] == "country") & (df_od["work"] <= 0))]
 
     unknown_count = before_count - len(df_od)
-    print("Removed %d (%.2f%%) observations for which no work location is known" % (unknown_count, 100 * unknown_count / before_count))
+    print("Removed %d (%.2f%%) observations from structural survey for which no work location is known" % (unknown_count, 100 * unknown_count / before_count))
 
     # I'm leaving this piece of code here which allows to plot where those people
     # with unknown work places are. They are distributed quite uniformly over Switzerland.
