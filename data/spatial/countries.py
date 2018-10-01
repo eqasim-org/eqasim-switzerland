@@ -17,7 +17,23 @@ def execute(context):
 
     return df
 
+def update_country_ids(df, df_countries, remove_unknown = False):
+    assert("country_id" in df.columns)
 
+    df["deprecated_country_id"] = df["country_id"]
+    del df["country_id"]
+
+    df_join = pd.merge(
+        df[["deprecated_country_id"]], df_countries,
+        left_on = "deprecated_country_id", right_on = "country_id", how = "left"
+    )
+
+    df.loc[:, "country_id"] = df_join.loc[:, "country_id"].values
+
+    if remove_unknown:
+        return df[~np.isnan(df["country_id"])]
+    else:
+        return df
 
 
 

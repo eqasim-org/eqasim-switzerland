@@ -113,16 +113,15 @@ def impute(df, df_municipalities, fix_by_distance = True):
     assert(not "municipality_id" in df.columns)
 
     print("Imputing %d municipalities by spatial join..." % len(df))
-    #df_join = gpd.sjoin(df_municipalities, df, op = "contains", how = "right").reset_index()
 
     result = []
     chunk_count = int(len(df) / 10000)
     for chunk in tqdm(np.array_split(df, chunk_count), total = chunk_count):
         result.append(gpd.sjoin(df_municipalities, chunk, op = "contains", how = "right"))
-    df_join = pd.concat(result).reset_index()
+    df = pd.concat(result).reset_index()
 
-    invalid_mask = np.isnan(df_join["municipality_id"])
-    df.loc[~invalid_mask, "municipality_id"] = df_join.loc[~invalid_mask, "municipality_id"]
+    invalid_mask = np.isnan(df["municipality_id"])
+    df.loc[~invalid_mask, "municipality_id"] = df.loc[~invalid_mask, "municipality_id"]
 
     if fix_by_distance and np.any(invalid_mask):
         print("  Fixing %d observations by distance join..." % np.count_nonzero(invalid_mask))

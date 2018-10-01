@@ -45,4 +45,4 @@ def execute(context):
 
             data_frames.append(data.utils.read_csv(f, fields, renames, total = total, sep = sep))
 
-    return pd.concat(data_frames)
+    return pd.concat(data_frames, sort = True)

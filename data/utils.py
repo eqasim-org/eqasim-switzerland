@@ -13,7 +13,11 @@ def to_gpd(df, x = "x", y = "y", crs = {"init" : "EPSG:2056"}):
         )]
     df = gpd.GeoDataFrame(df)
     df.crs = crs
-    return df.to_crs({"init" : "EPSG:2056"})
+
+    if not crs == {"init" : "EPSG:2056"}:
+        df = df.to_crs({"init" : "EPSG:2056"})
+
+    return df
 
 def fix_marital_status(df):
     """ Makes young people, who are separated, be treated as single! """

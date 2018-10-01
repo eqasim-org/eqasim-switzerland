@@ -41,6 +41,7 @@ def execute(context):
 def impute(df, df_zones):
     print("Imputing %d zones" % len(df))
     remaining_mask = np.ones((len(df),), dtype = np.bool)
+    df.loc[:, "zone_id"] = np.nan
 
     if "quarter_id" in df:
         f = ~np.isnan(df["quarter_id"]) & remaining_mask

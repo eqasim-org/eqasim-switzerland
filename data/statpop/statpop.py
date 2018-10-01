@@ -3,13 +3,18 @@ import pandas as pd
 import numpy as np
 import data.constants as c
 import data.statpop.head_of_household
-import data.statpop.home_structure
+import data.spatial.municipalities
+import data.spatial.zones
+import data.utils
+import data.spatial.municipality_types
 
 def configure(context, require):
     require.stage("data.statpop.persons")
     require.stage("data.statpop.households")
     require.stage("data.statpop.link")
-    require.stage("data.microcensus.households")
+    require.stage("data.spatial.municipalities")
+    require.stage("data.spatial.zones")
+    require.stage("data.spatial.municipality_types")
 
 def execute(context):
     df_persons = context.stage("data.statpop.persons")
@@ -69,6 +74,26 @@ def execute(context):
     # Get the age class
     df["age_class"] = np.digitize(df["age"], c.AGE_CLASS_UPPER_BOUNDS)
 
+    # Impute spatial information
+    df_municipalities = context.stage("data.spatial.municipalities")[0]
+    df_zones = context.stage("data.spatial.zones")
+    df_municipality_types = context.stage("data.spatial.municipality_types")
+
+    df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
+    df_spatial = data.utils.to_gpd(df_spatial, "home_x", "home_y")
+    df_spatial = data.spatial.municipalities.impute(df_spatial, df_municipalities)
+    df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
+    df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
+
+    assert(len(df) == len(df_spatial))
+
+    df = pd.merge(
+        df, df_spatial[["person_id", "zone_id", "spatial_type"]],
+        on = "person_id"
+    )
+
+    df["home_zone_id"] = df["zone_id"]
+
     # Wrap everything up
     df = df[[
         "person_id", "household_id",
@@ -76,7 +101,7 @@ def execute(context):
         "home_x", "home_y",
         "marital_status", "nationality",
         "household_size",
-        "age_class", "household_size_class"]]
+        "age_class", "household_size_class", "home_zone_id", "spatial_type"]]
 
     df = data.statpop.head_of_household.impute(df)
     return df

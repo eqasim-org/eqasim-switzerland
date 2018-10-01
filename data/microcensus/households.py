@@ -13,8 +13,6 @@ def configure(context, require):
     require.stage("data.spatial.municipalities")
     require.stage("data.spatial.zones")
     require.stage("data.spatial.municipality_types")
-    #require.stage("data.spatial.zones")
-    # require.cache = False
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]

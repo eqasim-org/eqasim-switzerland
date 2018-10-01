@@ -2,11 +2,17 @@ import pandas as pd
 import numpy as np
 import data.constants as c
 from tqdm import tqdm
+import data.spatial.zones
+import data.spatial.countries
+import data.spatial.municipalities
+import data.spatial.quarters
 
 def configure(context, require):
     require.stage("data.od.raw")
-    require.stage("data.od.municipality_shapes")
-    require.stage("data.od.quarter_shapes")
+    require.stage("data.spatial.countries")
+    require.stage("data.spatial.municipalities")
+    require.stage("data.spatial.quarters")
+    require.stage("data.spatial.zones")
 
 # TODO: Right now we only produce OD matrices for WORK. We have the information
 # from statpop on where the schools are, so we can use this in the future. Also,
@@ -14,8 +20,10 @@ def configure(context, require):
 
 def execute(context):
     df_od = context.stage("data.od.raw")
-    df_municipalities, df_municipality_mapping = context.stage("data.od.municipality_shapes")
-    df_quarters = context.stage("data.od.quarter_shapes")
+    df_zones = context.stage("data.spatial.zones")
+    df_countries = context.stage("data.spatial.countries")
+    df_municipality_mapping = context.stage("data.spatial.municipalities")[1]
+    df_quarters = context.stage("data.spatial.quarters")
 
     # Find the correct modes
     df_od.loc[:, "mode_numeric"] = df_od.loc[:, "mode"].astype(np.int)
@@ -34,90 +42,56 @@ def execute(context):
     df_od.loc[df_od["mode_numeric"] == 10, "mode"] = "other" # Ship, cable car, ...
     del df_od["mode_numeric"]
 
-    # Find the lowest level of aggregation for home and work:
-    # - Municipalities have the format {MUN_ID} with MUN_ID being 5 or 6 digits
-    # - Quarters have the format {MUN_ID,QUARTER_ID} with QUARTER_ID being max. 3 digits
-    # - Countries have the format {COUNTRY_ID} starting at around 8000, while the
-    #   municipalities have IDs less than 8000
-    # So just by setting the lowest level of aggregation as the "actual" ID does
-    #   work and we do not introduce any collisions.
-    df_od.loc[:, "home"] = df_od["home_municipality"]
-    df_od.loc[:, "home_type"] = "municipality"
+    # First impute the home zone
+    df_od.loc[:, "municipality_id"] = df_od["home_municipality"]
+    df_od.loc[:, "quarter_id"] = df_od["home_quarter"]
+    df_od = data.spatial.quarters.update_quarter_ids(df_od, df_quarters)
+    df_od = data.spatial.municipalities.update_municipality_ids(df_od, df_municipality_mapping)
 
-    f = df_od["home_quarter"].isin(df_quarters["zone"]) # Make sure we have a shape!
-    df_od.loc[f, "home"] = df_od[f]["home_quarter"]
-    df_od.loc[f, "home_type"] = "quarter"
+    df_od = data.spatial.zones.impute(df_od, df_zones)
+    df_od.loc[:, "home_zone_id"] = df_od.loc[:, "zone_id"]
+    df_od.loc[:, "home_zone_level"] = df_od.loc[:, "zone_level"]
 
-    df_od.loc[:, "work"] = df_od["work_country"]
-    df_od.loc[:, "work_type"] = "country"
+    # Second impute the work zone
+    df_od.loc[:, "country_id"] = df_od["work_country"]
+    df_od.loc[:, "municipality_id"] = df_od["work_municipality"]
+    df_od.loc[:, "quarter_id"] = df_od["work_quarter"]
+    df_od = data.spatial.quarters.update_quarter_ids(df_od, df_quarters)
+    df_od = data.spatial.municipalities.update_municipality_ids(df_od, df_municipality_mapping)
+    df_od = data.spatial.countries.update_country_ids(df_od, df_countries)
 
-    df_od.loc[df_od["work_municipality"] > 0, "work"] = df_od[df_od["work_municipality"] > 0]["work_municipality"]
-    df_od.loc[df_od["work_municipality"] > 0, "work_type"] = "municipality"
+    df_od = data.spatial.zones.impute(df_od, df_zones)
+    df_od.loc[:, "work_zone_id"] = df_od.loc[:, "zone_id"]
+    df_od.loc[:, "work_zone_level"] = df_od.loc[:, "zone_level"]
+    del df_od["country_id"]
 
-    f = df_od["work_quarter"].isin(df_quarters["zone"]) # Make sure we have a shape!
-    df_od.loc[f, "work"] = df_od[f]["work_quarter"]
-    df_od.loc[f, "work_type"] = "quarter"
+    # Third impute the education zone (TODO: not used right now)
+    #df_od.loc[:, "municipality_id"] = df_od["education_municipality"]
+    #df_od.loc[:, "quarter_id"] = df_od["education_quarter"]
+    #df_od = data.spatial.quarters.update_quarter_ids(df_od, df_quarters)
+    #df_od = data.spatial.municipalities.update_municipality_ids(df_od, df_municipality_mapping)
 
-    # We know now that every observation that *is* on the quarter level *has*
-    # a valid quarter. However, the municipalities don't need to exist in 2018.
-    # However, we have a mapping of old quarters to new ones from the previous
-    # stage. We can apply this here to remove invalid municipalities.
+    #df_od = data.spatial.zones.impute(df_od, df_zones)
+    #df_od.loc[:, "education_zone_id"] = df_od.loc[:, "zone_id"]
+    #df_od.loc[:, "education_zone_level"] = df_od.loc[:, "zone_level"]
 
-    f_home = df_od["home_type"] == "municipality"
-    f_work = df_od["work_type"] == "municipality"
+    del df_od["quarter_id"]
+    del df_od["municipality_id"]
 
-    df_changed = df_municipality_mapping[df_municipality_mapping["zone"] != df_municipality_mapping["zone_previously"]]
-    for _, row in tqdm(df_changed.iterrows(), total = len(df_changed), desc = "Rewriting municipality ids"):
-        updated_id, previous_id = row["zone"], row["zone_previously"]
-        df_od.loc[f_home & (df_od["home"] == previous_id), "home"] = updated_id
-        df_od.loc[f_work & (df_od["work"] == previous_id), "work"] = updated_id
-
-    # There are people about which we do not know anything. This is when there aggregation
-    # level is "country", but they don't have a country id.
-
+    # There are some people for which we don't have a valid OD pair
     before_count = len(df_od)
-
-    df_od = df_od[~((df_od["home_type"] == "country") & (df_od["home"] <= 0))]
-    df_od = df_od[~((df_od["work_type"] == "country") & (df_od["work"] <= 0))]
+    df_od = df_od[~np.isnan(df_od["home_zone_id"])]
+    df_od = df_od[~np.isnan(df_od["work_zone_id"])]
 
     unknown_count = before_count - len(df_od)
     print("Removed %d (%.2f%%) observations from structural survey for which no work location is known" % (unknown_count, 100 * unknown_count / before_count))
-
-    # I'm leaving this piece of code here which allows to plot where those people
-    # with unknown work places are. They are distributed quite uniformly over Switzerland.
-    # At first I was skeptical, but of course those are all the students, unemployed
-    # people and retired.
-    #
-    #    pd.merge(df_municipalities, df_od[
-    #        (df_od["work_type"] == "country") &
-    #        (df_od["work"] <= 0) &
-    #        (df_od["home_type"] == "municipality")
-    #    ].groupby("home").size().reset_index(name = "count"),
-    #    left_on = "zone", right_on = "home").to_file("/home/sebastian/output.shp")
-    #
-
-    # Now we should only have valid ids
-    assert(np.all(df_od[df_od["home_type"] == "municipality"]["home"].isin(df_municipalities["zone"])))
-    assert(np.all(df_od[df_od["work_type"] == "municipality"]["work"].isin(df_municipalities["zone"])))
-    assert(np.all(df_od[df_od["home_type"] == "quarter"]["home"].isin(df_quarters["zone"])))
-    assert(np.all(df_od[df_od["work_type"] == "quarter"]["work"].isin(df_quarters["zone"])))
-    assert(np.all(df_od[df_od["home_type"] == "country"]["home"] > 0))
-    assert(np.all(df_od[df_od["work_type"] == "country"]["work"] > 0))
-
-    df_od["work_type"] = df_od["work_type"].astype("category")
-    df_od["home_type"] = df_od["home_type"].astype("category")
-    df_od["mode"] = df_od["mode"].astype("category")
-
-    df_od = df_od[["home", "home_type", "work", "work_type", "mode", "weight"]]
     assert(len(df_od) == len(df_od.dropna()))
 
     # Filter unknonwn modes
     df_od = df_od[~((df_od["mode"] == "unknown") | (df_od["mode"] == "other"))]
 
     # Create the matrices
-    unique_zone_ids = set(np.unique(df_od["home"]))
-    unique_zone_ids |= set(np.unique(df_od["home"]))
-    unique_zone_ids = list(unique_zone_ids)
+    zone_ids = list(df_zones["zone_id"])
 
     pdf_matrices = {}
     cdf_matrices = {}
@@ -126,9 +100,9 @@ def execute(context):
         df_mode_od = df_od[df_od["mode"] == mode]
 
         matrix = pd.crosstab(
-            df_od["home"], df_od["work"],
+            df_od["home_zone_id"], df_od["work_zone_id"],
             df_od["weight"], aggfunc = sum).reindex(
-                index = pd.Index(unique_zone_ids), columns = pd.Index(unique_zone_ids)
+                index = pd.Index(zone_ids), columns = pd.Index(zone_ids)
             ).fillna(0).values
 
         zero_filter = np.sum(matrix, axis = 1) > 0.0
@@ -155,4 +129,4 @@ def execute(context):
     # this looks like, so we say that we ignore this fact here.
     # Still, one *could* improve this.
 
-    return pdf_matrices, cdf_matrices, unique_zone_ids
+    return pdf_matrices, cdf_matrices
