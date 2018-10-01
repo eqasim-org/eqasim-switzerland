@@ -18,7 +18,7 @@ config = {
         #"data.misc.spatial_structure",
         #"data.statpop.spatial_structure"
         #"data.microcensus.spatial_structure"
-        #"data.spatial.zones"
+        #"data.spatial.types"
     ]
 }
 
