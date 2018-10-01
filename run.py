@@ -1,5 +1,4 @@
 import pipeline
-import data.microcensus.trips
 import yaml
 import sys
 
