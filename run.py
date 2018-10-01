@@ -1,28 +1,15 @@
 import pipeline
 import data.microcensus.trips
+import yaml
+import sys
 
-config = {
-    "raw_data_path" : "/run/media/sebastian/shoerl_data/population/raw",
-    "target_path" : "/run/media/sebastian/shoerl_data/temp",
-    "threads" : 4,
-    "hot_deck_matching_runners" : 2,
-    "stages" : [
-        #"population.matching",
-        "population.sociodemographics",
-        #"data.microcensus.households",
-        #"data.microcensus.persons",
-        #"data.microcensus.trips",
-        #"population.commute",
-        "population.primary_locations",
-        #"data.od.raw",
-        #"data.od.matrix",
-        #"data.statpop.statpop",
-        #"data.misc.spatial_structure",
-        #"data.statpop.spatial_structure"
-        #"data.microcensus.spatial_structure"
-        #"data.spatial.types"
-    ]
-}
+config_path = "config.yml"
+
+if len(sys.argv) > 1:
+    config_path = sys.argv[1]
+
+with open(config_path) as f:
+    config = yaml.load(f)
 
 pipeline.run(
     config["stages"],
