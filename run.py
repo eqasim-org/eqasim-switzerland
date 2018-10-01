@@ -8,7 +8,7 @@ config = {
     "stages" : [
         #"population.matching",
         #"population.sociodemographics",
-        #"data.microcensus.persons",
+        "data.microcensus.households",
         #"data.microcensus.trips",
         #"population.commute",
         #"population.primary_locations",
@@ -18,7 +18,7 @@ config = {
         #"data.misc.spatial_structure",
         #"data.statpop.spatial_structure"
         #"data.microcensus.spatial_structure"
-        "data.spatial.zones"
+        #"data.spatial.zones"
     ]
 }
 

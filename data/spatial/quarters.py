@@ -19,6 +19,23 @@ def execute(context):
 
     return df
 
+def update_quarter_ids(df, df_quarters, remove_unknown = False):
+    assert("quarter_id" in df.columns)
+
+    df["deprecated_quarter_id"] = df["quarter_id"]
+    del df["quarter_id"]
+
+    df_join = pd.merge(
+        df[["deprecated_quarter_id"]], df_quarters,
+        left_on = "deprecated_quarter_id", right_on = "quarter_id", how = "left"
+    )
+
+    df.loc[:, "quarter_id"] = df_join.loc[:, "quarter_id"].values
+
+    if remove_unknown:
+        return df[~np.isnan(df["quarter_id"])]
+    else:
+        return df
 
 
 

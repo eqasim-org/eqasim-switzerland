@@ -3,9 +3,15 @@ import numpy as np
 import data.utils
 import data.constants as c
 import pyproj
+import data.spatial.municipalities
+import data.spatial.zones
+import data.utils
 
 def configure(context, require):
     require.config("raw_data_path")
+    require.stage("data.spatial.municipalities")
+    require.stage("data.spatial.zones")
+    #require.stage("data.spatial.zones")
     # require.cache = False
 
 def execute(context):
@@ -47,8 +53,25 @@ def execute(context):
     # Houeshold size class
     data.utils.assign_household_class(df_mz_households)
 
+    # Impute spatial information
+    df_municipalities = context.stage("data.spatial.municipalities")[0]
+    df_zones = context.stage("data.spatial.zones")
+
+    df_spatial = pd.DataFrame(df_mz_households[["person_id", "home_x", "home_y"]])
+    df_spatial = data.utils.to_gpd(df_spatial, "home_x", "home_y")
+    df_spatial = data.spatial.municipalities.impute(df_spatial, df_municipalities)
+    df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
+
+    df_mz_households = pd.merge(
+        df_mz_households, df_spatial[["person_id", "zone_id"]],
+        on = "person_id"
+    )
+
+    df_mz_households["home_zone_id"] = df_mz_households["zone_id"]
+
     # Wrap it up
     return df_mz_households[[
         "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
-        "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight"
+        "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
+        "home_zone_id"
     ]]

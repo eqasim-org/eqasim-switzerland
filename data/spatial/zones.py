@@ -37,3 +37,56 @@ def execute(context):
     df_zones["zone_level"] = df_zones["zone_level"].astype("category")
 
     return df_zones[["zone_id", "zone_name", "zone_level", "zone_level_id"]]
+
+def impute(df, df_zones):
+    print("Imputing %d zones" % len(df))
+    remaining_mask = np.ones((len(df),), dtype = np.bool)
+
+    if "quarter_id" in df:
+        f = ~np.isnan(df["quarter_id"]) & remaining_mask
+
+        df_join = pd.merge(
+            df[f][["quarter_id"]],
+            df_zones[df_zones["zone_level"] == "quarter"][["zone_level_id", "zone_id", "zone_level"]],
+            how = "left", left_on = "quarter_id", right_on = "zone_level_id")
+
+        df.loc[f, "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= np.isnan(df["zone_id"])
+
+        print("  Found %d quarters" % np.count_nonzero(df["zone_level"] == "quarter"))
+
+    if "municipality_id" in df:
+        f = ~np.isnan(df["municipality_id"]) & remaining_mask
+
+        df_join = pd.merge(
+            df[f][["municipality_id"]],
+            df_zones[df_zones["zone_level"] == "municipality"][["zone_level_id", "zone_id", "zone_level"]],
+            how = "left", left_on = "municipality_id", right_on = "zone_level_id")
+
+        df.loc[f, "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= np.isnan(df["zone_id"])
+
+        print("  Found %d municipalities" % np.count_nonzero(df["zone_level"] == "municipality"))
+
+    if "country_id" in df:
+        f = ~np.isnan(df["country_id"]) & remaining_mask
+
+        df_join = pd.merge(
+            df[f][["country_id"]],
+            df_zones[df_zones["zone_level"] == "country"][["zone_level_id", "zone_id", "zone_level"]],
+            how = "left", left_on = "country_id", right_on = "zone_level_id")
+
+        df.loc[f, "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= np.isnan(df["zone_id"])
+
+        print("  Found %d countries" % np.count_nonzero(df["zone_level"] == "country"))
+
+    unknown_count = np.count_nonzero(np.isnan(df["zone_id"]))
+
+    if unknown_count > 0:
+        print("  No information for %d observations" % unknown_count)
+
+    return df
