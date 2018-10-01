@@ -1,0 +1,7 @@
+raw_data_path: /nas/ivtmatsim/scenario/raw/raw
+target_path: output
+threads: 4
+hot_deck_matching_runners: 24
+stages:
+    - population.sociodemographics
+    - population.primary_locations
