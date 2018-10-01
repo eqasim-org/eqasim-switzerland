@@ -62,8 +62,15 @@ classifications for all municipalities in 2018
 - Year: 2014
 - Contract: [Open Data][3]
 
+**Country Codes**
+- Content `country_codes_2018.xlsx` contains the official BfS country codes
+- Year: 2018
+- Contract [Open Data][4]
+
 [1]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/generalisierte-gemeindegrenzen.assetdetail.5247306.html
 
 [2]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/quartiergrenzen-schweizer-staedte.html
 
 [3]: https://www.bfs.admin.ch/bfs/de/home/statistiken/querschnittsthemen/raeumliche-analysen/raeumliche-gliederungen/raeumliche-typologien.assetdetail.4542638.html
+
+[4]: https://www.bfs.admin.ch/bfs/de/home/grundlagen/stgb.assetdetail.6166613.html

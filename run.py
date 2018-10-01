@@ -11,13 +11,14 @@ config = {
         #"data.microcensus.persons",
         #"data.microcensus.trips",
         #"population.commute",
-        "population.primary_locations",
+        #"population.primary_locations",
         #"data.od.raw",
         #"data.od.matrix",
         #"data.statpop.statpop",
         #"data.misc.spatial_structure",
         #"data.statpop.spatial_structure"
         #"data.microcensus.spatial_structure"
+        "data.spatial.zones"
     ]
 }
 
