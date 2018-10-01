@@ -6,7 +6,6 @@ def configure(context, require):
     require.stage("population.commute")
     require.stage("data.od.matrix")
     require.stage("population.sociodemographics")
-    require.stage("data.statpop.spatial_structure")
 
 # TODO: We only assign work here through OD matrices. However, we *can* generate
 # OD matrices for education as well (the STATPOP information is available). What
@@ -17,6 +16,7 @@ def configure(context, require):
 # However, for now we will recover the simple scheme from Kirill!
 
 def execute(context):
+    exit()
     #df_commute = context.stage("population.commute")
     #pdf_matrices, cdf_matrices, unique_zone_ids = context.stage("data.od.matrix")
 
