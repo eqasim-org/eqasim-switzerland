@@ -1,5 +1,7 @@
 test:
     script:
+        - pwd
+        - echo $CI_PROJECT_DIR
         - rm -rf output
         - mkdir output
         - python3 run.py config_gitlab.yml
