@@ -1,5 +1,6 @@
 test:
     script:
+        - export PATH=/nas/vplworker/anaconda3/bin:$PATH
         - source activate ivt
         - rm -rf output
         - mkdir output
