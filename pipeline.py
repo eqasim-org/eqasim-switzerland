@@ -1,6 +1,58 @@
 import importlib
 import os.path
 import pickle
+import itertools
+import time
+
+class safe_tqdm:
+    def __init__(self, iterator = None, total = None, position = None, desc = "  Running something without description ...", *a, **k):
+        self.desc = desc
+        self.iterator = iterator
+        self.total = total
+        self.current = 0
+        self.last_time = 0.0
+
+        if position is not None:
+            self.desc = self.desc + "(%d)" % (position + 1)
+
+        self._print()
+
+    def _print(self):
+        current_time = time.time()
+
+        if current_time - self.last_time > 10.0:
+            self.last_time = current_time
+
+            if self.total is None:
+                if self.current == 0:
+                    print("%s: running" % self.desc)
+                else:
+                    print("%s: %d" % (self.desc, self.current))
+            else:
+                print("%s: %d/%d (%.2f%%)" % (self.desc, self.current, self.total, 100.0 * self.current / self.total))
+
+    def _print_done(self):
+        print("%s: done" % self.desc)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self ,type, value, traceback):
+        self._print_done()
+
+    def __iter__(self):
+        def loop():
+            for element in self.iterator:
+                yield element
+                self.update()
+            self._print_done()
+
+        return loop()
+        #return iter(self.iterator)
+
+    def update(self, count = 1, *a, **k):
+        self.current += count
+        self._print()
 
 class Require:
     def __init__(self):
