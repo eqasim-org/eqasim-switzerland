@@ -3,6 +3,7 @@ test:
         - export PATH=/nas/vplworker/anaconda3/bin:$PATH
         - source activate ivt
         - python3 --version
+        - pwd
         - rm -rf output
         - mkdir output
         - python3 run.py config_gitlab.yml
