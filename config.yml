@@ -2,18 +2,19 @@ raw_data_path: /run/media/sebastian/shoerl_data/population/raw
 target_path: /run/media/sebastian/shoerl_data/temp
 threads: 4
 hot_deck_matching_runners: 2
+disable_progress_bar: false
 stages:
     #- population.matching,
-    - population.sociodemographics
-    #- data.microcensus.households,
-    #- data.microcensus.persons,
-    #- data.microcensus.trips,
-    #- population.commute,
-    - population.primary_locations
-    #- data.od.raw,
-    #- data.od.matrix,
-    #- data.statpop.statpop,
-    #- data.misc.spatial_structure,
+    #- population.sociodemographics
+    - data.microcensus.households
+    #- data.microcensus.persons
+    #- data.microcensus.trips
+    #- population.commute
+    #- population.primary_locations
+    #- data.od.raw
+    #- data.od.matrix
+    #- data.statpop.statpop
+    #- data.misc.spatial_structure
     #- data.statpop.spatial_structure
     #- data.microcensus.spatial_structure
     #- data.spatial.types

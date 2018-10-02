@@ -6,3 +6,4 @@ test:
         - rm -rf output
         - mkdir output
         - python3 run.py config_gitlab.yml
+        - rm -rf output
