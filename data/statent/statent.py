@@ -2,16 +2,23 @@ import pandas as pd
 import numpy as np
 import data.constants as c
 from tqdm import tqdm
+import data.spatial.zones
+import data.utils
+import data.spatial.municipalities
+import data.spatial.quarters
 
 def configure(context, require):
     require.config("raw_data_path")
+    require.stage("data.spatial.zones")
+    require.stage("data.spatial.municipalities")
+    require.stage("data.spatial.quarters")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]
 
-    df = pd.read_csv(
+    df = pd.DataFrame(pd.read_csv(
         "%s/statent/QUERY_FOR_2014_DEC_STATENT_LOC.csv" % raw_data_path,
-        encoding = "latin1", sep = ";")
+        encoding = "latin1", sep = ";"))
 
     df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08", "EMPTOT"]])
     df.columns = ["x", "y", "noga", "number_employees"]
@@ -20,5 +27,34 @@ def execute(context):
 
     # For now we don't do anything with the NOGA category.
     # (but need to do later for the education locations)
+
+    # Impute zones
+    df_zones = context.stage("data.spatial.zones")
+    df_quarters = context.stage("data.spatial.quarters")
+    df_municipalities = context.stage("data.spatial.municipalities")[0]
+
+    df_spatial = pd.DataFrame(df[["enterprise_id", "x", "y"]])
+    df_spatial = data.utils.to_gpd(df_spatial, "x", "y")
+
+    df_spatial = data.spatial.municipalities.impute(df_spatial, df_municipalities)[[
+        "enterprise_id", "municipality_id", "geometry"
+    ]]
+
+    df_spatial = data.spatial.quarters.impute(df_spatial, df_quarters, fix_by_distance = False)[[
+        "enterprise_id", "municipality_id", "quarter_id", "geometry"
+    ]]
+
+    df_spatial = data.spatial.zones.impute(df_spatial, df_zones)[[
+        "enterprise_id", "zone_id", "zone_level"
+    ]]
+
+    assert(len(df) == len(df_spatial))
+    assert(len(df_spatial) == len(df_spatial.dropna()))
+
+    df = pd.merge(
+        df, df_spatial[["enterprise_id", "zone_id"]],
+        on = "enterprise_id"
+    )
+    df["zone_id"] = df["zone_id"].astype(np.int)
 
     return df
