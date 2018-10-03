@@ -68,6 +68,12 @@ classifications for all municipalities in 2018
 - Year: 2018
 - Contract [Open Data][4]
 
+**STATENT**
+- Content `statent/` contains the enterprise register for Switzerland with coordinates,
+number of employees and classifications of the enterprises.
+- Year: 2014
+- Contract: Until end of 2018?
+
 [1]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/generalisierte-gemeindegrenzen.assetdetail.5247306.html
 
 [2]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/quartiergrenzen-schweizer-staedte.html
