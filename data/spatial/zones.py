@@ -11,9 +11,9 @@ def configure(context, require):
     require.stage("data.spatial.quarters")
 
 def execute(context):
-    df_countries = context.stage("data.spatial.countries")
-    df_municipalities = context.stage("data.spatial.municipalities")[0]
-    df_quarters = context.stage("data.spatial.quarters")
+    df_countries = pd.DataFrame(context.stage("data.spatial.countries"), copy = True)
+    df_municipalities = pd.DataFrame(context.stage("data.spatial.municipalities")[0], copy = True)
+    df_quarters = pd.DataFrame(context.stage("data.spatial.quarters"), copy = True)
 
     df_countries["zone_level_id"] = df_countries["country_id"]
     df_municipalities["zone_level_id"] = df_municipalities["municipality_id"]

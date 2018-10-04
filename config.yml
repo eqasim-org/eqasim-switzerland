@@ -3,6 +3,7 @@ target_path: /run/media/sebastian/shoerl_data/temp
 threads: 4
 hot_deck_matching_runners: 2
 disable_progress_bar: false
+debug_household_count: 100000
 stages:
     #- population.matching,
     #- population.sociodemographics
