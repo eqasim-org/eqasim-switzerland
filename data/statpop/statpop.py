@@ -21,6 +21,9 @@ def execute(context):
     df_households = context.stage("data.statpop.households")
     df_link = context.stage("data.statpop.link")
 
+    if "debug_household_count" in context.config:
+        df_households = df_households[:context.config["debug_household_count"]]
+
     # Filter non-main residence
     df_persons = df_persons[df_persons["type_of_residence"] == 1]
 

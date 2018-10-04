@@ -105,8 +105,8 @@ def execute(context):
                 index = pd.Index(zone_ids), columns = pd.Index(zone_ids)
             ).fillna(0).values
 
-        zero_filter = np.sum(matrix, axis = 1) > 0.0
-        matrix = matrix[zero_filter,:]
+        zero_filter = np.sum(matrix, axis = 1) == 0.0
+        matrix[zero_filter,:] += 1e-3
 
         pdf_matrix = matrix / np.sum(matrix, axis = 1)[:, np.newaxis]
 

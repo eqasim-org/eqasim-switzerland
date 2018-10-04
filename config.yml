@@ -18,4 +18,6 @@ stages:
     #- data.statpop.spatial_structure
     #- data.microcensus.spatial_structure
     #- data.spatial.types
-    - data.statent.statent
+    #- data.statpop.statpop
+    #- data.od.distances
+    - population.primary_zones
