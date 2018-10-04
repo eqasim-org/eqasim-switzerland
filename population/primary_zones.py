@@ -83,8 +83,8 @@ def execute(context):
 
                 progress.update()
 
-    df.loc[:, "work_zone"] = work_zones
-    df = df[["person_id", "work_zone"]]
+    df.loc[:, "work_zone_id"] = work_zones
+    df = df[["person_id", "work_zone_id", "commute_mode"]]
     assert(len(df) == len(df.dropna()))
 
     return df

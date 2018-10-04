@@ -20,4 +20,6 @@ stages:
     #- data.spatial.types
     #- data.statpop.statpop
     #- data.od.distances
-    - population.primary_zones
+    #- population.primary_zones
+    #- data.spatial.zone_shapes
+    - population.primary_locations

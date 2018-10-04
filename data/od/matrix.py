@@ -84,7 +84,21 @@ def execute(context):
     df_od = df_od[~np.isnan(df_od["work_zone_id"])]
 
     unknown_count = before_count - len(df_od)
-    print("Removed %d (%.2f%%) observations from structural survey for which no work location is known" % (unknown_count, 100 * unknown_count / before_count))
+    print("Removed %d (%.2f%%) observations from structural survey for which no work or home location is known" % (unknown_count, 100 * unknown_count / before_count))
+    assert(len(df_od) == len(df_od.dropna()))
+
+    # Filter out people who are not working in a neighboring country
+    # TODO: Eventually, we want to have commuters back in the population!
+    # But this involves adjustments at several points:
+    # - We want them to get activity chains for commuters
+    # - We want them to have consistent work / education locations at the border
+    #   at the right crossing.
+    before_count = len(df_od)
+    df_od = df_od[~(df_od["work_zone_level"] == "country")]
+    df_od = df_od[~(df_od["home_zone_level"] == "country")]
+
+    outside_count = before_count - len(df_od)
+    print("Removed %d (%.2f%%) observations from structural survey which live or work abroad (TODO: eventually we want them back in!)" % (outside_count, 100 * outside_count / before_count))
     assert(len(df_od) == len(df_od.dropna()))
 
     # Filter unknonwn modes
