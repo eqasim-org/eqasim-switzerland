@@ -6,7 +6,7 @@ disable_progress_bar: false
 stages:
     #- population.matching,
     #- population.sociodemographics
-    - data.microcensus.households
+    #- data.microcensus.households
     #- data.microcensus.persons
     #- data.microcensus.trips
     #- population.commute
@@ -18,3 +18,4 @@ stages:
     #- data.statpop.spatial_structure
     #- data.microcensus.spatial_structure
     #- data.spatial.types
+    - data.statent.statent
