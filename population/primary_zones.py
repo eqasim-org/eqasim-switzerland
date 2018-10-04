@@ -56,7 +56,9 @@ def execute(context):
         counts = np.zeros(pdf_matrices[mode].shape, dtype = np.int)
 
         for i in range(len(df_zones)):
-            counts[i,:] = np.random.multinomial(origin_counts[i], pdf_matrices[mode][i,:])
+            if origin_counts[i] > 0:
+                assert(~np.any(np.isnan(pdf_matrices[mode][i])))
+                counts[i,:] = np.random.multinomial(origin_counts[i], pdf_matrices[mode][i,:])
 
         commute_counts[mode] = counts
         assert(len(counts) == len(df_zones))

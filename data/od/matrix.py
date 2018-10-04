@@ -119,10 +119,17 @@ def execute(context):
                 index = pd.Index(zone_ids), columns = pd.Index(zone_ids)
             ).fillna(0).values
 
+        # Find the origins which have no observations and make sure we don't divide by zero
         zero_filter = np.sum(matrix, axis = 1) == 0.0
-        matrix[zero_filter,:] += 1e-3
+        matrix[zero_filter,:] = 1
 
         pdf_matrix = matrix / np.sum(matrix, axis = 1)[:, np.newaxis]
+
+        # However, we actually want a NaN here, because later on we will know
+        # that something is wrong if we ever want to sample a destination for
+        # an origin for which we do not have any observations (this may be
+        # municipalities with quarters, or countries for now)
+        pdf_matrix[zero_filter,:] = np.nan
 
         cdf_matrix = np.cumsum(matrix, axis = 1)
         cdf_matrix /= cdf_matrix[:, -1][:, np.newaxis]
