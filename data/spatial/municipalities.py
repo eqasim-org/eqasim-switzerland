@@ -120,6 +120,9 @@ def impute(df, df_municipalities, fix_by_distance = True):
         result.append(gpd.sjoin(df_municipalities, chunk, op = "contains", how = "right"))
     df = pd.concat(result).reset_index()
 
+    if "left_index" in df: del df["left_index"]
+    if "right_index" in df: del df["right_index"]
+
     invalid_mask = np.isnan(df["municipality_id"])
     df.loc[~invalid_mask, "municipality_id"] = df.loc[~invalid_mask, "municipality_id"]
 

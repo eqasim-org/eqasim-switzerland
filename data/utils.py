@@ -5,20 +5,6 @@ import numpy as np
 import geopandas as gpd
 import shapely.geometry as geo
 
-def to_gpd(df, x = "x", y = "y", crs = {"init" : "EPSG:2056"}):
-    df["geometry"] = [
-        geo.Point(*coord) for coord in tqdm(
-            zip(df[x], df[y]), total = len(df),
-            desc = "Converting coordinates"
-        )]
-    df = gpd.GeoDataFrame(df)
-    df.crs = crs
-
-    if not crs == {"init" : "EPSG:2056"}:
-        df = df.to_crs({"init" : "EPSG:2056"})
-
-    return df
-
 def fix_marital_status(df):
     """ Makes young people, who are separated, be treated as single! """
     df.loc[

@@ -32,16 +32,3 @@ def execute(context):
     #df.to_file("/home/sebastian/zones.shp")
 
     return df
-
-def sample_coordinates(row, count):
-    samples = []
-    bounds = row["geometry"].bounds
-
-    while len(samples) < count:
-        x = bounds[0] + np.random.random(size = (1000,)) * (bounds[2] - bounds[0])
-        y = bounds[1] + np.random.random(size = (1000,)) * (bounds[3] - bounds[1])
-        points = map(geo.Point, zip(x, y))
-        points = [point for point in points if row["geometry"].contains(point)]
-        samples += points
-
-    return np.array(list(map(lambda p: (p.x, p.y), samples[:count])))

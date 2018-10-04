@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 from tqdm import tqdm
+from sklearn.neighbors import KDTree
 
 def configure(context, require):
     require.config("raw_data_path")
@@ -48,6 +49,9 @@ def impute(df, df_quarters, fix_by_distance = True):
     for chunk in tqdm(np.array_split(df, chunk_count), total = chunk_count):
         result.append(gpd.sjoin(df_quarters, chunk, op = "contains", how = "right"))
     df = pd.concat(result).reset_index()
+
+    if "left_index" in df: del df["left_index"]
+    if "right_index" in df: del df["right_index"]
 
     invalid_mask = np.isnan(df["quarter_id"])
     df.loc[~invalid_mask, "quarter_id"] = df.loc[~invalid_mask, "quarter_id"]

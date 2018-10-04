@@ -13,6 +13,7 @@ def configure(context, require):
     require.stage("data.statpop.households")
     require.stage("data.statpop.link")
     require.stage("data.spatial.municipalities")
+    require.stage("data.spatial.quarters")
     require.stage("data.spatial.zones")
     require.stage("data.spatial.municipality_types")
 
@@ -81,21 +82,33 @@ def execute(context):
     df_municipalities = context.stage("data.spatial.municipalities")[0]
     df_zones = context.stage("data.spatial.zones")
     df_municipality_types = context.stage("data.spatial.municipality_types")
+    df_quarters = context.stage("data.spatial.quarters")
 
     df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
     df_spatial = data.utils.to_gpd(df_spatial, "home_x", "home_y")
-    df_spatial = data.spatial.municipalities.impute(df_spatial, df_municipalities)
-    df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
+
+    df_spatial = data.spatial.municipalities.impute(df_spatial, df_municipalities)[[
+        "person_id", "municipality_id", "geometry"
+    ]]
+
+    df_spatial = data.spatial.quarters.impute(df_spatial, df_quarters, fix_by_distance = False)[[
+        "person_id", "municipality_id", "quarter_id", "geometry"
+    ]]
+
     df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
+    df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
 
     assert(len(df) == len(df_spatial))
 
+    del df["municipality_id"]
     df = pd.merge(
-        df, df_spatial[["person_id", "zone_id", "spatial_type"]],
+        df, df_spatial[["person_id", "zone_id", "spatial_type", "municipality_id", "quarter_id"]],
         on = "person_id"
     )
 
     df["home_zone_id"] = df["zone_id"]
+    df["home_municipality_id"] = df["municipality_id"]
+    df["home_quarter_id"] = df["quarter_id"]
 
     # Wrap everything up
     df = df[[
@@ -104,7 +117,8 @@ def execute(context):
         "home_x", "home_y",
         "marital_status", "nationality",
         "household_size",
-        "age_class", "household_size_class", "home_zone_id", "spatial_type"]]
+        "age_class", "household_size_class", "home_zone_id", "spatial_type",
+        "home_municipality_id", "home_quarter_id"]]
 
     df = data.statpop.head_of_household.impute(df)
     return df
