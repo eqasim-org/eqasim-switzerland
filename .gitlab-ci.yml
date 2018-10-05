@@ -1,9 +1,10 @@
-script:
-    - export PATH=/nas/vplworker/anaconda3/bin:$PATH
-    - source activate ivt
-    - python3 --version
-    - pwd
-    - rm -rf output
-    - mkdir output
-    - python3 -u run.py config_gitlab.yml
-    - rm -rf output
+test:
+    script:
+        - export PATH=/nas/vplworker/anaconda3/bin:$PATH
+        - source activate ivt
+        - python3 --version
+        - pwd
+        - rm -rf output
+        - mkdir output
+        - python3 -u run.py config_gitlab.yml
+        - rm -rf output
