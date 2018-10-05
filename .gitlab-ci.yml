@@ -1,12 +1,9 @@
-test:
-    script:
-        - export PATH=/nas/vplworker/anaconda3/bin:$PATH
-        - source activate ivt
-        - virtualenv --system-site-packages .
-        - bin/pip install --upgrade geopandas==0.4.0
-        - bin/python3 --version
-        - pwd
-        - rm -rf output
-        - mkdir output
-        - bin/python3 -u run.py config_gitlab.yml
-        - rm -rf output
+script:
+    - export PATH=/nas/vplworker/anaconda3/bin:$PATH
+    - source activate ivt
+    - python3 --version
+    - pwd
+    - rm -rf output
+    - mkdir output
+    - python3 -u run.py config_gitlab.yml
+    - rm -rf output
