@@ -2,9 +2,9 @@ test:
     script:
         - export PATH=/nas/vplworker/anaconda3/bin:$PATH
         - source activate ivt
-        - virtualenv .
-        - bin/pip install --upgrade -r requirements.txt
-        - python3 --version
+        - virtualenv --system-site-packages .
+        - bin/pip install --upgrade geopandas==0.4.0
+        - bin/python3 --version
         - pwd
         - rm -rf output
         - mkdir output
