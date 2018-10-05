@@ -227,7 +227,7 @@ def execute(context):
     df_se = data.spatial.zones.impute(df_se, df_zones, zone_id_prefix = "work_", country_id_field = "work_country_id", municipality_id_field = "work_municipality_id", quarter_id_field = "work_quarter_id")
 
     return df_se[[
-        "home_municipality_id", "home_quarter_id", "home_zone_id",
-        "work_country_id", "work_municipality_id", "work_quarter_id", "work_zone_id",
-        "mode"
+        "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
+        "work_country_id", "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
+        "mode", "weight"
     ]]

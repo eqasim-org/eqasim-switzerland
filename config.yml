@@ -22,7 +22,7 @@ stages:
     #- data.statpop.statpop
     #- data.statent.statent
     #- data.od.distances
-    - data.structural_survey.structural_survey
+    #- data.structural_survey.structural_survey
     #- population.primary_zones
     #- data.spatial.zone_shapes
-    #- population.primary_locations
+    - population.primary_locations

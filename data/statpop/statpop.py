@@ -6,6 +6,7 @@ import data.statpop.head_of_household
 import data.spatial.municipalities
 import data.spatial.zones
 import data.utils
+import data.spatial.utils
 import data.spatial.municipality_types
 
 def configure(context, require):
@@ -85,7 +86,7 @@ def execute(context):
     df_quarters = context.stage("data.spatial.quarters")
 
     df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
-    df_spatial = data.utils.to_gpd(df_spatial, "home_x", "home_y")
+    df_spatial = data.spatial.utils.to_gpd(df_spatial, "home_x", "home_y")
 
     df_spatial = data.spatial.municipalities.impute(df_spatial, df_municipalities)[[
         "person_id", "municipality_id", "geometry"
