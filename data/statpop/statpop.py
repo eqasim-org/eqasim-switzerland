@@ -88,11 +88,11 @@ def execute(context):
     df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
     df_spatial = data.spatial.utils.to_gpd(df_spatial, "home_x", "home_y")
 
-    df_spatial = data.spatial.municipalities.impute(df_spatial, df_municipalities)[[
+    df_spatial = data.spatial.utils.impute(df_spatial, df_municipalities, "person_id", "municipality_id")[[
         "person_id", "municipality_id", "geometry"
     ]]
 
-    df_spatial = data.spatial.quarters.impute(df_spatial, df_quarters, fix_by_distance = False)[[
+    df_spatial = data.spatial.utils.impute(df_spatial, df_quarters, "person_id", "quarter_id", fix_by_distance = False)[[
         "person_id", "municipality_id", "quarter_id", "geometry"
     ]]
 

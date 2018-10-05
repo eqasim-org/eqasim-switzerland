@@ -61,7 +61,7 @@ def execute(context):
 
     df_spatial = pd.DataFrame(df_mz_households[["person_id", "home_x", "home_y"]])
     df_spatial = data.spatial.utils.to_gpd(df_spatial, "home_x", "home_y")
-    df_spatial = data.spatial.municipalities.impute(df_spatial, df_municipalities)
+    df_spatial = data.spatial.utils.impute(df_spatial, df_municipalities, "person_id", "municipality_id")
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
     df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
 

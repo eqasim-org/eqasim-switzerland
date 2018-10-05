@@ -108,33 +108,3 @@ def update_municipality_ids(df, df_mapping, remove_unknown = False):
         return df[~np.isnan(df["municipality_id"])]
     else:
         return df
-
-def impute(df, df_municipalities, fix_by_distance = True):
-    assert(not "municipality_id" in df.columns)
-
-    print("Imputing %d municipalities by spatial join..." % len(df))
-
-    result = []
-    chunk_count = int(len(df) / 10000)
-    for chunk in tqdm(np.array_split(df, chunk_count), total = chunk_count):
-        result.append(gpd.sjoin(df_municipalities, chunk, op = "contains", how = "right"))
-    df = pd.concat(result).reset_index()
-
-    if "left_index" in df: del df["left_index"]
-    if "right_index" in df: del df["right_index"]
-
-    invalid_mask = np.isnan(df["municipality_id"])
-    df.loc[~invalid_mask, "municipality_id"] = df.loc[~invalid_mask, "municipality_id"]
-
-    if fix_by_distance and np.any(invalid_mask):
-        print("  Fixing %d observations by distance join..." % np.count_nonzero(invalid_mask))
-        coordinates = np.vstack([df_municipalities["geometry"].centroid.x, df_municipalities["geometry"].centroid.y]).T
-        kd_tree = KDTree(coordinates)
-
-        df_missing = df[invalid_mask]
-        coordinates = np.vstack([df_missing["geometry"].centroid.x, df_missing["geometry"].centroid.y]).T
-        indices = kd_tree.query(coordinates, return_distance = False).flatten()
-
-        df.loc[invalid_mask, "municipality_id"] = df_municipalities.iloc[indices]["municipality_id"].values
-
-    return df
