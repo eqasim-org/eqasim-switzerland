@@ -14,7 +14,7 @@ stages:
     #- population.primary_locations
     #- data.od.raw
     #- data.od.matrix
-    #- data.statpop.statpop
+    - data.statpop.statpop
     #- data.misc.spatial_structure
     #- data.statpop.spatial_structure
     #- data.microcensus.spatial_structure
@@ -25,4 +25,4 @@ stages:
     #- data.structural_survey.structural_survey
     #- population.primary_zones
     #- data.spatial.zone_shapes
-    - population.primary_locations
+    #- population.primary_locations

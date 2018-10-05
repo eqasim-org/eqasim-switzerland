@@ -2,9 +2,11 @@ test:
     script:
         - export PATH=/nas/vplworker/anaconda3/bin:$PATH
         - source activate ivt
+        - virtualenv .
+        - bin/pip install geopandas==0.4.0
         - python3 --version
         - pwd
         - rm -rf output
         - mkdir output
-        - python3 -u run.py config_gitlab.yml
+        - bin/python3 -u run.py config_gitlab.yml
         - rm -rf output
