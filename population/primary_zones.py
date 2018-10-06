@@ -24,9 +24,9 @@ def execute(context):
     df_zones = context.stage("data.spatial.zones")
 
     # Load commute information for work
-    df_commute = context.stage("population.commute")[[
+    df_commute = pd.DataFrame(context.stage("population.commute")[[
         "person_id", "commute_mode", "commute_home_distance", "commute_purpose"
-    ]]
+    ]], copy = True)
     df_commute = df_commute[df_commute["commute_purpose"] == "work"]
     df_commute["mz_person_id"] = df_commute["person_id"]
     del df_commute["person_id"]

@@ -3,6 +3,7 @@ import numpy as np
 from tqdm import tqdm
 import functools, itertools
 import multiprocessing as mp
+import numpy.ma as ma
 
 class HotDeckMatcher:
     def __init__(self, df_source, source_id, source_weight, mandatory_fields, preference_fields, default_id, minimum_source_samples):
@@ -73,7 +74,7 @@ class HotDeckMatcher:
                     if np.any(target_mask):
                         source_indices = np.where(source_mask)[0]
                         random_indices = np.floor(random[target_mask] * len(source_indices)).astype(np.int)
-                        matched_indices[~matched_mask][target_mask] = source_indices[random_indices]
+                        matched_indices[np.where(~matched_mask)[0][target_mask]] = source_indices[random_indices]
 
                         # We continuously shrink these matrix to make the matching
                         # easier and easier as the HDM proceeds
