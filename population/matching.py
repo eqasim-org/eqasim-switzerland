@@ -184,5 +184,7 @@ def execute(context):
     print("  Households: %d (%.2f%%)" % ( len(removed_household_ids), 100.0 * len(removed_household_ids) / number_of_statpop_households ))
     print("  Persons: %d (%.2f%%)" % ( len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_statpop_persons ))
 
+    print(np.unique(df_matching["mz_head_id"]))
+
     # Return
     return df_matching, removed_person_ids

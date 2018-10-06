@@ -26,6 +26,12 @@ def execute(context):
     df.loc[:, "noga"] = df["noga"].astype(np.str)
     df.loc[:, "enterprise_id"] = np.arange(len(df))
 
+    df.loc[df["noga"].str.startswith("851"), "education_type"] = "kindergarten"
+    df.loc[df["noga"].str.startswith("852"), "education_type"] = "primary"
+    df.loc[df["noga"].str.startswith("853"), "education_type"] = "secondary"
+    df.loc[df["noga"].str.startswith("854"), "education_type"] = "tertiary"
+    df["education_type"] = df["education_type"].astype("category")
+
     # For now we don't do anything with the NOGA category.
     # (but need to do later for the education locations)
 

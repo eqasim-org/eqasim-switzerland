@@ -35,6 +35,7 @@ def execute(context):
             f = df["work_zone_id"] == zone_id
             df.loc[f, "work_x"] = df_statent.iloc[indices]["x"].values
             df.loc[f, "work_y"] = df_statent.iloc[indices]["y"].values
+            df.loc[f, "work_enterprise_id"] = df_statent.iloc[indices]["enterprise_id"].values
         else:
             empty_zones.append(zone_id)
 

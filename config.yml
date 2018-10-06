@@ -5,24 +5,9 @@ hot_deck_matching_runners: 2
 disable_progress_bar: false
 debug_household_count: 100000
 stages:
-    #- population.matching,
-    #- population.sociodemographics
-    #- data.microcensus.households
-    #- data.microcensus.persons
-    #- data.microcensus.trips
-    #- population.commute
-    #- population.primary_locations
-    #- data.od.raw
-    #- data.od.matrix
-    - data.statpop.statpop
-    #- data.misc.spatial_structure
-    #- data.statpop.spatial_structure
-    #- data.microcensus.spatial_structure
-    #- data.spatial.types
-    #- data.statpop.statpop
     #- data.statent.statent
-    #- data.od.distances
-    #- data.structural_survey.structural_survey
-    #- population.primary_zones
-    #- data.spatial.zone_shapes
-    #- population.primary_locations
+    #- population.work_locations
+    #- population.education_locations
+    #- population.matching
+    - population.education_locations
+    - population.work_locations

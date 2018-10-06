@@ -4,4 +4,5 @@ threads: 24
 hot_deck_matching_runners: 24
 disable_progress_bar: true
 stages:
-    - population.primary_locations
+    - population.work_locations
+    - population.education_locations
