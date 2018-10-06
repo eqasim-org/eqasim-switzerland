@@ -29,7 +29,6 @@ def execute(context):
         weights /= np.sum(weights)
 
         if len(indices) > 0:
-            indices = np.random.multinomial(count, weights)
             indices = np.repeat(indices, np.random.multinomial(count, weights))
 
             f = df["work_zone_id"] == zone_id
