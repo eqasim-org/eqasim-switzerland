@@ -51,8 +51,9 @@ def execute(context):
                 end_time = None
 
                 for _, trip in df_trips[df_trips["person_id"] == row["person_id"]].iterrows():
-                    write_line('      <activity type="%s" x="%f" y="%f" end_time="%f" />' % (
-                        purpose, location[0], location[1], trip["departure_time"]
+                    write_line('      <activity type="%s" x="%f" y="%f" end_time="%f"%s />' % (
+                        purpose, location[0], location[1], trip["departure_time"],
+                        (' facility="%d"' % location[2]) if location[2] is not None else ""
                     ))
 
                     travel_time = trip["arrival_time"] - trip["departure_time"]
@@ -61,14 +62,15 @@ def execute(context):
                         trip["mode"], trip["departure_time"], travel_time
                     ))
 
-                    location = (trip["location_x"], trip["location_y"], None)
+                    facility_id = None if np.isnan(trip["location_id"]) else int(trip["location_id"])
+                    location = (trip["location_x"], trip["location_y"], facility_id)
                     purpose = trip["purpose"]
 
                     if np.isnan(location[0]):
                         location = home_location
 
-                write_line('      <activity type="%s" x="%f" y="%f" />' % (
-                    purpose, location[0], location[1]
+                write_line('      <activity type="%s" x="%f" y="%f"%s />' % (
+                    purpose, location[0], location[1], (' facility="%d"' % location[2]) if location[2] is not None else ""
                 ))
 
                 write_line('    </plan>')

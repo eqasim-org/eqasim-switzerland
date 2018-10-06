@@ -4,7 +4,7 @@ test:
         - source activate ivt
         - python3 --version
         - pwd
-        - rm -rf output
-        - mkdir output
+        - rm -rf output temp
+        - mkdir output temp
         - python3 -u run.py config_gitlab.yml
         - rm -rf output
