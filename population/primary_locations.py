@@ -1,51 +1,64 @@
 import pandas as pd
 import numpy as np
-import data.constants as c
+from tqdm import tqdm
+import data.spatial.zone_shapes
 
 def configure(context, require):
-    require.stage("population.commute")
-    require.stage("data.od.matrix")
-    require.stage("population.sociodemographics")
-
-# TODO: We only assign work here through OD matrices. However, we *can* generate
-# OD matrices for education as well (the STATPOP information is available). What
-# would need to be done is to adjust data.od.matrix to produce two kinds of
-# matrices and then we would need to use this information here. In population.commute
-# we already produce information on education commute.
-
-# However, for now we will recover the simple scheme from Kirill!
+    require.stage("population.primary_zones")
+    require.stage("data.statent.statent")
+    require.stage("data.spatial.zones")
+    require.stage("data.spatial.zone_shapes")
 
 def execute(context):
-    exit()
-    #df_commute = context.stage("population.commute")
-    #pdf_matrices, cdf_matrices, unique_zone_ids = context.stage("data.od.matrix")
+    df = context.stage("population.primary_zones")
+    df_statent = context.stage("data.statent.statent")
 
-    # We don't need all the data, so let's do some filtering already
-    df_spatial = context.stage("data.statpop.spatial_structure")[[
-        "household_id", "zone"
-    ]]
+    df_zones = context.stage("data.spatial.zones")
+    df_zones["work_zone_id"] = df_zones["zone_id"]
 
-    df_persons = context.stage("population.sociodemographics")[[
-        "person_id", "household_id", "mz_person_id"
-    ]]
+    df_demand = df.groupby("work_zone_id").size().reset_index(name = "count")
+    df_demand = pd.merge(df_demand, df_zones[["work_zone_id", "zone_level"]])
 
-    df_commute = context.stage("population.commute")[[
-        "person_id", "commute_mode", "commute_home_distance", "commute_purpose"
-    ]]
-    df_commute = df_commute[df_commute["commute_purpose"] == "work"]
-    df_commute["mz_person_id"] = df_commute["person_id"]
-    del df_commute["person_id"]
+    # First handle the national commuters
+    df_national = df_demand[df_demand["zone_level"].isin(("municipality", "quarter"))]
+    empty_zones = []
 
-    # Merge commute information into the persons
-    df = pd.merge(
-        df_persons, df_commute, on = "mz_person_id"
-    )
+    for zone_id, count in tqdm(zip(df_national["work_zone_id"], df_national["count"]), desc = "Assigning national locations ...", total = len(df_demand)):
+        indices = np.where(df_statent["zone_id"] == zone_id)[0]
+        weights = df_statent.iloc[indices]["number_employees"]
+        weights /= np.sum(weights)
 
-    # Merge home zone information into the persons
-    df = pd.merge(
-        df, df_spatial, on = "household_id"
-    )
+        if len(indices) > 0:
+            indices = np.random.multinomial(count, weights)
+            indices = np.repeat(indices, np.random.multinomial(count, weights))
 
-    print(df)
+            f = df["work_zone_id"] == zone_id
+            df.loc[f, "work_x"] = df_statent.iloc[indices]["x"].values
+            df.loc[f, "work_y"] = df_statent.iloc[indices]["y"].values
+        else:
+            empty_zones.append(zone_id)
 
-    return {}
+    print("Found %d zones which do not have any samples in STATENT" % len(empty_zones))
+
+    # There are some empty zones (mainly border zones to Italy, which are under shared administration)
+    # There, we just sample a random location inside of the zone
+
+    df_shapes = context.stage("data.spatial.zone_shapes")
+
+    for zone_id in tqdm(empty_zones, desc = "Assigning national locations for empty zones ..."):
+        count = df_national[df_national["work_zone_id"] == zone_id]["count"].iloc[0]
+        row = df_shapes[df_shapes["zone_id"] == zone_id].iloc[0]
+        coordinates = data.spatial.zone_shapes.sample_coordinates(row, count)
+        df.loc[df["work_zone_id"] == zone_id, "work_x"] = coordinates[:,0]
+        df.loc[df["work_zone_id"] == zone_id, "work_y"] = coordinates[:,1]
+
+    # Second, handle the international commuters
+    print("TODO: We do not handle commuter traffic at the moment.")
+
+    # For now, make sure that we do not have any international traffic
+    df_international = df_demand[df_demand["zone_level"] == "country"]
+
+    assert(len(df_international) == 0)
+    assert(len(df) == len(df.dropna()))
+
+    return df

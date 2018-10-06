@@ -8,10 +8,7 @@ import data.spatial.municipalities
 import data.spatial.quarters
 
 def configure(context, require):
-    require.stage("data.od.raw")
-    require.stage("data.spatial.countries")
-    require.stage("data.spatial.municipalities")
-    require.stage("data.spatial.quarters")
+    require.stage("data.structural_survey.structural_survey")
     require.stage("data.spatial.zones")
 
 # TODO: Right now we only produce OD matrices for WORK. We have the information
@@ -19,64 +16,12 @@ def configure(context, require):
 # we have commute information for school already prepared (see population.commute).
 
 def execute(context):
-    df_od = context.stage("data.od.raw")
     df_zones = context.stage("data.spatial.zones")
-    df_countries = context.stage("data.spatial.countries")
-    df_municipality_mapping = context.stage("data.spatial.municipalities")[1]
-    df_quarters = context.stage("data.spatial.quarters")
-
-    # Find the correct modes
-    df_od.loc[:, "mode_numeric"] = df_od.loc[:, "mode"].astype(np.int)
-    df_od.loc[df_od["mode_numeric"] == -10, "mode"] = "unknown"
-    df_od.loc[df_od["mode_numeric"] == -9, "mode"] = "unknown"
-    df_od.loc[df_od["mode_numeric"] == -8, "mode"] = "unknown"
-    df_od.loc[df_od["mode_numeric"] == 1, "mode"] = "walk" # walking
-    df_od.loc[df_od["mode_numeric"] == 2, "mode"] = "walk" # skateboard
-    df_od.loc[df_od["mode_numeric"] == 3, "mode"] = "bike" # bike / elec. bike
-    df_od.loc[df_od["mode_numeric"] == 4, "mode"] = "car" # Mofa / Moped / light motor bike
-    df_od.loc[df_od["mode_numeric"] == 5, "mode"] = "car" # Car as driver or passenger
-    df_od.loc[df_od["mode_numeric"] == 6, "mode"] = "car" # company bus
-    df_od.loc[df_od["mode_numeric"] == 7, "mode"] = "pt" # Train
-    df_od.loc[df_od["mode_numeric"] == 8, "mode"] = "pt" # Tram / Metro
-    df_od.loc[df_od["mode_numeric"] == 9, "mode"] = "pt" # Bus
-    df_od.loc[df_od["mode_numeric"] == 10, "mode"] = "other" # Ship, cable car, ...
-    del df_od["mode_numeric"]
-
-    # First impute the home zone
-    df_od.loc[:, "municipality_id"] = df_od["home_municipality"]
-    df_od.loc[:, "quarter_id"] = df_od["home_quarter"]
-    df_od = data.spatial.quarters.update_quarter_ids(df_od, df_quarters)
-    df_od = data.spatial.municipalities.update_municipality_ids(df_od, df_municipality_mapping)
-
-    df_od = data.spatial.zones.impute(df_od, df_zones)
-    df_od.loc[:, "home_zone_id"] = df_od.loc[:, "zone_id"]
-    df_od.loc[:, "home_zone_level"] = df_od.loc[:, "zone_level"]
-
-    # Second impute the work zone
-    df_od.loc[:, "country_id"] = df_od["work_country"]
-    df_od.loc[:, "municipality_id"] = df_od["work_municipality"]
-    df_od.loc[:, "quarter_id"] = df_od["work_quarter"]
-    df_od = data.spatial.quarters.update_quarter_ids(df_od, df_quarters)
-    df_od = data.spatial.municipalities.update_municipality_ids(df_od, df_municipality_mapping)
-    df_od = data.spatial.countries.update_country_ids(df_od, df_countries)
-
-    df_od = data.spatial.zones.impute(df_od, df_zones)
-    df_od.loc[:, "work_zone_id"] = df_od.loc[:, "zone_id"]
-    df_od.loc[:, "work_zone_level"] = df_od.loc[:, "zone_level"]
-    del df_od["country_id"]
-
-    # Third impute the education zone (TODO: not used right now)
-    #df_od.loc[:, "municipality_id"] = df_od["education_municipality"]
-    #df_od.loc[:, "quarter_id"] = df_od["education_quarter"]
-    #df_od = data.spatial.quarters.update_quarter_ids(df_od, df_quarters)
-    #df_od = data.spatial.municipalities.update_municipality_ids(df_od, df_municipality_mapping)
-
-    #df_od = data.spatial.zones.impute(df_od, df_zones)
-    #df_od.loc[:, "education_zone_id"] = df_od.loc[:, "zone_id"]
-    #df_od.loc[:, "education_zone_level"] = df_od.loc[:, "zone_level"]
-
-    del df_od["quarter_id"]
-    del df_od["municipality_id"]
+    df_od = context.stage("data.structural_survey.structural_survey")[[
+        "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
+        "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
+        "mode", "weight"
+    ]]
 
     # There are some people for which we don't have a valid OD pair
     before_count = len(df_od)
@@ -84,14 +29,33 @@ def execute(context):
     df_od = df_od[~np.isnan(df_od["work_zone_id"])]
 
     unknown_count = before_count - len(df_od)
-    print("Removed %d (%.2f%%) observations from structural survey for which no work location is known" % (unknown_count, 100 * unknown_count / before_count))
-    assert(len(df_od) == len(df_od.dropna()))
+    print("Removed %d (%.2f%%) observations from structural survey for which no work or home location is known" % (unknown_count, 100 * unknown_count / before_count))
+    #assert(len(df_od) == len(df_od.dropna())) Commented this, because home_quarter_id may be NaN deliberately
+
+    # Filter out people who are not working in a neighboring country
+    # TODO: Eventually, we want to have commuters back in the population!
+    # But this involves adjustments at several points:
+    # - We want them to get activity chains for commuters
+    # - We want them to have consistent work / education locations at the border
+    #   at the right crossing.
+    before_count = len(df_od)
+    df_od = df_od[~(df_od["work_zone_level"] == "country")]
+    df_od = df_od[~(df_od["home_zone_level"] == "country")]
+
+    outside_count = before_count - len(df_od)
+    print("Removed %d (%.2f%%) observations from structural survey which live or work abroad (TODO: eventually we want them back in!)" % (outside_count, 100 * outside_count / before_count))
+    #assert(len(df_od) == len(df_od.dropna())) Commented this, because home_quarter_id may be NaN deliberately
 
     # Filter unknonwn modes
+    before_count = len(df_od)
     df_od = df_od[~((df_od["mode"] == "unknown") | (df_od["mode"] == "other"))]
+    unknown_mode_count = before_count - len(df_od)
+    print("Removed %d (%.2f%%) observations from structural survey with unknown mode" % (unknown_mode_count, 100 * unknown_mode_count / before_count))
 
     # Create the matrices
     zone_ids = list(df_zones["zone_id"])
+    municipality_ids = list(df_zones[df_zones["zone_level"] == "municipality"]["zone_level_id"])
+    quarter_ids = list(df_zones[df_zones["zone_level"] == "quarter"]["zone_level_id"])
 
     pdf_matrices = {}
     cdf_matrices = {}
@@ -99,16 +63,57 @@ def execute(context):
     for mode in ["car", "pt", "bike", "walk"]:
         df_mode_od = df_od[df_od["mode"] == mode]
 
-        matrix = pd.crosstab(
-            df_od["home_zone_id"], df_od["work_zone_id"],
+        municipality_matrix = pd.crosstab(
+            df_od["home_municipality_id"], df_od["work_zone_id"],
             df_od["weight"], aggfunc = sum).reindex(
-                index = pd.Index(zone_ids), columns = pd.Index(zone_ids)
-            ).fillna(0).values
+                index = pd.Index(municipality_ids, name = "municipality_id"), columns = pd.Index(zone_ids, name = "destination_zone_id")
+            ).fillna(0).reset_index()
 
-        zero_filter = np.sum(matrix, axis = 1) > 0.0
-        matrix = matrix[zero_filter,:]
+        quarter_matrix = pd.crosstab(
+            df_od["home_quarter_id"], df_od["work_zone_id"],
+            df_od["weight"], aggfunc = sum).reindex(
+                index = pd.Index(quarter_ids, name = "quarter_id"), columns = pd.Index(zone_ids, name = "destination_zone_id")
+            ).fillna(0).reset_index()
+
+        municipality_matrix = pd.merge(
+            municipality_matrix, df_zones[df_zones["zone_level"] == "municipality"],
+            left_on = "municipality_id", right_on = "zone_level_id"
+        )
+        del municipality_matrix["municipality_id"]
+
+        quarter_matrix = pd.merge(
+            quarter_matrix, df_zones[df_zones["zone_level"] == "quarter"],
+            left_on = "quarter_id", right_on = "zone_level_id"
+        )
+        del quarter_matrix["quarter_id"]
+
+        matrix = pd.concat((municipality_matrix, quarter_matrix))
+        for column in ("zone_name", "zone_level", "zone_level_id"): del matrix[column]
+
+        matrix = matrix.set_index("zone_id")
+        matrix = matrix.reindex(index = pd.Index(zone_ids))
+        matrix = matrix.values
+
+        f_origin = df_zones["zone_level"].isin(("municipality", "quarter"))
+        f_zero = np.sum(matrix, axis = 1) == 0.0
+
+        # There are two types of origins with zero observations:
+        # - Quarters or municipalities for which we simply don't have data
+        # - Countries which we do not want to handle for now
+        #
+        # The latter ones will simply be set to NaN after avoiding a division
+        # by zero error. The former ones will be set for now in a way that all
+        # people stay inside this zone. (TODO: Probably it would be better to
+        # attach them to adjacent zones.)
+
+        for index in np.where(f_origin & f_zero)[0]:
+            matrix[index,:] = 0.0
+            matrix[index,index] = 1.0
+
+        matrix[~f_origin & f_zero] = 1.0
 
         pdf_matrix = matrix / np.sum(matrix, axis = 1)[:, np.newaxis]
+        pdf_matrix[~f_origin & f_zero,:] = np.nan
 
         cdf_matrix = np.cumsum(matrix, axis = 1)
         cdf_matrix /= cdf_matrix[:, -1][:, np.newaxis]
@@ -116,17 +121,16 @@ def execute(context):
         pdf_matrices[mode] = pdf_matrix
         cdf_matrices[mode] = cdf_matrix
 
-    # One final note: The way the OD matrix is measured here is such that the
-    # observations that fall into quarters are *not* included in the counts for
-    # the municipalities. Let's say there is a municipality which is mostly covered
-    # by quarters, but not entirely. Strictly speaking, the count for the municipality
-    # is then valid for the area of [municipality area] - [cumulative quarter area].
-    # For the origin it makes sense, because we will have a coordinate, we will
-    # assign the zone. If we don't hit a quarter, we will hit the municipality, so
-    # we use indeed the remaining area. For the destination it is tricky, because
-    # if we do not sample a quarter, strictly speaking we should put the destinaton
-    # coordinates into the difference area. However, we don't really know how
-    # this looks like, so we say that we ignore this fact here.
-    # Still, one *could* improve this.
+        print("  - Finished %s (%d fixed municipalities)" % (mode, np.count_nonzero(f_origin & f_zero)))
+
+    # A final note on the structure of these OD matrices:
+    # - The origin counts for municipalities contain all originating trips, also
+    #   those which are actually assigned to quarters within this zone
+    # - The destination counts target the assigned top-level zone. So arrivals
+    #   in a quarter are NOT included in the arrivals for the municipality. This
+    #   way, arrivals in municipalities with quarters can only happen if the
+    #   municipality is not covered 1:1 by the quarters, which is usually the case
+    #   in our zoning system. This way the municipality itself will only have little
+    #   arrivals, while the quarters will have more.
 
     return pdf_matrices, cdf_matrices

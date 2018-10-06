@@ -11,9 +11,9 @@ def configure(context, require):
     require.stage("data.spatial.quarters")
 
 def execute(context):
-    df_countries = context.stage("data.spatial.countries")
-    df_municipalities = context.stage("data.spatial.municipalities")[0]
-    df_quarters = context.stage("data.spatial.quarters")
+    df_countries = pd.DataFrame(context.stage("data.spatial.countries"), copy = True)
+    df_municipalities = pd.DataFrame(context.stage("data.spatial.municipalities")[0], copy = True)
+    df_quarters = pd.DataFrame(context.stage("data.spatial.quarters"), copy = True)
 
     df_countries["zone_level_id"] = df_countries["country_id"]
     df_municipalities["zone_level_id"] = df_municipalities["municipality_id"]
@@ -38,54 +38,54 @@ def execute(context):
 
     return df_zones[["zone_id", "zone_name", "zone_level", "zone_level_id"]]
 
-def impute(df, df_zones):
+def impute(df, df_zones, zone_id_prefix = "", quarter_id_field = "quarter_id", municipality_id_field = "municipality_id", country_id_field = "country_id"):
     print("Imputing %d zones" % len(df))
     remaining_mask = np.ones((len(df),), dtype = np.bool)
     df.loc[:, "zone_id"] = np.nan
 
-    if "quarter_id" in df:
-        f = ~np.isnan(df["quarter_id"]) & remaining_mask
+    if quarter_id_field in df:
+        f = ~np.isnan(df[quarter_id_field]) & remaining_mask
 
         df_join = pd.merge(
-            df[f][["quarter_id"]],
+            df[f][[quarter_id_field]],
             df_zones[df_zones["zone_level"] == "quarter"][["zone_level_id", "zone_id", "zone_level"]],
-            how = "left", left_on = "quarter_id", right_on = "zone_level_id")
+            how = "left", left_on = quarter_id_field, right_on = "zone_level_id")
 
-        df.loc[f, "zone_id"] = df_join.loc[:, "zone_id"].values
-        df.loc[f, "zone_level"] = df_join.loc[:, "zone_level"].values
-        remaining_mask &= np.isnan(df["zone_id"])
+        df.loc[f, zone_id_prefix + "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, zone_id_prefix + "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= np.isnan(df[zone_id_prefix + "zone_id"])
 
-        print("  Found %d quarters" % np.count_nonzero(df["zone_level"] == "quarter"))
+        print("  Found %d quarters" % np.count_nonzero(df[zone_id_prefix + "zone_level"] == "quarter"))
 
-    if "municipality_id" in df:
-        f = ~np.isnan(df["municipality_id"]) & remaining_mask
+    if municipality_id_field in df:
+        f = ~np.isnan(df[municipality_id_field]) & remaining_mask
 
         df_join = pd.merge(
-            df[f][["municipality_id"]],
+            df[f][[municipality_id_field]],
             df_zones[df_zones["zone_level"] == "municipality"][["zone_level_id", "zone_id", "zone_level"]],
-            how = "left", left_on = "municipality_id", right_on = "zone_level_id")
+            how = "left", left_on = municipality_id_field, right_on = "zone_level_id")
 
-        df.loc[f, "zone_id"] = df_join.loc[:, "zone_id"].values
-        df.loc[f, "zone_level"] = df_join.loc[:, "zone_level"].values
-        remaining_mask &= np.isnan(df["zone_id"])
+        df.loc[f, zone_id_prefix + "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, zone_id_prefix + "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= np.isnan(df[zone_id_prefix + "zone_id"])
 
-        print("  Found %d municipalities" % np.count_nonzero(df["zone_level"] == "municipality"))
+        print("  Found %d municipalities" % np.count_nonzero(df[zone_id_prefix + "zone_level"] == "municipality"))
 
-    if "country_id" in df:
-        f = ~np.isnan(df["country_id"]) & remaining_mask
+    if country_id_field in df:
+        f = ~np.isnan(df[country_id_field]) & remaining_mask
 
         df_join = pd.merge(
-            df[f][["country_id"]],
+            df[f][[country_id_field]],
             df_zones[df_zones["zone_level"] == "country"][["zone_level_id", "zone_id", "zone_level"]],
-            how = "left", left_on = "country_id", right_on = "zone_level_id")
+            how = "left", left_on = country_id_field, right_on = "zone_level_id")
 
-        df.loc[f, "zone_id"] = df_join.loc[:, "zone_id"].values
-        df.loc[f, "zone_level"] = df_join.loc[:, "zone_level"].values
-        remaining_mask &= np.isnan(df["zone_id"])
+        df.loc[f, zone_id_prefix + "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, zone_id_prefix + "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= np.isnan(df[zone_id_prefix + "zone_id"])
 
-        print("  Found %d countries" % np.count_nonzero(df["zone_level"] == "country"))
+        print("  Found %d countries" % np.count_nonzero(df[zone_id_prefix + "zone_level"] == "country"))
 
-    unknown_count = np.count_nonzero(np.isnan(df["zone_id"]))
+    unknown_count = np.count_nonzero(np.isnan(df[zone_id_prefix + "zone_id"]))
 
     if unknown_count > 0:
         print("  No information for %d observations" % unknown_count)

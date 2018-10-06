@@ -6,6 +6,7 @@ import data.spatial.zones
 import data.utils
 import data.spatial.municipalities
 import data.spatial.quarters
+import data.spatial.utils
 
 def configure(context, require):
     require.config("raw_data_path")
@@ -34,25 +35,25 @@ def execute(context):
     df_municipalities = context.stage("data.spatial.municipalities")[0]
 
     df_spatial = pd.DataFrame(df[["enterprise_id", "x", "y"]])
-    df_spatial = data.utils.to_gpd(df_spatial, "x", "y")
+    df_spatial = data.spatial.utils.to_gpd(df_spatial, "x", "y")
 
-    df_spatial = data.spatial.municipalities.impute(df_spatial, df_municipalities)[[
+    df_spatial = data.spatial.utils.impute(df_spatial, df_municipalities, "enterprise_id", "municipality_id")[[
         "enterprise_id", "municipality_id", "geometry"
     ]]
 
-    df_spatial = data.spatial.quarters.impute(df_spatial, df_quarters, fix_by_distance = False)[[
+    df_spatial = data.spatial.utils.impute(df_spatial, df_quarters, "enterprise_id", "quarter_id", fix_by_distance = False)[[
         "enterprise_id", "municipality_id", "quarter_id", "geometry"
     ]]
 
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)[[
-        "enterprise_id", "zone_id", "zone_level"
+        "enterprise_id", "zone_id", "zone_level", "municipality_id", "quarter_id"
     ]]
 
     assert(len(df) == len(df_spatial))
-    assert(len(df_spatial) == len(df_spatial.dropna()))
+    assert(len(df_spatial) == len(df_spatial["zone_id"].dropna()))
 
     df = pd.merge(
-        df, df_spatial[["enterprise_id", "zone_id"]],
+        df, df_spatial[["enterprise_id", "zone_id", "municipality_id", "quarter_id"]],
         on = "enterprise_id"
     )
     df["zone_id"] = df["zone_id"].astype(np.int)

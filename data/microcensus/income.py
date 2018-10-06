@@ -26,7 +26,6 @@ def impute(df_mz):
 
     df_mz.loc[no_income_selector, "income_class"] = classifier.predict(prediction_data)
 
-    # Add a flag so we know later on if an income is imputed or not. Would be worth to verify (TODO).
     df_mz["income_imputed"] = False
     df_mz.loc[no_income_selector, "income_imputed"] = True
 

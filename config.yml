@@ -3,6 +3,7 @@ target_path: /run/media/sebastian/shoerl_data/temp
 threads: 4
 hot_deck_matching_runners: 2
 disable_progress_bar: false
+debug_household_count: 100000
 stages:
     #- population.matching,
     #- population.sociodemographics
@@ -13,9 +14,15 @@ stages:
     #- population.primary_locations
     #- data.od.raw
     #- data.od.matrix
-    #- data.statpop.statpop
+    - data.statpop.statpop
     #- data.misc.spatial_structure
     #- data.statpop.spatial_structure
     #- data.microcensus.spatial_structure
     #- data.spatial.types
-    - data.statent.statent
+    #- data.statpop.statpop
+    #- data.statent.statent
+    #- data.od.distances
+    #- data.structural_survey.structural_survey
+    #- population.primary_zones
+    #- data.spatial.zone_shapes
+    #- population.primary_locations

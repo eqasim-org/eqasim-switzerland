@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 from tqdm import tqdm
+from sklearn.neighbors import KDTree
 
 def configure(context, require):
     require.config("raw_data_path")
@@ -37,43 +38,3 @@ def update_quarter_ids(df, df_quarters, remove_unknown = False):
         return df[~np.isnan(df["quarter_id"])]
     else:
         return df
-
-def impute(df, df_quarters, fix_by_distance = True):
-    assert(not "quarter_id" in df.columns)
-
-    print("Imputing %d quarters by spatial join..." % len(df))
-
-    result = []
-    chunk_count = int(len(df) / 10000)
-    for chunk in tqdm(np.array_split(df, chunk_count), total = chunk_count):
-        result.append(gpd.sjoin(df_quarters, chunk, op = "contains", how = "right"))
-    df = pd.concat(result).reset_index()
-
-    invalid_mask = np.isnan(df["quarter_id"])
-    df.loc[~invalid_mask, "quarter_id"] = df.loc[~invalid_mask, "quarter_id"]
-
-    if fix_by_distance and np.any(invalid_mask):
-        print("  Fixing %d observations by distance join..." % np.count_nonzero(invalid_mask))
-        coordinates = np.vstack([df_quarters["geometry"].centroid.x, df_quarters["geometry"].centroid.y]).T
-        kd_tree = KDTree(coordinates)
-
-        df_missing = df[invalid_mask]
-        coordinates = np.vstack([df_missing["geometry"].centroid.x, df_missing["geometry"].centroid.y]).T
-        indices = kd_tree.query(coordinates, return_distance = False).flatten()
-
-        df.loc[invalid_mask, "quarter_id"] = df_quarters.iloc[indices]["quarter_id"].values
-
-    return df
-
-
-
-
-
-
-
-
-
-
-
-
-#
