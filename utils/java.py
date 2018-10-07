@@ -5,7 +5,7 @@ class JavaRunner:
         self.memory = memory
         self.binary = binary
 
-    def __call__(self, classpath, entry_point, arguments, vm_arguments = [], cwd = None, memory = None):
+    def __call__(self, classpath, entry_point, arguments, vm_arguments = [], cwd = None, memory = None, output = False):
         memory = self.memory if memory is None else memory
         vm_arguments += ["-Xmx" + self.memory]
 
@@ -16,8 +16,11 @@ class JavaRunner:
 
         print("Executing Java:")
         print("  " + " ".join(command_line))
-        
-        return sp.check_output(command_line, cwd = cwd)
+
+        if output:
+            return sp.check_output(command_line, cwd = cwd)
+        else:
+            return sp.check_call(command_line, cwd = cwd)
 
 def configure(context, require):
     require.config("java_memory", "10G")
