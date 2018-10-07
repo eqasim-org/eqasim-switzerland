@@ -16,4 +16,5 @@ stages:
     #- matsim.network.convert_osm
     #- matsim.network.mapped
     #- matsim.network.plausibility
-    - matsim.network.convert_hafas
+    #- matsim.network.convert_hafas
+    - matsim.java.pt2matsim
