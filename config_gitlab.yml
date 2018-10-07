@@ -6,3 +6,4 @@ hot_deck_matching_runners: 24
 disable_progress_bar: true
 stages:
     - matsim.population
+    - matsim.network.mapped
