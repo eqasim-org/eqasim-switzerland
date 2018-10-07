@@ -12,9 +12,12 @@ class JavaRunner:
         if type(classpath) == list or type(classpath) == tuple:
             classpath = ":".join(classpath)
 
-        return sp.check_output(
-            [self.binary, "-cp", classpath] + vm_arguments +
-            [entry_point] + arguments, cwd = cwd)
+        command_line = [self.binary, "-cp", classpath] + vm_arguments + [entry_point] + arguments
+
+        print("Executing Java:")
+        print("  " + " ".join(command_line))
+        
+        return sp.check_output(command_line, cwd = cwd)
 
 def configure(context, require):
     require.config("java_memory", "10G")
