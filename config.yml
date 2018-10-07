@@ -5,6 +5,7 @@ threads: 4
 hot_deck_matching_runners: 2
 disable_progress_bar: false
 debug_household_count: 100000
+java_memory: 10G
 stages:
     #- data.statent.statent
     #- population.work_locations
@@ -13,5 +14,6 @@ stages:
     #- population.education_locations
     #- population.work_locations
     #- matsim.network.convert_osm
-    - matsim.network.mapped
-    - matsim.network.plausibility
+    #- matsim.network.mapped
+    #- matsim.network.plausibility
+    - matsim.network.convert_hafas
