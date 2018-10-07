@@ -1,4 +1,5 @@
 import subprocess as sp
+import os.path
 
 def configure(context, require):
     require.stage("matsim.java.pt2matsim")
