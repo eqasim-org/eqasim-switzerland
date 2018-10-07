@@ -28,7 +28,7 @@ def execute(context):
             '<param name="outputNetworkFile" value="%s/converted_network.xml.gz" />' % context.cache_path
         )
 
-        with open("%s/convert_network.xml" % context.cache_path) as f:
+        with open("%s/convert_network.xml" % context.cache_path, "w+") as f:
             f.write(content)
 
         sp.check_call([
