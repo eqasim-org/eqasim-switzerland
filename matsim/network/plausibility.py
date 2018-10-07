@@ -7,7 +7,7 @@ def configure(context, require):
 
 def execute(context):
     jar = context.stage("matsim.java.pt2matsim")
-    paths = require.stage("matsim.network.mapped")
+    paths = context.stage("matsim.network.mapped")
 
     # Do plausibility checks
 
