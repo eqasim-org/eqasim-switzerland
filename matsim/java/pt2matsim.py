@@ -28,5 +28,4 @@ def execute(context):
     ], cwd = context.cache_path, stdout = sp.PIPE, stderr = sp.PIPE)
 
     assert(os.path.exists("%s/test_config.xml" % context.cache_path))
-
     return target_path

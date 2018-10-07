@@ -1,11 +1,11 @@
 import subprocess as sp
 
 def configure(context, require):
-    require.stage("pt2matsim")
+    require.stage("matsim.java.pt2matsim")
     require.config("raw_data_path")
 
 def execute(context):
-        jar = "%s/pt2matsim.jar" % context.cache_path("matsim.pt2matsim")
+        jar = context.stage("matsim.java.pt2matsim")
 
         # Create MATSim network
 
@@ -35,4 +35,4 @@ def execute(context):
             "java", "-cp", jar, "org.matsim.pt2matsim.run.Osm2MultimodalNetwork", "convert_network.xml"
         ], cwd = context.cache_path, stdout = sp.PIPE, stderr = sp.PIPE)
 
-        
+        return "%s/converted_network.xml.gz" % context.cache_path
