@@ -12,4 +12,6 @@ stages:
     #- population.matching
     #- population.education_locations
     #- population.work_locations
-    - matsim.network.convert_osm
+    #- matsim.network.convert_osm
+    - matsim.network.mapped
+    - matsim.network.plausibility

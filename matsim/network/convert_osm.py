@@ -35,4 +35,5 @@ def execute(context):
             "java", "-cp", jar, "org.matsim.pt2matsim.run.Osm2MultimodalNetwork", "convert_network.xml"
         ], cwd = context.cache_path)
 
+        assert(os.path.exists("%s/converted_network.xml.gz" % context.cache_path))
         return "%s/converted_network.xml.gz" % context.cache_path

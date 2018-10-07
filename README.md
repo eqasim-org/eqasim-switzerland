@@ -81,6 +81,11 @@ with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
 - State: 7 Oct 2018
 - Contract: [Open Data][5]
 
+**HAFAS**
+- Content: `hafas/` contains the official SBB HAFAS schedule for Switzerland.
+- State: 17 Sep 2018
+- Contract: [Open Data][6]
+
 [1]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/generalisierte-gemeindegrenzen.assetdetail.5247306.html
 
 [2]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/quartiergrenzen-schweizer-staedte.html
@@ -89,3 +94,4 @@ with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
 
 [4]: https://www.bfs.admin.ch/bfs/de/home/grundlagen/stgb.assetdetail.6166613.html
 [5]: https://download.geofabrik.de/europe/switzerland.html
+[6]: https://opendata.swiss/en/dataset/fahrplanentwurf-2018-hrdf
