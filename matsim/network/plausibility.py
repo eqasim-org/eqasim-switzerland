@@ -4,8 +4,10 @@ import os.path
 def configure(context, require):
     require.stage("matsim.java.pt2matsim")
     require.stage("matsim.network.mapped")
+    require.stage("utils.java")
 
 def execute(context):
+    java = context.stage("utils.java")
     jar = context.stage("matsim.java.pt2matsim")
     paths = context.stage("matsim.network.mapped")
 
