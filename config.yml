@@ -9,5 +9,6 @@ stages:
     #- population.work_locations
     #- population.education_locations
     #- population.matching
-    - population.education_locations
-    - population.work_locations
+    #- population.education_locations
+    #- population.work_locations
+    - matsim.pt2matsim
