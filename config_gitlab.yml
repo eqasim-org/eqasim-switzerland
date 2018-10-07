@@ -1,8 +1,8 @@
 raw_data_path: /nas/ivtmatsim/scenario/raw/raw
-target_path: output
+target_path: temp
+output_path: output
 threads: 24
 hot_deck_matching_runners: 24
 disable_progress_bar: true
 stages:
-    - population.work_locations
-    - population.education_locations
+    - matsim.population

@@ -1,5 +1,6 @@
 raw_data_path: /run/media/sebastian/shoerl_data/population/raw
 target_path: /run/media/sebastian/shoerl_data/temp
+output_path: /run/media/sebastian/shoerl_data/output
 threads: 4
 hot_deck_matching_runners: 2
 disable_progress_bar: false
@@ -9,5 +10,7 @@ stages:
     #- population.work_locations
     #- population.education_locations
     #- population.matching
-    - population.education_locations
-    - population.work_locations
+    #- population.education_locations
+    #- population.work_locations
+    - matsim.population
+    #- population.trips
