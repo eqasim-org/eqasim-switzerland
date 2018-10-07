@@ -5,9 +5,13 @@ class JavaRunner:
         self.memory = memory
         self.binary = binary
 
-    def __call__(self, classpath, entry_point, arguments, vm_arguments = [], cwd = None, memory = None, output = False):
+    def __call__(self, classpath, entry_point, arguments, vm_arguments = None, cwd = None, memory = None, output = False):
         memory = self.memory if memory is None else memory
-        vm_arguments += ["-Xmx" + self.memory]
+
+        if vm_arguments is None:
+            vm_arguments = []
+
+        vm_arguments = ["-Xmx" + self.memory] + vm_arguments
 
         if type(classpath) == list or type(classpath) == tuple:
             classpath = ":".join(classpath)
