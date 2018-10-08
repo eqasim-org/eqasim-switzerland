@@ -26,6 +26,10 @@ def execute(context):
     ], cwd = "%s/pt2matsim" % context.cache_path)
 
     sp.check_call([
+        "mvn", "-version"
+    ], cwd = "%s/pt2matsim" % context.cache_path)
+
+    sp.check_call([
         "mvn", "package"
     ], cwd = "%s/pt2matsim" % context.cache_path)
 
