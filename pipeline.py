@@ -1,5 +1,5 @@
 import importlib
-import os.path
+import os.path, shutil
 import pickle
 import itertools
 import time
@@ -75,6 +75,10 @@ class Context:
         self.stages = {}
         self.target_path = target_path
         self.config = config
+        self.cache_path = None
+
+    def cache_path(self, name):
+        return "%s/%s_cache" % (self.target_path, name)
 
     def stage_path(self, name):
         return "%s/%s.p" % (self.target_path, name)
@@ -143,6 +147,8 @@ def compute_dag(dependencies):
     return { "sequence" : linear, "parents" : parents, "children" : children }
 
 def run(requested_stages, target_path = "target", config = {}):
+    target_path = os.path.abspath(target_path)
+
     stage_names = requested_stages[:]
 
     stages = {}
@@ -226,6 +232,13 @@ def run(requested_stages, target_path = "target", config = {}):
 
     for stage_name in active_sequence:
         print("Executing stage %s ..." % stage_name)
+
+        cache_path = "%s/%s_cache" % (target_path, stage_name)
+        if os.path.exists(cache_path):
+            shutil.rmtree(cache_path)
+        os.makedirs(cache_path)
+        context.cache_path = cache_path
+
         data = stages[stage_name].execute(context)
         context.save(stage_name, data, requirements[stage_name].cache)
 
