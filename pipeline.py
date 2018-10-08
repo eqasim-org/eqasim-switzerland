@@ -147,6 +147,8 @@ def compute_dag(dependencies):
     return { "sequence" : linear, "parents" : parents, "children" : children }
 
 def run(requested_stages, target_path = "target", config = {}):
+    target_path = os.path.abspath(target_path)
+
     stage_names = requested_stages[:]
 
     stages = {}
