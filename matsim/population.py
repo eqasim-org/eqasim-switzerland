@@ -78,7 +78,7 @@ class PersonWriter:
             self.write_attribute(f, "employed", "java.lang.Boolean", employed)
 
             license = "yes" if self.person[5] else "no"
-            self.write_attribute(f, "hasLicense", "java.lang.Integer", license)
+            self.write_attribute(f, "hasLicense", "java.lang.String", license)
 
             sex = ["m", "f"][self.person[6]]
             self.write_attribute(f, "sex", "java.lang.Integer", sex)
