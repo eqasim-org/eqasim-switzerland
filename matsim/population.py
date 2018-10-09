@@ -133,49 +133,49 @@ def execute(context):
     trip_iterator = iter(df_trips.itertuples())
 
     with gzip.open("%s/population.xml.gz" % output_path, "w+") as f:
-        writer = io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2)
-        write_line = lambda line: writer.write(bytes(line + "\n", "utf-8"))
+        with io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2) as writer:
+            write_line = lambda line: writer.write(bytes(line + "\n", "utf-8"))
 
-        write_line('<?xml version="1.0" encoding="utf-8"?>')
-        write_line('<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">')
-        write_line('<population desc="Switzerland Baseline">')
+            write_line('<?xml version="1.0" encoding="utf-8"?>')
+            write_line('<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">')
+            write_line('<population desc="Switzerland Baseline">')
 
-        person_writer = None
+            person_writer = None
 
-        number_of_processed_trips = 1
-        number_of_processed_persons = 1
+            number_of_processed_trips = 1
+            number_of_processed_persons = 1
 
-        with tqdm(total = len(df_persons)) as progress:
-            try:
-                person = next(person_iterator)
-                trip = next(trip_iterator)
-
-                person_writer = PersonWriter(person)
-                person_writer.add_trip(trip)
-
-                while True:
-                    while True:
-                        trip = next(trip_iterator)
-                        number_of_processed_trips += 1
-
-                        if not trip[1] == person[1]:
-                            break
-                        else:
-                            person_writer.add_trip(trip)
-
-                    person_writer.write(writer)
-
+            with tqdm(total = len(df_persons)) as progress:
+                try:
                     person = next(person_iterator)
-                    number_of_processed_persons += 1
+                    trip = next(trip_iterator)
 
                     person_writer = PersonWriter(person)
                     person_writer.add_trip(trip)
 
-                    progress.update()
-            except StopIteration:
-                person_writer.write(writer)
+                    while True:
+                        while True:
+                            trip = next(trip_iterator)
+                            number_of_processed_trips += 1
 
-        assert(number_of_processed_trips == len(df_trips))
-        assert(number_of_processed_persons == len(df_persons))
+                            if not trip[1] == person[1]:
+                                break
+                            else:
+                                person_writer.add_trip(trip)
 
-        write_line('</population>')
+                        person_writer.write(writer)
+
+                        person = next(person_iterator)
+                        number_of_processed_persons += 1
+
+                        person_writer = PersonWriter(person)
+                        person_writer.add_trip(trip)
+
+                        progress.update()
+                except StopIteration:
+                    person_writer.write(writer)
+
+            assert(number_of_processed_trips == len(df_trips))
+            assert(number_of_processed_persons == len(df_persons))
+
+            write_line('</population>')
