@@ -133,7 +133,7 @@ def execute(context):
     trip_iterator = iter(df_trips.itertuples())
 
     with gzip.open("%s/population.xml.gz" % output_path, "w+") as f:
-        writer = io.BufferedWriter(f, buffer_size = 1024  * 1024 * 100)
+        writer = io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2)
         write_line = lambda line: writer.write(bytes(line + "\n", "utf-8"))
 
         write_line('<?xml version="1.0" encoding="utf-8"?>')
@@ -163,7 +163,7 @@ def execute(context):
                         else:
                             person_writer.add_trip(trip)
 
-                    person_writer.write(f)
+                    person_writer.write(writer)
 
                     person = next(person_iterator)
                     number_of_processed_persons += 1
