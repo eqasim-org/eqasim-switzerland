@@ -82,7 +82,7 @@ class PersonWriter:
             self.write_attribute(writer, "hasLicense", "java.lang.Integer", license)
 
             sex = ["m", "f"][self.person[6]]
-            self.write_attribute(writer, "sex", "java.lang.Integer", sex)
+            self.write_attribute(writer, "sex", "java.lang.String", sex)
 
             self.write_line(writer, 2, '</attributes>')
 
