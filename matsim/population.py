@@ -2,6 +2,7 @@ import gzip
 from tqdm import tqdm
 import data.constants as c
 import numpy as np
+import io
 
 def configure(context, require):
     require.stage("population.sociodemographics")
@@ -16,12 +17,12 @@ class PersonWriter:
     def add_trip(self, trip):
         self.trips.append(trip)
 
-    def write_line(self, f, indent, content):
+    def write_line(self, writer, indent, content):
         line = ("  " * indent) + content + "\n"
-        f.write(bytes(line, "utf-8"))
+        writer.write(bytes(line, "utf-8"))
 
-    def write_attribute(self, f, name, type, value):
-        self.write_line(f, 3,
+    def write_attribute(self, writer, name, type, value):
+        self.write_line(writer, 3,
             '<attribute name="%s" class="%s">%s</attribute>' % (name, type, value)
         )
 
@@ -32,7 +33,7 @@ class PersonWriter:
         seconds = (time % 60)
         return "%02d:%02d:%02d" % (hours, minutes, seconds)
 
-    def write_activity(self, f, purpose, location, start_time = None, end_time = None):
+    def write_activity(self, writer, purpose, location, start_time = None, end_time = None):
         attributes = []
 
         attributes.append('type="%s"' % purpose)
@@ -46,9 +47,9 @@ class PersonWriter:
         if end_time is not None: attributes.append('end_time="%s"' % self.write_time(end_time))
 
         attributes = " ".join(attributes)
-        self.write_line(f, 3, '<activity %s />' % attributes)
+        self.write_line(writer, 3, '<activity %s />' % attributes)
 
-    def write_leg(self, f, departure_time, arrival_time, mode):
+    def write_leg(self, writer, departure_time, arrival_time, mode):
         attributes = []
 
         travle_time = arrival_time - departure_time
@@ -58,36 +59,36 @@ class PersonWriter:
         attributes.append('trav_time="%s"' % self.write_time(arrival_time - departure_time))
 
         attributes = " ".join(attributes)
-        self.write_line(f, 3, '<leg %s />' % attributes)
+        self.write_line(writer, 3, '<leg %s />' % attributes)
 
-    def write(self, f):
+    def write(self, writer):
         if self.person[2] >= c.MZ_AGE_THRESHOLD:
-            self.write_line(f, 1, '<person id="%d">' % self.person[1])
+            self.write_line(writer, 1, '<person id="%d">' % self.person[1])
 
             # Write attributes
 
-            self.write_line(f, 2, '<attributes>')
+            self.write_line(writer, 2, '<attributes>')
 
             age = str(self.person[2])
-            self.write_attribute(f, "age", "java.lang.Integer", age)
+            self.write_attribute(writer, "age", "java.lang.Integer", age)
 
             car_availability = ["always", "sometimes", "never"][int(self.person[3])]
-            self.write_attribute(f, "carAvail", "java.lang.String", car_availability)
+            self.write_attribute(writer, "carAvail", "java.lang.String", car_availability)
 
             employed = "true" if self.person[4] else "false"
-            self.write_attribute(f, "employed", "java.lang.Boolean", employed)
+            self.write_attribute(writer, "employed", "java.lang.Boolean", employed)
 
             license = "yes" if self.person[5] else "no"
-            self.write_attribute(f, "hasLicense", "java.lang.String", license)
+            self.write_attribute(writer, "hasLicense", "java.lang.Integer", license)
 
             sex = ["m", "f"][self.person[6]]
-            self.write_attribute(f, "sex", "java.lang.String", sex)
+            self.write_attribute(writer, "sex", "java.lang.String", sex)
 
-            self.write_line(f, 2, '</attributes>')
+            self.write_line(writer, 2, '</attributes>')
 
             # Write plan
 
-            self.write_line(f, 2, '<plan selected="yes">')
+            self.write_line(writer, 2, '<plan selected="yes">')
 
             home_location = (self.person[7], self.person[8], None)
             location = home_location
@@ -99,8 +100,8 @@ class PersonWriter:
             for trip in self.trips:
                 end_time = trip[3]
 
-                self.write_activity(f, purpose, location, start_time, end_time)
-                self.write_leg(f, trip[3], trip[4], trip[5])
+                self.write_activity(writer, purpose, location, start_time, end_time)
+                self.write_leg(writer, trip[3], trip[4], trip[5])
 
                 purpose = trip[6]
                 location = (trip[7], trip[8], trip[9])
@@ -109,10 +110,10 @@ class PersonWriter:
                 if np.isnan(trip[7]):
                     location = home_location
 
-            self.write_activity(f, purpose, location)
+            self.write_activity(writer, purpose, location)
 
-            self.write_line(f, 2, '</plan>')
-            self.write_line(f, 1, '</person>')
+            self.write_line(writer, 2, '</plan>')
+            self.write_line(writer, 1, '</person>')
 
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y"]
 TRIP_FIELDS = ["person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "location_x", "location_y", "location_id"]
@@ -132,48 +133,49 @@ def execute(context):
     trip_iterator = iter(df_trips.itertuples())
 
     with gzip.open("%s/population.xml.gz" % output_path, "w+") as f:
-        write_line = lambda line: f.write(bytes(line + "\n", "utf-8"))
+        with io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2) as writer:
+            write_line = lambda line: writer.write(bytes(line + "\n", "utf-8"))
 
-        write_line('<?xml version="1.0" encoding="utf-8"?>')
-        write_line('<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">')
-        write_line('<population desc="Switzerland Baseline">')
+            write_line('<?xml version="1.0" encoding="utf-8"?>')
+            write_line('<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">')
+            write_line('<population desc="Switzerland Baseline">')
 
-        person_writer = None
+            person_writer = None
 
-        number_of_processed_trips = 1
-        number_of_processed_persons = 1
+            number_of_processed_trips = 1
+            number_of_processed_persons = 1
 
-        with tqdm(total = len(df_persons)) as progress:
-            try:
-                person = next(person_iterator)
-                trip = next(trip_iterator)
-
-                person_writer = PersonWriter(person)
-                person_writer.add_trip(trip)
-
-                while True:
-                    while True:
-                        trip = next(trip_iterator)
-                        number_of_processed_trips += 1
-
-                        if not trip[1] == person[1]:
-                            break
-                        else:
-                            person_writer.add_trip(trip)
-
-                    person_writer.write(f)
-
+            with tqdm(total = len(df_persons)) as progress:
+                try:
                     person = next(person_iterator)
-                    number_of_processed_persons += 1
+                    trip = next(trip_iterator)
 
                     person_writer = PersonWriter(person)
                     person_writer.add_trip(trip)
 
-                    progress.update()
-            except StopIteration:
-                person_writer.write(f)
+                    while True:
+                        while True:
+                            trip = next(trip_iterator)
+                            number_of_processed_trips += 1
 
-        assert(number_of_processed_trips == len(df_trips))
-        assert(number_of_processed_persons == len(df_persons))
+                            if not trip[1] == person[1]:
+                                break
+                            else:
+                                person_writer.add_trip(trip)
 
-        write_line('</population>')
+                        person_writer.write(writer)
+
+                        person = next(person_iterator)
+                        number_of_processed_persons += 1
+
+                        person_writer = PersonWriter(person)
+                        person_writer.add_trip(trip)
+
+                        progress.update()
+                except StopIteration:
+                    person_writer.write(writer)
+
+            assert(number_of_processed_trips == len(df_trips))
+            assert(number_of_processed_persons == len(df_persons))
+
+            write_line('</population>')
