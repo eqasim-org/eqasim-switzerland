@@ -7,7 +7,6 @@ import io
 def configure(context, require):
     require.stage("population.sociodemographics")
     require.stage("population.trips")
-    require.config("output_path")
 
 class PersonWriter:
     def __init__(self, person):
@@ -79,7 +78,7 @@ class PersonWriter:
             self.write_attribute(writer, "employed", "java.lang.Boolean", employed)
 
             license = "yes" if self.person[5] else "no"
-            self.write_attribute(writer, "hasLicense", "java.lang.Integer", license)
+            self.write_attribute(writer, "hasLicense", "java.lang.String", license)
 
             sex = ["m", "f"][self.person[6]]
             self.write_attribute(writer, "sex", "java.lang.String", sex)
@@ -119,7 +118,7 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
 TRIP_FIELDS = ["person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "location_x", "location_y", "location_id"]
 
 def execute(context):
-    output_path = context.config["output_path"]
+    cache_path = context.cache_path
     df_persons = context.stage("population.sociodemographics")
     df_trips = context.stage("population.trips")
 
@@ -132,7 +131,7 @@ def execute(context):
     person_iterator = iter(df_persons.itertuples())
     trip_iterator = iter(df_trips.itertuples())
 
-    with gzip.open("%s/population.xml.gz" % output_path, "w+") as f:
+    with gzip.open("%s/population.xml.gz" % cache_path, "w+") as f:
         with io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2) as writer:
             write_line = lambda line: writer.write(bytes(line + "\n", "utf-8"))
 
@@ -179,3 +178,5 @@ def execute(context):
             assert(number_of_processed_persons == len(df_persons))
 
             write_line('</population>')
+
+    return "%s/population.xml.gz" % cache_path

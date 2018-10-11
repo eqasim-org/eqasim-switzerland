@@ -18,4 +18,4 @@ stages:
     #- matsim.network.plausibility
     #- matsim.network.convert_hafas
     #- matsim.java.pt2matsim
-    - matsim.population
+    - matsim.run
