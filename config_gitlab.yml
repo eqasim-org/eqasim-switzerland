@@ -6,5 +6,4 @@ hot_deck_matching_runners: 24
 disable_progress_bar: true
 java_memory: 100G
 stages:
-    - matsim.population
-    - matsim.network.mapped
+    - matsim.run
