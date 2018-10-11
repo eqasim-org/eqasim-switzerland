@@ -13,17 +13,17 @@ def execute(context):
         "git", "clone", "https://github.com/matsim-org/pt2matsim.git"
     ], cwd = context.cache_path)
 
-    sp.check_call([
-        "git", "remote", "add", "shoerl", "https://github.com/sebhoerl/pt2matsim.git"
-    ], cwd = "%s/pt2matsim" % context.cache_path)
+    #sp.check_call([
+    #    "git", "remote", "add", "shoerl", "https://github.com/sebhoerl/pt2matsim.git"
+    #], cwd = "%s/pt2matsim" % context.cache_path)
 
-    sp.check_call([
-        "git", "fetch", "shoerl"
-    ], cwd = "%s/pt2matsim" % context.cache_path)
+    #sp.check_call([
+    #    "git", "fetch", "shoerl"
+    #], cwd = "%s/pt2matsim" % context.cache_path)
 
-    sp.check_call([
-        "git", "checkout", "shoerl/wip"
-    ], cwd = "%s/pt2matsim" % context.cache_path)
+    #sp.check_call([
+    #    "git", "checkout", "shoerl/fix-inconsistent-car-network"
+    #], cwd = "%s/pt2matsim" % context.cache_path)
 
     sp.check_call([
         "mvn", "-version"

@@ -1,0 +1,38 @@
+import shutil
+import os.path
+
+def configure(context, require):
+    require.stage("matsim.population")
+    require.stage("matsim.network.mapped")
+    require.stage("matsim.java.matsim")
+    require.stage("matsim.java.baseline")
+    require.stage("utils.java")
+
+def execute(context):
+    network_path = context.stage("matsim.network.mapped")["network"]
+    shutil.copyfile(network_path, "%s/switzerland_network.xml.gz" % context.cache_path)
+
+    this_path = os.path.dirname(os.path.abspath(__file__))
+    shutil.copyfile("%s/config_template.xml" % this_path, "%s/switzerland_config.xml" % context.cache_path)
+
+    java = context.stage("utils.java")
+    input_population_path = context.stage("matsim.population")
+
+    java(
+        context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.preparation.Downsample", [
+            input_population_path, "0.01", "%s/unrouted_switzerland_population.xml.gz" % context.cache_path
+        ], cwd = context.cache_path)
+
+    java(
+        context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.preparation.Routing", [
+            "%s/switzerland_config.xml" % context.cache_path,
+            "%s/switzerland_network.xml.gz" % context.cache_path,
+            "%s/unrouted_switzerland_population.xml.gz" % context.cache_path,
+            "%s/switzerland_population.xml.gz" % context.cache_path
+        ], cwd = context.cache_path)
+
+    java(
+        context.stage("matsim.java.matsim"), "org.matsim.run.Controler",
+        ["switzerland_config.xml"], cwd = context.cache_path)
+
+    return {}
