@@ -27,6 +27,10 @@
 		<param name="inputPlansFile" value="switzerland_population.xml.gz" />
 	</module>
 
+    <module name="households">
+        <param name="inputFile" value="switzerland_households.xml.gz" />
+    </module>
+
     <module name="planCalcScore">
         <parameterset type="activityParams">
             <param name="activityType" value="home" />

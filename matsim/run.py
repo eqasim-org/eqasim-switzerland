@@ -3,6 +3,7 @@ import os.path
 
 def configure(context, require):
     require.stage("matsim.population")
+    require.stage("matsim.population_attributes")
     require.stage("matsim.network.mapped")
     require.stage("matsim.java.matsim")
     require.stage("matsim.java.baseline")
@@ -11,6 +12,9 @@ def configure(context, require):
 def execute(context):
     network_path = context.stage("matsim.network.mapped")["network"]
     shutil.copyfile(network_path, "%s/switzerland_network.xml.gz" % context.cache_path)
+
+    households_path = context.stage("matsim.households")
+    shutil.copyfile(households_path, "%s/switzerland_households.xml.gz" % context.cache_path)
 
     this_path = os.path.dirname(os.path.abspath(__file__))
     shutil.copyfile("%s/config_template.xml" % this_path, "%s/switzerland_config.xml" % context.cache_path)

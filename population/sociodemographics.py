@@ -29,7 +29,19 @@ def execute(context):
     # Merge in person attributes
     df_mz["mz_person_id"] = df_mz[["person_id"]]
     df_persons = pd.merge(
-        df_persons, df_mz[["mz_person_id", "driving_license", "car_availability", "employed"]],
+        df_persons, df_mz[[
+            "mz_person_id", "driving_license", "car_availability", "employed",
+            "subscriptions_ga",
+            "subscriptions_halbtax",
+            "subscriptions_verbund",
+            "subscriptions_strecke",
+            "subscriptions_gleis7",
+            "subscriptions_junior",
+            "subscriptions_other",
+            "subscriptions_ga_class",
+            "subscriptions_verbund_class",
+            "subscriptions_strecke_class",
+        ]],
         on = "mz_person_id", how = "left"
     )
 

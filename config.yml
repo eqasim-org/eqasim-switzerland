@@ -18,4 +18,8 @@ stages:
     #- matsim.network.plausibility
     #- matsim.network.convert_hafas
     #- matsim.java.pt2matsim
-    - matsim.run
+    #- matsim.run
+    #- population.sociodemographics
+    #- matsim.population
+    #- matsim.population_attributes
+    #- matsim.households
