@@ -32,7 +32,7 @@
     </module>
 
     <module name="facilities">
-        <parma name="inputFacilitiesFile" value="switzerland_facilities.xml.gz" />
+        <param name="inputFacilitiesFile" value="switzerland_facilities.xml.gz" />
     </module>
 
     <module name="planCalcScore">
