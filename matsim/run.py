@@ -16,6 +16,9 @@ def execute(context):
     households_path = context.stage("matsim.households")
     shutil.copyfile(households_path, "%s/switzerland_households.xml.gz" % context.cache_path)
 
+    facilities_path = context.stage("matsim.facilities")
+    shutil.copyfile(facilities_path, "%s/switzerland_facilities.xml.gz" % context.cache_path)
+
     this_path = os.path.dirname(os.path.abspath(__file__))
     shutil.copyfile("%s/config_template.xml" % this_path, "%s/switzerland_config.xml" % context.cache_path)
 

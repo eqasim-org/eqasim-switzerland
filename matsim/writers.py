@@ -194,3 +194,30 @@ class HouseholdsWriter(XmlWriter):
     def add_income(self, income):
         self._require_scope(self.HOUSEHOLD_SCOPE)
         self._write_line('<income currency="CHF" period="month">%f</income>' % income)
+
+class FacilitiesWriter(XmlWriter):
+    FACILITIES_SCOPE = 0
+    FINISHED_SCOPE = 1
+
+    def __init__(self, writer):
+        XmlWriter.__init__(self, writer)
+
+    def start_facilities(self):
+        self._require_scope(None)
+        self._write_line('<?xml version="1.0" encoding="utf-8"?>')
+        self._write_line('<!DOCTYPE facilities SYSTEM "http://www.matsim.org/files/dtd/facilities_v1.dtd">')
+        self._write_line('<facilities name="Facilities from different sources">')
+
+        self.scope = self.FACILITIES_SCOPE
+        self.indent += 1
+
+    def end_facilities(self):
+        self._require_scope(self.FACILITIES_SCOPE)
+        self._write_line('</facilities>')
+        self.scope = self.FINISHED_SCOPE
+
+    def add_facility(self, facility_id, x, y):
+        self._require_scope(self.FACILITIES_SCOPE)
+        self._write_line('<facility id="%d" x="%f" y="%f" />' % (
+            facility_id, x, y
+        ))

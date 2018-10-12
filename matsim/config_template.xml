@@ -31,6 +31,10 @@
         <param name="inputFile" value="switzerland_households.xml.gz" />
     </module>
 
+    <module name="facilities">
+        <parma name="inputFacilitiesFile" value="switzerland_facilities.xml.gz" />
+    </module>
+
     <module name="planCalcScore">
         <parameterset type="activityParams">
             <param name="activityType" value="home" />
