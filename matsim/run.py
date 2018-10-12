@@ -3,7 +3,8 @@ import os.path
 
 def configure(context, require):
     require.stage("matsim.population")
-    require.stage("matsim.population_attributes")
+    require.stage("matsim.households")
+    require.stage("matsim.facilities")
     require.stage("matsim.network.mapped")
     require.stage("matsim.java.matsim")
     require.stage("matsim.java.baseline")
