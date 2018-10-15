@@ -3,6 +3,7 @@ from tqdm import tqdm
 import data.constants as c
 import numpy as np
 import io
+import matsim.writers
 
 def configure(context, require):
     require.stage("population.sociodemographics")
@@ -16,82 +17,30 @@ class PersonWriter:
     def add_trip(self, trip):
         self.trips.append(trip)
 
-    def write_line(self, writer, indent, content):
-        line = ("  " * indent) + content + "\n"
-        writer.write(bytes(line, "utf-8"))
-
-    def write_attribute(self, writer, name, type, value):
-        self.write_line(writer, 3,
-            '<attribute name="%s" class="%s">%s</attribute>' % (name, type, value)
-        )
-
-    def write_time(self, time):
-        time = int(time)
-        hours = time // 3600
-        minutes = (time % 3600) // 60
-        seconds = (time % 60)
-        return "%02d:%02d:%02d" % (hours, minutes, seconds)
-
-    def write_activity(self, writer, purpose, location, start_time = None, end_time = None):
-        attributes = []
-
-        attributes.append('type="%s"' % purpose)
-        attributes.append('x="%f"' % location[0])
-        attributes.append('y="%f"' % location[1])
-
-        id = location[2]
-        if id is not None and not np.isnan(id): attributes.append('facility="%d"' % id)
-
-        if start_time is not None: attributes.append('start_time="%s"' % self.write_time(start_time))
-        if end_time is not None: attributes.append('end_time="%s"' % self.write_time(end_time))
-
-        attributes = " ".join(attributes)
-        self.write_line(writer, 3, '<activity %s />' % attributes)
-
-    def write_leg(self, writer, departure_time, arrival_time, mode):
-        attributes = []
-
-        travle_time = arrival_time - departure_time
-
-        attributes.append('mode="%s"' % mode)
-        attributes.append('dep_time="%s"' % self.write_time(departure_time))
-        attributes.append('trav_time="%s"' % self.write_time(arrival_time - departure_time))
-
-        attributes = " ".join(attributes)
-        self.write_line(writer, 3, '<leg %s />' % attributes)
-
     def write(self, writer):
+         # Here we filter out young person without actvity chain
         if self.person[2] >= c.MZ_AGE_THRESHOLD:
-            self.write_line(writer, 1, '<person id="%d">' % self.person[1])
+            writer.start_person(self.person[1])
 
-            # Write attributes
+            # Attributes
+            writer.start_attributes()
+            writer.add_attribute("age", "java.long.Integer", str(self.person[2]))
+            writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(self.person[4]))
+            writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(self.person[5]))
+            writer.add_attribute("sex", "java.lang.String", ["m", "f"][self.person[6]])
+            writer.add_attribute("carAvail", "java.lang.String", ["always", "sometimes", "never"][int(self.person[3])])
+            writer.add_attribute("ptHasGA", "java.lang.Boolean", writer.true_false(self.person[9]))
+            writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[10]))
+            writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[11]))
+            writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[12]))
+            writer.end_attributes()
 
-            self.write_line(writer, 2, '<attributes>')
+            # Plan
+            writer.start_plan(selected = True)
 
-            age = str(self.person[2])
-            self.write_attribute(writer, "age", "java.lang.Integer", age)
-
-            car_availability = ["always", "sometimes", "never"][int(self.person[3])]
-            self.write_attribute(writer, "carAvail", "java.lang.String", car_availability)
-
-            employed = "true" if self.person[4] else "false"
-            self.write_attribute(writer, "employed", "java.lang.Boolean", employed)
-
-            license = "yes" if self.person[5] else "no"
-            self.write_attribute(writer, "hasLicense", "java.lang.String", license)
-
-            sex = ["m", "f"][self.person[6]]
-            self.write_attribute(writer, "sex", "java.lang.String", sex)
-
-            self.write_line(writer, 2, '</attributes>')
-
-            # Write plan
-
-            self.write_line(writer, 2, '<plan selected="yes">')
-
-            home_location = (self.person[7], self.person[8], None)
+            home_location = writer.location(x = self.person[7], y = self.person[8])
             location = home_location
-            purpose = "home"
+            activity_type = "home"
             end_time = None
             start_time = None
             first = True
@@ -99,22 +48,19 @@ class PersonWriter:
             for trip in self.trips:
                 end_time = trip[3]
 
-                self.write_activity(writer, purpose, location, start_time, end_time)
-                self.write_leg(writer, trip[3], trip[4], trip[5])
+                writer.add_activity(activity_type, location, start_time, end_time)
+                writer.add_leg(trip[5], trip[3], trip[4] - trip[3])
 
-                purpose = trip[6]
-                location = (trip[7], trip[8], trip[9])
+                activity_type = trip[6]
+                location = writer.location(trip[7], trip[8], trip[9]) if not np.isnan(trip[7]) else home_location
                 start_time = trip[4]
 
-                if np.isnan(trip[7]):
-                    location = home_location
+            writer.add_activity(activity_type, location, start_time)
 
-            self.write_activity(writer, purpose, location)
+            writer.end_plan()
+            writer.end_person()
 
-            self.write_line(writer, 2, '</plan>')
-            self.write_line(writer, 1, '</person>')
-
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y"]
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke"]
 TRIP_FIELDS = ["person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "location_x", "location_y", "location_id"]
 
 def execute(context):
@@ -132,12 +78,9 @@ def execute(context):
     trip_iterator = iter(df_trips.itertuples())
 
     with gzip.open("%s/population.xml.gz" % cache_path, "w+") as f:
-        with io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2) as writer:
-            write_line = lambda line: writer.write(bytes(line + "\n", "utf-8"))
-
-            write_line('<?xml version="1.0" encoding="utf-8"?>')
-            write_line('<!DOCTYPE population SYSTEM "http://www.matsim.org/files/dtd/population_v6.dtd">')
-            write_line('<population desc="Switzerland Baseline">')
+        with io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2) as raw_writer:
+            writer = matsim.writers.PopulationWriter(raw_writer)
+            writer.start_population()
 
             person_writer = None
 
@@ -177,6 +120,6 @@ def execute(context):
             assert(number_of_processed_trips == len(df_trips))
             assert(number_of_processed_persons == len(df_persons))
 
-            write_line('</population>')
+            writer.end_population()
 
     return "%s/population.xml.gz" % cache_path
