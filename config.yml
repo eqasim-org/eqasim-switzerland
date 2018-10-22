@@ -16,4 +16,4 @@ stages:
     #- matsim.facilities
     #- population.trips
     #- population.commute
-    #- population.secondary_locations
+    - population.secondary_locations
