@@ -6,7 +6,8 @@ from sklearn.neighbors import KDTree
 import numpy.linalg as la
 
 def configure(context, require):
-    require.stage("population.trips")
+    require.stage("matsim.population")
+    require.stage("matsim.facilities")
     require.stage("data.microcensus.trips")
     require.stage("matsim.java.baseline")
     require.stage("utils.java")
