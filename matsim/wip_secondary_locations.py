@@ -55,7 +55,7 @@ def execute(context):
     input_facilities_path = context.stage("matsim.facilities")
 
     output_population_path = "%s/population_with_locations.xml.gz" % context.cache_path
-    output_statistics_path = "%s/statistics.csv"
+    output_statistics_path = "%s/statistics.csv" % context.cache_path
 
     java(
         context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.location_assignment.RunZurichLocationAssignment", [
