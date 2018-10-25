@@ -10,7 +10,7 @@ def configure(context, require):
     require.stage("data.spatial.zone_shapes")
 
 def execute(context):
-    df = context.stage("population.spatial.primary_zones")
+    df = context.stage("population.spatial.by_person.primary_zones")
     df_statent = context.stage("data.statent.statent")
 
     df_zones = context.stage("data.spatial.zones")
