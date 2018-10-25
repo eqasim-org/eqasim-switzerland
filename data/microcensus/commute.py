@@ -57,5 +57,4 @@ def execute(context):
 
     # Find the one with the longest duration, so we only have one commute purpose
     df_commute = df_commute.sort_values("commute_activity_duration", ascending = False).drop_duplicates("person_id")
-
     return df_commute

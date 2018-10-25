@@ -10,10 +10,18 @@ stages:
     #- population.trips
     #- data.microcensus.trips
     #- population.sociodemographics
-    #- matsim.population
+    - matsim.population
     #- matsim.population_attributes
     #- matsim.households
     #- matsim.facilities
-    #- population.trips
+    #- data.microcensus.commute_extrapolation
+    #- population.spatial.education_locations
+    #- population.spatial.by_person.education_locations
+    #- population.spatial.by_activity.subprimary_locations
+    #- population.spatial.activity_locations
+    #- population.opportunities
+    #- population.activities
     #- population.commute
-    - population.secondary_locations
+    #- population.secondary_locations
+    #- population.fixed_locations
+    #- population.commute_ratios

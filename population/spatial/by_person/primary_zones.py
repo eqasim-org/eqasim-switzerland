@@ -5,7 +5,7 @@ from tqdm import tqdm
 import functools
 
 def configure(context, require):
-    require.stage("population.commute")
+    require.stage("data.microcensus.commute")
     require.stage("data.od.matrix")
     require.stage("data.od.distances")
     require.stage("population.sociodemographics")

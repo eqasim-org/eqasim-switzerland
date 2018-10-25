@@ -6,14 +6,26 @@ import io
 import matsim.writers
 
 def configure(context, require):
-    require.stage("data.statent.statent")
+    require.stage("population.opportunities")
 
-FIELDS = ["enterprise_id", "x", "y"]
+FIELDS = [
+    "location_id", "location_x", "location_y",
+    "offers_work", "offers_education", "offers_service", "offers_leisure", "offers_shop"
+]
+
+def make_options(item):
+    options = []
+    if item[4]: options.append("work")
+    if item[5]: options.append("education")
+    if item[6]: options.append("service")
+    if item[7]: options.append("leisure")
+    if item[8]: options.append("shop")
+    return options
 
 def execute(context):
     cache_path = context.cache_path
 
-    df_statent = context.stage("data.statent.statent")
+    df_statent = context.stage("population.opportunities")
     df_statent = df_statent[FIELDS]
 
     with gzip.open("%s/facilities.xml.gz" % cache_path, "w+") as f:
@@ -22,7 +34,13 @@ def execute(context):
             writer.start_facilities()
 
             for item in tqdm(df_statent.itertuples(), total = len(df_statent)):
-                writer.add_facility(item[1], item[2], item[3])
+                writer.start_facility(item[1], item[2], item[3])
+                if item[4]: writer.add_activity("work")
+                if item[5]: writer.add_activity("education")
+                if item[6]: writer.add_activity("service")
+                if item[7]: writer.add_activity("leisure")
+                if item[8]: writer.add_activity("shop")
+                writer.end_facility()
 
             writer.end_facilities()
 
