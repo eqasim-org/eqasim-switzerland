@@ -23,7 +23,7 @@ def execute(context):
         "person_id", "home_x", "home_y"
     ]]
 
-    df_commute = context.stage("population.commute")[[
+    df_commute = context.stage("data.microcensus.commute")[[
         "person_id", "commute_trip_id", "commute_x", "commute_y"
     ]]
 
