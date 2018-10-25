@@ -4,122 +4,119 @@ import data.constants as c
 import numpy as np
 import io
 import matsim.writers
+import pandas as pd
 
 def configure(context, require):
     require.stage("population.sociodemographics")
     require.stage("population.trips")
+    require.stage("population.activities")
+    require.stage("population.spatial.locations")
 
 class PersonWriter:
     def __init__(self, person):
         self.person = person
-        self.trips = []
+        self.activities = []
 
-    def add_trip(self, trip):
-        self.trips.append(trip)
+    def add_activity(self, activity):
+        self.activities.append(activity)
 
     def write(self, writer):
-         # Here we filter out young person without actvity chain
-        if self.person[2] >= c.MZ_AGE_THRESHOLD:
-            writer.start_person(self.person[1])
+        writer.start_person(self.person[1])
 
-            # Attributes
-            writer.start_attributes()
-            writer.add_attribute("age", "java.long.Integer", str(self.person[2]))
-            writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(self.person[4]))
-            writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(self.person[5]))
-            writer.add_attribute("sex", "java.lang.String", ["m", "f"][self.person[6]])
-            writer.add_attribute("carAvail", "java.lang.String", ["always", "sometimes", "never"][int(self.person[3])])
-            writer.add_attribute("ptHasGA", "java.lang.Boolean", writer.true_false(self.person[9]))
-            writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[10]))
-            writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[11]))
-            writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[12]))
-            writer.end_attributes()
+        # Attributes
+        writer.start_attributes()
+        writer.add_attribute("age", "java.long.Integer", str(self.person[2]))
+        writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(self.person[4]))
+        writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(self.person[5]))
+        writer.add_attribute("sex", "java.lang.String", ["m", "f"][self.person[6]])
+        writer.add_attribute("carAvail", "java.lang.String", ["always", "sometimes", "never"][int(self.person[3])])
+        writer.add_attribute("ptHasGA", "java.lang.Boolean", writer.true_false(self.person[9]))
+        writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[10]))
+        writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[11]))
+        writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[12]))
+        writer.end_attributes()
 
-            # Plan
-            writer.start_plan(selected = True)
+        # Plan
+        writer.start_plan(selected = True)
 
-            home_location = writer.location(x = self.person[7], y = self.person[8])
-            location = home_location
-            activity_type = "home"
-            end_time = None
-            start_time = None
-            first = True
+        home_location = writer.location(x = self.activities[0][8], y = self.activities[0][9])
 
-            for trip in self.trips:
-                end_time = trip[3]
+        for i in range(len(self.activities)):
+            activity = self.activities[i]
+            location = home_location if np.isnan(activity[10]) else writer.location(activity[8], activity[9], activity[10])
 
-                writer.add_activity(activity_type, location, start_time, end_time)
-                writer.add_leg(trip[5], trip[3], trip[4] - trip[3])
+            start_time = activity[3] if not np.isnan(activity[3]) else None
+            end_time = activity[4] if not np.isnan(activity[4]) else None
 
-                activity_type = trip[6]
-                location = writer.location(trip[7], trip[8], trip[9]) if not np.isnan(trip[7]) else home_location
-                start_time = trip[4]
+            writer.add_activity(activity[6], location, start_time, end_time)
 
-            writer.add_activity(activity_type, location, start_time)
+            if not activity[7]:
+                next_activity = self.activities[i + 1]
+                writer.add_leg(activity[11], activity[4], next_activity[3] - activity[4])
 
-            writer.end_plan()
-            writer.end_person()
+        writer.end_plan()
+        writer.end_person()
 
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke"]
-TRIP_FIELDS = ["person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "location_x", "location_y", "location_id"]
+ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x", "location_y", "location_id", "following_mode"]
 
 def execute(context):
     cache_path = context.cache_path
     df_persons = context.stage("population.sociodemographics")
-    df_trips = context.stage("population.trips")
+    df_activities = context.stage("population.activities")
 
+    # Attach following modes to activities
+    df_trips = pd.DataFrame(context.stage("population.trips"), copy = True)[["person_id", "trip_id", "mode"]]
+    df_trips.columns = ["person_id", "activity_id", "following_mode"]
+    df_activities = pd.merge(df_activities, df_trips, on = ["person_id", "activity_id"], how = "left")
+
+    # Attach locations to activities
+    df_locations = context.stage("population.spatial.locations")
+    df_activities = pd.merge(df_activities, df_locations, on = ["person_id", "activity_id"], how = "left")
+
+    # Bring in correct order (although it should already be)
     df_persons = df_persons.sort_values(by = "person_id")
-    df_trips = df_trips.sort_values(by = ["person_id", "trip_id"])
+    df_activities = df_activities.sort_values(by = ["person_id", "activity_id"])
 
     df_persons = df_persons[PERSON_FIELDS]
-    df_trips = df_trips[TRIP_FIELDS]
+    df_activities = df_activities[ACTIVITY_FIELDS]
 
     person_iterator = iter(df_persons.itertuples())
-    trip_iterator = iter(df_trips.itertuples())
+    activity_iterator = iter(df_activities.itertuples())
+
+    number_of_written_persons = 0
+    number_of_written_activities = 0
 
     with gzip.open("%s/population.xml.gz" % cache_path, "w+") as f:
         with io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2) as raw_writer:
             writer = matsim.writers.PopulationWriter(raw_writer)
             writer.start_population()
 
-            person_writer = None
-
-            number_of_processed_trips = 1
-            number_of_processed_persons = 1
-
-            with tqdm(total = len(df_persons)) as progress:
+            with tqdm(total = len(df_persons), desc = "Writing persons ...") as progress:
                 try:
-                    person = next(person_iterator)
-                    trip = next(trip_iterator)
-
-                    person_writer = PersonWriter(person)
-                    person_writer.add_trip(trip)
-
                     while True:
-                        while True:
-                            trip = next(trip_iterator)
-                            number_of_processed_trips += 1
-
-                            if not trip[1] == person[1]:
-                                break
-                            else:
-                                person_writer.add_trip(trip)
-
-                        person_writer.write(writer)
-
                         person = next(person_iterator)
-                        number_of_processed_persons += 1
+                        is_last = False
 
                         person_writer = PersonWriter(person)
-                        person_writer.add_trip(trip)
 
+                        while not is_last:
+                            activity = next(activity_iterator)
+                            is_last = activity[7]
+                            assert(person[1] == activity[1])
+
+                            person_writer.add_activity(activity)
+                            number_of_written_activities += 1
+
+                        person_writer.write(writer)
+                        number_of_written_persons += 1
                         progress.update()
                 except StopIteration:
-                    person_writer.write(writer)
-
-            assert(number_of_processed_trips == len(df_trips))
-            assert(number_of_processed_persons == len(df_persons))
+                    pass
 
             writer.end_population()
+
+            assert(number_of_written_activities == len(df_activities))
+            assert(number_of_written_persons == len(df_persons))
 
     return "%s/population.xml.gz" % cache_path

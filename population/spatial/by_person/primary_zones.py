@@ -5,7 +5,7 @@ from tqdm import tqdm
 import functools
 
 def configure(context, require):
-    require.stage("population.commute")
+    require.stage("data.microcensus.commute")
     require.stage("data.od.matrix")
     require.stage("data.od.distances")
     require.stage("population.sociodemographics")
@@ -14,7 +14,7 @@ def configure(context, require):
 # TODO: We only assign work here through OD matrices. However, we *can* generate
 # OD matrices for education as well (the STATPOP information is available). What
 # would need to be done is to adjust data.od.matrix to produce two kinds of
-# matrices and then we would need to use this information here. In population.commute
+# matrices and then we would need to use this information here. In data.microcensus.commute
 # we already produce information on education commute.
 
 # However, for now we will recover the simple scheme from Kirill!
@@ -24,7 +24,7 @@ def execute(context):
     df_zones = context.stage("data.spatial.zones")
 
     # Load commute information for work
-    df_commute = pd.DataFrame(context.stage("population.commute")[[
+    df_commute = pd.DataFrame(context.stage("data.microcensus.commute")[[
         "person_id", "commute_mode", "commute_home_distance", "commute_purpose"
     ]], copy = True)
     df_commute = df_commute[df_commute["commute_purpose"] == "work"]

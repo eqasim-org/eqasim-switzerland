@@ -4,13 +4,13 @@ from tqdm import tqdm
 import data.spatial.zone_shapes
 
 def configure(context, require):
-    require.stage("population.primary_zones")
+    require.stage("population.spatial.by_person.primary_zones")
     require.stage("data.statent.statent")
     require.stage("data.spatial.zones")
     require.stage("data.spatial.zone_shapes")
 
 def execute(context):
-    df = context.stage("population.primary_zones")
+    df = context.stage("population.spatial.by_person.primary_zones")
     df_statent = context.stage("data.statent.statent")
 
     df_zones = context.stage("data.spatial.zones")
@@ -34,7 +34,7 @@ def execute(context):
             f = df["work_zone_id"] == zone_id
             df.loc[f, "work_x"] = df_statent.iloc[indices]["x"].values
             df.loc[f, "work_y"] = df_statent.iloc[indices]["y"].values
-            df.loc[f, "work_enterprise_id"] = df_statent.iloc[indices]["enterprise_id"].values
+            df.loc[f, "work_location_id"] = df_statent.iloc[indices]["enterprise_id"].values
         else:
             empty_zones.append(zone_id)
 
@@ -60,5 +60,9 @@ def execute(context):
 
     assert(len(df_international) == 0)
     assert(len(df) == len(df.dropna()))
+
+    df = df[[
+        "person_id", "work_x", "work_y", "work_location_id"
+    ]]
 
     return df

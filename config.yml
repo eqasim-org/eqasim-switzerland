@@ -7,20 +7,21 @@ disable_progress_bar: false
 debug_household_count: 100000
 java_memory: 10G
 stages:
-    #- data.statent.statent
-    #- population.work_locations
-    #- population.education_locations
-    #- population.matching
-    #- population.education_locations
-    #- population.work_locations
-    #- matsim.network.convert_osm
-    #- matsim.network.mapped
-    #- matsim.network.plausibility
-    #- matsim.network.convert_hafas
-    #- matsim.java.pt2matsim
-    #- matsim.run
+    #- population.trips
+    #- data.microcensus.trips
     #- population.sociodemographics
-    #- matsim.population
+    - matsim.population
     #- matsim.population_attributes
     #- matsim.households
-    - matsim.facilities
+    #- matsim.facilities
+    #- data.microcensus.commute_extrapolation
+    #- population.spatial.education_locations
+    #- population.spatial.by_person.education_locations
+    #- population.spatial.by_activity.subprimary_locations
+    #- population.spatial.activity_locations
+    #- population.opportunities
+    #- population.activities
+    #- population.commute
+    #- population.secondary_locations
+    #- population.fixed_locations
+    #- population.commute_ratios

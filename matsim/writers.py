@@ -198,6 +198,7 @@ class HouseholdsWriter(XmlWriter):
 class FacilitiesWriter(XmlWriter):
     FACILITIES_SCOPE = 0
     FINISHED_SCOPE = 1
+    FACILITY_SCOPE = 2
 
     def __init__(self, writer):
         XmlWriter.__init__(self, writer)
@@ -216,8 +217,21 @@ class FacilitiesWriter(XmlWriter):
         self._write_line('</facilities>')
         self.scope = self.FINISHED_SCOPE
 
-    def add_facility(self, facility_id, x, y):
+    def start_facility(self, facility_id, x, y):
         self._require_scope(self.FACILITIES_SCOPE)
-        self._write_line('<facility id="%d" x="%f" y="%f" />' % (
+        self._write_line('<facility id="%d" x="%f" y="%f">' % (
             facility_id, x, y
         ))
+
+        self.indent += 1
+        self.scope = self.FACILITY_SCOPE
+
+    def end_facility(self):
+        self._require_scope(self.FACILITY_SCOPE)
+        self.indent -= 1
+        self.scope = self.FACILITIES_SCOPE
+        self._write_line('</facility>')
+
+    def add_activity(self, purpose):
+        self._require_scope(self.FACILITY_SCOPE)
+        self._write_line('<activity type="%s" />' % purpose)

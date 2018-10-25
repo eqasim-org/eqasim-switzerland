@@ -7,27 +7,10 @@ import data.constants as c
 
 def configure(context, require):
     require.stage("data.statent.statent")
-    require.stage("population.commute")
     require.stage("population.sociodemographics")
-    require.stage("population.matching")
 
 def execute(context):
-    df_commute = pd.DataFrame(context.stage("population.commute"), copy = True)
-    df_commute = df_commute[df_commute["commute_purpose"] == "education"]
-    df_commute["mz_person_id"] = df_commute["person_id"]
-    del df_commute["person_id"]
-
     df_persons = context.stage("population.sociodemographics")
-    df_underage = df_persons[df_persons["age"] < c.MZ_AGE_THRESHOLD]
-
-    df_persons = pd.merge(
-        df_persons[df_persons["age"] >= c.MZ_AGE_THRESHOLD],
-        df_commute, on = "mz_person_id")
-
-    df_persons = pd.concat([
-        df_persons[["person_id", "age", "home_x", "home_y"]],
-        df_underage[["person_id", "age", "home_x", "home_y"]]
-    ])
 
     df_statent = context.stage("data.statent.statent")
     df_statent = df_statent[~df_statent["education_type"].isna()]
@@ -50,8 +33,9 @@ def execute(context):
 
         df_persons.loc[f_persons, "education_x"] = df_statent.iloc[indices]["x"].values
         df_persons.loc[f_persons, "education_y"] = df_statent.iloc[indices]["y"].values
-        df_persons.loc[f_persons, "education_enterprise_id"] = df_statent.iloc[indices]["enterprise_id"].values
+        df_persons.loc[f_persons, "education_location_id"] = df_statent.iloc[indices]["enterprise_id"].values
 
         print("  %s (%d persons, %d locations)" % (type, np.count_nonzero(f_persons), np.count_nonzero(f_statent)))
 
+    df_persons = df_persons[["person_id", "education_x", "education_y", "education_location_id"]]
     return df_persons

@@ -45,11 +45,16 @@ def execute(context):
             (df_commute["home_x"] - df_commute["destination_x"])**2 + (df_commute["home_y"] - df_commute["destination_y"])**2
         )
 
-        df_commute = df_commute[["person_id", "commute_trip_id", "commute_mode", "commute_home_distance", "commute_activity_duration"]]
+        df_commute["commute_x"] = df_commute["destination_x"]
+        df_commute["commute_y"] = df_commute["destination_y"]
+
+        df_commute = df_commute[["person_id", "commute_trip_id", "commute_mode", "commute_home_distance", "commute_activity_duration", "commute_x", "commute_y"]]
         df_commute.loc[:, "commute_purpose"] = primary_purpose
         df_primary_commute.append(df_commute)
 
     df_commute = pd.concat(df_primary_commute)
     df_commute["commute_purpose"] = df_commute["commute_purpose"].astype("category")
 
+    # Find the one with the longest duration, so we only have one commute purpose
+    df_commute = df_commute.sort_values("commute_activity_duration", ascending = False).drop_duplicates("person_id")
     return df_commute
