@@ -2,7 +2,7 @@ import shutil
 import os.path
 
 def configure(context, require):
-    require.stage("matsim.population")
+    require.stage("matsim.secondary_locations")
     require.stage("matsim.households")
     require.stage("matsim.facilities")
     require.stage("matsim.network.mapped")
@@ -24,7 +24,7 @@ def execute(context):
     shutil.copyfile("%s/config_template.xml" % this_path, "%s/switzerland_config.xml" % context.cache_path)
 
     java = context.stage("utils.java")
-    input_population_path = context.stage("matsim.population")
+    input_population_path = context.stage("matsim.secondary_locations")
 
     java(
         context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.preparation.Downsample", [
