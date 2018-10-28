@@ -57,11 +57,13 @@ def execute(context):
     output_population_path = "%s/population_with_locations.xml.gz" % context.cache_path
     output_statistics_path = "%s/statistics.csv" % context.cache_path
 
+    number_of_threads = context.config["threads"]
+
     java(
         context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.location_assignment.RunZurichLocationAssignment", [
             input_facilities_path, input_population_path,
             quantiles_path, distributions_path,
-            output_population_path, output_statistics_path
+            output_population_path, output_statistics_path, str(number_of_threads)
         ], cwd = context.cache_path)
 
     assert(os.path.exists(output_population_path))
