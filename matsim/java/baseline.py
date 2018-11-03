@@ -25,5 +25,5 @@ def execute(context):
         "mvn", "-Pstandalone", "package"
     ], cwd = "%s/baseline_scenario" % context.cache_path)
 
-    jar = "%s/baseline_scenario/target/baseline_scenario-0.0.1-SNAPSHOT.jar" % context.cache_path
+    jar = "%s/baseline_scenario/target/baseline_scenario-0.0.1-synpop-SNAPSHOT.jar" % context.cache_path
     return jar
