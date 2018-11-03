@@ -14,6 +14,12 @@ def execute(context):
     network_path = context.stage("matsim.network.mapped")["network"]
     shutil.copyfile(network_path, "%s/switzerland_network.xml.gz" % context.cache_path)
 
+    transit_schedule_path = context.stage("matsim.network.mapped")["schedule"]
+    shutil.copyfile(transit_schedule_path, "%s/switzerland_transit_schedule.xml.gz" % context.cache_path)
+
+    transit_vehicles_path = context.stage("matsim.network.mapped")["vehicles"]
+    shutil.copyfile(transit_vehicles_path, "%s/switzerland_transit_vehicles.xml.gz" % context.cache_path)
+
     households_path = context.stage("matsim.households")
     shutil.copyfile(households_path, "%s/switzerland_households.xml.gz" % context.cache_path)
 
@@ -26,21 +32,27 @@ def execute(context):
     java = context.stage("utils.java")
     input_population_path = context.stage("matsim.secondary_locations")
 
-    java(
-        context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.preparation.Downsample", [
-            input_population_path, "0.01", "%s/unrouted_switzerland_population.xml.gz" % context.cache_path
-        ], cwd = context.cache_path)
+    #java(
+    #    context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.preparation.Downsample", [
+    #        input_population_path, "0.01", "%s/unrouted_switzerland_population.xml.gz" % context.cache_path
+    #    ], cwd = context.cache_path)
 
     java(
         context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.preparation.Routing", [
             "%s/switzerland_config.xml" % context.cache_path,
             "%s/switzerland_network.xml.gz" % context.cache_path,
-            "%s/unrouted_switzerland_population.xml.gz" % context.cache_path,
+            input_population_path,
+            "%s/switzerland_transit_schedule.xml.gz" % context.cache_path,
             "%s/switzerland_population.xml.gz" % context.cache_path
         ], cwd = context.cache_path)
 
+    #java(
+    #    context.stage("matsim.java.matsim"), "org.matsim.run.Controler",
+    #    ["switzerland_config.xml"], cwd = context.cache_path)
+
     java(
-        context.stage("matsim.java.matsim"), "org.matsim.run.Controler",
-        ["switzerland_config.xml"], cwd = context.cache_path)
+        context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.RunIleDeFranceScenario", [
+            "%s/switzerland_config.xml" % context.cache_path
+        ], cwd = context.cache_path)
 
     return {}

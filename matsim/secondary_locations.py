@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from sklearn.neighbors import KDTree
 import numpy.linalg as la
+import os
 
 def configure(context, require):
     require.stage("matsim.population")

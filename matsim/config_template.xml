@@ -35,6 +35,12 @@
         <param name="inputFacilitiesFile" value="switzerland_facilities.xml.gz" />
     </module>
 
+    <module name="transit">
+        <param name="transitScheduleFile" value="switzerland_schedule.xml.gz" />
+        <param name="vehiclesFile" value="switzerland_vehicles.xml.gz" />
+        <param name="useTransit" value="true" />
+    </module>
+
     <module name="planCalcScore">
         <parameterset type="activityParams">
             <param name="activityType" value="home" />
@@ -63,11 +69,6 @@
     </module>
 
     <module name="planscalcroute">
-        <parameterset type="teleportedModeParameters">
-            <param name="mode" value="pt" />
-            <param name="teleportedModeSpeed" value="5.5" />
-            <param name="beelineDistanceFactor" value="1.0" />
-        </parameterset>
         <parameterset type="teleportedModeParameters">
             <param name="mode" value="bike" />
             <param name="teleportedModeSpeed" value="3.3" />
