@@ -36,8 +36,8 @@
     </module>
 
     <module name="transit">
-        <param name="transitScheduleFile" value="switzerland_schedule.xml.gz" />
-        <param name="vehiclesFile" value="switzerland_vehicles.xml.gz" />
+        <param name="transitScheduleFile" value="switzerland_transit_schedule.xml.gz" />
+        <param name="vehiclesFile" value="switzerland_transit_vehicles.xml.gz" />
         <param name="useTransit" value="true" />
     </module>
 
