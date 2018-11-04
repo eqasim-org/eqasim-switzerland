@@ -23,8 +23,18 @@ def execute(context):
     df_households = context.stage("data.statpop.households")
     df_link = context.stage("data.statpop.link")
 
-    if "debug_household_count" in context.config:
-        df_households = df_households[:context.config["debug_household_count"]]
+    if "input_downsampling" in context.config:
+        probability = context.config["input_downsampling"]
+        print("Downsampling (%f)" % probability)
+
+        household_ids = np.unique(df_households["household_id"])
+        print("  Initial number of households:", len(household_ids))
+
+        f = np.random.random(size = (len(household_ids),)) < probability
+        remaining_household_ids = household_ids[f]
+        print("  Sampled number of households:", len(remaining_household_ids))
+
+        df_households = df_households[df_households["household_id"].isin(remaining_household_ids)]
 
     # Filter non-main residence
     df_persons = df_persons[df_persons["type_of_residence"] == 1]

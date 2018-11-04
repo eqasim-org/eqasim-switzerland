@@ -4,9 +4,11 @@ import pandas as pd
 import numpy as np
 from sklearn.neighbors import KDTree
 import numpy.linalg as la
+import os
 
 def configure(context, require):
-    require.stage("population.trips")
+    require.stage("matsim.population")
+    require.stage("matsim.facilities")
     require.stage("data.microcensus.trips")
     require.stage("matsim.java.baseline")
     require.stage("utils.java")
@@ -53,17 +55,20 @@ def execute(context):
     input_population_path = context.stage("matsim.population")
     input_facilities_path = context.stage("matsim.facilities")
 
-    output_population_path = "%s/population_with_locations.xml.gz" % self.cache_path
-    output_statistics_path = "%s/statistics.csv"
+    output_population_path = "%s/population_with_locations.xml.gz" % context.cache_path
+    output_statistics_path = "none" # "%s/statistics.csv" % context.cache_path <- DISABLED!
+
+    number_of_threads = context.config["threads"]
 
     java(
         context.stage("matsim.java.baseline"), "ch.ethz.matsim.baseline_scenario.location_assignment.RunZurichLocationAssignment", [
             input_facilities_path, input_population_path,
             quantiles_path, distributions_path,
-            output_population_path, output_statistics_path
+            output_population_path, output_statistics_path, str(number_of_threads),
+            "1000"
         ], cwd = context.cache_path)
 
     assert(os.path.exists(output_population_path))
-    assert(os.path.exists(output_statistics_path))
+    #assert(os.path.exists(output_statistics_path))
 
     return output_population_path

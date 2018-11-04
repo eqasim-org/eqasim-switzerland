@@ -5,5 +5,6 @@ threads: 24
 hot_deck_matching_runners: 24
 disable_progress_bar: true
 java_memory: 100G
+input_downsampling: 0.01
 stages:
     - matsim.run
