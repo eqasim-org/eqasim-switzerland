@@ -13,12 +13,15 @@ def execute(context):
     raw_data_path = context.config["raw_data_path"]
 
     df_mz_persons = pd.read_csv(
-        "%s/microcensus/zielpersonen.csv" % raw_data_path, sep = ",", encoding = "latin1")
+        "%s/microcensus/zielpersonen.csv" % raw_data_path,
+        sep = ",", encoding = "latin1", parse_dates = ["USTag"]
+    )
 
     df_mz_persons["age"] = df_mz_persons["alter"]
     df_mz_persons["sex"] = df_mz_persons["gesl"] - 1 # Make zero-based
     df_mz_persons["person_id"] = df_mz_persons["HHNR"]
     df_mz_persons["person_weight"] = df_mz_persons["WP"]
+    df_mz_persons["date"] = df_mz_persons["USTag"]
 
     # Marital status
     df_mz_persons.loc[df_mz_persons["zivil"] == 1, "marital_status"] = c.MARITAL_STATUS_SINGLE
@@ -84,7 +87,7 @@ def execute(context):
         "subscriptions_verbund_class",
         "subscriptions_strecke_class",
         "age_class", "person_weight",
-        "weekend"
+        "weekend", "date"
     ]]
 
     # Merge in the other data sets

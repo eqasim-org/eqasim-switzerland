@@ -8,3 +8,4 @@ java_memory: 100G
 input_downsampling: 0.01
 stages:
     - matsim.run
+    - matsim.mz.population
