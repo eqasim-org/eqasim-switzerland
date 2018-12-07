@@ -36,6 +36,7 @@ class PersonWriter:
         writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[12]))
         writer.add_attribute("mzWeekend", "java.lang.Boolean", writer.true_false(self.person[13]))
         writer.add_attribute("mzDate", "java.lang.String", str(self.person[14]))
+        writer.add_attribute("mzWeight", "java.lang.Double", str(self.person[15]))
         writer.end_attributes()
 
         # Plan
@@ -59,7 +60,7 @@ class PersonWriter:
         writer.end_plan()
         writer.end_person()
 
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke", "weekend", "date"]
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke", "weekend", "date", "person_weight"]
 ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x", "location_y", "following_mode"]
 
 def execute(context):
