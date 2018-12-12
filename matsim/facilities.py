@@ -7,6 +7,7 @@ import matsim.writers
 
 def configure(context, require):
     require.stage("population.opportunities")
+    require.stage("population.sociodemographics")
 
 FIELDS = [
     "location_id", "location_x", "location_y",
@@ -25,6 +26,7 @@ def make_options(item):
 def execute(context):
     cache_path = context.cache_path
 
+    # First, write actual facilities (from STATENT)
     df_statent = context.stage("population.opportunities")
     df_statent = df_statent[FIELDS]
 
@@ -40,6 +42,16 @@ def execute(context):
                 if item[6]: writer.add_activity("service")
                 if item[7]: writer.add_activity("leisure")
                 if item[8]: writer.add_activity("shop")
+                writer.end_facility()
+
+            # Second, write household facilities
+            df_households = context.stage("population.sociodemographics")[[
+                "household_id", "home_x", "home_y"
+            ]].drop_duplicates("household_id")
+
+            for item in tqdm(df_households.itertuples(), total = len(df_households), desc = "Homes"):
+                writer.start_facility("home%s" % item[1], item[2], item[3])
+                writer.add_activity("home")
                 writer.end_facility()
 
             writer.end_facilities()

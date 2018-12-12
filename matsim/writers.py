@@ -41,7 +41,8 @@ class XmlWriter:
         return "%02d:%02d:%02d" % (hours, minutes, seconds)
 
     def location(self, x, y, facility_id = None):
-        return (x, y, None if facility_id is None or np.isnan(facility_id) else int(facility_id))
+        #return (x, y, None if facility_id is None or np.isnan(facility_id) else int(facility_id))
+        return (x, y, None if facility_id is None or (type(facility_id) == float and np.isnan(facility_id)) else facility_id)
 
 class PopulationWriter(XmlWriter):
     POPULATION_SCOPE = 0
@@ -116,7 +117,7 @@ class PopulationWriter(XmlWriter):
         self._write('<activity ')
         self._write('type="%s" ' % type)
         self._write('x="%f" y="%f" ' % (location[0], location[1]))
-        if location[2] is not None: self._write('facility="%d" ' % location[2])
+        if location[2] is not None: self._write('facility="%s" ' % str(location[2]))
         if start_time is not None: self._write('start_time="%s" ' % self.time(start_time))
         if end_time is not None: self._write('end_time="%s" ' % self.time(end_time))
         self._write('/>\n')
@@ -219,8 +220,8 @@ class FacilitiesWriter(XmlWriter):
 
     def start_facility(self, facility_id, x, y):
         self._require_scope(self.FACILITIES_SCOPE)
-        self._write_line('<facility id="%d" x="%f" y="%f">' % (
-            facility_id, x, y
+        self._write_line('<facility id="%s" x="%f" y="%f">' % (
+            str(facility_id), x, y
         ))
 
         self.indent += 1
