@@ -39,11 +39,11 @@ class PersonWriter:
         # Plan
         writer.start_plan(selected = True)
 
-        home_location = writer.location(x = self.activities[0][8], y = self.activities[0][9])
+        home_location = writer.location(self.activities[0][8], self.activities[0][9], "home%s" % self.person[13])
 
         for i in range(len(self.activities)):
             activity = self.activities[i]
-            location = home_location if np.isnan(activity[10]) else writer.location(activity[8], activity[9], activity[10])
+            location = home_location if np.isnan(activity[10]) else writer.location(activity[8], activity[9], int(activity[10]))
 
             start_time = activity[3] if not np.isnan(activity[3]) else None
             end_time = activity[4] if not np.isnan(activity[4]) else None
@@ -57,7 +57,7 @@ class PersonWriter:
         writer.end_plan()
         writer.end_person()
 
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke"]
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke", "household_id"]
 ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x", "location_y", "location_id", "following_mode"]
 
 def execute(context):
