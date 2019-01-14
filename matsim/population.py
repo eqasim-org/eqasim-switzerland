@@ -25,7 +25,7 @@ class PersonWriter:
 
         # Attributes
         writer.start_attributes()
-        writer.add_attribute("age", "java.long.Integer", str(self.person[2]))
+        writer.add_attribute("age", "java.lang.Integer", str(self.person[2]))
         writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(self.person[4]))
         writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(self.person[5]))
         writer.add_attribute("sex", "java.lang.String", ["m", "f"][self.person[6]])
