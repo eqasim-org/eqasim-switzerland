@@ -1,19 +1,22 @@
-raw_data_path: /run/media/sebastian/shoerl_data/population/raw
-target_path: /run/media/sebastian/shoerl_data/temp
-output_path: /run/media/sebastian/shoerl_data/output
+raw_data_path: /run/media/sebastian/shoerl_data/scenarios/switzerland/data
+target_path: /run/media/sebastian/shoerl_data/scenarios/switzerland/temp
+output_path: /run/media/sebastian/shoerl_data/scenarios/switzerland/temp
 threads: 4
 hot_deck_matching_runners: 2
 disable_progress_bar: false
 input_downsampling: 0.01
 java_memory: 10G
 stages:
+    #- data.spatial.ov_guteklasse
+    #- data.microcensus.trips
+    #- population.spatial.locations
     #- population.trips
     #- data.microcensus.trips
     #- population.sociodemographics
-    - matsim.population
+    #- matsim.population
     #- matsim.population_attributes
     #- matsim.households
-    #- matsim.facilities
+    - matsim.population
     #- data.microcensus.commute_extrapolation
     #- population.spatial.education_locations
     #- population.spatial.by_person.education_locations
