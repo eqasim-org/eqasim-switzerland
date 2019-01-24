@@ -14,6 +14,7 @@ def configure(context, require):
     require.stage("data.spatial.municipalities")
     require.stage("data.spatial.zones")
     require.stage("data.spatial.municipality_types")
+    require.stage("data.statpop.density")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]
@@ -72,9 +73,12 @@ def execute(context):
 
     df_mz_households["home_zone_id"] = df_mz_households["zone_id"]
 
+    # Impute density
+    data.statpop.density.impute(context.stage("data.statpop.density"), df_mz_households, "home_x", "home_y")
+
     # Wrap it up
     return df_mz_households[[
         "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
-        "home_zone_id", "spatial_type"
+        "home_zone_id", "spatial_type", "population_density"
     ]]

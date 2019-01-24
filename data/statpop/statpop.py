@@ -8,6 +8,7 @@ import data.spatial.zones
 import data.utils
 import data.spatial.utils
 import data.spatial.municipality_types
+import data.statpop.density
 
 def configure(context, require):
     require.stage("data.statpop.persons")
@@ -17,6 +18,7 @@ def configure(context, require):
     require.stage("data.spatial.quarters")
     require.stage("data.spatial.zones")
     require.stage("data.spatial.municipality_types")
+    require.stage("data.statpop.density")
 
 def execute(context):
     df_persons = context.stage("data.statpop.persons")
@@ -121,6 +123,9 @@ def execute(context):
     df["home_municipality_id"] = df["municipality_id"]
     df["home_quarter_id"] = df["quarter_id"]
 
+    # Impute population density
+    data.statpop.density.impute(context.stage("data.statpop.density"), df, "home_x", "home_y")
+
     # Wrap everything up
     df = df[[
         "person_id", "household_id",
@@ -129,7 +134,8 @@ def execute(context):
         "marital_status", "nationality",
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "spatial_type",
-        "home_municipality_id", "home_quarter_id"]]
+        "home_municipality_id", "home_quarter_id", "population_density"]]
 
     df = data.statpop.head_of_household.impute(df)
+
     return df
