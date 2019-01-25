@@ -1,4 +1,4 @@
-raw_data_path: /nas/ivtmatsim/scenario/raw/raw
+raw_data_path: /nas/ivtmatsim/scenarios/switzerland/data
 target_path: temp
 output_path: output
 threads: 24
