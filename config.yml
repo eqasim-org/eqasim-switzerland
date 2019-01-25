@@ -11,7 +11,8 @@ stages:
     #- data.microcensus.trips
     #- population.spatial.locations
     #- population.trips
-    #- data.microcensus.trips
+    #- data.microcensus.persons
+    - data.microcensus.households
     #- population.sociodemographics
     #- matsim.population
     #- matsim.population_attributes

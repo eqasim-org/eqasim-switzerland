@@ -141,8 +141,18 @@ def execute(context):
     df_destination = data.spatial.ov_guteklasse.impute(df_ov_guteklasse, df_destination, ["person_id", "trip_id"]).rename({ "ov_guteklasse" : "destination_ov_guteklasse" }, axis = 1)
     df_mz_trips = pd.merge(df_mz_trips, df_destination, on = ["person_id", "trip_id"], how = "left")
 
-    # Wrap it up
+    # Parking cost
+    df_mz_stages = pd.read_csv("%s/microcensus/etappen.csv" % raw_data_path, encoding = "latin1")
+
+    df_cost = pd.DataFrame(df_mz_stages[["HHNR", "WEGNR", "f51330"]], copy = True)
+    df_cost.columns = ["person_id", "trip_id", "parking_cost"]
+    df_cost["parking_cost"] = np.maximum(0, df_cost["parking_cost"])
+    df_cost = df_cost.groupby(["person_id", "trip_id"]).sum().reset_index()
+
+    df_mz_trips = pd.merge(df_mz_trips, df_cost, on = ["person_id", "trip_id"], how = "left")
+    assert(not np.any(np.isnan(df_mz_trips["parking_cost"])))
+
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y",
-        "uses_plane", "activity_duration", "crowfly_distance", "origin_ov_guteklasse", "destination_ov_guteklasse"
+        "uses_plane", "activity_duration", "crowfly_distance", "origin_ov_guteklasse", "destination_ov_guteklasse", "parking_cost"
     ]]

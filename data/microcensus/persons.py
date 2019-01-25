@@ -69,6 +69,31 @@ def execute(context):
     df_mz_persons["subscriptions_verbund_class"] = df_mz_persons["f41653"] == 1
     df_mz_persons["subscriptions_strecke_class"] = df_mz_persons["f41654"] == 1
 
+    # Education
+    df_mz_persons["highest_education"] = np.nan
+    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([1, 2, 3, 4]), "highest_education"] = "primary"
+    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([5, 6, 7, 8, 9, 10, 11, 12]), "highest_education"] = "secondary"
+    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([13, 14, 15, 16]), "highest_education"] = "tertiary_professional"
+    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([17, 18, 19]), "highest_education"] = "tertiary_academic"
+    df_mz_persons["highest_education"] = df_mz_persons["highest_education"].astype("category")
+
+    # Parking
+    df_mz_persons["parking_work"] = "unknown"
+    df_mz_persons.loc[df_mz_persons["f41300"] == 1, "parking_work"] = "free"
+    df_mz_persons.loc[df_mz_persons["f41300"] == 2, "parking_work"] = "paid"
+    df_mz_persons.loc[df_mz_persons["f41300"] == 3, "parking_work"] = "no"
+    df_mz_persons["parking_work"] = df_mz_persons["parking_work"].astype("category")
+
+    df_mz_persons["parking_education"] = "unknown"
+    df_mz_persons.loc[df_mz_persons["f41301"] == 1, "parking_education"] = "free"
+    df_mz_persons.loc[df_mz_persons["f41301"] == 2, "parking_education"] = "paid"
+    df_mz_persons.loc[df_mz_persons["f41301"] == 3, "parking_education"] = "no"
+    df_mz_persons["parking_education"] = df_mz_persons["parking_education"].astype("category")
+
+    df_mz_persons["parking_cost_work"] = np.maximum(0, df_mz_persons["f41400"].astype(np.float))
+    df_mz_persons["parking_cost_education"] = np.maximum(0, df_mz_persons["f41401"].astype(np.float))
+
+    # Wrap up
     df_mz_persons = df_mz_persons[[
         "person_id",
         "age", "sex",
@@ -76,6 +101,9 @@ def execute(context):
         "driving_license",
         "car_availability",
         "employed",
+        "highest_education",
+        "parking_work", "parking_cost_work",
+        "parking_education", "parking_cost_education",
         "subscriptions_ga",
         "subscriptions_halbtax",
         "subscriptions_verbund",
