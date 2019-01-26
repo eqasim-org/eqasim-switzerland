@@ -55,6 +55,18 @@ def execute(context):
     # Houeshold size class
     data.utils.assign_household_class(df_mz_households)
 
+    # Region information
+    # (acc. to Analyse der SP-Befragung 2015 zur Verkehrsmodus- und Routenwahl)
+    REGION1 = [25, 12, 13, 1, 2, 14, 9]
+    REGION2 = [21, 26, 15, 16, 22, 11, 24, 3, 6, 7]
+    REGION3 = [17, 19, 10, 23, 20, 5, 18, 4, 8]
+
+    df_mz_households["sp_region"] = 0
+    df_mz_households.loc[df_mz_households["W_KANTON"].isin(REGION1), "sp_region"] = 1
+    df_mz_households.loc[df_mz_households["W_KANTON"].isin(REGION2), "sp_region"] = 2
+    df_mz_households.loc[df_mz_households["W_KANTON"].isin(REGION3), "sp_region"] = 3
+    assert(not np.any(df_mz_households["sp_region"] == 0))
+
     # Impute spatial information
     df_municipalities = context.stage("data.spatial.municipalities")[0]
     df_zones = context.stage("data.spatial.zones")
@@ -80,5 +92,5 @@ def execute(context):
     return df_mz_households[[
         "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
-        "home_zone_id", "spatial_type", "population_density"
+        "home_zone_id", "spatial_type", "sp_region", "population_density"
     ]]
