@@ -48,7 +48,11 @@ class PersonWriter:
             start_time = activity[3] if not np.isnan(activity[3]) else None
             end_time = activity[4] if not np.isnan(activity[4]) else None
 
-            writer.add_activity(activity[6], location, start_time, end_time)
+            writer.start_activity(activity[6], location, start_time, end_time)
+            writer.start_attributes()
+            writer.add_attribute("ov_guteklasse", "java.lang.String", activity[12])
+            writer.end_attributes()
+            writer.end_activity()
 
             if not activity[7]:
                 next_activity = self.activities[i + 1]
@@ -58,7 +62,7 @@ class PersonWriter:
         writer.end_person()
 
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke", "household_id"]
-ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x", "location_y", "location_id", "following_mode"]
+ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x", "location_y", "location_id", "following_mode", "ov_guteklasse"]
 
 def execute(context):
     cache_path = context.cache_path

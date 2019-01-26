@@ -86,6 +86,12 @@ with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
 - State: 17 Sep 2018
 - Contract: [Open Data][6]
 
+**ÖV Güteklasse**
+- Content: `ov_guteklasse/` contains the shape files of ARE for the "ÖV Güteklasse",
+which is a spatial classification of public transport level of service.
+- State: 20 Mar 2018
+- Contract: [Open Data][7]
+
 [1]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/generalisierte-gemeindegrenzen.assetdetail.5247306.html
 
 [2]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/quartiergrenzen-schweizer-staedte.html
@@ -95,3 +101,4 @@ with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
 [4]: https://www.bfs.admin.ch/bfs/de/home/grundlagen/stgb.assetdetail.6166613.html
 [5]: https://download.geofabrik.de/europe/switzerland.html
 [6]: https://opendata.swiss/en/dataset/fahrplanentwurf-2018-hrdf
+[7]: https://opendata.swiss/de/dataset/ov-guteklassen-are
