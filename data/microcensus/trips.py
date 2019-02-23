@@ -15,10 +15,15 @@ def execute(context):
     raw_data_path = context.config["raw_data_path"]
 
     df_mz_trips = pd.read_csv("%s/microcensus/wege.csv" % raw_data_path, encoding = "latin1")
+    df_mz_stages = pd.read_csv("%s/microcensus/etappen.csv" % raw_data_path, encoding = "latin1")
 
     df_mz_trips = df_mz_trips[[
         "HHNR", "WEGNR", "f51100", "f51400", "wzweck1", "wzweck2", "wmittel",
         "S_X_CH1903", "S_Y_CH1903", "Z_X_CH1903", "Z_Y_CH1903", "W_X_CH1903", "W_Y_CH1903"
+    ]]
+
+    df_mz_stages = df_mz_stages[[
+        "HHNR", "WEGNR", "ETNR", "f51300"
     ]]
 
     # First, adjust the modes
@@ -43,6 +48,17 @@ def execute(context):
 
     # Put a flag if this agent is using a Flugi
     df_mz_trips.loc[:, "uses_plane"] = df_mz_trips["wmittel"] == 1
+
+    df_mz_trips["mode_detailed"] = df_mz_trips["mode"]
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 1, "mode_detailed"] = "plane"
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 11, "mode_detailed"] = "taxi"
+
+    # Find passenger trips
+    df_mz_stages["is_car_passenger"] = df_mz_stages["f51300"] == 8
+    df_passengers = df_mz_stages[["HHNR", "WEGNR", "is_car_passenger"]].groupby(["HHNR", "WEGNR"]).sum().reset_index()
+    df_mz_trips = pd.merge(df_mz_trips, df_passengers, on = ["HHNR", "WEGNR"], how = "left")
+    df_mz_trips.loc[df_mz_trips["is_car_passenger"] > 0, "mode_detailed"] = "car_passenger"
+    del df_mz_trips["is_car_passenger"]
 
     # Second, adjust the purposes
     df_mz_trips.loc[df_mz_trips["wzweck1"] == -99, "purpose"] = "unknown" # Pseudo stage
@@ -154,5 +170,6 @@ def execute(context):
 
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y",
-        "uses_plane", "activity_duration", "crowfly_distance", "origin_ov_guteklasse", "destination_ov_guteklasse", "parking_cost"
+        "uses_plane", "activity_duration", "crowfly_distance", "origin_ov_guteklasse", "destination_ov_guteklasse", "parking_cost",
+        "mode_detailed"
     ]]
