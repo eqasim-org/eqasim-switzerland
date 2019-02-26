@@ -9,6 +9,7 @@ import data.utils
 import data.spatial.utils
 import data.spatial.municipality_types
 import data.statpop.density
+import data.spatial.cantons
 
 def configure(context, require):
     require.stage("data.statpop.persons")
@@ -19,6 +20,7 @@ def configure(context, require):
     require.stage("data.spatial.zones")
     require.stage("data.spatial.municipality_types")
     require.stage("data.statpop.density")
+    require.stage("data.spatial.cantons")
 
 def execute(context):
     df_persons = context.stage("data.statpop.persons")
@@ -115,13 +117,19 @@ def execute(context):
 
     del df["municipality_id"]
     df = pd.merge(
-        df, df_spatial[["person_id", "zone_id", "spatial_type", "municipality_id", "quarter_id"]],
+        df, df_spatial[["person_id", "zone_id", "municipality_type", "municipality_id", "quarter_id"]],
         on = "person_id"
     )
 
     df["home_zone_id"] = df["zone_id"]
     df["home_municipality_id"] = df["municipality_id"]
     df["home_quarter_id"] = df["quarter_id"]
+
+    # Impute SP region
+    df["municipality_id"] = df["municipality_id"].astype(np.int)
+    df_cantons = context.stage("data.spatial.cantons")
+    df = data.spatial.cantons.impute(df_cantons, df)
+    df = data.spatial.cantons.impute_sp_region(df)
 
     # Impute population density
     data.statpop.density.impute(context.stage("data.statpop.density"), df, "home_x", "home_y")
@@ -133,9 +141,8 @@ def execute(context):
         "home_x", "home_y",
         "marital_status", "nationality",
         "household_size",
-        "age_class", "household_size_class", "home_zone_id", "spatial_type",
-        "home_municipality_id", "home_quarter_id", "population_density"]]
+        "age_class", "household_size_class", "home_zone_id", "municipality_type",
+        "home_municipality_id", "home_quarter_id", "population_density", "sp_region"]]
 
     df = data.statpop.head_of_household.impute(df)
-
     return df

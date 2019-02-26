@@ -103,6 +103,11 @@ which is a spatial classification of public transport level of service.
 - State: 20 Mar 2018
 - Contract: [Open Data][7]
 
+**ARE Gemeindetypologie**
+- Content: `municipality_types` contains the ARE Gemeindetypologie which assigns a certain spatial type to each municipality in Switzerland.
+- State: 26 Feb 2019
+- Contract: [Open Data][8]
+
 [1]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/generalisierte-gemeindegrenzen.assetdetail.5247306.html
 
 [2]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/quartiergrenzen-schweizer-staedte.html
@@ -113,3 +118,4 @@ which is a spatial classification of public transport level of service.
 [5]: https://download.geofabrik.de/europe/switzerland.html
 [6]: https://opendata.swiss/en/dataset/fahrplanentwurf-2018-hrdf
 [7]: https://opendata.swiss/de/dataset/ov-guteklassen-are
+[8]: https://opendata.swiss/de/dataset/gemeindetypologie-are

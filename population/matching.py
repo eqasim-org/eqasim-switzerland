@@ -55,7 +55,7 @@ def execute(context):
         df_source, "person_id",
         "household_weight",
         ["age_class", "sex", "marital_status"],
-        ["household_size_class", "spatial_type"],
+        ["household_size_class", "municipality_type"],
         runners = hdm_runners,
         minimum_source_samples = hdm_minimum_source_samples
     )
@@ -127,7 +127,7 @@ def execute(context):
         df_source, "person_id",
         "person_weight",
         ["age_class", "sex", "marital_status"],
-        ["household_size_class", "spatial_type", "income_class", "number_of_cars_class", "number_of_bikes_class"],
+        ["household_size_class", "municipality_type", "income_class", "number_of_cars_class", "number_of_bikes_class"],
         runners = hdm_runners,
         minimum_source_samples = hdm_minimum_source_samples
     )

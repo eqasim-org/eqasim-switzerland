@@ -1,0 +1,2 @@
+- Add SP region and municipality type of household
+- Change municipality type to 2014 ARE Gemeindetypologie

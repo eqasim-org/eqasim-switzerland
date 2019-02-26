@@ -10,28 +10,31 @@ def configure(context, require):
     require.stage("data.spatial.municipalities")
 
 def execute(context):
+    # Load data
     raw_data_path = context.config["raw_data_path"]
+
+    df_types = gpd.read_file("%s/municipality_types/ARE_GemTyp00_9.shp" % raw_data_path)
     df_municipalities = context.stage("data.spatial.municipalities")[0]
 
-    print("  Reading structure information ...")
-    df_structure = pd.read_excel(
-        "%s/spatial_structure_2018.xlsx" % raw_data_path,
-        skiprows = (0, 1, 2, 4, 5, 6)
-    )[["BFS Nr.", "Raum mit städtischem Charakter 2012"]]
-    df_structure.columns = ["municipality_id", "spatial_type_raw"]
-
     # Rewrite classification
-    df_structure.loc[df_structure["spatial_type_raw"] == 1, "spatial_type"] = "urban"
-    df_structure.loc[df_structure["spatial_type_raw"] == 2, "spatial_type"] = "urban"
-    df_structure.loc[df_structure["spatial_type_raw"] == 3, "spatial_type"] = "suburban"
-    df_structure.loc[df_structure["spatial_type_raw"] == 4, "spatial_type"] = "suburban"
-    df_structure.loc[df_structure["spatial_type_raw"] == 5, "spatial_type"] = "rural"
-    df_structure.loc[df_structure["spatial_type_raw"] == 6, "spatial_type"] = "rural"
-    df_structure.loc[df_structure["spatial_type_raw"] == 0, "spatial_type"] = "rural"
+    df_types.loc[df_types["TYP"] == 1, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 2, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 3, "municipality_type"] = "suburban"
+    df_types.loc[df_types["TYP"] == 4, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 5, "municipality_type"] = "suburban"
+    df_types.loc[df_types["TYP"] == 6, "municipality_type"] = "rural"
+    df_types.loc[df_types["TYP"] == 7, "municipality_type"] = "rural"
+    df_types.loc[df_types["TYP"] == 8, "municipality_type"] = "rural"
+    df_types.loc[df_types["TYP"] == 9, "municipality_type"] = "rural"
 
-    df_existing = pd.merge(df_municipalities, df_structure, on ="municipality_id")
-    df_existing["imputed_spatial_type"] = False
-    df_existing = df_existing[["municipality_id", "spatial_type", "imputed_spatial_type", "geometry"]]
+    df_types["municipality_type"] = df_types["municipality_type"].astype("category")
+    df_types["municipality_id"] = df_types["BFS_NO"]
+    df_types = df_types[["municipality_id", "municipality_type"]]
+
+    # Match by municipality_id
+    df_existing = pd.merge(df_municipalities, df_types, on = "municipality_id")
+    df_existing["imputed_municipality_type"] = False
+    df_existing = df_existing[["municipality_id", "municipality_type", "imputed_municipality_type", "geometry"]]
 
     # Some ids are missing (because they are special zones)
     df_missing = gpd.GeoDataFrame(df_municipalities[
@@ -47,17 +50,17 @@ def execute(context):
     coordinates = np.vstack([df_missing["geometry"].centroid.x, df_missing["geometry"].centroid.y]).T
     indices = kd_tree.query(coordinates, return_distance = False).flatten()
 
-    df_missing.loc[:, "spatial_type"] = df_existing.iloc[indices]["spatial_type"].values
-    df_missing.loc[:, "imputed_spatial_type"] = True
-    df_missing = df_missing[["municipality_id", "spatial_type", "imputed_spatial_type", "geometry"]]
+    df_missing.loc[:, "municipality_type"] = df_existing.iloc[indices]["municipality_type"].values
+    df_missing.loc[:, "imputed_municipality_type"] = True
+    df_missing = df_missing[["municipality_id", "municipality_type", "imputed_municipality_type", "geometry"]]
 
     df_mapping = pd.concat((df_existing, df_missing))
 
     assert(len(df_mapping) == len(df_municipalities))
     assert(set(np.unique(df_mapping["municipality_id"])) == set(np.unique(df_municipalities["municipality_id"])))
 
-    df_mapping = pd.DataFrame(df_mapping[["municipality_id", "spatial_type", "imputed_spatial_type"]])
-    df_mapping["spatial_type"] = df_mapping["spatial_type"].astype("category")
+    df_mapping = pd.DataFrame(df_mapping[["municipality_id", "municipality_type", "imputed_municipality_type"]])
+    df_mapping["municipality_type"] = df_mapping["municipality_type"].astype("category")
 
     return df_mapping
 
@@ -66,6 +69,6 @@ def impute(df, df_municipality_types, remove_unknown = False):
     df = pd.merge(df, df_municipality_types, on = "municipality_id")
 
     if remove_unknown:
-        return df[~np.isnan(df["spatial_type"])]
+        return df[~np.isnan(df["municipality_type"])]
     else:
         return df

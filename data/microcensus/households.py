@@ -8,6 +8,7 @@ import data.spatial.zones
 import data.utils
 import data.spatial.utils
 import data.spatial.municipality_types
+import data.spatial.cantons
 
 def configure(context, require):
     require.config("raw_data_path")
@@ -57,15 +58,8 @@ def execute(context):
 
     # Region information
     # (acc. to Analyse der SP-Befragung 2015 zur Verkehrsmodus- und Routenwahl)
-    REGION1 = [25, 12, 13, 1, 2, 14, 9]
-    REGION2 = [21, 26, 15, 16, 22, 11, 24, 3, 6, 7]
-    REGION3 = [17, 19, 10, 23, 20, 5, 18, 4, 8]
-
-    df_mz_households["sp_region"] = 0
-    df_mz_households.loc[df_mz_households["W_KANTON"].isin(REGION1), "sp_region"] = 1
-    df_mz_households.loc[df_mz_households["W_KANTON"].isin(REGION2), "sp_region"] = 2
-    df_mz_households.loc[df_mz_households["W_KANTON"].isin(REGION3), "sp_region"] = 3
-    assert(not np.any(df_mz_households["sp_region"] == 0))
+    df_mz_households["canton_id"] = df_mz_households["W_KANTON"]
+    df_mz_households = data.spatial.cantons.impute_sp_region(df_mz_households)
 
     # Impute spatial information
     df_municipalities = context.stage("data.spatial.municipalities")[0]
@@ -79,7 +73,7 @@ def execute(context):
     df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
 
     df_mz_households = pd.merge(
-        df_mz_households, df_spatial[["person_id", "zone_id", "spatial_type"]],
+        df_mz_households, df_spatial[["person_id", "zone_id", "municipality_type"]],
         on = "person_id"
     )
 
@@ -92,5 +86,5 @@ def execute(context):
     return df_mz_households[[
         "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
-        "home_zone_id", "spatial_type", "sp_region", "population_density"
+        "home_zone_id", "municipality_type", "sp_region", "population_density"
     ]]
