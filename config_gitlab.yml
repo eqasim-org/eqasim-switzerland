@@ -9,3 +9,4 @@ input_downsampling: 0.01
 stages:
     - matsim.run
     - matsim.mz.population
+    - data.microcensus.csv
