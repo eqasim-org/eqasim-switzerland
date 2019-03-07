@@ -19,7 +19,8 @@ def execute(context):
 
     df_mz_trips = df_mz_trips[[
         "HHNR", "WEGNR", "f51100", "f51400", "wzweck1", "wzweck2", "wmittel",
-        "S_X_CH1903", "S_Y_CH1903", "Z_X_CH1903", "Z_Y_CH1903", "W_X_CH1903", "W_Y_CH1903"
+        "S_X_CH1903", "S_Y_CH1903", "Z_X_CH1903", "Z_Y_CH1903", "W_X_CH1903", "W_Y_CH1903",
+        "w_rdist"
     ]]
 
     df_mz_stages = df_mz_stages[[
@@ -168,8 +169,11 @@ def execute(context):
     df_mz_trips = pd.merge(df_mz_trips, df_cost, on = ["person_id", "trip_id"], how = "left")
     assert(not np.any(np.isnan(df_mz_trips["parking_cost"])))
 
+    # Network distance
+    df_mz_trips["network_distance"] = df_mz_trips["w_rdist"] * 1000.0
+
     return df_mz_trips[[
-        "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y",
-        "uses_plane", "activity_duration", "crowfly_distance", "origin_ov_guteklasse", "destination_ov_guteklasse", "parking_cost",
+        "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y", "origin_x", "origin_y",
+        "uses_plane", "activity_duration", "crowfly_distance", "origin_ov_guteklasse", "destination_ov_guteklasse", "parking_cost", "network_distance",
         "mode_detailed"
     ]]
