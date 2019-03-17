@@ -26,7 +26,7 @@ def execute(context):
     # Simple attributes
     df_mz_households["home_structure"] = df_mz_households["W_STRUKTUR_AGG_2000"]
     df_mz_households["household_size"] = df_mz_households["hhgr"]
-    df_mz_households["number_of_cars"] = df_mz_households["f30100"]
+    df_mz_households["number_of_cars"] = np.maximum(0, df_mz_households["f30100"])
     df_mz_households["number_of_bikes"] = df_mz_households["f32200a"]
     df_mz_households["person_id"] = df_mz_households["HHNR"]
     df_mz_households["household_weight"] = df_mz_households["WM"]
@@ -86,5 +86,5 @@ def execute(context):
     return df_mz_households[[
         "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
-        "home_zone_id", "municipality_type", "sp_region", "population_density"
+        "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id"
     ]]
