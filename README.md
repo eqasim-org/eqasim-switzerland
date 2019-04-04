@@ -27,7 +27,7 @@ The raw data that is used in the process can be found on either of our servers
 (pikelot, ifalik, nama) under:
 
 ```
-/nas/ivtmatsim/scenario/raw/raw
+/nas/ivtmatsim/scenarios/switzerland/data OR /nas/ivtmatsim/scenario/raw/raw
 ```
 
 **Microcensus Transport and Mobility**
