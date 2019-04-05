@@ -4,12 +4,15 @@ with `python` modules that call each other in the sense of incremental builds.
 
 # Installation
 
-Two bash scripts which set up everything that is needed to run the pipeline on our servers, as well as a requirements.txt file, can be found in ./setup/ :
+Two bash scripts which set up everything that is needed to run the pipeline on our servers, as well as a requirements.txt file, can be found in `setup`:
 
-- setup.sh : downloads miniconda, creates python venv, downloads jdk and maven in ./setup/pipeline_environment.
-- activate.sh : activates python venv and adds both jdk and maven to PATH variable
+- `setup.sh` downloads miniconda, creates python venv, downloads jdk and maven in `setup/pipeline_environment`.
+- `activate.sh` activates python venv and adds both jdk and maven to PATH variable.
 
-To clean, simply delete the ./setup/pipeline_environment subdirectory.
+The activation is done (as in Anaconda/Miniconda) by source'ing `activate.sh` (either
+`. setup/activate.sh` or `source setup/activate.sh` depending on the shell).
+
+To clean, simply delete the `setup/pipeline_environment` subdirectory.
 
 # Run
 
@@ -20,6 +23,15 @@ now it is not very configurable, but should become more so in the future.
 
 No deployment yet, still work in progress. Later new updates will be automatically
 deployed to NAS.
+
+# Docker
+
+Alternatively, the pipeline is available as a dockerized application. To create
+the Docker container, call `docker build -t chpop .` in the project directory.
+
+The pipeline can then be run using `docker run -v [data path]:/data -v [cache path]:/cache chpop /cache/config_docker.yml`. This assumes that the raw data is located at `[data path]` and that the output path is at `[cache path]`. The directories will be mounted in the docker container at `/data` and `/cache`, respectively. To use the docker container, a config file must be provided in
+one of the mounted directories, e.g. in `/cache/config_docker.yml`. An example config
+file is given in `config_docker.yml`. Note that also there the paths must be adjusted accordingly.
 
 # Raw data
 
