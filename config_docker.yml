@@ -1,0 +1,10 @@
+raw_data_path: /data
+target_path: /cache
+output_path: /cache
+threads: 4
+hot_deck_matching_runners: 2
+disable_progress_bar: false
+input_downsampling: 0.01
+java_memory: 10G
+stages:
+    - matsim.run
