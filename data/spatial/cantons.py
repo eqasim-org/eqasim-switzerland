@@ -12,10 +12,12 @@ def execute(context):
     # Load data
     raw_data_path = context.config["raw_data_path"]
 
-    df_cantons = gpd.read_file("%s/municipality_types/ARE_GemTyp00_9.shp" % raw_data_path)
-    df_cantons["municipality_id"] = df_cantons["BFS_NO"]
-    df_cantons["canton_id"] = df_cantons["KT_NO"]
-    df_cantons = df_cantons[["municipality_id", "canton_id"]]
+    df_cantons = pd.read_excel("%s/spatial_structure_2018.xlsx" % raw_data_path,
+                               names=["municipality_id", "canton_id"],
+                               usecols=[0, 2],
+                               skiprows=6,
+                               nrows=2229,
+                               )
 
     return df_cantons
 
