@@ -13,7 +13,12 @@ def execute(context):
     # Load data
     raw_data_path = context.config["raw_data_path"]
 
-    df_types = gpd.read_file("%s/municipality_types/ARE_GemTyp00_9.shp" % raw_data_path)
+    df_types = pd.read_excel("%s/spatial_structure_2018.xlsx" % raw_data_path,
+                               names=["municipality_id", "TYP"],
+                               usecols=[0, 21],
+                               skiprows=6,
+                               nrows=2229,
+                               )
     df_municipalities = context.stage("data.spatial.municipalities")[0]
 
     # Rewrite classification
@@ -28,7 +33,6 @@ def execute(context):
     df_types.loc[df_types["TYP"] == 9, "municipality_type"] = "rural"
 
     df_types["municipality_type"] = df_types["municipality_type"].astype("category")
-    df_types["municipality_id"] = df_types["BFS_NO"]
     df_types = df_types[["municipality_id", "municipality_type"]]
 
     # Match by municipality_id
