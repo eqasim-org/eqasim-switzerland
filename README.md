@@ -120,6 +120,12 @@ which is a spatial classification of public transport level of service.
 - State: 26 Feb 2019
 - Contract: [Open Data][8]
 
+**Projections**
+- Content: `projections/households` contains predictions of household sizes per canton in 2017 and 2045, whereas `projections/population` contains predictions of population per canton, nationality, gender and age from 2015 to 2045. All predictions are according to the BfS reference scenario.
+- State: 1 Apr 2019
+- Contract: [Open Data][9][10]
+
+
 [1]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/generalisierte-gemeindegrenzen.assetdetail.5247306.html
 
 [2]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/quartiergrenzen-schweizer-staedte.html
@@ -131,3 +137,5 @@ which is a spatial classification of public transport level of service.
 [6]: https://opendata.swiss/en/dataset/fahrplanentwurf-2018-hrdf
 [7]: https://opendata.swiss/de/dataset/ov-guteklassen-are
 [8]: https://opendata.swiss/de/dataset/gemeindetypologie-are
+[9]: https://www.bfs.admin.ch/bfs/de/home/statistiken/kataloge-datenbanken/tabellen.assetdetail.3882982.html
+[10]: https://www.bfs.admin.ch/bfs/de/home/statistiken/bevoelkerung/zukuenftige-entwicklung/kantonale-szenarien.assetdetail.255402.html

@@ -1,0 +1,77 @@
+import pandas as pd
+import numpy as np
+from data.statpop.multilevelipf import multilevelipf
+
+def configure(context, require):
+    require.config("output_path")
+    require.config("enable_scaling")
+    require.stage("data.statpop.statpop")
+    require.stage("data.statpop.projections.households")
+    require.stage("data.statpop.projections.population")
+
+def execute(context):
+    df_statpop = context.stage("data.statpop.statpop")
+
+    if context.config["enable_scaling"]:
+
+        df_household_controls = context.stage("data.statpop.projections.households")
+        # df_population_controls = context.stage("data.statpop.projections.population")
+
+        print("  Number of households in household controls :", df_household_controls["weight"].sum())
+
+        print("  Number of households before scaling :", df_statpop["household_id"].unique().shape[0])
+        print("  Number of persons before scaling :", df_statpop["person_id"].unique().shape[0])
+
+        # we need to add a new household class column with only 3 categories,
+        # as the projections only have 3 categories
+        df_statpop["household_size_class_projection"] = np.minimum(3, df_statpop["household_size"]) - 1
+
+        # TODO: add population-level controls
+        # # we define a few large age groups for scaling
+        # age_class_bounds = [20, 60]
+        # df_statpop["age_class_projection"] = np.digitize(df_statpop["age"], age_class_bounds)
+
+        # # define fitting problem
+        # problem = multilevelipf.fitting_problem(df_statpop,
+        #                                         group_controls=[df_household_controls], group_id="household_id",
+        #                                         individual_controls=[df_population_controls], individual_id="person_id")
+
+        problem = multilevelipf.fitting_problem(df_statpop,
+                                                group_controls=[df_household_controls], group_id="household_id")
+
+        # perform fitting
+        df_statpop = multilevelipf.fit(problem, algorithm="ipf", tol_abs=1e-6, tol_rel=1e-6, maxiter=100)
+        del df_statpop["household_size_class_projection"]
+
+        # TODO: The expansion factors are rounded here by simply taking first the integer part
+        # as the base value and the remainder as a probability of have an extra household.
+        # An array of random doubles is then generated and compared to these probabilities to decide whether to add
+        # this remaining household. However, KM used the "Truncate-Replicate-Sample" method in his version. We should
+        # consider this maybe in the future.
+        df_household_expansion_factors = df_statpop[["household_id", "expansion_factor"]].drop_duplicates("household_id")
+        probability = (df_household_expansion_factors["expansion_factor"] - np.floor(df_household_expansion_factors["expansion_factor"])).values
+        df_household_expansion_factors["expansion_factor"] = np.floor(df_household_expansion_factors["expansion_factor"])
+        df_household_expansion_factors["expansion_factor"] += np.random.random(size = (len(probability),)) < probability
+        del df_statpop["expansion_factor"]
+        df_statpop = pd.merge(df_statpop, df_household_expansion_factors, on="household_id")
+
+        # duplicate households
+        df_households = df_statpop[["household_id", "expansion_factor"]].drop_duplicates("household_id")
+        indices = np.repeat(np.arange(df_households.shape[0]), df_households["expansion_factor"].astype(np.int64).values)
+        df_households = df_households.iloc[indices]
+        df_households["household_id_new"] = np.arange(df_households.shape[0]) + 1
+        del df_households["expansion_factor"]
+
+        # merge duplicated households back into statpop
+        df_statpop = pd.merge(df_statpop, df_households, on="household_id").drop("expansion_factor", axis=1)
+        df_statpop["household_id"] = df_statpop["household_id_new"]
+        del df_statpop["household_id_new"]
+
+        # sort by household id and generate new person ids
+        df_statpop = df_statpop.sort_values(by=["household_id", "person_id"])
+        df_statpop["person_id"] = np.arange(df_statpop.shape[0]) + 1
+
+        print("  Number of households after scaling :", df_statpop["household_id"].unique().shape[0])
+        print("  Number of persons after scaling :", df_statpop["person_id"].unique().shape[0])
+
+    return df_statpop

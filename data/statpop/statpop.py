@@ -27,19 +27,6 @@ def execute(context):
     df_households = context.stage("data.statpop.households")
     df_link = context.stage("data.statpop.link")
 
-    if "input_downsampling" in context.config:
-        probability = context.config["input_downsampling"]
-        print("Downsampling (%f)" % probability)
-
-        household_ids = np.unique(df_households["household_id"])
-        print("  Initial number of households:", len(household_ids))
-
-        f = np.random.random(size = (len(household_ids),)) < probability
-        remaining_household_ids = household_ids[f]
-        print("  Sampled number of households:", len(remaining_household_ids))
-
-        df_households = df_households[df_households["household_id"].isin(remaining_household_ids)]
-
     # Filter non-main residence
     df_persons = df_persons[df_persons["type_of_residence"] == 1]
 
@@ -142,7 +129,7 @@ def execute(context):
         "marital_status", "nationality",
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
-        "home_municipality_id", "home_quarter_id", "population_density", "sp_region"]]
+        "home_municipality_id", "home_quarter_id", "canton_id", "population_density", "sp_region"]]
 
     df = data.statpop.head_of_household.impute(df)
     return df

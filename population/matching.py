@@ -8,7 +8,7 @@ def configure(context, require):
     require.config("hot_deck_matching_runners", -1)
     require.config("hot_deck_minimum_source_samples", 20)
     require.stage("data.microcensus.persons")
-    require.stage("data.statpop.statpop")
+    require.stage("data.statpop.downsampled")
 
 # TODO: The matching categories are as they are defined by Kirill here. However,
 # we should discuss about them. Wouldn't it have a big impact on how the activity
@@ -40,7 +40,7 @@ def execute(context):
         (~is_weekend_scenario & ~df_mz["weekend"]) # and only weekday samples for a weekday
     ])
 
-    df_statpop = context.stage("data.statpop.statpop")
+    df_statpop = context.stage("data.statpop.downsampled")
     number_of_statpop_persons = len(np.unique(df_statpop["person_id"]))
     number_of_statpop_households = len(np.unique(df_statpop["household_id"]))
 
