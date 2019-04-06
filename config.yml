@@ -6,18 +6,22 @@ hot_deck_matching_runners: 2
 disable_progress_bar: false
 input_downsampling: 0.01
 java_memory: 10G
+scaling_year: 2020
+enable_scaling: true
 stages:
+    - data.statpop.projections.households
+    - data.statpop.scaled
     #- data.spatial.ov_guteklasse
     #- data.microcensus.trips
     #- population.spatial.locations
     #- population.trips
     #- data.microcensus.persons
-    - data.microcensus.households
+    #- data.microcensus.households
     #- population.sociodemographics
     #- matsim.population
     #- matsim.population_attributes
     #- matsim.households
-    - matsim.population
+    #- matsim.population
     #- data.microcensus.commute_extrapolation
     #- population.spatial.education_locations
     #- population.spatial.by_person.education_locations

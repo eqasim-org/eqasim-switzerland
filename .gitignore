@@ -1,3 +1,4 @@
 __pycache__
 temp
 setup/pipeline_environment/*/
+.idea/
