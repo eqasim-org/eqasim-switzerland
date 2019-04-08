@@ -41,7 +41,7 @@ def execute(context):
     # Load excel data
     df_households = pd.read_excel(
         "%s/projections/households/su-d-01.03.03.03.01.xlsx" % raw_data_path,
-        header=[0,1], skiprows = 2, nrows = 27).reset_index().rename({
+        header=[0,1], skiprows = 2, nrows = 27, index_col = 0).reset_index().rename({
             "index": "canton_id",
             "Total": "total",
             "1 Person": 1,
