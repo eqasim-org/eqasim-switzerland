@@ -66,9 +66,13 @@
             <param name="activityType" value="service" />
             <param name="scoringThisActivityAtAll" value="false" />
         </parameterset>
+        <parameterset type="modeParams">
+            <param name="mode" value="car_passenger" />
+        </parameterset>
     </module>
 
     <module name="planscalcroute">
+        <param name="networkModes" value="car,car_passenger" />
         <parameterset type="teleportedModeParameters">
             <param name="mode" value="bike" />
             <param name="teleportedModeSpeed" value="3.3" />
@@ -79,6 +83,10 @@
             <param name="teleportedModeSpeed" value="2.2" />
             <param name="beelineDistanceFactor" value="1.0" />
         </parameterset>
+    </module>
+
+    <module name="travelTimeCalculator">
+        <param name="analyzedModes" value="car,car_passenger" />
     </module>
 
     <module name="strategy">
