@@ -34,6 +34,7 @@ class PersonWriter:
         writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[10]))
         writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[11]))
         writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[12]))
+        writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(self.person[14]))
         writer.end_attributes()
 
         # Plan
@@ -61,7 +62,7 @@ class PersonWriter:
         writer.end_plan()
         writer.end_person()
 
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke", "household_id"]
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke", "household_id", "is_car_passenger"]
 ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x", "location_y", "location_id", "following_mode", "ov_guteklasse"]
 
 def execute(context):

@@ -46,19 +46,21 @@ def execute(context):
     commute_counts = {}
 
     print("Computing commute counts ...")
-    for mode in ["car", "pt", "bike", "walk"]:
+    for mode in ["car", "pt", "bike", "walk", "car_passenger"]:
+        source_mode = "car" if mode == "car_passenger" else mode
+
         origin_counts = np.array([
             np.sum(df_demand.loc[
                 (df_demand["commute_mode"] == mode) & (df_demand["home_zone_id"] == origin_zone), "count"
             ]) for origin_zone in tqdm(df_zones["zone_id"], desc = mode)
         ])[:, np.newaxis]
 
-        counts = np.zeros(pdf_matrices[mode].shape, dtype = np.int)
+        counts = np.zeros(pdf_matrices[source_mode].shape, dtype = np.int)
 
         for i in range(len(df_zones)):
             if origin_counts[i] > 0:
-                assert(~np.any(np.isnan(pdf_matrices[mode][i])))
-                counts[i,:] = np.random.multinomial(origin_counts[i], pdf_matrices[mode][i,:])
+                assert(~np.any(np.isnan(pdf_matrices[source_mode][i])))
+                counts[i,:] = np.random.multinomial(origin_counts[i], pdf_matrices[source_mode][i,:])
 
         commute_counts[mode] = counts
         assert(len(counts) == len(df_zones))
@@ -67,8 +69,8 @@ def execute(context):
     work_zones = np.zeros((len(df),), dtype = np.int)
     zone_ids = list(df_zones["zone_id"])
 
-    with tqdm(desc = "Assigning work zones", total = 4 * len(df_zones)) as progress:
-        for mode in ["car", "pt", "bike", "walk"]:
+    with tqdm(desc = "Assigning work zones", total = 5 * len(df_zones)) as progress:
+        for mode in ["car", "pt", "bike", "walk", "car_passenger"]:
             mode_f = df["commute_mode"] == mode
 
             for origin_index, origin_zone in enumerate(zone_ids):

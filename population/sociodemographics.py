@@ -41,6 +41,7 @@ def execute(context):
             "subscriptions_ga_class",
             "subscriptions_verbund_class",
             "subscriptions_strecke_class",
+            "is_car_passenger",
         ]],
         on = "mz_person_id", how = "left"
     )

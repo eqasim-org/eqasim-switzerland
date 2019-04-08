@@ -30,6 +30,10 @@ def execute(context):
         '<param name="outputNetworkFile" value="null" />',
         '<param name="outputNetworkFile" value="%s/converted_network.xml.gz" />' % context.cache_path
     )
+    content = content.replace(
+        '<param name="allowedTransportModes" value="car" />',
+        '<param name="allowedTransportModes" value="car,car_passenger" />'
+    )
 
     with open("%s/convert_network.xml" % context.cache_path, "w+") as f:
         f.write(content)

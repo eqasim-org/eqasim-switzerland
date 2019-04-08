@@ -18,7 +18,7 @@ def execute(context):
     df_mz_trips["travel_time"] = df_mz_trips["arrival_time"] - df_mz_trips["departure_time"]
 
     number_of_obs_per_quantile = 400
-    modes = ["car", "pt", "bike", "walk"]
+    modes = ["car", "pt", "bike", "walk", "car_passenger"]
 
     quantiles_path = "%s/quantiles.dat" % context.cache_path
     distributions_path = "%s/distributions.dat" % context.cache_path

@@ -47,9 +47,6 @@ def execute(context):
     df_mz_trips.loc[df_mz_trips["wmittel"] == 16, "mode"] = "car" # "Machines similar to a vehicle"
     df_mz_trips.loc[df_mz_trips["wmittel"] == 17, "mode"] = "unknown" # Other / don't know
 
-    # Put a flag if this agent is using a Flugi
-    df_mz_trips.loc[:, "uses_plane"] = df_mz_trips["wmittel"] == 1
-
     df_mz_trips["mode_detailed"] = df_mz_trips["mode"]
     df_mz_trips.loc[df_mz_trips["wmittel"] == 1, "mode_detailed"] = "plane"
     df_mz_trips.loc[df_mz_trips["wmittel"] == 11, "mode_detailed"] = "taxi"
@@ -59,6 +56,7 @@ def execute(context):
     df_passengers = df_mz_stages[["HHNR", "WEGNR", "is_car_passenger"]].groupby(["HHNR", "WEGNR"]).sum().reset_index()
     df_mz_trips = pd.merge(df_mz_trips, df_passengers, on = ["HHNR", "WEGNR"], how = "left")
     df_mz_trips.loc[df_mz_trips["is_car_passenger"] > 0, "mode_detailed"] = "car_passenger"
+    df_mz_trips.loc[df_mz_trips["is_car_passenger"] > 0, "mode"] = "car_passenger"
     del df_mz_trips["is_car_passenger"]
 
     # Second, adjust the purposes
@@ -174,6 +172,6 @@ def execute(context):
 
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y", "origin_x", "origin_y",
-        "uses_plane", "activity_duration", "crowfly_distance", "origin_ov_guteklasse", "destination_ov_guteklasse", "parking_cost", "network_distance",
+        "activity_duration", "crowfly_distance", "origin_ov_guteklasse", "destination_ov_guteklasse", "parking_cost", "network_distance",
         "mode_detailed"
     ]]

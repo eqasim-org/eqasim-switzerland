@@ -136,4 +136,8 @@ def execute(context):
         len(remove_ids), 100.0 * len(remove_ids) / initial_size
     ))
 
+    # Add car passenger flag
+    car_passenger_ids = df_mz_trips.loc[df_mz_trips["mode"] == "car_passenger", "person_id"].unique()
+    df_mz_persons["is_car_passenger"] = df_mz_persons["person_id"].isin(car_passenger_ids)
+
     return df_mz_persons
