@@ -8,7 +8,7 @@ import matsim.writers
 def configure(context, require):
     require.stage("population.sociodemographics")
 
-FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class", "municipality_type", "sp_region"]
+FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class", "municipality_type", "sp_region", "canton_id"]
 INCOME_VALUES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]
 
 def write_number_of_cars_class(value):
@@ -36,6 +36,7 @@ def add_household(writer, household, member_ids):
     writer.add_attribute("bikeAvailability", "java.lang.String", write_bike_availability(household[6]))
     writer.add_attribute("municipalityType", "java.lang.String", str(household[7]))
     writer.add_attribute("spRegion", "java.lang.Integer", str(household[8]))
+    writer.add_attribute("cantonId", "java.lang.Double", str(household[9]))
     writer.end_attributes()
 
     writer.end_household()
