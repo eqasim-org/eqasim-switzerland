@@ -56,12 +56,11 @@ def execute(context):
     df["age"] = df["age"].str.split("Jahr", expand=True)[0].astype(int)
 
     # Get the age class
-    age_class_bounds = [20, 60]
-    df["age_class_projection"] = np.digitize(df["age"], age_class_bounds)
+    df["age_class"] = np.digitize(df["age"], c.AGE_CLASS_UPPER_BOUNDS)
 
     # aggregate
-    df = df[["canton_id", "sex", "age_class_projection", "year", "weight"]]
-    df = df.groupby(["canton_id", "sex", "age_class_projection", "year"]).sum().reset_index()
+    df = df[["canton_id", "sex", "age_class", "year", "weight"]]
+    df = df.groupby(["canton_id", "sex", "age_class", "year"]).sum().reset_index()
 
     # select year in the future to project to (default = 2018)
     scaling_year = np.max([c.BASE_YEAR, context.config["scaling_year"]])
@@ -69,7 +68,7 @@ def execute(context):
     # create lists of cantons, household sizes and years from data
     canton_ids = list(df["canton_id"].unique())
     sexes = list(df["sex"].unique())
-    age_classes = list(df["age_class_projection"].unique())
+    age_classes = list(df["age_class"].unique())
     years = list(df["year"].unique())
 
     # fill data
@@ -78,7 +77,7 @@ def execute(context):
     else:
         # build empty data array
         index = np.arange(0, len(canton_ids) * len(sexes) * len(age_classes))
-        columns = ["canton_id", "sex", "age_class_projection", "weight"]
+        columns = ["canton_id", "sex", "age_class", "weight"]
         data = np.zeros((len(index), len(columns)), dtype=object)
 
         # for years not between 2015 and 2045, the data is linearly interpolated
@@ -93,7 +92,7 @@ def execute(context):
                         # interpolate value for future year
                         temp = df[(df["canton_id"] == canton_id) &
                                   (df["sex"] == sex) &
-                                  (df["age_class_projection"] == age_class)]
+                                  (df["age_class"] == age_class)]
 
                         # linear fit over last 5 years
                         xp = temp["year"].values[-5:]
