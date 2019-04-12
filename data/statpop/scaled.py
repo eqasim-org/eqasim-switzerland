@@ -15,7 +15,7 @@ def execute(context):
     if context.config["enable_scaling"]:
 
         df_household_controls = context.stage("data.statpop.projections.households")
-        # df_population_controls = context.stage("data.statpop.projections.population")
+        df_population_controls = context.stage("data.statpop.projections.population")
 
         print("  Number of households in household controls :", df_household_controls["weight"].sum())
 
@@ -26,21 +26,12 @@ def execute(context):
         # as the projections only have 3 categories
         df_statpop["household_size_class_projection"] = np.minimum(3, df_statpop["household_size"]) - 1
 
-        # TODO: add population-level controls
-        # # we define a few large age groups for scaling
-        # age_class_bounds = [20, 60]
-        # df_statpop["age_class_projection"] = np.digitize(df_statpop["age"], age_class_bounds)
-
-        # # define fitting problem
-        # problem = multilevelipf.fitting_problem(df_statpop,
-        #                                         group_controls=[df_household_controls], group_id="household_id",
-        #                                         individual_controls=[df_population_controls], individual_id="person_id")
-
+        # set up fitting problem
         problem = multilevelipf.fitting_problem(df_statpop,
-                                                group_controls=[df_household_controls], group_id="household_id")
-
+                                                group_controls=[df_household_controls], group_id="household_id",
+                                                individual_controls=[df_population_controls], individual_id="person_id")
         # perform fitting
-        df_statpop = multilevelipf.fit(problem, algorithm="ipf", tol_abs=1e-6, tol_rel=1e-6, maxiter=100)
+        df_statpop = multilevelipf.fit(problem, algorithm="ipu", tol_abs=1e-2, tol_rel=1e-2, maxiter=100, parallelize_on="canton_id")
         del df_statpop["household_size_class_projection"]
 
         # TODO: The expansion factors are rounded here by simply taking first the integer part

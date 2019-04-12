@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+import multiprocessing as mp
 
 def add_expansion_factor_column(df):
     if (df.columns.contains("expansion_factor") == False):
@@ -29,7 +30,6 @@ def compute_filters(fitting_problem):
     individual_controls = []
 
     # create filters for group level controls
-    print("Computing group-level control filters...")
     for control in fitting_problem.group_controls:
         for _, row in control.iterrows():
             group_control = []
@@ -44,7 +44,6 @@ def compute_filters(fitting_problem):
             group_controls.append(group_control)
 
     # create filters for individual level controls
-    print("Computing individual-level control filters...")
     for control in fitting_problem.individual_controls:
         for _, row in control.iterrows():
             individual_control = []
@@ -116,33 +115,60 @@ def is_converged(f, r, tol_abs, tol_rel):
         return True
     return False
 
-def fit(fitting_problem, algorithm="ipu", tol_abs=1e-3, tol_rel=1e-3, maxiter=2000):
+def parallel_fit(args):
+    index, task = args
+    fitting_problem, algorithm, tol_abs, tol_rel, maxiter = task
+
     df = fitting_problem.df
     group_controls, individual_controls = compute_filters(fitting_problem)
 
-    print("Fitting to data to controls...")
-    for i in tqdm(range(maxiter)):
-        df["r_factor"] = 1.0
-        df = group_fit(df, group_controls, fitting_problem.group_id)
-        if (algorithm is "ipu"):
-            df = individual_fit(df, individual_controls, fitting_problem.group_id, algorithm="ipu")
-        elif (algorithm is "ent"):
-            df = individual_fit(df, fitting_problem.individual_controls, fitting_problem.group_id, algorithm="ent")
+    with tqdm(total=maxiter, position=index, desc="progress #%s" % str(index)) as progress:
+        for i in range(maxiter):
+            df["r_factor"] = 1.0
+            df = group_fit(df, group_controls, fitting_problem.group_id)
+            if (algorithm == "ipu"):
+                df = individual_fit(df, individual_controls, fitting_problem.group_id, algorithm="ipu")
+            elif (algorithm == "ent"):
+                df = individual_fit(df, fitting_problem.individual_controls, fitting_problem.group_id, algorithm="ent")
 
-        if (is_converged(df["expansion_factor"], df["r_factor"], tol_abs, tol_rel)):
-            df = df.drop("r_factor", axis=1)
-            return df
+            progress.update()
+
+            if (is_converged(df["expansion_factor"], df["r_factor"], tol_abs, tol_rel)):
+                df = df.drop("r_factor", axis=1)
+                return df
 
     print("Reached max iteration ", maxiter)
     df = df.drop("r_factor", axis=1)
     return df
 
-def fit_ipf(fitting_problem, tol_abs=1e-3, tol_rel=1e-3, maxiter=2000):
-    return fit(fitting_problem, algorithm="ipf", tol_abs=tol_abs, tol_rel=tol_rel, maxiter=maxiter)
+def fit(problem, algorithm="ipu", tol_abs=1e-3, tol_rel=1e-3, maxiter=2000, parallelize_on=None):
 
-def fit_ipu(fitting_problem, tol_abs=1e-3, tol_rel=1e-3, maxiter=2000):
-    return fit(fitting_problem, algorithm="ipu", tol_abs=tol_abs, tol_rel=tol_rel, maxiter=maxiter)
+    tasks = []
 
-def fit_ent(fitting_problem, tol_abs=1e-3, tol_rel=1e-3, maxiter=2000):
-    return fit(fitting_problem, algorithm="ent", tol_abs=tol_abs, tol_rel=tol_rel, maxiter=maxiter)
+    if parallelize_on is None:
+        tasks.append((problem, algorithm, tol_abs, tol_rel, maxiter))
+    else:
+        categories = list(problem.df[parallelize_on].unique())
+        for category in categories:
+            sub_df = problem.df[problem.df[parallelize_on] == category]
 
+            sub_group_controls = []
+            for group_control in problem.group_controls:
+                sub_group_controls.append(group_control[group_control[parallelize_on] == category])
+
+            sub_individual_controls = []
+            for individual_control in problem.individual_controls:
+                sub_individual_controls.append(individual_control[individual_control[parallelize_on] == category])
+
+            subproblem = fitting_problem(sub_df, sub_group_controls, problem.group_id, sub_individual_controls,
+                          problem.individual_id)
+            tasks.append((subproblem, algorithm, tol_abs, tol_rel, maxiter))
+
+    runners = len(tasks)
+    print("Fitting to data to controls...")
+    with mp.Pool(runners) as pool:
+        frames = pool.map(parallel_fit, enumerate(tasks))
+        for i in range(runners + 1): print(" ")  # Formatting of output
+
+
+    return pd.concat(frames)
