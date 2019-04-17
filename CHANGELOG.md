@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Put in 2015 totals from BfS
 - Parallelize scaling
 - Scale STATPOP to both projected household and person-level control totals
 - Add canton ID to households
