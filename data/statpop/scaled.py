@@ -1,10 +1,12 @@
 import pandas as pd
 import numpy as np
 from data.statpop.multilevelipf import multilevelipf
+import data.constants as c
 
 def configure(context, require):
     require.config("output_path")
-    require.config("enable_scaling")
+    require.config("enable_scaling", default=False)
+    require.config("scaling_year", default=c.BASE_SCALING_YEAR)
     require.stage("data.statpop.statpop")
     require.stage("data.statpop.projections.households")
     require.stage("data.statpop.projections.population")
