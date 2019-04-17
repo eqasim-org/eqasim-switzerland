@@ -66,9 +66,9 @@ def execute(context):
     raw_data_path = context.config["raw_data_path"]
 
     # Select year in the future to project to
-    scaling_year = np.max([c.BASE_YEAR, context.config["scaling_year"]])
+    scaling_year = np.max([c.BASE_SCALING_YEAR, context.config["scaling_year"]])
 
-    if scaling_year <= 2017:
+    if scaling_year < c.BASE_PROJECTED_YEAR:
 
         # Load csv for historical data
         df_households = pd.read_csv(
@@ -104,7 +104,7 @@ def execute(context):
         df_households["household_size"] = np.minimum(5, df_households["household_size"]) - 1
         df_households = df_households.groupby(["canton_id", "household_size"]).sum().reset_index().sort_values(["canton_id", "household_size"])
         df_households = df_households.rename({"household_size": "household_size_class_projection"}, axis=1)
-        df_households = df_households.sort_values(["canton_id", "household_size"])
+        df_households = df_households.sort_values(["canton_id", "household_size_class_projection"])
 
     else:
 

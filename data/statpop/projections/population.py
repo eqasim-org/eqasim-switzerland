@@ -32,15 +32,14 @@ CANTON_TO_ID = {"Zürich": 1,
 def configure(context, require):
     require.config("raw_data_path")
     require.config("scaling_year")
-    # require.cache = False
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]
 
     # Select year in the future to project to
-    scaling_year = np.max([c.BASE_YEAR, context.config["scaling_year"]])
+    scaling_year = np.max([c.BASE_SCALING_YEAR, context.config["scaling_year"]])
 
-    if scaling_year <= 2017:
+    if scaling_year < c.BASE_PROJECTED_YEAR:
 
         # load excel data
         df = pd.read_csv("%s/projections/population/px-x-0102010000_101.csv" % raw_data_path, sep=";",
