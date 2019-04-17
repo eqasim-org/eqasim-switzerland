@@ -22,9 +22,9 @@ def execute(context):
         print("  Number of households before scaling :", df_statpop["household_id"].unique().shape[0])
         print("  Number of persons before scaling :", df_statpop["person_id"].unique().shape[0])
 
-        # we need to add a new household class column with only 3 categories,
-        # as the projections only have 3 categories
-        df_statpop["household_size_class_projection"] = np.minimum(3, df_statpop["household_size"]) - 1
+        # we need to add a new household class column with only as many categories as the controls
+        number_household_classes = len(df_household_controls["household_size_class_projection"].unique())
+        df_statpop["household_size_class_projection"] = np.minimum(number_household_classes, df_statpop["household_size"]) - 1
 
         # set up fitting problem
         problem = multilevelipf.fitting_problem(df_statpop,
