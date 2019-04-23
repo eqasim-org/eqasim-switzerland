@@ -55,4 +55,4 @@ def execute(context):
             "%s/switzerland_config.xml" % context.cache_path
         ], cwd = context.cache_path)
 
-    return {}
+    return context.cache_path
