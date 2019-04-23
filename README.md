@@ -19,6 +19,15 @@ To clean, simply delete the `setup/pipeline_environment` subdirectory.
 The starting point is `run.py`, where some configuration options can be set. Right
 now it is not very configurable, but should become more so in the future.
 
+# Output
+
+To create a full scenario, add the `matsim.final` stage to the config file. The
+configuration options `output_path` and `output_id` must be set. The option
+`output_path` must point to an existing directory, where results of the pipeline
+will be saved. For a specific run, the scenario output will be written to the
+folder `output_path/output_id`, i.e. the subfolder "output_id" *may be overwritten*
+if it exists already.
+
 # Deployment
 
 No deployment yet, still work in progress. Later new updates will be automatically
@@ -121,7 +130,7 @@ which is a spatial classification of public transport level of service.
 - Contract: [Open Data][8]
 
 **Projections**
-- Content: `projections/households` contains data for household sizes per canton from 2012-2017 and predictions of household sizes per canton in 2017 and 2045. 
+- Content: `projections/households` contains data for household sizes per canton from 2012-2017 and predictions of household sizes per canton in 2017 and 2045.
 `projections/population` contains data of population per canton, nationality, gender and age from 2010-2017 and predictions from 2015 to 2045.
 All predictions are according to the BfS reference scenario.
 - State: 1 Apr 2019
