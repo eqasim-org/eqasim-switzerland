@@ -44,26 +44,26 @@ PYTHON_VERSION=3.6
 REQUIREMENTS=${ROOT_DIR}/requirements.txt
 conda create -p ${PYTHON_VENV_DIR} python=${PYTHON_VERSION} --no-default-packages --channel conda-forge --file ${REQUIREMENTS} -y
 
-# download Oracle JDK
-JAVA_TARBALL=jdk-8u201-linux-x64.tar.gz
+# download Open JDK 12
+JAVA_TARBALL=openjdk-12.0.1_linux-x64_bin.tar.gz
 if [ ! -f ${DOWNLOAD_DIR}/${JAVA_TARBALL} ]
 then
-  echo "Downloading Oracle JDK..."
+  echo "Downloading Open JDK tarball ${JAVA_TARBALL} ..."
   cd ${DOWNLOAD_DIR}
-  curl -LOb "oraclelicense=a" https://download.oracle.com/otn-pub/java/jdk/8u201-b09/42970487e3af4f5aa5bca3f542482c60/${JAVA_TARBALL}
+  curl -LOb "oraclelicense=a" https://download.java.net/java/GA/jdk12.0.1/69cfe15208a647278a19ef0990eea691/12/GPL/${JAVA_TARBALL}
 else
   echo "Oracle JDK already downloaded under ${DOWNLOAD_DIR}/${JAVA_TARBALL}"
 fi
 
-# extract Oracle JDK files
-JAVA_DIR=${SETUP_DIR}/jdk1.8.0_201
+# extract Open JDK files
+JAVA_DIR=${SETUP_DIR}/jdk-12.0.1
 if [ ! -d ${JAVA_DIR} ]
 then
   echo "Unzipping contents of ${JAVA_TARBALL}"
   cd ${DOWNLOAD_DIR}
   tar xzvf ${JAVA_TARBALL} -C ${SETUP_DIR}
 else
-  echo "Oracle JDK already extracted under ${JAVA_DIR}"
+  echo "Open JDK already extracted under ${JAVA_DIR}"
 fi
 
 # download maven

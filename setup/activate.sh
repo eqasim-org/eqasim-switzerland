@@ -26,7 +26,7 @@ source activate ${PYTHON_VENV_DIR}
 
 # add java to path
 echo "Adding java to PATH..."
-JAVA_DIR=${SETUP_DIR}/jdk1.8.0_201/
+JAVA_DIR=${SETUP_DIR}/jdk-12.0.1/
 if [ ! -d ${JAVA_DIR} ]; then
   echo "Could not find java directory : ${JAVA_DIR}."
   echo "Please run setup.sh script again."
