@@ -34,7 +34,10 @@ fi
 
 # update conda
 echo "Updating conda..."
+
 PATH=${CONDA_DIR}/bin:$PATH
+python ${ROOT_DIR}/fix_conda.py ${CONDA_DIR}/bin/conda
+python ${ROOT_DIR}/fix_conda.py ${CONDA_DIR}/bin/conda-env
 conda update -y conda
 
 # create python environment
