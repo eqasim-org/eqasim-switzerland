@@ -10,3 +10,11 @@ test:
        - mkdir output temp
        - python3 -u run.py config_gitlab.yml
        - rm -rf output
+
+before_script:
+    - sh setup/setup.sh
+    - source setup/activate.sh
+
+cache:
+    paths:
+        - setup/pipeline_environment

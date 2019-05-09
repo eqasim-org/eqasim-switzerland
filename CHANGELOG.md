@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Set up CI execution environment using the setup/ scripts
 - Make output directory configurable
 - Set default scaling year values
 - Put in 2015 totals from BfS
