@@ -4,15 +4,16 @@ with `python` modules that call each other in the sense of incremental builds.
 
 # Installation
 
-Two bash scripts which set up everything that is needed to run the pipeline on our servers, as well as a requirements.txt file, can be found in `setup`:
+Two bash scripts which set up everything that is needed to run the pipeline on our servers, as well as a requirements.txt file, can be found in `environment`:
 
-- `setup.sh` downloads miniconda, creates python venv, downloads jdk and maven in `setup/pipeline_environment`.
-- `activate.sh` activates python venv and adds both jdk and maven to PATH variable.
+- `setup.sh [path]` downloads Miniconda3, creates a Python virtual environment, installs OpenJDK and Maven. A path needs to be passed, which defines the directory in which the environment will be setup.
+- `activate.sh [path]` activates the environment when the script is *source*'d. The path to the environment needs to be supplied.
 
-The activation is done (as in Anaconda/Miniconda) by source'ing `activate.sh` (either
-`. setup/activate.sh` or `source setup/activate.sh` depending on the shell).
+Example:
+- `sh environment/setup.sh myenv`
+- `source environment/activate.sh myenv`
 
-To clean, simply delete the `setup/pipeline_environment` subdirectory.
+To clean, simply delete the environment directory (here `myenv`).
 
 # Run
 

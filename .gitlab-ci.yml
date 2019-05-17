@@ -1,20 +1,15 @@
 test:
    script:
-       - export PATH=/nas/vplworker/anaconda3/bin:$PATH
-       - export PATH=/nas/vplworker/java/bin:$PATH
-       - export PATH=/nas/vplworker/maven/bin:$PATH
-       - source activate ivt
-       - python3 --version
-       - pwd
-       - rm -rf output temp
-       - mkdir output temp
-       - python3 -u run.py config_gitlab.yml
-       - rm -rf output
+       - source environment/activate.sh env
+       - rm -rf output cache tmp
+       - mkdir output cache tmp
+       - TMPDIR=${CI_PROJECT_DIR}/tmp python3 -u run.py config_gitlab.yml
 
 before_script:
-    - sh setup/setup.sh
-    - source setup/activate.sh
+    - sh environment/setup.sh env
+    - sh environment/activate.sh env
 
 cache:
+    key: environment_v2
     paths:
-        - setup/pipeline_environment
+        - env
