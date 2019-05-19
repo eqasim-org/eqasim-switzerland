@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Write canton id -1 if value is NaN
 - Set up CI execution environment using the setup/ scripts
 - Make output directory configurable
 - Set default scaling year values

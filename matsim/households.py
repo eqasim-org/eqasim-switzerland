@@ -36,7 +36,10 @@ def add_household(writer, household, member_ids):
     writer.add_attribute("bikeAvailability", "java.lang.String", write_bike_availability(household[6]))
     writer.add_attribute("municipalityType", "java.lang.String", str(household[7]))
     writer.add_attribute("spRegion", "java.lang.Integer", str(household[8]))
-    writer.add_attribute("cantonId", "java.lang.Double", str(household[9]))
+
+    canton_id = str(household[9]) if not np.isnan(household[9]) else "-1"
+    writer.add_attribute("cantonId", "java.lang.Double", canton_id)
+
     writer.end_attributes()
 
     writer.end_household()
