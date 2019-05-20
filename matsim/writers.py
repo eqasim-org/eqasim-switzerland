@@ -85,7 +85,7 @@ class PopulationWriter(XmlWriter):
 
     def start_person(self, person_id):
         self._require_scope(self.POPULATION_SCOPE)
-        self._write_line('<person id="%d">' % person_id)
+        self._write_line('<person id="%s">' % person_id)
         self._push_scope(self.PERSON_SCOPE)
 
     def end_person(self):

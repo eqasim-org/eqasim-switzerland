@@ -1,7 +1,9 @@
 **Version v2 (master)**
 
+- Add freight population based on GTE and GQGV survey
 - Write canton id -1 if value is NaN
 - Set up CI execution environment using the setup/ scripts
+- Change from Oracle JDK 8 to Open JDK 12
 - Make output directory configurable
 - Set default scaling year values
 - Put in 2015 totals from BfS

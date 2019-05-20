@@ -8,6 +8,7 @@ java_memory: 100G
 input_downsampling: 0.01
 enable_scaling: true
 scaling_year: 2045
+use_freight: true
 stages:
     - matsim.run
     - matsim.mz.population
