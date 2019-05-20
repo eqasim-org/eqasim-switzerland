@@ -4,10 +4,11 @@ output_path: /run/media/sebastian/shoerl_data/scenarios/switzerland/temp
 threads: 4
 hot_deck_matching_runners: 2
 disable_progress_bar: false
-input_downsampling: 0.01
 java_memory: 10G
-scaling_year: 2020
+input_downsampling: 0.01
 enable_scaling: true
+scaling_year: 2020
+use_freight: true
 stages:
     - data.statpop.projections.households
     - data.statpop.scaled

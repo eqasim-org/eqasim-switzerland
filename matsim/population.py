@@ -11,6 +11,8 @@ def configure(context, require):
     require.stage("population.trips")
     require.stage("population.activities")
     require.stage("population.spatial.locations")
+    require.config("use_freight", default=False)
+    require.stage("freight.trips")
 
 class PersonWriter:
     def __init__(self, person):
@@ -21,7 +23,7 @@ class PersonWriter:
         self.activities.append(activity)
 
     def write(self, writer):
-        writer.start_person(self.person[1])
+        writer.start_person(str(self.person[1]))
 
         # Attributes
         writer.start_attributes()
@@ -58,6 +60,45 @@ class PersonWriter:
             if not activity[7]:
                 next_activity = self.activities[i + 1]
                 writer.add_leg(activity[11], activity[4], next_activity[3] - activity[4])
+
+        writer.end_plan()
+        writer.end_person()
+
+class FreightWriter:
+    def __init__(self, freight_agent):
+        self.freight_agent = freight_agent
+
+    def write(self, writer):
+        writer.start_person("freight_" + str(self.freight_agent[1]))
+
+        # Attributes
+        writer.start_attributes()
+        writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
+        writer.add_attribute("type", "java.lang.String", str(self.freight_agent[7]))
+        writer.end_attributes()
+
+        # Plan
+        writer.start_plan(selected = True)
+
+        start_location = writer.location(self.freight_agent[2], self.freight_agent[3], None)
+        end_location = writer.location(self.freight_agent[4], self.freight_agent[5], None)
+        departure_time = self.freight_agent[6]
+        arrival_time = departure_time + 3600
+
+        # loading activity
+        writer.start_activity("freight_loading", start_location, 0, departure_time)
+        writer.start_attributes()
+        writer.end_attributes()
+        writer.end_activity()
+
+        # transport leg
+        writer.add_leg(str(self.freight_agent[7]), departure_time, arrival_time - departure_time)
+
+        # unloading activity
+        writer.start_activity("freight_unloading", end_location, arrival_time, 30*3600)
+        writer.start_attributes()
+        writer.end_attributes()
+        writer.end_activity()
 
         writer.end_plan()
         writer.end_person()
@@ -119,9 +160,28 @@ def execute(context):
                 except StopIteration:
                     pass
 
-            writer.end_population()
+            assert (number_of_written_activities == len(df_activities))
+            assert (number_of_written_persons == len(df_persons))
 
-            assert(number_of_written_activities == len(df_activities))
-            assert(number_of_written_persons == len(df_persons))
+            if context.config["use_freight"]:
+                df_freight = context.stage("freight.trips")
+
+                freight_iterator = iter(df_freight.itertuples())
+                number_of_written_freight = 0
+
+                with tqdm(total = len(df_freight), desc = "Writing freight agents ...") as progress:
+                    try:
+                        while True:
+                            freight = next(freight_iterator)
+                            freight_writer = FreightWriter(freight)
+                            freight_writer.write(writer)
+                            number_of_written_freight += 1
+                            progress.update()
+                    except StopIteration:
+                        pass
+
+                assert (number_of_written_freight == len(df_freight))
+
+            writer.end_population()
 
     return "%s/population.xml.gz" % cache_path

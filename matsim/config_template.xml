@@ -66,13 +66,24 @@
             <param name="activityType" value="service" />
             <param name="scoringThisActivityAtAll" value="false" />
         </parameterset>
+        <parameterset type="activityParams">
+            <param name="activityType" value="freight_loading" />
+            <param name="scoringThisActivityAtAll" value="false" />
+        </parameterset>
+        <parameterset type="activityParams">
+            <param name="activityType" value="freight_unloading" />
+            <param name="scoringThisActivityAtAll" value="false" />
+        </parameterset>
         <parameterset type="modeParams">
             <param name="mode" value="car_passenger" />
+        </parameterset>
+        <parameterset type="modeParams">
+            <param name="mode" value="truck" />
         </parameterset>
     </module>
 
     <module name="planscalcroute">
-        <param name="networkModes" value="car,car_passenger" />
+        <param name="networkModes" value="car,car_passenger,truck" />
         <parameterset type="teleportedModeParameters">
             <param name="mode" value="bike" />
             <param name="teleportedModeSpeed" value="3.3" />
@@ -86,7 +97,7 @@
     </module>
 
     <module name="travelTimeCalculator">
-        <param name="analyzedModes" value="car,car_passenger" />
+        <param name="analyzedModes" value="car,car_passenger,truck" />
     </module>
 
     <module name="strategy">

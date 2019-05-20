@@ -137,6 +137,27 @@ All predictions are according to the BfS reference scenario.
 - State: 1 Apr 2019
 - Contract: [Open Data][9] [Open Data][10] [Open Data][11] [Open Data][12]
 
+**NUTS**
+- Content: `nuts_borders` contains the borders of the Nomenclature of Territorial Units for Statistics (NUTS) country 
+subdivisions.
+- State: 2013 & 2016
+- Contract: [Open Data][13]
+
+**Postal codes**
+- Content: `postal_codes` contains shapefiles for postcodes in Switzerland.
+- State: 1 Apr 2019
+- Contract: [Open Data][14]
+
+**Freight (GTE)**
+- Content: `freight/gte` contains data from GTE survey which examines freight travel for freight vehicles registered in Switzerland.
+- State: 2017
+- Contract: BFS contract until ?
+
+**Freight (GQGV)**
+- Content: `freight/gqgv` contains data from GQGV survey which examines freight travel for freight vehicles registered abroad.
+- State: 2014
+- Contract: BFS contract until ?
+
 
 [1]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/generalisierte-gemeindegrenzen.assetdetail.5247306.html
 
@@ -153,3 +174,5 @@ All predictions are according to the BfS reference scenario.
 [10]: https://www.bfs.admin.ch/bfs/de/home/statistiken/kataloge-datenbanken/tabellen.assetdetail.3882982.html
 [11]: https://www.bfs.admin.ch/bfs/de/home/statistiken/bevoelkerung/stand-entwicklung/bevoelkerung.assetdetail.5887433.html
 [12]: https://www.bfs.admin.ch/bfs/de/home/statistiken/bevoelkerung/zukuenftige-entwicklung/kantonale-szenarien.assetdetail.255402.html
+[13]: https://ec.europa.eu/eurostat/web/gisco/geodata/reference-data/administrative-units-statistical-units/nuts
+[14]: https://www.cadastre.ch/en/services/service/plz.html

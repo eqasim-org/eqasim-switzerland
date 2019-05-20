@@ -32,7 +32,7 @@ def execute(context):
     )
     content = content.replace(
         '<param name="allowedTransportModes" value="car" />',
-        '<param name="allowedTransportModes" value="car,car_passenger" />'
+        '<param name="allowedTransportModes" value="car,car_passenger,truck" />'
     )
 
     with open("%s/convert_network.xml" % context.cache_path, "w+") as f:

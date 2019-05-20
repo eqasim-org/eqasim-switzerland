@@ -3,6 +3,7 @@ import pipeline
 import yaml
 import sys
 
+
 config_path = "config.yml"
 
 if len(sys.argv) > 1:
