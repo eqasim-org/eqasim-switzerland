@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Scale freight demand to ARE reference projections
 - Add freight population based on GTE and GQGV survey
 - Write canton id -1 if value is NaN
 - Set up CI execution environment using the setup/ scripts
