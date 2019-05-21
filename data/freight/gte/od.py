@@ -1,8 +1,11 @@
 import pandas as pd
 import numpy as np
 
+
 def configure(context, require):
     require.stage("data.freight.gte.cleaned")
+    require.stage("data.freight.scaling_factor")
+    require.config("enable_scaling")
 
 
 def execute(context):
@@ -33,6 +36,10 @@ def execute(context):
         # compute demand
         demands[vehicle_type] =  int(np.round(np.sum(matrix_values) / number_of_weeks / number_of_weekdays))
 
+        # scale demand
+        if context.config["enable_scaling"]:
+            demands[vehicle_type] *= context.stage("data.freight.scaling_factor")
+
         # make sure each from sums up to one
         f_zero = np.sum(matrix_values, axis = 1) == 0.0
         for index in np.where(f_zero)[0]:
@@ -47,6 +54,5 @@ def execute(context):
         od_pdf_matrices[vehicle_type] = pd.DataFrame(index=matrix.index,
                                   columns=matrix.columns,
                                   data=od_pdf_matrix)
-
 
     return demands, origin_pdf_matrices, od_pdf_matrices

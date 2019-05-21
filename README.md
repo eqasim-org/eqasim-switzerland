@@ -131,11 +131,25 @@ which is a spatial classification of public transport level of service.
 - Contract: [Open Data][8]
 
 **Projections**
-- Content: `projections/households` contains data for household sizes per canton from 2012-2017 and predictions of household sizes per canton in 2017 and 2045.
-`projections/population` contains data of population per canton, nationality, gender and age from 2010-2017 and predictions from 2015 to 2045.
-All predictions are according to the BfS reference scenario.
-- State: 1 Apr 2019
-- Contract: [Open Data][9] [Open Data][10] [Open Data][11] [Open Data][12]
+- Households:
+    - Content: `projections/households` contains data for household sizes per canton from 2012-2017 and projections of household sizes per canton in 2017 and 2045.
+    All projections are according to the BfS reference scenario.
+    - State: 1 Apr 2019
+    - Contract: 
+        - Past data: [Open Data][9] 
+        - Projections: [Open Data][10]
+- Population:
+    - Content: `projections/population` contains data of population per canton, nationality, gender and age from 2010-2017 and projections from 2015 to 2045.
+    All projections are according to the BfS reference scenario.
+    - State: 1 Apr 2019
+    - Contract: 
+        - Past data: [Open Data][11] 
+        - Projections: [Open Data][12]
+- Freight:
+    - Content: `projections/are/freight` contains projections for freight traffic from 2010 to 2040.
+    All projections are according to the ARE Transport Outlook 2040 reference scenario.
+    - State: 20 Oct 2016
+    - Contract: [Open Data][15]
 
 **NUTS**
 - Content: `nuts_borders` contains the borders of the Nomenclature of Territorial Units for Statistics (NUTS) country 
@@ -176,3 +190,4 @@ subdivisions.
 [12]: https://www.bfs.admin.ch/bfs/de/home/statistiken/bevoelkerung/zukuenftige-entwicklung/kantonale-szenarien.assetdetail.255402.html
 [13]: https://ec.europa.eu/eurostat/web/gisco/geodata/reference-data/administrative-units-statistical-units/nuts
 [14]: https://www.cadastre.ch/en/services/service/plz.html
+[15]: https://www.are.admin.ch/are/en/home/transport-and-infrastructure/data/transport-perspectives.html

@@ -2,12 +2,6 @@ import pandas as pd
 
 RENAMES = {"ernr":"agent_id",
            "journeyId":"journey_id",
-           "fromNuts":"origin_nuts_id",
-           "toNuts":"destination_nuts_id",
-           "fromPlz": "origin_postal_code",
-           "toPlz": "destination_postal_code",
-           "fromLand": "origin_country",
-           "toLand": "destination_country",
            "vehicleKind":"vehicle_type",
            "grossingFactor":"weight"
            }
@@ -16,8 +10,9 @@ FIELDS = ["week", "weekday",
           "origin_nuts_id","destination_nuts_id",
           "origin_postal_code", "destination_postal_code",
           "origin_country", "destination_country",
-          "vehicle_type", "weight"
+          "vehicle_type", "distance_km", "weight"
           ]
+
 
 # VEHICLE_TYPES = {
 #         35:"truck",
@@ -40,44 +35,61 @@ def configure(context, require):
 def execute(context):
     df_transport, df_journey, df_week = context.stage("data.freight.gte.raw")
 
-    # select transport columns of interest
-    df_transport = df_transport[["ernr", "journeyId", "weekday",
-                                 "fromNuts", "toNuts",
-                                 "fromLand", "toLand",
-                                 "fromPlz", "toPlz",
-                                 "transportKm", "transportKmCH"]]
+    df_merge = pd.merge(df_transport, df_journey, on=["ernr", "journeyId"], suffixes=("_leg", "_trip"))
+    df_merge = pd.merge(df_merge, df_week, on="ernr", suffixes=("", "_week"))
 
-    # get start location of each agent
-    df_start_locations = df_transport[~df_transport["ernr"].duplicated()][["fromPlz", "fromNuts", "fromLand"]]
+    # get all unique legs within trips
+    df_merge = df_merge.drop_duplicates(["ernr", "journeyId", "fromPlz_leg", "toPlz_leg"])
 
-    # get all unique stop along trips
-    df_transport = df_transport.drop_duplicates()
+    # fix OD pairs and distances for loading trips
+    f_loading = (df_merge["journeyLoading"] == 1) & (df_merge["journeyUnloading"] > 1)
+    index_first_loading = df_merge.loc[f_loading, ["ernr", "journeyId", "fromPlz_leg"]].drop_duplicates(keep="first").index
 
-    # separate into different trip legs
-    df_transport.loc[1:, "fromPlz"] = df_transport.loc[:, "toPlz"].shift(periods=1)
-    df_transport.loc[1:, "fromNuts"] = df_transport.loc[:, "toNuts"].shift(periods=1)
-    df_transport.loc[1:, "fromLand"] = df_transport.loc[:, "toLand"].shift(periods=1)
+    df_forward_differences = df_merge["transportKmCH"].diff()
+    df_unloading_points = df_merge.loc[:, ["toLand_leg", "toNuts_leg", "toPlz_leg"]].shift(periods=1)
 
-    # reset initial start locations of each agent
-    df_transport.loc[df_start_locations.index, ["fromPlz", "fromNuts", "fromLand"]] = df_start_locations
+    df_merge.loc[f_loading, "origin_country"] = df_unloading_points[f_loading]["toLand_leg"]
+    df_merge.loc[f_loading, "origin_nuts_id"] = df_unloading_points[f_loading]["toNuts_leg"]
+    df_merge.loc[f_loading, "origin_postal_code"] = df_unloading_points[f_loading]["toPlz_leg"]
+    df_merge.loc[f_loading, "destination_country"] = df_merge.loc[f_loading, "toLand_leg"]
+    df_merge.loc[f_loading, "destination_nuts_id"] = df_merge.loc[f_loading, "toNuts_leg"]
+    df_merge.loc[f_loading, "destination_postal_code"] = df_merge.loc[f_loading, "toPlz_leg"]
+    df_merge.loc[index_first_loading, "origin_country"] = df_merge.loc[index_first_loading, "fromLand_leg"]
+    df_merge.loc[index_first_loading, "origin_nuts_id"] = df_merge.loc[index_first_loading, "fromNuts_leg"]
+    df_merge.loc[index_first_loading, "origin_postal_code"] = df_merge.loc[index_first_loading, "fromPlz_leg"]
 
-    # # get distances of first journeys
-    # df_distances = df_transport.drop_duplicates(["ernr", "journeyId"], keep="first")[["transportKm", "transportKmCH"]]
-    #
-    # # calculate distance of each trip leg
-    # df_transport.loc[1:, ["transportKm", "transportKmCH"]] = df_transport[["transportKm", "transportKmCH"]].diff().loc[1:,:]
-    #
-    # # reset first leg distance in each journey for each agent
-    # df_transport.loc[df_distances.index, ["transportKm", "transportKmCH"]] = df_distances
+    df_merge.loc[f_loading, "distance_km"] = df_forward_differences[f_loading]
+    df_merge.loc[index_first_loading, "distance_km"] = df_merge.loc[index_first_loading, "transportKmCH"]
 
-    # select week columns of interest
-    df_week = df_week[["ernr", "week", "vehicleKind", "grossingFactor"]]
+    # fix OD pairs and distances for unloading trips
+    f_unloading = (df_merge["journeyLoading"] > 1) & (df_merge["journeyUnloading"] == 1)
+    index_last_unloading = df_merge.loc[f_unloading, ["ernr", "journeyId", "toPlz_leg"]].drop_duplicates(keep="last").index
 
-    # merge
-    df_merge = pd.merge(df_transport, df_week, on="ernr")
+    df_backward_differences = df_merge["transportKmCH"].diff(periods=-1)
+    df_unloading_points = df_merge.loc[:, ["fromLand_leg", "fromNuts_leg", "fromPlz_leg"]].shift(periods=-1)
 
-    # remove all trips not at least partially in CH
-    df_merge = df_merge[df_merge["transportKmCH"] > 0]
+    df_merge.loc[f_unloading, "origin_country"] = df_merge.loc[f_unloading, "fromLand_leg"]
+    df_merge.loc[f_unloading, "origin_nuts_id"] = df_merge.loc[f_unloading, "fromNuts_leg"]
+    df_merge.loc[f_unloading, "origin_postal_code"] = df_merge.loc[f_unloading, "fromPlz_leg"]
+    df_merge.loc[f_unloading, "destination_country"] = df_unloading_points[f_unloading]["fromLand_leg"]
+    df_merge.loc[f_unloading, "destination_nuts_id"] = df_unloading_points[f_unloading]["fromNuts_leg"]
+    df_merge.loc[f_unloading, "destination_postal_code"] = df_unloading_points[f_unloading]["fromPlz_leg"]
+    df_merge.loc[index_last_unloading, "destination_country"] = df_merge.loc[index_last_unloading, "toLand_leg"]
+    df_merge.loc[index_last_unloading, "destination_nuts_id"] = df_merge.loc[index_last_unloading, "toNuts_leg"]
+    df_merge.loc[index_last_unloading, "destination_postal_code"] = df_merge.loc[index_last_unloading, "toPlz_leg"]
+
+    df_merge.loc[f_unloading, "distance_km"] = df_backward_differences[f_unloading]
+    df_merge.loc[index_last_unloading, "distance_km"] = df_merge.loc[index_last_unloading, "transportKmCH"]
+
+    # copy OD pairs and distances for single-leg trips
+    f_single = (df_merge["journeyLoading"] <= 1) & (df_merge["journeyUnloading"] <= 1)
+    df_merge.loc[f_single, "origin_country"] = df_merge.loc[f_single, "fromLand_leg"]
+    df_merge.loc[f_single, "origin_nuts_id"] = df_merge.loc[f_single, "fromNuts_leg"]
+    df_merge.loc[f_single, "origin_postal_code"] = df_merge.loc[f_single, "fromPlz_leg"]
+    df_merge.loc[f_single, "destination_country"] = df_merge.loc[f_single, "toLand_leg"]
+    df_merge.loc[f_single, "destination_nuts_id"] = df_merge.loc[f_single, "toNuts_leg"]
+    df_merge.loc[f_single, "destination_postal_code"] = df_merge.loc[f_single, "toPlz_leg"]
+    df_merge.loc[f_single, "distance_km"] = df_merge.loc[f_single, "transportKmCH"]
 
     # rename columns
     df_merge = df_merge.rename(RENAMES, axis=1)
@@ -87,17 +99,15 @@ def execute(context):
 
     # There are some NUTS ids that do not exist in our NUTS data (maybe old ids)
     # for now, drop all trips where NUTS not in NUTS data
-    print("Dropping all trips where NUTS id not contained in NUTS data ...")
+    print("Dropping all OD pairs where NUTS id not contained in NUTS data ...")
     number_trips = len(df_merge)
     df_nuts = context.stage("data.spatial.nuts")
     nuts_ids = list(df_nuts["nuts_id"].unique())
     df_merge = df_merge[(df_merge["origin_nuts_id"].isin(nuts_ids)) & (df_merge["destination_nuts_id"].isin(nuts_ids))]
     number_trips_dropped = number_trips - len(df_merge)
-    print("Dropped %s of %s trips" % (number_trips_dropped, number_trips))
+    print("Dropped %s of %s OD pairs" % (number_trips_dropped, number_trips))
 
     # package
     df_merge = df_merge[FIELDS]
 
     return df_merge
-
-
