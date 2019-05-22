@@ -75,6 +75,7 @@ class FreightWriter:
         writer.start_attributes()
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
         writer.add_attribute("type", "java.lang.String", str(self.freight_agent[7]))
+        writer.add_attribute("subpopulation", "java.lang.String", "freight")
         writer.end_attributes()
 
         # Plan
