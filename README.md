@@ -154,7 +154,7 @@ which is a spatial classification of public transport level of service.
 **NUTS**
 - Content: `nuts_borders` contains the borders of the Nomenclature of Territorial Units for Statistics (NUTS) country 
 subdivisions.
-- State: 2013 & 2016
+- State: 2016, 2013, 2010, 2006 & 2003
 - Contract: [Open Data][13]
 
 **Postal codes**

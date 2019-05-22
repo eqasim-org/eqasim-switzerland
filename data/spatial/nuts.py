@@ -1,24 +1,47 @@
 import pandas as pd
 import numpy as np
 import geopandas as gpd
+from tqdm import tqdm
+
 
 def configure(context, require):
     require.config("raw_data_path")
 
+SHAPEFILES = [
+    (2016, "nuts_borders/ref-nuts-2016-01m.shp/NUTS_RG_01M_2016_4326.shp/NUTS_RG_01M_2016_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),
+    (2013, "nuts_borders/ref-nuts-2013-01m.shp/NUTS_RG_01M_2013_4326.shp/NUTS_RG_01M_2013_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),
+    (2010, "nuts_borders/ref-nuts-2010-01m.shp/NUTS_RG_01M_2010_4326.shp/NUTS_RG_01M_2010_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),
+    (2006, "nuts_borders/ref-nuts-2006-01m.shp/NUTS_RG_01M_2006_4326.shp/NUTS_RG_01M_2006_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),
+    (2003, "nuts_borders/ref-nuts-2003-01m.shp/NUTS_RG_01M_2003_4326.shp/NUTS_RG_01M_2003_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE")
+]
+
 def execute(context):
     raw_data_path = context.config["raw_data_path"]
 
-    df_nuts = gpd.read_file(
-        "%s/nuts_borders/ref-nuts-2013-01m.shp/NUTS_RG_01M_2013_4326.shp/NUTS_RG_01M_2013_4326.shp" % raw_data_path,
-        encoding = "utf-8"
-    )
-    df_nuts.crs = {'init' :'EPSG:4326'}
-    df_nuts = df_nuts.to_crs({'init': 'EPSG:2056'})
+    df_all = []
+    all_ids = set()
 
-    df_nuts["nuts_id"] = df_nuts["NUTS_ID"]
-    df_nuts["nuts_name"] = df_nuts["NUTS_NAME"]
-    df_nuts["nuts_level"] = df_nuts["LEVL_CODE"]
-    df_nuts = df_nuts.sort_values(by=["nuts_id", "nuts_level"]).reset_index()
-    df_nuts = df_nuts[["nuts_id", "nuts_name", "nuts_level", "geometry"]]
+    # Load all the shape files, only add the NUTS zones that haven't been found before
+    for year, shapefile, id_field, name_field, level_field in tqdm(SHAPEFILES, desc="Reading NUTS shape files"):
+        df = gpd.read_file(
+            "%s/%s" % (raw_data_path, shapefile),
+            encoding="utf-8"
+        )#.to_crs({'init': 'EPSG:2056'})
+        df.crs = {'init': 'EPSG:4326'}
+        df = df.to_crs({'init': 'EPSG:2056'})
 
-    return df_nuts
+        df.loc[:, "nuts_id"] = df[id_field]
+        df.loc[:, "nuts_name"] = df[name_field]
+        df["nuts_level"] = df[level_field]
+        df.loc[:, "year"] = year
+
+        df_ids = set(np.unique(df["nuts_id"]))
+        df_new_ids = df_ids - all_ids
+
+        df_all.append(
+            df[df["nuts_id"].isin(df_new_ids)][["nuts_id", "nuts_name", "nuts_level", "year", "geometry"]])
+        all_ids |= df_new_ids
+
+    df_all = pd.concat(df_all)
+
+    return df_all
