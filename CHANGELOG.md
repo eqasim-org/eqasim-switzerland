@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Use all available NUTS data
 - Add subpopulation for freight agents
 - Scale freight demand to ARE reference projections
 - Add freight population based on GTE and GQGV survey
