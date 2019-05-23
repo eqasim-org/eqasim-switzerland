@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Sample freight departure times from realistic distribution
 - Use all available NUTS data
 - Add subpopulation for freight agents
 - Scale freight demand to ARE reference projections

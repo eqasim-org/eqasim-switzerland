@@ -143,17 +143,9 @@ def execute(context):
 
             progress.update()
 
-    # add departure times (before midnight)
-    df_trips["departure_time"] = (24 * 3600 * np.random.rand(len(df_trips))).astype(int)
-
-    # add agent ids
-    df_trips["agent_id"] = np.arange(len(df_trips))
-
     # package up
-    df_trips = df_trips[["agent_id",
-                         "origin_x", "origin_y",
+    df_trips = df_trips[["origin_x", "origin_y",
                          "destination_x", "destination_y",
-                         "departure_time",
                          "vehicle_type"]
     ]
 
