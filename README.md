@@ -162,15 +162,20 @@ subdivisions.
 - State: 1 Apr 2019
 - Contract: [Open Data][14]
 
-**Freight (GTE)**
-- Content: `freight/gte` contains data from GTE survey which examines freight travel for freight vehicles registered in Switzerland.
-- State: 2017
-- Contract: BFS contract until ?
+**Freight**
+- GTE:
+    - Content: `freight/gte` contains data from GTE survey which examines freight travel for freight vehicles registered in Switzerland.
+    - State: 2017
+    - Contract: BFS contract until ?
+- GQGV:
+    - Content: `freight/gqgv` contains data from GQGV survey which examines freight travel for freight vehicles registered abroad.
+    - State: 2014
+    - Contract: BFS contract until ?
+- Departure times:
+    - Content: `freight/departure_times.csv` contains data on the probability of a freight vehicle departing within a certain time bin.
+    - State: 2008
+    - Contract: [Open Data][16]
 
-**Freight (GQGV)**
-- Content: `freight/gqgv` contains data from GQGV survey which examines freight travel for freight vehicles registered abroad.
-- State: 2014
-- Contract: BFS contract until ?
 
 
 [1]: https://www.bfs.admin.ch/bfs/de/home/dienstleistungen/geostat/geodaten-bundesstatistik/administrative-grenzen/generalisierte-gemeindegrenzen.assetdetail.5247306.html
@@ -191,3 +196,4 @@ subdivisions.
 [13]: https://ec.europa.eu/eurostat/web/gisco/geodata/reference-data/administrative-units-statistical-units/nuts
 [14]: https://www.cadastre.ch/en/services/service/plz.html
 [15]: https://www.are.admin.ch/are/en/home/transport-and-infrastructure/data/transport-perspectives.html
+[16]: https://trimis.ec.europa.eu/sites/default/files/project/documents/20150826_232657_83989_SVI_1999_328.pdf
