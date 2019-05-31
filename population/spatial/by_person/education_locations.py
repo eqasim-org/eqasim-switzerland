@@ -33,7 +33,7 @@ def execute(context):
 
         df_persons.loc[f_persons, "education_x"] = df_candidates.iloc[indices]["x"].values
         df_persons.loc[f_persons, "education_y"] = df_candidates.iloc[indices]["y"].values
-        df_persons.loc[f_persons, "education_location_id"] = df_statent.iloc[indices]["enterprise_id"].values
+        df_persons.loc[f_persons, "education_location_id"] = df_candidates.iloc[indices]["enterprise_id"].values
 
         print("  %s (%d persons, %d locations)" % (type, np.count_nonzero(f_persons), len(df_candidates)))
 
