@@ -5,6 +5,7 @@ def configure(context, require):
     require.stage("matsim.run")
     require.config("output_path")
     require.config("output_id")
+    require.stage("contracts.contracts")
 
 def execute(context):
     results_path = context.stage("matsim.run")
@@ -36,5 +37,8 @@ def execute(context):
         "switzerland_config.xml"
     ]:
         shutil.copyfile("%s/%s" % (results_path, file), "%s/%s" % (target_path, file))
+
+    contracts_path = context.stage("contracts.contracts")
+    shutil.copyfile(contracts_path, "%s/CONTRACTS.html" % target_path)
 
     return {}

@@ -1,0 +1,26 @@
+datasets:
+    mz15:
+        name: "Microcensus 2015"
+        publisher: BfS
+
+    statpop15:
+        name: "STATPOP 2015"
+        publisher: BfS
+
+persons:
+    - name: Sebastian Hörl
+      group: VPL
+
+    - name: Christopher Tchervenkov
+      group: VPL
+
+contracts:
+    - dataset: mz15
+      until: 31/12/2021
+      groups: [VPL]
+      info: ~
+
+    - dataset: statpop15
+      until: 31/12/2021
+      groups: [VPL]
+      info: ~
