@@ -27,6 +27,7 @@ scikit-learn==0.20.2
 requests==2.21.0
 rtree==0.8.3
 xlrd==1.2.0
+jinja2==2.9.5
 EOF
 )
 

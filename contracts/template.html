@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>MATSim Switzerland Contracts</title>
+    </head>
+    <body style="width: 800px;">
+        <h1>MATSim Switzerland Contracts</h1>
+        <p>
+            For researchers to use the MATSim Switzerland scenario of ETH Zurich, they must
+            be covered by a number of contracts, mainly with the Federal Statistical Office
+            (BfS) and the Federal Office for Spatial Development (ARE). This file is auto-
+            generated and delivered with every release of the scenario. It lists the necessary
+            contracts and the persons which are allowed to use the data.
+        </p>
+        <h2>Data sets</h2>
+        <p>The necessary data sets with contracts required are:</p>
+        <ul>
+        {% for id, dataset in datasets|dictsort -%}
+            <li>{{ dataset.name }} ({{ dataset.publisher }})</li>
+        {% endfor %}
+        </ul>
+        <h2>People overview</h2>
+        <p>The following persons are covered by contracts and are therefore allowed to
+        use the data sets:</p>
+        <ul>
+        {% for person in persons if person.is_active -%}
+            <li><b>{{ person.name }}</b> expires {{ person.until.strftime("%d/%m/%Y") }}</li>
+        {% endfor %}
+        </ul>
+        <p>The following persons are <b>not</b> allowed to use the data set <i>unless
+        their contracts are renewed</i>:</p>
+        <ul>
+        {% for person in persons if not person.is_active -%}
+            <li><b><del>{{ person.name }}</del></b> expired {{ person.until.strftime("%d/%m/%Y") }}</li>
+        {% endfor %}
+        </ul>
+        <h2>Contracts</h2>
+        <p>The following contracts are still active:</p>
+        <dl>
+        {% for contract in contracts if contract.is_active -%}
+            <dt><b>{{ datasets[contract.dataset].name }}</b></dt>
+            <dd>Expires: {{ contract.until.strftime("%d/%m/%Y") }}</dd>
+            {% if contract.groups %}
+                <dd>Groups: {% for group in contract.groups %}{{ group }}{% if not loop.last %}, {% endif %}{% endfor %}</dd>
+            {% endif %}
+            {% if contract.persons %}
+                <dd>Groups: {% for person in contract.persons %}{{ person }}{% if not loop.last %}, {% endif %}{% endfor %}</dd>
+            {% endif %}
+            <dd>
+                {% if contract.info %}{{ contract.info }}{% else %}No further information given.{% endif %}
+            </dd>
+            {% if not loop.last %}<dd>&nbsp;</dd>{% endif %}
+        {% endfor %}
+        </dl>
+        <p>The following contracts have expired:</p>
+        <dl>
+        {% for contract in contracts if not contract.is_active -%}
+            <dt><b>{{ datasets[contract.dataset].name }}</b></dt>
+            <dd>Expires: {{ contract.until.strftime("%d/%m/%Y") }}</dd>
+            {% if contract.groups %}
+                <dd>Groups: {% for group in contract.groups %}{{ group }}{% if not loop.last %}, {% endif %}{% endfor %}</dd>
+            {% endif %}
+            {% if contract.persons %}
+                <dd>Groups: {% for person in contract.persons %}{{ person }}{% if not loop.last %}, {% endif %}{% endfor %}</dd>
+            {% endif %}
+            <dd>
+                {% if contract.info %}{{ contract.info }}{% else %}No further information given.{% endif %}
+            </dd>
+            {% if not loop.last %}<dd>&nbsp;</dd>{% endif %}
+        {% endfor %}
+        </dl>
+        <h2>Contracts by person</h2>
+        <p>The following is a list of involved persons and by which contracts they are covered:</p>
+        {% for person in persons -%}
+            <p><b>{{ person.name }}</b> ({{ person.group }})</p>
+            <ul>
+            {%- for dataset, until in person.contracts.items() %}
+                <li><i>{{ datasets[dataset].name }}</i> until {{ until.strftime("%d/%m/%Y") -}}</li>
+            {% endfor %}
+            </ul>
+        {% endfor %}
+    </body>
+</html>
