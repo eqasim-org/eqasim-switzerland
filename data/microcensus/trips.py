@@ -67,12 +67,12 @@ def execute(context):
     df_mz_trips.loc[df_mz_trips["wzweck1"] == 2, "purpose"] = "work" # Work
     df_mz_trips.loc[df_mz_trips["wzweck1"] == 3, "purpose"] = "education" # Education
     df_mz_trips.loc[df_mz_trips["wzweck1"] == 4, "purpose"] = "shop" # Shopping
-    df_mz_trips.loc[df_mz_trips["wzweck1"] == 5, "purpose"] = "service" # Chores, use of public services
+    df_mz_trips.loc[df_mz_trips["wzweck1"] == 5, "purpose"] = "other" # Chores, use of public services
     df_mz_trips.loc[df_mz_trips["wzweck1"] == 6, "purpose"] = "work" # Business activity
     df_mz_trips.loc[df_mz_trips["wzweck1"] == 7, "purpose"] = "work" # Business trip
     df_mz_trips.loc[df_mz_trips["wzweck1"] == 8, "purpose"] = "leisure" # Leisure
-    df_mz_trips.loc[df_mz_trips["wzweck1"] == 9, "purpose"] = "service" # Bring children
-    df_mz_trips.loc[df_mz_trips["wzweck1"] == 10, "purpose"] = "service" # Bring others (disabled, ...)
+    df_mz_trips.loc[df_mz_trips["wzweck1"] == 9, "purpose"] = "other" # Bring children
+    df_mz_trips.loc[df_mz_trips["wzweck1"] == 10, "purpose"] = "other" # Bring others (disabled, ...)
     df_mz_trips.loc[df_mz_trips["wzweck1"] == 11, "purpose"] = "home" # Return home
     df_mz_trips.loc[df_mz_trips["wzweck1"] == 12, "purpose"] = "unknown" # Other
     df_mz_trips.loc[df_mz_trips["wzweck1"] == 13, "purpose"] = "border" # Going out of country
