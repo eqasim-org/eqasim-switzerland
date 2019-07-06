@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Change activity type "errand" to "other"
 - Sample freight departure times from realistic distribution
 - Use all available NUTS data
 - Add subpopulation for freight agents

@@ -18,7 +18,7 @@ def make_options(item):
     options = []
     if item[4]: options.append("work")
     if item[5]: options.append("education")
-    if item[6]: options.append("service")
+    if item[6]: options.append("other")
     if item[7]: options.append("leisure")
     if item[8]: options.append("shop")
     return options
@@ -39,7 +39,7 @@ def execute(context):
                 writer.start_facility(item[1], item[2], item[3])
                 if item[4]: writer.add_activity("work")
                 if item[5]: writer.add_activity("education")
-                if item[6]: writer.add_activity("service")
+                if item[6]: writer.add_activity("other")
                 if item[7]: writer.add_activity("leisure")
                 if item[8]: writer.add_activity("shop")
                 writer.end_facility()

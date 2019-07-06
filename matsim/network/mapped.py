@@ -47,6 +47,11 @@ def execute(context):
         '<param name="outputStreetNetworkFile" value="%s/road_network.xml.gz" />' % context.cache_path
     )
 
+    content = content.replace(
+        '<param name="modesToKeepOnCleanUp" value="car" />',
+        '<param name="modesToKeepOnCleanUp" value="car,car_passenger,truck" />'
+    )
+
     with open("%s/map_network.xml" % context.cache_path, "w+") as f:
         f.write(content)
 
