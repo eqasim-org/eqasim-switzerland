@@ -60,7 +60,7 @@ def execute(context):
 
     java(
         context.stage("matsim.java.eqasim"),
-        "org.eqasim.scenario.location_assignment.RunLocationAssignment", [
+        "org.eqasim.core.scenario.location_assignment.RunLocationAssignment", [
         "--population-path", input_population_path,
         "--facilities-path", input_facilities_path,
         "--quantiles-path", quantiles_path,

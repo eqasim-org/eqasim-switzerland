@@ -38,7 +38,7 @@ def execute(context):
 
     java(
         context.stage("matsim.java.eqasim"),
-        "org.eqasim.scenario.preparation.RunPreparation", [
+        "org.eqasim.core.scenario.preparation.RunPreparation", [
         "--input-facilities-path", facilities_input_path,
         "--output-facilities-path", facilities_output_path,
         "--input-population-path", population_input_path,
@@ -50,18 +50,17 @@ def execute(context):
 
     java(
         context.stage("matsim.java.eqasim"),
-        "org.eqasim.scenario.preparation.CreateDefaultConfig", [
+        "org.eqasim.core.scenario.config.RunGenerateConfig", [
         "--output-path", config_output_path,
         "--prefix", "switzerland_",
         "--sample-size", str(context.config["input_downsampling"]),
-        "--config:global.randomSeed", str(1000),
-        "--config:global.numberOfThreads", str(context.config["threads"]),
-        "--config:qsim.numberOfThreads", str(min(12, context.config["threads"]))
+        "--random-seed", str(1000),
+        "--threads", str(context.config["threads"])
     ], cwd = context.cache_path)
 
     java(
         context.stage("matsim.java.eqasim"),
-        "org.eqasim.scenario.routing.RunPopulationRouting", [
+        "org.eqasim.core.scenario.routing.RunPopulationRouting", [
         "--config-path", config_output_path,
         "--output-path", population_output_path,
         "--threads", str(context.config["threads"]),
@@ -70,13 +69,13 @@ def execute(context):
 
     java(
         context.stage("matsim.java.eqasim"),
-        "org.eqasim.scenario.validation.RunScenarioValidator", [
+        "org.eqasim.core.scenario.validation.RunScenarioValidator", [
         "--config-path", config_output_path
     ], cwd = context.cache_path)
 
     java(
         context.stage("matsim.java.eqasim"),
-        "org.eqasim.simulation.RunSwitzerlandSimulation", [
+        "org.eqasim.switzerland.RunSimulation", [
         "--config-path", config_output_path,
         "--config:controler.lastIteration", str(1),
         "--config:controler.writeEventsInterval", str(1),
