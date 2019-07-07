@@ -17,5 +17,5 @@ def execute(context):
         "mvn", "-Pstandalone", "package"
     ], cwd = "%s/eqasim-java" % context.cache_path)
 
-    jar = "%s/eqasim-java/target/eqasim-1.0.0.jar" % context.cache_path
+    jar = "%s/eqasim-java/switzerland/target/switzerland-1.0.0.jar" % context.cache_path
     return jar
