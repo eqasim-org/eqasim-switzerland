@@ -1,6 +1,8 @@
 test:
    script:
        - source environment/activate.sh env
+       - git clone https://github.com/eqasim-org/eqasim-python.git
+       - cd eqasim-python && python3 setup.py install && cd ..
        - rm -rf output cache tmp
        - mkdir output cache tmp
        - TMPDIR=${CI_PROJECT_DIR}/tmp python3 -u run.py config_gitlab.yml
