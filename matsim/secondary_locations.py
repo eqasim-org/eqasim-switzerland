@@ -5,51 +5,51 @@ import numpy as np
 from sklearn.neighbors import KDTree
 import numpy.linalg as la
 import os
+import eqasim.location_assignment as eqla
 
 def configure(context, require):
     require.stage("matsim.population")
     require.stage("matsim.facilities")
     require.stage("data.microcensus.trips")
+    require.stage("data.microcensus.persons")
     require.stage("matsim.java.eqasim")
     require.stage("utils.java")
 
 def execute(context):
-    df_mz_trips = context.stage("data.microcensus.trips")
-    df_mz_trips["travel_time"] = df_mz_trips["arrival_time"] - df_mz_trips["departure_time"]
+    primary_activities = ["home", "work", "education"]
 
-    number_of_obs_per_quantile = 400
-    modes = ["car", "pt", "bike", "walk", "car_passenger"]
+    df_persons = context.stage("data.microcensus.persons")[["person_id", "person_weight"]]
+    df_trips = context.stage("data.microcensus.trips")[["person_id", "trip_id", "mode", "crowfly_distance", "departure_time", "arrival_time", "purpose"]]
+    df_trips = pd.merge(df_trips, df_persons[["person_id", "person_weight"]], on = "person_id")
+
+    df_trips["travel_time"] = df_trips["arrival_time"] - df_trips["departure_time"]
+    df_trips = df_trips[df_trips["travel_time"] > 0.0]
+    df_trips = df_trips[df_trips["crowfly_distance"] > 0.0]
+
+    df_trips["following_purpose"] = df_trips["purpose"]
+    df_trips["preceeding_purpose"] = df_trips["purpose"].shift(1)
+    df_trips.loc[df_trips["trip_id"] == 1, "preceeding_purpose"] = "home"
+
+    df_trips = df_trips[~(
+        df_trips["preceeding_purpose"].isin(primary_activities) &
+        df_trips["following_purpose"].isin(primary_activities)
+    )]
+
+    df_trips = df_trips.rename(columns = {
+        "person_weight": "weight",
+        "crowfly_distance": "distance"
+    })[["mode", "travel_time", "distance", "weight"]]
+
+    eqla.create_input_distributions(
+        df_trips, context.cache_path,
+        modes = ["car", "pt", "bike", "walk", "car_passenger"],
+        resampling_factors = {
+            "car": 0.8, "bike": 0.0, "walk": 0.0, "pt": 1.0, "car_passenger": 1.0
+        }
+    )
 
     quantiles_path = "%s/quantiles.dat" % context.cache_path
     distributions_path = "%s/distributions.dat" % context.cache_path
-
-    with open(quantiles_path, "w+") as quantiles_writer:
-        with open(distributions_path, "w+") as distributions_writer:
-            for mode in modes:
-                df_mode = df_mz_trips[df_mz_trips["mode"] == mode]
-                df_mode = df_mode[df_mode["travel_time"] > 0.0]
-
-                number_of_obs = len(df_mode)
-                number_of_quantiles = int(np.floor(number_of_obs / number_of_obs_per_quantile))
-                quantiles = np.unique([
-                    np.percentile(df_mode["travel_time"], 100.0 * i / number_of_quantiles) for i in range(number_of_quantiles)
-                ])
-                quantiles[-1] = np.max(df_mode["travel_time"])
-                quantiles = quantiles[quantiles > 0]
-
-                quantiles_writer.write("%s;%s\n" % (mode, ";".join(map(str, quantiles))))
-
-                lower_bound = -np.inf
-                for index, upper_bound in enumerate(quantiles):
-                    distances = df_mode[
-                        (df_mode["travel_time"] > lower_bound) & (df_mode["travel_time"] <= upper_bound)
-                    ]["crowfly_distance"].values
-
-                    distributions_writer.write("%s;%d;%s\n" % (mode, index,
-                        ";".join(map(str, distances))
-                    ))
-
-                    lower_bound = upper_bound
 
     java = context.stage("utils.java")
     input_population_path = context.stage("matsim.population")
