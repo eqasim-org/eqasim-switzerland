@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Use fixed eqasim version
 - Change activity type "errand" to "other"
 - Sample freight departure times from realistic distribution
 - Use all available NUTS data
