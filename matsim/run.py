@@ -75,6 +75,13 @@ def execute(context):
 
     java(
         context.stage("matsim.java.eqasim"),
+        "org.eqasim.switzerland.scenario.RunAdaptConfig", [
+        "--input-path", config_output_path,
+        "--output-path", config_output_path
+    ], cwd = context.cache_path)
+
+    java(
+        context.stage("matsim.java.eqasim"),
         "org.eqasim.switzerland.RunSimulation", [
         "--config-path", config_output_path,
         "--config:controler.lastIteration", str(1),
