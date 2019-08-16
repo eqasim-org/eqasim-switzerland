@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Use modular mode choice (Update to eqasim v1.0.1)
 - Use fixed eqasim version
 - Change activity type "errand" to "other"
 - Sample freight departure times from realistic distribution
