@@ -14,12 +14,12 @@ def execute(context):
     ], cwd = context.cache_path)
 
     sp.check_call([
-        "git", "checkout", "v1.0.1"
+        "git", "checkout", "v1.0.2"
     ], cwd = "%s/eqasim-java" % context.cache_path)
 
     sp.check_call([
         "mvn", "-Pstandalone", "package"
     ], cwd = "%s/eqasim-java" % context.cache_path)
 
-    jar = "%s/eqasim-java/switzerland/target/switzerland-1.0.1.jar" % context.cache_path
+    jar = "%s/eqasim-java/switzerland/target/switzerland-1.0.2.jar" % context.cache_path
     return jar

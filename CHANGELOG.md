@@ -1,5 +1,9 @@
 **Version v2 (master)**
 
+- Added ÖV Güteklasse for home locations
+- Remove imputation of ÖV Güteklasse for activities
+- Use code for ÖV Güteklasse from eqasim-java
+
 - Use modular mode choice (Update to eqasim v1.0.1)
 - Use fixed eqasim version
 - Change activity type "errand" to "other"

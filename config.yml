@@ -12,7 +12,6 @@ use_freight: true
 stages:
     - data.statpop.projections.households
     - data.statpop.scaled
-    #- data.spatial.ov_guteklasse
     #- data.microcensus.trips
     #- population.spatial.locations
     #- population.trips

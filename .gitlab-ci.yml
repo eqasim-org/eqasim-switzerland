@@ -14,4 +14,4 @@ before_script:
 cache:
     key: environment_v2
     paths:
-        - env
+        - env/

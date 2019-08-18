@@ -5,7 +5,6 @@ import data.spatial.utils
 import data.constants as c
 import pyproj
 import geopandas as gpd
-import data.spatial.ov_guteklasse
 
 def configure(context, require):
     require.config("raw_data_path")

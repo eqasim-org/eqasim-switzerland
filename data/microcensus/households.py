@@ -9,6 +9,7 @@ import data.utils
 import data.spatial.utils
 import data.spatial.municipality_types
 import data.spatial.cantons
+import data.spatial.ovgk
 
 def configure(context, require):
     require.config("raw_data_path")
@@ -16,6 +17,7 @@ def configure(context, require):
     require.stage("data.spatial.zones")
     require.stage("data.spatial.municipality_types")
     require.stage("data.statpop.density")
+    require.stage("data.spatial.ovgk")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]
@@ -82,9 +84,15 @@ def execute(context):
     # Impute density
     data.statpop.density.impute(context.stage("data.statpop.density"), df_mz_households, "home_x", "home_y")
 
+    # Impute OV Guteklasse
+    print("Imputing ÖV Güteklasse ...")
+    df_ovgk = context.stage("data.spatial.ovgk")
+    df_spatial = data.spatial.ovgk.impute(df_ovgk, df_spatial, ["person_id"])
+    df_mz_households = pd.merge(df_mz_households, df_spatial[["person_id", "ovgk"]], on = ["person_id"], how = "left")
+
     # Wrap it up
     return df_mz_households[[
         "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
-        "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id"
+        "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id", "ovgk"
     ]]

@@ -5,11 +5,9 @@ import data.spatial.utils
 import data.constants as c
 import pyproj
 import geopandas as gpd
-import data.spatial.ov_guteklasse
 
 def configure(context, require):
     require.config("raw_data_path")
-    require.stage("data.spatial.ov_guteklasse")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]
@@ -143,19 +141,6 @@ def execute(context):
     after_length = len(np.unique(df_mz_trips["person_id"]))
     print("  Removed %d persons with trips not starting at home location" % (before_length - after_length,))
 
-    # Impute OV Guteklasse
-    print("Imputing ÖV Güteklasse ...")
-
-    df_ov_guteklasse = context.stage("data.spatial.ov_guteklasse")
-
-    df_origin = data.spatial.utils.to_gpd(pd.DataFrame(df_mz_trips[["person_id", "trip_id", "origin_x", "origin_y"]], copy = True), "origin_x", "origin_y")
-    df_origin = data.spatial.ov_guteklasse.impute(df_ov_guteklasse, df_origin, ["person_id", "trip_id"]).rename({ "ov_guteklasse" : "origin_ov_guteklasse" }, axis = 1)
-    df_mz_trips = pd.merge(df_mz_trips, df_origin, on = ["person_id", "trip_id"], how = "left")
-
-    df_destination = data.spatial.utils.to_gpd(pd.DataFrame(df_mz_trips[["person_id", "trip_id", "destination_x", "destination_y"]], copy = True), "destination_x", "destination_y")
-    df_destination = data.spatial.ov_guteklasse.impute(df_ov_guteklasse, df_destination, ["person_id", "trip_id"]).rename({ "ov_guteklasse" : "destination_ov_guteklasse" }, axis = 1)
-    df_mz_trips = pd.merge(df_mz_trips, df_destination, on = ["person_id", "trip_id"], how = "left")
-
     # Parking cost
     df_mz_stages = pd.read_csv("%s/microcensus/etappen.csv" % raw_data_path, encoding = "latin1")
 
@@ -172,6 +157,6 @@ def execute(context):
 
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y", "origin_x", "origin_y",
-        "activity_duration", "crowfly_distance", "origin_ov_guteklasse", "destination_ov_guteklasse", "parking_cost", "network_distance",
+        "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
         "mode_detailed"
     ]]
