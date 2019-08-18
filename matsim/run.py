@@ -11,9 +11,6 @@ def configure(context, require):
 
 def execute(context):
     # Some files we just copy
-    transit_schedule_path = context.stage("matsim.network.mapped")["schedule"]
-    shutil.copyfile(transit_schedule_path, "%s/switzerland_transit_schedule.xml.gz" % context.cache_path)
-
     transit_vehicles_path = context.stage("matsim.network.mapped")["vehicles"]
     shutil.copyfile(transit_vehicles_path, "%s/switzerland_transit_vehicles.xml.gz" % context.cache_path)
 
@@ -21,6 +18,9 @@ def execute(context):
     shutil.copyfile(households_path, "%s/switzerland_households.xml.gz" % context.cache_path)
 
     # Some files we send through the preparation script
+    transit_schedule_input_path = context.stage("matsim.network.mapped")["schedule"]
+    transit_schedule_output_path = "%s/switzerland_transit_schedule.xml.gz" % context.cache_path
+
     network_input_path = context.stage("matsim.network.mapped")["network"]
     network_output_path = "%s/switzerland_network.xml.gz" % context.cache_path
 
@@ -56,6 +56,13 @@ def execute(context):
         "--sample-size", str(context.config["input_downsampling"]),
         "--random-seed", str(1000),
         "--threads", str(context.config["threads"])
+    ], cwd = context.cache_path)
+
+    java(
+        context.stage("matsim.java.eqasim"),
+        "org.eqasim.switzerland.scenario.RunCalculateStopCategories", [
+        "--input-path", transit_schedule_input_path,
+        "--output-path", transit_schedule_output_path
     ], cwd = context.cache_path)
 
     java(
