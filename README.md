@@ -6,11 +6,11 @@ with `python` modules that call each other in the sense of incremental builds.
 
 Two bash scripts which set up everything that is needed to run the pipeline on our servers, as well as a requirements.txt file, can be found in `environment`:
 
-- `setup.sh [path]` downloads Miniconda3, creates a Python virtual environment, installs OpenJDK and Maven. A path needs to be passed, which defines the directory in which the environment will be setup.
+- `setup.sh [path]` downloads Miniconda3, creates a Python virtual environment, installs OpenJDK and Maven. A path needs to be passed, which defines the directory in which the environment will be setup. Make sure you call this script with `bash`!
 - `activate.sh [path]` activates the environment when the script is *source*'d. The path to the environment needs to be supplied.
 
 Example:
-- `sh environment/setup.sh myenv`
+- `bash environment/setup.sh myenv`
 - `source environment/activate.sh myenv`
 
 To clean, simply delete the environment directory (here `myenv`).
@@ -34,7 +34,22 @@ if it exists already.
 No deployment yet, still work in progress. Later new updates will be automatically
 deployed to NAS.
 
+# Setting up and running on Windows
+
+We recommend to run the pipeline on a Linux server, mainly because for large scenarios around 100GB of memory are needed. However, it is possible to run the pipeline locally on a Windows machine. This can either be done by setting up an environment step by step (see `environment/setup.sh` for the neccessary steps). Alternatively, the whole pipeline can run in  a Virtual Machine (VM). The procedure would be as follows:
+
+- Install VirtualBox
+- Install a lightweight Linux system in the VM, for instance Ubuntu Server
+- Clone the pipeline repository and follow the setup instructions as above
+- Download the data into the VM or mount a folder of the local file system in the VM to access all the necessary files for the pipeline
+
+Depending on how the VM is configured (memory, cores, etc.) the pipeline will have a certain performance. However, it is probably much lower than running it in a real Linux environment. It only provides a solution for locally testing small cases, like creating a 0.1% sample population.
+
+(TODO: More detailed explanation will follow)
+
 # Docker
+
+*This was EXPERIMENTAL. The information may be outdated*
 
 Alternatively, the pipeline is available as a dockerized application. To create
 the Docker container, call `docker build -t chpop .` in the project directory.
@@ -135,15 +150,15 @@ which is a spatial classification of public transport level of service.
     - Content: `projections/households` contains data for household sizes per canton from 2012-2017 and projections of household sizes per canton in 2017 and 2045.
     All projections are according to the BfS reference scenario.
     - State: 1 Apr 2019
-    - Contract: 
-        - Past data: [Open Data][9] 
+    - Contract:
+        - Past data: [Open Data][9]
         - Projections: [Open Data][10]
 - Population:
     - Content: `projections/population` contains data of population per canton, nationality, gender and age from 2010-2017 and projections from 2015 to 2045.
     All projections are according to the BfS reference scenario.
     - State: 1 Apr 2019
-    - Contract: 
-        - Past data: [Open Data][11] 
+    - Contract:
+        - Past data: [Open Data][11]
         - Projections: [Open Data][12]
 - Freight:
     - Content: `projections/are/freight` contains projections for freight traffic from 2010 to 2040.
@@ -152,7 +167,7 @@ which is a spatial classification of public transport level of service.
     - Contract: [Open Data][15]
 
 **NUTS**
-- Content: `nuts_borders` contains the borders of the Nomenclature of Territorial Units for Statistics (NUTS) country 
+- Content: `nuts_borders` contains the borders of the Nomenclature of Territorial Units for Statistics (NUTS) country
 subdivisions.
 - State: 2016, 2013, 2010, 2006 & 2003
 - Contract: [Open Data][13]

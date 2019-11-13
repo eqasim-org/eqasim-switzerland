@@ -44,4 +44,10 @@ else
     mvn -version
 fi
 
+if [ ! -d ${environment_directory}/eqasim-python ]; then
+    git clone https://github.com/eqasim-org/eqasim-python.git ${environment_directory}/eqasim-python
+fi
+
+sh -c "cd ${environment_directory}/eqasim-python; git pull origin master; python3 setup.py install"
+
 echo "Environment is set up."
