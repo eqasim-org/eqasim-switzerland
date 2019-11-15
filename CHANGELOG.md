@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Make possible to run pipeline in VM, add instructions
 - Added ÖV Güteklasse for home locations
 - Remove imputation of ÖV Güteklasse for activities
 - Use code for ÖV Güteklasse from eqasim-java
