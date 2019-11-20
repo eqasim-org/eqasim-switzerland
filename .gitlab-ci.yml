@@ -1,9 +1,8 @@
 test:
    script:
        - source environment/activate.sh env
-       - rm -rf output cache tmp
-       - mkdir output cache tmp
-       - export TMPDIR=${CI_PROJECT_DIR}/tmp
+       - rm -rf output cache
+       - mkdir output cache
        - python3 -u run.py config_gitlab.yml
 
 before_script:
