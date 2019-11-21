@@ -37,6 +37,11 @@ class PersonWriter:
         writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[11]))
         writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[12]))
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(self.person[14]))
+        writer.add_attribute("statpopPersonId", "java.lang.Long", str(self.person[15]))
+        writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[16]))
+        writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[17]))
+        writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[18]))
+
         writer.end_attributes()
 
         # Plan
@@ -100,7 +105,7 @@ class FreightWriter:
         writer.end_plan()
         writer.end_person()
 
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke", "household_id", "is_car_passenger"]
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke", "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id", "mz_head_id"]
 ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x", "location_y", "location_id", "following_mode"]
 
 def execute(context):

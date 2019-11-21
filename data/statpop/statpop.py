@@ -129,6 +129,10 @@ def execute(context):
     df_spatial = data.spatial.ovgk.impute(df_ovgk, df_spatial, ["person_id"])
     df = pd.merge(df, df_spatial[["person_id", "ovgk"]], on = ["person_id"], how = "left")
 
+    # Save original statpop person and household ids
+    df["statpop_person_id"] = df["person_id"].astype(int)
+    df["statpop_household_id"] = df["household_id"].astype(int)
+
     # Wrap everything up
     df = df[[
         "person_id", "household_id",
@@ -137,7 +141,9 @@ def execute(context):
         "marital_status", "nationality",
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
-        "home_municipality_id", "home_quarter_id", "canton_id", "population_density", "sp_region", "ovgk"]]
+        "home_municipality_id", "home_quarter_id", "canton_id", "population_density", "sp_region", "ovgk",
+        "statpop_person_id", "statpop_household_id"]]
 
     df = data.statpop.head_of_household.impute(df)
+
     return df
