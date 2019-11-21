@@ -56,4 +56,11 @@ def execute(context):
     # Make sure we have now NaNs included (commented out, because home_quater_id MAY be NaN deliberately)
     #assert(len(df_persons.drop(["mz_person_id", "mz_head_id"], axis = 1).dropna()) == len(df_matching))
 
+    # Make sure all mz_id == NaN are agents under threshold age
+    assert(np.sum(df_persons[df_persons["mz_person_id"].isna()]["age"] >= c.MZ_AGE_THRESHOLD) == 0)
+
+    # Set mz_person_id == NaN to -1 and format ids to int
+    df_persons["mz_person_id"] = df_persons["mz_person_id"].fillna(-1).astype(int)
+    df_persons["mz_head_id"] = df_persons["mz_head_id"].fillna(-1).astype(int)
+
     return df_persons
