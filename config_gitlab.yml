@@ -9,6 +9,7 @@ input_downsampling: 0.01
 enable_scaling: true
 scaling_year: 2045
 use_freight: true
+hafas_date: 01.10.2018
 stages:
     - matsim.run
     - matsim.mz.population
