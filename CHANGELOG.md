@@ -1,5 +1,6 @@
 **Version v2 (master)**
 
+- Upgrade to new pt2matsim version to allow selecting of HAFAS date
 - Store STATPOP and MZ ids as agents attributes
 - Fix Java /tmp bug in shared environments (IVT servers)
 - Make possible to run pipeline in VM, add instructions
