@@ -60,12 +60,12 @@ def execute(context):
             member_ids = []
 
             for item in tqdm(df_persons.itertuples(), total = len(df_persons)):
-                if item[4] >= c.MZ_AGE_THRESHOLD: # Here we filter out young person without actvity chain
-                    if not household[1] == item[1]:
-                        if household[0] is not None: add_household(writer, household, member_ids)
-                        household, member_ids = item, [item[2]]
-                    else:
-                        member_ids.append(item[2])
+                #if item[4] >= c.MZ_AGE_THRESHOLD: # Here we filter out young person without actvity chain
+                if not household[1] == item[1]:
+                    if household[0] is not None: add_household(writer, household, member_ids)
+                    household, member_ids = item, [item[2]]
+                else:
+                    member_ids.append(item[2])
 
             if household[0] is not None: add_household(writer, household, member_ids)
 
