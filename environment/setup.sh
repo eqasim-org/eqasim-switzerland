@@ -12,9 +12,9 @@ jdk_version="8u212"
 jdk_url="https://github.com/AdoptOpenJDK/openjdk8-binaries/releases/download/jdk8u212-b03/OpenJDK8U-jdk_x64_linux_hotspot_8u212b03.tar.gz"
 jdk_sha256="dd28d6d2cde2b931caf94ac2422a2ad082ea62f0beee3bf7057317c53093de93"
 
-maven_version="3.6.1"
+maven_version="3.6.3"
 maven_url="http://mirror.easyname.ch/apache/maven/maven-3/${maven_version}/binaries/apache-maven-${maven_version}-bin.tar.gz"
-maven_sha512="b4880fb7a3d81edd190a029440cdf17f308621af68475a4fe976296e71ff4a4b546dd6d8a58aaafba334d309cc11e638c52808a4b0e818fc0fd544226d952544"
+maven_sha512="c35a1803a6e70a126e80b2b3ae33eed961f83ed74d18fcd16909b2d44d7dada3203f1ffe726c17ef8dcca2dcaa9fca676987befeadc9b9f759967a8cb77181c0"
 
 # Define Python requirements
 python_requirements=$(cat <<EOF

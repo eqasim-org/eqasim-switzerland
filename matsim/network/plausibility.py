@@ -8,12 +8,13 @@ def configure(context, require):
 
 def execute(context):
     java = context.stage("utils.java")
-    jar = context.stage("matsim.java.pt2matsim")
+    jar, tmp_path = context.stage("matsim.java.pt2matsim")
     paths = context.stage("matsim.network.mapped")
 
     # Do plausibility checks
 
     java(jar, "org.matsim.pt2matsim.run.CheckMappedSchedulePlausibility", [
+        "-Djava.io.tmpdir=%s/java_tmp" % tmp_path,
         paths["schedule"], paths["network"], "EPSG:2056", context.cache_path
     ], cwd = context.cache_path)
 
