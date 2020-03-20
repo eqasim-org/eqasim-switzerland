@@ -29,4 +29,4 @@ def execute(context):
     assert(os.path.exists("%s/test_config.xml" % context.cache_path))
     assert(os.path.exists("%s/java_tmp/GeoTools" % context.cache_path))
 
-    return jar
+    return jar, "%s/java_tmp" % context.cache_path

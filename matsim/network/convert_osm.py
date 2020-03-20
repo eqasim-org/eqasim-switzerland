@@ -7,14 +7,14 @@ def configure(context, require):
     require.config("raw_data_path")
 
 def execute(context):
-    jar = context.stage("matsim.java.pt2matsim")
+    jar, tmp_path = context.stage("matsim.java.pt2matsim")
     java = context.stage("utils.java")
 
     # Create MATSim network
 
     java(jar, "org.matsim.pt2matsim.run.CreateDefaultOsmConfig", [
         "convert_network_template.xml"
-    ], cwd = context.cache_path)
+    ], cwd = context.cache_path, vm_arguments = ["-Djava.io.tmpdir=%s" % tmp_path])
 
     content = open("%s/convert_network_template.xml" % context.cache_path).read()
 
@@ -58,7 +58,7 @@ def execute(context):
 
     java(jar, "org.matsim.pt2matsim.run.Osm2MultimodalNetwork", [
         "convert_network.xml"
-    ], cwd = context.cache_path)
+    ], cwd = context.cache_path, vm_arguments = ["-Djava.io.tmpdir=%s" % tmp_path])
 
     assert(os.path.exists("%s/converted_network.xml.gz" % context.cache_path))
     return "%s/converted_network.xml.gz" % context.cache_path

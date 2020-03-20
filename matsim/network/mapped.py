@@ -8,7 +8,7 @@ def configure(context, require):
     require.stage("matsim.network.convert_hafas")
 
 def execute(context):
-    jar = context.stage("matsim.java.pt2matsim")
+    jar, tmp_path = context.stage("matsim.java.pt2matsim")
     java = context.stage("utils.java")
 
     unmapped_network_path = context.stage("matsim.network.convert_osm")
@@ -18,7 +18,7 @@ def execute(context):
 
     java(jar, "org.matsim.pt2matsim.run.CreateDefaultPTMapperConfig", [
         "map_network_template.xml"
-    ], cwd = context.cache_path)
+    ], cwd = context.cache_path, vm_arguments = ["-Djava.io.tmpdir=%s" % tmp_path])
 
     content = open("%s/map_network_template.xml" % context.cache_path).read()
 
@@ -57,7 +57,7 @@ def execute(context):
 
     java(jar, "org.matsim.pt2matsim.run.PublicTransitMapper", [
         "map_network.xml"
-    ], cwd = context.cache_path)
+    ], cwd = context.cache_path, vm_arguments = ["-Djava.io.tmpdir=%s" % tmp_path])
 
     assert(os.path.exists("%s/mapped_network.xml.gz" % context.cache_path))
     assert(os.path.exists("%s/mapped_schedule.xml.gz" % context.cache_path))
