@@ -2,7 +2,6 @@ import functools
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
 
 def configure(context):
@@ -53,7 +52,7 @@ def execute(context):
         origin_counts = np.array([
             np.sum(df_demand.loc[
                 (df_demand["commute_mode"] == mode) & (df_demand["home_zone_id"] == origin_zone), "count"
-            ]) for origin_zone in tqdm(df_zones["zone_id"], desc = mode)
+            ]) for origin_zone in context.progress(df_zones["zone_id"], desc = mode)
         ])[:, np.newaxis]
 
         counts = np.zeros(pdf_matrices[source_mode].shape, dtype = np.int)
@@ -70,7 +69,7 @@ def execute(context):
     work_zones = np.zeros((len(df),), dtype = np.int)
     zone_ids = list(df_zones["zone_id"])
 
-    with tqdm(desc = "Assigning work zones", total = 5 * len(df_zones)) as progress:
+    with context.progress(desc = "Assigning work zones", total = 5 * len(df_zones)) as progress:
         for mode in ["car", "pt", "bike", "walk", "car_passenger"]:
             mode_f = df["commute_mode"] == mode
 

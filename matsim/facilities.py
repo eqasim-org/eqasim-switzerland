@@ -1,8 +1,6 @@
 import gzip
 import io
 
-from tqdm import tqdm
-
 import matsim.writers
 
 
@@ -36,7 +34,7 @@ def execute(context):
             writer = matsim.writers.FacilitiesWriter(raw_writer)
             writer.start_facilities()
 
-            for item in tqdm(df_statent.itertuples(), total = len(df_statent)):
+            for item in context.progress(df_statent.itertuples(), total = len(df_statent)):
                 writer.start_facility(item[1], item[2], item[3])
                 if item[4]: writer.add_activity("work")
                 if item[5]: writer.add_activity("education")
@@ -50,7 +48,7 @@ def execute(context):
                 "household_id", "home_x", "home_y"
             ]].drop_duplicates("household_id")
 
-            for item in tqdm(df_households.itertuples(), total = len(df_households), desc = "Homes"):
+            for item in context.progress(df_households.itertuples(), total = len(df_households), desc = "Homes"):
                 writer.start_facility("home%s" % item[1], item[2], item[3])
                 writer.add_activity("home")
                 writer.end_facility()

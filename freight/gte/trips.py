@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import KDTree
-from tqdm import tqdm
 
 
 def configure(context):
@@ -36,7 +35,7 @@ def execute(context):
         assert (len(counts) == len(origin_counts))
 
         # generate single trips
-        with tqdm(desc="Creating %i %s trips ..." % (int(demand), vehicle_type), total=np.sum(counts)) as progress:
+        with context.progress(label="Creating %i %s trips ..." % (int(demand), vehicle_type), total=np.sum(counts)) as progress:
             for origin_index in range(counts.shape[0]):
                 for destination_index in range(counts.shape[1]):
 
@@ -81,7 +80,7 @@ def execute(context):
     origin_ids = df_trips["origin_id"].unique()
     destination_ids = df_trips["destination_id"].unique()
 
-    with tqdm(desc="Setting origin locations ...", total=len(origin_ids)) as progress:
+    with context.progress(label="Setting origin locations ...", total=len(origin_ids)) as progress:
 
         for origin_id in origin_ids:
 
@@ -112,7 +111,7 @@ def execute(context):
 
             progress.update()
 
-    with tqdm(desc="Setting destination locations ...", total=len(destination_ids)) as progress:
+    with context.progress(label="Setting destination locations ...", total=len(destination_ids)) as progress:
 
         for destination_id in destination_ids:
 
