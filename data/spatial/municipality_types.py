@@ -6,14 +6,14 @@ from tqdm import tqdm
 from sklearn.neighbors import KDTree
 
 def configure(context):
-    context.config("raw_data_path")
+    context.config("data_path")
     context.stage("data.spatial.municipalities")
 
 def execute(context):
     # Load data
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config["data_path"]
 
-    df_types = pd.read_excel("%s/spatial_structure_2018.xlsx" % raw_data_path,
+    df_types = pd.read_excel("%s/spatial_structure_2018.xlsx" % data_path,
                                names=["municipality_id", "TYP"],
                                usecols=[0, 21],
                                skiprows=6,

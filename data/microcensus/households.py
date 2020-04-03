@@ -12,7 +12,7 @@ import data.spatial.cantons
 import data.spatial.ovgk
 
 def configure(context):
-    context.config("raw_data_path")
+    context.config("data_path")
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.zones")
     context.stage("data.spatial.municipality_types")
@@ -20,10 +20,10 @@ def configure(context):
     context.stage("data.spatial.ovgk")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config["data_path"]
 
     df_mz_households = pd.read_csv(
-        "%s/microcensus/haushalte.csv" % raw_data_path, sep = ",", encoding = "latin1")
+        "%s/microcensus/haushalte.csv" % data_path, sep = ",", encoding = "latin1")
 
     # Simple attributes
     df_mz_households["home_structure"] = df_mz_households["W_STRUKTUR_AGG_2000"]

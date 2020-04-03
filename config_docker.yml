@@ -1,4 +1,4 @@
-raw_data_path: /data
+data_path: /data
 target_path: /cache
 output_path: /cache
 threads: 4

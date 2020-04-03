@@ -3,13 +3,13 @@ import numpy as np
 import geopandas as gpd
 
 def configure(context):
-    context.config("raw_data_path")
+    context.config("data_path")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config["data_path"]
 
     df = gpd.read_file(
-        "%s/postal_codes/PLZO_SHP_LV95/PLZO_PLZ.shp" % raw_data_path,
+        "%s/postal_codes/PLZO_SHP_LV95/PLZO_PLZ.shp" % data_path,
         encoding = "latin1"
     ).to_crs({'init': 'EPSG:2056'})
 

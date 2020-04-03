@@ -169,19 +169,19 @@ def run(requested_stages, target_path = "target", config = {}):
 
             stages[stage_name] = stage
             requirements[stage_name] = require
-            dependencies[stage_name] = list(set(require.stage_names))
+            dependencies[stage_name] = list(set(context.stage_names))
 
-            stage_names += require.stage_names
+            stage_names += context.stage_names
 
     config_defaults = {}
     multiple_defaults = []
 
     for stage_name, require in requirements.items():
-        for config_name in require.config_defaults:
+        for config_name in context.config_defaults:
             if config_name in config_defaults:
                 raise RuntimError("Multiple defaults")
             else:
-                config_defaults[config_name] = require.config_defaults[config_name]
+                config_defaults[config_name] = context.config_defaults[config_name]
 
     for config_name, config_value in config_defaults.items():
         if not config_name in config:
@@ -190,7 +190,7 @@ def run(requested_stages, target_path = "target", config = {}):
     missing_config_values = []
 
     for stage_name, require in requirements.items():
-        for config_name in require.config_names:
+        for config_name in context.config_names:
             if not config_name in config:
                 missing_config_values.append((stage_name, config_name))
 

@@ -9,7 +9,7 @@ import data.spatial.quarters
 import data.spatial.utils
 
 def configure(context):
-    context.config("raw_data_path")
+    context.config("data_path")
     context.stage("data.spatial.zones")
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.quarters")
@@ -17,10 +17,10 @@ def configure(context):
     context.stage("data.spatial.postal_codes")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config["data_path"]
 
     df = pd.DataFrame(pd.read_csv(
-        "%s/statent/QUERY_FOR_2014_DEC_STATENT_LOC.csv" % raw_data_path,
+        "%s/statent/QUERY_FOR_2014_DEC_STATENT_LOC.csv" % data_path,
         encoding = "latin1", sep = ";"))
 
     df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08", "EMPTOT"]])

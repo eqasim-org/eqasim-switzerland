@@ -4,7 +4,7 @@ import os.path
 def configure(context):
     context.stage("matsim.java.pt2matsim")
     context.stage("utils.java")
-    context.config("raw_data_path")
+    context.config("data_path")
 
 def execute(context):
     jar, tmp_path = context.stage("matsim.java.pt2matsim")
@@ -13,7 +13,7 @@ def execute(context):
     # Create MATSim schedule
 
     java(jar, "org.matsim.pt2matsim.run.Hafas2TransitSchedule", [
-        "%s/hafas" % context.config["raw_data_path"], "EPSG:2056",
+        "%s/hafas" % context.config["data_path"], "EPSG:2056",
         "%s/transit_schedule.xml.gz" % context.cache_path,
         "%s/transit_vehicles.xml.gz" % context.cache_path,
         context.config["hafas_date"]

@@ -6,7 +6,7 @@ from tqdm import tqdm
 from sklearn.neighbors import KDTree
 
 def configure(context):
-    context.config("raw_data_path")
+    context.config("data_path")
 
 REFERENCE_YEAR = 2018
 
@@ -24,7 +24,7 @@ SHAPEFILES = [
 ]
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config["data_path"]
 
     df_all = []
     all_ids = set()
@@ -32,7 +32,7 @@ def execute(context):
     # Load all the shape files, only add the municipalities that haven't been found before
     for year, shapefile, id_field, name_field in tqdm(SHAPEFILES, desc = "Reading municipality shape files"):
         df = gpd.read_file(
-            "%s/%s" % (raw_data_path, shapefile),
+            "%s/%s" % (data_path, shapefile),
             encoding = "latin1"
         ).to_crs({'init': 'EPSG:2056'})
         df.loc[:, "municipality_id"] = df[id_field]

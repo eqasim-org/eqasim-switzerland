@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 
 def configure(context):
-    context.config("raw_data_path")
+    context.config("data_path")
 
 SHAPEFILES = [
     (2016, "nuts_borders/ref-nuts-2016-01m.shp/NUTS_RG_01M_2016_4326.shp/NUTS_RG_01M_2016_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),
@@ -16,7 +16,7 @@ SHAPEFILES = [
 ]
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config["data_path"]
 
     df_all = []
     all_ids = set()
@@ -24,7 +24,7 @@ def execute(context):
     # Load all the shape files, only add the NUTS zones that haven't been found before
     for year, shapefile, id_field, name_field, level_field in tqdm(SHAPEFILES, desc="Reading NUTS shape files"):
         df = gpd.read_file(
-            "%s/%s" % (raw_data_path, shapefile),
+            "%s/%s" % (data_path, shapefile),
             encoding="utf-8"
         )#.to_crs({'init': 'EPSG:2056'})
         df.crs = {'init': 'EPSG:4326'}

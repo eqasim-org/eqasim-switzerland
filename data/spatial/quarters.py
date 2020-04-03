@@ -5,13 +5,13 @@ from tqdm import tqdm
 from sklearn.neighbors import KDTree
 
 def configure(context):
-    context.config("raw_data_path")
+    context.config("data_path")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config["data_path"]
 
     df = gpd.read_file(
-        "%s/statistical_quarter_borders/shp/quart17.shp" % raw_data_path,
+        "%s/statistical_quarter_borders/shp/quart17.shp" % data_path,
         encoding = "latin1"
     ).to_crs({'init': 'EPSG:2056'})
 

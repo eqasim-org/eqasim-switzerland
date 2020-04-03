@@ -4,7 +4,7 @@ import os.path
 def configure(context):
     context.stage("matsim.java.pt2matsim")
     context.stage("utils.java")
-    context.config("raw_data_path")
+    context.config("data_path")
 
 def execute(context):
     jar, tmp_path = context.stage("matsim.java.pt2matsim")
@@ -20,7 +20,7 @@ def execute(context):
 
     content = content.replace(
         '<param name="osmFile" value="null" />',
-        '<param name="osmFile" value="%s/osm/switzerland-latest.osm.gz" />' % context.config["raw_data_path"]
+        '<param name="osmFile" value="%s/osm/switzerland-latest.osm.gz" />' % context.config["data_path"]
     )
     content = content.replace(
         '<param name="outputCoordinateSystem" value="null" />',

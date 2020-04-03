@@ -8,19 +8,19 @@ INDEX_RENAMES = {0: "total",
 
 
 def configure(context):
-    context.config("raw_data_path")
+    context.config("data_path")
     context.config("scaling_year")
 
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config["data_path"]
 
     # Select year in the future to project to
     scaling_year = np.max([c.BASE_SCALING_YEAR, context.config["scaling_year"]])
 
     # Load excel for projections
     df = pd.read_excel(
-        "%s/projections/are/freight/Verkehrsperspektiven_2040_Ergebnisse_Gueterverkehr_de.xlsx" % raw_data_path,
+        "%s/projections/are/freight/Verkehrsperspektiven_2040_Ergebnisse_Gueterverkehr_de.xlsx" % data_path,
         sheet_name="Fahrzeugkilometer_Referenz", header=9,
         index_col=None, nrows=3
     ).dropna(axis=1)[[2010,2020,2030,2040]].rename(index=INDEX_RENAMES).reset_index().rename(columns={"index":"type"})

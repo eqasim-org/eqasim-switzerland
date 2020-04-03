@@ -7,13 +7,13 @@ import pyproj
 import geopandas as gpd
 
 def configure(context):
-    context.config("raw_data_path")
+    context.config("data_path")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config["data_path"]
 
-    df_mz_trips = pd.read_csv("%s/microcensus/wege.csv" % raw_data_path, encoding = "latin1")
-    df_mz_stages = pd.read_csv("%s/microcensus/etappen.csv" % raw_data_path, encoding = "latin1")
+    df_mz_trips = pd.read_csv("%s/microcensus/wege.csv" % data_path, encoding = "latin1")
+    df_mz_stages = pd.read_csv("%s/microcensus/etappen.csv" % data_path, encoding = "latin1")
 
     df_mz_trips = df_mz_trips[[
         "HHNR", "WEGNR", "f51100", "f51400", "wzweck1", "wzweck2", "wmittel",
@@ -142,7 +142,7 @@ def execute(context):
     print("  Removed %d persons with trips not starting at home location" % (before_length - after_length,))
 
     # Parking cost
-    df_mz_stages = pd.read_csv("%s/microcensus/etappen.csv" % raw_data_path, encoding = "latin1")
+    df_mz_stages = pd.read_csv("%s/microcensus/etappen.csv" % data_path, encoding = "latin1")
 
     df_cost = pd.DataFrame(df_mz_stages[["HHNR", "WEGNR", "f51330"]], copy = True)
     df_cost.columns = ["person_id", "trip_id", "parking_cost"]
