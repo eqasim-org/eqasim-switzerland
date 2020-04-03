@@ -15,7 +15,7 @@ SHAPEFILES = [
 ]
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     df_all = []
     all_ids = set()

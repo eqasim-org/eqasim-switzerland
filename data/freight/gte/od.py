@@ -37,7 +37,7 @@ def execute(context):
         demands[vehicle_type] =  int(np.round(np.sum(matrix_values) / number_of_weeks / number_of_weekdays))
 
         # scale demand
-        if context.config["enable_scaling"]:
+        if context.config("enable_scaling"):
             demands[vehicle_type] *= context.stage("data.freight.scaling_factor")
 
         # make sure each from sums up to one

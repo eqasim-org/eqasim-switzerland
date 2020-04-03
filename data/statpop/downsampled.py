@@ -7,7 +7,7 @@ def execute(context):
     df = context.stage("data.statpop.scaled")
 
     if "input_downsampling" in context.config:
-        probability = context.config["input_downsampling"]
+        probability = context.config("input_downsampling")
         print("Downsampling (%f)" % probability)
 
         household_ids = np.unique(df["household_id"])

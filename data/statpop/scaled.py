@@ -15,7 +15,7 @@ def configure(context):
 def execute(context):
     df_statpop = context.stage("data.statpop.statpop")
 
-    if context.config["enable_scaling"]:
+    if context.config("enable_scaling"):
 
         df_household_controls = context.stage("data.statpop.projections.households")
         df_population_controls = context.stage("data.statpop.projections.population")

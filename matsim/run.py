@@ -45,7 +45,7 @@ def execute(context):
         "--output-population-path", population_prepared_path,
         "--input-network-path", network_input_path,
         "--output-network-path", network_output_path,
-        "--threads", str(context.config["threads"])
+        "--threads", str(context.config("threads"))
     ], cwd = context.cache_path)
 
     java(
@@ -53,9 +53,9 @@ def execute(context):
         "org.eqasim.core.scenario.config.RunGenerateConfig", [
         "--output-path", config_output_path,
         "--prefix", "switzerland_",
-        "--sample-size", str(context.config["input_downsampling"]),
+        "--sample-size", str(context.config("input_downsampling")),
         "--random-seed", str(1000),
-        "--threads", str(context.config["threads"])
+        "--threads", str(context.config("threads"))
     ], cwd = context.cache_path)
 
     java(
@@ -70,7 +70,7 @@ def execute(context):
         "org.eqasim.core.scenario.routing.RunPopulationRouting", [
         "--config-path", config_output_path,
         "--output-path", population_output_path,
-        "--threads", str(context.config["threads"]),
+        "--threads", str(context.config("threads")),
         "--config:plans.inputPlansFile", population_prepared_path
     ], cwd = context.cache_path)
 

@@ -22,7 +22,7 @@ def configure(context):
     context.stage("data.spatial.ovgk")
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     df_mz_households = pd.read_csv(
         "%s/microcensus/haushalte.csv" % data_path, sep = ",", encoding = "latin1")

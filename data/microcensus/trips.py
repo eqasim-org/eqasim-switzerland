@@ -9,7 +9,7 @@ def configure(context):
     context.config("data_path")
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     df_mz_trips = pd.read_csv("%s/microcensus/wege.csv" % data_path, encoding = "latin1")
     df_mz_stages = pd.read_csv("%s/microcensus/etappen.csv" % data_path, encoding = "latin1")

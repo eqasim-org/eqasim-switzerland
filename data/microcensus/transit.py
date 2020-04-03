@@ -8,7 +8,7 @@ def configure(context):
 
 def execute(context):
     # Load data
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
     df_stages = pd.read_csv("%s/microcensus/etappen.csv" % data_path, encoding = "latin1")
 
     # Filter stages in pt trips

@@ -9,7 +9,7 @@ def configure(context):
     context.config("threads")
 
 def execute(context):
-    input_path = "%s/ov_guteklasse/LV95/Oev_Gueteklassen_ARE.shp" % context.config["data_path"]
+    input_path = "%s/ov_guteklasse/LV95/Oev_Gueteklassen_ARE.shp" % context.config("data_path")
     df = gpd.read_file(input_path)
     df.crs = {"init" : "EPSG:2056"}
     df = df[["KLASSE", "geometry"]].rename({"KLASSE" : "ovgk"}, axis = 1)

@@ -4,7 +4,7 @@ def configure(context):
     context.config("data_path")
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     df = gpd.read_file(
         "%s/postal_codes/PLZO_SHP_LV95/PLZO_PLZ.shp" % data_path,

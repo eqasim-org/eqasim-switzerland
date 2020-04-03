@@ -167,7 +167,7 @@ def execute(context):
             assert (number_of_written_activities == len(df_activities))
             assert (number_of_written_persons == len(df_persons))
 
-            if context.config["use_freight"]:
+            if context.config("use_freight"):
                 df_freight = context.stage("freight.trips")
 
                 freight_iterator = iter(df_freight.itertuples())

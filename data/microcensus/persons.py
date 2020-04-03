@@ -12,7 +12,7 @@ def configure(context):
     context.stage("data.microcensus.trips")
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     df_mz_persons = pd.read_csv(
         "%s/microcensus/zielpersonen.csv" % data_path,

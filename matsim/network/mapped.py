@@ -31,7 +31,7 @@ def execute(context):
     )
     content = content.replace(
         '<param name="numOfThreads" value="2" />',
-        '<param name="numOfThreads" value="%d" />' % context.config["threads"]
+        '<param name="numOfThreads" value="%d" />' % context.config("threads")
     )
     content = content.replace(
         '<param name="outputNetworkFile" value="" />',

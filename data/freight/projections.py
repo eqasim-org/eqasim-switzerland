@@ -14,10 +14,10 @@ def configure(context):
 
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     # Select year in the future to project to
-    scaling_year = np.max([c.BASE_SCALING_YEAR, context.config["scaling_year"]])
+    scaling_year = np.max([c.BASE_SCALING_YEAR, context.config("scaling_year")])
 
     # Load excel for projections
     df = pd.read_excel(

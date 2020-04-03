@@ -3,7 +3,7 @@ def configure(context):
     # require.cache = False
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     import lzma as xz
     import data.utils

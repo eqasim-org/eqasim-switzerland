@@ -31,9 +31,9 @@ def configure(context):
 
 def execute(context):
     df_mz = context.stage("data.microcensus.persons")
-    is_weekend_scenario = context.config["weekend_scenario"]
-    hdm_runners = context.config["hot_deck_matching_runners"]
-    hdm_minimum_source_samples = context.config["hot_deck_minimum_source_samples"]
+    is_weekend_scenario = context.config("weekend_scenario")
+    hdm_runners = context.config("hot_deck_matching_runners")
+    hdm_minimum_source_samples = context.config("hot_deck_minimum_source_samples")
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
     df_source = pd.DataFrame(df_mz[

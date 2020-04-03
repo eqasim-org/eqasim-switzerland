@@ -36,4 +36,4 @@ def configure(context):
     assert("1.8.0" in sp.check_output(["java", "-version"], stderr = sp.STDOUT).decode("utf-8"))
 
 def execute(context):
-    return JavaRunner(context.config["java_binary"], context.config["java_memory"])
+    return JavaRunner(context.config("java_binary"), context.config("java_memory"))

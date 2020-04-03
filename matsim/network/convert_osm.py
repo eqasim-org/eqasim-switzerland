@@ -19,7 +19,7 @@ def execute(context):
 
     content = content.replace(
         '<param name="osmFile" value="null" />',
-        '<param name="osmFile" value="%s/osm/switzerland-latest.osm.gz" />' % context.config["data_path"]
+        '<param name="osmFile" value="%s/osm/switzerland-latest.osm.gz" />' % context.config("data_path")
     )
     content = content.replace(
         '<param name="outputCoordinateSystem" value="null" />',

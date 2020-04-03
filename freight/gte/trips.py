@@ -14,7 +14,7 @@ def configure(context):
 
 def execute(context):
     demands, origin_pdf_matrices, od_pdf_matrices = context.stage("data.freight.gte.od")
-    input_downsampling = context.config["input_downsampling"]
+    input_downsampling = context.config("input_downsampling")
 
     trips_frames = []
 

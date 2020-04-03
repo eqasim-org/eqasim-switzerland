@@ -7,7 +7,7 @@ def configure(context):
     context.config("data_path")
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     df = gpd.read_file(
         "%s/statistical_quarter_borders/shp/quart17.shp" % data_path,

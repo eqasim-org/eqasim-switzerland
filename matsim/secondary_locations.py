@@ -56,7 +56,7 @@ def execute(context):
     input_facilities_path = context.stage("matsim.facilities")
 
     output_population_path = "%s/population_with_locations.xml.gz" % context.cache_path
-    number_of_threads = context.config["threads"]
+    number_of_threads = context.config("threads")
 
     java(
         context.stage("matsim.java.eqasim"),

@@ -10,7 +10,7 @@ def configure(context):
 
 def execute(context):
     # Load data
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     df_types = pd.read_excel("%s/spatial_structure_2018.xlsx" % data_path,
                                names=["municipality_id", "TYP"],

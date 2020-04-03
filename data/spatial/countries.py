@@ -6,7 +6,7 @@ def configure(context):
     context.config("data_path")
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     df = pd.read_excel(
         "%s/country_codes_2018.xlsx" % data_path

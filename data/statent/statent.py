@@ -17,7 +17,7 @@ def configure(context):
     context.stage("data.spatial.postal_codes")
 
 def execute(context):
-    data_path = context.config["data_path"]
+    data_path = context.config("data_path")
 
     df = pd.DataFrame(pd.read_csv(
         "%s/statent/QUERY_FOR_2014_DEC_STATENT_LOC.csv" % data_path,
