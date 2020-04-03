@@ -11,13 +11,13 @@ import data.spatial.municipality_types
 import data.spatial.cantons
 import data.spatial.ovgk
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.stage("data.spatial.municipalities")
-    require.stage("data.spatial.zones")
-    require.stage("data.spatial.municipality_types")
-    require.stage("data.statpop.density")
-    require.stage("data.spatial.ovgk")
+def configure(context):
+    context.config("raw_data_path")
+    context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.zones")
+    context.stage("data.spatial.municipality_types")
+    context.stage("data.statpop.density")
+    context.stage("data.spatial.ovgk")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]

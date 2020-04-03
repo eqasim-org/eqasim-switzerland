@@ -1,7 +1,7 @@
 import numpy as np
 
-def configure(context, require):
-    require.stage("data.statpop.scaled")
+def configure(context):
+    context.stage("data.statpop.scaled")
 
 def execute(context):
     df = context.stage("data.statpop.scaled")

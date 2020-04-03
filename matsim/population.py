@@ -6,13 +6,13 @@ import io
 import matsim.writers
 import pandas as pd
 
-def configure(context, require):
-    require.stage("population.sociodemographics")
-    require.stage("population.trips")
-    require.stage("population.activities")
-    require.stage("population.spatial.locations")
-    require.config("use_freight", default=False)
-    require.stage("freight.trips")
+def configure(context):
+    context.stage("population.sociodemographics")
+    context.stage("population.trips")
+    context.stage("population.activities")
+    context.stage("population.spatial.locations")
+    context.config("use_freight", default=False)
+    context.stage("freight.trips")
 
 class PersonWriter:
     def __init__(self, person):

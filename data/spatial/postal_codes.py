@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 import geopandas as gpd
 
-def configure(context, require):
-    require.config("raw_data_path")
+def configure(context):
+    context.config("raw_data_path")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]

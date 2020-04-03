@@ -5,8 +5,8 @@ import numpy as np
 from sklearn.neighbors import KDTree
 import numpy.linalg as la
 
-def configure(context, require):
-    require.stage("data.statent.statent")
+def configure(context):
+    context.stage("data.statent.statent")
 
 def execute(context):
     df_opportunities = pd.DataFrame(context.stage("data.statent.statent")[[

@@ -4,8 +4,8 @@ import geopandas as gpd
 from tqdm import tqdm
 
 
-def configure(context, require):
-    require.config("raw_data_path")
+def configure(context):
+    context.config("raw_data_path")
 
 SHAPEFILES = [
     (2016, "nuts_borders/ref-nuts-2016-01m.shp/NUTS_RG_01M_2016_4326.shp/NUTS_RG_01M_2016_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),

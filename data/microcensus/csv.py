@@ -6,10 +6,10 @@ import data.constants as c
 import pyproj
 import geopandas as gpd
 
-def configure(context, require):
-    require.stage("data.microcensus.persons")
-    require.stage("data.microcensus.trips")
-    require.stage("data.microcensus.transit")
+def configure(context):
+    context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.transit")
 
 def execute(context):
     df_persons = context.stage("data.microcensus.persons")

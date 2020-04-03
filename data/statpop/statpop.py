@@ -12,17 +12,17 @@ import data.statpop.density
 import data.spatial.cantons
 import data.spatial.ovgk
 
-def configure(context, require):
-    require.stage("data.statpop.persons")
-    require.stage("data.statpop.households")
-    require.stage("data.statpop.link")
-    require.stage("data.spatial.municipalities")
-    require.stage("data.spatial.quarters")
-    require.stage("data.spatial.zones")
-    require.stage("data.spatial.municipality_types")
-    require.stage("data.statpop.density")
-    require.stage("data.spatial.cantons")
-    require.stage("data.spatial.ovgk")
+def configure(context):
+    context.stage("data.statpop.persons")
+    context.stage("data.statpop.households")
+    context.stage("data.statpop.link")
+    context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.quarters")
+    context.stage("data.spatial.zones")
+    context.stage("data.spatial.municipality_types")
+    context.stage("data.statpop.density")
+    context.stage("data.spatial.cantons")
+    context.stage("data.spatial.ovgk")
 
 def execute(context):
     df_persons = context.stage("data.statpop.persons")

@@ -5,12 +5,12 @@ import geopandas as gpd
 from tqdm import tqdm
 from sklearn.neighbors import KDTree
 
-def configure(context, require):
-    require.stage("data.spatial.countries")
-    require.stage("data.spatial.municipalities")
-    require.stage("data.spatial.quarters")
-    require.stage("data.spatial.nuts")
-    require.stage("data.spatial.postal_codes")
+def configure(context):
+    context.stage("data.spatial.countries")
+    context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.quarters")
+    context.stage("data.spatial.nuts")
+    context.stage("data.spatial.postal_codes")
 
 def execute(context):
     df_countries = pd.DataFrame(context.stage("data.spatial.countries"), copy = True)

@@ -7,13 +7,13 @@ import numpy.linalg as la
 import os
 import eqasim.location_assignment as eqla
 
-def configure(context, require):
-    require.stage("matsim.population")
-    require.stage("matsim.facilities")
-    require.stage("data.microcensus.trips")
-    require.stage("data.microcensus.persons")
-    require.stage("matsim.java.eqasim")
-    require.stage("utils.java")
+def configure(context):
+    context.stage("matsim.population")
+    context.stage("matsim.facilities")
+    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.persons")
+    context.stage("matsim.java.eqasim")
+    context.stage("utils.java")
 
 def execute(context):
     primary_activities = ["home", "work", "education"]

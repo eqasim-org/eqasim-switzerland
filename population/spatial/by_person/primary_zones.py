@@ -4,12 +4,12 @@ import data.constants as c
 from tqdm import tqdm
 import functools
 
-def configure(context, require):
-    require.stage("data.microcensus.commute")
-    require.stage("data.od.matrix")
-    require.stage("data.od.distances")
-    require.stage("population.sociodemographics")
-    require.stage("data.spatial.zones")
+def configure(context):
+    context.stage("data.microcensus.commute")
+    context.stage("data.od.matrix")
+    context.stage("data.od.distances")
+    context.stage("population.sociodemographics")
+    context.stage("data.spatial.zones")
 
 # TODO: We only assign work here through OD matrices. However, we *can* generate
 # OD matrices for education as well (the STATPOP information is available). What

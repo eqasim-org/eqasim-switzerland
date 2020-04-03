@@ -5,8 +5,8 @@ import numpy as np
 import io
 import matsim.writers
 
-def configure(context, require):
-    require.stage("population.sociodemographics")
+def configure(context):
+    context.stage("population.sociodemographics")
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class", "municipality_type", "sp_region", "canton_id", "ovgk"]
 INCOME_VALUES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]

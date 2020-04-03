@@ -6,9 +6,9 @@ import data.constants as c
 import pyproj
 import geopandas as gpd
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.stage("data.microcensus.trips")
+def configure(context):
+    context.config("raw_data_path")
+    context.stage("data.microcensus.trips")
 
 def execute(context):
     # Load data

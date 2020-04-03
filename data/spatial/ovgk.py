@@ -3,9 +3,9 @@ import numpy as np
 import geopandas as gpd
 from tqdm import tqdm
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.config("threads")
+def configure(context):
+    context.config("raw_data_path")
+    context.config("threads")
 
 def execute(context):
     input_path = "%s/ov_guteklasse/LV95/Oev_Gueteklassen_ARE.shp" % context.config["raw_data_path"]

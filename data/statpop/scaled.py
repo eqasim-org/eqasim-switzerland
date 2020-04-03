@@ -3,13 +3,13 @@ import numpy as np
 from data.statpop.multilevelipf import multilevelipf
 import data.constants as c
 
-def configure(context, require):
-    require.config("output_path")
-    require.config("enable_scaling", default=False)
-    require.config("scaling_year", default=c.BASE_SCALING_YEAR)
-    require.stage("data.statpop.statpop")
-    require.stage("data.statpop.projections.households")
-    require.stage("data.statpop.projections.population")
+def configure(context):
+    context.config("output_path")
+    context.config("enable_scaling", default=False)
+    context.config("scaling_year", default=c.BASE_SCALING_YEAR)
+    context.stage("data.statpop.statpop")
+    context.stage("data.statpop.projections.households")
+    context.stage("data.statpop.projections.population")
 
 def execute(context):
     df_statpop = context.stage("data.statpop.statpop")

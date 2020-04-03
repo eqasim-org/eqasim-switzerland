@@ -6,8 +6,8 @@ import shapely.geometry as geo
 import data.spatial.utils
 import data.constants as c
 
-def configure(context, require):
-    require.stage("data.statpop.persons")
+def configure(context):
+    context.stage("data.statpop.persons")
 
 def execute(context):
     df_statpop = context.stage("data.statpop.persons")

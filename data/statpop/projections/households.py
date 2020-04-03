@@ -58,9 +58,9 @@ CANTON_TO_ID_MULTILANGUAGE = {"Zürich": 1,
                               "Genève": 25,
                               "Jura": 26}
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.config("scaling_year")
+def configure(context):
+    context.config("raw_data_path")
+    context.config("scaling_year")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]

@@ -5,9 +5,9 @@ import numpy as np
 import io
 import matsim.writers
 
-def configure(context, require):
-    require.stage("population.opportunities")
-    require.stage("population.sociodemographics")
+def configure(context):
+    context.stage("population.opportunities")
+    context.stage("population.sociodemographics")
 
 FIELDS = [
     "location_id", "location_x", "location_y",

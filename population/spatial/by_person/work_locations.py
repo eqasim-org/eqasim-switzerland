@@ -3,11 +3,11 @@ import numpy as np
 from tqdm import tqdm
 import data.spatial.zone_shapes
 
-def configure(context, require):
-    require.stage("population.spatial.by_person.primary_zones")
-    require.stage("data.statent.statent")
-    require.stage("data.spatial.zones")
-    require.stage("data.spatial.zone_shapes")
+def configure(context):
+    context.stage("population.spatial.by_person.primary_zones")
+    context.stage("data.statent.statent")
+    context.stage("data.spatial.zones")
+    context.stage("data.spatial.zone_shapes")
 
 def execute(context):
     df = context.stage("population.spatial.by_person.primary_zones")

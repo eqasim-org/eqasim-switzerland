@@ -1,13 +1,13 @@
 import shutil
 import os.path
 
-def configure(context, require):
-    require.stage("matsim.secondary_locations")
-    require.stage("matsim.households")
-    require.stage("matsim.facilities")
-    require.stage("matsim.network.mapped")
-    require.stage("matsim.java.eqasim")
-    require.stage("utils.java")
+def configure(context):
+    context.stage("matsim.secondary_locations")
+    context.stage("matsim.households")
+    context.stage("matsim.facilities")
+    context.stage("matsim.network.mapped")
+    context.stage("matsim.java.eqasim")
+    context.stage("utils.java")
 
 def execute(context):
     # Some files we just copy

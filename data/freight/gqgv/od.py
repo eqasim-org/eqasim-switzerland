@@ -2,10 +2,10 @@ import pandas as pd
 import numpy as np
 
 
-def configure(context, require):
-    require.stage("data.freight.gqgv.cleaned")
-    require.stage("data.freight.scaling_factor")
-    require.config("enable_scaling")
+def configure(context):
+    context.stage("data.freight.gqgv.cleaned")
+    context.stage("data.freight.scaling_factor")
+    context.config("enable_scaling")
 
 
 def execute(context):

@@ -7,9 +7,9 @@ INDEX_RENAMES = {0: "total",
                  2: "delivery_van"}
 
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.config("scaling_year")
+def configure(context):
+    context.config("raw_data_path")
+    context.config("scaling_year")
 
 
 def execute(context):

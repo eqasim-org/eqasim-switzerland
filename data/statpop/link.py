@@ -1,5 +1,5 @@
-def configure(context, require):
-    require.config("raw_data_path")
+def configure(context):
+    context.config("raw_data_path")
     # require.cache = False
 
 def execute(context):

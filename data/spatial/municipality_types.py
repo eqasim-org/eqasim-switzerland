@@ -5,9 +5,9 @@ import geopandas as gpd
 from tqdm import tqdm
 from sklearn.neighbors import KDTree
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.stage("data.spatial.municipalities")
+def configure(context):
+    context.config("raw_data_path")
+    context.stage("data.spatial.municipalities")
 
 def execute(context):
     # Load data

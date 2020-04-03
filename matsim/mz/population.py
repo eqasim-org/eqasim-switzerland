@@ -6,10 +6,10 @@ import io
 import matsim.writers
 import pandas as pd
 
-def configure(context, require):
-    require.stage("data.microcensus.persons")
-    require.stage("data.microcensus.trips")
-    require.stage("matsim.mz.activities")
+def configure(context):
+    context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.trips")
+    context.stage("matsim.mz.activities")
 
 class PersonWriter:
     def __init__(self, person):

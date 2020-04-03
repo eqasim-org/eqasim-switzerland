@@ -3,12 +3,12 @@ import numpy as np
 import data.constants as c
 import population.algo.hot_deck_matching
 
-def configure(context, require):
-    require.config("weekend_scenario", False)
-    require.config("hot_deck_matching_runners", -1)
-    require.config("hot_deck_minimum_source_samples", 20)
-    require.stage("data.microcensus.persons")
-    require.stage("data.statpop.downsampled")
+def configure(context):
+    context.config("weekend_scenario", False)
+    context.config("hot_deck_matching_runners", -1)
+    context.config("hot_deck_minimum_source_samples", 20)
+    context.stage("data.microcensus.persons")
+    context.stage("data.statpop.downsampled")
 
 # TODO: The matching categories are as they are defined by Kirill here. However,
 # we should discuss about them. Wouldn't it have a big impact on how the activity

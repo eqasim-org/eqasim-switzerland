@@ -1,11 +1,11 @@
 import shutil
 import os.path
 
-def configure(context, require):
-    require.stage("matsim.run")
-    require.config("output_path")
-    require.config("output_id")
-    require.stage("contracts.contracts")
+def configure(context):
+    context.stage("matsim.run")
+    context.config("output_path")
+    context.config("output_id")
+    context.stage("contracts.contracts")
 
 def execute(context):
     results_path = context.stage("matsim.run")

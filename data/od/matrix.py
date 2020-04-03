@@ -7,9 +7,9 @@ import data.spatial.countries
 import data.spatial.municipalities
 import data.spatial.quarters
 
-def configure(context, require):
-    require.stage("data.structural_survey.structural_survey")
-    require.stage("data.spatial.zones")
+def configure(context):
+    context.stage("data.structural_survey.structural_survey")
+    context.stage("data.spatial.zones")
 
 # TODO: Right now we only produce OD matrices for WORK. We have the information
 # from statpop on where the schools are, so we can use this in the future. Also,

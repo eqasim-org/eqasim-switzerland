@@ -8,13 +8,13 @@ import data.spatial.municipalities
 import data.spatial.quarters
 import data.spatial.utils
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.stage("data.spatial.zones")
-    require.stage("data.spatial.municipalities")
-    require.stage("data.spatial.quarters")
-    require.stage("data.spatial.nuts")
-    require.stage("data.spatial.postal_codes")
+def configure(context):
+    context.config("raw_data_path")
+    context.stage("data.spatial.zones")
+    context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.quarters")
+    context.stage("data.spatial.nuts")
+    context.stage("data.spatial.postal_codes")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]

@@ -3,13 +3,13 @@ import numpy as np
 from tqdm import tqdm
 from sklearn.neighbors import KDTree
 
-def configure(context, require):
-    require.stage("data.freight.gte.od")
-    require.stage("data.spatial.zones")
-    require.stage("data.statent.statent")
-    require.stage("data.spatial.nuts")
-    require.stage("data.spatial.swiss_border")
-    require.config("input_downsampling")
+def configure(context):
+    context.stage("data.freight.gte.od")
+    context.stage("data.spatial.zones")
+    context.stage("data.statent.statent")
+    context.stage("data.spatial.nuts")
+    context.stage("data.spatial.swiss_border")
+    context.config("input_downsampling")
 
 def execute(context):
     demands, origin_pdf_matrices, od_pdf_matrices = context.stage("data.freight.gte.od")

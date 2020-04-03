@@ -6,10 +6,10 @@ from tqdm import tqdm
 from sklearn.neighbors import KDTree
 import shapely.geometry as geo
 
-def configure(context, require):
-    require.stage("data.spatial.zones")
-    require.stage("data.spatial.municipalities")
-    require.stage("data.spatial.quarters")
+def configure(context):
+    context.stage("data.spatial.zones")
+    context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.quarters")
 
 def execute(context):
     df_zones = context.stage("data.spatial.zones")

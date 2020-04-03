@@ -4,10 +4,10 @@ import data.utils
 import data.constants as c
 import data.microcensus.income
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.stage("data.microcensus.households")
-    require.stage("data.microcensus.trips")
+def configure(context):
+    context.config("raw_data_path")
+    context.stage("data.microcensus.households")
+    context.stage("data.microcensus.trips")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]

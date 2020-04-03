@@ -4,8 +4,8 @@ import geopandas as gpd
 from tqdm import tqdm
 from sklearn.neighbors import KDTree
 
-def configure(context, require):
-    require.config("raw_data_path")
+def configure(context):
+    context.config("raw_data_path")
 
 def execute(context):
     raw_data_path = context.config["raw_data_path"]

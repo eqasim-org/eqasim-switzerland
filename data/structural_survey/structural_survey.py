@@ -8,14 +8,14 @@ import data.spatial.municipalities
 import data.spatial.quarters
 import data.spatial.utils
 
-def configure(context, require):
-    require.stage("data.structural_survey.raw")
-    require.stage("data.statpop.statpop")
-    require.stage("data.statent.statent")
-    require.stage("data.spatial.zones")
-    require.stage("data.spatial.countries")
-    require.stage("data.spatial.municipalities")
-    require.stage("data.spatial.quarters")
+def configure(context):
+    context.stage("data.structural_survey.raw")
+    context.stage("data.statpop.statpop")
+    context.stage("data.statent.statent")
+    context.stage("data.spatial.zones")
+    context.stage("data.spatial.countries")
+    context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.quarters")
 
 def execute(context):
     df_se = context.stage("data.structural_survey.raw")
