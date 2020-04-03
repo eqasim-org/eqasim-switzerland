@@ -1,9 +1,5 @@
-import gzip
-from tqdm import tqdm
 import pandas as pd
-import numpy as np
-from sklearn.neighbors import KDTree
-import numpy.linalg as la
+
 
 def configure(context):
     context.stage("data.statent.statent")

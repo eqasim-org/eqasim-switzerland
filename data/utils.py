@@ -1,9 +1,9 @@
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
+
 import data.constants as c
-import numpy as np
-import geopandas as gpd
-import shapely.geometry as geo
+
 
 def fix_marital_status(df):
     """ Makes young people, who are separated, be treated as single! """

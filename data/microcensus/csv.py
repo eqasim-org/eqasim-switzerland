@@ -1,11 +1,3 @@
-import pandas as pd
-import numpy as np
-import data.utils
-import data.spatial.utils
-import data.constants as c
-import pyproj
-import geopandas as gpd
-
 def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")

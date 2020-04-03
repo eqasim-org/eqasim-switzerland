@@ -1,7 +1,9 @@
-import pandas as pd
 import numpy as np
-from data.statpop.multilevelipf import multilevelipf
+import pandas as pd
+
 import data.constants as c
+from data.statpop.multilevelipf import multilevelipf
+
 
 def configure(context):
     context.config("output_path")

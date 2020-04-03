@@ -1,9 +1,11 @@
-import pandas as pd
 import numpy as np
 from tqdm import tqdm
-import functools, itertools
+import itertools
 import multiprocessing as mp
-import numpy.ma as ma
+
+import numpy as np
+from tqdm import tqdm
+
 
 class HotDeckMatcher:
     def __init__(self, df_source, source_id, source_weight, mandatory_fields, preference_fields, default_id, minimum_source_samples):

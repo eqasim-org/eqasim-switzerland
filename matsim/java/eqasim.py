@@ -1,7 +1,5 @@
-import requests
-from tqdm import tqdm
 import subprocess as sp
-import os.path
+
 
 def configure(context):
     context.stage("utils.java")

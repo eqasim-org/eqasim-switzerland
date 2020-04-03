@@ -1,5 +1,6 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 import data.constants as c
 
 CANTON_TO_ID = {

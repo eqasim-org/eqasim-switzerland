@@ -1,15 +1,14 @@
 import numpy as np
-import data.spatial.zones
-import data.spatial.countries
-import data.spatial.municipalities
-import data.spatial.quarters
-import data.spatial.utils
-import numpy as np
 
 import data.spatial.countries
+import data.spatial.countries
+import data.spatial.municipalities
 import data.spatial.municipalities
 import data.spatial.quarters
+import data.spatial.quarters
 import data.spatial.utils
+import data.spatial.utils
+import data.spatial.zones
 import data.spatial.zones
 
 

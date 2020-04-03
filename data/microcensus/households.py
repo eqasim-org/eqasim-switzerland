@@ -1,15 +1,17 @@
-import pandas as pd
 import numpy as np
-import data.utils
-import data.constants as c
+import pandas as pd
 import pyproj
+
+import data.constants as c
+import data.spatial.cantons
 import data.spatial.municipalities
+import data.spatial.municipality_types
+import data.spatial.ovgk
+import data.spatial.utils
 import data.spatial.zones
 import data.utils
-import data.spatial.utils
-import data.spatial.municipality_types
-import data.spatial.cantons
-import data.spatial.ovgk
+import data.utils
+
 
 def configure(context):
     context.config("data_path")

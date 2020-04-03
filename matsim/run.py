@@ -1,5 +1,5 @@
 import shutil
-import os.path
+
 
 def configure(context):
     context.stage("matsim.secondary_locations")

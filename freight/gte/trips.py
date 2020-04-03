@@ -1,7 +1,8 @@
-import pandas as pd
 import numpy as np
-from tqdm import tqdm
+import pandas as pd
 from sklearn.neighbors import KDTree
+from tqdm import tqdm
+
 
 def configure(context):
     context.stage("data.freight.gte.od")

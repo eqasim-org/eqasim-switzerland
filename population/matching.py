@@ -1,7 +1,9 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 import data.constants as c
 import population.algo.hot_deck_matching
+
 
 def configure(context):
     context.config("weekend_scenario", False)

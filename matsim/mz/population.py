@@ -1,10 +1,12 @@
 import gzip
-from tqdm import tqdm
-import data.constants as c
-import numpy as np
 import io
-import matsim.writers
+
+import numpy as np
 import pandas as pd
+from tqdm import tqdm
+
+import matsim.writers
+
 
 def configure(context):
     context.stage("data.microcensus.persons")

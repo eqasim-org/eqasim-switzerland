@@ -1,7 +1,9 @@
+import multiprocessing as mp
+
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-import multiprocessing as mp
+
 
 def add_expansion_factor_column(df):
     if (df.columns.contains("expansion_factor") == False):

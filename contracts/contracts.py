@@ -1,7 +1,9 @@
+import os
+from datetime import datetime
+
 import jinja2
 import yaml
-from datetime import datetime
-import os
+
 
 def configure(context):
     pass

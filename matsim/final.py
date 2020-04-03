@@ -1,5 +1,6 @@
-import shutil
 import os.path
+import shutil
+
 
 def configure(context):
     context.stage("matsim.run")

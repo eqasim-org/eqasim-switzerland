@@ -1,10 +1,10 @@
-import shapely.geometry as geo
-import numpy as np
-from tqdm import tqdm
 import geopandas as gpd
+import numpy as np
 import pandas as pd
+import shapely.geometry as geo
 from sklearn.neighbors import KDTree
-import multiprocessing as mp
+from tqdm import tqdm
+
 
 def sample_coordinates(row, count):
     samples = []

@@ -1,9 +1,10 @@
 import gzip
-from tqdm import tqdm
-import data.constants as c
-import numpy as np
 import io
+
+from tqdm import tqdm
+
 import matsim.writers
+
 
 def configure(context):
     context.stage("population.opportunities")

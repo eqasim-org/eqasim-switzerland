@@ -1,10 +1,11 @@
-import pandas as pd
 import numpy as np
-import geopandas as gpd
 from sklearn.neighbors import KDTree
-import shapely.geometry as geo
-import data.spatial.utils
 import data.constants as c
+import numpy as np
+from sklearn.neighbors import KDTree
+
+import data.constants as c
+
 
 def configure(context):
     context.stage("data.statpop.persons")

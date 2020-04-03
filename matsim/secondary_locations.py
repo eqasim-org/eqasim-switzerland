@@ -1,11 +1,11 @@
-import gzip
-from tqdm import tqdm
 import pandas as pd
-import numpy as np
-from sklearn.neighbors import KDTree
-import numpy.linalg as la
 import os
 import eqasim.location_assignment as eqla
+import os
+
+import eqasim.location_assignment as eqla
+import pandas as pd
+
 
 def configure(context):
     context.stage("matsim.population")

@@ -1,8 +1,10 @@
-import pandas as pd
 import numpy as np
-import data.utils
+import pandas as pd
+
 import data.constants as c
 import data.microcensus.income
+import data.utils
+
 
 def configure(context):
     context.config("data_path")

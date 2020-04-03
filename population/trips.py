@@ -1,5 +1,4 @@
 import pandas as pd
-import pandas as pd
 
 import data.constants as c
 

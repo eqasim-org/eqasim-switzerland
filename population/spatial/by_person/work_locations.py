@@ -1,7 +1,9 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
+
 import data.spatial.zone_shapes
+
 
 def configure(context):
     context.stage("population.spatial.by_person.primary_zones")

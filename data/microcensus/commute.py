@@ -1,6 +1,6 @@
-import pandas as pd
 import numpy as np
-import data.constants as c
+import pandas as pd
+
 
 def configure(context):
     context.stage("data.microcensus.trips")

@@ -1,16 +1,18 @@
-import data.utils
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 import data.constants as c
-import data.statpop.head_of_household
-import data.spatial.municipalities
-import data.spatial.zones
-import data.utils
-import data.spatial.utils
-import data.spatial.municipality_types
-import data.statpop.density
 import data.spatial.cantons
+import data.spatial.municipalities
+import data.spatial.municipality_types
 import data.spatial.ovgk
+import data.spatial.utils
+import data.spatial.zones
+import data.statpop.density
+import data.statpop.head_of_household
+import data.utils
+import data.utils
+
 
 def configure(context):
     context.stage("data.statpop.persons")

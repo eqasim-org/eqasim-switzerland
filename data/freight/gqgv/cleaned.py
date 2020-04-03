@@ -1,5 +1,3 @@
-import pandas as pd
-
 RENAMES = {"ORIGIN":"origin_nuts_id",
            "DESTINATION":"destination_nuts_id",
            "CH_MUNICIPALITY_ORIGIN": "origin_municipality",

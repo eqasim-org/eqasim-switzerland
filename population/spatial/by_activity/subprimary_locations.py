@@ -1,9 +1,8 @@
-import gzip
-from tqdm import tqdm
 import pandas as pd
-import numpy as np
-from sklearn.neighbors import KDTree
 import numpy.linalg as la
+import pandas as pd
+from sklearn.neighbors import KDTree
+
 
 def configure(context):
     context.stage("population.sociodemographics")

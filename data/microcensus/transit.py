@@ -1,10 +1,6 @@
-import pandas as pd
 import numpy as np
-import data.utils
-import data.spatial.utils
-import data.constants as c
-import pyproj
-import geopandas as gpd
+import pandas as pd
+
 
 def configure(context):
     context.config("data_path")

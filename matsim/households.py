@@ -1,9 +1,12 @@
 import gzip
-from tqdm import tqdm
-import data.constants as c
-import numpy as np
 import io
+
+import numpy as np
+from tqdm import tqdm
+
+import data.constants as c
 import matsim.writers
+
 
 def configure(context):
     context.stage("population.sociodemographics")

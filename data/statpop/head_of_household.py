@@ -1,7 +1,9 @@
-import data.utils
 import pandas as pd
-import numpy as np
 import data.constants as c
+import pandas as pd
+
+import data.constants as c
+
 
 def impute(df):
     df_head = pd.DataFrame(df)
