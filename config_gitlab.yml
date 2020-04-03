@@ -1,16 +1,20 @@
-raw_data_path: /nas/ivtmatsim/scenarios/switzerland/data
-target_path: temp
-output_path: output
-threads: 24
-hot_deck_matching_runners: 24
-disable_progress_bar: true
-java_memory: 100G
-input_downsampling: 0.01
-enable_scaling: true
-scaling_year: 2045
-use_freight: true
-hafas_date: 01.10.2018
-stages:
+# General pipeline settings
+working_directory: /nas/ivtmatsim/scenarios/switzerland/data
+
+# Requested stages
+run:
     - matsim.run
     - matsim.mz.population
     - data.microcensus.csv
+
+# These are configuration options that we use in the pipeline
+config:
+    threads: 24
+    hot_deck_matching_runners: 24
+    disable_progress_bar: true
+    java_memory: 100G
+    input_downsampling: 0.01
+    enable_scaling: true
+    scaling_year: 2045
+    use_freight: true
+    hafas_date: 01.10.2018
