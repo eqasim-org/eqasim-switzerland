@@ -1,12 +1,17 @@
-import pandas as pd
 import numpy as np
-import data.constants as c
-from tqdm import tqdm
 import data.spatial.zones
 import data.spatial.countries
 import data.spatial.municipalities
 import data.spatial.quarters
 import data.spatial.utils
+import numpy as np
+
+import data.spatial.countries
+import data.spatial.municipalities
+import data.spatial.quarters
+import data.spatial.utils
+import data.spatial.zones
+
 
 def configure(context):
     context.stage("data.structural_survey.raw")
@@ -92,7 +97,7 @@ def execute(context):
     # Assign coordinates in the home municipalities
 
     se_municipality_ids = np.unique(df_se["home_municipality_id"].dropna()).astype(np.int)
-    for municipality_id in tqdm(se_municipality_ids, desc = "Imputing home locations by municipality from STATPOP"):
+    for municipality_id in context.progress(se_municipality_ids, desc = "Imputing home locations by municipality from STATPOP"):
         indices = np.where(df_statpop["home_municipality_id"] == municipality_id)[0]
 
         if len(indices) > 0:
@@ -104,7 +109,7 @@ def execute(context):
     unassigned_municipality_ids = np.unique(df_se[np.isnan(df_se["home_municipality_x"])]["home_municipality_id"].dropna())
     print("A number of %d municipalities could not be assigned from STATPOP" % len(unassigned_municipality_ids))
 
-    for municipality_id in tqdm(unassigned_municipality_ids, desc = "Sampling home locations for municipalities"):
+    for municipality_id in context.progress(unassigned_municipality_ids, desc = "Sampling home locations for municipalities"):
         f = np.isnan(df_se["home_municipality_x"]) &  (df_se["home_municipality_id"] == municipality_id)
         row = df_municipalities[df_municipalities["municipality_id"] == municipality_id].iloc[0]
         coordinates = data.spatial.utils.sample_coordinates(row, np.count_nonzero(f))
@@ -115,7 +120,7 @@ def execute(context):
     # Assign coordinates in the home quarters
 
     se_quarter_ids = np.unique(df_se["home_quarter_id"].dropna()).astype(np.int)
-    for quarter_id in tqdm(se_quarter_ids, desc = "Imputing home locations by quarter from STATPOP"):
+    for quarter_id in context.progress(se_quarter_ids, desc = "Imputing home locations by quarter from STATPOP"):
         indices = np.where(df_statpop["home_quarter_id"] == quarter_id)[0]
 
         if len(indices) > 0:
@@ -127,7 +132,7 @@ def execute(context):
     unassigned_quarter_ids = np.unique(df_se[np.isnan(df_se["home_quarter_x"])]["home_quarter_id"].dropna())
     print("A number of %d quarters could not be assigned from STATPOP" % len(unassigned_quarter_ids))
 
-    for quarter_id in tqdm(unassigned_quarter_ids, desc = "Sampling home locations for municipalities"):
+    for quarter_id in context.progress(unassigned_quarter_ids, desc = "Sampling home locations for municipalities"):
         f = np.isnan(df_se["home_quarter_x"]) &  (df_se["home_quarter_id"] == quarter_id)
         row = df_quarters[df_quarters["quarter_id"] == quarter_id].iloc[0]
         coordinates = data.spatial.utils.sample_coordinates(row, np.count_nonzero(f))
@@ -162,7 +167,7 @@ def execute(context):
     # Assign coordinates in the work municipalities
 
     se_municipality_ids = np.unique(df_se["work_municipality_id"].dropna()).astype(np.int)
-    for municipality_id in tqdm(se_municipality_ids, desc = "Imputing work locations by municipality from STATENT"):
+    for municipality_id in context.progress(se_municipality_ids, desc = "Imputing work locations by municipality from STATENT"):
         indices = np.where(df_statent["municipality_id"] == municipality_id)[0]
 
         if len(indices) > 0:
@@ -174,7 +179,7 @@ def execute(context):
     unassigned_municipality_ids = np.unique(df_se[np.isnan(df_se["work_municipality_x"])]["work_municipality_id"].dropna())
     print("A number of %d municipalities could not be assigned from STATENT" % len(unassigned_municipality_ids))
 
-    for municipality_id in tqdm(unassigned_municipality_ids, desc = "Sampling work locations for municipalities"):
+    for municipality_id in context.progress(unassigned_municipality_ids, desc = "Sampling work locations for municipalities"):
         f = np.isnan(df_se["work_municipality_x"]) &  (df_se["work_municipality_id"] == municipality_id)
         row = df_municipalities[df_municipalities["municipality_id"] == municipality_id].iloc[0]
         coordinates = data.spatial.utils.sample_coordinates(row, np.count_nonzero(f))
@@ -183,7 +188,7 @@ def execute(context):
     # Assign coordinates in the work quarters
 
     se_quarter_ids = np.unique(df_se["work_quarter_id"].dropna()).astype(np.int)
-    for quarter_id in tqdm(se_quarter_ids, desc = "Imputing work locations by quarter from STATENT"):
+    for quarter_id in context.progress(se_quarter_ids, desc = "Imputing work locations by quarter from STATENT"):
         indices = np.where(df_statent["quarter_id"] == quarter_id)[0]
 
         if len(indices) > 0:
@@ -195,7 +200,7 @@ def execute(context):
     unassigned_quarter_ids = np.unique(df_se[np.isnan(df_se["work_quarter_x"])]["work_quarter_id"].dropna())
     print("A number of %d quarters could not be assigned from STATENT" % len(unassigned_quarter_ids))
 
-    for quarter_id in tqdm(unassigned_quarter_ids, desc = "Sampling work locations for municipalities"):
+    for quarter_id in context.progress(unassigned_quarter_ids, desc = "Sampling work locations for municipalities"):
         f = np.isnan(df_se["work_quarter_x"]) &  (df_se["work_quarter_id"] == quarter_id)
         row = df_quarters[df_quarters["quarter_id"] == quarter_id].iloc[0]
         coordinates = data.spatial.utils.sample_coordinates(row, np.count_nonzero(f))

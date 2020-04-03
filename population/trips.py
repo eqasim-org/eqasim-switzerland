@@ -1,8 +1,8 @@
-import gzip
-from tqdm import tqdm
 import pandas as pd
-import numpy as np
+import pandas as pd
+
 import data.constants as c
+
 
 def configure(context):
     context.stage("population.sociodemographics")

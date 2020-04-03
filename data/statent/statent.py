@@ -1,12 +1,12 @@
-import pandas as pd
 import numpy as np
-import data.constants as c
-from tqdm import tqdm
-import data.spatial.zones
-import data.utils
+import pandas as pd
+
 import data.spatial.municipalities
 import data.spatial.quarters
 import data.spatial.utils
+import data.spatial.zones
+import data.utils
+
 
 def configure(context):
     context.config("data_path")

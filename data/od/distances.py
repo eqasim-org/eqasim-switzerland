@@ -1,7 +1,6 @@
-import pandas as pd
 import numpy as np
-import data.constants as c
-from tqdm import tqdm
+import pandas as pd
+
 
 def configure(context):
     context.stage("data.spatial.zones")

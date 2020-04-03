@@ -1,11 +1,6 @@
-import pandas as pd
 import numpy as np
-import data.constants as c
-from tqdm import tqdm
-import data.spatial.zones
-import data.spatial.countries
-import data.spatial.municipalities
-import data.spatial.quarters
+import pandas as pd
+
 
 def configure(context):
     context.stage("data.structural_survey.structural_survey")

@@ -1,7 +1,6 @@
-import pandas as pd
-import numpy as np
 import geopandas as gpd
-from tqdm import tqdm
+import numpy as np
+import pandas as pd
 
 
 def configure(context):
@@ -22,7 +21,7 @@ def execute(context):
     all_ids = set()
 
     # Load all the shape files, only add the NUTS zones that haven't been found before
-    for year, shapefile, id_field, name_field, level_field in tqdm(SHAPEFILES, desc="Reading NUTS shape files"):
+    for year, shapefile, id_field, name_field, level_field in context.progress(SHAPEFILES, desc="Reading NUTS shape files"):
         df = gpd.read_file(
             "%s/%s" % (data_path, shapefile),
             encoding="utf-8"

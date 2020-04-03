@@ -1,8 +1,7 @@
-import pandas as pd
-import numpy as np
 import geopandas as gpd
-from tqdm import tqdm
-from sklearn.neighbors import KDTree
+import numpy as np
+import pandas as pd
+
 
 def configure(context):
     context.config("data_path")

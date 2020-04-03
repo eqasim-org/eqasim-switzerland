@@ -1,9 +1,8 @@
-import pandas as pd
-import numpy as np
-import data.constants as c
 import geopandas as gpd
-from tqdm import tqdm
+import numpy as np
+import pandas as pd
 from sklearn.neighbors import KDTree
+
 
 def configure(context):
     context.config("data_path")
@@ -30,7 +29,7 @@ def execute(context):
     all_ids = set()
 
     # Load all the shape files, only add the municipalities that haven't been found before
-    for year, shapefile, id_field, name_field in tqdm(SHAPEFILES, desc = "Reading municipality shape files"):
+    for year, shapefile, id_field, name_field in context.progress(SHAPEFILES, desc = "Reading municipality shape files"):
         df = gpd.read_file(
             "%s/%s" % (data_path, shapefile),
             encoding = "latin1"
