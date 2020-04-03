@@ -6,7 +6,6 @@ from data.statpop.multilevelipf import multilevelipf
 
 
 def configure(context):
-    context.config("output_path")
     context.config("enable_scaling", default=False)
     context.config("scaling_year", default=c.BASE_SCALING_YEAR)
     context.stage("data.statpop.statpop")
