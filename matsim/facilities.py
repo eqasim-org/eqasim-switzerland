@@ -48,7 +48,7 @@ def execute(context):
                 "household_id", "home_x", "home_y"
             ]].drop_duplicates("household_id")
 
-            for item in context.progress(df_households.itertuples(), total = len(df_households), desc = "Homes"):
+            for item in context.progress(df_households.itertuples(), total = len(df_households), label = "Homes"):
                 writer.start_facility("home%s" % item[1], item[2], item[3])
                 writer.add_activity("home")
                 writer.end_facility()

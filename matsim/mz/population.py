@@ -3,7 +3,6 @@ import io
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
 import matsim.writers
 
@@ -93,7 +92,7 @@ def execute(context):
             writer = matsim.writers.PopulationWriter(raw_writer)
             writer.start_population()
 
-            with tqdm(total = len(df_persons), desc = "Writing persons ...") as progress:
+            with context.progress(total = len(df_persons), label = "Writing persons ...") as progress:
                 try:
                     while True:
                         person = next(person_iterator)

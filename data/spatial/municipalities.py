@@ -29,7 +29,7 @@ def execute(context):
     all_ids = set()
 
     # Load all the shape files, only add the municipalities that haven't been found before
-    for year, shapefile, id_field, name_field in context.progress(SHAPEFILES, desc = "Reading municipality shape files"):
+    for year, shapefile, id_field, name_field in context.progress(SHAPEFILES, label = "Reading municipality shape files"):
         df = gpd.read_file(
             "%s/%s" % (data_path, shapefile),
             encoding = "latin1"

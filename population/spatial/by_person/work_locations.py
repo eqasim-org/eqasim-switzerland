@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
 import data.spatial.zone_shapes
 
@@ -25,7 +24,7 @@ def execute(context):
     df_national = df_demand[df_demand["zone_level"].isin(("municipality", "quarter"))]
     empty_zones = []
 
-    for zone_id, count in tqdm(zip(df_national["work_zone_id"], df_national["count"]), desc = "Assigning national locations ...", total = len(df_demand)):
+    for zone_id, count in context.progress(zip(df_national["work_zone_id"], df_national["count"]), desc = "Assigning national locations ...", total = len(df_demand)):
         indices = np.where(df_statent["zone_id"] == zone_id)[0]
         weights = df_statent.iloc[indices]["number_employees"]
         weights /= np.sum(weights)
@@ -47,7 +46,7 @@ def execute(context):
 
     df_shapes = context.stage("data.spatial.zone_shapes")
 
-    for zone_id in tqdm(empty_zones, desc = "Assigning national locations for empty zones ..."):
+    for zone_id in context.progress(empty_zones, desc = "Assigning national locations for empty zones ..."):
         count = df_national[df_national["work_zone_id"] == zone_id]["count"].iloc[0]
         row = df_shapes[df_shapes["zone_id"] == zone_id].iloc[0]
         coordinates = data.spatial.zone_shapes.sample_coordinates(row, count)
