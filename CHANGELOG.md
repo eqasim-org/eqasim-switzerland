@@ -1,5 +1,10 @@
 **Version v2 (master)**
 
+- Update Maven dependency
+- Update eqasim to 1.0.5
+- Upgrade to new pt2matsim version to allow selecting of HAFAS date
+- Store STATPOP and MZ ids as agents attributes
+- Fix Java /tmp bug in shared environments (IVT servers)
 - Make possible to run pipeline in VM, add instructions
 - Added ÖV Güteklasse for home locations
 - Remove imputation of ÖV Güteklasse for activities
