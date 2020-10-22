@@ -1,19 +1,20 @@
-import pandas as pd
 import numpy as np
-from tqdm import tqdm
+import pandas as pd
 from sklearn.neighbors import KDTree
 
-def configure(context, require):
-    require.stage("data.freight.gqgv.od")
-    require.stage("data.spatial.zones")
-    require.stage("data.statent.statent")
-    require.stage("data.spatial.nuts")
-    require.stage("data.spatial.swiss_border")
-    require.config("input_downsampling")
+
+def configure(context):
+    context.stage("data.freight.gqgv.od")
+    context.stage("data.spatial.zones")
+    context.stage("data.statent.statent")
+    context.stage("data.spatial.nuts")
+    context.stage("data.spatial.swiss_border")
+    context.config("input_downsampling")
+
 
 def execute(context):
     demands, origin_pdf_matrices, od_pdf_matrices = context.stage("data.freight.gqgv.od")
-    input_downsampling = context.config["input_downsampling"]
+    input_downsampling = context.config("input_downsampling")
 
     trips_frames = []
 
@@ -23,7 +24,7 @@ def execute(context):
         demand = np.round(input_downsampling * demands[vehicle_type])
 
         # compute origin counts
-        origin_counts = np.random.multinomial(demand, origin_pdf_matrices[vehicle_type].values[:,0])
+        origin_counts = np.random.multinomial(demand, origin_pdf_matrices[vehicle_type].values[:, 0])
         counts = np.zeros(od_pdf_matrices[vehicle_type].shape, dtype=np.int)
 
         # compute origin-destination counts
@@ -35,14 +36,14 @@ def execute(context):
         assert (len(counts) == len(origin_counts))
 
         # generate single trips
-        with tqdm(desc="Creating %i %s trips ..." % (int(demand), vehicle_type), total=np.sum(counts)) as progress:
+        with context.progress(label="Creating %i %s trips ..." % (int(demand), vehicle_type),
+                              total=np.sum(counts)) as progress:
             for origin_index in range(counts.shape[0]):
                 for destination_index in range(counts.shape[1]):
 
                     number_of_trips = counts[origin_index, destination_index]
 
                     if number_of_trips > 0:
-
                         origin_id = od_pdf_matrices[vehicle_type].index[origin_index]
                         destination_id = od_pdf_matrices[vehicle_type].columns[destination_index]
 
@@ -50,7 +51,7 @@ def execute(context):
                                           number_of_trips, axis=0)
 
                         trips_frames.append(pd.DataFrame(columns=["origin_id", "destination_id", "vehicle_type"],
-                                                     data=trips))
+                                                         data=trips))
 
                     progress.update(number_of_trips)
 
@@ -80,7 +81,7 @@ def execute(context):
     origin_ids = df_trips["origin_id"].unique()
     destination_ids = df_trips["destination_id"].unique()
 
-    with tqdm(desc="Setting origin locations ...", total=len(origin_ids)) as progress:
+    with context.progress(label="Setting origin locations ...", total=len(origin_ids)) as progress:
 
         for origin_id in origin_ids:
 
@@ -111,7 +112,7 @@ def execute(context):
 
             progress.update()
 
-    with tqdm(desc="Setting destination locations ...", total=len(destination_ids)) as progress:
+    with context.progress(label="Setting destination locations ...", total=len(destination_ids)) as progress:
 
         for destination_id in destination_ids:
 

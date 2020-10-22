@@ -27,9 +27,9 @@ VEHICLE_TYPES = {
 }
 
 
-def configure(context, require):
-    require.stage("data.freight.gte.raw")
-    require.stage("data.spatial.nuts")
+def configure(context):
+    context.stage("data.freight.gte.raw")
+    context.stage("data.spatial.nuts")
 
 
 def execute(context):

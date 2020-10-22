@@ -1,10 +1,11 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-def configure(context, require):
-    require.stage("freight.gte.trips")
-    require.stage("freight.gqgv.trips")
-    require.stage("data.freight.departure_times")
+
+def configure(context):
+    context.stage("freight.gte.trips")
+    context.stage("freight.gqgv.trips")
+    context.stage("data.freight.departure_times")
 
 def execute(context):
     df_gte_trips = context.stage("freight.gte.trips")

@@ -1,18 +1,14 @@
 import pandas as pd
-import numpy as np
-import data.constants as c
-import geopandas as gpd
-from tqdm import tqdm
-from sklearn.neighbors import KDTree
 
-def configure(context, require):
-    require.config("raw_data_path")
+
+def configure(context):
+    context.config("data_path")
 
 def execute(context):
     # Load data
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config("data_path")
 
-    df_cantons = pd.read_excel("%s/spatial_structure_2018.xlsx" % raw_data_path,
+    df_cantons = pd.read_excel("%s/spatial_structure_2018.xlsx" % data_path,
                                names=["municipality_id", "canton_id"],
                                usecols=[0, 2],
                                skiprows=6,

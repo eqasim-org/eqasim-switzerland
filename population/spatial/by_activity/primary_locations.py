@@ -1,13 +1,11 @@
-import gzip
-from tqdm import tqdm
 import pandas as pd
-import numpy as np
 
-def configure(context, require):
-    require.stage("population.sociodemographics")
-    require.stage("population.spatial.by_person.work_locations")
-    require.stage("population.spatial.by_person.education_locations")
-    require.stage("population.activities")
+
+def configure(context):
+    context.stage("population.sociodemographics")
+    context.stage("population.spatial.by_person.work_locations")
+    context.stage("population.spatial.by_person.education_locations")
+    context.stage("population.activities")
 
 def execute(context):
     df_activities = context.stage("population.activities")

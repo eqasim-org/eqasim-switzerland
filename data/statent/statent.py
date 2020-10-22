@@ -1,26 +1,26 @@
-import pandas as pd
 import numpy as np
-import data.constants as c
-from tqdm import tqdm
-import data.spatial.zones
-import data.utils
+import pandas as pd
+
 import data.spatial.municipalities
 import data.spatial.quarters
 import data.spatial.utils
+import data.spatial.zones
+import data.utils
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.stage("data.spatial.zones")
-    require.stage("data.spatial.municipalities")
-    require.stage("data.spatial.quarters")
-    require.stage("data.spatial.nuts")
-    require.stage("data.spatial.postal_codes")
+
+def configure(context):
+    context.config("data_path")
+    context.stage("data.spatial.zones")
+    context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.quarters")
+    context.stage("data.spatial.nuts")
+    context.stage("data.spatial.postal_codes")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config("data_path")
 
     df = pd.DataFrame(pd.read_csv(
-        "%s/statent/QUERY_FOR_2014_DEC_STATENT_LOC.csv" % raw_data_path,
+        "%s/statent/QUERY_FOR_2014_DEC_STATENT_LOC.csv" % data_path,
         encoding = "latin1", sep = ";"))
 
     df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08", "EMPTOT"]])
@@ -46,29 +46,29 @@ def execute(context):
 
     df_spatial = pd.DataFrame(df[["enterprise_id", "x", "y"]])
 
-    df_spatial = data.spatial.utils.to_gpd(df_spatial, "x", "y")
+    df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "x", "y")
     df_spatial = df_spatial.drop(["x", "y"], axis=1)
 
     columns = ["enterprise_id"]
 
     # impute municipalities
-    df_spatial = data.spatial.utils.impute(df_spatial, df_municipalities, "enterprise_id", "municipality_id")
+    df_spatial = data.spatial.utils.impute(context, df_spatial, df_municipalities, "enterprise_id", "municipality_id")
     columns.extend(["municipality_id"])
 
     # impute quarters
-    df_spatial = data.spatial.utils.impute(df_spatial, df_quarters, "enterprise_id", "quarter_id", fix_by_distance = False)
+    df_spatial = data.spatial.utils.impute(context, df_spatial, df_quarters, "enterprise_id", "quarter_id", fix_by_distance = False)
     columns.extend(["quarter_id"])
 
     # impute NUTS
     df_nuts = df_nuts[df_nuts["nuts_id"].str.contains("CH")]
     for level in df_nuts["nuts_level"].unique():
-        df_spatial = data.spatial.utils.impute(df_spatial, df_nuts[df_nuts["nuts_level"] == level],
+        df_spatial = data.spatial.utils.impute(context, df_spatial, df_nuts[df_nuts["nuts_level"] == level],
                                                "enterprise_id", "nuts_id", fix_by_distance=False).rename(
             {"nuts_id": ("nuts_id_level_" + str(level))}, axis=1)
         columns.extend([("nuts_id_level_" + str(level))])
 
     # impute postal codes
-    df_spatial = data.spatial.utils.impute(df_spatial, df_postal_codes, "enterprise_id", "postal_code", fix_by_distance=False)
+    df_spatial = data.spatial.utils.impute(context, df_spatial, df_postal_codes, "enterprise_id", "postal_code", fix_by_distance=False)
     columns.extend(["postal_code"])
 
     # clean up columns

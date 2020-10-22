@@ -1,19 +1,15 @@
-import pandas as pd
 import numpy as np
-import data.utils
-import data.spatial.utils
-import data.constants as c
-import pyproj
-import geopandas as gpd
+import pandas as pd
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.stage("data.microcensus.trips")
+
+def configure(context):
+    context.config("data_path")
+    context.stage("data.microcensus.trips")
 
 def execute(context):
     # Load data
-    raw_data_path = context.config["raw_data_path"]
-    df_stages = pd.read_csv("%s/microcensus/etappen.csv" % raw_data_path, encoding = "latin1")
+    data_path = context.config("data_path")
+    df_stages = pd.read_csv("%s/microcensus/etappen.csv" % data_path, encoding = "latin1")
 
     # Filter stages in pt trips
     df_trips = context.stage("data.microcensus.trips")

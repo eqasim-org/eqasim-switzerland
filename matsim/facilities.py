@@ -1,18 +1,19 @@
 import gzip
-from tqdm import tqdm
-import data.constants as c
-import numpy as np
 import io
+
 import matsim.writers
 
-def configure(context, require):
-    require.stage("population.opportunities")
-    require.stage("population.sociodemographics")
+
+def configure(context):
+    context.stage("population.opportunities")
+    context.stage("population.sociodemographics")
+
 
 FIELDS = [
     "location_id", "location_x", "location_y",
     "offers_work", "offers_education", "offers_service", "offers_leisure", "offers_shop"
 ]
+
 
 def make_options(item):
     options = []
@@ -23,6 +24,7 @@ def make_options(item):
     if item[8]: options.append("shop")
     return options
 
+
 def execute(context):
     cache_path = context.cache_path
 
@@ -31,11 +33,11 @@ def execute(context):
     df_statent = df_statent[FIELDS]
 
     with gzip.open("%s/facilities.xml.gz" % cache_path, "w+") as f:
-        with io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2) as raw_writer:
+        with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:
             writer = matsim.writers.FacilitiesWriter(raw_writer)
             writer.start_facilities()
 
-            for item in tqdm(df_statent.itertuples(), total = len(df_statent)):
+            for item in context.progress(df_statent.itertuples(), total=len(df_statent)):
                 writer.start_facility(item[1], item[2], item[3])
                 if item[4]: writer.add_activity("work")
                 if item[5]: writer.add_activity("education")
@@ -49,7 +51,7 @@ def execute(context):
                 "household_id", "home_x", "home_y"
             ]].drop_duplicates("household_id")
 
-            for item in tqdm(df_households.itertuples(), total = len(df_households), desc = "Homes"):
+            for item in context.progress(df_households.itertuples(), total=len(df_households), label="Homes"):
                 writer.start_facility("home%s" % item[1], item[2], item[3])
                 writer.add_activity("home")
                 writer.end_facility()

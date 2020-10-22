@@ -1,10 +1,9 @@
-import subprocess as sp
 import os.path
 
-def configure(context, require):
-    require.stage("matsim.java.pt2matsim")
-    require.stage("utils.java")
-    require.config("raw_data_path")
+def configure(context):
+    context.stage("matsim.java.pt2matsim")
+    context.stage("utils.java")
+    context.config("data_path")
 
 def execute(context):
     jar, tmp_path = context.stage("matsim.java.pt2matsim")
@@ -20,7 +19,7 @@ def execute(context):
 
     content = content.replace(
         '<param name="osmFile" value="null" />',
-        '<param name="osmFile" value="%s/osm/switzerland-latest.osm.gz" />' % context.config["raw_data_path"]
+        '<param name="osmFile" value="%s/osm/switzerland-latest.osm.gz" />' % context.config("data_path")
     )
     content = content.replace(
         '<param name="outputCoordinateSystem" value="null" />',

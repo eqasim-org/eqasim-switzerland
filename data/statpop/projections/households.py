@@ -1,5 +1,6 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 import data.constants as c
 
 CANTON_TO_ID = {
@@ -58,21 +59,21 @@ CANTON_TO_ID_MULTILANGUAGE = {"Zürich": 1,
                               "Genève": 25,
                               "Jura": 26}
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.config("scaling_year")
+def configure(context):
+    context.config("data_path")
+    context.config("scaling_year")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config("data_path")
 
     # Select year in the future to project to
-    scaling_year = np.max([c.BASE_SCALING_YEAR, context.config["scaling_year"]])
+    scaling_year = np.max([c.BASE_SCALING_YEAR, context.config("scaling_year")])
 
     if scaling_year < c.BASE_PROJECTED_YEAR:
 
         # Load csv for historical data
         df_households = pd.read_csv(
-            "%s/projections/households/px-x-0102020000_402.csv" % raw_data_path,
+            "%s/projections/households/px-x-0102020000_402.csv" % data_path,
             sep=";", encoding="latin1", skiprows=1).rename({
             'Kanton (-) / Bezirk (>>) / Gemeinde (......)':"canton_id"
         }, axis=1)
@@ -110,7 +111,7 @@ def execute(context):
 
         # Load excel for projections
         df_households = pd.read_excel(
-            "%s/projections/households/su-d-01.03.03.03.01.xlsx" % raw_data_path,
+            "%s/projections/households/su-d-01.03.03.03.01.xlsx" % data_path,
             header=[0,1], skiprows = 2, nrows = 27, index_col = 0).reset_index().rename({
                 "index": "canton_id",
                 "Total": "total",

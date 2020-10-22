@@ -1,14 +1,11 @@
-import gzip
-from tqdm import tqdm
-import pandas as pd
-import numpy as np
-from sklearn.neighbors import KDTree
 import numpy.linalg as la
+import pandas as pd
 
-def configure(context, require):
-    require.stage("data.microcensus.trips")
-    require.stage("data.microcensus.persons")
-    require.stage("data.microcensus.commute")
+
+def configure(context):
+    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.commute")
 
 # TODO: Merge this into data.microcensus.commute
 

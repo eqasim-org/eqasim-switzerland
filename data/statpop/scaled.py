@@ -1,20 +1,21 @@
-import pandas as pd
 import numpy as np
-from data.statpop.multilevelipf import multilevelipf
-import data.constants as c
+import pandas as pd
 
-def configure(context, require):
-    require.config("output_path")
-    require.config("enable_scaling", default=False)
-    require.config("scaling_year", default=c.BASE_SCALING_YEAR)
-    require.stage("data.statpop.statpop")
-    require.stage("data.statpop.projections.households")
-    require.stage("data.statpop.projections.population")
+import data.constants as c
+from data.statpop.multilevelipf import multilevelipf
+
+
+def configure(context):
+    context.config("enable_scaling", default=False)
+    context.config("scaling_year", default=c.BASE_SCALING_YEAR)
+    context.stage("data.statpop.statpop")
+    context.stage("data.statpop.projections.households")
+    context.stage("data.statpop.projections.population")
 
 def execute(context):
     df_statpop = context.stage("data.statpop.statpop")
 
-    if context.config["enable_scaling"]:
+    if context.config("enable_scaling"):
 
         df_household_controls = context.stage("data.statpop.projections.households")
         df_population_controls = context.stage("data.statpop.projections.population")
@@ -33,7 +34,8 @@ def execute(context):
                                                 group_controls=[df_household_controls], group_id="household_id",
                                                 individual_controls=[df_population_controls], individual_id="person_id")
         # perform fitting
-        df_statpop = multilevelipf.fit(problem, algorithm="ipu", tol_abs=1e-2, tol_rel=1e-2, maxiter=100, parallelize_on="canton_id")
+        df_statpop = multilevelipf.fit(None, problem, algorithm="ipu", tol_abs=1e-2, tol_rel=1e-2, max_iter=100,
+                                       parallelize_on="canton_id")
         del df_statpop["household_size_class_projection"]
 
         # TODO: The expansion factors are rounded here by simply taking first the integer part

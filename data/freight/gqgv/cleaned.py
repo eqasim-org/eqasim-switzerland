@@ -1,5 +1,3 @@
-import pandas as pd
-
 RENAMES = {"ORIGIN":"origin_nuts_id",
            "DESTINATION":"destination_nuts_id",
            "CH_MUNICIPALITY_ORIGIN": "origin_municipality",
@@ -32,9 +30,9 @@ VEHICLE_TYPES = {
 }
 
 
-def configure(context, require):
-    require.stage("data.freight.gqgv.raw")
-    require.stage("data.spatial.nuts")
+def configure(context):
+    context.stage("data.freight.gqgv.raw")
+    context.stage("data.spatial.nuts")
 
 
 def execute(context):

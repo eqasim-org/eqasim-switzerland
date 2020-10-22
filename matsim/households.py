@@ -1,14 +1,14 @@
 import gzip
-from tqdm import tqdm
-import data.constants as c
-import numpy as np
 import io
+
+import numpy as np
+
+import data.constants as c
 import matsim.writers
 
 
-def configure(context, require):
-    require.stage("population.sociodemographics")
-
+def configure(context):
+    context.stage("population.sociodemographics")
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class",
           "municipality_type", "sp_region", "canton_id", "ovgk"]
@@ -66,8 +66,8 @@ def execute(context):
             household = [None, None]
             member_ids = []
 
-            for item in tqdm(df_persons.itertuples(), total=len(df_persons)):
-                # if item[4] >= c.MZ_AGE_THRESHOLD: # Here we filter out young person without activity chain
+            for item in context.progress(df_persons.itertuples(), total=len(df_persons)):
+                # if item[4] >= c.MZ_AGE_THRESHOLD: # Here we filter out young person without actvity chain
                 if not household[1] == item[1]:
                     if household[0] is not None: add_household(writer, household, member_ids)
                     household, member_ids = item, [item[2]]

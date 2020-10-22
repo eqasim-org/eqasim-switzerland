@@ -1,19 +1,21 @@
-import pandas as pd
 import numpy as np
-import data.utils
+import pandas as pd
+
 import data.constants as c
 import data.microcensus.income
+import data.utils
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.stage("data.microcensus.households")
-    require.stage("data.microcensus.trips")
+
+def configure(context):
+    context.config("data_path")
+    context.stage("data.microcensus.households")
+    context.stage("data.microcensus.trips")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config("data_path")
 
     df_mz_persons = pd.read_csv(
-        "%s/microcensus/zielpersonen.csv" % raw_data_path,
+        "%s/microcensus/zielpersonen.csv" % data_path,
         sep = ",", encoding = "latin1", parse_dates = ["USTag"]
     )
 

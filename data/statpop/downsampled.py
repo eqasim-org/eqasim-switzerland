@@ -1,13 +1,13 @@
 import numpy as np
 
-def configure(context, require):
-    require.stage("data.statpop.scaled")
+def configure(context):
+    context.stage("data.statpop.scaled")
 
 def execute(context):
     df = context.stage("data.statpop.scaled")
 
     if "input_downsampling" in context.config:
-        probability = context.config["input_downsampling"]
+        probability = context.config("input_downsampling")
         print("Downsampling (%f)" % probability)
 
         household_ids = np.unique(df["household_id"])

@@ -1,10 +1,9 @@
-import subprocess as sp
 import os.path
 
-def configure(context, require):
-    require.stage("matsim.java.pt2matsim")
-    require.stage("matsim.network.mapped")
-    require.stage("utils.java")
+def configure(context):
+    context.stage("matsim.java.pt2matsim")
+    context.stage("matsim.network.mapped")
+    context.stage("utils.java")
 
 def execute(context):
     java = context.stage("utils.java")

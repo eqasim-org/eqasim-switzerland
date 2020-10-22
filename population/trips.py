@@ -1,13 +1,12 @@
-import gzip
-from tqdm import tqdm
 import pandas as pd
-import numpy as np
+
 import data.constants as c
 
-def configure(context, require):
-    require.stage("population.sociodemographics")
-    require.stage("data.microcensus.trips")
-    require.stage("data.microcensus.commute")
+
+def configure(context):
+    context.stage("population.sociodemographics")
+    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.commute")
 
 def execute(context):
     df_persons = context.stage("population.sociodemographics")[[

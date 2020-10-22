@@ -1,9 +1,11 @@
+import os
+from datetime import datetime
+
 import jinja2
 import yaml
-from datetime import datetime
-import os
 
-def configure(context, require):
+
+def configure(context):
     pass
 
 def min_date(dates):

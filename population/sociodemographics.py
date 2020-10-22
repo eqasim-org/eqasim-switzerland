@@ -1,11 +1,13 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 import data.constants as c
 
-def configure(context, require):
-    require.stage("population.matching")
-    require.stage("data.statpop.downsampled")
-    require.stage("data.microcensus.persons")
+
+def configure(context):
+    context.stage("population.matching")
+    context.stage("data.statpop.downsampled")
+    context.stage("data.microcensus.persons")
 
 def execute(context):
     df_matching, unmatched_ids = context.stage("population.matching")

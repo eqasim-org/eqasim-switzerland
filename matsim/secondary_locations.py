@@ -1,19 +1,16 @@
-import gzip
-from tqdm import tqdm
-import pandas as pd
-import numpy as np
-from sklearn.neighbors import KDTree
-import numpy.linalg as la
 import os
-import eqasim.location_assignment as eqla
 
-def configure(context, require):
-    require.stage("matsim.population")
-    require.stage("matsim.facilities")
-    require.stage("data.microcensus.trips")
-    require.stage("data.microcensus.persons")
-    require.stage("matsim.java.eqasim")
-    require.stage("utils.java")
+import eqasim.location_assignment as eqla
+import pandas as pd
+
+
+def configure(context):
+    context.stage("matsim.population")
+    context.stage("matsim.facilities")
+    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.persons")
+    context.stage("matsim.java.eqasim")
+    context.stage("utils.java")
 
 def execute(context):
     primary_activities = ["home", "work", "education"]
@@ -56,7 +53,7 @@ def execute(context):
     input_facilities_path = context.stage("matsim.facilities")
 
     output_population_path = "%s/population_with_locations.xml.gz" % context.cache_path
-    number_of_threads = context.config["threads"]
+    number_of_threads = context.config("threads")
 
     java(
         context.stage("matsim.java.eqasim"),

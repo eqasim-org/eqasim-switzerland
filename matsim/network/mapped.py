@@ -1,11 +1,10 @@
-import subprocess as sp
 import os.path
 
-def configure(context, require):
-    require.stage("matsim.java.pt2matsim")
-    require.stage("utils.java")
-    require.stage("matsim.network.convert_osm")
-    require.stage("matsim.network.convert_hafas")
+def configure(context):
+    context.stage("matsim.java.pt2matsim")
+    context.stage("utils.java")
+    context.stage("matsim.network.convert_osm")
+    context.stage("matsim.network.convert_hafas")
 
 def execute(context):
     jar, tmp_path = context.stage("matsim.java.pt2matsim")
@@ -32,7 +31,7 @@ def execute(context):
     )
     content = content.replace(
         '<param name="numOfThreads" value="2" />',
-        '<param name="numOfThreads" value="%d" />' % context.config["threads"]
+        '<param name="numOfThreads" value="%d" />' % context.config("threads")
     )
     content = content.replace(
         '<param name="outputNetworkFile" value="" />',

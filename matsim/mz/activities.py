@@ -1,12 +1,9 @@
-import gzip
-from tqdm import tqdm
 import pandas as pd
-import numpy as np
-import data.constants as c
 
-def configure(context, require):
-    require.stage("data.microcensus.persons")
-    require.stage("data.microcensus.trips")
+
+def configure(context):
+    context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.trips")
 
 def execute(context):
     df_trips = pd.DataFrame(context.stage("data.microcensus.trips"), copy = True)

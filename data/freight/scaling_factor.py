@@ -1,11 +1,10 @@
-import pandas as pd
 import numpy as np
 
 
-def configure(context, require):
-    require.stage("data.freight.gte.cleaned")
-    require.stage("data.freight.gqgv.cleaned")
-    require.stage("data.freight.projections")
+def configure(context):
+    context.stage("data.freight.gte.cleaned")
+    context.stage("data.freight.gqgv.cleaned")
+    context.stage("data.freight.projections")
 
 
 def execute(context):

@@ -1,5 +1,6 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 import data.constants as c
 
 CANTON_TO_ID = {"Zürich": 1,
@@ -29,20 +30,20 @@ CANTON_TO_ID = {"Zürich": 1,
                 "Genève": 25,
                 "Jura": 26}
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.config("scaling_year")
+def configure(context):
+    context.config("data_path")
+    context.config("scaling_year")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config("data_path")
 
     # Select year in the future to project to
-    scaling_year = np.max([c.BASE_SCALING_YEAR, context.config["scaling_year"]])
+    scaling_year = np.max([c.BASE_SCALING_YEAR, context.config("scaling_year")])
 
     if scaling_year < c.BASE_PROJECTED_YEAR:
 
         # load excel data
-        df = pd.read_csv("%s/projections/population/px-x-0102010000_101.csv" % raw_data_path, sep=";",
+        df = pd.read_csv("%s/projections/population/px-x-0102010000_101.csv" % data_path, sep=";",
                          encoding="latin1", skiprows=1).rename({
             "Kanton (-) / Bezirk (>>) / Gemeinde (......)":"canton_id",
             "Jahr":"year",
@@ -64,7 +65,7 @@ def execute(context):
     else:
 
         # load csv projection data
-        df = pd.read_csv("%s/projections/population/px-x-0104020000_101.csv" % raw_data_path, sep=";",
+        df = pd.read_csv("%s/projections/population/px-x-0104020000_101.csv" % data_path, sep=";",
                          encoding="latin1", skiprows=1).rename({
             "Kanton": "canton_id",
             "Staatsangehörigkeit (Kategorie)":"nationality",

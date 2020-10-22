@@ -1,17 +1,18 @@
-import shutil
 import os.path
+import shutil
 
-def configure(context, require):
-    require.stage("matsim.run")
-    require.config("output_path")
-    require.config("output_id")
-    require.stage("contracts.contracts")
+
+def configure(context):
+    context.stage("matsim.run")
+    context.config("output_path")
+    context.config("output_id")
+    context.stage("contracts.contracts")
 
 def execute(context):
     results_path = context.stage("matsim.run")
 
-    output_path = context.config["output_path"]
-    output_id = context.config["output_id"]
+    output_path = context.config("output_path")
+    output_id = context.config("output_id")
 
     if not os.path.isdir(output_path):
         raise RuntimeError("Output path does not exist:", output_path)

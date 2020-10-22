@@ -1,16 +1,14 @@
-import gzip
-from tqdm import tqdm
-import pandas as pd
-import numpy as np
-from sklearn.neighbors import KDTree
 import numpy.linalg as la
+import pandas as pd
+from sklearn.neighbors import KDTree
 
-def configure(context, require):
-    require.stage("population.sociodemographics")
-    require.stage("population.activities")
-    require.stage("population.spatial.by_activity.primary_locations")
-    require.stage("data.microcensus.commute_extrapolation")
-    require.stage("population.opportunities")
+
+def configure(context):
+    context.stage("population.sociodemographics")
+    context.stage("population.activities")
+    context.stage("population.spatial.by_activity.primary_locations")
+    context.stage("data.microcensus.commute_extrapolation")
+    context.stage("population.opportunities")
 
 def execute(context):
     df_activities = context.stage("population.activities")

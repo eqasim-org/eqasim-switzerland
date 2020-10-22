@@ -1,13 +1,10 @@
-import pandas as pd
 import numpy as np
-from tqdm import tqdm
-import data.spatial.zone_shapes
 from sklearn.neighbors import KDTree
-import data.constants as c
 
-def configure(context, require):
-    require.stage("data.statent.statent")
-    require.stage("population.sociodemographics")
+
+def configure(context):
+    context.stage("data.statent.statent")
+    context.stage("population.sociodemographics")
 
 def execute(context):
     df_persons = context.stage("population.sociodemographics")
