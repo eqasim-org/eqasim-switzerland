@@ -26,6 +26,7 @@ def configure(context):
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.ovgk")
 
+
 def execute(context):
     df_persons = context.stage("data.statpop.persons")
     df_households = context.stage("data.statpop.households")
@@ -41,12 +42,12 @@ def execute(context):
     df_persons = df_persons[df_persons["population_type"] == 1]
 
     # Merge STATPOP persons and households into a list of persons with houeshold attributes
-    df = pd.merge(df_persons, df_link, on = ("person_id", "municipality_id"))
-    df = pd.merge(df, df_households, on = "household_id")
+    df = pd.merge(df_persons, df_link, on=("person_id", "municipality_id"))
+    df = pd.merge(df, df_households, on="household_id")
 
     # Impute the houeshold size for each STATPOP person
-    df_size = df.groupby("household_id").size().reset_index(name = "household_size")
-    df = pd.merge(df, df_size, on = "household_id")
+    df_size = df.groupby("household_id").size().reset_index(name="household_size")
+    df = pd.merge(df, df_size, on="household_id")
 
     # Only allow plausible households
     df = df[df["plausible"] == 1]
@@ -58,16 +59,16 @@ def execute(context):
     df_filter = df[["household_id", "age"]].groupby("household_id").max().reset_index()
     df_filter.loc[:, "all_under_age"] = df_filter["age"] < c.MINIMUM_AGE_PER_HOUSEHOLD
 
-    df = pd.merge(df, df_filter[["household_id", "all_under_age"]], on = "household_id")
+    df = pd.merge(df, df_filter[["household_id", "all_under_age"]], on="household_id")
     df = df[~df["all_under_age"]]
 
     # This mapping comes from KM
-    for from_value, to_value in zip( (1, 2, 3, 4, 5, 6, 7, -9), (
-        c.MARITAL_STATUS_SINGLE, c.MARITAL_STATUS_MARRIED,
-        c.MARITAL_STATUS_SEPARATE, c.MARITAL_STATUS_SEPARATE,
-        c.MARITAL_STATUS_SINGLE, c.MARITAL_STATUS_MARRIED,
-        c.MARITAL_STATUS_SEPARATE, c.MARITAL_STATUS_SINGLE
-    ) ):
+    for from_value, to_value in zip((1, 2, 3, 4, 5, 6, 7, -9), (
+            c.MARITAL_STATUS_SINGLE, c.MARITAL_STATUS_MARRIED,
+            c.MARITAL_STATUS_SEPARATE, c.MARITAL_STATUS_SEPARATE,
+            c.MARITAL_STATUS_SINGLE, c.MARITAL_STATUS_MARRIED,
+            c.MARITAL_STATUS_SEPARATE, c.MARITAL_STATUS_SINGLE
+    )):
         df.loc[df["marital_status"] == from_value, "marital_status_new"] = to_value
 
     df["marital_status"] = df["marital_status_new"]
@@ -91,25 +92,26 @@ def execute(context):
     df_quarters = context.stage("data.spatial.quarters")
 
     df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
-    df_spatial = data.spatial.utils.to_gpd(df_spatial, "home_x", "home_y")
+    df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y")
 
-    df_spatial = data.spatial.utils.impute(df_spatial, df_municipalities, "person_id", "municipality_id")[[
+    df_spatial = data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id")[[
         "person_id", "municipality_id", "geometry"
     ]]
 
-    df_spatial = data.spatial.utils.impute(df_spatial, df_quarters, "person_id", "quarter_id", fix_by_distance = False)[[
-        "person_id", "municipality_id", "quarter_id", "geometry"
-    ]]
+    df_spatial = \
+        data.spatial.utils.impute(context, df_spatial, df_quarters, "person_id", "quarter_id", fix_by_distance=False)[[
+            "person_id", "municipality_id", "quarter_id", "geometry"
+        ]]
 
     df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
 
-    assert(len(df) == len(df_spatial))
+    assert (len(df) == len(df_spatial))
 
     del df["municipality_id"]
     df = pd.merge(
         df, df_spatial[["person_id", "zone_id", "municipality_type", "municipality_id", "quarter_id"]],
-        on = "person_id"
+        on="person_id"
     )
 
     df["home_zone_id"] = df["zone_id"]
@@ -128,8 +130,8 @@ def execute(context):
     # Impute OV Guteklasse
     print("Imputing ÖV Güteklasse ...")
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.ovgk.impute(df_ovgk, df_spatial, ["person_id"])
-    df = pd.merge(df, df_spatial[["person_id", "ovgk"]], on = ["person_id"], how = "left")
+    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"])
+    df = pd.merge(df, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
 
     # Save original statpop person and household ids
     df["statpop_person_id"] = df["person_id"].astype(int)

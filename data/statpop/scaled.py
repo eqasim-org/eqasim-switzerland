@@ -34,7 +34,8 @@ def execute(context):
                                                 group_controls=[df_household_controls], group_id="household_id",
                                                 individual_controls=[df_population_controls], individual_id="person_id")
         # perform fitting
-        df_statpop = multilevelipf.fit(problem, algorithm="ipu", tol_abs=1e-2, tol_rel=1e-2, maxiter=100, parallelize_on="canton_id")
+        df_statpop = multilevelipf.fit(None, problem, algorithm="ipu", tol_abs=1e-2, tol_rel=1e-2, max_iter=100,
+                                       parallelize_on="canton_id")
         del df_statpop["household_size_class_projection"]
 
         # TODO: The expansion factors are rounded here by simply taking first the integer part

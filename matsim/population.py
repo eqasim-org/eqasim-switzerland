@@ -15,6 +15,7 @@ def configure(context):
     context.config("use_freight", default=False)
     context.stage("freight.trips")
 
+
 class PersonWriter:
     def __init__(self, person):
         self.person = person
@@ -46,13 +47,14 @@ class PersonWriter:
         writer.end_attributes()
 
         # Plan
-        writer.start_plan(selected = True)
+        writer.start_plan(selected=True)
 
         home_location = writer.location(self.activities[0][8], self.activities[0][9], "home%s" % self.person[13])
 
         for i in range(len(self.activities)):
             activity = self.activities[i]
-            location = home_location if np.isnan(activity[10]) else writer.location(activity[8], activity[9], int(activity[10]))
+            location = home_location if np.isnan(activity[10]) else writer.location(activity[8], activity[9],
+                                                                                    int(activity[10]))
 
             start_time = activity[3] if not np.isnan(activity[3]) else None
             end_time = activity[4] if not np.isnan(activity[4]) else None
@@ -65,6 +67,7 @@ class PersonWriter:
 
         writer.end_plan()
         writer.end_person()
+
 
 class FreightWriter:
     def __init__(self, freight_agent):
@@ -81,7 +84,7 @@ class FreightWriter:
         writer.end_attributes()
 
         # Plan
-        writer.start_plan(selected = True)
+        writer.start_plan(selected=True)
 
         start_location = writer.location(self.freight_agent[2], self.freight_agent[3], None)
         end_location = writer.location(self.freight_agent[4], self.freight_agent[5], None)
@@ -98,7 +101,7 @@ class FreightWriter:
         writer.add_leg(str(self.freight_agent[7]), departure_time, arrival_time - departure_time)
 
         # unloading activity
-        writer.start_activity("freight_unloading", end_location, arrival_time, 30*3600)
+        writer.start_activity("freight_unloading", end_location, arrival_time, 30 * 3600)
         writer.start_attributes()
         writer.end_attributes()
         writer.end_activity()
@@ -106,8 +109,14 @@ class FreightWriter:
         writer.end_plan()
         writer.end_person()
 
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke", "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id", "mz_head_id"]
-ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x", "location_y", "location_id", "following_mode"]
+
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y",
+                 "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke",
+                 "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id",
+                 "mz_head_id"]
+ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x",
+                   "location_y", "location_id", "following_mode"]
+
 
 def execute(context):
     cache_path = context.cache_path
@@ -115,17 +124,17 @@ def execute(context):
     df_activities = context.stage("population.activities")
 
     # Attach following modes to activities
-    df_trips = pd.DataFrame(context.stage("population.trips"), copy = True)[["person_id", "trip_id", "mode"]]
+    df_trips = pd.DataFrame(context.stage("population.trips"), copy=True)[["person_id", "trip_id", "mode"]]
     df_trips.columns = ["person_id", "activity_id", "following_mode"]
-    df_activities = pd.merge(df_activities, df_trips, on = ["person_id", "activity_id"], how = "left")
+    df_activities = pd.merge(df_activities, df_trips, on=["person_id", "activity_id"], how="left")
 
     # Attach locations to activities
     df_locations = context.stage("population.spatial.locations")
-    df_activities = pd.merge(df_activities, df_locations, on = ["person_id", "activity_id"], how = "left")
+    df_activities = pd.merge(df_activities, df_locations, on=["person_id", "activity_id"], how="left")
 
     # Bring in correct order (although it should already be)
-    df_persons = df_persons.sort_values(by = "person_id")
-    df_activities = df_activities.sort_values(by = ["person_id", "activity_id"])
+    df_persons = df_persons.sort_values(by="person_id")
+    df_activities = df_activities.sort_values(by=["person_id", "activity_id"])
 
     df_persons = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
@@ -137,11 +146,11 @@ def execute(context):
     number_of_written_activities = 0
 
     with gzip.open("%s/population.xml.gz" % cache_path, "w+") as f:
-        with io.BufferedWriter(f, buffer_size = 1024  * 1024 * 1024 * 2) as raw_writer:
+        with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:
             writer = matsim.writers.PopulationWriter(raw_writer)
             writer.start_population()
 
-            with context.progress(total = len(df_persons), desc = "Writing persons ...") as progress:
+            with context.progress(total=len(df_persons), desc="Writing persons ...") as progress:
                 try:
                     while True:
                         person = next(person_iterator)
@@ -152,7 +161,7 @@ def execute(context):
                         while not is_last:
                             activity = next(activity_iterator)
                             is_last = activity[7]
-                            assert(person[1] == activity[1])
+                            assert (person[1] == activity[1])
 
                             person_writer.add_activity(activity)
                             number_of_written_activities += 1
@@ -172,7 +181,7 @@ def execute(context):
                 freight_iterator = iter(df_freight.itertuples())
                 number_of_written_freight = 0
 
-                with context.progress(total = len(df_freight), desc = "Writing freight agents ...") as progress:
+                with context.progress(total=len(df_freight), desc="Writing freight agents ...") as progress:
                     try:
                         while True:
                             freight = next(freight_iterator)

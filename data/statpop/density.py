@@ -1,8 +1,5 @@
 import numpy as np
 from sklearn.neighbors import KDTree
-import data.constants as c
-import numpy as np
-from sklearn.neighbors import KDTree
 
 import data.constants as c
 

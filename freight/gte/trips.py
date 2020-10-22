@@ -11,6 +11,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.config("input_downsampling")
 
+
 def execute(context):
     demands, origin_pdf_matrices, od_pdf_matrices = context.stage("data.freight.gte.od")
     input_downsampling = context.config("input_downsampling")
@@ -23,7 +24,7 @@ def execute(context):
         demand = np.round(input_downsampling * demands[vehicle_type])
 
         # compute origin counts
-        origin_counts = np.random.multinomial(demand, origin_pdf_matrices[vehicle_type].values[:,0])
+        origin_counts = np.random.multinomial(demand, origin_pdf_matrices[vehicle_type].values[:, 0])
         counts = np.zeros(od_pdf_matrices[vehicle_type].shape, dtype=np.int)
 
         # compute origin-destination counts
@@ -35,14 +36,14 @@ def execute(context):
         assert (len(counts) == len(origin_counts))
 
         # generate single trips
-        with context.progress(label="Creating %i %s trips ..." % (int(demand), vehicle_type), total=np.sum(counts)) as progress:
+        with context.progress(label="Creating %i %s trips ..." % (int(demand), vehicle_type),
+                              total=np.sum(counts)) as progress:
             for origin_index in range(counts.shape[0]):
                 for destination_index in range(counts.shape[1]):
 
                     number_of_trips = counts[origin_index, destination_index]
 
                     if number_of_trips > 0:
-
                         origin_id = od_pdf_matrices[vehicle_type].index[origin_index]
                         destination_id = od_pdf_matrices[vehicle_type].columns[destination_index]
 
@@ -50,7 +51,7 @@ def execute(context):
                                           number_of_trips, axis=0)
 
                         trips_frames.append(pd.DataFrame(columns=["origin_id", "destination_id", "vehicle_type"],
-                                                     data=trips))
+                                                         data=trips))
 
                     progress.update(number_of_trips)
 

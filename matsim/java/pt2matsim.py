@@ -1,5 +1,4 @@
 import subprocess as sp
-import subprocess as sp
 
 
 def configure(context):

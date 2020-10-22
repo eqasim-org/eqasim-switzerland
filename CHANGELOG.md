@@ -1,4 +1,7 @@
-**Version v2 (master)**
+**3.0.0**
+- Port code to use `synpp`
+
+**2.0.0**
 
 - Update Maven dependency
 - Update eqasim to 1.0.5

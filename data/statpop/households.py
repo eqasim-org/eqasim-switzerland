@@ -1,6 +1,6 @@
 def configure(context):
     context.config("data_path")
-    # require.cache = False
+
 
 def execute(context):
     data_path = context.config("data_path")
@@ -10,13 +10,13 @@ def execute(context):
 
     with xz.open("%s/statpop/STATPOP_2012_PHH.csv.xz" % data_path) as f:
         fields = {
-            "householdIdNum" : int,
-            "Plausibel" : int
+            "householdIdNum": int,
+            "Plausibel": int
         }
 
         renames = {
-            "householdIdNum" : "household_id",
-            "Plausibel" : "plausible"
+            "householdIdNum": "household_id",
+            "Plausibel": "plausible"
         }
 
-        return data.utils.read_csv(f, fields, renames, total = 3488739)
+        return data.utils.read_csv(context, f, fields, renames, total=3488739)

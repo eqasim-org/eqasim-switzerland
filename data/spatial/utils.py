@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import shapely.geometry as geo
 from sklearn.neighbors import KDTree
-from tqdm import tqdm
 
 
 def sample_coordinates(row, count):
@@ -11,35 +10,37 @@ def sample_coordinates(row, count):
     bounds = row["geometry"].bounds
 
     while len(samples) < count:
-        x = bounds[0] + np.random.random(size = (1000,)) * (bounds[2] - bounds[0])
-        y = bounds[1] + np.random.random(size = (1000,)) * (bounds[3] - bounds[1])
+        x = bounds[0] + np.random.random(size=(1000,)) * (bounds[2] - bounds[0])
+        y = bounds[1] + np.random.random(size=(1000,)) * (bounds[3] - bounds[1])
         points = map(geo.Point, zip(x, y))
         points = [point for point in points if row["geometry"].contains(point)]
         samples += points
 
     return np.array(list(map(lambda p: (p.x, p.y), samples[:count])))
 
-def to_gpd(df, x = "x", y = "y", crs = {"init" : "EPSG:2056"}):
+
+def to_gpd(context, df, x="x", y="y", crs={"init": "EPSG:2056"}):
     df["geometry"] = [
-        geo.Point(*coord) for coord in tqdm(
-            zip(df[x], df[y]), total = len(df),
-            desc = "Converting coordinates"
+        geo.Point(*coord) for coord in context.progress(
+            zip(df[x], df[y]), total=len(df),
+            desc="Converting coordinates"
         )]
     df = gpd.GeoDataFrame(df)
     df.crs = crs
 
-    if not crs == {"init" : "EPSG:2056"}:
-        df = df.to_crs({"init" : "EPSG:2056"})
+    if not crs == {"init": "EPSG:2056"}:
+        df = df.to_crs({"init": "EPSG:2056"})
 
     return df
 
-def impute(df_points, df_zones, point_id_field, zone_id_field, fix_by_distance = True, chunk_size = 10000):
-    assert(type(df_points) == gpd.GeoDataFrame)
-    assert(type(df_zones) == gpd.GeoDataFrame)
 
-    assert(point_id_field in df_points.columns)
-    assert(zone_id_field in df_zones.columns)
-    assert(not zone_id_field in df_points.columns)
+def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_distance=True, chunk_size=10000):
+    assert (type(df_points) == gpd.GeoDataFrame)
+    assert (type(df_zones) == gpd.GeoDataFrame)
+
+    assert (point_id_field in df_points.columns)
+    assert (zone_id_field in df_zones.columns)
+    assert (not zone_id_field in df_points.columns)
 
     df_original = df_points
     df_points = df_points[[point_id_field, "geometry"]]
@@ -49,8 +50,8 @@ def impute(df_points, df_zones, point_id_field, zone_id_field, fix_by_distance =
 
     result = []
     chunk_count = max(1, int(len(df_points) / chunk_size))
-    for chunk in tqdm(np.array_split(df_points, chunk_count), total = chunk_count):
-        result.append(gpd.sjoin(df_zones, chunk, op = "contains", how = "right"))
+    for chunk in context.progress(np.array_split(df_points, chunk_count), total=chunk_count):
+        result.append(gpd.sjoin(df_zones, chunk, op="contains", how="right"))
     df_points = pd.concat(result).reset_index()
 
     if "left_index" in df_points: del df_points["left_index"]
@@ -65,8 +66,8 @@ def impute(df_points, df_zones, point_id_field, zone_id_field, fix_by_distance =
 
         df_missing = df_points[invalid_mask]
         coordinates = np.vstack([df_missing["geometry"].centroid.x, df_missing["geometry"].centroid.y]).T
-        indices = kd_tree.query(coordinates, return_distance = False).flatten()
+        indices = kd_tree.query(coordinates, return_distance=False).flatten()
 
         df_points.loc[invalid_mask, zone_id_field] = df_zones.iloc[indices][zone_id_field].values
 
-    return pd.merge(df_original, df_points[[point_id_field, zone_id_field]], on = point_id_field, how = "left")
+    return pd.merge(df_original, df_points[[point_id_field, zone_id_field]], on=point_id_field, how="left")

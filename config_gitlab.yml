@@ -18,3 +18,4 @@ config:
     scaling_year: 2045
     use_freight: true
     hafas_date: 01.10.2018
+    data_path: /nas/ivtmatsim/scenarios/switzerland/data

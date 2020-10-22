@@ -12,6 +12,7 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.statpop.downsampled")
 
+
 # TODO: The matching categories are as they are defined by Kirill here. However,
 # we should discuss about them. Wouldn't it have a big impact on how the activity
 # chains look like if a person is EMPLOYED or has a DRIVING LICENSE? Probably much
@@ -37,10 +38,11 @@ def execute(context):
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
     df_source = pd.DataFrame(df_mz[
-        (is_weekend_scenario & df_mz["weekend"]) # use only weekend samples for a weekend scenario
-             |
-        (~is_weekend_scenario & ~df_mz["weekend"]) # and only weekday samples for a weekday
-    ])
+                                 (is_weekend_scenario & df_mz[
+                                     "weekend"])  # use only weekend samples for a weekend scenario
+                                 |
+                                 (~is_weekend_scenario & ~df_mz["weekend"])  # and only weekday samples for a weekday
+                                 ])
 
     df_statpop = context.stage("data.statpop.downsampled")
     number_of_statpop_persons = len(np.unique(df_statpop["person_id"]))
@@ -58,8 +60,8 @@ def execute(context):
         "household_weight",
         ["age_class", "sex", "marital_status"],
         ["household_size_class", "municipality_type"],
-        runners = hdm_runners,
-        minimum_source_samples = hdm_minimum_source_samples
+        runners=hdm_runners,
+        minimum_source_samples=hdm_minimum_source_samples
     )
 
     # Remove and track unmatchable houesholds (i.e. head of household)
@@ -85,8 +87,8 @@ def execute(context):
     print("  Removed persons: ", removed_persons_count)
     print("")
 
-    assert(len(df_target) == initial_target_length - removed_houesholds_count)
-    assert(len(df_statpop) == initial_statpop_length - removed_persons_count)
+    assert (len(df_target) == initial_target_length - removed_houesholds_count)
+    assert (len(df_statpop) == initial_statpop_length - removed_persons_count)
 
     # Convert IDs
     df_target["hdm_source_id"] = df_target["hdm_source_id"].astype(np.int)
@@ -100,24 +102,24 @@ def execute(context):
         df_source[[
             "person_id", "income_class", "number_of_cars_class", "number_of_bikes_class"
         ]],
-        left_on = "hdm_source_id", right_on = "person_id"
+        left_on="hdm_source_id", right_on="person_id"
     )
 
     df_attributes["mz_head_id"] = df_attributes["hdm_source_id"]
     del df_attributes["hdm_source_id"]
     del df_attributes["person_id"]
 
-    assert(len(df_attributes) == len(df_target))
+    assert (len(df_attributes) == len(df_target))
 
     # Attach attrbiutes to STATPOP for the second matching
 
     initial_statpop_size = len(df_statpop)
 
     df_statpop = pd.merge(
-        df_statpop, df_attributes, on = "household_id"
+        df_statpop, df_attributes, on="household_id"
     )
 
-    assert(len(df_statpop) == initial_statpop_size)
+    assert (len(df_statpop) == initial_statpop_size)
     del df_attributes
 
     # Match persons
@@ -130,8 +132,8 @@ def execute(context):
         "person_weight",
         ["age_class", "sex", "marital_status"],
         ["household_size_class", "municipality_type", "income_class", "number_of_cars_class", "number_of_bikes_class"],
-        runners = hdm_runners,
-        minimum_source_samples = hdm_minimum_source_samples
+        runners=hdm_runners,
+        minimum_source_samples=hdm_minimum_source_samples
     )
 
     # Remove and track unmatchable persons
@@ -158,33 +160,35 @@ def execute(context):
     print("  Removed household members: ", removed_members_count)
     print("")
 
-    assert(len(df_target) == initial_target_length - removed_persons_count)
-    assert(len(df_statpop) == initial_statpop_length - removed_members_count)
+    assert (len(df_target) == initial_target_length - removed_persons_count)
+    assert (len(df_statpop) == initial_statpop_length - removed_members_count)
 
     # Extract only the matching information
 
     df_matching = pd.merge(
-        df_statpop[[ "person_id", "household_id", "mz_head_id" ]],
-        df_target[[ "person_id", "hdm_source_id" ]],
-        on = "person_id", how = "left")
+        df_statpop[["person_id", "household_id", "mz_head_id"]],
+        df_target[["person_id", "hdm_source_id"]],
+        on="person_id", how="left")
 
     df_matching["mz_person_id"] = df_matching["hdm_source_id"]
     del df_matching["hdm_source_id"]
 
-    assert(len(df_matching) == len(df_statpop))
+    assert (len(df_matching) == len(df_statpop))
 
     # Check that all person who don't have a MZ id now are under age
-    assert(np.all(df_statpop[
-        df_statpop["person_id"].isin(
-            df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
-        )
-    ]["age"] < c.MZ_AGE_THRESHOLD))
+    assert (np.all(df_statpop[
+                       df_statpop["person_id"].isin(
+                           df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
+                       )
+                   ]["age"] < c.MZ_AGE_THRESHOLD))
 
-    assert(not np.any(df_matching["mz_head_id"] == -1))
+    assert (not np.any(df_matching["mz_head_id"] == -1))
 
     print("Matching is done. In total, the following observations were removed from STATPOP: ")
-    print("  Households: %d (%.2f%%)" % ( len(removed_household_ids), 100.0 * len(removed_household_ids) / number_of_statpop_households ))
-    print("  Persons: %d (%.2f%%)" % ( len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_statpop_persons ))
+    print("  Households: %d (%.2f%%)" % (
+    len(removed_household_ids), 100.0 * len(removed_household_ids) / number_of_statpop_households))
+    print("  Persons: %d (%.2f%%)" % (
+    len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_statpop_persons))
 
     print(np.unique(df_matching["mz_head_id"]))
 

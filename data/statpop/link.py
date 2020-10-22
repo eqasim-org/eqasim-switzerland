@@ -1,6 +1,6 @@
 def configure(context):
     context.config("data_path")
-    # require.cache = False
+
 
 def execute(context):
     data_path = context.config("data_path")
@@ -21,4 +21,4 @@ def execute(context):
             "REPORTINGMUNICIPALITYID" : "municipality_id"
         }
 
-        return data.utils.read_csv(f, fields, renames, total = 8261094)
+        return data.utils.read_csv(context, f, fields, renames, total = 8261094)
