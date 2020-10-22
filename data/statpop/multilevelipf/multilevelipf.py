@@ -128,7 +128,7 @@ def parallel_fit(context, args):
     df = fitting_problem.df
     group_controls, individual_controls = compute_filters(fitting_problem)
 
-    with context.progress(total=maxiter, position=index, desc="progress #%s" % str(index)) as progress:
+    with context.progress(total=maxiter, position=index, label="progress #%s" % str(index)) as progress:
         for i in range(maxiter):
             df["r_factor"] = 1.0
             df = group_fit(df, group_controls, fitting_problem.group_id)

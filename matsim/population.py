@@ -150,7 +150,7 @@ def execute(context):
             writer = matsim.writers.PopulationWriter(raw_writer)
             writer.start_population()
 
-            with context.progress(total=len(df_persons), desc="Writing persons ...") as progress:
+            with context.progress(total=len(df_persons), label="Writing persons ...") as progress:
                 try:
                     while True:
                         person = next(person_iterator)
@@ -181,7 +181,7 @@ def execute(context):
                 freight_iterator = iter(df_freight.itertuples())
                 number_of_written_freight = 0
 
-                with context.progress(total=len(df_freight), desc="Writing freight agents ...") as progress:
+                with context.progress(total=len(df_freight), label="Writing freight agents ...") as progress:
                     try:
                         while True:
                             freight = next(freight_iterator)

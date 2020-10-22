@@ -23,7 +23,7 @@ def to_gpd(context, df, x="x", y="y", crs={"init": "EPSG:2056"}):
     df["geometry"] = [
         geo.Point(*coord) for coord in context.progress(
             zip(df[x], df[y]), total=len(df),
-            desc="Converting coordinates"
+            label="Converting coordinates"
         )]
     df = gpd.GeoDataFrame(df)
     df.crs = crs

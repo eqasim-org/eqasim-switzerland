@@ -44,7 +44,7 @@ class HotDeckMatcher:
         column_index = 0
 
         with self.context.progress(total=columns,
-                                   desc="Reading categories (%s) ..." % ("source" if source else "target"),
+                                   label="Reading categories (%s) ..." % ("source" if source else "target"),
                                    position=chunk_index) as progress:
             for field_name in self.all_fields:
                 for field_value in self.values[field_name]:
@@ -64,12 +64,12 @@ class HotDeckMatcher:
         # for each person which is later on used for the sampling.
         random = np.array([
             np.random.random() for _ in
-            self.context.progress(range(len(df_target)), desc="Generating random numbers", position=chunk_index)
+            self.context.progress(range(len(df_target)), label="Generating random numbers", position=chunk_index)
         ])
 
         with self.context.progress(total=len(self.field_masks),
                                    position=chunk_index,
-                                   desc="Hot Deck Matching") as progress:
+                                   label="Hot Deck Matching") as progress:
             for field_mask in self.field_masks:
                 field_mask = np.array(functools.reduce(lambda x, y: x + y, field_mask), dtype=np.bool)
                 source_mask = np.all(self.source_matrix[:, field_mask], axis=1)

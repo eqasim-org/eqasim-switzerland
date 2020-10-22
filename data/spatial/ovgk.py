@@ -20,7 +20,7 @@ def impute(context, df_ovgk, df, on):
     indices = np.array_split(np.arange(len(df)), 100)
     df_join = []
 
-    for chunk in context.progress(indices, desc="Imputing ÖV Güteklasse"):
+    for chunk in context.progress(indices, label="Imputing ÖV Güteklasse"):
         df_join.append(gpd.sjoin(df.iloc[chunk], df_ovgk, op="within")[on + ["ovgk"]])
 
     df_join = pd.concat(df_join)
