@@ -1,4 +1,5 @@
 **3.0.0**
+- Use new pyproj syntax without `init:`
 - Port code to use `synpp`
 
 **2.0.0**
