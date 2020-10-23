@@ -33,9 +33,9 @@ def execute(context):
         df = gpd.read_file(
             "%s/%s" % (data_path, shapefile),
             encoding="utf-8"
-        )  # .to_crs({'init': 'EPSG:2056'})
-        df.crs = {'init': 'EPSG:4326'}
-        df = df.to_crs({'init': 'EPSG:2056'})
+        )
+        df.crs = "EPSG:4326"
+        df = df.to_crs("EPSG:2056")
 
         df.loc[:, "nuts_id"] = df[id_field]
         df.loc[:, "nuts_name"] = df[name_field]
