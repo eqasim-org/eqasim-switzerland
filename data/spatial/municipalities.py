@@ -35,7 +35,7 @@ def execute(context):
         df = gpd.read_file(
             "%s/%s" % (data_path, shapefile),
             encoding="latin1"
-        ).to_crs({'init': 'EPSG:2056'})
+        ).to_crs("EPSG:2056")
         df.loc[:, "municipality_id"] = df[id_field]
         df.loc[:, "municipality_name"] = df[name_field]
         df.loc[:, "year"] = year

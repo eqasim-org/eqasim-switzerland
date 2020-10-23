@@ -3,8 +3,9 @@ working_directory: /home/tchervec/Documents/data/switzerland/cache
 
 # Requested stages
 run:
-    - data.statpop.projections.households
-    - data.statpop.scaled
+    - data.microcensus.trips
+#    - data.statpop.projections.households
+#    - data.statpop.scaled
 
 # These are configuration options that we use in the pipeline
 config:

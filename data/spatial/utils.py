@@ -19,7 +19,7 @@ def sample_coordinates(row, count):
     return np.array(list(map(lambda p: (p.x, p.y), samples[:count])))
 
 
-def to_gpd(context, df, x="x", y="y", crs={"init": "EPSG:2056"}):
+def to_gpd(context, df, x="x", y="y", crs="EPSG:2056"):
     df["geometry"] = [
         geo.Point(*coord) for coord in context.progress(
             zip(df[x], df[y]), total=len(df),
@@ -28,8 +28,8 @@ def to_gpd(context, df, x="x", y="y", crs={"init": "EPSG:2056"}):
     df = gpd.GeoDataFrame(df)
     df.crs = crs
 
-    if not crs == {"init": "EPSG:2056"}:
-        df = df.to_crs({"init": "EPSG:2056"})
+    if not crs == "EPSG:2056":
+        df = df.to_crs("EPSG:2056")
 
     return df
 
