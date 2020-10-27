@@ -1,4 +1,5 @@
 **3.0.0**
+- Added config elements for generating flowchart
 - Use new pyproj syntax without `init:`
 - Port code to use `synpp`
 
