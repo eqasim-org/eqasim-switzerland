@@ -1,11 +1,14 @@
 # General pipeline settings
 working_directory: /home/tchervec/Documents/data/switzerland/cache
+flowchart_path: /home/tchervec/Documents/data/switzerland/flowchart.json
+dryrun: true
 
 # Requested stages
 run:
-    - data.microcensus.trips
+#    - data.microcensus.trips
+#    - matsim.run
 #    - data.statpop.projections.households
-#    - data.statpop.scaled
+    - data.statpop.scaled
 
 # These are configuration options that we use in the pipeline
 config:

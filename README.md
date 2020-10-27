@@ -23,6 +23,24 @@ To clean, simply delete the environment directory (here `myenv`).
 The starting point is `run.py`, where some configuration options can be set. Right
 now it is not very configurable, but should become more so in the future.
 
+# Generating pipeline flowchart
+
+To generate a json file which represents the graph of the pipeline, you need to specify the output path in the config file.
+Simply add `flowchart_path: /path/to/flowchart.json` under the "General pipeline settings".
+Then, the flowchart json will be saved at this path next time you run the pipeline until the last specified stage.
+To only generate the flowchart without running the pipeline, add `dryrun: true` under the "General pipeline settings".
+Setting `dryrun: false` will run the full pipeline.
+
+To convert the json file into an image, you will need to use 
+[Pipeline Data Flow Plotter](https://gitlab.ethz.ch/ivt-vpl/populations/pipeline-data-flow-plotter).
+The full syntax is:
+
+`python3 visualize_pipeline.py -j /path/to/flowchart.json -o /path/to/flowchart.png -g`
+
+Type `python3 visualize_pipeline.py -h` for further explanations.
+
+
+
 # Output
 
 To create a full scenario, add the `matsim.final` stage to the config file. The
