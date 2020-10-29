@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 
 
 def add_expansion_factor_column(df):
@@ -15,169 +14,126 @@ def check_control_has_weight_column(controls):
     return controls
 
 
-class FittingProblem:
-    def __init__(self, df, group_controls, group_id,
-                 individual_controls=None, individual_id=""):
-        if individual_controls is None:
-            individual_controls = []
-        self.df = add_expansion_factor_column(df)
-        self.group_controls = check_control_has_weight_column(group_controls)
-        self.group_id = group_id
-        self.individual_controls = check_control_has_weight_column(individual_controls)
-        self.individual_id = individual_id
-
-
-def compute_filters(fitting_problem):
-    df = fitting_problem.df
-    group_controls = []
-    individual_controls = []
-
+def compute_group_filters(df, group_controls):
     # create filters for group level controls
-    for control in fitting_problem.group_controls:
+    group_filters = []
+    for control in group_controls:
         for _, row in control.iterrows():
-            group_control = [row["weight"]]
+            group_filter = [row["weight"]]
 
             # build filter
             f = np.ones(df.shape[0], dtype=np.bool)
             for c in list(row.drop("weight").index):
                 f &= (df[c] == row[c])
 
-            group_control.append(f)
-            group_controls.append(group_control)
+            group_filter.append(f)
+            group_filters.append(group_filter)
 
+    return group_filters
+
+
+def compute_individual_filters(df, group_id, individual_controls):
     # create filters for individual level controls
-    for control in fitting_problem.individual_controls:
+    individual_filters = []
+    for control in individual_controls:
         for _, row in control.iterrows():
-            individual_control = [row["weight"]]
+            individual_filter = [row["weight"]]
 
             # build a filter to select all individuals that match current control values
             f_individual = np.ones(df.shape[0], dtype=np.bool)
             for c in list(row.drop("weight").index):
                 f_individual &= (df[c] == row[c])
 
-            individual_control.append(f_individual)
+            individual_filter.append(f_individual)
 
             # select group ids corresponding to individuals to rescale
-            group_ids = list(df[f_individual][fitting_problem.group_id].unique())
-            f_group = df[fitting_problem.group_id].isin(group_ids)
+            group_ids = list(df[f_individual][group_id].unique())
+            f_group = df[group_id].isin(group_ids)
 
-            individual_control.append(f_group)
-            individual_controls.append(individual_control)
+            individual_filter.append(f_group)
+            individual_filters.append(individual_filter)
 
-    return group_controls, individual_controls
-
-
-def group_fit(df, group_controls, group_id):
-    for group_control in group_controls:
-        group_weight = group_control[0]
-        group_filter = group_control[1]
-        df = group_adjust(df, group_filter, group_weight, group_id)
-    return df
+    return individual_filters
 
 
-def group_adjust(df, group_filter, group_weight, group_id):
-    # rescale expansion factors
-    total = np.sum(df[group_filter][[group_id, "expansion_factor"]].drop_duplicates(group_id)["expansion_factor"])
-    r = group_weight / total
-    df.loc[group_filter, "r_factor"] = r
-    df.loc[group_filter, "expansion_factor"] *= r
-
-    return df
-
-
-def individual_fit(df, controls, group_id, algorithm="ipu"):
-    for control in controls:
-        weight = control[0]
-        individual_filter = control[1]
-        group_filter = control[2]
-
-        if algorithm is "ipu":
-            df = individual_adjust_ipu(df, individual_filter, group_filter, weight)
-        elif algorithm is "ent":
-            df = individual_adjust_ent(df, control, group_id)
-    return df
+class FittingProblem:
+    def __init__(self, df, group_controls, group_id, individual_controls=None, individual_id=""):
+        if individual_controls is None:
+            individual_controls = []
+        self.df = df
+        self.group_controls = group_controls
+        self.group_id = group_id
+        self.individual_controls = individual_controls
+        self.individual_id = individual_id
 
 
-def individual_adjust_ipu(df, f_individual, f_group, weight):
-    # compute scaling factor
-    total = np.sum(df[f_individual]["expansion_factor"])
-    r = weight / total
+class IPUSolver:
+    def __init__(self, tol_abs=1e-3, tol_rel=1e-3, max_iter=2000):
+        self.tol_abs = tol_abs
+        self.tol_rel = tol_rel
+        self.max_iter = max_iter
 
-    # assign to groups
-    df.loc[f_group, "r_factor"] = r
-    df.loc[f_group, "expansion_factor"] *= r
+    def _group_fit(self, df, group_controls, group_id):
+        for group_control in group_controls:
+            group_weight = group_control[0]
+            group_filter = group_control[1]
+            df = self._group_adjust(df, group_filter, group_weight, group_id)
+        return df
 
-    return df
+    @staticmethod
+    def _group_adjust(df, group_filter, group_weight, group_id):
+        # rescale expansion factors
+        total = np.sum(df[group_filter][[group_id, "expansion_factor"]].drop_duplicates(group_id)["expansion_factor"])
+        r = group_weight / total
+        df.loc[group_filter, "r_factor"] = r
+        df.loc[group_filter, "expansion_factor"] *= r
 
+        return df
 
-def individual_adjust_ent(df, group_id, f, weight):
-    return df
+    def _individual_fit(self, df, controls):
+        for control in controls:
+            weight = control[0]
+            individual_filter = control[1]
+            group_filter = control[2]
+            df = self._individual_adjust(df, individual_filter, group_filter, weight)
 
+        return df
 
-def is_converged(f, r, tol_abs, tol_rel):
-    if np.all(f * np.abs(1 - 1 / r) < tol_abs) and np.all(np.abs(1 - r) < tol_rel):
-        print("Expansion factors have converged.")
-        return True
-    return False
+    @staticmethod
+    def _individual_adjust(df, f_individual, f_group, weight):
+        # compute scaling factor
+        total = np.sum(df[f_individual]["expansion_factor"])
+        r = weight / total
 
+        # assign to groups
+        df.loc[f_group, "r_factor"] = r
+        df.loc[f_group, "expansion_factor"] *= r
 
-def parallel_fit(context, args):
-    index, task = args
-    fitting_problem, algorithm, tol_abs, tol_rel, maxiter = task
+        return df
 
-    df = fitting_problem.df
-    group_controls, individual_controls = compute_filters(fitting_problem)
+    def _is_converged(self, f, r):
+        if np.all(f * np.abs(1 - 1 / r) < self.tol_abs) and np.all(np.abs(1 - r) < self.tol_rel):
+            return True
+        return False
 
-    with context.progress(total=maxiter, position=index, label="progress #%s" % str(index)) as progress:
-        for i in range(maxiter):
+    def fit(self, args):
+
+        index, problem = args
+
+        df = problem.df
+        group_controls = problem.group_controls
+        group_id = problem.group_id
+        individual_controls = problem.individual_controls
+
+        for i in range(self.max_iter):
             df["r_factor"] = 1.0
-            df = group_fit(df, group_controls, fitting_problem.group_id)
+            df = self._group_fit(df=df, group_controls=group_controls, group_id=group_id)
+            df = self._individual_fit(df=df, controls=individual_controls)
 
-            if algorithm == "ipu":
-                df = individual_fit(df=df, controls=individual_controls,
-                                    group_id=fitting_problem.group_id, algorithm="ipu")
-            elif algorithm == "ent":
-                df = individual_fit(df=df, controls=fitting_problem.individual_controls,
-                                    group_id=fitting_problem.group_id, algorithm="ent")
-
-            progress.update()
-
-            if is_converged(f=df["expansion_factor"], r=df["r_factor"], tol_abs=tol_abs, tol_rel=tol_rel):
+            if self._is_converged(f=df["expansion_factor"], r=df["r_factor"]):
                 df = df.drop("r_factor", axis=1)
-                return df
+                return df, True
 
-    print("Reached max iteration ", maxiter)
-    df = df.drop("r_factor", axis=1)
-    return df
+        df = df.drop("r_factor", axis=1)
 
-
-def fit(context, fitting_problem, algorithm="ipu", tol_abs=1e-3, tol_rel=1e-3, max_iter=2000, parallelize_on=None):
-    tasks = []
-
-    if parallelize_on is None:
-        tasks.append((fitting_problem, algorithm, tol_abs, tol_rel, max_iter))
-    else:
-        categories = list(fitting_problem.df[parallelize_on].unique())
-        for category in categories:
-            sub_df = fitting_problem.df[fitting_problem.df[parallelize_on] == category]
-
-            sub_group_controls = []
-            for group_control in fitting_problem.group_controls:
-                sub_group_controls.append(group_control[group_control[parallelize_on] == category])
-
-            sub_individual_controls = []
-            for individual_control in fitting_problem.individual_controls:
-                sub_individual_controls.append(individual_control[individual_control[parallelize_on] == category])
-
-            sub_problem = FittingProblem(df=sub_df,
-                                         group_controls=sub_group_controls,
-                                         group_id=fitting_problem.group_id,
-                                         individual_controls=sub_individual_controls,
-                                         individual_id=fitting_problem.individual_id)
-            tasks.append((sub_problem, algorithm, tol_abs, tol_rel, max_iter))
-
-    print("Fitting to data to controls...")
-    with context.parallel() as parallel:
-        result = parallel.map(parallel_fit, tasks)
-
-    return pd.concat(result)
+        return df, False

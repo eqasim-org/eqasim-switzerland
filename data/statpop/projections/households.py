@@ -59,9 +59,11 @@ CANTON_TO_ID_MULTILANGUAGE = {"Zürich": 1,
                               "Genève": 25,
                               "Jura": 26}
 
+
 def configure(context):
     context.config("data_path")
     context.config("scaling_year")
+
 
 def execute(context):
     data_path = context.config("data_path")
@@ -72,11 +74,10 @@ def execute(context):
     if scaling_year < c.BASE_PROJECTED_YEAR:
 
         # Load csv for historical data
-        df_households = pd.read_csv(
-            "%s/projections/households/px-x-0102020000_402.csv" % data_path,
-            sep=";", encoding="latin1", skiprows=1).rename({
-            'Kanton (-) / Bezirk (>>) / Gemeinde (......)':"canton_id"
-        }, axis=1)
+        df_households = (pd.read_csv("%s/projections/households/px-x-0102020000_402.csv" % data_path,
+                                     sep=";", encoding="latin1", skiprows=1)
+                         .rename({'Kanton (-) / Bezirk (>>) / Gemeinde (......)': "canton_id"}, axis=1)
+                         )
 
         # Convert to long format
         df_households = df_households.melt(
@@ -103,7 +104,8 @@ def execute(context):
         # TODO: why do we only use five categories?
         # Make zero-based with only 5 categories
         df_households["household_size"] = np.minimum(5, df_households["household_size"]) - 1
-        df_households = df_households.groupby(["canton_id", "household_size"]).sum().reset_index().sort_values(["canton_id", "household_size"])
+        df_households = df_households.groupby(["canton_id", "household_size"]).sum().reset_index().sort_values(
+            ["canton_id", "household_size"])
         df_households = df_households.rename({"household_size": "household_size_class_projection"}, axis=1)
         df_households = df_households.sort_values(["canton_id", "household_size_class_projection"])
 
@@ -112,18 +114,18 @@ def execute(context):
         # Load excel for projections
         df_households = pd.read_excel(
             "%s/projections/households/su-d-01.03.03.03.01.xlsx" % data_path,
-            header=[0,1], skiprows = 2, nrows = 27, index_col = 0).reset_index().rename({
-                "index": "canton_id",
-                "Total": "total",
-                "1 Person": 1,
-                "2 Personen": 2,
-                "3 und mehr Personen": 3
-            }, axis = 1)
+            header=[0, 1], skiprows=2, nrows=27, index_col=0).reset_index().rename({
+            "index": "canton_id",
+            "Total": "total",
+            "1 Person": 1,
+            "2 Personen": 2,
+            "3 und mehr Personen": 3
+        }, axis=1)
 
         # Convert to long format
         df_households = df_households.melt(
-            id_vars = "canton_id", value_vars = [1, 2, 3],
-            value_name = "weight", var_name = ["household_size", "year"]
+            id_vars="canton_id", value_vars=[1, 2, 3],
+            value_name="weight", var_name=["household_size", "year"]
         )
 
         # Remove Switzerland total
@@ -131,7 +133,7 @@ def execute(context):
 
         # Pivot years to columns
         df_households = df_households.pivot_table(
-            index = ["canton_id", "household_size"], columns = ["year"]
+            index=["canton_id", "household_size"], columns=["year"]
         )
 
         # Add new interpolated column
@@ -139,12 +141,12 @@ def execute(context):
             lambda x: max(0, 1e3 * np.dot(
                 np.polyfit(
                     [2017, 2045],
-                    [x[("weight"), 2017], x[("weight"), 2045]],
+                    [x["weight", 2017], x["weight", 2045]],
                     1
                 ),
                 [scaling_year, 1]
             ))
-        , axis = 1)
+            , axis=1)
 
         # Reformat
         df_households = df_households[("weight", scaling_year)].reset_index()
@@ -152,10 +154,15 @@ def execute(context):
 
         # Make zero-based
         df_households["household_size"] -= 1
-        df_households = df_households.rename({"household_size": "household_size_class_projection"}, axis = 1)
+        df_households = df_households.rename({"household_size": "household_size_class_projection"}, axis=1)
 
         # Replace cantons
         df_households = df_households.replace(CANTON_TO_ID)
 
+    # round weights and convert to integer
+    df_households["weight"] = np.round(df_households["weight"])
+    df_households["weight"] = df_households["weight"].astype(int)
 
-    return df_households
+    print(df_households.head())
+
+    return df_households, scaling_year

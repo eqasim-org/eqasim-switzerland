@@ -1,4 +1,5 @@
 **3.0.0**
+- Refactor IPU fitting
 - Impute canton id directly from shapefile
 - Added config elements for generating flowchart
 - Use new pyproj syntax without `init:`

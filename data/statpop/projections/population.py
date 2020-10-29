@@ -119,5 +119,10 @@ def execute(context):
         df = df[("weight", scaling_year)].reset_index()
         df.columns = ["canton_id", "sex", "nationality", "age_class", "weight"]
 
+    # round weights and convert to integer
+    df["weight"] = np.round(df["weight"])
+    df["weight"] = df["weight"].astype(int)
 
-    return df
+    print(df.head())
+
+    return df, scaling_year
