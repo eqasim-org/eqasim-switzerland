@@ -1,33 +1,32 @@
-import pandas as pd
+import geopandas as gpd
 
 
 def configure(context):
     context.config("data_path")
 
+
 def execute(context):
     # Load data
     data_path = context.config("data_path")
 
-    df_cantons = pd.read_excel("%s/spatial_structure_2018.xlsx" % data_path,
-                               names=["municipality_id", "canton_id"],
-                               usecols=[0, 2],
-                               skiprows=6,
-                               nrows=2229,
-                               )
+    df = gpd.read_file("%s/municipality_borders/gd-b-00.03-875-gg18/ggg_2018-LV95/shp/g1k18.shp" % data_path,
+                       encoding="latin1"
+                       ).to_crs("EPSG:2056")
 
-    return df_cantons
+    df = df.rename({"KTNR": "canton_id", "KTNAME": "canton_name"}, axis=1)
+    df = df[["canton_id", "canton_name", "geometry"]]
 
-def impute(df_cantons, df):
-    assert("municipality_id" in df.columns)
-    return pd.merge(df, df_cantons, on = "municipality_id", how = "left")
+    return df
+
 
 SP_REGION_1 = [25, 12, 13, 1, 2, 14, 9]
 SP_REGION_2 = [21, 26, 15, 16, 22, 11, 24, 3, 6, 7]
 SP_REGION_3 = [17, 19, 10, 23, 20, 5, 18, 4, 8]
 
+
 def impute_sp_region(df):
-    assert("canton_id" in df.columns)
-    assert("sp_region" not in df.columns)
+    assert ("canton_id" in df.columns)
+    assert ("sp_region" not in df.columns)
 
     df["sp_region"] = 0
     df.loc[df["canton_id"].isin(SP_REGION_1), "sp_region"] = 1
@@ -39,5 +38,5 @@ def impute_sp_region(df):
     # Especially, we need a consistent spatial system. It probably would make
     # more sense to impute the SP region in another way
 
-    #assert(not np.any(df["sp_region"] == 0))
+    # assert(not np.any(df["sp_region"] == 0))
     return df

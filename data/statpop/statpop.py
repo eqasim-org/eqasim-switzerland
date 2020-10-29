@@ -90,27 +90,39 @@ def execute(context):
     df_zones = context.stage("data.spatial.zones")
     df_municipality_types = context.stage("data.spatial.municipality_types")
     df_quarters = context.stage("data.spatial.quarters")
+    df_cantons = context.stage("data.spatial.cantons")
 
     df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
     df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y")
 
+    # Impute municipalities
     df_spatial = data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id")[[
         "person_id", "municipality_id", "geometry"
     ]]
+    df_spatial["municipality_id"] = df_spatial["municipality_id"].astype(np.int)
 
-    df_spatial = \
-        data.spatial.utils.impute(context, df_spatial, df_quarters, "person_id", "quarter_id", fix_by_distance=False)[[
-            "person_id", "municipality_id", "quarter_id", "geometry"
-        ]]
+    # Impute quarters
+    df_spatial = (data.spatial.utils.impute(context, df_spatial, df_quarters, "person_id", "quarter_id",
+                                            fix_by_distance=False)[
+        ["person_id", "municipality_id", "quarter_id", "geometry"]]
+    )
 
+    # Impute cantons
+    df_spatial = data.spatial.utils.impute(context, df_spatial, df_cantons, "person_id", "canton_id")[[
+        "person_id", "municipality_id", "quarter_id", "canton_id", "geometry"
+    ]]
+
+    # Impute municipality types
     df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
+
+    # Impute zones
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
 
     assert (len(df) == len(df_spatial))
 
     del df["municipality_id"]
     df = pd.merge(
-        df, df_spatial[["person_id", "zone_id", "municipality_type", "municipality_id", "quarter_id"]],
+        df, df_spatial[["person_id", "zone_id", "municipality_type", "municipality_id", "quarter_id", "canton_id"]],
         on="person_id"
     )
 
@@ -119,9 +131,6 @@ def execute(context):
     df["home_quarter_id"] = df["quarter_id"]
 
     # Impute SP region
-    df["municipality_id"] = df["municipality_id"].astype(np.int)
-    df_cantons = context.stage("data.spatial.cantons")
-    df = data.spatial.cantons.impute(df_cantons, df)
     df = data.spatial.cantons.impute_sp_region(df)
 
     # Impute population density
