@@ -1,4 +1,5 @@
 **3.0.0**
+- Impute canton id directly from shapefile
 - Added config elements for generating flowchart
 - Use new pyproj syntax without `init:`
 - Port code to use `synpp`
