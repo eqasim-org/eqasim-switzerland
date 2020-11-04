@@ -1,6 +1,5 @@
 # General pipeline settings
-working_directory: /nas/ivtmatsim/scenarios/switzerland/data
-flowchart_path: /path/to/flowchart.json
+working_directory: cache
 dryrun: false
 
 # Requested stages

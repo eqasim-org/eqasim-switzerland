@@ -1,35 +1,20 @@
 test:
-   script:
-   - python3 --version
-   - java -version
-   - mvn -version
-   - python3 -m synpp config_gitlab.yml
+  script:
+    - source environment/activate.sh env
+    - rm -rf output cache
+    - mkdir output cache
+    - which conda
+    - conda list
+    - which python
+    - python --version
+    - python -u -v -m synpp config_gitlab.yml
 
 before_script:
-  # Anaconda
-  - wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh;
-  - bash miniconda.sh -b -p $HOME/miniconda
-  - source "$HOME/miniconda/etc/profile.d/conda.sh"
-  - conda config --set always_yes yes --set changeps1 no
-  - conda update -q conda
-  - conda env create -f environment.yml
-  - conda activate switzerland
-
-  # Java
-  - wget https://github.com/AdoptOpenJDK/openjdk11-binaries/releases/download/jdk-11.0.7%2B10/OpenJDK11U-jdk_x64_linux_hotspot_11.0.7_10.tar.gz -O java.tar.gz
-  - tar xf java.tar.gz
-  - export PATH=$HOME/jdk-11.0.7%2B10/bin:$PATH
-
-  # Maven
-  - wget http://mirror.easyname.ch/apache/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.tar.gz -O maven.tar.gz
-  - tar xf maven.tar.gz
-  - export PATH=$HOME/apache-maven-3.6.3/bin:$PATH
-
-  # eqasim-python
-  - git clone https://github.com/eqasim-org/eqasim-python.git $HOME/eqasim-python
-  - sh -c "cd $HOME/eqasim-python; git pull origin master; python3 setup.py install"
+  - rm -rf env
+  - sh environment/setup.sh env
+  - sh environment/activate.sh env
 
 cache:
-    key: environment_v2
-    paths:
-        - env/
+  key: environment_v2
+  paths:
+    - env/
