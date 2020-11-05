@@ -7,7 +7,7 @@ test:
     - conda list
     - which python
     - python --version
-    - python -u -v -m synpp config_gitlab.yml
+    - python -u -m synpp config_gitlab.yml
 
 before_script:
   - rm -rf env

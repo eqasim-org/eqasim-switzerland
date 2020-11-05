@@ -1,4 +1,5 @@
 **3.0.0**
+- Update to `java 11.0.x`
 - Update environment set-up on servers
 - Refactor IPU fitting
 - Impute canton id directly from shapefile
