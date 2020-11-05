@@ -122,7 +122,7 @@ def execute(context):
 
 
 def process(context, args):
-    ipu_solver = IPUSolver(tol_abs=1e-2, tol_rel=1e-2, max_iter=100)
+    ipu_solver = IPUSolver(group_tol=1e-4, individual_tol=1e-4, max_iter=2000)
     result, convergence = ipu_solver.fit(args)
     context.progress.update()
 
