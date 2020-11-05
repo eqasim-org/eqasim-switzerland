@@ -34,8 +34,8 @@ def execute(context):
             "%s/%s" % (data_path, shapefile),
             encoding="utf-8"
         )
-        df.crs = "EPSG:4326"
-        df = df.to_crs("EPSG:2056")
+        df.crs = "epsg:4326"
+        df = df.to_crs("epsg:2056")
 
         df.loc[:, "nuts_id"] = df[id_field]
         df.loc[:, "nuts_name"] = df[name_field]

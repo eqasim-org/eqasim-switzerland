@@ -23,7 +23,7 @@ def execute(context):
     )
     content = content.replace(
         '<param name="outputCoordinateSystem" value="null" />',
-        '<param name="outputCoordinateSystem" value="EPSG:2056" />'
+        '<param name="outputCoordinateSystem" value="epsg:2056" />'
     )
     content = content.replace(
         '<param name="outputNetworkFile" value="null" />',

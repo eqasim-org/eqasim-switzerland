@@ -93,24 +93,23 @@ def execute(context):
     df_cantons = context.stage("data.spatial.cantons")
 
     df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
-    df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y")
+    df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y", coord_type="home")
 
     # Impute municipalities
-    df_spatial = data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id")[[
-        "person_id", "municipality_id", "geometry"
-    ]]
+    df_spatial = (data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id",
+                                            zone_type="municipality", point_type="home")[
+        ["person_id", "municipality_id", "geometry"]])
     df_spatial["municipality_id"] = df_spatial["municipality_id"].astype(np.int)
 
     # Impute quarters
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_quarters, "person_id", "quarter_id",
-                                            fix_by_distance=False)[
-        ["person_id", "municipality_id", "quarter_id", "geometry"]]
-    )
+                                            fix_by_distance=False, zone_type="quarter", point_type="home")[
+        ["person_id", "municipality_id", "quarter_id", "geometry"]])
 
     # Impute cantons
-    df_spatial = data.spatial.utils.impute(context, df_spatial, df_cantons, "person_id", "canton_id")[[
-        "person_id", "municipality_id", "quarter_id", "canton_id", "geometry"
-    ]]
+    df_spatial = (data.spatial.utils.impute(context, df_spatial, df_cantons, "person_id", "canton_id",
+                                            zone_type="canton", point_type="home")[
+        ["person_id", "municipality_id", "quarter_id", "canton_id", "geometry"]])
 
     # Impute municipality types
     df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)

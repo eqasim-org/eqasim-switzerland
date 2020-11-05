@@ -14,7 +14,7 @@ def execute(context):
 
     java(jar, "org.matsim.pt2matsim.run.CheckMappedSchedulePlausibility", [
         "-Djava.io.tmpdir=%s/java_tmp" % tmp_path,
-        paths["schedule"], paths["network"], "EPSG:2056", context.cache_path
+        paths["schedule"], paths["network"], "epsg:2056", context.cache_path
     ], cwd = context.cache_path)
 
     assert(os.path.exists("%s/allPlausibilityWarnings.csv" % context.cache_path))

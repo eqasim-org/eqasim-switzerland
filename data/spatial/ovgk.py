@@ -11,7 +11,7 @@ def configure(context):
 def execute(context):
     input_path = "%s/ov_guteklasse/LV95/Oev_Gueteklassen_ARE.shp" % context.config("data_path")
     df = gpd.read_file(input_path)
-    df.crs = "EPSG:2056"
+    df.crs = "epsg:2056"
     df = df[["KLASSE", "geometry"]].rename({"KLASSE": "ovgk"}, axis=1)
     return df
 
