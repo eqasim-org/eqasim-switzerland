@@ -12,7 +12,9 @@ def execute(context):
     df = gpd.read_file(
         "%s/statistical_quarter_borders/shp/quart17.shp" % data_path,
         encoding = "latin1"
-    ).to_crs("EPSG:2056")
+    ).to_crs("epsg:2056")
+
+    df.crs = "epsg:2056"
 
     df["quarter_id"] = df["GMDEQNR"]
     df["quarter_name"] = df["NAME"]
