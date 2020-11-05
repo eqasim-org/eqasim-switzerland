@@ -66,11 +66,17 @@ class FittingProblem:
         self.individual_controls = individual_controls
         self.individual_id = individual_id
 
+    def get_group_expansion_factors(self, group_filter):
+        return self.df[group_filter][[self.group_id, "expansion_factor"]].drop_duplicates(self.group_id)["expansion_factor"]
+
+    def get_individual_expansion_factors(self, individual_filter):
+        return self.df[individual_filter]["expansion_factor"]
+
 
 class IPUSolver:
-    def __init__(self, tol_abs=1e-3, tol_rel=1e-3, max_iter=2000):
-        self.tol_abs = tol_abs
-        self.tol_rel = tol_rel
+    def __init__(self, group_tol=1e-3, individual_tol=1e-3, max_iter=2000):
+        self.group_tol = group_tol
+        self.individual_tol = individual_tol
         self.max_iter = max_iter
 
     def _group_fit(self, df, group_controls, group_id):
@@ -85,7 +91,6 @@ class IPUSolver:
         # rescale expansion factors
         total = np.sum(df[group_filter][[group_id, "expansion_factor"]].drop_duplicates(group_id)["expansion_factor"])
         r = group_weight / total
-        df.loc[group_filter, "r_factor"] = r
         df.loc[group_filter, "expansion_factor"] *= r
 
         return df
@@ -106,15 +111,50 @@ class IPUSolver:
         r = weight / total
 
         # assign to groups
-        df.loc[f_group, "r_factor"] = r
         df.loc[f_group, "expansion_factor"] *= r
 
         return df
 
-    def _is_converged(self, f, r):
-        if np.all(f * np.abs(1 - 1 / r) < self.tol_abs) and np.all(np.abs(1 - r) < self.tol_rel):
+    def _is_converged(self, df, group_controls, group_id, individual_controls):
+
+        if (len(group_controls) == 0):
             return True
-        return False
+
+        # compute WMAPE at group level
+        nominator = 0
+        denominator = 0
+
+        for group_control in group_controls:
+            weight = group_control[0]
+            f_group = group_control[1]
+            total = np.sum(df[f_group][[group_id, "expansion_factor"]].drop_duplicates(group_id)["expansion_factor"])
+
+            nominator += np.abs(total - weight)
+            denominator += np.abs(weight)
+
+        wmape = nominator / denominator
+
+        if wmape > self.group_tol:
+            return False
+
+        # compute WMAPE at individual level
+        nominator = 0
+        denominator = 0
+
+        for individual_control in individual_controls:
+            weight = individual_control[0]
+            f_individual = individual_control[1]
+            total = np.sum(df[f_individual]["expansion_factor"])
+
+            nominator += np.abs(total - weight)
+            denominator += np.abs(weight)
+
+        wmape = nominator / denominator
+
+        if wmape > self.individual_tol:
+            return False
+
+        return True
 
     def fit(self, args):
 
@@ -126,14 +166,10 @@ class IPUSolver:
         individual_controls = problem.individual_controls
 
         for i in range(self.max_iter):
-            df["r_factor"] = 1.0
             df = self._group_fit(df=df, group_controls=group_controls, group_id=group_id)
             df = self._individual_fit(df=df, controls=individual_controls)
 
-            if self._is_converged(f=df["expansion_factor"], r=df["r_factor"]):
-                df = df.drop("r_factor", axis=1)
+            if self._is_converged(df=df, group_controls=group_controls, group_id=group_id, individual_controls=individual_controls):
                 return df, True
-
-        df = df.drop("r_factor", axis=1)
 
         return df, False
