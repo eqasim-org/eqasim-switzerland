@@ -96,6 +96,9 @@ def execute(context):
         df_statpop = df_statpop.sort_values(by=["household_id", "person_id"])
         df_statpop["person_id"] = np.arange(df_statpop.shape[0]) + 1
 
+        # remove unneeded columns
+        del df_statpop["household_size_class_projection"]
+
         print("Number of households in household controls :", df_household_controls["weight"].sum())
         print("Number of persons in population controls :", df_population_controls["weight"].sum())
         print("Number of households after scaling :", len(df_statpop["household_id"].unique()))
