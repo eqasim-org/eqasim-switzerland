@@ -66,45 +66,28 @@ def execute(context):
             problem = FittingProblem(df, group_controls, group_id, individual_controls, individual_id)
             problems.append(problem)
 
+        print("Constructed %d IPU fitting problems." % len(problems))
+        print("Starting IPU.")
+
         # Run IPU algorithm in parallel
         with context.progress(label="Performing IPU on STATPOP by canton...", total=len(problems)):
             with context.parallel(processes=processes) as parallel:
-                df_results, convergence = [], []
+                df_households, convergence = [], []
 
-                for df_result_item, convergence_item in parallel.imap_unordered(process, enumerate(problems)):
-                    df_results.append(df_result_item)
+                for df_household_item, convergence_item in parallel.imap_unordered(process, problems):
+                    df_households.append(df_household_item)
                     convergence.append(convergence_item)
 
-        df_statpop = pd.concat(df_results).drop("household_size_class_projection", axis=1)
+        df_households = pd.concat(df_households)
         print("Convergence rate:", np.round(np.mean(convergence), 3))
 
-        # TODO: The expansion factors are rounded here by simply taking first the integer part
-        # as the base value and the remainder as a probability of have an extra household.
-        # An array of random doubles is then generated and compared to these probabilities to decide whether to add
-        # this remaining household. However, KM used the "Truncate-Replicate-Sample" method in his version. We should
-        # consider this maybe in the future.
-        print("Duplicating STATPOP households based on expansion factors obtained by IPU.")
-        df_household_expansion_factors = df_statpop[["household_id", "expansion_factor"]].drop_duplicates(
-            "household_id")
-        probability = (df_household_expansion_factors["expansion_factor"] - np.floor(
-            df_household_expansion_factors["expansion_factor"])).values
-        df_household_expansion_factors["expansion_factor"] = np.floor(
-            df_household_expansion_factors["expansion_factor"])
-        df_household_expansion_factors["expansion_factor"] += np.random.random(size=(len(probability),)) < probability
-        del df_statpop["expansion_factor"]
-        df_statpop = pd.merge(df_statpop, df_household_expansion_factors, on="household_id")
-
-        # duplicate households
-        df_households = df_statpop[["household_id", "expansion_factor"]].drop_duplicates("household_id")
-        indices = np.repeat(np.arange(df_households.shape[0]),
-                            df_households["expansion_factor"].astype(np.int64).values)
-        df_households = df_households.iloc[indices]
-        df_households["household_id_new"] = np.arange(df_households.shape[0]) + 1
-        del df_households["expansion_factor"]
-
-        # merge duplicated households back into statpop
+        # Generate new unique ids
         print("Generating new household ids.")
-        df_statpop = pd.merge(df_statpop, df_households, on="household_id").drop("expansion_factor", axis=1)
+        df_households["household_id_new"] = np.arange(df_households.shape[0]) + 1
+        del df_statpop["household_id"]
+
+        # Merge the new household ids onto statpop by statpop_household_id (i.e. original id)
+        df_statpop = pd.merge(df_statpop, df_households, on="statpop_household_id")
         df_statpop["household_id"] = df_statpop["household_id_new"]
         del df_statpop["household_id_new"]
 
@@ -121,9 +104,48 @@ def execute(context):
     return df_statpop
 
 
-def process(context, args):
-    ipu_solver = IPUSolver(group_tol=1e-4, individual_tol=1e-4, max_iter=2000)
-    result, convergence = ipu_solver.fit(args)
+def process(context, problem):
+
+    # Create the IPU solver
+    ipu_solver = IPUSolver(group_rel_tol=1e-4, group_abs_tol=1, ind_rel_tol=1e-5, ind_abs_tol=10, max_iter=2000)
+
+    # Fit the problem, which results a df with expansion factors and whether the algorithm converged
+    df_result, convergence = ipu_solver.fit(problem)
+
+    df_households = []
+    # Integerize the results using the "Truncate-Replicate-Sample" method
+    # We loop through the groups here to get a better fit by household size
+    # because we know they are mutually exclusive (but this is not general)
+    for i, group_control in enumerate(problem.group_controls):
+        group_weight = group_control[0]
+        group_filter = group_control[1]
+
+        # 1) Truncate - here we compute both the integer part (count) and remainder of the weight for each household
+        df_hh_group = (df_result[group_filter][["household_id", "statpop_household_id", "expansion_factor"]]
+                       .drop_duplicates("household_id"))
+        weights = df_hh_group["expansion_factor"].values
+        counts = np.floor(weights).astype(np.int)
+        remainders = weights - counts
+
+        # 2) Replicate - We duplicate the households based on the count
+        indices = np.repeat(list(df_hh_group.index), counts)
+        df_replicate = df_hh_group.loc[indices]
+
+        # 3) Sample - We sample the required remaining households based on the remainders without replacement
+        indices = np.random.choice(list(df_hh_group.index), int(np.round(np.sum(weights) - np.sum(counts))),
+                                   replace=False, p=(remainders / np.sum(remainders)))
+        df_sample = df_hh_group.loc[indices]
+
+        # We combine the replicated and sampled households
+        df = pd.concat([df_replicate, df_sample])
+
+        # We add them to our list by group
+        df_households.append(df)
+
+    df_households = pd.concat(df_households).drop("expansion_factor", axis=1)
+    df_households["household_id"] = np.arange(df_households.shape[0]) + 1
+
     context.progress.update()
 
-    return result, convergence
+    # return only duplicated households with new and original ids
+    return df_households, convergence
