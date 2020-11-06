@@ -74,9 +74,11 @@ class FittingProblem:
 
 
 class IPUSolver:
-    def __init__(self, group_tol=1e-3, individual_tol=1e-3, max_iter=2000):
-        self.group_tol = group_tol
-        self.individual_tol = individual_tol
+    def __init__(self, group_rel_tol=1e-3, group_abs_tol=10, ind_rel_tol=1e-3, ind_abs_tol=10, max_iter=2000):
+        self.group_rel_tol = group_rel_tol
+        self.group_abs_tol = group_abs_tol
+        self.ind_rel_tol = ind_rel_tol
+        self.ind_abs_tol = ind_abs_tol
         self.max_iter = max_iter
 
     def _group_fit(self, df, group_controls, group_id):
@@ -117,11 +119,12 @@ class IPUSolver:
 
     def _is_converged(self, df, group_controls, group_id, individual_controls):
 
-        if (len(group_controls) == 0):
+        if len(group_controls) == 0:
             return True
 
-        # compute WMAPE at group level
-        nominator = 0
+        # compute WMAPE and WMAE at group level
+        nominator_wmape = 0
+        nominator_wmae = 0
         denominator = 0
 
         for group_control in group_controls:
@@ -129,16 +132,19 @@ class IPUSolver:
             f_group = group_control[1]
             total = np.sum(df[f_group][[group_id, "expansion_factor"]].drop_duplicates(group_id)["expansion_factor"])
 
-            nominator += np.abs(total - weight)
+            nominator_wmape += np.abs(total - weight)
+            nominator_wmae += np.abs(total - weight) * np.abs(weight)
             denominator += np.abs(weight)
 
-        wmape = nominator / denominator
+        wmape = nominator_wmape / denominator
+        wmae = nominator_wmae / denominator
 
-        if wmape > self.group_tol:
+        if wmape > self.group_rel_tol and wmae > self.group_abs_tol:
             return False
 
-        # compute WMAPE at individual level
-        nominator = 0
+        # compute WMAPE and WMAE at individual level
+        nominator_wmape = 0
+        nominator_wmae = 0
         denominator = 0
 
         for individual_control in individual_controls:
@@ -146,19 +152,19 @@ class IPUSolver:
             f_individual = individual_control[1]
             total = np.sum(df[f_individual]["expansion_factor"])
 
-            nominator += np.abs(total - weight)
+            nominator_wmape += np.abs(total - weight)
+            nominator_wmae += np.abs(total - weight) * np.abs(weight)
             denominator += np.abs(weight)
 
-        wmape = nominator / denominator
+        wmape = nominator_wmape / denominator
+        wmae = nominator_wmae / denominator
 
-        if wmape > self.individual_tol:
+        if wmape > self.ind_rel_tol and wmae > self.ind_abs_tol:
             return False
 
         return True
 
-    def fit(self, args):
-
-        index, problem = args
+    def fit(self, problem):
 
         df = problem.df
         group_controls = problem.group_controls
@@ -166,10 +172,16 @@ class IPUSolver:
         individual_controls = problem.individual_controls
 
         for i in range(self.max_iter):
+            # group fit and check convergence
             df = self._group_fit(df=df, group_controls=group_controls, group_id=group_id)
-            df = self._individual_fit(df=df, controls=individual_controls)
+            if self._is_converged(df=df, group_controls=group_controls, group_id=group_id,
+                                  individual_controls=individual_controls):
+                return df, True
 
-            if self._is_converged(df=df, group_controls=group_controls, group_id=group_id, individual_controls=individual_controls):
+            # individual fit and check convergence
+            df = self._individual_fit(df=df, controls=individual_controls)
+            if self._is_converged(df=df, group_controls=group_controls, group_id=group_id,
+                                  individual_controls=individual_controls):
                 return df, True
 
         return df, False
