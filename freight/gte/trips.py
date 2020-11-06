@@ -53,7 +53,7 @@ def execute(context):
                         trips_frames.append(pd.DataFrame(columns=["origin_id", "destination_id", "vehicle_type"],
                                                          data=trips))
 
-                    progress.update(number_of_trips)
+                        progress.update(number_of_trips)
 
     # concatenate into single data frame
     df_trips = pd.concat(trips_frames)
