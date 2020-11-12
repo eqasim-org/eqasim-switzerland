@@ -1,3 +1,4 @@
+import numpy as np
 import numpy.linalg as la
 import pandas as pd
 

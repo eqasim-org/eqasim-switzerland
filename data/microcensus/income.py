@@ -15,7 +15,7 @@ def impute(df_mz):
     # TODO: Maybe adjusted later!
     classifier = sklearn.tree.DecisionTreeClassifier(min_samples_leaf = 30, max_depth = 5)
 
-    classifier.fit(None, training_data, training_labels)
+    classifier.fit(X=training_data, y=training_labels, sample_weight=None)
 
     # Predict the incomes
     prediction_data = df_mz[no_income_selector][[

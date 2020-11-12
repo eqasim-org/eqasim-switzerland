@@ -59,7 +59,7 @@ def execute(context):
         df_mz_households["number_of_bikes"] >= df_mz_households["household_size"],
         "number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_ALL
 
-    # Houeshold size class
+    # Household size class
     data.utils.assign_household_class(df_mz_households)
 
     # Region information
@@ -86,12 +86,12 @@ def execute(context):
     df_mz_households["home_zone_id"] = df_mz_households["zone_id"]
 
     # Impute density
-    data.statpop.density.impute(context, context.stage("data.statpop.density"), df_mz_households, "home_x", "home_y")
+    data.statpop.density.impute(context.stage("data.statpop.density"), df_mz_households, "home_x", "home_y")
 
     # Impute OV Guteklasse
     print("Imputing ÖV Güteklasse ...")
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.utils.impute(context, df_ovgk, df_spatial, ["person_id"])
+    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"])
     df_mz_households = pd.merge(df_mz_households, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
 
     # Wrap it up
