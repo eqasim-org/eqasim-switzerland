@@ -6,10 +6,9 @@ dryrun: false
 # Requested stages
 run:
 #    - data.microcensus.trips
-#    - matsim.run
 #    - data.statpop.projections.households
-#    - data.statpop.projections.population
-    - data.statpop.scaled
+#    - data.statpop.scaled
+    - population.matched
 
 # These are configuration options that we use in the pipeline
 config:
