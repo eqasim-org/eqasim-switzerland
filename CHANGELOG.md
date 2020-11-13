@@ -1,4 +1,5 @@
 **3.0.0**
+- Updated statistical matching to most recent version
 - Duplicate agents after IPU using Truncate-Replicate-Sample method
 - Use WMAPE and WMAE as IPU convergence criteria
 - Update to `java 11.0.x`
