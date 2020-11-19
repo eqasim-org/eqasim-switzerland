@@ -88,7 +88,8 @@ def execute(context):
     # Adjust coordinates
     for mz_attribute, df_attribute in [("Z", "destination"), ("S", "origin"), ("W", "home")]:
         coords = df_mz_trips[["%s_X_CH1903" % mz_attribute, "%s_Y_CH1903" % mz_attribute]].values
-        x, y = pyproj.transform(c.CH1903, c.CH1903_PLUS, coords[:,0], coords[:,1])
+        transformer = pyproj.Transformer.from_crs(c.CH1903, c.CH1903_PLUS)
+        x, y = transformer.transform(coords[:, 0], coords[:, 1])
         df_mz_trips.loc[:, "%s_x" % df_attribute] = x
         df_mz_trips.loc[:, "%s_y" % df_attribute] = y
 

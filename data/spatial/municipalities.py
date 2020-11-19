@@ -2,7 +2,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import KDTree
-import data.spatial.utils
 
 
 def configure(context):
@@ -37,7 +36,7 @@ def execute(context):
             "%s/%s" % (data_path, shapefile),
             encoding="latin1"
         ).to_crs("epsg:2056")
-        
+
         df.crs = "epsg:2056"
 
         df.loc[:, "municipality_id"] = df[id_field]
