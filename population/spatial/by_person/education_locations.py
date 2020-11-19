@@ -6,6 +6,7 @@ def configure(context):
     context.stage("data.statent.statent")
     context.stage("population.sociodemographics")
 
+
 def execute(context):
     df_persons = context.stage("population.sociodemographics")
 
@@ -20,8 +21,8 @@ def execute(context):
         f_persons = (df_persons["age"] > lower_bound) & (df_persons["age"] <= upper_bound)
         df_candidates = df_statent[df_statent["education_type"] == type]
 
-        education_coordinates = list(zip(df_candidates["x"], df_candidates["y"]))
-        home_coordinates = list(zip(df_persons.loc[f_persons, "home_x"], df_persons.loc[f_persons, "home_y"]))
+        education_coordinates = np.vstack([df_candidates["x"], df_candidates["y"]]).T
+        home_coordinates = np.vstack([df_persons.loc[f_persons, "home_x"], df_persons.loc[f_persons, "home_y"]]).T
 
         tree = KDTree(education_coordinates)
         distances, indices = tree.query(home_coordinates, query_size, return_distance = True)

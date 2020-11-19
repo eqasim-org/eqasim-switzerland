@@ -23,29 +23,30 @@ channels:
   - defaults
 
 dependencies:
-  - matplotlib=3.1.3
-  - pandas=1.0.3
-  - scipy=1.4.1
-  - numpy=1.18.1
+  - matplotlib=3.3.2
+  - pandas=1.1.3
+  - scipy=1.5.2
+  - numpy=1.19.2
   - geopandas=0.6.1
-  - numba=0.49.0
+  - numba=0.51.2
   - palettable=3.3.0
-  - scikit-learn=0.22.1
-  - shapely=1.7.0
-  - tqdm=4.46.0
+  - scikit-learn=0.23.2
+  - shapely=1.6.4
+  - tqdm=4.50.2
   - pytables=3.6.1
   - xlrd=1.2.0
-  - pip=20.0.2
+  - pip=20.2.4
 
   - pip:
+    - pyproj==3.0.0
     - simpledbf==0.2.6
     - synpp==1.3.1
     - python-Levenshtein==0.12.0
 
   # For testing
-  - pytest==5.4.2
+  - pytest==6.1.1
   - xlwt==1.3.0
-  - pysal==1.14.4.post1
+  - pysal==2.3.0
 EOF
 )
 

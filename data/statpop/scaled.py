@@ -36,10 +36,12 @@ def execute(context):
         print("Number of households before scaling :", len(df_statpop["household_id"].unique()))
         print("Number of persons before scaling :", len(df_statpop["person_id"].unique()))
 
+        # rename household_size_class column
+        df_household_controls = df_household_controls.rename({"household_size_class": "household_size_class_projection"}, axis=1)
+
         # we need to add a new household class column with only as many categories as the controls
         number_household_classes = len(df_household_controls["household_size_class_projection"].unique())
-        df_statpop["household_size_class_projection"] = np.minimum(number_household_classes,
-                                                                   df_statpop["household_size"]) - 1
+        df_statpop["household_size_class_projection"] = np.minimum(number_household_classes, df_statpop["household_size"]) - 1
 
         # create IPU fitting problem by canton
         problems = []

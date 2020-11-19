@@ -42,7 +42,8 @@ def execute(context):
 
     # Convert coordinates to LV95
     coords = df_mz_households[["W_X_CH1903", "W_Y_CH1903"]].values
-    x, y = pyproj.transform(c.CH1903, c.CH1903_PLUS, coords[:, 0], coords[:, 1])
+    transformer = pyproj.Transformer.from_crs(c.CH1903, c.CH1903_PLUS)
+    x, y = transformer.transform(coords[:, 0], coords[:, 1])
     df_mz_households.loc[:, "home_x"] = x
     df_mz_households.loc[:, "home_y"] = y
 

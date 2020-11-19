@@ -4,6 +4,7 @@ import pandas as pd
 import shapely.geometry as geo
 from sklearn.neighbors import KDTree
 
+
 def sample_coordinates(row, count):
     samples = []
     bounds = row["geometry"].bounds

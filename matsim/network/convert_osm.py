@@ -1,9 +1,11 @@
-import os.path
+import os
+
 
 def configure(context):
     context.stage("matsim.java.pt2matsim")
     context.stage("utils.java")
     context.config("data_path")
+
 
 def execute(context):
     jar, tmp_path = context.stage("matsim.java.pt2matsim")
@@ -13,7 +15,7 @@ def execute(context):
 
     java(jar, "org.matsim.pt2matsim.run.CreateDefaultOsmConfig", [
         "convert_network_template.xml"
-    ], cwd = context.cache_path, vm_arguments = ["-Djava.io.tmpdir=%s" % tmp_path])
+    ], cwd=context.cache_path, vm_arguments=["-Djava.io.tmpdir=%s" % tmp_path])
 
     content = open("%s/convert_network_template.xml" % context.cache_path).read()
 
@@ -57,7 +59,7 @@ def execute(context):
 
     java(jar, "org.matsim.pt2matsim.run.Osm2MultimodalNetwork", [
         "convert_network.xml"
-    ], cwd = context.cache_path, vm_arguments = ["-Djava.io.tmpdir=%s" % tmp_path])
+    ], cwd=context.cache_path, vm_arguments=["-Djava.io.tmpdir=%s" % tmp_path])
 
-    assert(os.path.exists("%s/converted_network.xml.gz" % context.cache_path))
+    assert (os.path.exists("%s/converted_network.xml.gz" % context.cache_path))
     return "%s/converted_network.xml.gz" % context.cache_path
