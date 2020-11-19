@@ -2,8 +2,7 @@ This repository contains all the scripts that are used to create the
 IVT Switzerland / Zurich MATSim scenario. It uses a custom build pipeline
 with `python` modules that call each other in the sense of incremental builds.
 
-A more flexible version is being made public on github.com. The documentation is
-more through, and may be helpfu. [](https://github.com/eqasim-org/synpp).
+A more flexible version is being made public at [https://github.com/eqasim-org/synpp](https://github.com/eqasim-org/synpp). The documentation is more thorough, and may be helpful.
 
 # Installation
 
