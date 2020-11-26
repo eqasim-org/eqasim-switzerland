@@ -1,4 +1,5 @@
 **3.0.0**
+- Add `isFreight` attribute to all agents in `population.xml`
 - Update python requirements
 - Updated statistical matching to most recent version
 - Duplicate agents after IPU using Truncate-Replicate-Sample method

@@ -43,6 +43,7 @@ class PersonWriter:
         writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[16]))
         writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[17]))
         writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[18]))
+        writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
 
         writer.end_attributes()
 
