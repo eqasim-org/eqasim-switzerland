@@ -55,8 +55,8 @@ class XmlWriter:
         return "%02d:%02d:%02d" % (hours, minutes, seconds)
 
     def location(self, x, y, facility_id = None):
-        #return (x, y, None if facility_id is None or np.isnan(facility_id) else int(facility_id))
-        return (x, y, None if facility_id is None or (type(facility_id) == float and np.isnan(facility_id)) else facility_id)
+        return (x, y,
+                None if facility_id is None or (type(facility_id) == float and np.isnan(facility_id)) else facility_id)
 
 class PopulationWriter(XmlWriter):
     POPULATION_SCOPE = 0

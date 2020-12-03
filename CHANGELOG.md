@@ -1,4 +1,8 @@
 **3.0.0**
+- Facilities attribute `offers_service` changed to `offers_other`
+- Determine secondary activity locations directly in `python`
+- Assign all work activities to the same location (i.e. one with longest duration)
+- Separate work and education commute dataframes
 - Add `isFreight` attribute to all agents in `population.xml`
 - Update python requirements
 - Updated statistical matching to most recent version

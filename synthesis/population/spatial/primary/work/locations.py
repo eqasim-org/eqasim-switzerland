@@ -1,18 +1,19 @@
 import numpy as np
 import pandas as pd
 
+import data.spatial.utils as spatial_utils
 import data.spatial.zone_shapes
 
 
 def configure(context):
-    context.stage("population.spatial.by_person.primary_zones")
     context.stage("data.statent.statent")
     context.stage("data.spatial.zones")
     context.stage("data.spatial.zone_shapes")
+    context.stage("synthesis.population.spatial.primary.work.zones")
 
 
 def execute(context):
-    df = context.stage("population.spatial.by_person.primary_zones")
+    df = context.stage("synthesis.population.spatial.primary.work.zones")
     df_statent = context.stage("data.statent.statent")
 
     df_zones = context.stage("data.spatial.zones")
@@ -64,8 +65,13 @@ def execute(context):
     assert (len(df_international) == 0)
     assert (len(df) == len(df.dropna()))
 
-    df = df[[
-        "person_id", "work_x", "work_y", "work_location_id"
-    ]]
+    df = df[["person_id",
+             "work_x", "work_y",
+             "work_location_id"]].rename({"work_x": "x",
+                                          "work_y": "y",
+                                          "work_location_id": "destination_id"},
+                                         axis=1)
 
-    return df
+    df = spatial_utils.to_gpd(context, df, coord_type="work")
+
+    return df[["person_id", "destination_id", "geometry"]]

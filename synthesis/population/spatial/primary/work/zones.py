@@ -8,8 +8,8 @@ def configure(context):
     context.stage("data.microcensus.commute")
     context.stage("data.od.matrix")
     context.stage("data.od.distances")
-    context.stage("population.sociodemographics")
     context.stage("data.spatial.zones")
+    context.stage("synthesis.population.enriched")
 
 
 # TODO: We only assign work here through OD matrices. However, we *can* generate
@@ -18,29 +18,20 @@ def configure(context):
 # matrices and then we would need to use this information here. In data.microcensus.commute
 # we already produce information on education commute.
 
-# However, for now we will recover the simple scheme from Kirill!
-
 def execute(context):
-    df = context.stage("population.sociodemographics")
     df_zones = context.stage("data.spatial.zones")
 
     # Load commute information for work
-    df_commute = pd.DataFrame(context.stage("data.microcensus.commute")[[
-        "person_id", "commute_mode", "commute_home_distance", "commute_purpose"
-    ]], copy=True)
-    df_commute = df_commute[df_commute["commute_purpose"] == "work"]
-    df_commute["mz_person_id"] = df_commute["person_id"]
-    del df_commute["person_id"]
+    commute = context.stage("data.microcensus.commute")
+    df_commute = commute["work"][["person_id", "commute_mode", "commute_home_distance"]]
+    df_commute = df_commute.rename({"person_id": "mz_person_id"}, axis=1)
 
     # Load person information
-    df_persons = context.stage("population.sociodemographics")[[
-        "person_id", "household_id", "mz_person_id", "home_zone_id"
-    ]]
+    df_persons = context.stage("synthesis.population.enriched")[["person_id", "household_id",
+                                                                 "mz_person_id", "home_zone_id"]]
 
     # Merge commute information into the persons
-    df = pd.merge(
-        df_persons, df_commute, on="mz_person_id"
-    )
+    df = pd.merge(df_persons, df_commute, on="mz_person_id")
 
     df_demand = df.groupby(["commute_mode", "home_zone_id"]).size().reset_index(name="count")
     pdf_matrices, cdf_matrices = context.stage("data.od.matrix")

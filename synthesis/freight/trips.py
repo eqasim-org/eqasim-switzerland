@@ -3,13 +3,13 @@ import pandas as pd
 
 
 def configure(context):
-    context.stage("freight.gte.trips")
-    context.stage("freight.gqgv.trips")
+    context.stage("synthesis.freight.gte.trips")
+    context.stage("synthesis.freight.gqgv.trips")
     context.stage("data.freight.departure_times")
 
 def execute(context):
-    df_gte_trips = context.stage("freight.gte.trips")
-    df_gqgv_trips = context.stage("freight.gqgv.trips")
+    df_gte_trips = context.stage("synthesis.freight.gte.trips")
+    df_gqgv_trips = context.stage("synthesis.freight.gqgv.trips")
     df_departure_times = context.stage("data.freight.departure_times")
 
     df_trips = pd.concat([df_gte_trips, df_gqgv_trips], ignore_index=True)
