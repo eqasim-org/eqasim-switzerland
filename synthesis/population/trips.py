@@ -3,15 +3,18 @@ import pandas as pd
 
 import data.constants as c
 
+"""
+This stage attaches all trip relevant information to the synthetic population.
+"""
+
 
 def configure(context):
-    context.stage("population.sociodemographics")
+    context.stage("synthesis.population.enriched")
     context.stage("data.microcensus.trips")
-    context.stage("data.microcensus.commute")
 
 
 def execute(context):
-    df_persons = context.stage("population.sociodemographics")[[
+    df_persons = context.stage("synthesis.population.enriched")[[
         "person_id", "mz_person_id", "age"
     ]]
 
@@ -19,6 +22,10 @@ def execute(context):
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose"
     ]]
     df_trips.columns = ["mz_person_id", "trip_id", "departure_time", "arrival_time", "mode", "following_purpose"]
+
+    # Assume the preceeding purpose for all trips is home
+    df_trips["preceding_purpose"] = df_trips["following_purpose"].shift(1)
+    df_trips.loc[df_trips["trip_id"] == 1, "preceding_purpose"] = "home"
 
     df_trips = pd.merge(df_persons, df_trips, on="mz_person_id")
 
@@ -32,16 +39,10 @@ def execute(context):
 
     df_trips.loc[:, "travel_time"] = df_trips.loc[:, "arrival_time"] - df_trips.loc[:, "departure_time"]
 
-    # Impute commuting information
-    df_commute = pd.DataFrame(context.stage("data.microcensus.commute"), copy=True)[["person_id", "commute_trip_id"]]
-    df_commute.columns = ["mz_person_id", "commute_trip_id"]
-    df_trips = pd.merge(df_trips, df_commute, on="mz_person_id", how="left")
-    df_trips.loc[:, "is_commute"] = df_trips.loc[:, "trip_id"] == df_trips.loc[:, "commute_trip_id"]
-
-    df_trips = df_trips[[
-        "person_id", "trip_id", "departure_time", "arrival_time", "travel_time", "mode", "following_purpose",
-        "is_commute"
-    ]].sort_values(by=["person_id", "trip_id"])
+    df_trips = df_trips[["person_id", "trip_id",
+                         "departure_time", "arrival_time",
+                         "travel_time", "mode",
+                         "preceding_purpose", "following_purpose"]].sort_values(by=["person_id", "trip_id"])
 
     # Diversify departure times
     counts = df_trips[["person_id", "trip_id"]].groupby("person_id").size().reset_index(name="count")["count"].values
@@ -62,5 +63,20 @@ def execute(context):
     df_trips["arrival_time"] += offset
     df_trips["departure_time"] = np.round(df_trips["departure_time"])
     df_trips["arrival_time"] = np.round(df_trips["arrival_time"])
+    df_trips["trip_duration"] = df_trips["arrival_time"] - df_trips["departure_time"]
 
-    return df_trips
+    # Define trip index
+    df_trips = df_trips.sort_values(by=["person_id", "trip_id"])
+    df_count = df_trips.groupby("person_id").size().reset_index(name="count")
+    df_trips["trip_index"] = np.hstack([np.arange(count) for count in df_count["count"].values])
+
+    return df_trips[[
+        "person_id", "trip_index",
+        "departure_time", "arrival_time",
+        "preceding_purpose",
+        "following_purpose",
+        # "is_first_trip", "is_last_trip",
+        "trip_duration",
+        # "activity_duration",
+        "mode"
+    ]]

@@ -8,7 +8,7 @@ import matsim.writers
 
 
 def configure(context):
-    context.stage("population.sociodemographics")
+    context.stage("synthesis.population.enriched")
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class",
           "municipality_type", "sp_region", "canton_id", "ovgk"]
@@ -55,7 +55,7 @@ def add_household(writer, household, member_ids):
 def execute(context):
     cache_path = context.cache_path
 
-    df_persons = context.stage("population.sociodemographics").sort_values(by=["household_id", "person_id"])
+    df_persons = context.stage("synthesis.population.enriched").sort_values(by=["household_id", "person_id"])
     df_persons = df_persons[FIELDS]
 
     with gzip.open("%s/households.xml.gz" % cache_path, "w+") as f:

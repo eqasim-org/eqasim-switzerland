@@ -5,13 +5,13 @@ import matsim.writers
 
 
 def configure(context):
-    context.stage("population.opportunities")
-    context.stage("population.sociodemographics")
+    context.stage("synthesis.population.destinations")
+    context.stage("synthesis.population.enriched")
 
 
 FIELDS = [
-    "location_id", "location_x", "location_y",
-    "offers_work", "offers_education", "offers_service", "offers_leisure", "offers_shop"
+    "destination_id", "destination_x", "destination_y",
+    "offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other"
 ]
 
 
@@ -29,7 +29,7 @@ def execute(context):
     cache_path = context.cache_path
 
     # First, write actual facilities (from STATENT)
-    df_statent = context.stage("population.opportunities")
+    df_statent = context.stage("synthesis.population.destinations")
     df_statent = df_statent[FIELDS]
 
     with gzip.open("%s/facilities.xml.gz" % cache_path, "w+") as f:
@@ -47,7 +47,7 @@ def execute(context):
                 writer.end_facility()
 
             # Second, write household facilities
-            df_households = context.stage("population.sociodemographics")[[
+            df_households = context.stage("synthesis.population.enriched")[[
                 "household_id", "home_x", "home_y"
             ]].drop_duplicates("household_id")
 

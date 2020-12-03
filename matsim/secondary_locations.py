@@ -24,11 +24,11 @@ def execute(context):
     df_trips = df_trips[df_trips["crowfly_distance"] > 0.0]
 
     df_trips["following_purpose"] = df_trips["purpose"]
-    df_trips["preceeding_purpose"] = df_trips["purpose"].shift(1)
-    df_trips.loc[df_trips["trip_id"] == 1, "preceeding_purpose"] = "home"
+    df_trips["preceding_purpose"] = df_trips["purpose"].shift(1)
+    df_trips.loc[df_trips["trip_id"] == 1, "preceding_purpose"] = "home"
 
     df_trips = df_trips[~(
-        df_trips["preceeding_purpose"].isin(primary_activities) &
+        df_trips["preceding_purpose"].isin(primary_activities) &
         df_trips["following_purpose"].isin(primary_activities)
     )]
 

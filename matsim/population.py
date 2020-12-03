@@ -8,12 +8,12 @@ import matsim.writers
 
 
 def configure(context):
-    context.stage("population.sociodemographics")
-    context.stage("population.trips")
-    context.stage("population.activities")
-    context.stage("population.spatial.locations")
+    context.stage("synthesis.population.enriched")
+    context.stage("synthesis.population.trips")
+    context.stage("synthesis.population.activities")
+    context.stage("synthesis.population.spatial.locations")
     context.config("use_freight", default=False)
-    context.stage("freight.trips")
+    context.stage("synthesis.freight.trips")
 
 
 class PersonWriter:
@@ -50,12 +50,14 @@ class PersonWriter:
         # Plan
         writer.start_plan(selected=True)
 
-        home_location = writer.location(self.activities[0][8], self.activities[0][9], "home%s" % self.person[13])
+        home_location = writer.location(self.activities[0][8].x, self.activities[0][8].y, "home%s" % self.person[13])
 
         for i in range(len(self.activities)):
             activity = self.activities[i]
-            location = home_location if np.isnan(activity[10]) else writer.location(activity[8], activity[9],
-                                                                                    int(activity[10]))
+            geometry = activity[8]
+            destination_id = activity[9]
+            location = home_location if destination_id == -1 else writer.location(geometry.x, geometry.y,
+                                                                                  int(destination_id))
 
             start_time = activity[3] if not np.isnan(activity[3]) else None
             end_time = activity[4] if not np.isnan(activity[4]) else None
@@ -64,7 +66,7 @@ class PersonWriter:
 
             if not activity[7]:
                 next_activity = self.activities[i + 1]
-                writer.add_leg(activity[11], activity[4], next_activity[3] - activity[4])
+                writer.add_leg(activity[10], activity[4], next_activity[3] - activity[4])
 
         writer.end_plan()
         writer.end_person()
@@ -115,27 +117,27 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
                  "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke",
                  "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id",
                  "mz_head_id"]
-ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "duration", "purpose", "is_last", "location_x",
-                   "location_y", "location_id", "following_mode"]
+ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
+                   "geometry", "destination_id", "following_mode"]
 
 
 def execute(context):
     cache_path = context.cache_path
-    df_persons = context.stage("population.sociodemographics")
-    df_activities = context.stage("population.activities")
+    df_persons = context.stage("synthesis.population.enriched")
+    df_activities = context.stage("synthesis.population.activities")
 
     # Attach following modes to activities
-    df_trips = pd.DataFrame(context.stage("population.trips"), copy=True)[["person_id", "trip_id", "mode"]]
-    df_trips.columns = ["person_id", "activity_id", "following_mode"]
-    df_activities = pd.merge(df_activities, df_trips, on=["person_id", "activity_id"], how="left")
+    df_trips = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
+    df_trips.columns = ["person_id", "activity_index", "following_mode"]
+    df_activities = pd.merge(df_activities, df_trips, on=["person_id", "activity_index"], how="left")
 
     # Attach locations to activities
-    df_locations = context.stage("population.spatial.locations")
-    df_activities = pd.merge(df_activities, df_locations, on=["person_id", "activity_id"], how="left")
+    df_locations = context.stage("synthesis.population.spatial.locations")
+    df_activities = pd.merge(df_activities, df_locations, on=["person_id", "activity_index"], how="left")
 
     # Bring in correct order (although it should already be)
     df_persons = df_persons.sort_values(by="person_id")
-    df_activities = df_activities.sort_values(by=["person_id", "activity_id"])
+    df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
 
     df_persons = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
@@ -177,7 +179,7 @@ def execute(context):
             assert (number_of_written_persons == len(df_persons))
 
             if context.config("use_freight"):
-                df_freight = context.stage("freight.trips")
+                df_freight = context.stage("synthesis.freight.trips")
 
                 freight_iterator = iter(df_freight.itertuples())
                 number_of_written_freight = 0
