@@ -3,11 +3,11 @@ import pyproj
 # TODO: Pandas is quite good at working with categorical data. Refactor everything to make use of that.
 # It will not only be more readable but will also bring a speedup!
 
-CH1903 = pyproj.Proj(init = "EPSG:21781")
+CH1903 = "epsg:21781"
 LV05 = CH1903
-CH1903_PLUS = pyproj.Proj(init = "EPSG:2056")
+CH1903_PLUS = "epsg:2056"
 LV95 = CH1903_PLUS
-WGS84 = pyproj.Proj(init = "EPSG:4326")
+WGS84 = "epsg:4326"
 
 MAXIMUM_HOUSEHOLD_SIZE = 12
 MINIMUM_AGE_PER_HOUSEHOLD = 16

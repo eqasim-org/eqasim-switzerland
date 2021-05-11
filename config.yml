@@ -1,35 +1,25 @@
-raw_data_path: /run/media/sebastian/shoerl_data/scenarios/switzerland/data
-target_path: /run/media/sebastian/shoerl_data/scenarios/switzerland/temp
-output_path: /run/media/sebastian/shoerl_data/scenarios/switzerland/temp
-threads: 4
-hot_deck_matching_runners: 2
-disable_progress_bar: false
-java_memory: 10G
-input_downsampling: 0.01
-enable_scaling: true
-scaling_year: 2020
-use_freight: true
-stages:
-    - data.statpop.projections.households
-    - data.statpop.scaled
-    #- data.microcensus.trips
-    #- population.spatial.locations
-    #- population.trips
-    #- data.microcensus.persons
-    #- data.microcensus.households
-    #- population.sociodemographics
-    #- matsim.population
-    #- matsim.population_attributes
-    #- matsim.households
-    #- matsim.population
-    #- data.microcensus.commute_extrapolation
-    #- population.spatial.education_locations
-    #- population.spatial.by_person.education_locations
-    #- population.spatial.by_activity.subprimary_locations
-    #- population.spatial.activity_locations
-    #- population.opportunities
-    #- population.activities
-    #- population.commute
-    #- population.secondary_locations
-    #- population.fixed_locations
-    #- population.commute_ratios
+# General pipeline settings
+working_directory: /home/tchervec/Documents/data/switzerland/cache
+flowchart_path: /home/tchervec/Documents/data/switzerland/flowchart.json
+dryrun: false
+
+# Requested stages
+run:
+#    - data.microcensus.trips
+#    - data.statpop.projections.households
+#    - data.statpop.scaled
+    - population.matched
+
+# These are configuration options that we use in the pipeline
+config:
+    threads: 4
+    random_seed: 0
+    hot_deck_matching_runners: 2
+    disable_progress_bar: false
+    java_memory: 10G
+    input_downsampling: 0.01
+    enable_scaling: true
+    scaling_year: 2020
+    use_freight: true
+    hafas_date: 01.10.2018
+    data_path: /home/tchervec/Documents/data/switzerland/data

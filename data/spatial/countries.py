@@ -1,14 +1,15 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-def configure(context, require):
-    require.config("raw_data_path")
+
+def configure(context):
+    context.config("data_path")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config("data_path")
 
     df = pd.read_excel(
-        "%s/country_codes_2018.xlsx" % raw_data_path
+        "%s/country_codes_2018.xlsx" % data_path
     )
 
     df["country_id"] = df["Ländercode BFS\nCode des pays OFS\nCodice del paese UST"]

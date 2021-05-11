@@ -1,28 +1,30 @@
-import pandas as pd
-import numpy as np
 import geopandas as gpd
-from tqdm import tqdm
+import numpy as np
+import pandas as pd
 
-def configure(context, require):
-    require.config("raw_data_path")
-    require.config("threads")
+
+def configure(context):
+    context.config("data_path")
+    context.config("threads")
+
 
 def execute(context):
-    input_path = "%s/ov_guteklasse/LV95/Oev_Gueteklassen_ARE.shp" % context.config["raw_data_path"]
+    input_path = "%s/ov_guteklasse/LV95/Oev_Gueteklassen_ARE.shp" % context.config("data_path")
     df = gpd.read_file(input_path)
-    df.crs = {"init" : "EPSG:2056"}
-    df = df[["KLASSE", "geometry"]].rename({"KLASSE" : "ovgk"}, axis = 1)
+    df.crs = "epsg:2056"
+    df = df[["KLASSE", "geometry"]].rename({"KLASSE": "ovgk"}, axis=1)
     return df
 
-def impute(df_ovgk, df, on):
+
+def impute(context, df_ovgk, df, on):
     indices = np.array_split(np.arange(len(df)), 100)
     df_join = []
 
-    for chunk in tqdm(indices, desc = "Imputing ÖV Güteklasse"):
-        df_join.append(gpd.sjoin(df.iloc[chunk], df_ovgk, op = "within")[on + ["ovgk"]])
+    for chunk in context.progress(indices, label="Imputing ÖV Güteklasse"):
+        df_join.append(gpd.sjoin(df.iloc[chunk], df_ovgk, op="within")[on + ["ovgk"]])
 
     df_join = pd.concat(df_join)
-    df_join = pd.merge(df, df_join, on = on, how = "left")
+    df_join = pd.merge(df, df_join, on=on, how="left")
     df_join.loc[df_join["ovgk"].isna(), "ovgk"] = "None"
     df_join["ovgk"] = df_join["ovgk"].astype("category")
 

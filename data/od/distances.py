@@ -1,12 +1,11 @@
-import pandas as pd
 import numpy as np
-import data.constants as c
-from tqdm import tqdm
+import pandas as pd
 
-def configure(context, require):
-    require.stage("data.spatial.zones")
-    require.stage("data.spatial.quarters")
-    require.stage("data.spatial.municipalities")
+
+def configure(context):
+    context.stage("data.spatial.zones")
+    context.stage("data.spatial.quarters")
+    context.stage("data.spatial.municipalities")
 
 COUNRY_DISTANCE = 800 * 1e3
 

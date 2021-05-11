@@ -1,15 +1,20 @@
 test:
-   script:
-       - source environment/activate.sh env
-       - rm -rf output cache
-       - mkdir output cache
-       - python3 -u run.py config_gitlab.yml
+  script:
+    - source environment/activate.sh env
+    - rm -rf output cache
+    - mkdir output cache
+    - which conda
+    - conda list
+    - which python
+    - python --version
+    - python -u -m synpp config_gitlab.yml
 
 before_script:
-    - sh environment/setup.sh env
-    - sh environment/activate.sh env
+  - rm -rf env
+  - sh environment/setup.sh env
+  - sh environment/activate.sh env
 
 cache:
-    key: environment_v2
-    paths:
-        - env/
+  key: environment_v2
+  paths:
+    - env/

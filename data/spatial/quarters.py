@@ -1,19 +1,20 @@
-import pandas as pd
-import numpy as np
 import geopandas as gpd
-from tqdm import tqdm
-from sklearn.neighbors import KDTree
+import numpy as np
+import pandas as pd
 
-def configure(context, require):
-    require.config("raw_data_path")
+
+def configure(context):
+    context.config("data_path")
 
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config("data_path")
 
     df = gpd.read_file(
-        "%s/statistical_quarter_borders/shp/quart17.shp" % raw_data_path,
+        "%s/statistical_quarter_borders/shp/quart17.shp" % data_path,
         encoding = "latin1"
-    ).to_crs({'init': 'EPSG:2056'})
+    ).to_crs("epsg:2056")
+
+    df.crs = "epsg:2056"
 
     df["quarter_id"] = df["GMDEQNR"]
     df["quarter_name"] = df["NAME"]

@@ -1,11 +1,11 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 
-def configure(context, require):
-    require.stage("data.freight.gte.cleaned")
-    require.stage("data.freight.scaling_factor")
-    require.config("enable_scaling")
+def configure(context):
+    context.stage("data.freight.gte.cleaned")
+    context.stage("data.freight.scaling_factor")
+    context.config("enable_scaling")
 
 
 def execute(context):
@@ -37,7 +37,7 @@ def execute(context):
         demands[vehicle_type] =  int(np.round(np.sum(matrix_values) / number_of_weeks / number_of_weekdays))
 
         # scale demand
-        if context.config["enable_scaling"]:
+        if context.config("enable_scaling"):
             demands[vehicle_type] *= context.stage("data.freight.scaling_factor")
 
         # make sure each from sums up to one

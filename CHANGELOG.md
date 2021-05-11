@@ -1,4 +1,22 @@
-**Version v2 (master)**
+**3.0.0**
+- Facilities attribute `offers_service` changed to `offers_other`
+- Determine secondary activity locations directly in `python`
+- Assign all work activities to the same location (i.e. one with longest duration)
+- Separate work and education commute dataframes
+- Add `isFreight` attribute to all agents in `population.xml`
+- Update python requirements
+- Updated statistical matching to most recent version
+- Duplicate agents after IPU using Truncate-Replicate-Sample method
+- Use WMAPE and WMAE as IPU convergence criteria
+- Update to `java 11.0.x`
+- Update environment set-up on servers
+- Refactor IPU fitting
+- Impute canton id directly from shapefile
+- Added config elements for generating flowchart
+- Use new pyproj syntax without `init:`
+- Port code to use `synpp`
+
+**2.0.0**
 
 - Update Maven dependency
 - Update eqasim to 1.0.5

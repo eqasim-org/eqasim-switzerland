@@ -1,35 +1,55 @@
 #!/bin/bash
 set -e
 
-# Define Miniconda3
+# Define Miniconda
 miniconda_version="4.6.14"
 miniconda_url="https://repo.anaconda.com/miniconda/Miniconda3-${miniconda_version}-Linux-x86_64.sh"
 miniconda_md5="718259965f234088d785cad1fbd7de03"
 
-python_version="3.6"
-
-jdk_version="8u212"
-jdk_url="https://github.com/AdoptOpenJDK/openjdk8-binaries/releases/download/jdk8u212-b03/OpenJDK8U-jdk_x64_linux_hotspot_8u212b03.tar.gz"
-jdk_sha256="dd28d6d2cde2b931caf94ac2422a2ad082ea62f0beee3bf7057317c53093de93"
+jdk_version="11.0.7"
+jdk_url="https://github.com/AdoptOpenJDK/openjdk11-binaries/releases/download/jdk-11.0.7%2B10/OpenJDK11U-jdk_x64_linux_hotspot_11.0.7_10.tar.gz"
+jdk_sha256="ee60304d782c9d5654bf1a6b3f38c683921c1711045e1db94525a51b7024a2ca"
 
 maven_version="3.6.3"
-maven_url="http://mirror.easyname.ch/apache/maven/maven-3/${maven_version}/binaries/apache-maven-${maven_version}-bin.tar.gz"
+maven_url="https://downloads.apache.org/maven/maven-3/${maven_version}/binaries/apache-maven-${maven_version}-bin.tar.gz"
 maven_sha512="c35a1803a6e70a126e80b2b3ae33eed961f83ed74d18fcd16909b2d44d7dada3203f1ffe726c17ef8dcca2dcaa9fca676987befeadc9b9f759967a8cb77181c0"
 
+
 # Define Python requirements
-python_requirements=$(cat <<EOF
-tqdm==4.30.0
-pyyaml==3.13
-pandas==0.24.1
-pyproj==1.9.6
-geopandas==0.4.0
-scikit-learn==0.20.2
-requests==2.21.0
-rtree==0.8.3
-xlrd==1.2.0
-jinja2==2.9.5
+environment_yaml=$(cat <<EOF
+name: venv
+
+channels:
+  - defaults
+
+dependencies:
+  - matplotlib=3.3.2
+  - pandas=1.1.3
+  - scipy=1.5.2
+  - numpy=1.19.2
+  - geopandas=0.6.1
+  - numba=0.51.2
+  - palettable=3.3.0
+  - scikit-learn=0.23.2
+  - shapely=1.6.4
+  - tqdm=4.50.2
+  - pytables=3.6.1
+  - xlrd=1.2.0
+  - pip=20.2.4
+
+  - pip:
+    - pyproj==3.0.0
+    - simpledbf==0.2.6
+    - synpp==1.3.1
+    - python-Levenshtein==0.12.0
+
+  # For testing
+  - pytest==6.1.1
+  - xlwt==1.3.0
+  - pysal==2.3.0
 EOF
 )
+
 
 # Miniconda update script to avoid too long paths in interpreter path
 miniconda_update_script=$(cat <<EOF
@@ -38,7 +58,7 @@ import re
 
 with open(sys.argv[1]) as f:
     content = f.read()
-    content = re.sub(r'#!(.+)/miniconda3/bin/python', '#!/usr/bin/env python', content)
+    content = re.sub(r'#!(.+)/miniconda/bin/python', '#!/usr/bin/env python', content)
 
 with open(sys.argv[1], "w+") as f:
     f.write(content)
@@ -63,7 +83,7 @@ cd ${environment_directory}
 if [ "$(md5sum miniconda.sh)" == "${miniconda_md5}  miniconda.sh" ]; then
     echo "Miniconda 3 ${miniconda_version} already downloaded."
 else
-    echo "Downloading Miniconda3 ${miniconda_version} ..."
+    echo "Downloading Miniconda ${miniconda_version} ..."
     rm -rf miniconda_installed
     rm -rf python_installed
     curl -o miniconda.sh ${miniconda_url}
@@ -91,19 +111,22 @@ fi
 
 # III.1) Install Miniconda
 if [ -f miniconda_installed ]; then
-    echo "Miniconda3 ${miniconda_version} already installed."
+    echo "Miniconda ${miniconda_version} already installed."
 else
-    echo "Installing Miniconda3 ${miniconda_version} ..."
+    echo "Installing Miniconda ${miniconda_version} ..."
 
-    rm -rf miniconda3
-    sh miniconda.sh -b -u -p miniconda3
+    rm -rf miniconda
+    sh miniconda.sh -b -u -p miniconda
 
     cat <<< "${miniconda_update_script}" > fix_conda.py
 
-    PATH=${environment_directory}/miniconda3/bin:$PATH
-    python fix_conda.py miniconda3/bin/conda
-    python fix_conda.py miniconda3/bin/conda-env
-    conda update -y conda
+    PATH=${environment_directory}/miniconda/bin:$PATH
+    python fix_conda.py miniconda/bin/conda
+    python fix_conda.py miniconda/bin/conda-env
+
+    source "${environment_directory}/miniconda/etc/profile.d/conda.sh"
+    conda config --set always_yes yes --set changeps1 no
+    conda update -q conda
 
     touch miniconda_installed
 fi
@@ -114,8 +137,10 @@ if [ -f python_installed ]; then
 else
     echo "Setting up Python environment ..."
 
-    cat <<< "${python_requirements}" > requirements.txt
-    conda create -p venv python=${python_version} --no-default-packages --channel conda-forge --file requirements.txt -y
+    cat <<< "${environment_yaml}" > environment.yml
+
+    source "${environment_directory}/miniconda/etc/profile.d/conda.sh"
+    conda env create -f environment.yml
 
     touch python_installed
 fi

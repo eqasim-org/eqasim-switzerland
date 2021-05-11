@@ -1,34 +1,41 @@
-import pandas as pd
-import numpy as np
 import geopandas as gpd
-from tqdm import tqdm
+import numpy as np
+import pandas as pd
 
 
-def configure(context, require):
-    require.config("raw_data_path")
+def configure(context):
+    context.config("data_path")
+
 
 SHAPEFILES = [
-    (2016, "nuts_borders/ref-nuts-2016-01m.shp/NUTS_RG_01M_2016_4326.shp/NUTS_RG_01M_2016_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),
-    (2013, "nuts_borders/ref-nuts-2013-01m.shp/NUTS_RG_01M_2013_4326.shp/NUTS_RG_01M_2013_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),
-    (2010, "nuts_borders/ref-nuts-2010-01m.shp/NUTS_RG_01M_2010_4326.shp/NUTS_RG_01M_2010_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),
-    (2006, "nuts_borders/ref-nuts-2006-01m.shp/NUTS_RG_01M_2006_4326.shp/NUTS_RG_01M_2006_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE"),
-    (2003, "nuts_borders/ref-nuts-2003-01m.shp/NUTS_RG_01M_2003_4326.shp/NUTS_RG_01M_2003_4326.shp", "NUTS_ID", "NUTS_NAME", "LEVL_CODE")
+    (2016, "nuts_borders/ref-nuts-2016-01m.shp/NUTS_RG_01M_2016_4326.shp/NUTS_RG_01M_2016_4326.shp", "NUTS_ID",
+     "NUTS_NAME", "LEVL_CODE"),
+    (2013, "nuts_borders/ref-nuts-2013-01m.shp/NUTS_RG_01M_2013_4326.shp/NUTS_RG_01M_2013_4326.shp", "NUTS_ID",
+     "NUTS_NAME", "LEVL_CODE"),
+    (2010, "nuts_borders/ref-nuts-2010-01m.shp/NUTS_RG_01M_2010_4326.shp/NUTS_RG_01M_2010_4326.shp", "NUTS_ID",
+     "NUTS_NAME", "LEVL_CODE"),
+    (2006, "nuts_borders/ref-nuts-2006-01m.shp/NUTS_RG_01M_2006_4326.shp/NUTS_RG_01M_2006_4326.shp", "NUTS_ID",
+     "NUTS_NAME", "LEVL_CODE"),
+    (2003, "nuts_borders/ref-nuts-2003-01m.shp/NUTS_RG_01M_2003_4326.shp/NUTS_RG_01M_2003_4326.shp", "NUTS_ID",
+     "NUTS_NAME", "LEVL_CODE")
 ]
 
+
 def execute(context):
-    raw_data_path = context.config["raw_data_path"]
+    data_path = context.config("data_path")
 
     df_all = []
     all_ids = set()
 
     # Load all the shape files, only add the NUTS zones that haven't been found before
-    for year, shapefile, id_field, name_field, level_field in tqdm(SHAPEFILES, desc="Reading NUTS shape files"):
+    for year, shapefile, id_field, name_field, level_field in context.progress(SHAPEFILES,
+                                                                               label="Reading NUTS shape files"):
         df = gpd.read_file(
-            "%s/%s" % (raw_data_path, shapefile),
+            "%s/%s" % (data_path, shapefile),
             encoding="utf-8"
-        )#.to_crs({'init': 'EPSG:2056'})
-        df.crs = {'init': 'EPSG:4326'}
-        df = df.to_crs({'init': 'EPSG:2056'})
+        )
+        df.crs = "epsg:4326"
+        df = df.to_crs("epsg:2056")
 
         df.loc[:, "nuts_id"] = df[id_field]
         df.loc[:, "nuts_name"] = df[name_field]

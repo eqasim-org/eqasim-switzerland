@@ -1,15 +1,16 @@
 import gzip
-from tqdm import tqdm
-import data.constants as c
-import numpy as np
 import io
-import matsim.writers
+
+import numpy as np
 import pandas as pd
 
-def configure(context, require):
-    require.stage("data.microcensus.persons")
-    require.stage("data.microcensus.trips")
-    require.stage("matsim.mz.activities")
+import matsim.writers
+
+
+def configure(context):
+    context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.trips")
+    context.stage("matsim.mz.activities")
 
 class PersonWriter:
     def __init__(self, person):
@@ -91,7 +92,7 @@ def execute(context):
             writer = matsim.writers.PopulationWriter(raw_writer)
             writer.start_population()
 
-            with tqdm(total = len(df_persons), desc = "Writing persons ...") as progress:
+            with context.progress(total = len(df_persons), label = "Writing persons ...") as progress:
                 try:
                     while True:
                         person = next(person_iterator)
