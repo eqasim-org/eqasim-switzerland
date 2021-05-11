@@ -5,10 +5,7 @@ dryrun: false
 
 # Requested stages
 run:
-#    - data.microcensus.trips
-#    - data.statpop.projections.households
-#    - data.statpop.scaled
-    - population.matched
+    - synthesis.population.enriched
 
 # These are configuration options that we use in the pipeline
 config:
