@@ -19,8 +19,9 @@ To clean, simply delete the environment directory (here `myenv`).
 
 # Run
 
-The starting point is `run.py`, where some configuration options can be set. Right
-now it is not very configurable, but should become more so in the future.
+Once you have set up your environment, all dependencies should have been installed, including synpp. At this point, all you need to do is adjust the config file (**DO NOT MODIFY** `config_gitlab.yml`, as this is the one that is used for gitlab testing) to run the stages you required, and then:
+
+`python3 -m synpp config.yml`
 
 # Generating pipeline flowchart
 
