@@ -1,4 +1,20 @@
-__pycache__
-temp
-setup/pipeline_environment/*/
-.idea/
+# Ignore everything
+*
+
+# But not these folders...
+!analysis
+!contracts
+!data
+!environment
+!matsim
+!synthesis
+!utils
+
+# And not these files...
+!.gitlab-ci.yml
+!CHANGELOG.md
+!config.yml
+!config_gitlab.yml
+!contracts.yml
+!README.md
+!VERSION
