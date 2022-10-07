@@ -123,6 +123,4 @@ def execute(context):
     df["weight"] = np.round(df["weight"])
     df["weight"] = df["weight"].astype(int)
 
-    print(df.head())
-
     return df, scaling_year

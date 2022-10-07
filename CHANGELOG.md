@@ -1,3 +1,10 @@
+This change log is written in descending order. Changes that happen after version X was released, are written above that version number, because they will be included in the (note yet determined) next version number.
+
+**Development version**
+- Improve logger verbosity
+- Update code to reflect python upgrade, fix deprecated and future warnings.
+- Upgrade python to `python 3.8.x`, update packages in venv setup scripts and install them via pip.
+
 **3.0.0**
 - Facilities attribute `offers_service` changed to `offers_other`
 - Determine secondary activity locations directly in `python`
@@ -17,7 +24,6 @@
 - Port code to use `synpp`
 
 **2.0.0**
-
 - Update Maven dependency
 - Update eqasim to 1.0.5
 - Upgrade to new pt2matsim version to allow selecting of HAFAS date
@@ -27,7 +33,6 @@
 - Added ÖV Güteklasse for home locations
 - Remove imputation of ÖV Güteklasse for activities
 - Use code for ÖV Güteklasse from eqasim-java
-
 - Use modular mode choice (Update to eqasim v1.0.1)
 - Use fixed eqasim version
 - Change activity type "errand" to "other"

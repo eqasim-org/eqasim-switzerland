@@ -193,7 +193,7 @@ def process(context, arguments):
 
     df_locations = pd.DataFrame.from_records(df_locations,
                                              columns=["person_id", "trip_index", "destination_id", "geometry"])
-    df_locations = gpd.GeoDataFrame(df_locations, crs=dict(init="epsg:2154"))
+    df_locations = gpd.GeoDataFrame(df_locations, crs="epsg:2154")
 
     df_convergence = pd.DataFrame.from_records(df_convergence, columns=["valid", "size"])
     return df_locations, df_convergence
