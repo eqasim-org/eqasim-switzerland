@@ -1,6 +1,7 @@
 This change log is written in descending order. Changes that happen after version X was released, are written above that version number, because they will be included in the (note yet determined) next version number.
 
 **Development version**
+- Refactored stages for generating the MATSim scenario
 - Improve logger verbosity
 - Update code to reflect `python 3.8.13` upgrade, fix deprecated and future warnings.
 - Upgrade python to `python 3.8.13`, update packages in venv setup scripts and install them via pip.
