@@ -10,7 +10,7 @@ import matsim.writers
 def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
-    context.stage("matsim.mz.activities")
+    context.stage("matsim.scenario.mz.activities")
 
 class PersonWriter:
     def __init__(self, person):
@@ -67,7 +67,7 @@ ACTIVITY_FIELDS = ["person_id", "activity_id", "start_time", "end_time", "durati
 def execute(context):
     cache_path = context.cache_path
     df_persons = context.stage("data.microcensus.persons")
-    df_activities = context.stage("matsim.mz.activities")
+    df_activities = context.stage("matsim.scenario.mz.activities")
 
     # Attach following modes to activities
     df_trips = pd.DataFrame(context.stage("data.microcensus.trips"), copy = True)[["person_id", "trip_id", "mode"]]

@@ -26,7 +26,7 @@ def make_options(item):
 
 
 def execute(context):
-    cache_path = context.cache_path
+    cache_path = context.path()
 
     # First, write actual facilities (from STATENT)
     df_statent = context.stage("synthesis.population.destinations")

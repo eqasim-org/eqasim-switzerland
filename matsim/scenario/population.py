@@ -122,7 +122,7 @@ ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "dur
 
 
 def execute(context):
-    cache_path = context.cache_path
+    cache_path = context.path()
     df_persons = context.stage("synthesis.population.enriched")
     df_activities = context.stage("synthesis.population.activities")
 

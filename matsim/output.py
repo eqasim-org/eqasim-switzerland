@@ -3,13 +3,16 @@ import shutil
 
 
 def configure(context):
-    context.stage("matsim.run")
+    context.stage("matsim.simulation.run")
     context.config("output_path")
     context.config("output_id")
     context.stage("contracts.contracts")
+    
+    context.config("input_prefix", "output_")
+    context.config("output_prefix", "switzerland_")
 
 def execute(context):
-    results_path = context.stage("matsim.run")
+    results_path = "%s/simulation_output" % context.stage("matsim.simulation.run")
 
     output_path = context.config("output_path")
     output_id = context.config("output_id")
@@ -29,15 +32,16 @@ def execute(context):
     os.mkdir(target_path)
 
     for file in [
-        "switzerland_network.xml.gz",
-        "switzerland_transit_schedule.xml.gz",
-        "switzerland_transit_vehicles.xml.gz",
-        "switzerland_facilities.xml.gz",
-        "switzerland_households.xml.gz",
-        "switzerland_population.xml.gz",
-        "switzerland_config.xml"
+        "network.xml.gz",
+        "transitSchedule.xml.gz",
+        "transitVehicles.xml.gz",
+        "facilities.xml.gz",
+        "households.xml.gz",
+        "plans.xml.gz",
+        "config.xml"
     ]:
-        shutil.copyfile("%s/%s" % (results_path, file), "%s/%s" % (target_path, file))
+        shutil.copyfile("%s/%s%s" % (results_path, context.config("input_prefix"), file), 
+                        "%s/%s%s" % (target_path, context.config("output_prefix"), file))
 
     contracts_path = context.stage("contracts.contracts")
     shutil.copyfile(contracts_path, "%s/CONTRACTS.html" % target_path)
