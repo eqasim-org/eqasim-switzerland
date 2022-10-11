@@ -2,8 +2,8 @@ This change log is written in descending order. Changes that happen after versio
 
 **Development version**
 - Improve logger verbosity
-- Update code to reflect python upgrade, fix deprecated and future warnings.
-- Upgrade python to `python 3.8.x`, update packages in venv setup scripts and install them via pip.
+- Update code to reflect `python 3.8.13` upgrade, fix deprecated and future warnings.
+- Upgrade python to `python 3.8.13`, update packages in venv setup scripts and install them via pip.
 
 **3.0.0**
 - Facilities attribute `offers_service` changed to `offers_other`

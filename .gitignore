@@ -1,20 +1,8 @@
-# Ignore everything
-*
-
-# But not these folders...
-!analysis
-!contracts
-!data
-!environment
-!matsim
-!synthesis
-!utils
-
-# And not these files...
-!.gitlab-ci.yml
-!CHANGELOG.md
+__pycache__
+cache
+.idea
+.vscode
+config*.yml
 !config.yml
 !config_gitlab.yml
-!contracts.yml
-!README.md
-!VERSION
+!config_docker.yml
