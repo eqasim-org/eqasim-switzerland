@@ -14,7 +14,7 @@ This is done by statistical matching.
 
 def configure(context):
     context.config("threads")
-    context.config("random_seed")
+    context.config("random_seed", 0)
     context.config("matching_minimum_observations", 20)
     context.config("weekend_scenario", False)
 
@@ -34,9 +34,7 @@ def sample_indices(uniform, cdf, selected_indices):
 
 def statistical_matching(progress, df_source, source_identifier, weight, df_target, target_identifier, columns,
                          random_seed=0, minimum_observations=0):
-    
-    # Set up RNG
-    rng = np.random.RandomState(random_seed)
+    random = np.random.RandomState(random_seed)
 
     # Reduce data frames
     df_source = df_source[[source_identifier, weight] + columns].copy()
@@ -68,7 +66,7 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
     assigned_indices = np.ones((len(df_target),), dtype=np.int) * -1
     unassigned_mask = np.ones((len(df_target),), dtype=np.bool)
     assigned_levels = np.ones((len(df_target),), dtype=np.int) * -1
-    uniform = rng.random_sample(size=(len(df_target),))
+    uniform = random.random_sample(size=(len(df_target),))
 
     column_indices = [np.arange(len(unique_values[column])) for column in columns]
 
@@ -139,8 +137,8 @@ def parallel_statistical_matching(context, df_source, source_identifier, weight,
                                   minimum_observations=0):
     random_seed = context.config("random_seed")
     processes = context.config("threads")
-    
-    rng = np.random.RandomState(random_seed)
+
+    random = np.random.RandomState(random_seed)
     chunks = np.array_split(df_target, processes)
 
     with context.progress(label="Statistical matching ...", total=len(df_target)):
@@ -149,7 +147,7 @@ def parallel_statistical_matching(context, df_source, source_identifier, weight,
             "target_identifier": target_identifier, "columns": columns,
             "minimum_observations": minimum_observations
         }) as parallel:
-            random_seeds = rng.randint(10000, size=len(chunks))
+            random_seeds = random.randint(10000, size=len(chunks))
             results = parallel.map(_run_parallel_statistical_matching, zip(chunks, random_seeds))
 
             levels = np.hstack([r[1] for r in results])

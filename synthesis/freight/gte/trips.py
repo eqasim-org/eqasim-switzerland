@@ -9,17 +9,12 @@ def configure(context):
     context.stage("data.statent.statent")
     context.stage("data.spatial.nuts")
     context.stage("data.spatial.swiss_border")
-    
     context.config("input_downsampling")
-    context.config("random_seed")
-    
+
 
 def execute(context):
     demands, origin_pdf_matrices, od_pdf_matrices = context.stage("data.freight.gte.od")
     input_downsampling = context.config("input_downsampling")
-    
-    # Set up RNG
-    rng = np.random.RandomState(context.config("random_seed"))
 
     trips_frames = []
 
@@ -29,14 +24,14 @@ def execute(context):
         demand = np.round(input_downsampling * demands[vehicle_type])
 
         # compute origin counts
-        origin_counts = rng.multinomial(n=demand, pvals=origin_pdf_matrices[vehicle_type].values[:, 0])
+        origin_counts = np.random.multinomial(demand, origin_pdf_matrices[vehicle_type].values[:, 0])
         counts = np.zeros(od_pdf_matrices[vehicle_type].shape, dtype=np.int)
 
         # compute origin-destination counts
         for i in range(len(origin_counts)):
             if origin_counts[i] > 0:
                 assert (~np.any(np.isnan(od_pdf_matrices[vehicle_type].values[i])))
-                counts[i, :] = rng.multinomial(n=origin_counts[i], pvals=od_pdf_matrices[vehicle_type].values[i, :])
+                counts[i, :] = np.random.multinomial(origin_counts[i], od_pdf_matrices[vehicle_type].values[i, :])
 
         assert (len(counts) == len(origin_counts))
 
@@ -108,7 +103,7 @@ def execute(context):
                 indices = df_statent[df_statent[("nuts_id_level_" + str(nuts_level))] == origin_id].index.values
 
                 # select random enterprise within NUTS zone
-                choices = rng.choice(indices, size=number_trips)
+                choices = np.random.choice(indices, number_trips)
                 enterprises = df_statent.values[choices, 0:2]
 
                 # assign coordinates
@@ -140,7 +135,7 @@ def execute(context):
                 indices = df_statent[df_statent[("nuts_id_level_" + str(nuts_level))] == destination_id].index.values
 
                 # select random enterprise within NUTS zone
-                choices = rng.choice(indices, size=number_trips)
+                choices = np.random.choice(indices, number_trips)
                 enterprises = df_statent.values[choices, 0:2]
 
                 # assign coordinates

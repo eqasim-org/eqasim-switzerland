@@ -53,7 +53,7 @@ def add_household(writer, household, member_ids):
 
 
 def execute(context):
-    cache_path = context.path()
+    cache_path = context.cache_path
 
     df_persons = context.stage("synthesis.population.enriched").sort_values(by=["household_id", "person_id"])
     df_persons = df_persons[FIELDS]

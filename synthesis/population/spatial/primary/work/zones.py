@@ -10,8 +10,6 @@ def configure(context):
     context.stage("data.od.distances")
     context.stage("data.spatial.zones")
     context.stage("synthesis.population.enriched")
-    
-    context.config("random_seed")
 
 
 # TODO: We only assign work here through OD matrices. However, we *can* generate
@@ -34,9 +32,6 @@ def execute(context):
 
     # Merge commute information into the persons
     df = pd.merge(df_persons, df_commute, on="mz_person_id")
-    
-    # Set up RNG
-    rng = np.random.RandomState(context.config("random_seed"))
 
     df_demand = df.groupby(["commute_mode", "home_zone_id"]).size().reset_index(name="count")
     pdf_matrices, cdf_matrices = context.stage("data.od.matrix")
@@ -57,7 +52,7 @@ def execute(context):
         for i in range(len(df_zones)):
             if origin_counts[i] > 0:
                 assert (~np.any(np.isnan(pdf_matrices[source_mode][i])))
-                counts[i, :] = rng.multinomial(n=origin_counts[i], pvals=pdf_matrices[source_mode][i, :])
+                counts[i, :] = np.random.multinomial(origin_counts[i], pdf_matrices[source_mode][i, :])
 
         commute_counts[mode] = counts
         assert (len(counts) == len(df_zones))
