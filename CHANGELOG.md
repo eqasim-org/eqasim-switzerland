@@ -1,12 +1,3 @@
-This change log is written in descending order. Changes that happen after version X was released, are written above that version number, because they will be included in the (note yet determined) next version number.
-
-**Development version**
-- Specify random seed for all random number generators. `numpy.random.RandomState` is used as it is frozen and thus guaranteed to produce the same values.
-- Refactored stages for generating the MATSim scenario
-- Improve logger verbosity
-- Update code to reflect `python 3.8.13` upgrade, fix deprecated and future warnings.
-- Upgrade python to `python 3.8.13`, update packages in venv setup scripts and install them via pip.
-
 **3.0.0**
 - Facilities attribute `offers_service` changed to `offers_other`
 - Determine secondary activity locations directly in `python`
@@ -26,6 +17,7 @@ This change log is written in descending order. Changes that happen after versio
 - Port code to use `synpp`
 
 **2.0.0**
+
 - Update Maven dependency
 - Update eqasim to 1.0.5
 - Upgrade to new pt2matsim version to allow selecting of HAFAS date
@@ -35,6 +27,7 @@ This change log is written in descending order. Changes that happen after versio
 - Added ÖV Güteklasse for home locations
 - Remove imputation of ÖV Güteklasse for activities
 - Use code for ÖV Güteklasse from eqasim-java
+
 - Use modular mode choice (Update to eqasim v1.0.1)
 - Use fixed eqasim version
 - Change activity type "errand" to "other"

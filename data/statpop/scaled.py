@@ -7,16 +7,13 @@ from data.statpop.multilevelipf.multilevelipf import FittingProblem, IPUSolver
 
 
 def configure(context):
+    context.config("enable_scaling", default=False)
+    context.config("scaling_year", default=c.BASE_SCALING_YEAR)
+    context.config("threads")
     context.stage("data.statpop.statpop")
     context.stage("data.statpop.projections.households")
     context.stage("data.statpop.projections.population")
 
-    context.config("enable_scaling", default=False)
-    context.config("scaling_year", default=c.BASE_SCALING_YEAR)
-    
-    context.config("random_seed")
-    context.config("threads")    
-    
 
 def execute(context):
     df_statpop = context.stage("data.statpop.statpop")
@@ -113,9 +110,6 @@ def execute(context):
 
 
 def process(context, problem):
-    
-    # Set up RNG
-    rng = np.random.RandomState(context.config("random_seed"))
 
     # Create the IPU solver
     ipu_solver = IPUSolver(group_rel_tol=1e-4, group_abs_tol=1, ind_rel_tol=1e-5, ind_abs_tol=10, max_iter=2000)
@@ -143,12 +137,8 @@ def process(context, problem):
         df_replicate = df_hh_group.loc[indices]
 
         # 3) Sample - We sample the required remaining households based on the remainders without replacement
-        indices = rng.choice(
-            a=list(df_hh_group.index), 
-            size=int(np.round(np.sum(weights) - np.sum(counts))),
-            replace=False, 
-            p=(remainders / np.sum(remainders))
-            )
+        indices = np.random.choice(list(df_hh_group.index), int(np.round(np.sum(weights) - np.sum(counts))),
+                                   replace=False, p=(remainders / np.sum(remainders)))
         df_sample = df_hh_group.loc[indices]
 
         # We combine the replicated and sampled households

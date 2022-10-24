@@ -10,8 +10,6 @@ def configure(context):
     context.stage("data.spatial.zones")
     context.stage("data.spatial.zone_shapes")
     context.stage("synthesis.population.spatial.primary.work.zones")
-    
-    context.config("random_seed")
 
 
 def execute(context):
@@ -23,9 +21,6 @@ def execute(context):
 
     df_demand = df.groupby("work_zone_id").size().reset_index(name="count")
     df_demand = pd.merge(df_demand, df_zones[["work_zone_id", "zone_level"]])
-    
-    # Set up RNG
-    rng = np.random.RandomState(context.config("random_seed"))
 
     # First handle the national commuters
     df_national = df_demand[df_demand["zone_level"].isin(("municipality", "quarter"))]
@@ -38,7 +33,7 @@ def execute(context):
         weights /= np.sum(weights)
 
         if len(indices) > 0:
-            indices = np.repeat(indices, rng.multinomial(n=count, pvals=weights))
+            indices = np.repeat(indices, np.random.multinomial(count, weights))
 
             f = df["work_zone_id"] == zone_id
             df.loc[f, "work_x"] = df_statent.iloc[indices]["x"].values

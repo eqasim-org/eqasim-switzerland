@@ -7,8 +7,6 @@ import data.spatial.utils as spatial_utils
 def configure(context):
     context.stage("data.statent.statent")
     context.stage("synthesis.population.enriched")
-    
-    context.config("random_seed")
 
 
 # TODO: We only assign work here through OD matrices. However, we *can* generate
@@ -26,9 +24,6 @@ def execute(context):
     age_bounds = [(-np.inf, 6), (6, 12), (12, 16), (16, np.inf)]
     education_types = ["kindergarten", "primary", "secondary", "tertiary"]
     query_sizes = (1, 1, 5, 10)
-    
-    # Set up RNG
-    rng = np.random.RandomState(context.config("random_seed"))
 
     for (lower_bound, upper_bound), type, query_size in zip(age_bounds, education_types, query_sizes):
         f_persons = (df_persons["age"] > lower_bound) & (df_persons["age"] <= upper_bound)
@@ -39,7 +34,7 @@ def execute(context):
 
         tree = KDTree(education_coordinates)
         distances, indices = tree.query(home_coordinates, query_size, return_distance=True)
-        selector = rng.randint(query_size, size=(indices.shape[0],))
+        selector = np.random.randint(query_size, size=(indices.shape[0],))
         indices = np.choose(selector, indices.T)
 
         df_persons.loc[f_persons, "education_x"] = df_candidates.iloc[indices]["x"].values

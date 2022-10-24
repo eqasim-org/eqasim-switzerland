@@ -63,7 +63,7 @@ def execute(context):
 
     # For each deprecated municipality find the covering reference municipality
     df_mapping = gpd.sjoin(
-        df_reference, df_deprecated, predicate="contains"
+        df_reference, df_deprecated, op="contains"
     ).reset_index()[["municipality_id", "deprecated_municipality_id"]]
 
     # Now we are left over with some old municipalities whose centroids
