@@ -1,6 +1,7 @@
 This change log is written in descending order. Changes that happen after version X was released, are written above that version number, because they will be included in the (note yet determined) next version number.
 
 **Development version**
+- Specify random seed for all random number generators. `numpy.random.RandomState` is used as it is frozen and thus guaranteed to produce the same values.
 - Refactored stages for generating the MATSim scenario
 - Improve logger verbosity
 - Update code to reflect `python 3.8.13` upgrade, fix deprecated and future warnings.

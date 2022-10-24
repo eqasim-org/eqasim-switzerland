@@ -1,17 +1,21 @@
-import geopandas as gpd
 import numpy as np
 import pandas as pd
+
+import geopandas as gpd
 import shapely.geometry as geo
 from sklearn.neighbors import KDTree
 
 
-def sample_coordinates(row, count):
+def sample_coordinates(row, count, random_seed=0):
     samples = []
     bounds = row["geometry"].bounds
+    
+    # Set up RNG
+    rng = np.random.RandomState(random_seed)
 
     while len(samples) < count:
-        x = bounds[0] + np.random.random(size=(1000,)) * (bounds[2] - bounds[0])
-        y = bounds[1] + np.random.random(size=(1000,)) * (bounds[3] - bounds[1])
+        x = bounds[0] + rng.random_sample(size=(1000,)) * (bounds[2] - bounds[0])
+        y = bounds[1] + rng.random_sample(size=(1000,)) * (bounds[3] - bounds[1])
         points = map(geo.Point, zip(x, y))
         points = [point for point in points if row["geometry"].contains(point)]
         samples += points
