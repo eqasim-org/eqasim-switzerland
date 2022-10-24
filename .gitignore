@@ -1,4 +1,8 @@
 __pycache__
-temp
-setup/pipeline_environment/*/
-.idea/
+cache
+.idea
+.vscode
+config*.yml
+!config.yml
+!config_gitlab.yml
+!config_docker.yml

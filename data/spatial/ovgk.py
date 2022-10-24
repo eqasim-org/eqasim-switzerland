@@ -16,12 +16,13 @@ def execute(context):
     return df
 
 
-def impute(context, df_ovgk, df, on):
-    indices = np.array_split(np.arange(len(df)), 100)
+def impute(context, df_ovgk, df, on, point_type="", chunk_size=100):
+    indices = np.array_split(np.arange(len(df)), chunk_size)
     df_join = []
 
-    for chunk in context.progress(indices, label="Imputing ÖV Güteklasse"):
-        df_join.append(gpd.sjoin(df.iloc[chunk], df_ovgk, op="within")[on + ["ovgk"]])
+    print(f"Imputing ÖV Güteklasse for {len(df)} {point_type} coordinates...")
+    for chunk in context.progress(indices, total=len(indices), label="Imputing ÖV Güteklasse..."):
+        df_join.append(gpd.sjoin(df.iloc[chunk], df_ovgk, predicate="within")[on + ["ovgk"]])
 
     df_join = pd.concat(df_join)
     df_join = pd.merge(df, df_join, on=on, how="left")

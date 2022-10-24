@@ -14,7 +14,6 @@ maven_version="3.6.3"
 maven_url="https://downloads.apache.org/maven/maven-3/${maven_version}/binaries/apache-maven-${maven_version}-bin.tar.gz"
 maven_sha512="c35a1803a6e70a126e80b2b3ae33eed961f83ed74d18fcd16909b2d44d7dada3203f1ffe726c17ef8dcca2dcaa9fca676987befeadc9b9f759967a8cb77181c0"
 
-
 # Define Python requirements
 environment_yaml=$(cat <<EOF
 name: venv
@@ -23,33 +22,34 @@ channels:
   - defaults
 
 dependencies:
-  - matplotlib=3.3.2
-  - pandas=1.1.3
-  - scipy=1.5.2
-  - numpy=1.19.2
-  - geopandas=0.6.1
-  - numba=0.51.2
-  - palettable=3.3.0
-  - scikit-learn=0.23.2
-  - shapely=1.6.4
-  - tqdm=4.50.2
-  - pytables=3.6.1
-  - xlrd=1.2.0
-  - pip=20.2.4
+  - python=3.8.13
+  - pip=22.1.2
 
   - pip:
-    - pyproj==3.0.0
+    - matplotlib==3.6.0
+    - pandas==1.5.0
+    - scipy==1.9.1
+    - numpy==1.23.3
+    - geopandas==0.11.1
+    - numba==0.56.2
+    - palettable==3.3.0
+    - scikit-learn==1.1.2
+    - shapely==1.8.4
+    - tqdm==4.64.1
+    - tables==3.7.0
+    - xlrd==2.0.1
+    - pyproj==3.4.0
     - simpledbf==0.2.6
-    - synpp==1.3.1
-    - python-Levenshtein==0.12.0
+    - synpp==1.5.0
+    - python-Levenshtein==0.20.5
+    - openpyxl==3.0.10
 
-  # For testing
-  - pytest==6.1.1
-  - xlwt==1.3.0
-  - pysal==2.3.0
+    # For testing
+    - pytest==7.1.3
+    - xlwt==1.3.0
+    - pysal==2.7.0
 EOF
 )
-
 
 # Miniconda update script to avoid too long paths in interpreter path
 miniconda_update_script=$(cat <<EOF
