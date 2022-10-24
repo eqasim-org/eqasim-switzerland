@@ -16,8 +16,15 @@ def execute(context):
     return kd_tree
 
 
-def impute(kd_tree, df, x="x", y="y", radius=c.POPULATION_DENSITY_RADIUS):
-    print("Imputing population density ...")
-    coordinates = np.vstack([df[x], df[y]]).T
-    counts = kd_tree.query_radius(coordinates, radius, count_only=True)
-    df["population_density"] = counts  # / (np.pi * c.POPULATION_DENSITY_RADIUS**2)
+def impute(context, kd_tree, df, x="x", y="y", radius=c.POPULATION_DENSITY_RADIUS, point_type="", chunk_size=1e6):
+    print(f"Imputing population density within {radius} m of {len(df)} {point_type} coordinates...")
+    counts = []
+    chunk_count = max(1, int(len(df) / chunk_size))
+    for chunk in context.progress(np.array_split(df, chunk_count), 
+                                  total=chunk_count,
+                                  label="Imputing population density..."):
+        
+        coordinates = np.vstack([chunk[x], chunk[y]]).T
+        counts.extend(kd_tree.query_radius(coordinates, radius, count_only=True))
+    
+    df["population_density"] = counts # / (np.pi * c.POPULATION_DENSITY_RADIUS**2)

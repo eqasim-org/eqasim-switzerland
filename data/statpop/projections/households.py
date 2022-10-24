@@ -174,6 +174,4 @@ def execute(context):
     # sort values
     df_households = df_households.sort_values(["canton_id", "household_size_class"])
 
-    print(df_households.head())
-
     return df_households, scaling_year

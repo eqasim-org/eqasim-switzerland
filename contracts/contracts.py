@@ -20,8 +20,9 @@ def min_date(dates):
 def execute(context):
     this_path = os.path.dirname(os.path.abspath(__file__))
 
-    with open("%s/../contracts.yml" % this_path) as f_contracts:
-        data = yaml.load(f_contracts)
+    with open("%s/../contracts.yml" % this_path, "r") as f_contracts:
+        
+        data = yaml.safe_load(f_contracts)
 
         datasets = data["datasets"]
         persons = data["persons"]

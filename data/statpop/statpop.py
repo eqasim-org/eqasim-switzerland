@@ -133,12 +133,16 @@ def execute(context):
     df = data.spatial.cantons.impute_sp_region(df)
 
     # Impute population density
-    data.statpop.density.impute(context.stage("data.statpop.density"), df, "home_x", "home_y")
+    data.statpop.density.impute(
+        context, 
+        context.stage("data.statpop.density"), df, 
+        "home_x", "home_y", 
+        chunk_size=1e5,
+        point_type="home")
 
     # Impute OV Guteklasse
-    print("Imputing ÖV Güteklasse ...")
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"])
+    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
     df = pd.merge(df, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
 
     # Save original statpop person and household ids
