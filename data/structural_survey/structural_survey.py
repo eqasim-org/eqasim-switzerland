@@ -10,8 +10,10 @@ def configure(context):
     
     context.stage("data.spatial.countries")
     context.stage("data.spatial.municipalities")
-    context.stage("data.spatial.quarters")    
+    context.stage("data.spatial.quarters")
     context.stage("data.spatial.zones")
+
+    context.config("random_seed")
 
 
 def execute(context):
@@ -22,6 +24,10 @@ def execute(context):
     df_municipalities, df_municipality_mapping = context.stage("data.spatial.municipalities")
     df_quarters = context.stage("data.spatial.quarters")
     
+    # Set up RNG
+    random_seed = context.config("random_seed")
+    rng = np.random.RandomState(random_seed)
+
     # Find the correct modes
     df_se.loc[:, "mode_numeric"] = df_se.loc[:, "mode"].astype(np.int)
     df_se.loc[df_se["mode_numeric"] == -10, "mode"] = "unknown"
@@ -96,7 +102,7 @@ def execute(context):
 
         if len(indices) > 0:
             f = df_se["home_municipality_id"] == municipality_id
-            indices = indices[np.random.randint(len(indices), size=(np.count_nonzero(f),))]
+            indices = indices[rng.randint(len(indices), size=(np.count_nonzero(f),))]
             df_se.loc[f, "home_municipality_x"] = df_statpop.iloc[indices]["home_x"].values
             df_se.loc[f, "home_municipality_y"] = df_statpop.iloc[indices]["home_y"].values
 
@@ -109,7 +115,7 @@ def execute(context):
                                             label="Sampling home locations for municipalities"):
         f = np.isnan(df_se["home_municipality_x"]) & (df_se["home_municipality_id"] == municipality_id)
         row = df_municipalities[df_municipalities["municipality_id"] == municipality_id].iloc[0]
-        coordinates = utils.sample_coordinates(row, np.count_nonzero(f))
+        coordinates = utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
         df_se.loc[f, "home_municipality_x"], df_se.loc[f, "home_municipality_y"] = coordinates[:, 0], coordinates[:, 1]
 
     assert (~np.any(np.isnan(df_se["home_municipality_x"])))
@@ -124,7 +130,7 @@ def execute(context):
 
         if len(indices) > 0:
             f = df_se["home_quarter_id"] == quarter_id
-            indices = indices[np.random.randint(len(indices), size=(np.count_nonzero(f),))]
+            indices = indices[rng.randint(len(indices), size=(np.count_nonzero(f),))]
             df_se.loc[f, "home_quarter_x"] = df_statpop.iloc[indices]["home_x"].values
             df_se.loc[f, "home_quarter_y"] = df_statpop.iloc[indices]["home_y"].values
 
@@ -136,7 +142,7 @@ def execute(context):
                                        label="Sampling home locations for municipalities"):
         f = np.isnan(df_se["home_quarter_x"]) & (df_se["home_quarter_id"] == quarter_id)
         row = df_quarters[df_quarters["quarter_id"] == quarter_id].iloc[0]
-        coordinates = utils.sample_coordinates(row, np.count_nonzero(f))
+        coordinates = utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
         df_se.loc[f, "home_quarter_x"], df_se.loc[f, "home_quarter_y"] = coordinates[:, 0], coordinates[:, 1]
 
     quarter_count = np.count_nonzero(~np.isnan(df_se["home_quarter_x"]))
@@ -176,7 +182,7 @@ def execute(context):
 
         if len(indices) > 0:
             f = df_se["work_municipality_id"] == municipality_id
-            indices = indices[np.random.randint(len(indices), size=(np.count_nonzero(f),))]
+            indices = indices[rng.randint(len(indices), size=(np.count_nonzero(f),))]
             df_se.loc[f, "work_municipality_x"] = df_statent.iloc[indices]["x"].values
             df_se.loc[f, "work_municipality_y"] = df_statent.iloc[indices]["y"].values
 
@@ -189,7 +195,7 @@ def execute(context):
                                             label="Sampling work locations for municipalities"):
         f = np.isnan(df_se["work_municipality_x"]) & (df_se["work_municipality_id"] == municipality_id)
         row = df_municipalities[df_municipalities["municipality_id"] == municipality_id].iloc[0]
-        coordinates = utils.sample_coordinates(row, np.count_nonzero(f))
+        coordinates = utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
         df_se.loc[f, "work_municipality_x"], df_se.loc[f, "work_municipality_y"] = coordinates[:, 0], coordinates[:, 1]
 
     # Assign coordinates in the work quarters
@@ -202,7 +208,7 @@ def execute(context):
 
         if len(indices) > 0:
             f = df_se["work_quarter_id"] == quarter_id
-            indices = indices[np.random.randint(len(indices), size=(np.count_nonzero(f),))]
+            indices = indices[rng.randint(len(indices), size=(np.count_nonzero(f),))]
             df_se.loc[f, "work_quarter_x"] = df_statent.iloc[indices]["x"].values
             df_se.loc[f, "work_quarter_y"] = df_statent.iloc[indices]["y"].values
 
@@ -214,7 +220,7 @@ def execute(context):
                                        label="Sampling work locations for municipalities"):
         f = np.isnan(df_se["work_quarter_x"]) & (df_se["work_quarter_id"] == quarter_id)
         row = df_quarters[df_quarters["quarter_id"] == quarter_id].iloc[0]
-        coordinates = utils.sample_coordinates(row, np.count_nonzero(f))
+        coordinates = utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
         df_se.loc[f, "work_quarter_x"], df_se.loc[f, "work_quarter_y"] = coordinates[:, 0], coordinates[:, 1]
 
     quarter_count = np.count_nonzero(~np.isnan(df_se["work_quarter_x"]))

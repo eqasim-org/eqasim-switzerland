@@ -97,8 +97,8 @@ def execute(context):
     number_of_persons = len(unique_person_ids)
     unique_person_ids = np.array_split(unique_person_ids, processes)
 
-    random = np.random.RandomState(context.config("random_seed"))
-    random_seeds = random.randint(10000, size=processes)
+    rng = np.random.RandomState(context.config("random_seed"))
+    random_seeds = rng.randint(10000, size=processes)
 
     # Create batch problems for parallelization
     batches = []
@@ -134,18 +134,18 @@ def process(context, arguments):
     df_trips, df_primary, random_seed = arguments
 
     # Set up RNG
-    random = np.random.RandomState(context.config("random_seed"))
+    rng = np.random.RandomState(random_seed)
 
     # Set up distance sampler
     distance_distributions = context.data("distance_distributions")
     distance_sampler = CustomDistanceSampler(
         maximum_iterations=1000,
-        random=random,
+        random=rng,
         distributions=distance_distributions)
 
     # Set up relaxation solver; currently, we do not consider tail problems.
     relaxation_solver = GravityChainSolver(
-        random=random, eps=10.0, lateral_deviation=10.0, alpha=0.1
+        random=rng, eps=10.0, lateral_deviation=10.0, alpha=0.1
     )
 
     # Set up discretization solver

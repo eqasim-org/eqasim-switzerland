@@ -11,6 +11,8 @@ This stage attaches all trip relevant information to the synthetic population.
 def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.microcensus.trips")
+    
+    context.config("random_seed")
 
 
 def execute(context):
@@ -56,7 +58,9 @@ def execute(context):
     # If first departure time is just 5min after midnight, we only add a deviation of 5min
     interval = np.minimum(1800.0, interval)
 
-    offset = np.random.random(size=(len(counts),)) * interval * 2.0 - interval
+    # Set up RNG
+    rng = np.random.RandomState(context.config("random_seed"))
+    offset = rng.random_sample(size=(len(counts),)) * interval * 2.0 - interval
     offset = np.repeat(offset, counts)
 
     df_trips["departure_time"] += offset
