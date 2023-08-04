@@ -1,3 +1,5 @@
+**Make sure you are on a develop branch when you are using this repository as it contains the most recent improvements tot he pipeline!! The master branch will be soon updated to reflect these important updates!!**
+
 This repository contains all the scripts that are used to create the
 IVT Switzerland / Zurich MATSim scenario. It uses a custom build pipeline
 with `python` modules that call each other in the sense of incremental builds.
