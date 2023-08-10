@@ -4,7 +4,7 @@ dryrun: false
 
 # Requested stages
 run:
-    - matsim.output
+    - matsim.simulation.run
     - matsim.scenario.mz.population
     - data.microcensus.csv
 
