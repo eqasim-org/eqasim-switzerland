@@ -8,6 +8,7 @@ import data.utils
 
 def configure(context):
     context.config("data_path")
+    context.config("output_path")
     context.stage("data.microcensus.households")
     context.stage("data.microcensus.trips")
 
@@ -57,6 +58,12 @@ def execute(context):
     df_mz_persons.loc[df_mz_persons["tag"] == 6, "weekend"] = True
     df_mz_persons.loc[df_mz_persons["tag"] == 7, "weekend"] = True
 
+    # Detailed weekend observations
+    df_mz_persons["saturday"] = False
+    df_mz_persons.loc[df_mz_persons["tag"] == 6, "saturday"] = True
+    df_mz_persons["sunday"] = False
+    df_mz_persons.loc[df_mz_persons["tag"] == 7, "sunday"] = True
+
     # Here we extract a bit more than Kirill, but most likely it will be useful later
 
     df_mz_persons["subscriptions_ga"] = df_mz_persons["f41610a"] == 1
@@ -92,8 +99,8 @@ def execute(context):
     df_mz_persons.loc[df_mz_persons["f41301"] == 3, "parking_education"] = "no"
     df_mz_persons["parking_education"] = df_mz_persons["parking_education"].astype("category")
 
-    df_mz_persons["parking_cost_work"] = np.maximum(0, df_mz_persons["f41400"].astype(np.float))
-    df_mz_persons["parking_cost_education"] = np.maximum(0, df_mz_persons["f41401"].astype(np.float))
+    df_mz_persons["parking_cost_work"] = np.maximum(0, df_mz_persons["f41400"].astype(float))
+    df_mz_persons["parking_cost_education"] = np.maximum(0, df_mz_persons["f41401"].astype(float))
 
     # Wrap up
     df_mz_persons = df_mz_persons[[
@@ -117,29 +124,42 @@ def execute(context):
         "subscriptions_verbund_class",
         "subscriptions_strecke_class",
         "age_class", "person_weight",
-        "weekend", "date"
+        "weekend", "saturday", "sunday", "date"
     ]]
 
     # Merge in the other data sets
     df_mz_households = context.stage("data.microcensus.households")
-    df_mz_trips = context.stage("data.microcensus.trips")
+    df_mz_trips, filterout_person_ids = context.stage("data.microcensus.trips")
+    
+    #df_mz_persons = df_mz_persons[~df_mz_persons["person_id"].isin(filterout_person_ids)]
 
     df_mz_persons = pd.merge(df_mz_persons, df_mz_households)
     df_mz_persons = data.microcensus.income.impute(df_mz_persons)
 
-    remove_ids = set(df_mz_persons["person_id"]) - set(df_mz_trips["person_id"])
+    
     initial_size = len(df_mz_persons)
 
-    df_mz_persons = df_mz_persons[~df_mz_persons["person_id"].isin(remove_ids)]
+    # TODO Uncomment if you DO WANT to exclude people staying at home all day
+    df_mz_persons = df_mz_persons[~df_mz_persons["person_id"].isin(filterout_person_ids)]
+    df_mz_persons = df_mz_persons[df_mz_persons["weekend"] == False]
+    then_size = len(df_mz_persons)
+    home_ids = set(df_mz_persons["person_id"]) - set(df_mz_trips["person_id"])
 
     # Note: Around 7000 of them are those, which do not even have an activity chain in the first place
     # because they have not been asked.
     print("  Removed %d (%.2f%%) persons from MZ because of insufficient trip data" % (
-        len(remove_ids), 100.0 * len(remove_ids) / initial_size
+        len(filterout_person_ids), 100.0 * len(filterout_person_ids) / initial_size
+    ))
+    
+    print("  Percentage of agents staying home (not weighted): %d (%.2f%%)" % (
+        len(home_ids), 100.0 * len(home_ids) / then_size
     ))
 
     # Add car passenger flag
     car_passenger_ids = df_mz_trips.loc[df_mz_trips["mode"] == "car_passenger", "person_id"].unique()
     df_mz_persons["is_car_passenger"] = df_mz_persons["person_id"].isin(car_passenger_ids)
+    
+    output_path = context.config("output_path")
+    df_mz_persons.to_csv(output_path + "/mz_persons.csv", index = False)
 
     return df_mz_persons

@@ -1,4 +1,5 @@
 import functools
+from random import choices
 
 import numpy as np
 import pandas as pd
@@ -10,7 +11,6 @@ def configure(context):
     context.stage("data.od.distances")
     context.stage("data.spatial.zones")
     context.stage("synthesis.population.enriched")
-    
     context.config("random_seed")
 
 
@@ -30,11 +30,18 @@ def execute(context):
 
     # Load person information
     df_persons = context.stage("synthesis.population.enriched")[["person_id", "household_id",
-                                                                 "mz_person_id", "home_zone_id"]]
-
-    # Merge commute information into the persons
-    df = pd.merge(df_persons, df_commute, on="mz_person_id")
+                                                                 "mz_person_id", "home_zone_id",
+                                                                 "employed"]]
     
+    df_persons["work_mz_person_id"] = df_persons["mz_person_id"]
+
+    filter = (df_persons["employed"]) & ~(df_persons["work_mz_person_id"].isin(df_commute["mz_person_id"]))
+    N_missing = len(df_persons[filter])
+    df_persons.loc[filter, "work_mz_person_id"] = choices(df_commute["mz_person_id"].values.tolist(), k = N_missing)
+    
+    # Merge commute information into the persons
+    df = pd.merge(df_persons, df_commute, left_on="work_mz_person_id", right_on = "mz_person_id", how = "inner")
+
     # Set up RNG
     rng = np.random.RandomState(context.config("random_seed"))
 
@@ -52,7 +59,7 @@ def execute(context):
                    ]) for origin_zone in context.progress(df_zones["zone_id"], label=mode)
         ])[:, np.newaxis]
 
-        counts = np.zeros(pdf_matrices[source_mode].shape, dtype=np.int)
+        counts = np.zeros(pdf_matrices[source_mode].shape, dtype=np.int32)
 
         for i in range(len(df_zones)):
             if origin_counts[i] > 0:
@@ -63,7 +70,7 @@ def execute(context):
         assert (len(counts) == len(df_zones))
 
     distances = context.stage("data.od.distances")
-    work_zones = np.zeros((len(df),), dtype=np.int)
+    work_zones = np.zeros((len(df),), dtype=np.int32)
     zone_ids = list(df_zones["zone_id"])
 
     with context.progress(label="Assigning work zones", total=5 * len(df_zones)) as progress:

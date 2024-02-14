@@ -4,18 +4,19 @@ import pyproj
 
 import data.constants as c
 import data.spatial.cantons
+import data.statpop.density
 import data.spatial.municipalities
 import data.spatial.municipality_types
 import data.spatial.ovgk
 import data.spatial.utils
 import data.spatial.zones
-import data.statpop.density
 import data.utils
 import data.utils
 
 
 def configure(context):
     context.config("data_path")
+    context.config("output_path")
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.zones")
     context.stage("data.spatial.municipality_types")
@@ -25,6 +26,7 @@ def configure(context):
 
 def execute(context):
     data_path = context.config("data_path")
+    output_path = context.config("output_path")
 
     df_mz_households = pd.read_csv(
         "%s/microcensus/haushalte.csv" % data_path, sep=",", encoding="latin1")
@@ -75,12 +77,8 @@ def execute(context):
     df_municipality_types = context.stage("data.spatial.municipality_types")
 
     df_spatial = pd.DataFrame(df_mz_households[["person_id", "home_x", "home_y"]])
-    df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y", coord_type="home")
-    df_spatial = data.spatial.utils.impute(
-        context, 
-        df_spatial, df_municipalities, 
-        "person_id", "municipality_id", 
-        zone_type="municipality", point_type="home")
+    df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y")
+    df_spatial = data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id")
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
     df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
 
@@ -91,17 +89,22 @@ def execute(context):
 
     df_mz_households["home_zone_id"] = df_mz_households["zone_id"]
 
-    # Impute population density
-    data.statpop.density.impute(
-        context, 
-        context.stage("data.statpop.density"), df_mz_households, 
-        "home_x", "home_y",
-        point_type="home")
+    # Impute density
+    data.statpop.density.impute(context.stage("data.statpop.density"), df_mz_households, "home_x", "home_y")
 
     # Impute OV Guteklasse
+    print("Imputing ÖV Güteklasse ...")
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
+    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"])
     df_mz_households = pd.merge(df_mz_households, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
+
+    df_mz_households = df_mz_households[[
+        "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
+        "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
+        "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id", "ovgk"
+    ]]
+
+    df_mz_households.to_csv("%s/mz_households.csv" % output_path, index = False, encoding = "latin1")
 
     # Wrap it up
     return df_mz_households[[

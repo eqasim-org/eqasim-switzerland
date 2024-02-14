@@ -50,49 +50,85 @@ def execute(context):
     return df_zones[["zone_id", "zone_name", "zone_level", "zone_level_id"]]
 
 def impute(df, df_zones, zone_id_prefix = "",
-           zone_fields={"quarter": "quarter_id",
-                        "municipality": "municipality_id",
-                        "country": "country_id",
-                        "nuts": "nuts_id",
-                        "postal_code": "postal_code"}):
-    print(f"Imputing {list(zone_fields.keys())} zones for {len(df)} points...")
-    remaining_mask = np.ones((len(df),), dtype = np.bool)
-    df[zone_id_prefix + "zone_id"] = np.nan
-    df[zone_id_prefix + "zone_level"] = np.nan
-    
-    for zone_level, zone_id_field in zone_fields.items():
-        if zone_id_field in df:
-            
-            # Create filters
-            f = ~pd.isnull(df[zone_id_field]) & remaining_mask            
-            f_zone = df_zones["zone_level"] == zone_level
-            
-            # Create temp df to merge
-            temp1 = df.loc[f, [zone_id_field]].rename({zone_id_field: "zone_level_id"}, axis=1).reset_index(drop=True)
-            temp2 = df_zones.loc[f_zone, ["zone_level_id", "zone_id", "zone_level"]].reset_index(drop=True)
+           quarter_id_field = "quarter_id", municipality_id_field = "municipality_id", country_id_field = "country_id",
+           nuts_id_field = "nuts_id", postal_code_field = "postal_code"):
+    print("Imputing %d zones" % len(df))
+    remaining_mask = np.ones((len(df),), dtype = bool)
+    df.loc[:, "zone_id"] = np.nan
 
-            # Merge
-            df_join = pd.merge(temp1, temp2, how = "left", on = "zone_level_id")
-            
-            # Add to df
-            if np.sum(f) == len(df):
-                df[zone_id_prefix + "zone_id"] = df_join["zone_id"].values
-                df[zone_id_prefix + "zone_level"] = df_join["zone_level"].values
-            else:
-                df.loc[f, zone_id_prefix + "zone_id"] = df_join["zone_id"].values
-                df.loc[f, zone_id_prefix + "zone_level"] = df_join["zone_level"].values
-                
-            # Compute remaining mask
-            remaining_mask &= pd.isnull(df[zone_id_prefix + "zone_id"])
-            count = np.count_nonzero(df[zone_id_prefix + "zone_level"] == zone_level)
-            print(f"  Found zone of type {zone_level} for {count} points")
-            
-        else:
-            print(f"  Id {zone_id_field} for zone type {zone_level} not found in dataframe")
-        
+    if quarter_id_field in df:
+        f = ~pd.isnull(df[quarter_id_field]) & remaining_mask
+
+        df_join = pd.merge(
+            df[f][[quarter_id_field]],
+            df_zones[df_zones["zone_level"] == "quarter"][["zone_level_id", "zone_id", "zone_level"]],
+            how = "left", left_on = quarter_id_field, right_on = "zone_level_id")
+
+        df.loc[f, zone_id_prefix + "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, zone_id_prefix + "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= pd.isnull(df[zone_id_prefix + "zone_id"])
+
+        print("  Found %d quarters" % np.count_nonzero(df[zone_id_prefix + "zone_level"] == "quarter"))
+
+    if municipality_id_field in df:
+        f = ~pd.isnull(df[municipality_id_field]) & remaining_mask
+
+        df_join = pd.merge(
+            df[f][[municipality_id_field]],
+            df_zones[df_zones["zone_level"] == "municipality"][["zone_level_id", "zone_id", "zone_level"]],
+            how = "left", left_on = municipality_id_field, right_on = "zone_level_id")
+
+        df.loc[f, zone_id_prefix + "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, zone_id_prefix + "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= pd.isnull(df[zone_id_prefix + "zone_id"])
+
+        print("  Found %d municipalities" % np.count_nonzero(df[zone_id_prefix + "zone_level"] == "municipality"))
+
+    if country_id_field in df:
+        f = ~pd.isnull(df[country_id_field]) & remaining_mask
+
+        df_join = pd.merge(
+            df[f][[country_id_field]],
+            df_zones[df_zones["zone_level"] == "country"][["zone_level_id", "zone_id", "zone_level"]],
+            how = "left", left_on = country_id_field, right_on = "zone_level_id")
+
+        df.loc[f, zone_id_prefix + "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, zone_id_prefix + "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= pd.isnull(df[zone_id_prefix + "zone_id"])
+
+        print("  Found %d countries" % np.count_nonzero(df[zone_id_prefix + "zone_level"] == "country"))
+
+    if nuts_id_field in df:
+        f = ~pd.isnull(df[nuts_id_field]) & remaining_mask
+
+        df_join = pd.merge(
+            df[f][[nuts_id_field]],
+            df_zones[df_zones["zone_level"] == "nuts"][["zone_level_id", "zone_id", "zone_level"]],
+            how = "left", left_on = nuts_id_field, right_on = "zone_level_id")
+
+        df.loc[f, zone_id_prefix + "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, zone_id_prefix + "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= pd.isnull(df[zone_id_prefix + "zone_id"])
+
+        print("  Found %d NUTS zones" % np.count_nonzero(df[zone_id_prefix + "zone_level"] == "nuts"))
+
+    if postal_code_field in df:
+        f = ~pd.isnull(df[postal_code_field]) & remaining_mask
+
+        df_join = pd.merge(
+            df[f][[postal_code_field]],
+            df_zones[df_zones["zone_level"] == "postal_code"][["zone_level_id", "zone_id", "zone_level"]],
+            how = "left", left_on = postal_code_field, right_on = "zone_level_id")
+
+        df.loc[f, zone_id_prefix + "zone_id"] = df_join.loc[:, "zone_id"].values
+        df.loc[f, zone_id_prefix + "zone_level"] = df_join.loc[:, "zone_level"].values
+        remaining_mask &= pd.isnull(df[zone_id_prefix + "zone_id"])
+
+        print("  Found %d postal codes" % np.count_nonzero(df[zone_id_prefix + "zone_level"] == "postal_code"))
+
     unknown_count = np.count_nonzero(pd.isnull(df[zone_id_prefix + "zone_id"]))
 
     if unknown_count > 0:
-        print(f"  No information for {unknown_count} observations")
-        
+        print("  No information for %d observations" % unknown_count)
+
     return df

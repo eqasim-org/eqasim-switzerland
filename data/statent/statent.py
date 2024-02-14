@@ -15,6 +15,7 @@ def configure(context):
     context.stage("data.spatial.quarters")
     context.stage("data.spatial.nuts")
     context.stage("data.spatial.postal_codes")
+    context.stage("data.spatial.municipality_types")
 
 def execute(context):
     data_path = context.config("data_path")
@@ -23,14 +24,18 @@ def execute(context):
         "%s/statent/QUERY_FOR_2014_DEC_STATENT_LOC.csv" % data_path,
         encoding = "latin1", sep = ";"))
 
-    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08", "EMPTOT"]])
-    df.columns = ["x", "y", "noga", "number_employees"]
-    df.loc[:, "noga"] = df["noga"].astype(np.str)
+    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08", "EMPTOT", "NOGA08_SECTION"]])
+    df.columns = ["x", "y", "noga", "number_employees", "noga08_section"]
+    df.loc[:, "noga"] = df["noga"].astype(str)
     df.loc[:, "enterprise_id"] = np.arange(len(df))
 
     df.loc[df["noga"].str.startswith("851"), "education_type"] = "kindergarten"
     df.loc[df["noga"].str.startswith("852"), "education_type"] = "primary"
-    df.loc[df["noga"].str.startswith("853"), "education_type"] = "secondary"
+    df.loc[df["noga"] == "853101", "education_type"] = "secondary1"
+    df.loc[df["noga"] == "853102", "education_type"] = "secondary2"
+    df.loc[df["noga"] == "853103", "education_type"] = "secondary2"
+    df.loc[df["noga"] == "853200", "education_type"] = "secondary2"
+    #df.loc[df["noga"].str.startswith("853"), "education_type"] = "secondary"
     df.loc[df["noga"].str.startswith("854"), "education_type"] = "tertiary"
     df["education_type"] = df["education_type"].astype("category")
 
@@ -44,72 +49,53 @@ def execute(context):
     df_nuts = context.stage("data.spatial.nuts")
     df_postal_codes = context.stage("data.spatial.postal_codes")
 
-    df_spatial = pd.DataFrame(df[["enterprise_id", "x", "y"]])
+    df_spatial = pd.DataFrame(df[["enterprise_id", "x", "y", "number_employees", "noga08_section"]])
 
-    df_spatial = data.spatial.utils.to_gpd(
-        context, df_spatial, "x", "y", 
-        coord_type="enterprise")    
+    df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "x", "y")
     df_spatial = df_spatial.drop(["x", "y"], axis=1)
 
     columns = ["enterprise_id"]
 
     # impute municipalities
-    df_spatial = data.spatial.utils.impute(
-        context, 
-        df_spatial, df_municipalities, 
-        "enterprise_id", "municipality_id",
-        zone_type="municipality", point_type="enterprise")
+    df_spatial = data.spatial.utils.impute(context, df_spatial, df_municipalities, "enterprise_id", "municipality_id")
     columns.extend(["municipality_id"])
 
     # impute quarters
-    df_spatial = data.spatial.utils.impute(
-        context, 
-        df_spatial, df_quarters, 
-        "enterprise_id", "quarter_id", 
-        fix_by_distance = False,
-        zone_type="quarter", point_type="enterprise")
+    df_spatial = data.spatial.utils.impute(context, df_spatial, df_quarters, "enterprise_id", "quarter_id", fix_by_distance = False)
     columns.extend(["quarter_id"])
 
     # impute NUTS
-    df_nuts = df_nuts[df_nuts["nuts_id"].str.contains("CH")].reset_index(drop=True)
+    df_nuts = df_nuts[df_nuts["nuts_id"].str.contains("CH")]
     for level in df_nuts["nuts_level"].unique():
-        f_level = df_nuts["nuts_level"] == level
-        df_spatial = (data.spatial.utils.impute(
-            context,
-            df_spatial, df_nuts[f_level].reset_index(drop=True),
-            "enterprise_id", "nuts_id", 
-            fix_by_distance=False,
-            zone_type="NUTS", point_type="enterprise"
-            )
-        .rename({"nuts_id": ("nuts_id_level_" + str(level))}, axis=1)
-        )
+        df_spatial = data.spatial.utils.impute(context, df_spatial, df_nuts[df_nuts["nuts_level"] == level],
+                                               "enterprise_id", "nuts_id", fix_by_distance=False).rename(
+            {"nuts_id": ("nuts_id_level_" + str(level))}, axis=1)
         columns.extend([("nuts_id_level_" + str(level))])
 
     # impute postal codes
-    df_spatial = data.spatial.utils.impute(
-        context, 
-        df_spatial, df_postal_codes, 
-        "enterprise_id", "postal_code", 
-        fix_by_distance=False,
-        zone_type="postal code", point_type="enterprise"
-        )
+    df_spatial = data.spatial.utils.impute(context, df_spatial, df_postal_codes, "enterprise_id", "postal_code", fix_by_distance=False)
     columns.extend(["postal_code"])
 
-    # clean up columns
-    df_spatial = df_spatial[columns]
+    # impute municipality type
+    df_municipality_types = context.stage("data.spatial.municipality_types")
+    df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
+    columns.extend(["municipality_type"])
 
     # impute zones
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
+
 
     assert(len(df) == len(df_spatial))
     assert(len(df_spatial) == len(df_spatial["zone_id"].dropna()))
 
     columns.extend(["zone_id"])
 
+    # clean up columns
+    df_spatial = df_spatial[columns]    
+
     df = pd.merge(
         df, df_spatial[columns],
         on = "enterprise_id"
     )
-    df["zone_id"] = df["zone_id"].astype(np.int)
-
+    df["zone_id"] = df["zone_id"].astype(np.int32)
     return df

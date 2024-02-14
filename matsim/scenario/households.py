@@ -4,11 +4,11 @@ import io
 import numpy as np
 
 import data.constants as c
-import matsim.writers
+import matsim.writers as writers
 
 
 def configure(context):
-    context.stage("synthesis.population.enriched")
+    context.stage("synthesis.population.SNN_population")
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class",
           "municipality_type", "sp_region", "canton_id", "ovgk"]
@@ -46,6 +46,8 @@ def add_household(writer, household, member_ids):
 
     canton_id = str(household[9]) if not np.isnan(household[9]) else "-1"
     writer.add_attribute("cantonId", "java.lang.Double", canton_id)
+    
+    # random comment
 
     writer.end_attributes()
 
@@ -53,14 +55,14 @@ def add_household(writer, household, member_ids):
 
 
 def execute(context):
-    cache_path = context.path()
+    cache_path = context.cache_path
 
-    df_persons = context.stage("synthesis.population.enriched").sort_values(by=["household_id", "person_id"])
+    df_persons = context.stage("synthesis.population.SNN_population").sort_values(by=["household_id", "person_id"])
     df_persons = df_persons[FIELDS]
 
     with gzip.open("%s/households.xml.gz" % cache_path, "w+") as f:
         with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:
-            writer = matsim.writers.HouseholdsWriter(raw_writer)
+            writer = writers.HouseholdsWriter(raw_writer)
             writer.start_households()
 
             household = [None, None]
@@ -78,4 +80,5 @@ def execute(context):
 
             writer.end_households()
 
-    return "%s/households.xml.gz" % cache_path
+    return "households.xml.gz"
+    #return "%s/households.xml.gz" % cache_path

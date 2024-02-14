@@ -4,13 +4,16 @@ import io
 import numpy as np
 import pandas as pd
 
-import matsim.writers
+import itertools
+import matsim.writers as writers
+from matsim.writers import backlog_iterator
+
+from random import random
 
 
 def configure(context):
-    context.stage("synthesis.population.enriched")
-    context.stage("synthesis.population.trips")
-    context.stage("synthesis.population.activities")
+    context.stage("synthesis.population.SNN_population")
+    context.stage("synthesis.population.SNN_mobility")
     context.stage("synthesis.population.spatial.locations")
     context.config("use_freight", default=False)
     context.stage("synthesis.freight.trips")
@@ -41,8 +44,8 @@ class PersonWriter:
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(self.person[14]))
         writer.add_attribute("statpopPersonId", "java.lang.Long", str(self.person[15]))
         writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[16]))
-        writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[17]))
-        writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[18]))
+        writer.add_attribute("mzPersonId", "java.lang.Long", str(int(self.person[17])))
+        writer.add_attribute("mzHeadId", "java.lang.Long", str(int(self.person[18])))
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
 
         writer.end_attributes()
@@ -76,6 +79,10 @@ class FreightWriter:
     def __init__(self, freight_agent):
         self.freight_agent = freight_agent
 
+
+    def add_activity(self, activity):
+        self.activities.append(activity)
+
     def write(self, writer):
         writer.start_person("freight_" + str(self.freight_agent[1]))
 
@@ -83,7 +90,7 @@ class FreightWriter:
         writer.start_attributes()
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
         writer.add_attribute("type", "java.lang.String", str(self.freight_agent[7]))
-        writer.add_attribute("subpopulation", "java.lang.String", "freight")
+        # writer.add_attribute("subpopulation", "java.lang.String", "freight")
         writer.end_attributes()
 
         # Plan
@@ -95,19 +102,13 @@ class FreightWriter:
         arrival_time = departure_time + 3600
 
         # loading activity
-        writer.start_activity("freight_loading", start_location, 0, departure_time)
-        writer.start_attributes()
-        writer.end_attributes()
-        writer.end_activity()
+        writer.add_activity("freight_loading", start_location, 0, departure_time)
 
         # transport leg
         writer.add_leg(str(self.freight_agent[7]), departure_time, arrival_time - departure_time)
 
         # unloading activity
-        writer.start_activity("freight_unloading", end_location, arrival_time, 30 * 3600)
-        writer.start_attributes()
-        writer.end_attributes()
-        writer.end_activity()
+        writer.add_activity("freight_unloading", end_location, arrival_time, 30 * 3600)
 
         writer.end_plan()
         writer.end_person()
@@ -122,12 +123,14 @@ ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "dur
 
 
 def execute(context):
-    cache_path = context.path()
-    df_persons = context.stage("synthesis.population.enriched")
-    df_activities = context.stage("synthesis.population.activities")
+    cache_path = context.cache_path
+    df_persons = context.stage("synthesis.population.SNN_population")
+    df_activities = context.stage("synthesis.population.SNN_mobility")[0]
+
+    df_activities.loc[df_activities["purpose"]=="work_from_home", "purpose"] = "home"
 
     # Attach following modes to activities
-    df_trips = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
+    df_trips = pd.DataFrame(context.stage("synthesis.population.SNN_mobility")[1], copy=True)[["person_id", "trip_index", "mode"]]
     df_trips.columns = ["person_id", "activity_index", "following_mode"]
     df_activities = pd.merge(df_activities, df_trips, on=["person_id", "activity_index"], how="left")
 
@@ -150,7 +153,7 @@ def execute(context):
 
     with gzip.open("%s/population.xml.gz" % cache_path, "w+") as f:
         with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:
-            writer = matsim.writers.PopulationWriter(raw_writer)
+            writer = writers.PopulationWriter(raw_writer)
             writer.start_population()
 
             with context.progress(total=len(df_persons), label="Writing persons ...") as progress:
@@ -164,6 +167,11 @@ def execute(context):
                         while not is_last:
                             activity = next(activity_iterator)
                             is_last = activity[7]
+                            if person[1] != activity[1]:
+                                print(df_persons[df_persons["person_id"]==person[1]])
+                                print(df_activities[df_activities["person_id"]==person[1]])
+                                print(df_persons[df_persons["person_id"]==activity[1]])
+                                print(df_activities[df_activities["person_id"]==activity[1]])
                             assert (person[1] == activity[1])
 
                             person_writer.add_activity(activity)
@@ -172,6 +180,7 @@ def execute(context):
                         person_writer.write(writer)
                         number_of_written_persons += 1
                         progress.update()
+
                 except StopIteration:
                     pass
 
@@ -199,4 +208,5 @@ def execute(context):
 
             writer.end_population()
 
-    return "%s/population.xml.gz" % cache_path
+    return "population.xml.gz"
+    #return "%s/population.xml.gz" % cache_path

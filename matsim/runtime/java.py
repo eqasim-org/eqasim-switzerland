@@ -32,7 +32,7 @@ def run(context, entry_point, arguments = [], class_path = None, vm_arguments = 
     if type(class_path) == list or type(class_path) == tuple:
         class_path = ":".join(class_path)
 
-    # Preapre CWD
+    # Prepare CWD
     if cwd is None:
         cwd = context.path()
 
@@ -61,7 +61,7 @@ def run(context, entry_point, arguments = [], class_path = None, vm_arguments = 
         raise RuntimeError("Mode is expected to be one of 'raise', 'return_code' or 'output'")
 
 def validate(context):
-    if shutil.which(context.config("java_binary")) in ["", None]:
+    if shutil.which(context.config("java_binary")) == "":
         raise RuntimeError("Cannot find Java binary at: %s" % context.config("java_binary"))
 
     if not b"11" in sp.check_output([

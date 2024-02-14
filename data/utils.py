@@ -6,10 +6,10 @@ import data.constants as c
 
 def fix_marital_status(df):
     """ Makes young people, who are separated, be treated as single! """
-    f = ((df["marital_status"] == c.MARITAL_STATUS_SEPARATE) & 
-         (df["age"] < c.SEPARATE_SINGLE_THRESHOLD))
-    df.loc[f, "marital_status"] = c.MARITAL_STATUS_SINGLE
-    df["marital_status"] = df["marital_status"].astype(np.int)
+    df.loc[
+        (df["marital_status"] == c.MARITAL_STATUS_SEPARATE) & (df["age"] < c.SEPARATE_SINGLE_THRESHOLD)
+        , "marital_status"] = c.MARITAL_STATUS_SINGLE
+    df.loc[:, "marital_status"] = df.loc[:, "marital_status"].astype(np.int32)
 
 
 def assign_household_class(df):
@@ -23,7 +23,7 @@ def assign_household_class(df):
     df["household_size_class"] = np.minimum(5, df["household_size"]) - 1
 
 
-def read_csv(context, fp, fields, renames=None, sep=";", total=None, encoding="latin1", limit=None, label="Reading csv file..."):
+def read_csv(context, fp, fields, renames=None, sep=";", total=None, encoding="latin1", limit=None):
     if renames is None:
         renames = {}
     header = None
@@ -31,7 +31,7 @@ def read_csv(context, fp, fields, renames=None, sep=";", total=None, encoding="l
 
     count = 0
 
-    for line in context.progress(fp, total=total, label=label):
+    for line in context.progress(fp, total=total):
         line = line.decode(encoding).strip().split(sep)
 
         if header is None:

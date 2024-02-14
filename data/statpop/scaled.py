@@ -7,16 +7,14 @@ from data.statpop.multilevelipf.multilevelipf import FittingProblem, IPUSolver
 
 
 def configure(context):
+    context.config("enable_scaling", default=False)
+    context.config("scaling_year", default=c.BASE_SCALING_YEAR)
+    context.config("threads")
+    context.config("random_seed")
     context.stage("data.statpop.statpop")
     context.stage("data.statpop.projections.households")
     context.stage("data.statpop.projections.population")
 
-    context.config("enable_scaling", default=False)
-    context.config("scaling_year", default=c.BASE_SCALING_YEAR)
-    
-    context.config("random_seed")
-    context.config("threads")    
-    
 
 def execute(context):
     df_statpop = context.stage("data.statpop.statpop")
@@ -113,7 +111,7 @@ def execute(context):
 
 
 def process(context, problem):
-    
+
     # Set up RNG
     rng = np.random.RandomState(context.config("random_seed"))
 
@@ -135,7 +133,7 @@ def process(context, problem):
         df_hh_group = (df_result[group_filter][["household_id", "statpop_household_id", "expansion_factor"]]
                        .drop_duplicates("household_id"))
         weights = df_hh_group["expansion_factor"].values
-        counts = np.floor(weights).astype(np.int)
+        counts = np.floor(weights).astype(int)
         remainders = weights - counts
 
         # 2) Replicate - We duplicate the households based on the count
@@ -149,6 +147,7 @@ def process(context, problem):
             replace=False, 
             p=(remainders / np.sum(remainders))
             )
+
         df_sample = df_hh_group.loc[indices]
 
         # We combine the replicated and sampled households

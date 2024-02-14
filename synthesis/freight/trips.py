@@ -6,7 +6,6 @@ def configure(context):
     context.stage("synthesis.freight.gte.trips")
     context.stage("synthesis.freight.gqgv.trips")
     context.stage("data.freight.departure_times")
-    
     context.config("random_seed")
 
 def execute(context):
@@ -14,10 +13,11 @@ def execute(context):
     df_gqgv_trips = context.stage("synthesis.freight.gqgv.trips")
     df_departure_times = context.stage("data.freight.departure_times")
 
-    df_trips = pd.concat([df_gte_trips, df_gqgv_trips], ignore_index=True)
-    
     # Set up RNG
     rng = np.random.RandomState(context.config("random_seed"))
+
+
+    df_trips = pd.concat([df_gte_trips, df_gqgv_trips], ignore_index=True)
 
     # generate hour from departure time distribution
     departure_times = 3600 * rng.choice(df_departure_times["hour"].values,

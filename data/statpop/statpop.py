@@ -25,6 +25,8 @@ def configure(context):
     context.stage("data.statpop.density")
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.ovgk")
+    
+    context.config("output_path")
 
 
 def execute(context):
@@ -43,13 +45,14 @@ def execute(context):
 
     # Merge STATPOP persons and households into a list of persons with houeshold attributes
     df = pd.merge(df_persons, df_link, on=("person_id", "municipality_id"))
-    df = pd.merge(df, df_households, on="household_id")
+    df = pd.merge(df, df_households, on=("household_id"))
 
     # Impute the houeshold size for each STATPOP person
     df_size = df.groupby("household_id").size().reset_index(name="household_size")
     df = pd.merge(df, df_size, on="household_id")
 
     # Only allow plausible households
+    # Not available for STATPOP 2017
     df = df[df["plausible"] == 1]
 
     # Only allow houesholds under a certian size
@@ -99,7 +102,7 @@ def execute(context):
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id",
                                             zone_type="municipality", point_type="home")[
         ["person_id", "municipality_id", "geometry"]])
-    df_spatial["municipality_id"] = df_spatial["municipality_id"].astype(np.int)
+    df_spatial["municipality_id"] = df_spatial["municipality_id"].astype(np.int32)
 
     # Impute quarters
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_quarters, "person_id", "quarter_id",
@@ -133,16 +136,13 @@ def execute(context):
     df = data.spatial.cantons.impute_sp_region(df)
 
     # Impute population density
-    data.statpop.density.impute(
-        context, 
-        context.stage("data.statpop.density"), df, 
-        "home_x", "home_y", 
-        chunk_size=1e5,
-        point_type="home")
+    data.statpop.density.impute(context.stage("data.statpop.density"), df, "home_x", "home_y")
+    df = data.statpop.head_of_household.impute(df)
 
     # Impute OV Guteklasse
+    print("Imputing ÖV Güteklasse ...")
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
+    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"])
     df = pd.merge(df, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
 
     # Save original statpop person and household ids
@@ -158,8 +158,8 @@ def execute(context):
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
         "home_municipality_id", "home_quarter_id", "canton_id", "population_density", "sp_region", "ovgk",
-        "statpop_person_id", "statpop_household_id"]]
+        "statpop_person_id", "statpop_household_id", "is_head"]]
 
     df = data.statpop.head_of_household.impute(df)
-
+    
     return df

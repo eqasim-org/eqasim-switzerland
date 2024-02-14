@@ -7,7 +7,7 @@ Transforms the synthetic trip table into a synthetic activity table.
 
 
 def configure(context):
-    context.stage("synthesis.population.enriched")
+    context.stage("synthesis.population.SNN_population")
     context.stage("synthesis.population.trips")
 
 
@@ -40,7 +40,7 @@ def execute(context):
     df_activities = pd.concat([df_activities, df_last])
 
     # We're still missing activities for people who don't have a any trips
-    df_persons = context.stage("synthesis.population.enriched")[["person_id"]]
+    df_persons = context.stage("synthesis.population.SNN_population")[["person_id"]]
 
     missing_ids = set(np.unique(df_persons["person_id"])) - set(np.unique(df_activities["person_id"]))
     print("Found %d persons without activities" % len(missing_ids))

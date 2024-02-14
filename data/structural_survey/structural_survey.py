@@ -1,19 +1,24 @@
 import numpy as np
 
-from data.spatial import countries, municipalities, quarters, zones, utils
+import data.spatial.countries
+import data.spatial.municipalities
+import data.spatial.quarters
+import data.spatial.utils
+import data.spatial.zones
+import data.spatial.countries
+from data.spatial.countries import update_country_ids
 
 
 def configure(context):
+    context.config("random_seed")
+
     context.stage("data.structural_survey.raw")
     context.stage("data.statpop.statpop")
     context.stage("data.statent.statent")
-    
+    context.stage("data.spatial.zones")
     context.stage("data.spatial.countries")
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.quarters")
-    context.stage("data.spatial.zones")
-
-    context.config("random_seed")
 
 
 def execute(context):
@@ -23,13 +28,13 @@ def execute(context):
     df_countries = context.stage("data.spatial.countries")
     df_municipalities, df_municipality_mapping = context.stage("data.spatial.municipalities")
     df_quarters = context.stage("data.spatial.quarters")
-    
+
     # Set up RNG
     random_seed = context.config("random_seed")
     rng = np.random.RandomState(random_seed)
 
     # Find the correct modes
-    df_se.loc[:, "mode_numeric"] = df_se.loc[:, "mode"].astype(np.int)
+    df_se.loc[:, "mode_numeric"] = df_se.loc[:, "mode"].astype(int)
     df_se.loc[df_se["mode_numeric"] == -10, "mode"] = "unknown"
     df_se.loc[df_se["mode_numeric"] == -9, "mode"] = "unknown"
     df_se.loc[df_se["mode_numeric"] == -8, "mode"] = "unknown"
@@ -46,33 +51,35 @@ def execute(context):
     del df_se["mode_numeric"]
 
     # Impute the home zone
-    df_se = df_se.reset_index(drop=True)
-    df_se = df_se.rename({"home_municipality": "municipality_id",
-                          "home_quarter": "quarter_id"}, axis=1)
-    df_se = quarters.update_quarter_ids(df_se, df_quarters)
-    df_se = municipalities.update_municipality_ids(df_se, df_municipality_mapping)
-    df_se = df_se.rename({"municipality_id": "home_municipality_id",
-                          "quarter_id": "home_quarter_id"}, axis=1)
-    
-    # Impute the work zone
-    df_se = df_se.rename({"work_country": "country_id",
-                          "work_municipality": "municipality_id",
-                          "work_quarter": "quarter_id"}, axis=1)
-    df_se = quarters.update_quarter_ids(df_se, df_quarters)
-    df_se = municipalities.update_municipality_ids(df_se, df_municipality_mapping)
-    df_se = countries.update_country_ids(df_se, df_countries)
-    df_se = df_se.rename({"municipality_id": "work_municipality_id",
-                          "quarter_id": "work_quarter_id",
-                          "country_id": "work_country_id"}, axis=1)
+    df_se.loc[:, "municipality_id"] = df_se["home_municipality"]
+    df_se.loc[:, "quarter_id"] = df_se["home_quarter"]
+    df_se = data.spatial.quarters.update_quarter_ids(df_se, df_quarters)
+    df_se = data.spatial.municipalities.update_municipality_ids(df_se, df_municipality_mapping)
+    df_se.loc[:, "home_municipality_id"] = df_se.loc[:, "municipality_id"]
+    df_se.loc[:, "home_quarter_id"] = df_se.loc[:, "quarter_id"]
 
-    f_no_home = ((np.isnan(df_se["home_municipality_id"])) & 
-                 (np.isnan(df_se["home_quarter_id"])))
-    f_no_work = ((np.isnan(df_se["work_country_id"])) & 
-                 (np.isnan(df_se["work_municipality_id"])) & 
-                 (np.isnan(df_se["work_quarter_id"])))
+    # Impute the work zone
+    df_se.loc[:, "country_id"] = df_se["work_country"]
+    df_se.loc[:, "municipality_id"] = df_se["work_municipality"]
+    df_se.loc[:, "quarter_id"] = df_se["work_quarter"]
+    df_se = data.spatial.quarters.update_quarter_ids(df_se, df_quarters)
+    df_se = data.spatial.municipalities.update_municipality_ids(df_se, df_municipality_mapping)
+    df_se = update_country_ids(df_se, df_countries)
+    df_se.loc[:, "work_municipality_id"] = df_se.loc[:, "municipality_id"]
+    df_se.loc[:, "work_quarter_id"] = df_se.loc[:, "quarter_id"]
+    df_se.loc[:, "work_country_id"] = df_se.loc[:, "country_id"]
+
+    f_no_home = np.isnan(df_se["home_municipality_id"]) & np.isnan(df_se["home_quarter_id"])
+    f_no_work = np.isnan(df_se["work_country_id"]) & np.isnan(df_se["work_municipality_id"]) & np.isnan(
+        df_se["work_quarter_id"])
 
     print("Found %d observations without home location information" % np.count_nonzero(f_no_home))
     print("Found %d observations without work location information" % np.count_nonzero(f_no_work))
+
+    # Cleanup
+    for variable in ["quarter_id", "municipality_id", "country_id", "home_quarter", "home_municipality",
+                     "work_municipality", "work_country"]:
+        del df_se[variable]
 
     # Now we face the problem that in an old structural survey we may assign
     # a municipality that has now quarters, or we find quarters that have been
@@ -94,9 +101,8 @@ def execute(context):
 
     # Assign coordinates in the home municipalities
 
-    se_municipality_ids = np.unique(df_se["home_municipality_id"].dropna()).astype(np.int)
+    se_municipality_ids = np.unique(df_se["home_municipality_id"].dropna()).astype(int)
     for municipality_id in context.progress(se_municipality_ids,
-                                            total=len(se_municipality_ids),
                                             label="Imputing home locations by municipality from STATPOP"):
         indices = np.where(df_statpop["home_municipality_id"] == municipality_id)[0]
 
@@ -111,21 +117,18 @@ def execute(context):
     print("A number of %d municipalities could not be assigned from STATPOP" % len(unassigned_municipality_ids))
 
     for municipality_id in context.progress(unassigned_municipality_ids,
-                                            total=len(unassigned_municipality_ids),
                                             label="Sampling home locations for municipalities"):
         f = np.isnan(df_se["home_municipality_x"]) & (df_se["home_municipality_id"] == municipality_id)
         row = df_municipalities[df_municipalities["municipality_id"] == municipality_id].iloc[0]
-        coordinates = utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
+        coordinates = data.spatial.utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
         df_se.loc[f, "home_municipality_x"], df_se.loc[f, "home_municipality_y"] = coordinates[:, 0], coordinates[:, 1]
 
     assert (~np.any(np.isnan(df_se["home_municipality_x"])))
 
     # Assign coordinates in the home quarters
 
-    se_quarter_ids = np.unique(df_se["home_quarter_id"].dropna()).astype(np.int)
-    for quarter_id in context.progress(se_quarter_ids, 
-                                       total=len(se_quarter_ids),
-                                       label="Imputing home locations by quarter from STATPOP"):
+    se_quarter_ids = np.unique(df_se["home_quarter_id"].dropna()).astype(int)
+    for quarter_id in context.progress(se_quarter_ids, label="Imputing home locations by quarter from STATPOP"):
         indices = np.where(df_statpop["home_quarter_id"] == quarter_id)[0]
 
         if len(indices) > 0:
@@ -137,12 +140,10 @@ def execute(context):
     unassigned_quarter_ids = np.unique(df_se[np.isnan(df_se["home_quarter_x"])]["home_quarter_id"].dropna())
     print("A number of %d quarters could not be assigned from STATPOP" % len(unassigned_quarter_ids))
 
-    for quarter_id in context.progress(unassigned_quarter_ids, 
-                                       total=len(unassigned_quarter_ids),
-                                       label="Sampling home locations for municipalities"):
+    for quarter_id in context.progress(unassigned_quarter_ids, label="Sampling home locations for municipalities"):
         f = np.isnan(df_se["home_quarter_x"]) & (df_se["home_quarter_id"] == quarter_id)
         row = df_quarters[df_quarters["quarter_id"] == quarter_id].iloc[0]
-        coordinates = utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
+        coordinates = data.spatial.utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
         df_se.loc[f, "home_quarter_x"], df_se.loc[f, "home_quarter_y"] = coordinates[:, 0], coordinates[:, 1]
 
     quarter_count = np.count_nonzero(~np.isnan(df_se["home_quarter_x"]))
@@ -158,11 +159,10 @@ def execute(context):
     df_se.loc[f_quarter, "home_x"] = df_se.loc[f_quarter, "home_quarter_x"]
     df_se.loc[f_quarter, "home_y"] = df_se.loc[f_quarter, "home_quarter_y"]
 
-    # Cleanup
-    df_se = df_se.drop(["home_municipality_x", 
-                        "home_municipality_y", 
-                        "home_quarter_x", 
-                        "home_quarter_y"], axis=1)
+    del df_se["home_municipality_x"]
+    del df_se["home_municipality_y"]
+    del df_se["home_quarter_x"]
+    del df_se["home_quarter_y"]
 
     assert (~np.any(np.isnan(df_se["home_x"])))
 
@@ -174,9 +174,8 @@ def execute(context):
 
     # Assign coordinates in the work municipalities
 
-    se_municipality_ids = np.unique(df_se["work_municipality_id"].dropna()).astype(np.int)
+    se_municipality_ids = np.unique(df_se["work_municipality_id"].dropna()).astype(int)
     for municipality_id in context.progress(se_municipality_ids,
-                                            total=len(se_municipality_ids),
                                             label="Imputing work locations by municipality from STATENT"):
         indices = np.where(df_statent["municipality_id"] == municipality_id)[0]
 
@@ -191,19 +190,16 @@ def execute(context):
     print("A number of %d municipalities could not be assigned from STATENT" % len(unassigned_municipality_ids))
 
     for municipality_id in context.progress(unassigned_municipality_ids,
-                                            total=len(unassigned_municipality_ids),
                                             label="Sampling work locations for municipalities"):
         f = np.isnan(df_se["work_municipality_x"]) & (df_se["work_municipality_id"] == municipality_id)
         row = df_municipalities[df_municipalities["municipality_id"] == municipality_id].iloc[0]
-        coordinates = utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
+        coordinates = data.spatial.utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
         df_se.loc[f, "work_municipality_x"], df_se.loc[f, "work_municipality_y"] = coordinates[:, 0], coordinates[:, 1]
 
     # Assign coordinates in the work quarters
 
-    se_quarter_ids = np.unique(df_se["work_quarter_id"].dropna()).astype(np.int)
-    for quarter_id in context.progress(se_quarter_ids, 
-                                       total=len(se_quarter_ids),
-                                       label="Imputing work locations by quarter from STATENT"):
+    se_quarter_ids = np.unique(df_se["work_quarter_id"].dropna()).astype(int)
+    for quarter_id in context.progress(se_quarter_ids, label="Imputing work locations by quarter from STATENT"):
         indices = np.where(df_statent["quarter_id"] == quarter_id)[0]
 
         if len(indices) > 0:
@@ -215,12 +211,10 @@ def execute(context):
     unassigned_quarter_ids = np.unique(df_se[np.isnan(df_se["work_quarter_x"])]["work_quarter_id"].dropna())
     print("A number of %d quarters could not be assigned from STATENT" % len(unassigned_quarter_ids))
 
-    for quarter_id in context.progress(unassigned_quarter_ids,
-                                       total=len(unassigned_quarter_ids) ,
-                                       label="Sampling work locations for municipalities"):
+    for quarter_id in context.progress(unassigned_quarter_ids, label="Sampling work locations for municipalities"):
         f = np.isnan(df_se["work_quarter_x"]) & (df_se["work_quarter_id"] == quarter_id)
         row = df_quarters[df_quarters["quarter_id"] == quarter_id].iloc[0]
-        coordinates = utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
+        coordinates = data.spatial.utils.sample_coordinates(row=row, count=np.count_nonzero(f), random_seed=random_seed)
         df_se.loc[f, "work_quarter_x"], df_se.loc[f, "work_quarter_y"] = coordinates[:, 0], coordinates[:, 1]
 
     quarter_count = np.count_nonzero(~np.isnan(df_se["work_quarter_x"]))
@@ -236,29 +230,19 @@ def execute(context):
     df_se.loc[f_quarter, "work_x"] = df_se.loc[f_quarter, "work_quarter_x"]
     df_se.loc[f_quarter, "work_y"] = df_se.loc[f_quarter, "work_quarter_y"]
 
-    # Cleanup
-    df_se = df_se.drop(["work_municipality_x", 
-                        "work_municipality_y", 
-                        "work_quarter_x", 
-                        "work_quarter_y"], axis=1)
+    del df_se["work_municipality_x"]
+    del df_se["work_municipality_y"]
+    del df_se["work_quarter_x"]
+    del df_se["work_quarter_y"]
 
     # Now that all the coordinates are available, a zone can be assigned
     print("Imputing home zones ...")
-    df_se = zones.impute(df_se, df_zones, 
-                                      zone_id_prefix="home_",
-                                      zone_fields={"quarter": "home_quarter_id",
-                                                    "municipality": "home_municipality_id",
-                                                    "country": "country_id",
-                                                    "nuts": "nuts_id",
-                                                    "postal_code": "postal_code"})
+    df_se = data.spatial.zones.impute(df_se, df_zones, zone_id_prefix="home_",
+                                      municipality_id_field="home_municipality_id", quarter_id_field="home_quarter_id")
 
     print("Imputing work zones ...")
-    df_se = zones.impute(df_se, df_zones, zone_id_prefix="work_", 
-                                      zone_fields={"quarter": "work_quarter_id",
-                                                    "municipality": "work_municipality_id",
-                                                    "country": "work_country_id",
-                                                    "nuts": "nuts_id",
-                                                    "postal_code": "postal_code"})
+    df_se = data.spatial.zones.impute(df_se, df_zones, zone_id_prefix="work_", country_id_field="work_country_id",
+                                      municipality_id_field="work_municipality_id", quarter_id_field="work_quarter_id")
 
     return df_se[[
         "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",

@@ -9,7 +9,6 @@ def configure(context):
     context.stage("data.statent.statent")
     context.stage("data.spatial.nuts")
     context.stage("data.spatial.swiss_border")
-    
     context.config("input_downsampling")
     context.config("random_seed")
 
@@ -17,7 +16,7 @@ def configure(context):
 def execute(context):
     demands, origin_pdf_matrices, od_pdf_matrices = context.stage("data.freight.gqgv.od")
     input_downsampling = context.config("input_downsampling")
-    
+
     # Set up RNG
     rng = np.random.RandomState(context.config("random_seed"))
 
@@ -30,7 +29,7 @@ def execute(context):
 
         # compute origin counts
         origin_counts = rng.multinomial(n=demand, pvals=origin_pdf_matrices[vehicle_type].values[:, 0])
-        counts = np.zeros(od_pdf_matrices[vehicle_type].shape, dtype=np.int)
+        counts = np.zeros(od_pdf_matrices[vehicle_type].shape, dtype=int)
 
         # compute origin-destination counts
         for i in range(len(origin_counts)):
@@ -52,7 +51,7 @@ def execute(context):
                         origin_id = od_pdf_matrices[vehicle_type].index[origin_index]
                         destination_id = od_pdf_matrices[vehicle_type].columns[destination_index]
 
-                        trips = np.repeat(np.array([[origin_id, destination_id, vehicle_type]], dtype=np.object),
+                        trips = np.repeat(np.array([[origin_id, destination_id, vehicle_type]], dtype=object),
                                           number_of_trips, axis=0)
 
                         trips_frames.append(pd.DataFrame(columns=["origin_id", "destination_id", "vehicle_type"],

@@ -11,8 +11,7 @@ def configure(context):
     context.stage("matsim.runtime.maven")
 
     context.config("eqasim_version", "1.3.1")
-    # context.config("eqasim_branch", "upstream")
-    context.config("eqasim_branch", "147-swiss-config-does-not-include-separate-replanning-strategies-for-freight-agents")
+    context.config("eqasim_branch", "v1.3.1")
     context.config("eqasim_repository", "https://github.com/eqasim-org/eqasim-java.git")
     context.config("eqasim_path", "")
 
@@ -29,10 +28,12 @@ def run(context, command, arguments):
 
 def execute(context):
     version = context.config("eqasim_version")
+    print("THIS IS A CHECK!!!")
+    print(context.config("eqasim_repository"))
 
     # Normal case: we clone eqasim
     if context.config("eqasim_path") == "":
-        # Clone repository
+        # Clone repository and checkout version
         git.run(context, [
             "clone", context.config("eqasim_repository"),
             "--branch", context.config("eqasim_branch"),

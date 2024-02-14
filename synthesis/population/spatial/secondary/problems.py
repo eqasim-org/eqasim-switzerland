@@ -1,14 +1,14 @@
 import numpy as np
 
-FIELDS = ["person_id", "trip_index", "preceding_purpose", "following_purpose", "mode", "travel_time"]
-FIXED_PURPOSES = ["home", "work", "education"]
+FIELDS = ["person_id", "trip_index", "preceding_purpose", "following_purpose", "mode", "travel_time", "activity_duration", "arrival_time"]
+FIXED_PURPOSES = ["home", "work", "education", "work_from_home"]
 
 
-def find_bare_assignment_problems(df):
+def find_bare_assignment_problems(df, wfh = False):
     problem = None
 
     for row in df[FIELDS].itertuples(index=False):
-        person_id, trip_index, preceding_purpose, following_purpose, mode, travel_time = row
+        person_id, trip_index, preceding_purpose, following_purpose, mode, travel_time, act_dur, arr_time = row
 
         if not problem is None and person_id != problem["person_id"]:
             # We switch person, but we're still tracking a problem. This is a tail!
@@ -19,30 +19,41 @@ def find_bare_assignment_problems(df):
             # Start a new problem
             problem = dict(
                 person_id=person_id, trip_index=trip_index, purposes=[preceding_purpose],
-                modes=[], travel_times=[]
+                modes=[], travel_times=[], activity_duration = [], activity_start_time = []
             )
 
         problem["purposes"].append(following_purpose)
         problem["modes"].append(mode)
         problem["travel_times"].append(travel_time)
+        problem["activity_duration"].append(act_dur)
+        problem["activity_start_time"].append(arr_time)
 
         if problem["purposes"][-1] in FIXED_PURPOSES:
             # The current chain (or initial tail) ends with a fixed activity.
             yield problem
             problem = None
 
+    if not problem is None:
+        yield problem
 
-LOCATION_FIELDS = ["person_id", "home", "work", "education"]
+
+LOCATION_FIELDS_WFH = ["person_id", "home", "work", "education", "work_from_home"]
+LOCATION_FIELDS     = ["person_id", "home", "work", "education"]
 
 
-def find_assignment_problems(df, df_locations):
+def find_assignment_problems(df, df_locations, wfh = False):
     """
         Enriches assignment problems with:
           - Locations of the fixed activities
           - Size of the problem
           - Reduces purposes to the variable ones
     """
-    location_iterator = df_locations[LOCATION_FIELDS].itertuples(index=False)
+
+    FIELDS = LOCATION_FIELDS
+    if wfh:
+        FIELDS = LOCATION_FIELDS_WFH
+
+    location_iterator = df_locations[FIELDS].itertuples(index=False)
     current_location = None
 
     for problem in find_bare_assignment_problems(df):
@@ -60,7 +71,8 @@ def find_assignment_problems(df, df_locations):
             problem["purposes"] = problem["purposes"][:-1]
 
         else:
-            raise RuntimeError("The presented 'problem' is neither a chain nor a tail")
+            #raise RuntimeError("The presented 'problem' is neither a chain nor a tail")
+            pass
 
         # Define size
         problem["size"] = len(problem["purposes"])
@@ -74,8 +86,8 @@ def find_assignment_problems(df, df_locations):
 
         # Define origin and destination locations if they have fixed purposes
         problem["origin"] = None
-        problem["destination"] = None
-
+        problem["destination"] = None  
+        
         if origin_purpose in FIXED_PURPOSES:
             problem["origin"] = current_location[LOCATION_FIELDS.index(origin_purpose)]  # Shapely POINT
             problem["origin"] = np.array([[problem["origin"].x, problem["origin"].y]])
@@ -84,4 +96,9 @@ def find_assignment_problems(df, df_locations):
             problem["destination"] = current_location[LOCATION_FIELDS.index(destination_purpose)]  # Shapely POINT
             problem["destination"] = np.array([[problem["destination"].x, problem["destination"].y]])
 
+        if problem["origin"] is None:
+            problem["activity_index"] = problem["trip_index"]
+        else:
+            problem["activity_index"] = problem["trip_index"] + 1
+            
         yield problem

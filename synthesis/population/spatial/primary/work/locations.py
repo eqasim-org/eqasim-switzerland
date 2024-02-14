@@ -1,31 +1,33 @@
 import numpy as np
 import pandas as pd
 
+from SNN.adapt_work_locations import work_to_homeoffice
+
 import data.spatial.utils as spatial_utils
 import data.spatial.zone_shapes
 
 
+
 def configure(context):
+    context.config("random_seed")
     context.stage("data.statent.statent")
     context.stage("data.spatial.zones")
     context.stage("data.spatial.zone_shapes")
     context.stage("synthesis.population.spatial.primary.work.zones")
-    
-    context.config("random_seed")
 
 
 def execute(context):
     df = context.stage("synthesis.population.spatial.primary.work.zones")
     df_statent = context.stage("data.statent.statent")
 
+    # Set up RNG
+    rng = np.random.RandomState(context.config("random_seed"))
+
     df_zones = context.stage("data.spatial.zones")
     df_zones["work_zone_id"] = df_zones["zone_id"]
 
     df_demand = df.groupby("work_zone_id").size().reset_index(name="count")
     df_demand = pd.merge(df_demand, df_zones[["work_zone_id", "zone_level"]])
-    
-    # Set up RNG
-    rng = np.random.RandomState(context.config("random_seed"))
 
     # First handle the national commuters
     df_national = df_demand[df_demand["zone_level"].isin(("municipality", "quarter"))]
@@ -76,7 +78,7 @@ def execute(context):
                                           "work_y": "y",
                                           "work_location_id": "destination_id"},
                                          axis=1)
-
+    
     df = spatial_utils.to_gpd(context, df, coord_type="work")
 
     return df[["person_id", "destination_id", "geometry"]]

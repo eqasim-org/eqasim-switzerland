@@ -1,15 +1,14 @@
+import geopandas as gpd
 import numpy as np
 import pandas as pd
-
-import geopandas as gpd
 import shapely.geometry as geo
 from sklearn.neighbors import KDTree
 
 
-def sample_coordinates(row, count, random_seed=0):
+def sample_coordinates(row, count, random_seed = 0):
     samples = []
     bounds = row["geometry"].bounds
-    
+
     # Set up RNG
     rng = np.random.RandomState(random_seed)
 
@@ -23,26 +22,15 @@ def sample_coordinates(row, count, random_seed=0):
     return np.array(list(map(lambda p: (p.x, p.y), samples[:count])))
 
 
-def to_gpd(context, df, x="x", y="y", crs="epsg:2056", coord_type="", chunk_size=10000):
-    
-    result = []
-    chunk_count = max(1, int(len(df) / chunk_size))
-    for chunk in context.progress(np.array_split(df, chunk_count), 
-                              total=chunk_count,
-                              label="Converting %s coordinates" % coord_type):
-        result.append(
-            gpd.GeoDataFrame(
-                chunk,
-                geometry=gpd.points_from_xy(chunk[x], chunk[y], crs=crs)
-                )
-            )
-        
-    df = gpd.GeoDataFrame(
-        pd.concat(result).reset_index(),
-        crs=result[0].crs
-        )
-    del result
-    
+def to_gpd(context, df, x="x", y="y", crs="epsg:2056", coord_type=""):
+    df["geometry"] = [
+        geo.Point(*coord) for coord in context.progress(
+            zip(df[x], df[y]), total=len(df),
+            label="Converting %s coordinates" % coord_type
+        )]
+    df = gpd.GeoDataFrame(df)
+    df.crs = crs
+
     if not crs == "epsg:2056":
         df = df.to_crs("epsg:2056")
         df.crs = "epsg:2056"
@@ -63,15 +51,13 @@ def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_d
     df_points = df_points[[point_id_field, "geometry"]]
     df_zones = df_zones[[zone_id_field, "geometry"]]
 
-    print("Imputing %d %s zones onto %d %s points by spatial join..." 
+    print("Imputing %d %s zones onto %d %s points by spatial join..."
           % (len(df_zones), zone_type, len(df_points), point_type))
-    
+
     result = []
     chunk_count = max(1, int(len(df_points) / chunk_size))
-    for chunk in context.progress(np.array_split(df_points, chunk_count), 
-                                  total=chunk_count,
-                                  label="Imputing %s zones onto %s points..." % (zone_type, point_type)):
-        result.append(gpd.sjoin(df_zones, chunk, predicate="contains", how="right"))
+    for chunk in context.progress(np.array_split(df_points, chunk_count), total=chunk_count):
+        result.append(gpd.sjoin(df_zones, chunk, op="contains", how="right"))
     df_points = pd.concat(result).reset_index()
 
     if "left_index" in df_points: del df_points["left_index"]
@@ -82,7 +68,6 @@ def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_d
     if fix_by_distance and np.any(invalid_mask):
         print("  Fixing %d points by centroid distance join..." % np.count_nonzero(invalid_mask))
         coordinates = np.vstack([df_zones["geometry"].centroid.x, df_zones["geometry"].centroid.y]).T
-                
         kd_tree = KDTree(coordinates)
 
         df_missing = df_points[invalid_mask]

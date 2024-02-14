@@ -1,3 +1,4 @@
+import shutil
 import os.path
 
 import matsim.runtime.eqasim as eqasim
@@ -5,7 +6,7 @@ import matsim.runtime.eqasim as eqasim
 
 def configure(context):
     context.stage("matsim.simulation.prepare")
-    
+
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
 
@@ -19,11 +20,8 @@ def execute(context):
     # Run routing
     eqasim.run(context, "org.eqasim.switzerland.RunSimulation", [
         "--config-path", config_path,
-        "--config:controler.lastIteration", str(1),
-        "--config:controler.writeEventsInterval", str(1),
-        "--config:controler.writePlansInterval", str(1),
+        "--config:controler.lastIteration", str(60),
+        "--config:controler.writeEventsInterval", str(10),
+        "--config:controler.writePlansInterval", str(10),
     ])
-
     assert os.path.exists("%s/simulation_output/output_events.xml.gz" % context.path())
-    
-    return context.path()

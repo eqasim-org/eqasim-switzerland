@@ -11,12 +11,13 @@ This stage attaches observations from the microcensus to the synthetic populatio
 This is done by statistical matching.
 """
 
-
 def configure(context):
     context.config("threads")
-    context.config("random_seed")
+    context.config("random_seed", 0)
     context.config("matching_minimum_observations", 20)
     context.config("weekend_scenario", False)
+    context.config("specific_weekend_scenario", "all") # options are "all", "saturday", "sunday"
+    context.config("include_children")
 
     context.stage("data.microcensus.persons")
     context.stage("synthesis.population.sampled")
@@ -34,9 +35,9 @@ def sample_indices(uniform, cdf, selected_indices):
 
 def statistical_matching(progress, df_source, source_identifier, weight, df_target, target_identifier, columns,
                          random_seed=0, minimum_observations=0):
-    
     # Set up RNG
     rng = np.random.RandomState(random_seed)
+
 
     # Reduce data frames
     df_source = df_source[[source_identifier, weight] + columns].copy()
@@ -65,9 +66,9 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
 
     # Perform matching
     weights = df_source[weight].values
-    assigned_indices = np.ones((len(df_target),), dtype=np.int) * -1
-    unassigned_mask = np.ones((len(df_target),), dtype=np.bool)
-    assigned_levels = np.ones((len(df_target),), dtype=np.int) * -1
+    assigned_indices = np.ones((len(df_target),), dtype=np.int32) * -1
+    unassigned_mask = np.ones((len(df_target),), dtype=bool)
+    assigned_levels = np.ones((len(df_target),), dtype=np.int32) * -1
     uniform = rng.random_sample(size=(len(df_target),))
 
     column_indices = [np.arange(len(unique_values[column])) for column in columns]
@@ -139,7 +140,7 @@ def parallel_statistical_matching(context, df_source, source_identifier, weight,
                                   minimum_observations=0):
     random_seed = context.config("random_seed")
     processes = context.config("threads")
-    
+
     rng = np.random.RandomState(random_seed)
     chunks = np.array_split(df_target, processes)
 
@@ -161,14 +162,20 @@ def parallel_statistical_matching(context, df_source, source_identifier, weight,
 def execute(context):
     df_mz = context.stage("data.microcensus.persons")
     is_weekend_scenario = context.config("weekend_scenario")
+    specific_weekend_scenario = context.config("specific_weekend_scenario")
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
     df_source = pd.DataFrame(df_mz[
-                                 (is_weekend_scenario & df_mz[
-                                     "weekend"])  # use only weekend samples for a weekend scenario
-                                 |
-                                 (~is_weekend_scenario & ~df_mz["weekend"])  # and only weekday samples for a weekday
-                                 ])
+                                  (is_weekend_scenario & df_mz[
+                                      "weekend"])  # use only weekend samples for a weekend scenario
+                                  |
+                                  (~is_weekend_scenario & ~df_mz["weekend"])  # and only weekday samples for a weekday
+                                  ])
+
+    #If specific weekend context is needed for saturday or sunday
+    if (is_weekend_scenario & (specific_weekend_scenario != "all")):
+        df_source = pd.DataFrame(df_source[((specific_weekend_scenario == "saturday") & df_source["saturday"]) |
+                                  ((specific_weekend_scenario == "sunday") & df_source["sunday"])])
 
     df_population = context.stage("synthesis.population.sampled")
     number_of_statpop_persons = len(np.unique(df_population["person_id"]))
@@ -233,8 +240,8 @@ def execute(context):
     assert (len(df_population) == initial_statpop_length - removed_persons_count)
 
     # Convert IDs
-    df_target["mz_id"] = df_target["mz_id"].astype(np.int)
-    df_source["mz_id"] = df_source["mz_id"].astype(np.int)
+    df_target["mz_id"] = df_target["mz_id"].astype(np.int32)
+    df_source["mz_id"] = df_source["mz_id"].astype(np.int32)
 
     # Get the attributes from the MZ for the head of household (and thus for the household)
     df_attributes = pd.merge(
@@ -328,10 +335,10 @@ def execute(context):
 
     # Check that all person who don't have a MZ id now are under age
     assert (np.all(df_population[
-                       df_population["person_id"].isin(
-                           df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
-                       )
-                   ]["age"] < c.MZ_AGE_THRESHOLD))
+                        df_population["person_id"].isin(
+                            df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
+                        )
+                    ]["age"] < c.MZ_AGE_THRESHOLD))
 
     assert (not np.any(df_matching["mz_head_id"] == -1))
 
@@ -341,7 +348,12 @@ def execute(context):
     print("  Persons: %d (%.2f%%)" % (
     len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_statpop_persons))
 
-    print(np.unique(df_matching["mz_head_id"]))
-
     # Return
-    return df_matching, removed_person_ids
+    return df_matching, removed_person_ids, df_population
+
+
+
+
+
+
+    

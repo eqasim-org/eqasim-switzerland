@@ -22,7 +22,7 @@ def compute_group_filters(df, group_controls):
             group_filter = [row["weight"]]
 
             # build filter
-            f = np.ones(df.shape[0], dtype=np.bool)
+            f = np.ones(df.shape[0], dtype=bool)
             for c in list(row.drop("weight").index):
                 f &= (df[c] == row[c])
 
@@ -40,7 +40,7 @@ def compute_individual_filters(df, group_id, individual_controls):
             individual_filter = [row["weight"]]
 
             # build a filter to select all individuals that match current control values
-            f_individual = np.ones(df.shape[0], dtype=np.bool)
+            f_individual = np.ones(df.shape[0], dtype=bool)
             for c in list(row.drop("weight").index):
                 f_individual &= (df[c] == row[c])
 
