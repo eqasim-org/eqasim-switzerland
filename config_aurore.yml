@@ -1,0 +1,54 @@
+# General pipeline settings
+working_directory: /nas/asallard/Switzerland/caches/test_gitlab
+flowchart_path: /nas/asallard/Switzerland/caches/test_gitlab/flowchart.json
+dryrun: false
+
+# Requested stages
+run:
+ - data.statpop.persons
+ # - data.uk_data_for_kids
+ # - data.statent.statent
+ # - synthesis.population.spatial.locations
+ # - data.microcensus.household_persons
+ # - population.destinations
+ # - synthesis.population.SNN_mobility
+ # - synthesis.population.spatial.primary.work.zones
+ # - synthesis.population.sampled
+ # - synthesis.population.SNN_population
+ # - population.output
+ # - matsim.scenario.population
+ # - matsim.simulation.run
+ # - matsim.households
+ # - matsim.run
+ # - population.output
+ # - analysis.analysis
+ - SNN.MTO_zh
+
+# These are configuration options that we use in the pipeline
+config:
+    threads: 4
+    random_seed: 0
+    hot_deck_matching_runners: 2
+    disable_progress_bar: false
+    java_memory: 80G
+    input_downsampling: 0.0001
+    enable_scaling: true
+    scaling_year: 2017
+    use_freight: true
+    use_detailed_activities: false
+    hafas_date: 01.10.2018
+    data_path: /nas/ivtmatsim/scenarios/switzerland/data
+    output_path: /nas/asallard/Switzerland/outputs/test_gitlab
+    analysis_path: /nas/asallard/Switzerland/analysis_22_03_01
+    weekend_scenario: false
+    specific_weekend_scenario: all
+    include_children: false
+    kids_proba_table_data_path: /nas/asallard/UK/data_statmatch/trends_act_chains_categories.csv
+    uk_data_path: /nas/asallard/UK/UKDA-7553-tab/tab/
+    run_snn: true
+    snn_heuristic: 0
+    snn_day: friday-thursday
+    snn_var_path: /nas/asallard/Switzerland/SNN/variables.xlsx
+    
+    
+    
