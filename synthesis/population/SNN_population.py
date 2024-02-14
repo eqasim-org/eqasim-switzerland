@@ -70,6 +70,7 @@ def configure(context):
         context.config("data_path")
         context.config("snn_var_path")
         context.config("output_path")
+        context.config("random_seed")
         context.stage("data.microcensus.persons")
         context.stage("data.microcensus.households")
         context.stage("data.microcensus.household_persons")
@@ -433,8 +434,24 @@ def execute(context):
         df_persons["wfh_today"] = df_persons["wfh_today"].fillna(False)
 
         # Adjust mobility tool ownership for the unemployed adult population
-        filter = df_persons[~(df_persons["employed"]) & (df_persons["age"]>=18)]
-        df_persons.loc[filter & (df_persons["car_availability"] <= 1), "car_availability"]
+        random = np.random.RandomState(context.config("random_seed"))
+        filter = ~(df_persons["employed"]) & (df_persons["age"]>=18)
+
+        filter_car = filter &  (df_persons["car_availability"] <= 1)
+        probability = (0.851-0.665)/0.851
+        df_persons.loc[filter_car, "car_availability"] = 2*(random.random_sample(size=(len(df_persons[filter_car]),)) < probability  )
+
+        filter_GA = filter & df_persons["subscriptions_ga"].isna() & (df_persons["subscriptions_ga"]==1)
+        probability = (1-0.095 - 1 + 0.118 ) / (1-0.095)
+        df_persons.loc[filter_GA, "subscriptions_ga"] = random.random_sample(size=(len(df_persons[filter_GA]),)) < probability  
+
+        filter_HT = filter & df_persons["subscriptions_halbtax"].isna() & (df_persons["subscriptions_halbtax"]==1)
+        probability = (1-0.404 - 1 + 0.59) / (1-0.404)
+        df_persons.loc[filter_HT, "subscriptions_halbtax"] = random.random_sample(size=(len(df_persons[filter_HT]),)) < probability  
+
+        filter_regio = filter & df_persons["subscriptions_verbund"].isna() & (df_persons["subscriptions_verbund"]==1)
+        probability = (1-0.116 - 1 + 0.172) / (1-0.116)
+        df_persons.loc[filter_regio, "subscriptions_verbund"] = random.random_sample(size=(len(df_persons[filter_regio]),)) < probability
 
         return df_persons
 

@@ -26,8 +26,8 @@ def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, o
         d3 = pd.DataFrame(s3).reset_index()
         d3.columns = ["index", modeT + "_mz"]
 
-        d = d1.merge(d2, on = "index", suffixes=["_before", "_after"])
-        d =  d.merge(d3, on = "index")
+        d = d1.merge(d2, on = "index", suffixes=["_before", "_after"], how = "outer")
+        d =  d.merge(d3, on = "index", how = "outer")
         d["index"] = d["index"].astype(str)
         d["index"] = [c.replace("False", "No") for c in d["index"]]
         d["index"] = [c.replace("True", "Yes") for c in d["index"]]
@@ -39,6 +39,7 @@ def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, o
             suffix = modeT.split("_")[1]
         elif modeT == "car_availability":
             suffix = "car"
+            d = d.fillna(0)
             print(d)
         
         d.to_hdf(output_file_path, key = "mto_"+suffix)
@@ -46,17 +47,18 @@ def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, o
         fig, ax = plt.subplots()
     
         if modeT == "car_availability":
-            dfsum = df.iloc[[0,2]].sum()
-            df.loc[3] = dfsum
-            df = df[~df["index"].isin(["Always", "Sometimes"])]
-            df["index"] = [c.replace("AlwaysSometimes", "Always/sometimes") for c in df["index"]]
+            dfsum = d.iloc[[0,2]].sum()
+            d.loc[3] = dfsum
+            d = d[~d["index"].isin(["Always", "Sometimes"])]
+            d["index"] = [c.replace("AlwaysSometimes", "Always/sometimes") for c in d["index"]]
+            print(d)
         
-        x_labels = df["index"]
+        x_labels = d["index"]
 
-        bar0 = df[modeT + "_mz"].values.tolist() / np.sum(df[modeT + "_mz"]) * 100
-        bar1 = df[modeT + "_before"].values.tolist() / np.sum(df[modeT + "_before"]) * 100
-        bar2 = df[modeT + "_after"].values.tolist() / np.sum(df[modeT + "_after"]) * 100
-
+        bar0 = d[modeT + "_mz"].values.tolist() / np.sum(d[modeT + "_mz"]) * 100
+        bar1 = d[modeT + "_before"].values.tolist() / np.sum(d[modeT + "_before"]) * 100
+        bar2 = d[modeT + "_after"].values.tolist() / np.sum(d[modeT + "_after"]) * 100
+        
         color_0 = "#DFC27D"
         color_1 = "#80CDC1"
         color_2 = "#01665E"
@@ -120,6 +122,7 @@ def execute(context):
     output_file_path = output_path + "/results_data_agg_onlyMTO.h5"
 
     mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, output_path)
+
 
 
 
