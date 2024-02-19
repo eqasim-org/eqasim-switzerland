@@ -41,7 +41,7 @@ def execute(context):
     df_mz_trips.loc[df_mz_trips["wmittel"] == 13, "mode"] = "car" # Mofa
     df_mz_trips.loc[df_mz_trips["wmittel"] == 14, "mode"] = "bike" # Biciycle / E-bike
     df_mz_trips.loc[df_mz_trips["wmittel"] == 15, "mode"] = "walk" # Walking
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 16, "mode"] = "car" # "Machines similar to a vehicle"
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 16, "mode"] = "bike" # "Machines similar to a vehicle"
     df_mz_trips.loc[df_mz_trips["wmittel"] == 17, "mode"] = "unknown" # Other / don't know
 
     df_mz_trips["mode_detailed"] = df_mz_trips["mode"]
