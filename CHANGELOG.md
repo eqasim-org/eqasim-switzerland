@@ -1,11 +1,21 @@
 This change log is written in descending order. Changes that happen after version X was released, are written above that version number, because they will be included in the (note yet determined) next version number.
 
 **Development version**
+
+**4.0.0**
 - Specify random seed for all random number generators. `numpy.random.RandomState` is used as it is frozen and thus guaranteed to produce the same values.
 - Refactored stages for generating the MATSim scenario
 - Improve logger verbosity
 - Update code to reflect `python 3.8.13` upgrade, fix deprecated and future warnings.
 - Upgrade python to `python 3.8.13`, update packages in venv setup scripts and install them via pip.
+- Upgrade Python to `python 3.10.10`, and update all dependencies
+- Fix the issue with kids driving a car
+- Fix the filtering of `data.microcensus.persons` to reflect those persons filtered out in `data.microsensus.trips`
+- Use different attributes for statistical amtching to better match mobility tool ownership
+- Added the license
+- Added analysis scripts for socio demographic and activty chains
+- Updated maven 
+- Added download links for Mac M1 systems for setting up the environment
 
 **3.0.0**
 - Facilities attribute `offers_service` changed to `offers_other`
