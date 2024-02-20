@@ -4,9 +4,7 @@ dryrun: false
 
 # Requested stages
 run:
-    - matsim.simulation.run
-    - matsim.scenario.mz.population
-    - data.microcensus.csv
+    - synthesis.population.spatial.locations
 
 # These are configuration options that we use in the pipeline
 config:

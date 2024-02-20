@@ -3,14 +3,27 @@ set -e
 
 # Define Miniconda
 miniconda_version="4.6.14"
+# for linux use:
 miniconda_url="https://repo.anaconda.com/miniconda/Miniconda3-${miniconda_version}-Linux-x86_64.sh"
 miniconda_md5="718259965f234088d785cad1fbd7de03"
 
+# for mac use:
+#miniconda_url="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh"
+#miniconda_md5="2b7f9e46308c28c26dd83abad3e72121ef63916eaf17b63723b5a1f728dc3032"
+
+# on linux
 jdk_version="11.0.7"
 jdk_url="https://github.com/AdoptOpenJDK/openjdk11-binaries/releases/download/jdk-11.0.7%2B10/OpenJDK11U-jdk_x64_linux_hotspot_11.0.7_10.tar.gz"
 jdk_sha256="ee60304d782c9d5654bf1a6b3f38c683921c1711045e1db94525a51b7024a2ca"
 
-maven_version="3.8.8"
+# on Mac M1
+#jdk_version="11.0.22"
+#jdk_url="https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.22%2B7.1/OpenJDK11U-jdk_aarch64_mac_hotspot_11.0.22_7.tar.gz"
+#jdk_sha256="2708f12c6f3b9e18c042d80cd8fd29f3cc3b7896840b26757acfa43aebc4758d"
+
+
+
+maven_version="3.9.6"
 maven_url="https://downloads.apache.org/maven/maven-3/${maven_version}/binaries/apache-maven-${maven_version}-bin.tar.gz"
 maven_sha512="c35a1803a6e70a126e80b2b3ae33eed961f83ed74d18fcd16909b2d44d7dada3203f1ffe726c17ef8dcca2dcaa9fca676987befeadc9b9f759967a8cb77181c0"
 
@@ -19,35 +32,34 @@ environment_yaml=$(cat <<EOF
 name: venv
 
 channels:
-  - defaults
+  - conda-forge
 
 dependencies:
-  - python=3.8.13
-  - pip=22.1.2
+  - matplotlib=3.7.1
+  - pandas=1.5.3
+  - scipy=1.10.1
+  - numpy=1.23.5
+  - geopandas=0.12.2
+  - numba=0.56.4
+  - palettable=3.3.0
+  - scikit-learn=1.2.2
+  - shapely=2.0.1
+  - tqdm=4.65.0
+  - pytables=3.7.0
+  - xlrd=2.0.1
+  - openpyxl=3.1.0
+  - pip=23.0.1
+  - python=3.10.10
+  - py7zr=0.20.8
+  - pytest=7.2.2
+  - xlwt=1.3.0
+  - fiona=1.9.2
+  - sqlite=3.42.0
 
   - pip:
-    - matplotlib==3.6.0
-    - pandas==1.5.0
-    - scipy==1.9.1
-    - numpy==1.23.3
-    - geopandas==0.11.1
-    - numba==0.56.2
-    - palettable==3.3.0
-    - scikit-learn==1.1.2
-    - shapely==1.8.4
-    - tqdm==4.64.1
-    - tables==3.7.0
-    - xlrd==2.0.1
-    - pyproj==3.4.0
-    - simpledbf==0.2.6
-    - synpp==1.5.0
-    - python-Levenshtein==0.20.5
-    - openpyxl==3.0.10
+    - synpp==1.5.1
 
-    # For testing
-    - pytest==7.1.3
-    - xlwt==1.3.0
-    - pysal==2.7.0
+    
 EOF
 )
 

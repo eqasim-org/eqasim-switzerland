@@ -122,20 +122,28 @@ def execute(context):
 
     # Merge in the other data sets
     df_mz_households = context.stage("data.microcensus.households")
-    df_mz_trips = context.stage("data.microcensus.trips")
+    df_mz_trips, filterout_person_ids = context.stage("data.microcensus.trips")
 
     df_mz_persons = pd.merge(df_mz_persons, df_mz_households)
     df_mz_persons = data.microcensus.income.impute(df_mz_persons)
 
-    remove_ids = set(df_mz_persons["person_id"]) - set(df_mz_trips["person_id"])
     initial_size = len(df_mz_persons)
 
-    df_mz_persons = df_mz_persons[~df_mz_persons["person_id"].isin(remove_ids)]
+    # This will only filter out persons that do not have enough information in the trips file
+    # it will still keep persons that did not report any trips
+    df_mz_persons = df_mz_persons[~df_mz_persons["person_id"].isin(filterout_person_ids)]
+    df_mz_persons = df_mz_persons[df_mz_persons["weekend"] == False]
+    then_size = len(df_mz_persons)
+    home_ids = set(df_mz_persons["person_id"]) - set(df_mz_trips["person_id"])
 
     # Note: Around 7000 of them are those, which do not even have an activity chain in the first place
     # because they have not been asked.
     print("  Removed %d (%.2f%%) persons from MZ because of insufficient trip data" % (
-        len(remove_ids), 100.0 * len(remove_ids) / initial_size
+        len(filterout_person_ids), 100.0 * len(filterout_person_ids) / initial_size
+    ))
+    
+    print("  Percentage of agents staying home (not weighted): %d (%.2f%%)" % (
+        len(home_ids), 100.0 * len(home_ids) / then_size
     ))
 
     # Add car passenger flag

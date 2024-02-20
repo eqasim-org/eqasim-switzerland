@@ -77,7 +77,7 @@ def execute(context):
         "subscriptions_strecke", "subscriptions_gleis7", "subscriptions_junior",
         "subscriptions_other", "subscriptions_ga_class",
         "subscriptions_verbund_class", "subscriptions_strecke_class",
-        "statpop_person_id", "mz_person_id", "mz_head_id"
+        "statpop_person_id", "mz_person_id", "mz_head_id", "canton_id"
     ]]
 
     df_persons.to_csv("%s/%spersons.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
@@ -104,6 +104,8 @@ def execute(context):
 
     # Prepare trips
     df_trips = context.stage("synthesis.population.trips")
+    df_locat = context.stage("synthesis.population.spatial.locations")
+
 
     df_trips["preceding_activity_index"] = df_trips["trip_index"]
     df_trips["following_activity_index"] = df_trips["trip_index"] + 1
@@ -115,7 +117,7 @@ def execute(context):
         "preceding_purpose", "following_purpose"
     ]]
 
-    df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
+    #df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
 
     # Prepare spatial data sets
     df_locations = context.stage("synthesis.population.spatial.locations")[[
@@ -184,6 +186,13 @@ def execute(context):
     df_spatial["following_purpose"] = df_spatial["following_purpose"].astype(str)
     df_spatial["preceding_purpose"] = df_spatial["preceding_purpose"].astype(str)
     df_spatial["mode"] = df_spatial["mode"].astype(str)
+
+    df_spatial["crowfly_distance"] = df_spatial.geometry.length
+    df_trips = pd.merge(df_trips, df_spatial[["crowfly_distance", "person_id", "following_activity_index"]], how="left", 
+                        on=["person_id", "following_activity_index"])
+    df_trips = df_trips.drop(columns = ["following_activity_index"])
+    df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
+
     path = "%s/%strips.gpkg" % (output_path, output_prefix)
     df_spatial.to_file(path, driver = "GPKG")
     clean_gpkg(path)

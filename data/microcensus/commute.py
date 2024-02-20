@@ -8,7 +8,7 @@ def configure(context):
 
 
 def execute(context):
-    df_trips = context.stage("data.microcensus.trips")
+    df_trips = context.stage("data.microcensus.trips")[0]
     df_persons = context.stage("data.microcensus.persons")
 
     commutes = {}

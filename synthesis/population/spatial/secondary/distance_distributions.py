@@ -37,7 +37,7 @@ def execute(context):
     # Prepare data
     df_persons = context.stage("data.microcensus.persons")[["person_id", "person_weight"]].rename(
         columns={"person_weight": "weight"})
-    df_trips = context.stage("data.microcensus.trips")[["person_id", "trip_id", "mode", "crowfly_distance",
+    df_trips = context.stage("data.microcensus.trips")[0][["person_id", "trip_id", "mode", "crowfly_distance",
                                                         "departure_time", "arrival_time", "purpose"]]
     df_trips = pd.merge(df_trips, df_persons[["person_id", "weight"]], on="person_id")
 

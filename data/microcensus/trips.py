@@ -130,11 +130,15 @@ def execute(context):
     after_length = len(np.unique(df_mz_trips["person_id"]))
     print("  Removed %d persons with trips not ending with 'home'" % (before_length - after_length,))
 
+    filterout_ids = unknown_ids.union(set(df_end["person_id"]))
+
     df_start = df_mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "home_x", "home_y"]]
     df_start = df_start[
         (df_start["trip_id"] == 1) & ((df_start["origin_x"] != df_start["home_x"]) |
         (df_start["origin_y"] != df_start["home_y"]))
     ]
+
+    filterout_ids = filterout_ids.union(set(df_start["person_id"]))
 
     before_length = len(np.unique(df_mz_trips["person_id"]))
     df_mz_trips = df_mz_trips[~df_mz_trips["person_id"].isin(df_start["person_id"])]
@@ -159,4 +163,4 @@ def execute(context):
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y", "origin_x", "origin_y",
         "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
         "mode_detailed"
-    ]]
+    ]], filterout_ids
