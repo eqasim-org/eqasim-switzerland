@@ -182,8 +182,7 @@ def execute(context):
     head_selector = age_selector & df_population["is_head"]
 
     df_target = pd.DataFrame(df_population[head_selector])
-
-    columns = ["age_class", "sex", "marital_status", "household_size_class", "municipality_type"]
+    columns = [ "ovgk", "household_size_class", "age_class", "canton_id", "sex"]
 
     # Perform statistical matching
     df_source = df_source.rename(columns={"person_id": "mz_id"})
@@ -268,7 +267,7 @@ def execute(context):
     age_selector = df_population["age"] >= c.MZ_AGE_THRESHOLD
     df_target = pd.DataFrame(df_population[age_selector])
 
-    columns = ["age_class", "sex", "marital_status", "household_size_class", "municipality_type", "income_class", "number_of_cars_class", "number_of_bikes_class"]
+    columns = [ "number_of_cars_class", "household_size_class", "ovgk", "age_class", "sex",  "marital_status"]#,  "household_size_class","number_of_bikes_class"]
 
     df_assignment, levels = parallel_statistical_matching(
         context,

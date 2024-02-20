@@ -20,7 +20,7 @@ def execute(context):
         "person_id", "mz_person_id", "age"
     ]]
 
-    df_trips = pd.DataFrame(context.stage("data.microcensus.trips"), copy=True)[[
+    df_trips = pd.DataFrame(context.stage("data.microcensus.trips")[0], copy=True)[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose"
     ]]
     df_trips.columns = ["mz_person_id", "trip_id", "departure_time", "arrival_time", "mode", "following_purpose"]

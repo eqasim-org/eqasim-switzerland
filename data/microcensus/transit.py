@@ -12,7 +12,7 @@ def execute(context):
     df_stages = pd.read_csv("%s/microcensus/etappen.csv" % data_path, encoding = "latin1")
 
     # Filter stages in pt trips
-    df_trips = context.stage("data.microcensus.trips")
+    df_trips = context.stage("data.microcensus.trips")[0]
     df_trips = df_trips[df_trips["mode_detailed"] == "pt"]
     df_trips = df_trips[["person_id", "trip_id", "departure_time", "arrival_time"]]
     df_trips = df_trips.rename({ "departure_time" : "trip_departure_time", "arrival_time" : "trip_arrival_time"}, axis = 1)

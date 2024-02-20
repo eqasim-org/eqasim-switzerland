@@ -6,7 +6,7 @@ A more flexible version is being made public at [https://github.com/eqasim-org/s
 
 # Installation
 
-Two bash scripts which set up everything that is needed to run the pipeline on our servers, as well as a requirements.txt file, can be found in `environment`:
+Two bash scripts which set up everything that is needed to run the pipeline on Linux machines, as well as a requirements.txt file, can be found in `environment`:
 
 - `setup.sh [path]` downloads Miniconda3, creates a Python virtual environment, installs OpenJDK and Maven. A path needs to be passed, which defines the directory in which the environment will be setup. Make sure you call this script with `bash`!
 - `activate.sh [path]` activates the environment when the script is *source*'d. The path to the environment needs to be supplied.
@@ -16,6 +16,8 @@ Example:
 - `source environment/activate.sh myenv`
 
 To clean, simply delete the environment directory (here `myenv`).
+
+In case you are using a Mac machine there are minoconda paths within the `environment/setup.sh` file that you can use.
 
 # Run
 
