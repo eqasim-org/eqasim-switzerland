@@ -141,38 +141,22 @@ def aux_data_frame(df_act, df_syn, population_selector = None):
             print("INFO only considering ", gender, " agents.")
 
     df_act["person_id"] = df_act.index
-    pers_ids = list(set(df_act["person_id"].values.tolist()))
+    pers_ids = df_act["person_id"].unique()
+    df_act = df_act.reset_index(drop=True)
 
-    ids = []
-    weights = []
-    chains = []
+    df_aux_act = pd.DataFrame({
+        "person_id": pers_ids,
+        "weight_person": df_act.groupby("person_id")["weight_person"].mean(),
+        "chain": "home-" + df_act.groupby("person_id")["purpose"].apply(lambda x: "-".join(x))
+    })
 
-    for pid in tqdm(pers_ids, desc = "Building activity chains"):
-        df_thisperson = df_act[df_act["person_id"] == pid]
-        weight = np.mean(df_thisperson["weight_person"].values.tolist())
-        purposes = df_thisperson["purpose"].values.tolist()
-        first_activity = df_thisperson["preceding_purpose"].values.tolist()[0]
-        chain = "home" + "-" + "-".join([purpose for purpose in purposes])
-        ids.append(pid)
-        weights.append(weight)
-        chains.append(chain)
+    pers_ids = df_syn["person_id"].unique()
 
-    df_aux_act = pd.DataFrame.from_dict({"person_id": ids, "weight_person":weights, "chain": chains})   
-
-    pers_ids = list(set(df_syn["person_id"].values.tolist()))
-
-    ids = []
-    chains = []
-    
-    for pid in tqdm(pers_ids):
-        df = df_syn[df_syn["person_id"] == pid]
-        purposes = df["following_purpose"].values.tolist()
-        chain = "home-" + "-".join([purpose for purpose in purposes])
-        ids.append(pid)
-        chains.append(chain)
-
-
-    df_aux_syn = pd.DataFrame.from_dict({"person_id": ids, "weights": [1 for i in range(len(ids))], "chain": chains})      
+    df_aux_syn = pd.DataFrame({
+        "person_id": pers_ids,
+        "weights": 1,
+        "chain": "home-" + df_syn.groupby("person_id")["following_purpose"].apply(lambda x: "-".join(x))
+    })
 
     return df_aux_act, df_aux_syn
 
