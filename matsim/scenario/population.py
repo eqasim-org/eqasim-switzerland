@@ -33,6 +33,8 @@ class PersonWriter:
         writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(self.person[4]))
         writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(self.person[5]))
         writer.add_attribute("sex", "java.lang.String", ["m", "f"][self.person[6]])
+        writer.add_attribute("home_coordiante_x", "java.lang.Double", str(self.person[7]))
+        writer.add_attribute("home_coordiante_y", "java.lang.Double", str(self.person[8]))
         writer.add_attribute("carAvail", "java.lang.String", ["always", "sometimes", "never"][int(self.person[3])])
         writer.add_attribute("ptHasGA", "java.lang.Boolean", writer.true_false(self.person[9]))
         writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[10]))

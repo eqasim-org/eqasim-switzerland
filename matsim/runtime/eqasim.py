@@ -5,14 +5,18 @@ import matsim.runtime.git as git
 import matsim.runtime.java as java
 import matsim.runtime.maven as maven
 
+DEFAULT_EQASIM_VERSION = "1.5.0"
+DEFAULT_EQASIM_BRANCH = "develop"
+DEFAULT_EQASIM_COMMIT = "f525dc3"
+
 def configure(context):
     context.stage("matsim.runtime.git")
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.maven")
 
-    context.config("eqasim_version", "1.3.1")
-    # context.config("eqasim_branch", "upstream")
-    context.config("eqasim_branch", "147-swiss-config-does-not-include-separate-replanning-strategies-for-freight-agents")
+    context.config("eqasim_version", DEFAULT_EQASIM_VERSION)
+    context.config("eqasim_branch", DEFAULT_EQASIM_BRANCH)
+    context.config("eqasim_commit", DEFAULT_EQASIM_COMMIT)
     context.config("eqasim_repository", "https://github.com/eqasim-org/eqasim-java.git")
     context.config("eqasim_path", "")
 
@@ -32,13 +36,21 @@ def execute(context):
 
     # Normal case: we clone eqasim
     if context.config("eqasim_path") == "":
-        # Clone repository
+        # Clone repository and checkout version
+        branch = context.config("eqasim_branch")
+
         git.run(context, [
-            "clone", context.config("eqasim_repository"),
-            "--branch", context.config("eqasim_branch"),
-            "--single-branch", "eqasim-java",
-            "--depth", "1"
+            "clone", "--single-branch", "-b", branch,
+            context.config("eqasim_repository"), "eqasim-java"
         ])
+
+        # Select the configured commit or tag
+        commit = context.config("eqasim_commit")
+
+        git.run(context, [
+            "checkout", commit
+        ], cwd = "{}/eqasim-java".format(context.path()))
+
 
         # Build eqasim
         maven.run(context, ["-Pstandalone", "--projects", "switzerland", "--also-make", "package"], cwd = "%s/eqasim-java" % context.path())

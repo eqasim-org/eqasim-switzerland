@@ -1,6 +1,9 @@
 This change log is written in descending order. Changes that happen after version X was released, are written above that version number, because they will be included in the (note yet determined) next version number.
 
 **Development version**
+- Update to eqasim 1.5.0
+- Added home coordiantes to each person
+- Speedup of analysis
 
 **4.0.0**
 - Specify random seed for all random number generators. `numpy.random.RandomState` is used as it is frozen and thus guaranteed to produce the same values.
