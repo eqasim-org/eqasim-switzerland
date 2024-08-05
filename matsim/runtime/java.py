@@ -64,11 +64,11 @@ def validate(context):
     if shutil.which(context.config("java_binary")) in ["", None]:
         raise RuntimeError("Cannot find Java binary at: %s" % context.config("java_binary"))
 
-    if not b"11" in sp.check_output([
+    if not b"17" in sp.check_output([
         shutil.which(context.config("java_binary")),
         "-version"
     ], stderr = sp.STDOUT):
-        print("WARNING! A Java JDK of at least version 11 is recommended.")
+        print("WARNING! A Java JDK of at least version 17 is recommended.")
 
 def execute(context):
     pass
