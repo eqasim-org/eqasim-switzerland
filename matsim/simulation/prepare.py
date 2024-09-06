@@ -100,7 +100,10 @@ def execute(context):
     # Adapt the config
     eqasim.run(context, "org.eqasim.switzerland.scenario.RunAdaptConfig", [
         "--input-path", config_path,
-        "--output-path", config_path
+        "--output-path", config_path,
+        "--downsamplingRate", context.config("input_downsampling"),
+        "--replanningRate", "0.05",
+        "--hasFreight", context.config("use_freight")
     ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
