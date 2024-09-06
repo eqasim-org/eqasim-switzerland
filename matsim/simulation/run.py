@@ -16,12 +16,12 @@ def execute(context):
         context.stage("matsim.simulation.prepare")
     )
 
-    # Run routing
+    # Run simulation
     eqasim.run(context, "org.eqasim.switzerland.RunSimulation", [
         "--config-path", config_path,
-        "--config:controler.lastIteration", str(1),
-        "--config:controler.writeEventsInterval", str(1),
-        "--config:controler.writePlansInterval", str(1),
+        "--config:controler.lastIteration", str(60),
+        "--config:controler.writeEventsInterval", str(60),
+        "--config:controler.writePlansInterval", str(60),
     ])
 
     assert os.path.exists("%s/simulation_output/output_events.xml.gz" % context.path())

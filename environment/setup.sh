@@ -98,7 +98,7 @@ else
     echo "Downloading Miniconda ${miniconda_version} ..."
     rm -rf miniconda_installed
     rm -rf python_installed
-    curl -o miniconda.sh ${miniconda_url}
+    wget -O miniconda.sh ${miniconda_url}
 fi
 
 ## II.2) Download JDK

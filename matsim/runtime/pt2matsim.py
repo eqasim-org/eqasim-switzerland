@@ -10,8 +10,8 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.maven")
 
-    context.config("pt2matsim_version", "21.4")
-    context.config("pt2matsim_branch", "v21.4")
+    context.config("pt2matsim_version", "22.3")
+    context.config("pt2matsim_branch", "v22.3")
 
 def run(context, command, arguments):
     version = context.config("pt2matsim_version")
@@ -37,7 +37,7 @@ def execute(context):
     ])
 
     # Build pt2matsim
-    maven.run(context, ["package"], cwd = "%s/pt2matsim" % context.path())
+    maven.run(context, ["package", "-DskipTests"], cwd = "%s/pt2matsim" % context.path())
     jar_path = "%s/pt2matsim/target/pt2matsim-%s-shaded.jar" % (context.path(), version)
 
     # Test pt2matsim
