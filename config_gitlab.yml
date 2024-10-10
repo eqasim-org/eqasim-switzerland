@@ -4,7 +4,7 @@ dryrun: false
 
 # Requested stages
 run:
-    - synthesis.population.spatial.locations
+    - matsim.simulation.run
 
 # These are configuration options that we use in the pipeline
 config:
