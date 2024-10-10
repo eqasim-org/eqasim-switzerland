@@ -12,9 +12,9 @@ miniconda_md5="718259965f234088d785cad1fbd7de03"
 #miniconda_md5="2b7f9e46308c28c26dd83abad3e72121ef63916eaf17b63723b5a1f728dc3032"
 
 # on linux
-jdk_version="11.0.7"
-jdk_url="https://github.com/AdoptOpenJDK/openjdk11-binaries/releases/download/jdk-11.0.7%2B10/OpenJDK11U-jdk_x64_linux_hotspot_11.0.7_10.tar.gz"
-jdk_sha256="ee60304d782c9d5654bf1a6b3f38c683921c1711045e1db94525a51b7024a2ca"
+jdk_version="17.0.12_7"
+jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.12%2B7/OpenJDK17U-jdk_x64_linux_hotspot_17.0.12_7.tar.gz"
+jdk_sha256="9d4dd339bf7e6a9dcba8347661603b74c61ab2a5083ae67bf76da6285da8a778"
 
 # on Mac M1
 #jdk_version="11.0.22"
