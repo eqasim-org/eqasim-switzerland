@@ -127,7 +127,7 @@ def execute(context):
         # Convert to long format
         df_households = df_households.melt(
             id_vars="canton_id", value_vars=["1_2017", "1_2045", "2_2017", "2_2045", "3_2017", "3_2045"],
-            value_name="weight", var_name=["household_size_year"]
+            value_name="weight", var_name='household_size_year'
         )
 
         # split and rename columns
