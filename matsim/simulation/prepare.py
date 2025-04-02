@@ -9,6 +9,8 @@ def configure(context):
         
     context.stage("matsim.scenario.population")
     context.stage("matsim.scenario.households")
+    context.stage("matsim.scenario.vehicles")
+
     context.stage("matsim.scenario.facilities")
     context.stage("matsim.scenario.network.mapped")
         
@@ -23,7 +25,13 @@ def execute(context):
     # Some files we just copy
     transit_vehicles_input_path = context.stage("matsim.scenario.network.mapped")["vehicles"]
     transit_vehicles_output_path = "%s/%stransit_vehicles.xml.gz" % (context.path(), context.config("output_prefix"))
+    print(transit_vehicles_input_path)
     shutil.copyfile(transit_vehicles_input_path, transit_vehicles_output_path)
+
+    vehicles_input_path = context.stage("matsim.scenario.vehicles")
+    vehicles_output_path = "%s/%svehicles.xml.gz" % (context.path(), context.config("output_prefix"))
+    print(vehicles_input_path)
+    shutil.copyfile(vehicles_input_path, vehicles_output_path)
 
     households_input_path = context.stage("matsim.scenario.households")
     households_output_path = "%s/%shouseholds.xml.gz" % (context.path(), context.config("output_prefix"))
@@ -58,7 +66,6 @@ def execute(context):
 
     # Generate the config file
     config_path = "%sconfig.xml" % context.config("output_prefix")
-    
     eqasim.run(context, "org.eqasim.core.scenario.config.RunGenerateConfig", [
         "--output-path", config_path,
         "--prefix", context.config("output_prefix"),
@@ -79,6 +86,18 @@ def execute(context):
     ])
     
     assert os.path.exists("%s/%stransit_schedule.xml.gz" % (context.path(), context.config("output_prefix")))
+
+    # Adapt the config
+    eqasim.run(context, "org.eqasim.switzerland.scenario.RunAdaptConfig", [
+        "--input-path", config_path,
+        "--output-path", config_path,
+        "--downsamplingRate", context.config("input_downsampling"),
+        "--replanningRate", "0.05",
+        "--hasFreight", context.config("use_freight"),
+        "--prefix", context.config("output_prefix")
+    ])
+    
+    assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
     
     # Route the population
     population_output_path = "%spopulation.xml.gz" % context.config("output_prefix")
@@ -96,17 +115,6 @@ def execute(context):
     eqasim.run(context, "org.eqasim.core.scenario.validation.RunScenarioValidator", [
         "--config-path", config_path
     ])
-
-    # Adapt the config
-    eqasim.run(context, "org.eqasim.switzerland.scenario.RunAdaptConfig", [
-        "--input-path", config_path,
-        "--output-path", config_path,
-        "--downsamplingRate", context.config("input_downsampling"),
-        "--replanningRate", "0.05",
-        "--hasFreight", context.config("use_freight")
-    ])
-    
-    assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
     
     # Cleanup
     os.remove("%s/prepared_population.xml.gz" % context.path())

@@ -15,14 +15,23 @@ def configure(context):
     context.config("use_freight", default=False)
     context.stage("synthesis.freight.trips")
 
+    context.stage("synthesis.vehicles.vehicles")
+
+VEHICLE_FIELDS = [
+    "mode", "vehicle_id", "owner_id"
+]
 
 class PersonWriter:
     def __init__(self, person):
         self.person = person
         self.activities = []
+        self.vehicles = []
 
     def add_activity(self, activity):
         self.activities.append(activity)
+    
+    def add_vehicles(self, vehicles):
+        self.vehicles = vehicles
 
     def write(self, writer):
         writer.start_person(str(self.person[1]))
@@ -46,7 +55,10 @@ class PersonWriter:
         writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[17]))
         writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[18]))
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
-
+        writer.add_attribute("vehicles", "org.matsim.vehicles.PersonVehicles", "{{{content}}}".format(content = ",".join([
+                "\"{mode}\":\"{id}\"".format(mode = v[VEHICLE_FIELDS.index("mode")], id = v[VEHICLE_FIELDS.index("vehicle_id")])
+                for v in self.vehicles
+            ])))
         writer.end_attributes()
 
         # Plan
@@ -77,6 +89,10 @@ class PersonWriter:
 class FreightWriter:
     def __init__(self, freight_agent):
         self.freight_agent = freight_agent
+        self.vehicles = []
+
+    def add_vehicles(self, vehicles):
+        self.vehicles = vehicles
 
     def write(self, writer):
         writer.start_person("freight_" + str(self.freight_agent[1]))
@@ -86,6 +102,12 @@ class FreightWriter:
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
         writer.add_attribute("type", "java.lang.String", str(self.freight_agent[7]))
         writer.add_attribute("subpopulation", "java.lang.String", "freight")
+
+        writer.add_attribute("vehicles", "org.matsim.vehicles.PersonVehicles", "{{{content}}}".format(content = ",".join([
+                "\"{mode}\":\"{id}\"".format(mode = v[VEHICLE_FIELDS.index("mode")], id = v[VEHICLE_FIELDS.index("vehicle_id")])
+                for v in self.vehicles
+            ])))
+
         writer.end_attributes()
 
         # Plan
@@ -127,6 +149,7 @@ def execute(context):
     cache_path = context.path()
     df_persons = context.stage("synthesis.population.enriched")
     df_activities = context.stage("synthesis.population.activities")
+    df_vehicles = context.stage("synthesis.vehicles.vehicles")[1]
 
     # Attach following modes to activities
     df_trips = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
@@ -140,9 +163,11 @@ def execute(context):
     # Bring in correct order (although it should already be)
     df_persons = df_persons.sort_values(by="person_id")
     df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
+    df_vehicles = df_vehicles.sort_values(by=["owner_id"])
 
     df_persons = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
+    df_vehicles = df_vehicles[VEHICLE_FIELDS]
 
     person_iterator = iter(df_persons.itertuples())
     activity_iterator = iter(df_activities.itertuples())
@@ -170,6 +195,8 @@ def execute(context):
 
                             person_writer.add_activity(activity)
                             number_of_written_activities += 1
+                        owner_id = person[1]
+                        person_writer.add_vehicles(df_vehicles[df_vehicles["owner_id"] == owner_id][["mode", "vehicle_id"]].values.tolist())
 
                         person_writer.write(writer)
                         number_of_written_persons += 1
@@ -191,6 +218,8 @@ def execute(context):
                         while True:
                             freight = next(freight_iterator)
                             freight_writer = FreightWriter(freight)
+                            owner_id = freight[1]
+                            freight_writer.add_vehicles(df_vehicles[df_vehicles["owner_id"] == owner_id][["mode", "vehicle_id"]].values.tolist())
                             freight_writer.write(writer)
                             number_of_written_freight += 1
                             progress.update()
