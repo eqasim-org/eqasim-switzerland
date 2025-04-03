@@ -6,6 +6,8 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.simulation.run")
+    context.config("extent_path")
+    context.config("extent_prefix")
 
 def execute(context):
 
@@ -46,12 +48,12 @@ def execute(context):
 
         content = content.replace(
             'switzerland_transit_schedule.xml.gz',
-            '%s/%s/output_transit_schedule.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
+            '%s/%s/output_transitSchedule.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
         )
 
         content = content.replace(
             'switzerland_transit_vehicles.xml.gz',
-            '%s/%s/output_transit_vehicles.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
+            '%s/%s/output_transitVehicles.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
         )
 
         content = content.replace(
@@ -76,5 +78,5 @@ def execute(context):
         "--output-path", "%s/output" % context.path(),
         "--extent-path", context.config("extent_path"),
         "--threads", context.config("threads"),
-        "--prefix", "lausanne"
+        "--prefix", context.config("extent_prefix")
     ])
