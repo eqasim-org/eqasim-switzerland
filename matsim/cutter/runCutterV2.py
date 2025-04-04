@@ -2,14 +2,23 @@ import os.path
 
 import matsim.runtime.eqasim as eqasim
 
+# this cutter can currently be used only if Volume Delay Function (VDF) is
+# used to model traffic; it can be activated through the config file and has to be used
+# for the entire Swiss scenario
+
+
 def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.simulation.run")
     context.config("extent_path")
+    context.config("shape_name")
     context.config("extent_prefix")
+    context.config("use_vdf", default=False)
 
 def execute(context):
+
+    assert context.config("use_vdf"), "use of vdf needs to be enabled to use cutterV2"
 
     # get the output config from the ssimulation run in matsim.simulation.run stage
     config_path = "%s/%s" % (
@@ -69,10 +78,13 @@ def execute(context):
 
     config_path = "%s/config_cutter.xml" % context.path()
     
-    eqasim.run(context, "org.eqasim.core.scenario.cutter.RunScenarioCutter", [
+    
+    
+    eqasim.run(context, "org.eqasim.core.scenario.cutter.RunScenarioCutterV2", [
         "--config-path", config_path,
         "--output-path", "%s/output" % context.path(),
-        "--extent-path", context.config("extent_path"),
+        "--extent-path", "%s/%s" % (context.config("extent_path"), context.config("shape_name")),
+        "--vdf-travel-times-path", "%s/%s" % (context.path("matsim.simulation.run"), "simulation_output/vdf.bin"),
         "--threads", context.config("threads"),
         "--prefix", context.config("extent_prefix")
     ])
