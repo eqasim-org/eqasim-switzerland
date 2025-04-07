@@ -65,6 +65,11 @@ def execute(context):
             "%s/%srun.jar" % (target_path, context.config("output_prefix"))
         )
     
+    # move the results to the output
+    path_to_results =  "%s/simulation_output" % context.path("matsim.simulation.run")
+    shutil.move(path_to_results, 
+                "%s/simulation_output" % target_path)
+    
     # copy contract information
     contracts_path = context.stage("contracts.contracts")
     shutil.copyfile(contracts_path, "%s/CONTRACTS.html" % target_path)
