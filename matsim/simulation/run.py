@@ -9,6 +9,7 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
 
+    context.config("last_iteration", 60)
 
 def execute(context):
     config_path = "%s/%s" % (
@@ -17,11 +18,13 @@ def execute(context):
     )
 
     # Run simulation
+    last_iteration = context.config("last_iteration")
+
     eqasim.run(context, "org.eqasim.switzerland.RunSimulation", [
         "--config-path", config_path,
-        "--config:controler.lastIteration", str(60),
-        "--config:controler.writeEventsInterval", str(60),
-        "--config:controler.writePlansInterval", str(60),
+        "--config:controler.lastIteration", str(last_iteration),
+        "--config:controler.writeEventsInterval", str(last_iteration),
+        "--config:controler.writePlansInterval", str(last_iteration),
     ])
 
     assert os.path.exists("%s/simulation_output/output_events.xml.gz" % context.path())
