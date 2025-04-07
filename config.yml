@@ -20,3 +20,5 @@ config:
     use_freight: true
     hafas_date: 01.10.2018
     data_path: /home/tchervec/Documents/data/switzerland/data
+    extent_path:
+    extent_prefix:

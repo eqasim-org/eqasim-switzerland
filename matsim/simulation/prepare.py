@@ -25,12 +25,10 @@ def execute(context):
     # Some files we just copy
     transit_vehicles_input_path = context.stage("matsim.scenario.network.mapped")["vehicles"]
     transit_vehicles_output_path = "%s/%stransit_vehicles.xml.gz" % (context.path(), context.config("output_prefix"))
-    print(transit_vehicles_input_path)
     shutil.copyfile(transit_vehicles_input_path, transit_vehicles_output_path)
 
     vehicles_input_path = context.stage("matsim.scenario.vehicles")
     vehicles_output_path = "%s/%svehicles.xml.gz" % (context.path(), context.config("output_prefix"))
-    print(vehicles_input_path)
     shutil.copyfile(vehicles_input_path, vehicles_output_path)
 
     households_input_path = context.stage("matsim.scenario.households")
