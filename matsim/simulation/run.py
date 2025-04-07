@@ -10,27 +10,30 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.config("use_vdf", default=False)
 
+    context.config("last_iteration", 60)
 
 def execute(context):
     config_path = "%s/%s" % (
         context.path("matsim.simulation.prepare"),
         context.stage("matsim.simulation.prepare")
     )
+    
+    last_iteration = context.config("last_iteration")
     if (not context.config("use_vdf")):
         # Run simulation
         eqasim.run(context, "org.eqasim.switzerland.RunSimulation", [
             "--config-path", config_path,
-            "--config:controler.lastIteration", str(1),
-            "--config:controler.writeEventsInterval", str(1),
-            "--config:controler.writePlansInterval", str(1),
+            "--config:controler.lastIteration", str(last_iteration),
+            "--config:controler.writeEventsInterval", str(last_iteration),
+            "--config:controler.writePlansInterval", str(last_iteration),
         ])
     else:
         # Run simulation with vdf
         eqasim.run(context, "org.eqasim.switzerland.RunVDFSimulation", [
             "--config-path", config_path,
-            "--config:controler.lastIteration", str(1),
-            "--config:controler.writeEventsInterval", str(1),
-            "--config:controler.writePlansInterval", str(1),
+            "--config:controler.lastIteration", str(last_iteration),
+            "--config:controler.writeEventsInterval", str(last_iteration),
+            "--config:controler.writePlansInterval", str(last_iteration),
         ])
     assert os.path.exists("%s/simulation_output/output_events.xml.gz" % context.path())
     
