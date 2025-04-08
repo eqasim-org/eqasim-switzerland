@@ -137,7 +137,7 @@ def process(context, arguments):
 
     # Set up relaxation solver; currently, we do not consider tail problems.
     relaxation_solver = GravityChainSolver(
-        random=rng, eps=50.0, lateral_deviation=10.0, alpha=0.1
+        random=rng, eps=75.0, lateral_deviation=10.0, alpha=0.1
     )
 
     # Set up discretization solver
