@@ -7,3 +7,4 @@ config*.yml
 !config_gitlab.yml
 !config_docker.yml
 logs
+run*.sh
