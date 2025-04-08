@@ -1,13 +1,13 @@
 #!/bin/bash
 # Author: dabdelkader
 
-#SBATCH --job-name=Eqasim10 # name f the job
-#SBATCH -n 1                 # Number of tasks
+#SBATCH --job-name=Eqasim_small # name f the job
+#SBATCH -n 1                    # Number of tasks
 #SBATCH --cpus-per-task=24    # CPUs per task
 #SBATCH --time=12:00:00       # Maximum runtime (6 hours)
-#SBATCH --mem-per-cpu=8G     # Memory per CPU (8GB)
-#SBATCH -o /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_QueueModelsStudy%j.log   # Output file
-#SBATCH -e /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_QueueModelsStudy%j.log   # Error log file
+#SBATCH --mem-per-cpu=8G      # Memory per CPU (8GB)
+#SBATCH -o /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_small_%j.log   # Output file
+#SBATCH -e /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_small_%j.log   # Error log file
 
 
 # Source the interactive shell config (for osmosis)
@@ -36,7 +36,7 @@ unset DISPLAY
 # -----------------------------------------
 # Step 4: Run the Job
 # -----------------------------------------
-python3 -m synpp config_dib.yml
+python3 -m synpp config_dib_small.yml
 
 # -----------------------------------------
 # Step 5: Print Confirmation
