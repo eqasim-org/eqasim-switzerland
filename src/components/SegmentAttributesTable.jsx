@@ -6,10 +6,10 @@ const format = (value, isSpeed = false) => {
   return `${Math.round(parseFloat(value))}`;
 };
 
-const SegmentAttributesTable = ({ properties }) => {
+const SegmentAttributesTable = ({ properties, selectedGraph }) => {
   if (!properties) return null;
 
-  const { length, freespeed, capacity, permlanes, modes } = properties;
+  const { length, freespeed, capacity, permlanes, modes, daily_avg_volume} = properties;
   const modeList = modes?.split(",") || [];
 
   return (
@@ -21,6 +21,12 @@ const SegmentAttributesTable = ({ properties }) => {
           <tr><td>Free Speed</td><td>{format(freespeed, true)}</td></tr>
           <tr><td>Capacity</td><td>{format(capacity)}</td></tr>
           <tr><td>Lanes</td><td>{format(permlanes)}</td></tr>
+          {selectedGraph === "Volumes" && (
+          <tr>
+            <td>Average Daily Volume</td>
+            <td>{format(daily_avg_volume)} vehicles per day</td>
+          </tr>
+        )}
           <tr><td>Modes</td><td><div className="mode-badges">
         {modeList.map((mode) => (
             <span className="mode-badge" key={mode}>{mode}</span>

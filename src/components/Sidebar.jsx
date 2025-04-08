@@ -177,7 +177,7 @@ const Sidebar = ({canton, isOpen, toggleSidebar, onExpandGraph, setCanton, reset
             {selectedGraph === "Volumes" && (
               <div className="plot-container">
               {selectedNetworkFeature && (
-                <SegmentAttributesTable properties={selectedNetworkFeature[0]} />
+                <SegmentAttributesTable properties={selectedNetworkFeature[0]} selectedGraph={selectedGraph} />
               )}
               
               {selectedNetworkFeature ? (

@@ -12,7 +12,7 @@ const Legend = ({ selectedGraph }) => {
       {/* Speed/Volume Legend */}
       <div className="network-legend-section">
         <div className="network-legend-title">
-          {isVolumes ? "Average Daily Volume [vehicles/hour]" : "Network Speed [km/h]"}
+          {isVolumes ? "Average Daily Volume [vehicles/day]" : "Network Speed [km/h]"}
         </div>
         <div className="network-legend-bar">
           {isVolumes ? (
