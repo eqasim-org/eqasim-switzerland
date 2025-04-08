@@ -1,0 +1,68 @@
+.canton-mode-share {
+    margin-top: 15px;
+    padding-top: 1px;
+    padding-left: 5px;
+    padding-right: 5px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: opacity 0.3s ease-in-out;
+  }
+  
+  .canton-mode-share h4 {
+    margin-top: 10px;
+    margin-bottom: 10px;
+    text-align: center;
+    font-size: 16px;
+    font-weight: bold;
+    color: #333;
+  }
+  
+  .canton-mode-share table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  
+  .canton-mode-share th, .canton-mode-share td {
+    padding: 8px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+  }
+  
+  .canton-mode-share th {
+    background: #e9ecef;
+    font-weight: bold;
+  }
+  
+  .canton-mode-share tr:last-child td {
+    border-bottom: none;
+  }
+  
+  .canton-mode-share .highlight {
+    color: white;
+    font-weight: bold;
+  }
+  
+  .canton-mode-share tbody tr:hover {
+    background-color: #ddd;
+    cursor: pointer;
+  }
+
+  .mode-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 5px 0;
+  }
+  
+  .mode-badge {
+    background-color: #dee2e6;
+    color: #333;
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-size: 13px;
+    font-weight: 500;
+    display: inline-block;
+  }
+  
