@@ -391,7 +391,7 @@
             }
         }
     },
-    "Gen\u00e8ve": {
+    "Geneve": {
         "Microcensus": {
             "bike": {
                 "euclidean_distance": 1741.2190497356837,
@@ -503,7 +503,7 @@
             }
         }
     },
-    "Graub\u00fcnden": {
+    "Graubunden": {
         "Microcensus": {
             "bike": {
                 "euclidean_distance": 1049.3478038897088,
@@ -671,7 +671,7 @@
             }
         }
     },
-    "Neuch\u00e2tel": {
+    "Neuchatel": {
         "Microcensus": {
             "bike": {
                 "euclidean_distance": 1834.1568238978828,
@@ -1007,7 +1007,7 @@
             }
         }
     },
-    "St. Gallen": {
+    "StGallen": {
         "Microcensus": {
             "bike": {
                 "euclidean_distance": 1394.8876790060815,
@@ -1399,7 +1399,7 @@
             }
         }
     },
-    "Z\u00fcrich": {
+    "Zurich": {
         "Microcensus": {
             "bike": {
                 "euclidean_distance": 1683.4534323279906,

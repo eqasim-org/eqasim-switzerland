@@ -11463,7 +11463,7 @@
         ],
         "max_value": 10.0
     },
-    "Gen\u00e8ve": {
+    "Geneve": {
         "microcensus": [
             {
                 "variable_bin": "0.0-0.5",
@@ -14329,7 +14329,7 @@
         ],
         "max_value": 10.0
     },
-    "Graub\u00fcnden": {
+    "Graubunden": {
         "microcensus": [
             {
                 "variable_bin": "0.0-0.5",
@@ -18628,7 +18628,7 @@
         ],
         "max_value": 10.0
     },
-    "Neuch\u00e2tel": {
+    "Neuchatel": {
         "microcensus": [
             {
                 "variable_bin": "0.0-0.5",
@@ -27226,7 +27226,7 @@
         ],
         "max_value": 10.0
     },
-    "St. Gallen": {
+    "StGallen": {
         "microcensus": [
             {
                 "variable_bin": "0.0-0.5",
@@ -37257,7 +37257,7 @@
         ],
         "max_value": 10.0
     },
-    "Z\u00fcrich": {
+    "Zurich": {
         "microcensus": [
             {
                 "variable_bin": "0.0-0.5",

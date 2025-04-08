@@ -2256,7 +2256,7 @@
                 "percentage": 0.4
             }
         ],
-        "Gen\u00e8ve": [
+        "Geneve": [
             {
                 "distance_category": "0-1000",
                 "mode": "bike",
@@ -2820,7 +2820,7 @@
                 "percentage": 0.2
             }
         ],
-        "Graub\u00fcnden": [
+        "Graubunden": [
             {
                 "distance_category": "0-1000",
                 "mode": "bike",
@@ -3666,7 +3666,7 @@
                 "percentage": 0.3
             }
         ],
-        "Neuch\u00e2tel": [
+        "Neuchatel": [
             {
                 "distance_category": "0-1000",
                 "mode": "bike",
@@ -5358,7 +5358,7 @@
                 "percentage": 0.3
             }
         ],
-        "St. Gallen": [
+        "StGallen": [
             {
                 "distance_category": "0-1000",
                 "mode": "bike",
@@ -7332,7 +7332,7 @@
                 "percentage": 0.2
             }
         ],
-        "Z\u00fcrich": [
+        "Zurich": [
             {
                 "distance_category": "0-1000",
                 "mode": "bike",

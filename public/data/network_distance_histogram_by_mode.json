@@ -21586,7 +21586,7 @@
             "synthetic_sample_size": 6356
         }
     },
-    "Gen\u00e8ve": {
+    "Geneve": {
         "bike": {
             "bin_width": 359.2063570742107,
             "bins": [
@@ -29097,7 +29097,7 @@
             "synthetic_sample_size": 815
         }
     },
-    "Graub\u00fcnden": {
+    "Graubunden": {
         "bike": {
             "bin_width": 642.4860585852151,
             "bins": [
@@ -35517,7 +35517,7 @@
             "synthetic_sample_size": 10367
         }
     },
-    "Neuch\u00e2tel": {
+    "Neuchatel": {
         "bike": {
             "bin_width": 359.80543539784236,
             "bins": [
@@ -47318,7 +47318,7 @@
             "synthetic_sample_size": 6217
         }
     },
-    "St. Gallen": {
+    "StGallen": {
         "bike": {
             "bin_width": 422.50626543814906,
             "bins": [
@@ -62388,7 +62388,7 @@
             "synthetic_sample_size": 3786
         }
     },
-    "Z\u00fcrich": {
+    "Zurich": {
         "bike": {
             "bin_width": 381.33072002362263,
             "bins": [

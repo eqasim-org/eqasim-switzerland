@@ -176,27 +176,27 @@
             "share": 0.23965351299326276
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "bike",
             "share": 0.07076421516923961
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "car",
             "share": 0.28976891360629015
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "car_passenger",
             "share": 0.07498321986767667
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "pt",
             "share": 0.19867676670821746
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "walk",
             "share": 0.3658068846485761
         },
@@ -226,27 +226,27 @@
             "share": 0.2287145242070117
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "bike",
             "share": 0.09540229885057472
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "car",
             "share": 0.4281609195402299
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "car_passenger",
             "share": 0.07614942528735633
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "pt",
             "share": 0.08994252873563219
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "walk",
             "share": 0.3103448275862069
         },
@@ -301,27 +301,27 @@
             "share": 0.23544572468162522
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "bike",
             "share": 0.02268041237113402
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "car",
             "share": 0.47359238699444883
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "car_passenger",
             "share": 0.11308485329103886
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "pt",
             "share": 0.1099127676447264
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "walk",
             "share": 0.28072957969865187
         },
@@ -451,27 +451,27 @@
             "share": 0.22711267605633803
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "bike",
             "share": 0.12288851351351351
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "car",
             "share": 0.44594594594594594
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "car_passenger",
             "share": 0.09628378378378379
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "pt",
             "share": 0.0999436936936937
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "walk",
             "share": 0.23493806306306306
         },
@@ -626,27 +626,27 @@
             "share": 0.2809553739786298
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "bike",
             "share": 0.09746768662621999
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "car",
             "share": 0.3527433394882617
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "car_passenger",
             "share": 0.08355315220258507
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "pt",
             "share": 0.20588235294117646
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "walk",
             "share": 0.2603534687417568
         }
@@ -828,27 +828,27 @@
             "share": 0.20956149027365645
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "bike",
             "share": 0.08100129885464635
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "car",
             "share": 0.27104734915574447
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "car_passenger",
             "share": 0.072342267878931
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "pt",
             "share": 0.24007163380170818
         },
         {
-            "canton_name": "Gen\u00e8ve",
+            "canton_name": "Geneve",
             "mode": "walk",
             "share": 0.33553745030897
         },
@@ -878,27 +878,27 @@
             "share": 0.22557431497370606
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "bike",
             "share": 0.04571831444221487
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "car",
             "share": 0.4960681164922176
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "car_passenger",
             "share": 0.10130701231086285
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "pt",
             "share": 0.10895384782255003
         },
         {
-            "canton_name": "Graub\u00fcnden",
+            "canton_name": "Graubunden",
             "mode": "walk",
             "share": 0.24795270893215468
         },
@@ -953,27 +953,27 @@
             "share": 0.2553070974732798
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "bike",
             "share": 0.07307555870876198
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "car",
             "share": 0.4201253399550668
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "car_passenger",
             "share": 0.09164006148752513
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "pt",
             "share": 0.14774742816601633
         },
         {
-            "canton_name": "Neuch\u00e2tel",
+            "canton_name": "Neuchatel",
             "mode": "walk",
             "share": 0.2674116116826298
         },
@@ -1103,27 +1103,27 @@
             "share": 0.24411025600753888
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "bike",
             "share": 0.05146550672791577
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "car",
             "share": 0.4917273059880483
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "car_passenger",
             "share": 0.09599983739176389
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "pt",
             "share": 0.11654945322980609
         },
         {
-            "canton_name": "St. Gallen",
+            "canton_name": "StGallen",
             "mode": "walk",
             "share": 0.24425789666246595
         },
@@ -1278,27 +1278,27 @@
             "share": 0.28845714285714286
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "bike",
             "share": 0.08318163727351616
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "car",
             "share": 0.342167589892149
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "car_passenger",
             "share": 0.08556310229860309
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "pt",
             "share": 0.20467550092322548
         },
         {
-            "canton_name": "Z\u00fcrich",
+            "canton_name": "Zurich",
             "mode": "walk",
             "share": 0.28441216961250626
         }
