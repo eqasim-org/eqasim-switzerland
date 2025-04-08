@@ -89,7 +89,7 @@
     "train",
     "truck"
   ],
-  "Gen\u00e8ve": [
+  "Geneve": [
     "artificial",
     "bus",
     "car",
@@ -114,7 +114,7 @@
     "train",
     "truck"
   ],
-  "Graub\u00fcnden": [
+  "Graubunden": [
     "artificial",
     "bus",
     "car",
@@ -149,7 +149,7 @@
     "train",
     "truck"
   ],
-  "Neuch\u00e2tel": [
+  "Neuchatel": [
     "artificial",
     "bus",
     "car",
@@ -223,7 +223,7 @@
     "tram",
     "truck"
   ],
-  "St. Gallen": [
+  "StGallen": [
     "artificial",
     "bus",
     "car",
@@ -314,7 +314,7 @@
     "train",
     "truck"
   ],
-  "Z\u00fcrich": [
+  "Zurich": [
     "artificial",
     "bus",
     "car",
