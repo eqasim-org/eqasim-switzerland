@@ -2,7 +2,11 @@ __pycache__
 cache
 .idea
 .vscode
+plots
+slurm*
 config*.yml
 !config.yml
 !config_gitlab.yml
 !config_docker.yml
+*.sh
+*.md
