@@ -7,12 +7,25 @@ This file reads GTFS schedule.
 
 def configure(context):
     context.config("data_path")
-
-    context.stage("data.spatial.municipalities")
-
+    context.config("gtfs_name", default = "")
 
 def execute(context):
-    input_files = get_input_files("{}/{}".format(context.config("data_path"), "gtfs"))
+    all_input_files = get_input_files("{}/{}".format(context.config("data_path"), "gtfs"))
+
+    if context.config("gtfs_zip_name") == "":
+        # Keep all files
+        input_files = all_input_files
+
+    else:
+        # Look for the specified file name
+        input_files = []
+        for file in all_input_files:
+            if context.config("gtfs_zip_name") in file:
+                input_files = [file]
+
+        # If the specified file name was not found
+        if len(input_files) == 0:
+            raise RuntimeError("Did not find any GTFS data matching the specified name.")
 
     # Load feeds
     feeds = []
