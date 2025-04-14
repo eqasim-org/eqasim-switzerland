@@ -152,7 +152,7 @@ def execute(context):
     # Identify households with children
     children_columns = []
     for upper_age in [3, 6, 12, 18]:
-        col_name          = "N_children_"+str(upper_age)
+        col_name          = "N_children_under_"+str(upper_age)
         children          = df[df["age"]<upper_age]
         hhl_with_children = np.unique(children["household_id"].values.tolist())
         df.loc[:, col_name] = df["household_id"].isin(hhl_with_children)
