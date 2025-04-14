@@ -90,8 +90,10 @@ def execute(context):
         df_activities, df_persons[["person_id", "household_id"]], on = "person_id")
 
     df_activities["preceding_trip_index"] = df_activities["following_trip_index"].shift(1)
-    df_activities.loc[df_activities["activity_index"]==0, "preceding_trip_index"] = -1
-    df_activities["preceding_trip_index"] = df_activities["preceding_trip_index"].astype(int)
+    df_activities.loc[df_activities["activity_index"]==0, "preceding_trip_index"] = -1    
+    # I add filna(-1) in the next link, because something very rare can happen, which is: one person without any trips (only one activity) 
+    # is located in the first row of the dataframe. this person would have Nan value as proceding_trip_index and thus through an error.
+    df_activities["preceding_trip_index"] = df_activities["preceding_trip_index"].fillna(-1).astype(int) 
 
     df_activities = df_activities[[
         "person_id", "household_id", "activity_index",
