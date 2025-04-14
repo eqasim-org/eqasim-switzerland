@@ -65,4 +65,11 @@ def execute(context):
     df_persons["mz_person_id"] = df_persons["mz_person_id"].fillna(-1).astype(int)
     df_persons["mz_head_id"] = df_persons["mz_head_id"].fillna(-1).astype(int)
 
+    # Clean driving license attribute
+    N_underage_driving = len(df_persons[(df_persons["age"]<18) & (df_persons["driving_license"])])
+    print(f"Identified {N_underage_driving} agents under 18 years but having a driving license.")
+    print("This is due to statistical matching - those agents were not matched using the age variable.")
+    print("Fixing this to ensure consistency of the results.")
+    df_persons.loc[df_persons["age"]<18, "driving_license"] = False
+
     return df_persons
