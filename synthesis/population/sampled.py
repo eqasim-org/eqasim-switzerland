@@ -2,14 +2,14 @@ import numpy as np
 
 
 def configure(context):
-    context.stage("data.statpop.scaled")
+    context.stage("data.census.selected")
     
     context.config("input_downsampling")
     context.config("random_seed")
 
 
 def execute(context):
-    df = context.stage("data.statpop.scaled")
+    df = context.stage("data.census.selected")
 
     # If we do not want to downsample, set the value to 1.0 in config
     probability = context.config("input_downsampling")

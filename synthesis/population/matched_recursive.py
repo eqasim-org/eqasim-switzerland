@@ -8,7 +8,8 @@ import data.constants as c
 
 """
 This stage attaches observations from the microcensus to the synthetic population sample.
-This is done by statistical matching.
+This is done by statistical matching. Here, a recursive version of statistical matching is implemented.
+It progressively decreases the minimum number of observations to ensure the most important attributes are always matched.
 """
 
 
@@ -32,11 +33,17 @@ def sample_indices(uniform, cdf, selected_indices):
     return selected_indices[indices]
 
 
-def statistical_matching(progress, df_source, source_identifier, weight, df_target, target_identifier, columns,
-                         random_seed=0, minimum_observations=0):
-    
-    # Set up RNG
-    rng = np.random.RandomState(random_seed)
+def decrease_minimum_observation(N):
+    # Possible decreasing functions can be implemented here.
+    return N-1
+
+
+def is_left_slice(list1, list2):
+    return list1[:len(list2)] == list2
+
+
+def statistical_matching(df_source, source_identifier, weight, df_target, target_identifier, columns, mandatory_columns=None,
+                         rng=None, minimum_observations=0):
 
     # Reduce data frames
     df_source = df_source[[source_identifier, weight] + columns].copy()
@@ -65,105 +72,23 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
 
     # Perform matching
     weights = df_source[weight].values
-    assigned_indices = np.ones((len(df_target),), dtype=np.int) * -1
-    unassigned_mask = np.ones((len(df_target),), dtype=np.bool)
-    assigned_levels = np.ones((len(df_target),), dtype=np.int) * -1
-    uniform = rng.random_sample(size=(len(df_target),))
-
-    column_indices = [np.arange(len(unique_values[column])) for column in columns]
-
-    for level in range(1, len(column_indices) + 1)[::-1]:
-        level_column_indices = column_indices[:level]
-
-        if np.count_nonzero(unassigned_mask) > 0:
-            for column_index in itertools.product(*level_column_indices):
-                f_source = np.logical_and.reduce([source_filters[i][k] for i, k in enumerate(column_index)])
-                f_target = np.logical_and.reduce(
-                    [target_filters[i][k] for i, k in enumerate(column_index)] + [unassigned_mask])
-
-                selected_indices = np.nonzero(f_source)[0]
-                requested_samples = np.count_nonzero(f_target)
-
-                if requested_samples == 0:
-                    continue
-
-                if len(selected_indices) < minimum_observations:
-                    continue
-
-                selected_weights = weights[f_source]
-                cdf = np.cumsum(selected_weights)
-                cdf /= cdf[-1]
-
-                assigned_indices[f_target] = sample_indices(uniform[f_target], cdf, selected_indices)
-                assigned_levels[f_target] = level
-                unassigned_mask[f_target] = False
-
-                progress.update(np.count_nonzero(f_target))
-
-    # Randomly assign unmatched observations
-    cdf = np.cumsum(weights)
-    cdf /= cdf[-1]
-
-    assigned_indices[unassigned_mask] = sample_indices(uniform[unassigned_mask], cdf, np.arange(len(weights)))
-    assigned_levels[unassigned_mask] = 0
-
-    progress.update(np.count_nonzero(unassigned_mask))
-
-    assert np.count_nonzero(unassigned_mask) == 0
-    assert np.count_nonzero(assigned_indices == -1) == 0
-
-    # Write back indices
-    df_target[source_identifier] = df_source[source_identifier].values[assigned_indices]
-    df_target = df_target[[target_identifier, source_identifier]]
-
-    return df_target, assigned_levels
-
-
-def simple_statistical_matching(df_source, source_identifier, weight, df_target, target_identifier, columns,
-                         random_seed=0, minimum_observations=0):
-    
-    # Set up RNG
-    rng = np.random.RandomState(random_seed)
-
-    # Reduce data frames
-    df_source = df_source[[source_identifier, weight] + columns].copy()
-    df_target = df_target[[target_identifier] + columns].copy()
-
-    # Sort data frames
-    df_source = df_source.sort_values(by=columns)
-    df_target = df_target.sort_values(by=columns)
-
-    # Find unique values for all columns
-    unique_values = {}
-
-    for column in columns:
-        unique_values[column] = list(sorted(set(df_source[column].unique()) | set(df_target[column].unique())))
-
-    # Generate filters for all columns and values
-    source_filters, target_filters = {}, {}
-
-    for column, column_unique_values in unique_values.items():
-        source_filters[column] = [df_source[column].values == value for value in column_unique_values]
-        target_filters[column] = [df_target[column].values == value for value in column_unique_values]
-
-    # Define search order
-    source_filters = [source_filters[column] for column in columns]
-    target_filters = [target_filters[column] for column in columns]
-
-    # Perform matching
-    weights = df_source[weight].values
-    assigned_indices = np.ones((len(df_target),), dtype=np.int) * -1
-    unassigned_mask = np.ones((len(df_target),), dtype=np.bool)
-    assigned_levels = np.ones((len(df_target),), dtype=np.int) * -1
+    assigned_indices = np.ones((len(df_target),), dtype=int) * -1
+    unassigned_mask = np.ones((len(df_target),), dtype=bool)
+    assigned_levels = np.ones((len(df_target),), dtype=int) * -1
     uniform = rng.random_sample(size=(len(df_target),))
 
     column_indices = [np.arange(len(unique_values[column])) for column in columns]
 
     initial_number =  np.count_nonzero(unassigned_mask)
 
-    for level in range(1, len(column_indices) + 1)[::-1]:
-        level_column_indices = column_indices[:level]
+    if mandatory_columns:
+        minimum_level = len(mandatory_columns)
+    else:
+        minimum_level = 1
 
+    for level in range(minimum_level, len(column_indices) + 1)[::-1]:
+        level_column_indices = column_indices[:level]
+        
         if np.count_nonzero(unassigned_mask) > 0:
             nb_agents_to_match_initial = np.count_nonzero(unassigned_mask)
             for column_index in itertools.product(*level_column_indices):
@@ -187,7 +112,7 @@ def simple_statistical_matching(df_source, source_identifier, weight, df_target,
                 assigned_indices[f_target] = sample_indices(uniform[f_target], cdf, selected_indices)
                 assigned_levels[f_target] = level
                 unassigned_mask[f_target] = False
-
+                
             nb_agents_to_match_final = np.count_nonzero(unassigned_mask)
             nb_agents_matched        = nb_agents_to_match_initial - nb_agents_to_match_final
             remaining_share          = round(nb_agents_to_match_final / initial_number * 100, 2)
@@ -200,53 +125,60 @@ def simple_statistical_matching(df_source, source_identifier, weight, df_target,
     assigned_indices[unassigned_mask] = sample_indices(uniform[unassigned_mask], cdf, np.arange(len(weights)))
     assigned_levels[unassigned_mask] = 0
 
-    assert np.count_nonzero(unassigned_mask) == 0
-    assert np.count_nonzero(assigned_indices == -1) == 0
-
     # Write back indices
     df_target[source_identifier] = df_source[source_identifier].values[assigned_indices]
-    df_target = df_target[[target_identifier, source_identifier]]
 
-    return df_target, assigned_levels
-
-
-def _run_parallel_statistical_matching(context, args):
-    # Pass arguments
-    df_target, random_seed = args
-
-    # Pass data
-    df_source = context.data("df_source")
-    source_identifier = context.data("source_identifier")
-    weight = context.data("weight")
-    target_identifier = context.data("target_identifier")
-    columns = context.data("columns")
-    minimum_observations = context.data("minimum_observations")
-
-    return statistical_matching(context.progress, df_source, source_identifier, weight, df_target, target_identifier,
-                                columns, random_seed, minimum_observations)
+    return df_target, assigned_levels   
 
 
-def parallel_statistical_matching(context, df_source, source_identifier, weight, df_target, target_identifier, columns,
-                                  minimum_observations=0):
-    random_seed = context.config("random_seed")
-    processes = context.config("threads")
-    
+def recursive_statistical_matching(df_source, source_identifier, weight, df_target, target_identifier, columns, mandatory_columns=None,
+                         random_seed=0, minimum_observations=0, percentage_matched = 0, initial_nb_of_agents = 0):
+
+    # Columns check: mandatory columns should be a "left-slice" of columns.
+    if mandatory_columns:
+        if not is_left_slice(columns, mandatory_columns):
+            raise RuntimeError("Mandatory columns must match the beginning of columns!")
+
+    if initial_nb_of_agents == 0 and len(df_target) > 0:
+        initial_nb_of_agents = len(df_target)
+
+    assert(initial_nb_of_agents > 0)
+
+    # Set up RNG
     rng = np.random.RandomState(random_seed)
-    chunks = np.array_split(df_target, processes)
 
-    with context.progress(label="Statistical matching ...", total=len(df_target)):
-        with context.parallel({
-            "df_source": df_source, "source_identifier": source_identifier, "weight": weight,
-            "target_identifier": target_identifier, "columns": columns,
-            "minimum_observations": minimum_observations
-        }) as parallel:
-            random_seeds = rng.randint(10000, size=len(chunks))
-            results = parallel.map(_run_parallel_statistical_matching, zip(chunks, random_seeds))
+    # Termination step
+    if minimum_observations == 1:
+        # At this point, the goal is really to match everyone. So we do not consider the mandatory columns any longer.
+        df_matching, assigned_levels = statistical_matching(df_source, source_identifier, weight, df_target, target_identifier, columns, None,
+                         rng, minimum_observations)
 
-            levels = np.hstack([r[1] for r in results])
-            df_target = pd.concat([r[0] for r in results])
+        share_of_matched_agents = round(len(df_matching) / initial_nb_of_agents * 100,2) + percentage_matched
+        
+        print(f"{minimum_observations} obs required - matching {share_of_matched_agents:.2f}% of the population.")
+        print("")
+        
+        return df_matching, assigned_levels
 
-            return df_target, levels
+    else:
+        df_matching, assigned_levels = statistical_matching(df_source, source_identifier, weight, df_target, target_identifier, columns, mandatory_columns,
+                         rng, minimum_observations)
+        
+        df_not_matching_on_mandatory = df_matching[assigned_levels < len(mandatory_columns)]
+        df_matching_on_mandatory     = df_matching[assigned_levels >= len(mandatory_columns)]
+
+        unmatched_levels             = assigned_levels[assigned_levels < len(mandatory_columns)]
+        matched_levels               = assigned_levels[assigned_levels >= len(mandatory_columns)]
+
+        next_minimum_observations    =  decrease_minimum_observation(minimum_observations)
+
+        share_of_matched_agents = len(df_matching_on_mandatory) / initial_nb_of_agents * 100 + percentage_matched
+
+        print(f"{minimum_observations} obs required - matching {share_of_matched_agents:.2f}% of the population.")
+        
+        matching_the_missing, levels = recursive_statistical_matching(df_source, source_identifier, weight, df_not_matching_on_mandatory, target_identifier, columns, mandatory_columns, random_seed, next_minimum_observations, share_of_matched_agents, initial_nb_of_agents)
+        
+        return pd.concat([df_matching_on_mandatory, matching_the_missing]), np.concatenate((matched_levels, levels))
 
 
 def execute(context):
@@ -273,18 +205,18 @@ def execute(context):
     head_selector = age_selector & df_population["is_head"]
 
     df_target = pd.DataFrame(df_population[head_selector])
-    columns = [ "ovgk", "household_size_class", "age_class", "canton_id", "sex"]
+    columns = [ "ovgk", "N_children_12", "age_class", "canton_id", "sex"]
 
     # Perform statistical matching
     df_source = df_source.rename(columns={"person_id": "mz_id"})
 
-    #df_assignment, levels = parallel_statistical_matching(
-    df_assignment, levels = simple_statistical_matching(
-        #context,
+    df_assignment, levels = recursive_statistical_matching(
         df_source, "mz_id", "household_weight",
         df_target, "person_id",
         columns,
-        minimum_observations=context.config("matching_minimum_observations"))
+        columns[:3],
+        minimum_observations=context.config("matching_minimum_observations"),
+        percentage_matched=0)
 
     df_target = pd.merge(df_target, df_assignment, on="person_id")
     assert len(df_target) == len(df_assignment)
@@ -359,14 +291,13 @@ def execute(context):
     age_selector = df_population["age"] >= c.MZ_AGE_THRESHOLD
     df_target = pd.DataFrame(df_population[age_selector])
 
-    columns = [ "number_of_cars_class", "household_size_class", "ovgk", "age_class", "sex",  "marital_status"]#,  "household_size_class","number_of_bikes_class"]
+    columns = [ "number_of_cars_class", "N_children_12", "ovgk", "age_class", "sex",  "marital_status"]
 
-    #df_assignment, levels = parallel_statistical_matching(
-    df_assignment, levels = simple_statistical_matching(
-        #context,
+    df_assignment, levels = recursive_statistical_matching(
         df_source, "mz_id", "person_weight",
         df_target, "person_id",
         columns,
+        columns[:4],
         minimum_observations=context.config("matching_minimum_observations"))
 
     df_target = pd.merge(df_target, df_assignment, on="person_id")

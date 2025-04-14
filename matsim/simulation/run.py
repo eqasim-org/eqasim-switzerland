@@ -9,6 +9,7 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
     context.config("use_vdf", default=False)
+    context.config("useScheduleBasedTransport", default=True)
 
 
 def execute(context):
@@ -16,13 +17,20 @@ def execute(context):
         context.path("matsim.simulation.prepare"),
         context.stage("matsim.simulation.prepare")
     )
+    
+    if context.config("useScheduleBasedTransport"):
+        scheduleBasedPTconfig = "true"
+    else:
+        scheduleBasedPTconfig = "false"
+
     if (not context.config("use_vdf")):
         # Run simulation
         eqasim.run(context, "org.eqasim.switzerland.RunSimulation", [
             "--config-path", config_path,
-            "--config:controler.lastIteration", str(1),
-            "--config:controler.writeEventsInterval", str(1),
-            "--config:controler.writePlansInterval", str(1),
+            "--config:controler.lastIteration", str(60),
+            "--config:controler.writeEventsInterval", str(60),
+            "--config:controler.writePlansInterval", str(60),
+            "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
     else:
         # Run simulation with vdf
@@ -31,6 +39,7 @@ def execute(context):
             "--config:controler.lastIteration", str(1),
             "--config:controler.writeEventsInterval", str(1),
             "--config:controler.writePlansInterval", str(1),
+            "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
     assert os.path.exists("%s/simulation_output/output_events.xml.gz" % context.path())
     

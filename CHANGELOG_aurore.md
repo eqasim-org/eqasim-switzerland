@@ -1,4 +1,5 @@
 **Including GTFS in the simulation**
+
 We can now choose the public transport schedule we want to use in the simulation.
 - A parameter named "pt_schedule" was added in the config. It is read in the matsim.scenario.network.convert_pt_schedule stage and accepts two values: "hafas" and "gtfs".
 - If "hafas" is chosen, the usual stage matsim.scenario.network.convert_hafas will be executed. The date given in the config parameter "hafas_date" will be used. It should have the format "MM.DD.YYYY" - or "DD.MM.YYYY" (?)

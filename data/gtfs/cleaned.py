@@ -12,7 +12,7 @@ def configure(context):
 def execute(context):
     all_input_files = get_input_files("{}/{}".format(context.config("data_path"), "gtfs"))
 
-    if context.config("gtfs_zip_name") == "":
+    if context.config("gtfs_name") == "":
         # Keep all files
         input_files = all_input_files
 
@@ -20,7 +20,7 @@ def execute(context):
         # Look for the specified file name
         input_files = []
         for file in all_input_files:
-            if context.config("gtfs_zip_name") in file:
+            if context.config("gtfs_name") in file:
                 input_files = [file]
 
         # If the specified file name was not found
