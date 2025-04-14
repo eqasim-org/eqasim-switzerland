@@ -9,7 +9,7 @@ This stage fuses sampled STATPOP data with microcensus data.
 
 
 def configure(context):
-    context.stage("synthesis.population.matched")
+    context.stage("synthesis.population.matched_recursive")
     context.stage("synthesis.population.sampled")
     context.stage("data.microcensus.persons")
 

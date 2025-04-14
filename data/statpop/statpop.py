@@ -149,6 +149,16 @@ def execute(context):
     df["statpop_person_id"] = df["person_id"].astype(int)
     df["statpop_household_id"] = df["household_id"].astype(int)
 
+    # Identify households with children
+    children_columns = []
+    for upper_age in [3, 6, 12, 18]:
+        col_name          = "N_children_"+str(upper_age)
+        children          = df[df["age"]<upper_age]
+        hhl_with_children = np.unique(children["household_id"].values.tolist())
+        df.loc[:, col_name] = df["household_id"].isin(hhl_with_children)
+
+        children_columns.append(col_name)
+
     # Wrap everything up
     df = df[[
         "person_id", "household_id",
@@ -158,7 +168,7 @@ def execute(context):
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
         "home_municipality_id", "home_quarter_id", "canton_id", "population_density", "sp_region", "ovgk",
-        "statpop_person_id", "statpop_household_id"]]
+        "statpop_person_id", "statpop_household_id"]+children_columns]
 
     df = data.statpop.head_of_household.impute(df)
 

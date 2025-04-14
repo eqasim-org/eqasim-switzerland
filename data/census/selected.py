@@ -1,0 +1,17 @@
+import pandas as pd
+import numpy as np
+
+def configure(context):
+    census = context.config("census")
+
+    if census == "statpop":
+        context.stage("data.statpop.scaled", alias = "census")
+
+    elif census == "are_synpop":
+        context.stage("data.are_synpop.scaled", alias = "census")
+
+    else:
+        raise RuntimeError("Unknown census: %s" % census)
+    
+def execute(context):
+    return context.stage("census")
