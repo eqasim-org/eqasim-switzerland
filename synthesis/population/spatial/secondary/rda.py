@@ -1,21 +1,16 @@
 import numpy as np
 import numpy.linalg as la
-
+from numba import njit
 
 def check_feasibility(distances, direct_distance, consider_total_distance=True):
     return calculate_feasibility(distances, direct_distance, consider_total_distance) == 0.0
 
-
 def calculate_feasibility(distances, direct_distance, consider_total_distance=True):
     total_distance = np.sum(distances)
-    delta_distance = 0.0
-
     remaining_distance = total_distance - distances
-    delta = max(distances - direct_distance - remaining_distance)
-
+    delta = np.max(distances - direct_distance - remaining_distance)
     if consider_total_distance:
         delta = max(delta, direct_distance - total_distance)
-
     return float(max(delta, 0))
 
 
@@ -23,26 +18,21 @@ class DiscretizationSolver:
     def solve(self, problem, locations):
         raise NotImplementedError()
 
-
 class RelaxationSolver:
     def solve(self, problem, distances):
         raise NotImplementedError()
-
 
 class DistanceSampler:
     def sample(self, problem):
         raise NotImplementedError()
 
-
 class AssignmentObjective:
     def evaluate(self, problem, distance_result, relaxation_result, discretization_result):
         raise NotImplementedError()
 
-
 class AssignmentSolver:
     def __init__(self, distance_sampler, relaxation_solver, discretization_solver, objective, maximum_iterations=1000):
         self.maximum_iterations = maximum_iterations
-
         self.relaxation_solver = relaxation_solver
         self.distance_sampler = distance_sampler
         self.discretization_solver = discretization_solver
@@ -50,27 +40,19 @@ class AssignmentSolver:
 
     def solve(self, problem):
         best_result = None
-
         for assignment_iteration in range(self.maximum_iterations):
             distance_result = self.distance_sampler.sample(problem)
-
             relaxation_result = self.relaxation_solver.solve(problem, distance_result["distances"])
             discretization_result = self.discretization_solver.solve(problem, relaxation_result["locations"])
-
-            assignment_result = self.objective.evaluate(problem, distance_result, relaxation_result,
-                                                        discretization_result)
-
+            assignment_result = self.objective.evaluate(problem, distance_result, relaxation_result, discretization_result)
             if best_result is None or assignment_result["objective"] < best_result["objective"]:
                 best_result = assignment_result
-
                 assignment_result["distance"] = distance_result
                 assignment_result["relaxation"] = relaxation_result
                 assignment_result["discretization"] = discretization_result
                 assignment_result["iterations"] = assignment_iteration
-
             if best_result["valid"]:
                 break
-
         return best_result
 
 
@@ -122,10 +104,59 @@ class AngularTailSolver(RelaxationSolver):
         return dict(valid=True, locations=locations)
 
 
+# ---------------------------
+# Optimized GravityChainSolver using Numba for the simulation loop
+# ---------------------------
+@njit
+def _gravity_simulation_loop(locations, distances, alpha, eps, maximum_iterations, origin_weights, destination_weights):
+    # locations: shape (N,2), distances: shape (L,) where L = N-1.
+    N = locations.shape[0]
+    L = distances.shape[0]
+    valid = False
+    for k in range(maximum_iterations):
+        # Compute differences and lengths for each consecutive pair.
+        diff = np.empty((L, 2))
+        lengths = np.empty(L)
+        for i in range(L):
+            diff[i, 0] = locations[i, 0] - locations[i+1, 0]
+            diff[i, 1] = locations[i, 1] - locations[i+1, 1]
+            lengths[i] = np.sqrt(diff[i, 0] * diff[i, 0] + diff[i, 1] * diff[i, 1])
+        # Compute offsets and unit directions.
+        offset = np.empty(L)
+        unit_dirs = np.empty((L, 2))
+        for i in range(L):
+            offset[i] = distances[i] - lengths[i]
+            safe_length = lengths[i] if lengths[i] >= 1.0 else 1.0
+            unit_dirs[i, 0] = diff[i, 0] / safe_length
+            unit_dirs[i, 1] = diff[i, 1] / safe_length
+
+        # Check convergence: all abs(offset) < eps.
+        converged = True
+        for i in range(L):
+            if np.abs(offset[i]) >= eps:
+                converged = False
+                break
+        if converged:
+            valid = True
+            return locations, k, valid
+
+        # Apply adjustments for intermediate points: points 1 to N-2.
+        for i in range(1, N-1):
+            # For point i, adjustment is based on segment i-1 and segment i.
+            # Note: origin_weights and destination_weights are arrays with shape (L,2).
+            # We compute each coordinate separately.
+            adj0 = (-0.5 * alpha * offset[i-1] * unit_dirs[i-1, 0] * origin_weights[i-1, 0] +
+                    0.5 * alpha * offset[i]   * unit_dirs[i, 0]   * destination_weights[i, 0])
+            adj1 = (-0.5 * alpha * offset[i-1] * unit_dirs[i-1, 1] * origin_weights[i-1, 1] +
+                    0.5 * alpha * offset[i]   * unit_dirs[i, 1]   * destination_weights[i, 1])
+            locations[i, 0] += adj0
+            locations[i, 1] += adj1
+    return locations, maximum_iterations, valid
+
 class GravityChainSolver:
-    def __init__(self, random, alpha=0.3, eps=1.0, maximum_iterations=1000, lateral_deviation=None):
-        self.alpha = 0.3
-        self.eps = 1e-2
+    def __init__(self, random, alpha=0.3, eps=1e-2, maximum_iterations=1000, lateral_deviation=None):
+        self.alpha = alpha
+        self.eps = eps
         self.maximum_iterations = maximum_iterations
         self.random = random
         self.lateral_deviation = lateral_deviation
@@ -133,131 +164,86 @@ class GravityChainSolver:
     def solve_two_points(self, problem, origin, destination, distances, direction, direct_distance):
         if direct_distance == 0.0:
             location = origin + direction * distances[0]
-
             return dict(
-                valid=distances[0] == distances[1],
-                locations=location.reshape(-1, 2), iterations=None
+                valid=(distances[0] == distances[1]),
+                locations=location.reshape(-1, 2),
+                iterations=None
             )
-
         elif direct_distance > np.sum(distances):
-            ratio = 1.0
-
-            if distances[0] > 0.0 or distances[1] > 0.0:
-                ratio = distances[0] / np.sum(distances)
-
+            ratio = distances[0] / np.sum(distances) if (distances[0] > 0.0 or distances[1] > 0.0) else 1.0
             location = origin + direction * ratio * direct_distance
-
             return dict(
-                valid=False, locations=location.reshape(-1, 2), iterations=None
+                valid=False,
+                locations=location.reshape(-1, 2),
+                iterations=None
             )
-
         elif direct_distance < np.abs(distances[0] - distances[1]):
-            ratio = 1.0
-
-            if distances[0] > 0.0 or distances[1] > 0.0:
-                ratio = distances[0] / np.sum(distances)
-
+            ratio = distances[0] / np.sum(distances) if (distances[0] > 0.0 or distances[1] > 0.0) else 1.0
             maximum_distance = max(distances)
             location = origin + direction * ratio * maximum_distance
-
             return dict(
-                valid=False, locations=location.reshape(-1, 2), iterations=None
+                valid=False,
+                locations=location.reshape(-1, 2),
+                iterations=None
             )
-
         else:
-            A = 0.5 * (distances[0] ** 2 - distances[1] ** 2 + direct_distance ** 2) / direct_distance
-            H = np.sqrt(max(0, distances[0] ** 2 - A ** 2))
+            A = 0.5 * (distances[0]**2 - distances[1]**2 + direct_distance**2) / direct_distance
+            H = np.sqrt(max(0, distances[0]**2 - A**2))
             r = self.random.random_sample()
-
             center = origin + direction * A
             offset = direction * H
             offset = np.array([offset[0, 1], -offset[0, 0]])
-
             location = center + (1.0 if r < 0.5 else -1.0) * offset
-
             return dict(
-                valid=True, locations=location.reshape(-1, 2), iterations=None
+                valid=True,
+                locations=location.reshape(-1, 2),
+                iterations=None
             )
 
     def solve(self, problem, distances):
         origin, destination = problem["origin"], problem["destination"]
-
         if origin is None or destination is None:
             raise RuntimeError("Invalid chain for GravityChainSolver")
 
-        # Prepare direction and normal direction
         direct_distance = la.norm(destination - origin)
-
-        if direct_distance < 1e-12:  # We have a zero direct distance, choose a direction randomly
-            angle = self.random.random() * np.pi * 2.0
-
-            direction = np.array([
-                np.cos(angle), np.sin(angle)
-            ]).reshape((1, 2))
-
+        if direct_distance < 1e-12:
+            angle = self.random.random() * 2 * np.pi
+            direction = np.array([[np.cos(angle), np.sin(angle)]])
         else:
-            direction = (destination - origin) / direct_distance
-
+            direction = ((destination - origin) / direct_distance).reshape((1, 2))
         normal = np.array([direction[0, 1], -direction[0, 0]])
 
-        # If we have only one variable point, take a short cut
         if problem["size"] == 1:
             return self.solve_two_points(problem, origin, destination, distances, direction, direct_distance)
 
-        # Prepare initial locations
+        # Prepare initial locations.
         if np.sum(distances) < 1e-12:
             shares = np.linspace(0, 1, len(distances) - 1)
         else:
             shares = np.cumsum(distances[:-1]) / np.sum(distances)
-
-        locations = origin + direction * shares[:, np.newaxis] * direct_distance
-        locations = np.vstack([origin, locations, destination])
+        initial_points = origin + direction * shares[:, None] * direct_distance
+        locations = np.vstack([origin, initial_points, destination])
 
         if not check_feasibility(distances, direct_distance):
-            return dict(  # We still return some locations although they may not be perfect
-                valid=False, locations=locations[1:-1], iterations=None
-            )
+            return dict(valid=False, locations=locations[1:-1], iterations=None)
 
-        # Add lateral deviations
-        lateral_deviation = self.lateral_deviation if not self.lateral_deviation is None else max(direct_distance, 1.0)
-        locations[1:-1] += normal * 2.0 * (
-                    self.random.normal(size=len(distances) - 1)[:, np.newaxis] - 0.5) * lateral_deviation
+        lateral_deviation = self.lateral_deviation if self.lateral_deviation is not None else max(direct_distance, 1.0)
+        noise = self.random.normal(size=(len(distances)-1, 1)) - 0.5
+        locations[1:-1] += normal * 2.0 * lateral_deviation * noise
 
-        # Prepare gravity simulation
-        valid = False
-
-        origin_weights = np.ones((len(distances) - 1, 2))
+        nseg = len(distances)  # number of segments = len(locations)-1
+        origin_weights = np.ones((nseg, 2))
         origin_weights[0, :] = 2.0
-
-        destination_weights = np.ones((len(distances) - 1, 2))
+        destination_weights = np.ones((nseg, 2))
         destination_weights[-1, :] = 2.0
 
-        # Run gravity simulation
-        for k in range(self.maximum_iterations):
-            directions = locations[:-1] - locations[1:]
-            lengths = la.norm(directions, axis=1)
-
-            offset = distances - lengths
-            lengths[lengths < 1.0] = 1.0
-            directions /= lengths[:, np.newaxis]
-
-            if np.all(np.abs(offset) < self.eps):  # Check if we have converged
-                valid = True
-                break
-
-            # Apply adjustment to locations
-            adjustment = np.zeros((len(distances) - 1, 2))
-            adjustment -= 0.5 * self.alpha * offset[:-1, np.newaxis] * directions[:-1] * origin_weights
-            adjustment += 0.5 * self.alpha * offset[1:, np.newaxis] * directions[1:] * destination_weights
-
-            locations[1:-1] += adjustment
-
-            if np.isnan(locations).any() or np.isinf(locations).any():
-                raise RuntimeError("NaN/Inf value encountered during gravity simulation")
-
-        return dict(
-            valid=valid, locations=locations[1:-1], iterations=k
+        # Call the optimized gravity simulation loop.
+        optimized_locations, iterations, valid = _gravity_simulation_loop(
+            locations.copy(), distances, self.alpha, self.eps, self.maximum_iterations,
+            origin_weights, destination_weights
         )
+        # Return only the intermediate (adjusted) locations.
+        return dict(valid=valid, locations=optimized_locations[1:-1], iterations=iterations)
 
 
 class FeasibleDistanceSampler(DistanceSampler):

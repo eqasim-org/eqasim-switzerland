@@ -67,25 +67,40 @@ def execute(context):
     zone_ids = list(df_zones["zone_id"])
 
     with context.progress(label="Assigning work zones", total=5 * len(df_zones)) as progress:
+        commute_mode_values = df["commute_mode"].values
+        home_zone_values = df["home_zone_id"].values
+        commute_distances = df["commute_home_distance"].values
+
         for mode in ["car", "pt", "bike", "walk", "car_passenger"]:
-            mode_f = df["commute_mode"] == mode
+            mode_f = (commute_mode_values == mode)
+            source_mode = "car" if mode == "car_passenger" else mode
 
             for origin_index, origin_zone in enumerate(zone_ids):
                 destination_counts = commute_counts[mode][origin_index, :]
                 destination_order = np.argsort(distances[origin_index, :])
-                destinations = [[zone_ids[i]] * destination_counts[i] for i in destination_order]
-                destinations = functools.reduce(lambda x, y: x + y, destinations)
 
-                if len(destinations) > 0:
-                    f = mode_f & (df["home_zone_id"] == origin_zone)
+                # Sort destination_counts and corresponding zone_ids
+                sorted_counts = destination_counts[destination_order]
+                sorted_zone_ids = [zone_ids[i] for i in destination_order]
+
+                # Efficient flat list of destinations
+                destinations = np.repeat(sorted_zone_ids, sorted_counts)
+
+                if destinations.size > 0:
+                    f = mode_f & (home_zone_values == origin_zone)
                     person_indices = np.where(f)[0]
-                    person_order = np.argsort(df[f]["commute_home_distance"])
-                    work_zones[person_indices[person_order]] = destinations
+
+                    if person_indices.size > 0:
+                        commute_home_dists = commute_distances[person_indices]
+                        person_order = np.argsort(commute_home_dists)
+
+                        ordered_indices = person_indices[person_order]
+                        work_zones[ordered_indices] = destinations
 
                 progress.update()
+
 
     df.loc[:, "work_zone_id"] = work_zones
     df = df[["person_id", "work_zone_id", "commute_mode"]]
     assert (len(df) == len(df.dropna()))
-
     return df
