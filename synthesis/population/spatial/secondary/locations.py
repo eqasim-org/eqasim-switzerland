@@ -27,38 +27,27 @@ def configure(context):
 
 
 def prepare_locations(context):
-    # Load persons and their primary locations
-    df_home = context.stage("synthesis.population.spatial.home.locations")
-    df_work, df_education = context.stage("synthesis.population.spatial.primary.locations")
-
-    df_home = df_home.rename(columns={"geometry": "home"})
-    df_work = df_work.rename(columns={"geometry": "work"})
-    df_education = df_education.rename(columns={"geometry": "education"})
-
+    df_home = context.stage("synthesis.population.spatial.home.locations").rename(columns={"geometry": "home"})
+    df_work = context.stage("synthesis.population.spatial.primary.locations")[0].rename(columns={"geometry": "work"})
+    df_education = context.stage("synthesis.population.spatial.primary.locations")[1].rename(columns={"geometry": "education"})
     df_locations = context.stage("synthesis.population.sampled")[["person_id", "household_id"]]
     df_locations = pd.merge(df_locations, df_home[["household_id", "home"]], how="left", on="household_id")
     df_locations = pd.merge(df_locations, df_work[["person_id", "work"]], how="left", on="person_id")
     df_locations = pd.merge(df_locations, df_education[["person_id", "education"]], how="left", on="person_id")
-
     return df_locations[["person_id", "home", "work", "education"]].sort_values(by="person_id")
-
 
 def prepare_destinations(context):
     df_destinations = context.stage("synthesis.population.destinations")
-
     identifiers = df_destinations["destination_id"].values
-    locations = np.vstack(df_destinations["geometry"].apply(lambda x: np.array([x.x, x.y])).values)
-
+    # Use vectorized extraction from the geometry column:
+    locations = np.column_stack((df_destinations.geometry.x, df_destinations.geometry.y))
     data = {}
-
     for purpose in ("shop", "leisure", "other"):
         f = df_destinations["offers_%s" % purpose].values
-
         data[purpose] = dict(
             identifiers=identifiers[f],
             locations=locations[f]
         )
-
     return data
 
 
@@ -148,7 +137,7 @@ def process(context, arguments):
 
     # Set up relaxation solver; currently, we do not consider tail problems.
     relaxation_solver = GravityChainSolver(
-        random=rng, eps=10.0, lateral_deviation=10.0, alpha=0.1
+        random=rng, eps=75.0, lateral_deviation=10.0, alpha=0.1
     )
 
     # Set up discretization solver
@@ -167,7 +156,7 @@ def process(context, arguments):
         relaxation_solver=relaxation_solver,
         discretization_solver=discretization_solver,
         objective=assignment_objective,
-        maximum_iterations=20
+        maximum_iterations=100
     )
 
     df_locations = []
