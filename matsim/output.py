@@ -44,6 +44,7 @@ def execute(context):
         "%snetwork.xml.gz" % context.config("output_prefix"),
         "%stransit_schedule.xml.gz" % context.config("output_prefix"),
         "%stransit_vehicles.xml.gz" % context.config("output_prefix"),
+        "%svehicles.xml.gz" % context.config("output_prefix"),
         "%sconfig.xml" % context.config("output_prefix")
     ]
     

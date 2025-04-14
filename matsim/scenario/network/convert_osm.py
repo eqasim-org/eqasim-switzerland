@@ -53,6 +53,7 @@ def convert_pbf_to_osm_pyosmium(input_file, output_file):
         writer.close()
 
 def convert_pbf_to_osm_osmosis(context, input_file, output_file):
+
     print("using osmosis to convert .pbf data")
     if os.path.exists(output_file):
         print("The file: %s already exists. It will be overridden." % output_file)
@@ -60,11 +61,14 @@ def convert_pbf_to_osm_osmosis(context, input_file, output_file):
     
     try:
         matsim.scenario.network.osmosis.run(context, [
-                "--read-pbf", input_file,
+                "--read-pbf", input_file,            
                 "--tag-filter", "accept-ways", "highway=*", "railway=*",
-                "completeWays=yes", "--used-node",
+                #"--tag-filter","reject-ways","highway=service",
+                "completeWays=yes",     
+                "--used-node", 
                 "--write-xml", "compressionMethod=gzip", output_file
             ])
+        
     except Exception as e:
         print(f"Error during network conversion using osmosis: {e}")
         sys.exit(1)
@@ -112,7 +116,7 @@ def execute(context):
         # higher link length
         content = content.replace(
             '<param name="maxLinkLength" value="500.0" />',
-            '<param name="maxLinkLength" value="1000.0" />'
+            '<param name="maxLinkLength" value="99999.0" />'
         )
         # Export detailed geometry of the links if needed
         if context.config("export_detailed_network"):
