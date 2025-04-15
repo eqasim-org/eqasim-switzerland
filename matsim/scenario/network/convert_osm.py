@@ -2,9 +2,8 @@ import os
 import matsim.scenario.network.osmosis
 import matsim.runtime.pt2matsim as pt2matsim
 import sys
-import osmium
 import shutil
-
+from matsim.readers import read_network
 
 def configure(context):
     context.stage("matsim.runtime.java")
@@ -14,26 +13,29 @@ def configure(context):
     context.config("data_path")
     context.config("osm_path", "switzerland-latest.osm.gz")
     context.config("export_detailed_network", False)
+    context.config("simplify_network_in_eqasim", False)
 
 
 ###############################################################
 # Functions used to convert the network file:
 
-class OSMHandler(osmium.SimpleHandler):
-    def __init__(self, writer):
-        super(OSMHandler, self).__init__()
-        self.writer = writer
-
-    def node(self, n):
-        self.writer.add_node(n)
-
-    def way(self, w):
-        self.writer.add_way(w)
-
-    def relation(self, r):
-        self.writer.add_relation(r)
-
 def convert_pbf_to_osm_pyosmium(input_file, output_file):
+    import osmium # Import it only if it is used (maybe this function is never used!)
+    
+    class OSMHandler(osmium.SimpleHandler):
+        def __init__(self, writer):
+            super(OSMHandler, self).__init__()
+            self.writer = writer
+
+        def node(self, n):
+            self.writer.add_node(n)
+
+        def way(self, w):
+            self.writer.add_way(w)
+
+        def relation(self, r):
+            self.writer.add_relation(r)
+
     print("using pyosmium to convert .pbf data")
     if os.path.exists(output_file):
         print("The file: %s already exists. It will be overridden." % output_file)
@@ -80,7 +82,8 @@ def execute(context):
     osm_file = '%s/osm/%s' % (context.config("data_path"), context.config("osm_path"))
 
     if context.config("osm_path").endswith('.pbf'):
-        osmosis_path = shutil.which("osmosis")
+        osmosis_path = shutil.which("osmosis") 
+        # If osmosis is installed, use it, else, use pyosmium
         if osmosis_path:
             new_file_name = osm_file[:-8]+"-osmosis.osm.gz"
             convert_pbf_to_osm_osmosis(context, osm_file, new_file_name)
@@ -154,6 +157,14 @@ def execute(context):
     pt2matsim.run(context, "org.matsim.pt2matsim.run.Osm2MultimodalNetwork", [
         "%s/convert_network.xml" % context.path()
     ])
+
+    if context.config("simplify_network_in_eqasim"):
+        network_path =  "%s/converted_network.xml.gz" % context.path()
+        net = read_network(network_path)
+        net.clean_network()
+        # Do not remove the last version of the network, just rename it.
+        shutil.move(network_path, network_path.replace("converted_network","converted_network_uncleaned"))
+        net.save(network_path)
 
     assert (os.path.exists("%s/converted_network.xml.gz" % context.path()))
     return "%s/converted_network.xml.gz" % context.path()
