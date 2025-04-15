@@ -4,6 +4,7 @@ import matsim.runtime.pt2matsim as pt2matsim
 import sys
 import shutil
 from matsim.readers import read_network
+import json
 
 def configure(context):
     context.stage("matsim.runtime.java")
@@ -161,10 +162,13 @@ def execute(context):
     if context.config("simplify_network_in_eqasim"):
         network_path =  "%s/converted_network.xml.gz" % context.path()
         net = read_network(network_path)
-        net.clean_network()
+        stats = net.clean_network()
         # Do not remove the last version of the network, just rename it.
         shutil.move(network_path, network_path.replace("converted_network","converted_network_uncleaned"))
         net.save(network_path)
+        # Save stats
+        with open("%s/statistics_of_cleaning_network.json" % context.path(), "w") as f:
+            json.dump(stats, f, indent=4) 
 
     assert (os.path.exists("%s/converted_network.xml.gz" % context.path()))
     return "%s/converted_network.xml.gz" % context.path()

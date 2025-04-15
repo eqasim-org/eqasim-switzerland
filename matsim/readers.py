@@ -77,6 +77,8 @@ class Network:
     
     
     def clean_network(self):
+        stats = dict()
+
         # Only treat road network obtained from osm, don't touch pt links
         sel = self.links.link_id.apply(lambda x: "pt" not in x)
         df = self.links[sel]
@@ -84,20 +86,23 @@ class Network:
 
         # Removing loops
         sel = (df['from_node'] == df['to_node'])
-        print("There are %d loops in the network that are removed." % sel.sum())
-        df = df[~sel]
+        stats["removed_loops"] = sel.sum()
+        print("There are %d loops in the network that are removed." % stats["removed_loops"] )
+        df = df[~sel].reset_index(drop=True)
 
         # Remove replicated links
         len_df = len(df)
         df = df.drop_duplicates(subset=['length','modes','from_node', 'to_node', 'capacity'],
                                 ignore_index=True)
-        print("There are %d link duplicates in the network that are removed." % (len_df-len(df)))
+        stats["removed_link_duplicates"] = len_df-len(df)
+        print("There are %d link duplicates in the network that are removed." % stats["removed_link_duplicates"] )
         
         # Removing nodes with no intersection
         print("Removing nodes that do not represent an intersection.")
-        df2 = pd.concat([self.merge_link_chains(df),
-                          df_rest], ignore_index=True)
-        self.links = df2
+        df, stats2 = self.merge_link_chains(df)
+        df = pd.concat([df,df_rest], ignore_index=True)
+        self.links = df
+        stats.update(stats2)
 
         unique_nodes = pd.concat([df.from_node, df.to_node]).unique()
         self.nodes = self.nodes[self.nodes.node_id.isin(unique_nodes)].reset_index(drop=True)
@@ -106,21 +111,21 @@ class Network:
         self.links = self.links.merge(link_attrs, on="link_id",how="left")
         self.links.loc[self.links["attributes"].isna(), "attributes"] = None
         
+        return stats
     
-    @classmethod()
+    @classmethod
     def merge_link_chains(self, df):
         import networkx as nx #only if we use this function
-        stats = {
-            "number_of_nodes":0,
-            "number_of_links":0,
-            "attributes_change":0,
-            "degree_is_2":0,  
-            "one_in_one_out":0,
-            "already_visited":0,    
-            }
-        
-        
-        df = df.copy()
+        stats = {"number_of_nodes":0,
+                 "number_of_links":0,
+                 "attributes_change":0,
+                 "skiped_loop":0,
+                 "successful_merge":0,
+                 "degree_is_2":0,  
+                 "one_in_one_out":0,
+                 "already_visited":0,        
+                    }
+                        
         # Step 1: Build directed graph
         print("    Converting network to networkx ...")
         G = nx.MultiDiGraph()    
@@ -199,7 +204,7 @@ class Network:
                         stats['attributes_change']+=1
                         break
                     else:
-                       attribute_consistency = True 
+                        attribute_consistency = True 
 
                     current_chain.append(next_idx)
                     current_node = next_node
@@ -207,14 +212,21 @@ class Network:
                 if len(current_chain) > 1:
                     # Merge the chain
                     chain_rows = df.loc[current_chain]
-                    merged_links.append({
-                        'from_node': df.loc[current_chain[0], 'from_node'],
-                        'to_node': df.loc[current_chain[-1], 'to_node'],
-                        'link_id': "_".join(df.loc[current_chain, 'link_id'].tolist()),
-                        'length': chain_rows['length'].sum(),
-                        **current_attrs
-                    })
-                    visited_links.update(current_chain)
+                    first_node = df.loc[current_chain[0], 'from_node']
+                    last_node  = df.loc[current_chain[-1], 'to_node']
+                    if first_node!=last_node:
+                        # Otherwise, it would just create a loop               
+                        merged_links.append({
+                            'from_node': first_node,
+                            'to_node': last_node,
+                            'link_id': "_".join(chain_rows['link_id'].tolist()),
+                            'length': chain_rows['length'].sum(),
+                            **current_attrs
+                        })
+                        visited_links.update(current_chain)
+                        stats["successful_merge"]+=1
+                    else:
+                        stats["skiped_loop"]+=1
 
         # Step 3: Build final DataFrame
         links_to_remove = visited_links
@@ -223,7 +235,7 @@ class Network:
         final_df = pd.concat([df_cleaned, df_merged], ignore_index=True)
         
         progress_bar.close()
-        return final_df
+        return final_df, stats
     
     def save(self,file_path,write_attrbs=True):        
         # set the types
