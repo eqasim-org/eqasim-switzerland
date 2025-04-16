@@ -21,10 +21,12 @@ dist-ssr/
 .env
 .env.*.local
 *.local
+*yml
 
 # OS/system files
 .DS_Store
 Thumbs.db
+__pycache__
 
 # Editor settings
 .vscode/
@@ -35,3 +37,8 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+synthesis*
+data*
+matsim*
+*.md

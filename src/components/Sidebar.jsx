@@ -6,11 +6,18 @@ import modesByCanton from "../utils/modes_by_canton.json";
 
 // Sidebar Modules / Graphs
 import AverageDist from "./AverageDist";
+import ActivityDist from "./ActivityDist";
+import ActivityDurationDist from "./ActivityDurationDist";
 import Histogram from "./Histogram";
 import StackedBarPlot from "./StackedBarPlot";
+import CantonModeShareTable from "./CantonModeShareTable";
+import CarAvailability from "./CarAvailabilityDist";
 import ChoroplethControls from "./ChoroplethControls";
-import CantonModeShareTable from "./CantonModeShareTable"; 
+import DepatureTimes from "./DepartureTimes";
+import FrequentSequence from "./FrequentSequenceDist";
 import ModeShareLinePlot from "./ModeShareLinePlot";
+import OutOfHome from "./OutOfHomeDist";
+import PtSubscription from "./PtSubscriptionDist";
 import SegmentAttributesTable from "./SegmentAttributesTable";
 import SegmentVolumeHistogram from "./SegmentVolumeHistogram";
 
@@ -117,6 +124,13 @@ const Sidebar = ({canton, isOpen, toggleSidebar, onExpandGraph, setCanton, reset
             <option value="Graph 2">Histogram</option>
             <option value="Graph 3">Stacked Bar Plot</option>
             <option value="Graph 4">Line Plot</option>
+            <option value="Graph 5">Activity Distribution</option>
+            <option value="Graph 6">Frequent Activity Sequences</option>
+            <option value="Graph 7">Out of Home Activities</option>
+            <option value="Graph 8">Public Transport Subscriptions</option>
+            <option value="Graph 9">Car Availability Class</option>
+            <option value="Graph 10">Activity Durations</option>
+            <option value="Graph 11">Departure Times</option>
             </select>
             </div>
             </div>
@@ -133,7 +147,13 @@ const Sidebar = ({canton, isOpen, toggleSidebar, onExpandGraph, setCanton, reset
             {selectedGraph === "Graph 2" && <div className="plot-container"><Histogram canton={canton || "All"} /></div>}
             {selectedGraph === "Graph 3" && <div className="plot-container"><StackedBarPlot canton={canton || "All"} /></div>}
             {selectedGraph === "Graph 4" && <div className="plot-container"><ModeShareLinePlot canton={canton || "All"} /></div>}
-            
+            {selectedGraph === "Graph 5" && <div className="plot-container"><ActivityDist canton={canton || "All"} /></div>}            
+            {selectedGraph === "Graph 6" && <div className="plot-container"><FrequentSequence canton={canton || "All"} /></div>}
+            {selectedGraph === "Graph 7" && <div className="plot-container"><OutOfHome canton={canton || "All"} /></div>}
+            {selectedGraph === "Graph 8" && <div className="plot-container"><PtSubscription canton={canton || "All"} /></div>}
+            {selectedGraph === "Graph 9" && <div className="plot-container"><CarAvailability canton={canton || "All"} /></div>}
+            {selectedGraph === "Graph 10" && <div className="plot-container"><ActivityDurationDist canton={canton || "All"} /></div>}
+            {selectedGraph === "Graph 11" && <div className="plot-container"><DepatureTimes canton={canton || "All"} /></div>}
             {/* Mode Share Choropleth Selection */}
             {selectedGraph === "Choropleth" && (
               <div>
