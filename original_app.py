@@ -9,10 +9,11 @@ from app_utils import *
 # Initialize the Dash app
 app = dash.Dash(__name__)
 
-activities = pd.read_csv('microcensus_data/microcensus_act_geo.csv', sep=';', header=0)
-trips = pd.read_csv('microcensus_data/microcensus_trips_geo.csv', sep=',', header=0)
-households = pd.read_csv('microcensus_data/microcensus_households_geo.csv', sep=',', header=0)
-persons = pd.read_csv('microcensus_data/microcensus_persons_geo.csv', sep=',', header=0)
+prefix = '/cluster/project/cmdp/chaoch/'
+activities = pd.read_csv(f'{prefix}microcensus_data/microcensus_act_geo.csv', sep=';', header=0)
+trips = pd.read_csv(f'{prefix}microcensus_data/microcensus_trips_geo.csv', sep=',', header=0)
+households = pd.read_csv(f'{prefix}microcensus_data/microcensus_households_geo.csv', sep=',', header=0)
+persons = pd.read_csv(f'{prefix}microcensus_data/microcensus_persons_geo.csv', sep=',', header=0)
 
 output_activities = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_activities_geo.csv', sep=',', header=0)
 output_trips = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_trips_geo.csv', sep=',', header=0)
@@ -150,7 +151,7 @@ def pt_subscription_distribution_general(persons, output_persons):
     )
     return fig
 
-def car_availability_distribution_income(persons, output_persons, output_households):
+def car_availability_distribution_income(persons, output_persons):
     attribute_values = persons[persons['household_income'] >= 0]['household_income'].unique()
     attribute_name = 'household_income'
 
@@ -197,47 +198,6 @@ def pt_subscription_distribution_age(persons, output_persons):
     attribute_name = 'age_group'
     return generate_pt_distribution(persons, output_persons, sorted(attribute_values), attribute_name)
 
-def write_trip_crowfly_distance(trips, output_trips, category_name, category_options, func, feature):
-    micro = trips
-    synthetic = output_trips
-
-    cantons = []
-    write_data = dict()
-    for canton in cantons:
-        write_data[canton] = dict()
-        
-        # select by canton
-        micro_split = micro.query(f"home_canton == '{canton}'")
-        synthetic_split = synthetic.query(f"home_canton == '{canton}'")
-
-        # insert synthetic & microcensus data
-        write_data[canton]['synthetic'] = dict()
-        write_data[canton]['microcensus'] = dict()
-
-        for cat in category_options:
-            # filter by category
-            if cat == 'All': 
-                micro_filtered = micro_split
-                synthetic_filtered = synthetic_split
-            else:
-                micro_filtered = micro.loc[micro[category_name] == cat]
-                synthetic_filtered = synthetic.loc[synthetic[category_name] == cat]
-
-            if bins:
-                min_dist = np.percentile(micro_filtered['crowfly_distance'], 5)
-                max_dist = np.percentile(micro_filtered['crowfly_distance'], 95)
-                bins = np.linspace(min_dist, max_dist, num=40)  
-
-            bins_micro, hist_micro = func(micro_filtered, bins, feature=feature)
-            bins_syn, hist_syn = func(synthetic_filtered, bins, feature=feature)
-
-            for val, freq in zip(bins_micro, hist_micro):
-                write_data[canton]['microcensus'][cat][val] = freq
-            for val, freq in zip(bins_syn, hist_syn):
-                write_data[canton]['synthetic'][cat][val] = freq
-
-    return write_data
-
 
 def trip_crowfly_distance(trips, output_trips):
     output_trips['person_weight'] = 1
@@ -248,7 +208,7 @@ def trip_crowfly_distance(trips, output_trips):
 
     for param in parameter_options:
         # Independently determine bins for each purpose
-        if param == 'All': 
+        if param == 'All':
             trips_filtered = trips
             output_trips_filtered = output_trips
         else:

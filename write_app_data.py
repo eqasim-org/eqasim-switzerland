@@ -2,14 +2,16 @@ import dash
 import pandas as pd
 from app_utils import *
 import json 
+import numbers
 
 # Initialize the Dash app
 app = dash.Dash(__name__)
 
-activities = pd.read_csv('microcensus_data/microcensus_act_geo.csv', sep=';', header=0)
-trips = pd.read_csv('microcensus_data/microcensus_trips_geo.csv', sep=',', header=0)
-households = pd.read_csv('microcensus_data/microcensus_households_geo.csv', sep=',', header=0)
-persons = pd.read_csv('microcensus_data/microcensus_persons_geo.csv', sep=',', header=0)
+prefix = '/cluster/project/cmdp/chaoch/'
+activities = pd.read_csv(f'{prefix}microcensus_data/microcensus_act_geo.csv', sep=';', header=0)
+trips = pd.read_csv(f'{prefix}microcensus_data/microcensus_trips_geo.csv', sep=',', header=0)
+households = pd.read_csv(f'{prefix}microcensus_data/microcensus_households_geo.csv', sep=',', header=0)
+persons = pd.read_csv(f'{prefix}microcensus_data/microcensus_persons_geo.csv', sep=',', header=0)
 persons['home_canton'] = persons['canton_name']
 households['home_canton'] = households['canton_name']
 
@@ -47,12 +49,12 @@ def write_non_category_data(micro, synthetic, func):
         act_out, freq_out = func(synthetic_split)
 
         # insert synthetic & microcensus data
-        write_data[canton]['synthetic'] = dict()
-        write_data[canton]['microcensus'] = dict()
+        write_data[canton]['Synthetic'] = dict()
+        write_data[canton]['Microcensus'] = dict()
         for act, freq in zip(act_micro, freq_micro):
-            write_data[canton]['microcensus'][act] = freq
+            write_data[canton]['Microcensus'][act] = freq
         for act, freq in zip(act_out, freq_out):
-            write_data[canton]['synthetic'][act] = freq
+            write_data[canton]['Synthetic'][act] = freq
     return write_data
 
 
@@ -62,7 +64,7 @@ def write_category_data(micro, synthetic, category_name, category_options, func,
 
     :category_name: the category we want to filter by (name to marginalize the data by) (e.g. purpose)
     :category_options: the different values the category contains (e.g. home, shopping, education)
-    :func: function to apply per category
+    :func: function to apply per category (to obtain the statistics)
     :feature: feature of interest in the analysis (e.g. duration)
     """
     write_data = dict()
@@ -74,12 +76,16 @@ def write_category_data(micro, synthetic, category_name, category_options, func,
         synthetic_split = synthetic.query(f"home_canton == '{canton}'")
 
         # insert synthetic & microcensus data
-        write_data[canton]['synthetic'] = dict()
-        write_data[canton]['microcensus'] = dict()
+        write_data[canton]['Synthetic'] = dict()
+        write_data[canton]['Microcensus'] = dict()
 
         for cat in category_options:
-            write_data[canton]['microcensus'][cat] = dict()
-            write_data[canton]['synthetic'][cat] = dict()
+
+            if isinstance(cat, numbers.Number):
+                cat = int(cat)
+            
+            write_data[canton]['Microcensus'][cat] = dict()
+            write_data[canton]['Synthetic'][cat] = dict()
 
             # filter by category
             if cat == 'All': 
@@ -95,13 +101,14 @@ def write_category_data(micro, synthetic, category_name, category_options, func,
                 max_dist = np.percentile(micro_filtered[feature], 95)
                 bin_edges = np.linspace(min_dist, max_dist, num=40)  
 
+            # Apply the function that computes the statistics
             bins_micro, hist_micro = func(micro_filtered, feature=feature, bins=bin_edges)
             bins_syn, hist_syn = func(synthetic_filtered, feature=feature, bins=bin_edges)
 
             for val, freq in zip(bins_micro, hist_micro):
-                write_data[canton]['microcensus'][cat][val] = freq
+                write_data[canton]['Microcensus'][cat][val] = round(freq, 6)
             for val, freq in zip(bins_syn, hist_syn):
-                write_data[canton]['synthetic'][cat][val] = freq
+                write_data[canton]['Synthetic'][cat][val] = round(freq, 6)
     return write_data
 
 
@@ -137,6 +144,7 @@ def write_pt_subscriptions_general(persons, output_persons):
     with open("plot_data/pt_subscriptions.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
+
 def write_trip_crowfly_distance(trips, output_trips):
     options = ['All', 'home', 'work', 'leisure', 'shop', 'other', 'education']
     output_trips['person_weight'] = 1
@@ -171,6 +179,7 @@ def write_activity_durations(activities, output_activities):
     with open("plot_data/activity_durations.json", "w") as json_file:
         json.dump(data, json_file, indent=4)  
 
+
 def write_departure_times(trips, output_trips):
     output_trips['weight'] = 1
     purpose_types = sorted(trips['following_purpose'].unique())
@@ -181,14 +190,102 @@ def write_departure_times(trips, output_trips):
                         category_options=purpose_types, 
                         func=get_histogram_time,
                         feature='departure_time')
+    
     with open("plot_data/departure_times.json", "w") as json_file:
-        json.dump(data, json_file, indent=4) 
+        json.dump(data, json_file, indent=4)
+
+
+def write_num_cars_income(persons, output_persons):
+    incomes = sorted(persons[persons['household_income'] >= 0]['household_income'].unique())
+
+    data = write_category_data(persons, output_persons, 
+                               category_name='household_income', 
+                               category_options=incomes, 
+                               func=get_individual_car_class,
+                               feature=None)
+    
+    with open("plot_data/num_cars_income.json", "w") as json_file:
+        json.dump(data, json_file, indent=4)
+
+
+def write_num_cars_gender(persons, output_persons):
+    genders = [0, 1]
+
+    data = write_category_data(persons, output_persons, 
+                               category_name='sex', 
+                               category_options=genders, 
+                               func=get_individual_car_class,
+                               feature=None)
+    
+    with open("plot_data/num_cars_gender.json", "w") as json_file:
+        json.dump(data, json_file, indent=4)
+
+
+def write_num_cars_age(persons, output_persons):
+    ages = [6, 15, 18, 24, 30, 45, 65, 80]
+    labels = ['[6, 15)', '[15, 18)', '[18, 24)', '[24, 30)', '[30, 45)', '[45, 65)', '[65, 80)']
+    persons['age_group'] = pd.cut(persons['age'], bins=ages, labels=labels, right=False)
+    output_persons['age_group'] = pd.cut(output_persons['age'], bins=ages, labels=labels, right=False)
+    
+    data = write_category_data(persons, output_persons, 
+                               category_name='age_group', 
+                               category_options=labels, 
+                               func=get_individual_car_class,
+                               feature=None)
+    
+    with open("plot_data/num_cars_age.json", "w") as json_file:
+        json.dump(data, json_file, indent=4)
+
+
+def write_pt_sub_income(persons, output_persons):
+    # NOTE using household weight doesn't solve the issue
+    incomes = sorted(persons[persons['household_income'] >= 0]['household_income'].unique())
+
+    data = write_category_data(persons, output_persons, 
+                                category_name='household_income', 
+                                category_options=incomes, 
+                                func=get_subscription_proportions,
+                                feature=None)
+
+    with open("plot_data/pt_sub_income.json", "w") as json_file:
+        json.dump(data, json_file, indent=4)
+
+
+def write_pt_sub_gender(persons, output_persons):
+    genders = [0, 1]
+    
+    data = write_category_data(persons, output_persons, 
+                               category_name='sex', 
+                               category_options=genders, 
+                               func=get_subscription_proportions,
+                               feature=None)
+    with open("plot_data/pt_sub_gender.json", "w") as json_file:
+        json.dump(data, json_file, indent=4)
+
+
+def write_pt_sub_age(persons, output_persons):
+    ages = [6, 15, 18, 24, 30, 45, 65, 80]
+    labels = ['[6, 15)', '[15, 18)', '[18, 24)', '[24, 30)', '[30, 45)', '[45, 65)', '[65, 80)']
+    persons['age_group'] = pd.cut(persons['age'], bins=ages, labels=labels, right=False)
+    output_persons['age_group'] = pd.cut(output_persons['age'], bins=ages, labels=labels, right=False)
+    
+    data = write_category_data(persons, output_persons, 
+                               category_name='age_group', 
+                               category_options=labels, 
+                               func=get_subscription_proportions,
+                               feature=None)
+    
+    with open("plot_data/pt_sub_age.json", "w") as json_file:
+        json.dump(data, json_file, indent=4)
 
 
 if __name__ == '__main__':
 
     # write_frequent_sequences(activities, output_activities)
     # write_out_of_home(activities, output_activities)
-    print(list(persons.columns))
-    write_pt_subscriptions_general(persons, output_persons)
-    write_available_cars_general(households, output_households)
+    # write_pt_sub_age(persons, output_persons)
+    # write_pt_sub_income(persons, output_persons)
+    # write_pt_sub_gender(persons, output_persons)
+    write_num_cars_age(persons, output_persons)
+    write_num_cars_gender(persons, output_persons)
+    write_num_cars_income(persons, output_persons)
