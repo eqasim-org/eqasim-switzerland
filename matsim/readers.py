@@ -86,7 +86,11 @@ class Network:
 
         # Removing loops
         sel = (df['from_node'] == df['to_node'])
+<<<<<<< HEAD
         stats["removed_loops"] = int(sel.sum())
+=======
+        stats["removed_loops"] = sel.sum()
+>>>>>>> d35acae08df723113926f166f709f846568fd41a
         print("There are %d loops in the network that are removed." % stats["removed_loops"] )
         df = df[~sel].reset_index(drop=True)
 
