@@ -10,3 +10,8 @@ config*.yml
 !config_docker.yml
 *.sh
 *.md
+
+# Things that need to be ignored for the webapp
+dist/
+node_modules/
+public/
