@@ -1,10 +1,10 @@
 #!/bin/bash
 # Author: dabdelkader
 
-#SBATCH --job-name=Eqasim_small # name f the job
+#SBATCH --job-name=Eq_small # name f the job
 #SBATCH -n 1                    # Number of tasks
-#SBATCH --cpus-per-task=24      # CPUs per task
-#SBATCH --time=4:00:00          # Maximum runtime (6 hours)
+#SBATCH --cpus-per-task=12      # CPUs per task
+#SBATCH --time=6:00:00          # Maximum runtime 
 #SBATCH --mem-per-cpu=8G        # Memory per CPU (8GB)
 #SBATCH -o /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_small_%j.log   # Output file
 #SBATCH -e /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_small_%j.log   # Error log file

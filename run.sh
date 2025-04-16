@@ -1,13 +1,13 @@
 #!/bin/bash
 # Author: dabdelkader
 
-#SBATCH --job-name=Eqasim25  # name f the job
+#SBATCH --job-name=Eqasim100  # name f the job
 #SBATCH -n 1                 # Number of tasks
 #SBATCH --cpus-per-task=24    # CPUs per task
-#SBATCH --time=24:00:00       # Maximum runtime (6 hours)
-#SBATCH --mem-per-cpu=10G     # Memory per CPU (8GB)
-#SBATCH -o /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_vdf25_%j.log   # Output file
-#SBATCH -e /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_vdf25_%j.log   # Error log file
+#SBATCH --time=96:00:00       # Maximum runtime 
+#SBATCH --mem-per-cpu=14G     # Memory per CPU (8GB)
+#SBATCH -o /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_vdf100_%j.log   # Output file
+#SBATCH -e /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_vdf100_%j.log   # Error log file
 
 
 # Source the interactive shell config (for osmosis)
