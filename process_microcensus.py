@@ -11,6 +11,9 @@ def process_filename(file_path):
     return result
 
 def get_pkl_data(directory, prefix):
+    """
+    Reads in the .pkl files and simplifies their names
+    """
     files = dict()
     for filename in os.listdir(directory):
         if filename.startswith(prefix) and filename.endswith('.p'):
@@ -21,6 +24,13 @@ def get_pkl_data(directory, prefix):
     return files
 
 def create_activities(trips, persons):
+    """
+    Creates the activities dataset given the trips and the person
+    - Assumes the first activity is home for all individuals
+    - The first activity is the following purpose of the first trip
+    - Individuals who never had a trip will have one home activity
+    - Each activity is weighed by the person's weight
+    """
     activities = []
 
     # Group by person_id to handle each person's trips individually
@@ -90,13 +100,22 @@ def create_activities(trips, persons):
     return activities_df
 
 def convert_persons(persons, households):
+    """
+    Adds household income and renames some column to match synthetic data
+    """
     persons = persons.merge(households[['person_id', 'income']], on='person_id', how='left')
-    persons = persons.rename(columns={'driving_license': 'has_driving_license'})    
-    persons = persons.rename(columns={'income': 'household_income'})
-    persons = persons.rename(columns={'canton_name': 'home_canton'})
+    persons = persons.rename(columns={
+        'driving_license': 'has_driving_license',
+        'income': 'household_income',
+        'canton_name': 'home_canton'
+    })
     return persons
 
 def convert_trips(trips, persons):
+    """
+    Renames some columns. Adds the preceding purpose of a trip, the weight, and
+    the home canton of person performing the trip.
+    """
     # Update the purpose of trips
     trips = trips.rename(columns={'purpose': 'following_purpose', 'trip_id': 'trip_index'})
     trips['preceding_activity_index'] = None
@@ -115,12 +134,7 @@ def convert_households(data):
     data = data.rename(columns={'income_class': 'income'})
     return data
 
-if __name__ == '__main__':
-    # Get the directories for reading and writing
-    directory = input("Enter directory name where the microcensus data lies:")
-    save_directory = input("Enter directory where the processed data should be stored:")
-
-    prefix = 'data.microcensus'
+def preprocess_microcensus_data(directory, save_directory, prefix='data.microcensus'):
     print("Reading the .pkl files...")
     files = get_pkl_data(directory, prefix)
     
@@ -150,3 +164,12 @@ if __name__ == '__main__':
     persons.to_csv(f'{save_directory}/microcensus_persons.csv', sep=',', index=False, lineterminator='\n')
     trips.to_csv(f'{save_directory}/microcensus_trips.csv', sep=',', index=False, lineterminator='\n')
     activities.to_csv(f'{save_directory}/microcensus_activities.csv', sep=';', index=False, lineterminator='\n')
+
+
+if __name__ == '__main__':
+    # Get the directories for reading and writing
+    directory = input("Enter directory name where the microcensus data lies:")
+    save_directory = input("Enter directory where the processed data should be stored:")
+    prefix = 'data.microcensus'
+
+    preprocess_microcensus_data(directory, save_directory, prefix=prefix)

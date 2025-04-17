@@ -195,14 +195,13 @@ def add_home_canton(persons, trips, activities):
 
     return activities, trips
 
+def preprocess_synthetic_data(directory, save_directory):
+    """
+    Preprocesses the synthetic data for analysis. 
 
-if __name__ == '__main__':
-
-    directory = input("Enter directory name where the synthetic data lies:")
-    save_directory = input("Enter directory where the processed data should be stored:")
-
-    directory = '/cluster/project/cmdp/chaoch/switzerland_data/output'
-
+    - directory: The directory where the synthetic data is stored
+    - save_directory: The directory where the processed data is stored
+    """
     # Adds coordinates of activities
     activities = add_activities_coordinates(
         gpkg_path=f"{directory}/switzerland_activities.gpkg",
@@ -232,4 +231,14 @@ if __name__ == '__main__':
     households.to_csv(f'{save_directory}/switzerland_households_geo.csv', index=False, sep=',')
     trips.to_csv(f'{save_directory}/switzerland_trips_geo.csv', index=False, sep=',')
     activities.to_csv(f'{save_directory}/switzerland_activities_geo.csv', index=False, sep=',')
-    
+
+
+if __name__ == '__main__':
+
+    directory = input("Enter directory name where the synthetic data lies:")
+    save_directory = input("Enter directory where the processed data should be stored:")
+
+    directory = '/cluster/project/cmdp/chaoch/switzerland_data/output'
+    save_directory = '/cluster/project/cmdp/chaoch/switzerland_data/output'
+
+    preprocess_synthetic_data(directory, save_directory)

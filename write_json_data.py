@@ -4,26 +4,6 @@ from app_utils import *
 import json 
 import numbers
 
-# Initialize the Dash app
-app = dash.Dash(__name__)
-
-prefix = '/cluster/project/cmdp/chaoch/'
-activities = pd.read_csv(f'{prefix}microcensus_data/microcensus_act_geo.csv', sep=';', header=0)
-trips = pd.read_csv(f'{prefix}microcensus_data/microcensus_trips_geo.csv', sep=',', header=0)
-households = pd.read_csv(f'{prefix}microcensus_data/microcensus_households_geo.csv', sep=',', header=0)
-persons = pd.read_csv(f'{prefix}microcensus_data/microcensus_persons_geo.csv', sep=',', header=0)
-persons['home_canton'] = persons['canton_name']
-households['home_canton'] = households['canton_name']
-
-output_activities = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_activities_geo.csv', sep=',', header=0)
-output_trips = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_trips_geo.csv', sep=',', header=0)
-output_households = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_households_geo.csv', sep=',', header=0)
-output_persons = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_persons_geo.csv', sep=';', header=0)
-output_households['household_weight'] = 1
-output_trips['person_weight'] = 1
-output_persons['home_canton'] = output_persons['canton_name']
-output_households['home_canton'] = output_households['canton_name']
-
 cantons = [
     'Zürich', 'Basel-Stadt', 'St. Gallen', 'Bern', 'Fribourg', 'Vaud', 
     'Ticino', 'Aargau', 'Genève', 'Solothurn', 'Jura', 'Valais', 
@@ -36,7 +16,7 @@ def write_non_category_data(micro, synthetic, func):
     """
     Writes data to a specific JSON format. 
 
-    :func: The function to compute the data to write
+    - func: The function to compute the data to write
     """
     write_data = dict()
     for canton in cantons:
@@ -62,10 +42,10 @@ def write_category_data(micro, synthetic, category_name, category_options, func,
     """
     Writes data that will be filtered by a specific category.
 
-    :category_name: the category we want to filter by (name to marginalize the data by) (e.g. purpose)
-    :category_options: the different values the category contains (e.g. home, shopping, education)
-    :func: function to apply per category (to obtain the statistics)
-    :feature: feature of interest in the analysis (e.g. duration)
+    - category_name: the category we want to filter by (name to marginalize the data by) (e.g. purpose)
+    - category_options: the different values the category contains (e.g. home, shopping, education)
+    - func: function to apply per category (to obtain the statistics)
+    - feature: feature of interest in the analysis (e.g. duration)
     """
     write_data = dict()
     for canton in cantons:
@@ -280,12 +260,38 @@ def write_pt_sub_age(persons, output_persons):
 
 
 if __name__ == '__main__':
+    
+    # TODO should be updated to pick up the "saved_directory" directly
+    prefix = '/cluster/project/cmdp/chaoch/'
+    activities = pd.read_csv(f'{prefix}microcensus_data/microcensus_act_geo.csv', sep=';', header=0)
+    trips = pd.read_csv(f'{prefix}microcensus_data/microcensus_trips_geo.csv', sep=',', header=0)
+    households = pd.read_csv(f'{prefix}microcensus_data/microcensus_households_geo.csv', sep=',', header=0)
+    persons = pd.read_csv(f'{prefix}microcensus_data/microcensus_persons_geo.csv', sep=',', header=0)
+    persons['home_canton'] = persons['canton_name']
+    households['home_canton'] = households['canton_name']
 
-    # write_frequent_sequences(activities, output_activities)
-    # write_out_of_home(activities, output_activities)
-    # write_pt_sub_age(persons, output_persons)
-    # write_pt_sub_income(persons, output_persons)
-    # write_pt_sub_gender(persons, output_persons)
+    output_activities = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_activities_geo.csv', sep=',', header=0)
+    output_trips = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_trips_geo.csv', sep=',', header=0)
+    output_households = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_households_geo.csv', sep=',', header=0)
+    output_persons = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_persons_geo.csv', sep=';', header=0)
+    output_households['household_weight'] = 1
+    output_trips['person_weight'] = 1
+    output_persons['home_canton'] = output_persons['canton_name']
+    output_households['home_canton'] = output_households['canton_name']
+
+
+    write_num_activities(activities, output_activities)
+    write_frequent_sequences(activities, output_activities)
+    write_out_of_home(activities, output_activities)
+    write_available_cars_general(households, output_households)
+    write_pt_subscriptions_general(persons, output_persons)
+
+    write_trip_crowfly_distance(trips, output_trips)
+    write_activity_durations(activities, output_activities)
+    write_pt_sub_age(persons, output_persons)
+    write_pt_sub_income(persons, output_persons)
+    write_pt_sub_gender(persons, output_persons)
     write_num_cars_age(persons, output_persons)
     write_num_cars_gender(persons, output_persons)
     write_num_cars_income(persons, output_persons)
+
