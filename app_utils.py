@@ -112,61 +112,15 @@ def get_histogram(data, feature, bins=None):
     bins = 0.5 * (bin_edges[:-1] + bin_edges[1:])
     return bins, hist
 
-def generate_car_availability_distribution(persons, output_persons, attribute_values, attribute_name):
-    fig = go.Figure()
-
-    for attr_value in attribute_values:
-        filtered_micro = persons.loc[persons[attribute_name] == attr_value]
-        filtered_output = output_persons.loc[output_persons[attribute_name] == attr_value]
-
-        micro_x, micro_y = get_individual_car_class(filtered_micro)
-        output_x, output_y = get_individual_car_class(filtered_output)
-
-        fig.add_trace(go.Bar(x=micro_x, y=micro_y, name=f'Microcensus ({attr_value})', marker=dict(color="blue"), visible=False))
-        fig.add_trace(go.Bar(x=output_x, y=output_y, name=f'Output ({attr_value})', marker=dict(color="red"), visible=False))
-
-    fig.data[0].visible = True
-    fig.data[1].visible = True
-
-    attribute_name = " ".join(attribute_name.split('_')).title()
-
-    buttons = []
-    for i, param in enumerate(attribute_values):
-        param = str(param).capitalize()
-        visibility = [False] * (2 * len(attribute_values))
-        visibility[2 * i] = True
-        visibility[2 * i + 1] = True
-
-        buttons.append(dict(
-            label=param,
-            method="update",
-            args=[{"visible": visibility}, {"title": f"Number of Cars Class - {attribute_name} {param}"}]
-        ))
-
-    fig.update_layout(
-        title=f'Number of Cars Class - {attribute_name}',
-        xaxis_title='Number of Cars Class',
-        yaxis_title='Proportion',
-        barmode='group',
-        legend_title='Legend',
-        updatemenus=[{
-            "buttons": buttons,
-            "direction": "down",
-            "showactive": True,
-        }]
-    )
-
-    return fig
-
-def generate_pt_distribution(persons, output_persons, attribute_values, attribute_name):
+def generate_marginal_distribution(persons, output_persons, attribute_values, attribute_name, func, title, x_axis, y_axis):
     fig = go.Figure()
 
     for idx, attr_value in enumerate(attribute_values):
         filtered_micro = persons.loc[persons[attribute_name] == attr_value]
         filtered_output = output_persons.loc[output_persons[attribute_name] == attr_value]
 
-        micro_x, micro_y = get_subscription_proportions(filtered_micro)
-        output_x, output_y = get_subscription_proportions(filtered_output)
+        micro_x, micro_y = func(filtered_micro)
+        output_x, output_y = func(filtered_output)
 
         fig.add_trace(go.Bar(x=micro_x, y=micro_y, name=f'Microcensus ({attr_value})', marker=dict(color="blue"), visible=False))
         fig.add_trace(go.Bar(x=output_x, y=output_y, name=f'Output ({attr_value})', marker=dict(color="red"), visible=False))
@@ -188,14 +142,14 @@ def generate_pt_distribution(persons, output_persons, attribute_values, attribut
             method="update",
             args=[
                 {"visible": visibility},
-                {"title": f"Public Transport Subscription - {attribute_name} {param}"}
+                {"title": f"{title} - {attribute_name} {param}"}
             ]
         ))
 
     fig.update_layout(
-        title=f'Public Transport Subscriptions - {attribute_name}',
-        xaxis_title='Subscriptions',
-        yaxis_title='Proportion',
+        title=f'{title} - {attribute_name}',
+        xaxis_title=f'{x_axis}',
+        yaxis_title=f'{y_axis}',
         barmode='group',
         legend_title='Legend',
         updatemenus=[{
@@ -206,3 +160,17 @@ def generate_pt_distribution(persons, output_persons, attribute_values, attribut
     )
 
     return fig
+
+
+def generate_car_availability_distribution(persons, output_persons, attribute_values, attribute_name):
+    return generate_marginal_distribution(persons, output_persons, 
+                                          attribute_values, attribute_name, 
+                                          get_individual_car_class, title='Number of Cars Class',
+                                          x_axis='Number of Cars Class', y_axis='Proportion')
+
+def generate_pt_distribution(persons, output_persons, attribute_values, attribute_name):
+    
+    return generate_marginal_distribution(persons, output_persons, 
+                                          attribute_values, attribute_name, 
+                                          get_subscription_proportions, title='Public Transport Subscription',
+                                          x_axis='Subscriptions', y_axis='Proportions')

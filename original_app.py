@@ -388,7 +388,7 @@ def generate_html(canton_name):
         ),
         dcc.Graph(
             id='car-graph-income',
-            figure=car_availability_distribution_income(persons, output_persons, output_households)
+            figure=car_availability_distribution_income(persons, output_persons)
         ),
         dcc.Graph(
             id='car-graph-gender',
@@ -449,7 +449,7 @@ app.layout = html.Div(children=[
     ),
     dcc.Graph(
         id='car-graph-income',
-        figure=car_availability_distribution_income(persons, output_persons, output_households)
+        figure=car_availability_distribution_income(persons, output_persons)
     ),
     dcc.Graph(
         id='car-graph-gender',

@@ -2,6 +2,7 @@ import pickle
 import os 
 import numpy as np
 import pandas as pd
+from add_cantons import add_canton_name
 
 def process_filename(file_path):
     temp = file_path.split(".")[2:] # skip synthesis.population
@@ -18,23 +19,6 @@ def get_pkl_data(directory, prefix):
                 processed_name = process_filename(filename)
                 files[processed_name] = data
     return files
-
-def convert_trips(data):
-    data = data.rename(columns={'purpose': 'following_purpose', 'trip_id': 'trip_index'})
-    data['preceding_activity_index'] = None
-    data['preceding_purpose'] = data['following_purpose'].shift(1)
-    data.loc[data['trip_index'] == 1, 'preceding_purpose'] = 'home'
-
-    data.to_csv('microcensus_data/microcensus_trips.csv', sep=';', index=False, lineterminator='\n')
-
-def convert_persons(data):
-    data = data.rename(columns={'driving_license': 'has_driving_license'})    
-    data.to_csv('microcensus_data/microcensus_persons.csv', sep=';', index=False, lineterminator='\n')
-
-def convert_households(data):
-    data = data.rename(columns={'income_class': 'income'})
-    data.to_csv('microcensus_data/microcensus_households.csv', sep=';', index=False, lineterminator='\n')
-
 
 def create_activities(trips, persons):
     activities = []
@@ -98,48 +82,71 @@ def create_activities(trips, persons):
 
     activities_df = pd.DataFrame(activities)
 
-    activities_df.to_csv('microcensus_data/microcensus_activities.csv', sep=';', index=False, lineterminator='\n')
-
-def augment_activities(activities, persons):
-    # add the weights of individuals
-    weights = persons[['person_id', 'person_weight']]
-    activities_df = activities.merge(weights, left_on='person_id', right_on='person_id', how='left')
-
+    # Add the person weight and home canton to each activity
+    weights = persons[['person_id', 'person_weight', 'home_canton']]
+    activities_df = activities_df.merge(weights, left_on='person_id', right_on='person_id', how='left')
     activities_df = activities_df.dropna(subset=['person_weight'])
 
-    activities_df.to_csv('microcensus_data/microcensus_act_weighted.csv', sep=';', index=False, lineterminator='\n')
+    return activities_df
 
-def augment_trips(trips, persons):
-    # add the weights of individuals
-    weights = persons[['person_id', 'person_weight']]
-    trips_df = trips.merge(weights, left_on='person_id', right_on='person_id', how='left')
-
-    trips_df = trips_df.dropna(subset=['person_weight'])
-
-    trips_df.to_csv('microcensus_data/microcensus_trips_weighted.csv', sep=';', index=False, lineterminator='\n')
-
-def add_household_income(persons, households):
+def convert_persons(persons, households):
     persons = persons.merge(households[['person_id', 'income']], on='person_id', how='left')
+    persons = persons.rename(columns={'driving_license': 'has_driving_license'})    
     persons = persons.rename(columns={'income': 'household_income'})
-    persons.to_csv('microcensus_data/microcensus_persons.csv', sep=';', index=False, lineterminator='\n')
-
-def add_origin_canton(persons, trips, activities):
     persons = persons.rename(columns={'canton_name': 'home_canton'})
-    trips = trips.merge(persons[['person_id', 'home_canton']], on='person_id', how='left')
-    activities = activities.merge(persons[['person_id', 'home_canton']], on='person_id', how='left')
-    trips.to_csv('microcensus_data/microcensus_trips_geo.csv', sep=',', index=False, lineterminator='\n')
-    activities.to_csv('microcensus_data/microcensus_act_geo.csv', sep=';', index=False, lineterminator='\n')
+    return persons
+
+def convert_trips(trips, persons):
+    # Update the purpose of trips
+    trips = trips.rename(columns={'purpose': 'following_purpose', 'trip_id': 'trip_index'})
+    trips['preceding_activity_index'] = None
+    trips['preceding_purpose'] = trips['following_purpose'].shift(1)
+    trips.loc[trips['trip_index'] == 1, 'preceding_purpose'] = 'home'
+
+    # Add person weight and home canton to trips
+    weights = persons[['person_id', 'person_weight', 'home_canton']]
+    trips = trips.merge(weights, left_on='person_id', right_on='person_id', how='left')
+    trips = trips.dropna(subset=['person_weight'])
+
+    return trips
+
+def convert_households(data):
+    # Rename income column
+    data = data.rename(columns={'income_class': 'income'})
+    return data
 
 if __name__ == '__main__':
-    # directory = '/cluster/home/chaoch/ch/switzerland_data/cache/'
-    # prefix = 'data.microcensus'
-    # files = get_pkl_data(directory, prefix)
-    # for name, file in files.items():
-    #     print(name, type(file), len(file))
-    
-    trips = pd.read_csv('microcensus_data/microcensus_trips_geo.csv', sep=',', header=0)
-    persons = pd.read_csv('microcensus_data/microcensus_persons_geo.csv', sep=',', header=0)
-    activities = pd.read_csv('microcensus_data/microcensus_act_geo.csv', sep=';', header=0)
-    # households = pd.read_csv('microcensus_data/microcensus_households.csv', sep=';', header=0)
+    # Get the directories for reading and writing
+    directory = input("Enter directory name where the microcensus data lies:")
+    save_directory = input("Enter directory where the processed data should be stored:")
 
-    add_origin_canton(persons, trips, activities)
+    prefix = 'data.microcensus'
+    print("Reading the .pkl files...")
+    files = get_pkl_data(directory, prefix)
+    
+    households = None
+    trips = None
+    persons = None
+    activities = None
+
+    for name, file in files.items():
+        print(name, type(file), len(file))
+        if name == 'households':
+            households = file
+        elif name == 'persons':
+            persons = file
+        elif name == 'trips':
+            trips = file[0]
+
+    print("Preprocessing the data files...")
+    households = convert_households(households)
+    persons = convert_persons(persons)
+    persons = add_canton_name(persons, x_col='home_x', y_col='home_y')
+    trips = convert_trips(trips, persons)
+    activities = create_activities(trips, persons)
+
+    print("Writing the data files...")
+    households.to_csv(f'{save_directory}/microcensus_households.csv', sep=',', index=False, lineterminator='\n')
+    persons.to_csv(f'{save_directory}/microcensus_persons.csv', sep=',', index=False, lineterminator='\n')
+    trips.to_csv(f'{save_directory}/microcensus_trips.csv', sep=',', index=False, lineterminator='\n')
+    activities.to_csv(f'{save_directory}/microcensus_activities.csv', sep=';', index=False, lineterminator='\n')

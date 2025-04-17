@@ -1,46 +1,6 @@
-import os
 import pandas as pd
 import geopandas as gpd
-import time
-
-
-def modify_persons_households(person, household, path):
-    """
-    Augments the persons dataset using households:
-    - adds weight 1 to each person
-    - adds household income and number of cars class to persons
-    """
-    person['person_weight'] = 1
-    person = person.merge(household[['household_id', 'income', 'number_of_cars_class']], on='household_id', how='left')
-    person = person.rename(columns={'income': 'household_income'})
-    person.to_csv(path, sep=';', index=False, lineterminator='\n')
-
-def modify_activities_dataset(persons, activity, path):
-    """
-    Modifies the activities dataset:
-    - adds the weight 1 to each activity
-    - removes all individuals below 6
-    """
-    activity['person_weight'] = 1
-    print(list(activity.columns))
-    print(list(persons.columns))
-    filtered_persons = persons[persons['age'] > 6]
-    activity_below_6 = activity[activity['person_id'].isin(filtered_persons['person_id'])]
-    activity_below_6.to_csv(path, sep=';', index=False, lineterminator='\n')
-
-
-def add_home_canton(persons, trips, activities, prefix):
-    """
-    Adds the home canton of the person associated with the trip/activity
-    - this is added because activities/trips should be assigned based on the person's home canton
-    """
-    persons = persons.rename(columns={'canton_name': 'home_canton'})
-    trips = trips.merge(persons[['person_id', 'home_canton']], on='person_id', how='left')
-    activities = activities.merge(persons[['person_id', 'home_canton']], on='person_id', how='left')
-
-    activities.to_csv(f'{prefix}switzerland_activities_geo.csv', sep=',', index=False, lineterminator='\n')
-    trips.to_csv(f'{prefix}switzerland_trips_geo.csv', sep=',', index=False, lineterminator='\n')
-
+from add_cantons import add_canton_name
 
 def inspect_gpkg_columns(file_path):
     """
@@ -72,12 +32,12 @@ def inspect_gpkg_columns(file_path):
         else:
             sample_values = gdf[column].dropna().sample(min(5, len(gdf)), random_state=1).unique()
             print("Sample values:", sample_values)
-        
+
         if column == 'start_time' or column == 'end_time':
             print("Time range:", gdf[column].min(), "to", gdf[column].max())
 
 
-def join_activities_with_coordinates(gpkg_path, csv_path, output_path=None):
+def add_activities_coordinates(gpkg_path, csv_path):
     """
     Adds coordinate information to the activity dataset
     - the gpkg path contains the coordinates
@@ -113,21 +73,17 @@ def join_activities_with_coordinates(gpkg_path, csv_path, output_path=None):
     
     print("Missing coordinates count:", merged['easting'].isna().sum())
     
-    if output_path:
-        merged.to_csv(output_path, index=False)
-        print(f"Saved merged data to {output_path}")
-    
     return merged
 
 
-def add_trip_coordinates(trips_gpkg_path, trips_csv_path, output_path=None):
+def add_trip_coordinates(trips_gpkg_path, trips_csv_path):
     """
     Adds the trip origin and destination coordinates to the dataframe
     """    
     print("Reading trip geometries from GPKG...")
     trips_gdf = gpd.read_file(
         trips_gpkg_path,
-        include_fields=['person_id', 'trip_index']  # Only load necessary attributes
+        include_fields=['person_id', 'trip_index']
     )
     
     print("Extracting origin/destination coordinates...")
@@ -166,14 +122,10 @@ def add_trip_coordinates(trips_gpkg_path, trips_csv_path, output_path=None):
     print("- Origin:", trips_with_coords['origin_easting'].isna().sum())
     print("- Destination:", trips_with_coords['dest_easting'].isna().sum())
     
-    if output_path:
-        trips_with_coords.to_csv(output_path, index=False, sep=';')
-        print(f"Saved trip data with coordinates to {output_path}")
-    
     return trips_with_coords
 
 
-def add_home_coordinates(homes_gpkg_path, persons_csv_path, households_csv_path, output_dir=None):
+def add_home_coordinates(homes_gpkg_path, persons_csv_path, households_csv_path):
     """
     Adds home coordinates to the persons and household dataset
     """
@@ -205,62 +157,79 @@ def add_home_coordinates(homes_gpkg_path, persons_csv_path, households_csv_path,
     print(f"Households with coordinates: {households_with_coords['home_easting'].notna().sum()}/{len(households_with_coords)}")
     print(f"Persons with coordinates: {persons_with_coords['home_easting'].notna().sum()}/{len(persons_with_coords)}")
     
-    if output_dir:
-        import os
-        os.makedirs(output_dir, exist_ok=True)
-        
-        households_output = os.path.join(output_dir, "switzerland_households_coords.csv")
-        households_with_coords.to_csv(households_output, index=False, sep=';')
-        print(f"Saved households with coordinates to {households_output}")
-        
-        persons_output = os.path.join(output_dir, "switzerland_persons_coords.csv")
-        persons_with_coords.to_csv(persons_output, index=False, sep=';')
-        print(f"Saved persons with coordinates to {persons_output}")
-    
     return households_with_coords, persons_with_coords
+
+
+def modify_persons_households(person, household):
+    """
+    Augments the persons dataset using households:
+    - adds weight 1 to each person
+    - adds household income and number of cars class to persons
+    """
+    person['person_weight'] = 1
+    person = person.merge(household[['household_id', 'income', 'number_of_cars_class']], on='household_id', how='left')
+    person = person.rename(columns={'income': 'household_income'})
+    return person
+
+
+def modify_activities_dataset(persons, activity):
+    """
+    Modifies the activities dataset:
+    - adds the weight 1 to each activity
+    - removes all individuals below 6
+    """
+    activity['person_weight'] = 1
+    filtered_persons = persons[persons['age'] > 6]
+    activity_below_6 = activity[activity['person_id'].isin(filtered_persons['person_id'])]
+    return activity_below_6
+
+
+def add_home_canton(persons, trips, activities):
+    """
+    Adds the home canton of the person associated with the trip/activity
+    - this is added because activities/trips should be assigned based on the person's home canton
+    """
+    persons = persons.rename(columns={'canton_name': 'home_canton'})
+    trips = trips.merge(persons[['person_id', 'home_canton']], on='person_id', how='left')
+    activities = activities.merge(persons[['person_id', 'home_canton']], on='person_id', how='left')
+
+    return activities, trips
 
 
 if __name__ == '__main__':
 
-    # person = pd.read_csv(f'/cluster/home/chaoch/ch/switzerland_data/output/switzerland_persons_filt.csv', sep=';', header=0)
-    # household = pd.read_csv(f'/cluster/home/chaoch/ch/switzerland_data/output/switzerland_households.csv', sep=';', header=0)
+    directory = input("Enter directory name where the synthetic data lies:")
+    save_directory = input("Enter directory where the processed data should be stored:")
 
-    prefix = '/cluster/project/cmdp/chaoch/switzerland_data/output/'
-    add_coords_activities = False
-    add_coords_to_trips = False
-    add_coords_to_persons = False
-
-    persons = pd.read_csv(f'{prefix}switzerland_persons_geo.csv', sep=';', header=0)
-    # households = pd.read_csv(f'{prefix}switzerland_households_geo.csv', sep=',', header=0)
-    activities = pd.read_csv(f'{prefix}switzerland_activities_geo.csv', sep=';', header=0)
-    trips = pd.read_csv(f'{prefix}switzerland_trips_geo.csv', sep=',', header=0)
-    print(persons.columns)
-    print(activities.columns)
-    print(trips.columns)
-    add_home_canton(persons, trips, activities, prefix)
+    directory = '/cluster/project/cmdp/chaoch/switzerland_data/output'
 
     # Adds coordinates of activities
-    if add_coords_activities:
-        merged_data = join_activities_with_coordinates(
-            gpkg_path=f"{prefix}switzerland_activities.gpkg",
-            csv_path=f"{prefix}switzerland_activities.csv",
-            output_path=f"{prefix}activities_with_coordinates.csv"
-        )
+    activities = add_activities_coordinates(
+        gpkg_path=f"{directory}/switzerland_activities.gpkg",
+        csv_path=f"{directory}/switzerland_activities.csv",
+    )
 
     # Adds coordinates of trips (origin & destination)
-    if add_coords_to_trips:
-        trips_with_coords = add_trip_coordinates(
-            trips_gpkg_path=f"{prefix}switzerland_trips.gpkg",
-            trips_csv_path=f"{prefix}switzerland_trips.csv",
-            output_path=f"{prefix}trips_with_coordinates.csv"
-        )
+    trips = add_trip_coordinates(
+        trips_gpkg_path=f"{directory}/switzerland_trips.gpkg",
+        trips_csv_path=f"{directory}/switzerland_trips.csv",
+    )
 
     # Adds coordinates to persons and households based on home coordinates
-    if add_coords_to_persons:
-        households, persons = add_home_coordinates(
-            homes_gpkg_path=f"{prefix}switzerland_homes.gpkg",
-            persons_csv_path=f"{prefix}switzerland_persons.csv",
-            households_csv_path=f"{prefix}switzerland_households.csv",
-            output_dir=f"{prefix}"
-        )
-   
+    households, persons = add_home_coordinates(
+        homes_gpkg_path=f"{directory}/switzerland_homes.gpkg",
+        persons_csv_path=f"{directory}/switzerland_persons.csv",
+        households_csv_path=f"{directory}/switzerland_households.csv",
+    )
+
+    persons = add_canton_name(persons, x_col='home_easting', y_col='home_northing')
+    persons = modify_persons_households(persons, households)
+    activities = modify_activities_dataset(persons, activities)
+    activities, trips = add_home_canton(persons, trips, activities)
+
+    # Write all data
+    persons.to_csv(f'{save_directory}/switzerland_persons_geo.csv', index=False, sep=';')
+    households.to_csv(f'{save_directory}/switzerland_households_geo.csv', index=False, sep=',')
+    trips.to_csv(f'{save_directory}/switzerland_trips_geo.csv', index=False, sep=',')
+    activities.to_csv(f'{save_directory}/switzerland_activities_geo.csv', index=False, sep=',')
+    
