@@ -112,6 +112,7 @@ class Network:
         print("Change the infinit freespeed to 85.")
         # This is also done in : https://github.com/eqasim-org/eqasim-java/blob/develop/core/src/main/java/org/eqasim/core/scenario/preparation/AdjustLinkLength.java#L9
         self.links.loc[self.links.freespeed.apply(np.isinf),"freespeed"] = 85
+        self.links.loc[self.links.freespeed<20/3.6,"freespeed"] = 20/3.6
         
         unique_nodes = pd.concat([df.from_node, df.to_node]).unique()
         self.nodes = self.nodes[self.nodes.node_id.isin(unique_nodes)].reset_index(drop=True)
