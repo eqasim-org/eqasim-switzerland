@@ -310,9 +310,30 @@ class Network:
                              write_attrbs = write_attrbs)
             writer.end_network()
 
-
-
-  
+    
+    def _correct_capacity(self, row, sampling_rate, minimum_speed):
+        current_capacity = row["capacity"]
+        length = row["length"]
+        return np.maximum(current_capacity, 3600*minimum_speed/(length*sampling_rate))
+    
+    
+    def correct_capacity(self, sampling_rate, minimum_speed=2/3.6):
+        """        
+        This function here correct the capacity of a link based on its length and 
+        the sampling rate of teh population. It will only impact small links.
+        """
+        car_links = self.links.modes.apply(lambda x: "car" in x)
+        
+        self.links.loc[car_links, "capacity"] = \
+            self.links.loc[car_links, ["capacity", "length"]].apply(
+            lambda x: self._correct_capacity(x, sampling_rate, minimum_speed),
+            axis=1)
+    
+    def correct_speed(self, current_speed, length, time_step = 1):
+        steps = np.maximum(1,np.round(length/(current_speed*time_step)))
+        return length/(steps*time_step)
+        
+        
 
 def read_network(filename, skip_attributes=False):
     """Read a MATSim network.xml.gz file. Returns a Network object with dataframes
