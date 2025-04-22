@@ -4,23 +4,22 @@ import numba
 import numpy as np
 import pandas as pd
 
-import data.constants as c
-
 """
 This stage attaches observations from the microcensus to the synthetic population sample.
 This is done by statistical matching. Here, a recursive version of statistical matching is implemented.
 It progressively decreases the minimum number of observations to ensure the most important attributes are always matched.
 """
 
-
 def configure(context):
     context.config("hot_deck_matching_runners")
     context.config("random_seed")
     context.config("matching_minimum_observations", 20)
     context.config("weekend_scenario", False)
+    context.config("census", "statpop")
 
     context.stage("data.microcensus.persons")
     context.stage("synthesis.population.sampled")
+    context.stage("data.constants")
 
 
 @numba.jit(nopython=True, parallel=True)
@@ -216,9 +215,95 @@ def parallel_statistical_matching(context, df_source, source_identifier, weight,
             return df_target, levels
 
 
+def run_statistical_matching_extended(context, df_source, source_identifier, weight,
+                                      df_population, target_identifier,
+                                      columns, mandatory_columns,
+                                      minimum_observations=0, population_selector=None,
+                                      option = "person"):
+    
+    df_target = df_population.copy()
+    
+    if population_selector is not None:
+        df_target = pd.DataFrame(df_target[population_selector])
+
+    df_assignment, levels = parallel_statistical_matching(
+        context,
+        df_source, source_identifier, weight,
+        df_target, target_identifier,
+        columns,
+        mandatory_columns,
+        minimum_observations=minimum_observations)
+    
+    df_target = pd.merge(df_target, df_assignment, on=target_identifier)
+
+    assert len(df_target) == len(df_assignment)
+
+    context.set_info("matched_counts", {
+        count: np.count_nonzero(levels >= count) for count in range(len(columns) + 1)
+    })
+
+    for count in range(len(columns) + 1):
+        print("%d matched levels:" % count, np.count_nonzero(levels >= count),
+              "%.2f%%" % (100 * np.count_nonzero(levels >= count) / len(df_target),))
+        
+    # Remove and track unmatchable households (i.e. head of household)
+
+    initial_population_length = len(df_population)
+    initial_target_length     = len(df_target)
+        
+    if option == "household":
+
+        unmatchable_household_selector = levels < 1
+        umatchable_household_ids       = set(df_target.loc[unmatchable_household_selector, "household_id"].values)
+
+        unmatchable_person_selector    = df_population["household_id"].isin(umatchable_household_ids)
+        removed_person_ids             = set(df_population.loc[unmatchable_person_selector, "person_id"].values)
+
+        removed_household_ids = set() | umatchable_household_ids
+
+        df_target     = df_target.loc[~unmatchable_household_selector, :]
+        df_population = df_population.loc[~unmatchable_person_selector, :]
+
+        removed_households_count = sum(unmatchable_household_selector)
+        removed_persons_count    = sum(unmatchable_person_selector)
+
+        print("Unmatchable heads of household: ", removed_households_count)
+        print("  Removed households: ", removed_households_count)
+        print("  Removed persons: ", removed_persons_count)
+        print("")
+
+        assert (len(df_target)     == initial_target_length     - removed_households_count)
+        assert (len(df_population) == initial_population_length - removed_persons_count)
+
+        return df_target, df_population, [removed_person_ids, removed_household_ids]
+    
+    elif option == "person":
+
+        unmatchable_person_selector        = levels < 1
+        unmatchable_person_ids             = set(df_target.loc[unmatchable_person_selector, "person_id"].values)
+        unmatchable_person_selector        = df_population["person_id"].isin(unmatchable_person_ids) 
+        unmatchable_person_selector_target = df_target["person_id"].isin(unmatchable_person_ids)  
+
+        df_target     = df_target.loc[~unmatchable_person_selector_target, :]
+        df_population = df_population.loc[~unmatchable_person_selector, :]  
+
+        removed_persons_count = sum(unmatchable_person_selector)
+
+        print("  Removed persons: ", removed_persons_count)
+        print("")
+
+        assert (len(df_target)     == initial_target_length     - removed_persons_count)
+        assert (len(df_population) == initial_population_length - removed_persons_count)
+
+        return df_target, df_population, [unmatchable_person_ids, None]
+
+    
+
 def execute(context):
-    df_mz = context.stage("data.microcensus.persons")
+    df_mz               = context.stage("data.microcensus.persons")
+    c                   = context.stage("data.constants")
     is_weekend_scenario = context.config("weekend_scenario")
+    census              = context.config("census")
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
     df_source = pd.DataFrame(df_mz[
@@ -227,160 +312,108 @@ def execute(context):
                                  |
                                  (~is_weekend_scenario & ~df_mz["weekend"])  # and only weekday samples for a weekday
                                  ])
-
+    
+    df_source     = df_source.rename(columns={"person_id": "mz_id"})
     df_population = context.stage("synthesis.population.sampled")
-    number_of_statpop_persons = len(np.unique(df_population["person_id"]))
-    number_of_statpop_households = len(np.unique(df_population["household_id"]))
 
-    ## We first want to match by household to be able
-    ## to add extra attributes to the persons
+    if census == "statpop":
 
-    # Match households
-    age_selector = df_population["age"] >= c.MZ_AGE_THRESHOLD
-    head_selector = age_selector & df_population["is_head"]
+        ## We first want to match by household to be able
+        ## to add extra attributes to the persons
 
-    df_target = pd.DataFrame(df_population[head_selector])
-    #columns = [ "ovgk", "household_size_class", "age_class", "canton_id", "sex"]
-    columns = [ "ovgk", "N_children_under_12", "age_class", "canton_id", "sex"]
+        number_of_population_persons    = len(np.unique(df_population["person_id"]))
+        number_of_population_households = len(np.unique(df_population["household_id"]))
 
-    # Perform statistical matching
-    df_source = df_source.rename(columns={"person_id": "mz_id"})
+        population_selector  = df_population["age"] >= c.MZ_AGE_THRESHOLD
+        population_selector &= df_population["is_head"]
 
-    df_assignment, levels = parallel_statistical_matching(
-        context,
-        df_source, "mz_id", "household_weight",
-        df_target, "person_id",
-        columns,
-        columns[:3],
-        minimum_observations=context.config("matching_minimum_observations"))
+        columns_household_matching           = [ "ovgk", "N_children_under_12", "age_class", "canton_id", "sex"]
+        mandatory_columns_household_matching = columns_household_matching[:3]
 
-    df_target = pd.merge(df_target, df_assignment, on="person_id")
-    assert len(df_target) == len(df_assignment)
+        df_target, df_population, removed_ids_list = run_statistical_matching_extended(context, 
+                                                             df_source, "mz_id", "household_weight",
+                                                             df_population.copy(), "person_id",
+                                                             columns_household_matching, mandatory_columns_household_matching,
+                                                             minimum_observations = context.config("matching_minimum_observations"), 
+                                                             population_selector=population_selector,
+                                                             option="household")
 
-    context.set_info("matched_counts", {
-        count: np.count_nonzero(levels >= count) for count in range(len(columns) + 1)
-    })
+        # Convert IDs
+        df_target["mz_id"] = df_target["mz_id"].astype(np.int)
+        df_source["mz_id"] = df_source["mz_id"].astype(np.int)
 
-    for count in range(len(columns) + 1):
-        print("%d matched levels:" % count, np.count_nonzero(levels >= count),
-              "%.2f%%" % (100 * np.count_nonzero(levels >= count) / len(df_target),))
+        # Get the attributes from the MZ for the head of household (and thus for the household)
+        df_attributes = pd.merge(
+            df_target[[
+                "household_id", "mz_id"
+            ]],
+            df_source[[
+                "mz_id", "income_class", "number_of_cars_class", "number_of_bikes_class"
+            ]],
+            on = "mz_id"
+        )
 
-    # Remove and track unmatchable households (i.e. head of household)
+        df_attributes["mz_head_id"] = df_attributes["mz_id"]
+        del df_attributes["mz_id"]
 
-    initial_statpop_length = len(df_population)
-    initial_target_length = len(df_target)
+        assert (len(df_attributes) == len(df_target))
 
-    unmatchable_household_selector = levels < 1
-    umatchable_household_ids = set(df_target.loc[unmatchable_household_selector, "household_id"].values)
-    unmatchable_person_selector = df_population["household_id"].isin(umatchable_household_ids)
+        # Attach attrbiutes to STATPOP for the second matching
+        print("Attach attributes to STATPOP for the second matching")
+        initial_population_size = len(df_population)
 
-    removed_person_ids = set(df_population.loc[unmatchable_person_selector, "person_id"].values)
-    removed_household_ids = set() | umatchable_household_ids
+        df_population = pd.merge(
+            df_population, df_attributes, on="household_id"
+        )
 
-    df_target = df_target.loc[~unmatchable_household_selector, :]
-    df_population = df_population.loc[~unmatchable_person_selector, :]
+        assert (len(df_population) == initial_population_size)
+        del df_attributes
 
-    removed_households_count = sum(unmatchable_household_selector)
-    removed_persons_count = sum(unmatchable_person_selector)
+        ## Now that we have added attributes
+        ## SECOND MATCHING
 
-    print("Unmatchable heads of household: ", removed_households_count)
-    print("  Removed households: ", removed_households_count)
-    print("  Removed persons: ", removed_persons_count)
-    print("")
+        population_selector = df_population["age"] >= c.MZ_AGE_THRESHOLD
 
-    assert (len(df_target) == initial_target_length - removed_households_count)
-    assert (len(df_population) == initial_statpop_length - removed_persons_count)
+        columns_individual_matching           = ["number_of_cars_class", "N_children_under_12", "ovgk", "age_class", "sex", "marital_status"]
+        mandatory_columns_individual_matching = columns_individual_matching[:4]
 
-    # Convert IDs
-    df_target["mz_id"] = df_target["mz_id"].astype(np.int)
-    df_source["mz_id"] = df_source["mz_id"].astype(np.int)
+        df_target, df_population, removed_ids_list  = run_statistical_matching_extended(context, 
+                                                              df_source, "mz_id", "household_weight",
+                                                              df_population.copy(), "person_id",
+                                                              columns_individual_matching, mandatory_columns_individual_matching,
+                                                              minimum_observations = context.config("matching_minimum_observations"), 
+                                                              population_selector=population_selector,
+                                                              option = "household")
+        
+        # Extract only the matching information
 
-    # Get the attributes from the MZ for the head of household (and thus for the household)
-    df_attributes = pd.merge(
-        df_target[[
-            "household_id", "mz_id"
-        ]],
-        df_source[[
-            "mz_id", "income_class", "number_of_cars_class", "number_of_bikes_class"
-        ]],
-        on = "mz_id"
-    )
+        df_matching = pd.merge(
+            df_population[["person_id", "household_id", "mz_head_id"]],
+            df_target[["person_id", "mz_id"]],
+            on="person_id", how="left")
+    
+    elif census == "are_synpop":
+        number_of_population_persons    = len(np.unique(df_population["person_id"]))
 
-    df_attributes["mz_head_id"] = df_attributes["mz_id"]
-    del df_attributes["mz_id"]
+        population_selector = df_population["age_class"] > 0
 
-    assert (len(df_attributes) == len(df_target))
+        columns_individual_matching           = [ "number_of_cars_class", "N_children_under_18", "ovgk", "age_class", "sex", "employment_status"]
+        mandatory_columns_individual_matching = columns_individual_matching[:4]
 
-    # Attach attrbiutes to STATPOP for the second matching
-    print("Attach attributes to STATPOP for the second matching")
-    initial_statpop_size = len(df_population)
+        df_target, df_population, removed_ids_list  = run_statistical_matching_extended(context, 
+                                                              df_source, "mz_id", "household_weight",
+                                                              df_population.copy(), "person_id",
+                                                              columns_individual_matching, mandatory_columns_individual_matching,
+                                                              minimum_observations = context.config("matching_minimum_observations"), 
+                                                              population_selector=population_selector, 
+                                                              option = "person")
+        
+        df_matching = pd.merge(
+            df_population[["person_id"]],
+            df_target[["person_id", "mz_id"]],
+            on="person_id", how="left")
 
-    df_population = pd.merge(
-        df_population, df_attributes, on="household_id"
-    )
-
-    assert (len(df_population) == initial_statpop_size)
-    del df_attributes
-
-    ## Now that we have added attributes
-    ## Match persons
-    age_selector = df_population["age"] >= c.MZ_AGE_THRESHOLD
-    df_target = pd.DataFrame(df_population[age_selector])
-
-    #columns = [ "number_of_cars_class", "household_size_class", "ovgk", "age_class", "sex",  "marital_status"]#,  "household_size_class","number_of_bikes_class"]
-    columns = [ "number_of_cars_class", "N_children_under_12", "ovgk", "age_class", "sex",  "marital_status"]
-
-    df_assignment, levels = parallel_statistical_matching(
-        context,
-        df_source, "mz_id", "person_weight",
-        df_target, "person_id",
-        columns,
-        columns[:4],
-        minimum_observations=context.config("matching_minimum_observations"))
-
-    df_target = pd.merge(df_target, df_assignment, on="person_id")
-    assert len(df_target) == len(df_assignment)
-
-    context.set_info("matched_counts", {
-        count: np.count_nonzero(levels >= count) for count in range(len(columns) + 1)
-    })
-
-    for count in range(len(columns) + 1):
-        print("%d matched levels:" % count, np.count_nonzero(levels >= count),
-              "%.2f%%" % (100 * np.count_nonzero(levels >= count) / len(df_target),))
-
-    # Remove and track unmatchable persons
-    initial_statpop_length = len(df_population)
-    initial_target_length = len(df_target)
-
-    unmatchable_person_selector = levels < 1
-    umatchable_household_ids = set(df_target.loc[unmatchable_person_selector, "household_id"].values)
-    unmatchable_member_selector = df_population["household_id"].isin(umatchable_household_ids)
-
-    removed_person_ids |= set(df_population.loc[unmatchable_member_selector, "person_id"].values)
-    removed_household_ids |= umatchable_household_ids
-
-    df_target = df_target.loc[~unmatchable_person_selector, :]
-    df_population = df_population.loc[~unmatchable_member_selector, :]
-
-    removed_persons_count = sum(unmatchable_person_selector)
-    removed_households_count = len(umatchable_household_ids)
-    removed_members_count = sum(unmatchable_member_selector)
-
-    print("Unmatchable persons: ", removed_persons_count)
-    print("  Removed households: ", removed_households_count)
-    print("  Removed household members: ", removed_members_count)
-    print("")
-
-    assert (len(df_target) == initial_target_length - removed_persons_count)
-    assert (len(df_population) == initial_statpop_length - removed_members_count)
-
-    # Extract only the matching information
-
-    df_matching = pd.merge(
-        df_population[["person_id", "household_id", "mz_head_id"]],
-        df_target[["person_id", "mz_id"]],
-        on="person_id", how="left")
+    # Wrap up    
 
     df_matching["mz_person_id"] = df_matching["mz_id"]
     del df_matching["mz_id"]
@@ -388,19 +421,33 @@ def execute(context):
     assert (len(df_matching) == len(df_population))
 
     # Check that all person who don't have a MZ id now are under age
-    assert (np.all(df_population[
-                       df_population["person_id"].isin(
-                           df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
-                       )
-                   ]["age"] < c.MZ_AGE_THRESHOLD))
+    if census == "statpop":
+        assert (np.all(df_population[
+                    df_population["person_id"].isin(
+                        df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
+                    )
+                ]["age"] < c.MZ_AGE_THRESHOLD))
 
-    assert (not np.any(df_matching["mz_head_id"] == -1))
+    
+        assert (not np.any(df_matching["mz_head_id"] == -1))
 
-    print("Matching is done. In total, the following observations were removed from STATPOP: ")
-    print("  Households: %d (%.2f%%)" % (
-    len(removed_household_ids), 100.0 * len(removed_household_ids) / number_of_statpop_households))
-    print("  Persons: %d (%.2f%%)" % (
-    len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_statpop_persons))
+    elif census == "are_synpop":
+        assert (np.all(df_population[
+                    df_population["person_id"].isin(
+                        df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
+                    )
+                ]["age_class"] == 0))
+
+    print("Matching is done. In total, the following observations were removed from the census: ")
+
+    if census == "statpop":
+        removed_household_ids = removed_ids_list[1]
+        print("  Households: %d (%.2f%%)" % ( len(removed_household_ids), 100.0 * len(removed_household_ids) / number_of_population_households))
+
+    removed_person_ids = removed_ids_list[0]
+    print("  Persons: %d (%.2f%%)" % (len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_population_persons))
 
     # Return
     return df_matching, removed_person_ids
+
+

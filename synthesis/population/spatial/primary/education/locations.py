@@ -9,6 +9,7 @@ def configure(context):
     context.stage("synthesis.population.enriched")
     
     context.config("random_seed")
+    context.config("census")
 
 
 # TODO: We only assign work here through OD matrices. However, we *can* generate
@@ -23,16 +24,45 @@ def execute(context):
     df_statent = context.stage("data.statent.statent")
     df_statent = df_statent[~df_statent["education_type"].isna()]
 
-    age_bounds = [(-np.inf, 6), (6, 12), (12, 16), (16, np.inf)]
-    education_types = ["kindergarten", "primary", "secondary", "tertiary"]
-    query_sizes = (1, 1, 5, 10)
+    filters_persons   = []
+    filters_locations = [] 
+
+    if context.config("census") == "statpop":
+
+        age_bounds      = [(-np.inf, 6), (6, 12), (12, 16), (16, np.inf)]
+        education_types = ["kindergarten", "primary", "secondary", "tertiary"]
+        query_sizes     = (1, 1, 5, 10)
+
+        for (lower_bound, upper_bound), type, query_size in zip(age_bounds, education_types, query_sizes):
+            filter_persons  = (df_persons["age"] > lower_bound) & (df_persons["age"] <= upper_bound)
+            filter_location = df_statent["education_type"] == type
+
+            filters_persons.append(filter_persons)
+            filters_locations.append(filter_location)
+
+
+    elif context.config("census") == "are_synpop":
+
+        query_sizes     = (1, 3, 10)
+        education_types = ["kindergarten", "primary and secondary", "tertiary"]
+
+        f_under_6  = df_persons["age_class"] == 0
+        f_6_17     = df_persons["age_class"] == 1
+        f_above_18 = df_persons["age_class"] >= 2
+
+        f_kindergarden      = df_statent["education_type"] == "kindergarten"
+        f_primary_secondary = (df_statent["education_type"] == "primary") | (df_statent["education_type"] == "secondary")
+        f_tertiary          = df_statent["education_type"] == "tertiary"
+
+        filters_persons = [f_under_6, f_6_17, f_above_18]
+        filters_locations = [f_kindergarden, f_primary_secondary, f_tertiary]
     
     # Set up RNG
     rng = np.random.RandomState(context.config("random_seed"))
 
-    for (lower_bound, upper_bound), type, query_size in zip(age_bounds, education_types, query_sizes):
-        f_persons = (df_persons["age"] > lower_bound) & (df_persons["age"] <= upper_bound)
-        df_candidates = df_statent[df_statent["education_type"] == type]
+    for person_selector, location_selector, type, query_size in zip(filters_persons, filters_locations, education_types, query_sizes):
+        f_persons = person_selector#(df_persons["age"] > lower_bound) & (df_persons["age"] <= upper_bound)
+        df_candidates = df_statent[location_selector]#[df_statent["education_type"] == type]
 
         education_coordinates = np.vstack([df_candidates["x"], df_candidates["y"]]).T
         home_coordinates = np.vstack([df_persons.loc[f_persons, "home_x"], df_persons.loc[f_persons, "home_y"]]).T

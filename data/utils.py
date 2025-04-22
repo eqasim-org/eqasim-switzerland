@@ -1,10 +1,8 @@
 import numpy as np
 import pandas as pd
 
-import data.constants as c
 
-
-def fix_marital_status(df):
+def fix_marital_status(df, c):
     """ Makes young people, who are separated, be treated as single! """
     f = ((df["marital_status"] == c.MARITAL_STATUS_SEPARATE) & 
          (df["age"] < c.SEPARATE_SINGLE_THRESHOLD))
@@ -12,7 +10,7 @@ def fix_marital_status(df):
     df["marital_status"] = df["marital_status"].astype(np.int)
 
 
-def assign_household_class(df):
+def assign_household_class(df, census):
     """
         Combines all houeshold sizes above 5 into one class.
 
@@ -20,7 +18,16 @@ def assign_household_class(df):
         have a minimum size of 2. Technically, this doesn't need be true in reality, and
         I'm not sure if it has any implications later on. (TODO)
     """
-    df["household_size_class"] = np.minimum(5, df["household_size"]) - 1
+
+    if census == "statpop":
+        df["household_size_class"] = np.minimum(5, df["household_size"]) - 1
+
+    elif census == "are_synpop":
+        df["household_size_class"] = "5+"
+        df.loc[df["household_size"]==1, "household_size_class"] = "1"
+        df.loc[df["household_size"]==2, "household_size_class"] = "2"
+        df.loc[df["household_size"]==3, "household_size_class"] = "3-4"
+        df.loc[df["household_size"]==4, "household_size_class"] = "3-4"
 
 
 def read_csv(context, fp, fields, renames=None, sep=";", total=None, encoding="latin1", limit=None, label="Reading csv file..."):

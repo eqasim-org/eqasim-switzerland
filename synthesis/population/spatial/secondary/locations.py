@@ -2,9 +2,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely.geometry as geo
-import data.constants as c
-
-
 
 from synthesis.population.spatial.secondary.components import CustomDistanceSampler, CustomDiscretizationSolver
 from synthesis.population.spatial.secondary.problems import find_assignment_problems
@@ -13,6 +10,7 @@ from synthesis.population.spatial.secondary.rda import AssignmentSolver, Discret
 
 
 def configure(context):
+    context.stage("data.constants")
     context.stage("synthesis.population.trips")
 
     context.stage("synthesis.population.sampled")
@@ -35,6 +33,7 @@ def prepare_locations(context):
     df_locations = pd.merge(df_locations, df_work[["person_id", "work"]], how="left", on="person_id")
     df_locations = pd.merge(df_locations, df_education[["person_id", "education"]], how="left", on="person_id")
     return df_locations[["person_id", "home", "work", "education"]].sort_values(by="person_id")
+
 
 def prepare_destinations(context):
     df_destinations = context.stage("synthesis.population.destinations")
@@ -68,10 +67,13 @@ def resample_distributions(distributions, factors):
 
 
 def execute(context):
+    c    = context.stage("data.constants")
+    crs  = c.CH1903_PLUS
+
     # Load trips and primary locations
-    df_trips = context.stage("synthesis.population.trips").sort_values(by=["person_id", "trip_index"])
+    df_trips                = context.stage("synthesis.population.trips").sort_values(by=["person_id", "trip_index"])
     df_trips["travel_time"] = df_trips["arrival_time"] - df_trips["departure_time"]
-    df_primary = prepare_locations(context)
+    df_primary              = prepare_locations(context)
 
     # Prepare data
     distance_distributions = context.stage("synthesis.population.spatial.secondary.distance_distributions")
@@ -99,7 +101,8 @@ def execute(context):
         batches.append((
             df_trips[df_trips["person_id"].isin(unique_person_ids[index])],
             df_primary[df_primary["person_id"].isin(unique_person_ids[index])],
-            random_seeds[index]
+            random_seeds[index],
+            crs
         ))
 
     # Run algorithm in parallel
@@ -123,7 +126,7 @@ def execute(context):
 
 
 def process(context, arguments):
-    df_trips, df_primary, random_seed = arguments
+    df_trips, df_primary, random_seed, crs = arguments
 
     # Set up RNG
     rng = np.random.RandomState(random_seed)
@@ -185,7 +188,7 @@ def process(context, arguments):
 
     df_locations = pd.DataFrame.from_records(df_locations,
                                              columns=["person_id", "trip_index", "destination_id", "geometry"])
-    df_locations = gpd.GeoDataFrame(df_locations, crs=c.CH1903_PLUS)
+    df_locations = gpd.GeoDataFrame(df_locations, crs=crs)
 
     df_convergence = pd.DataFrame.from_records(df_convergence, columns=["valid", "size"])
     return df_locations, df_convergence

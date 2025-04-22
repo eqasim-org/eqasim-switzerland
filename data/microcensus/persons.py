@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-import data.constants as c
 import data.microcensus.income
 import data.utils
 
@@ -10,9 +9,12 @@ def configure(context):
     context.config("data_path")
     context.stage("data.microcensus.households")
     context.stage("data.microcensus.trips")
+    context.stage("data.constants")
+    context.config("census")
 
 def execute(context):
     data_path = context.config("data_path")
+    c         = context.stage("data.constants")
 
     df_mz_persons = pd.read_csv(
         "%s/microcensus/zielpersonen.csv" % data_path,
@@ -50,7 +52,7 @@ def execute(context):
     df_mz_persons["age_class"] = np.digitize(df_mz_persons["age"], c.AGE_CLASS_UPPER_BOUNDS)
 
     # Fix marital status
-    data.utils.fix_marital_status(df_mz_persons)
+    data.utils.fix_marital_status(df_mz_persons, c)
 
     # Day of the observation
     df_mz_persons["weekend"] = False
@@ -59,15 +61,15 @@ def execute(context):
 
     # Here we extract a bit more than Kirill, but most likely it will be useful later
 
-    df_mz_persons["subscriptions_ga"] = df_mz_persons["f41610a"] == 1
+    df_mz_persons["subscriptions_ga"]      = df_mz_persons["f41610a"] == 1
     df_mz_persons["subscriptions_halbtax"] = df_mz_persons["f41610b"] == 1
     df_mz_persons["subscriptions_verbund"] = df_mz_persons["f41610c"] == 1
     df_mz_persons["subscriptions_strecke"] = df_mz_persons["f41610d"] == 1
-    df_mz_persons["subscriptions_gleis7"] = df_mz_persons["f41610e"] == 1
-    df_mz_persons["subscriptions_junior"] = df_mz_persons["f41610f"] == 1
-    df_mz_persons["subscriptions_other"] = df_mz_persons["f41610g"] == 1
+    df_mz_persons["subscriptions_gleis7"]  = df_mz_persons["f41610e"] == 1
+    df_mz_persons["subscriptions_junior"]  = df_mz_persons["f41610f"] == 1
+    df_mz_persons["subscriptions_other"]   = df_mz_persons["f41610g"] == 1
 
-    df_mz_persons["subscriptions_ga_class"] = df_mz_persons["f41651"] == 1
+    df_mz_persons["subscriptions_ga_class"]      = df_mz_persons["f41651"] == 1
     df_mz_persons["subscriptions_verbund_class"] = df_mz_persons["f41653"] == 1
     df_mz_persons["subscriptions_strecke_class"] = df_mz_persons["f41654"] == 1
 
@@ -95,30 +97,76 @@ def execute(context):
     df_mz_persons["parking_cost_work"] = np.maximum(0, df_mz_persons["f41400"].astype(np.float))
     df_mz_persons["parking_cost_education"] = np.maximum(0, df_mz_persons["f41401"].astype(np.float))
 
-    # Wrap up
-    df_mz_persons = df_mz_persons[[
-        "person_id",
-        "age", "sex",
-        "marital_status",
-        "driving_license",
-        "car_availability",
-        "employed",
-        "highest_education",
-        "parking_work", "parking_cost_work",
-        "parking_education", "parking_cost_education",
-        "subscriptions_ga",
-        "subscriptions_halbtax",
-        "subscriptions_verbund",
-        "subscriptions_strecke",
-        "subscriptions_gleis7",
-        "subscriptions_junior",
-        "subscriptions_other",
-        "subscriptions_ga_class",
-        "subscriptions_verbund_class",
-        "subscriptions_strecke_class",
-        "age_class", "person_weight",
-        "weekend", "date"
-    ]]
+    # Modifications if we are using the Synthetic Population from ARE instead of statpop
+    if context.config("census")=="are_synpop":
+
+        # PT subscriptions
+        df_mz_persons["subscriptions"] = "null"
+        df_mz_persons.loc[df_mz_persons["subscriptions_ga"],            "subscriptions"] = "GA"
+        df_mz_persons.loc[df_mz_persons["subscriptions_ga_class"],      "subscriptions"] = "GA"
+        df_mz_persons.loc[df_mz_persons["subscriptions_halbtax"],       "subscriptions"] = "HTA"
+        df_mz_persons.loc[df_mz_persons["subscriptions_verbund"],       "subscriptions"] = "VA"
+        df_mz_persons.loc[df_mz_persons["subscriptions_verbund_class"], "subscriptions"] = "VA"
+        df_mz_persons.loc[(df_mz_persons["subscriptions_halbtax"]) & ((df_mz_persons["subscriptions_verbund"]) | (df_mz_persons["subscriptions_verbund_class"])), "subscriptions"] = "HTA+VA"
+
+        # Employment
+        df_mz_persons.loc[:, "employment_status"]                                                                   = "inactive"
+        df_mz_persons.loc[df_mz_persons["f40800_01"] == 5, "employment_status"]                                     = "working student"
+        df_mz_persons.loc[(df_mz_persons["f40800_01"] < 5) & (df_mz_persons["f40800_01"] > 0), "employment_status"] = "active"
+        df_mz_persons.loc[df_mz_persons["age"]<15, "employment_status"]                                             = "student"
+        df_mz_persons.loc[(df_mz_persons["f41001a"]==32) | (df_mz_persons["f41001b"]==32), "employment_status"]     = "student"
+        df_mz_persons.loc[(df_mz_persons["f41000a"]==32) | (df_mz_persons["f41000b"]==32), "employment_status"]     = "working student"
+
+        df_mz_persons = df_mz_persons[[
+                                "person_id",
+                                "age", "sex",
+                                "marital_status",
+                                "driving_license",
+                                "car_availability",
+                                "employment_status",
+                                "highest_education",
+                                "parking_work", "parking_cost_work",
+                                "parking_education", "parking_cost_education",
+                                "subscriptions_ga",
+                                "subscriptions_halbtax",
+                                "subscriptions_verbund",
+                                "subscriptions_strecke",
+                                "subscriptions_gleis7",
+                                "subscriptions_junior",
+                                "subscriptions_other",
+                                "subscriptions_ga_class",
+                                "subscriptions_verbund_class",
+                                "subscriptions_strecke_class",
+                                "age_class", "person_weight",
+                                "weekend", "date"
+                            ]]
+
+    elif context.config("census") == "statpop":    
+
+        # Wrap up
+        df_mz_persons = df_mz_persons[[
+            "person_id",
+            "age", "sex",
+            "marital_status",
+            "driving_license",
+            "car_availability",
+            "employed",
+            "highest_education",
+            "parking_work", "parking_cost_work",
+            "parking_education", "parking_cost_education",
+            "subscriptions_ga",
+            "subscriptions_halbtax",
+            "subscriptions_verbund",
+            "subscriptions_strecke",
+            "subscriptions_gleis7",
+            "subscriptions_junior",
+            "subscriptions_other",
+            "subscriptions_ga_class",
+            "subscriptions_verbund_class",
+            "subscriptions_strecke_class",
+            "age_class", "person_weight",
+            "weekend", "date"
+        ]]
 
     # Merge in the other data sets
     df_mz_households = context.stage("data.microcensus.households")

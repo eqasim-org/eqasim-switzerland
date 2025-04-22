@@ -1,16 +1,13 @@
 import numpy as np
 import pandas as pd
 
-import data.constants as c
 import data.spatial.cantons
-import data.spatial.municipalities
 import data.spatial.municipality_types
 import data.spatial.ovgk
 import data.spatial.utils
 import data.spatial.zones
 import data.statpop.density
 import data.statpop.head_of_household
-import data.utils
 import data.utils
 
 
@@ -25,12 +22,14 @@ def configure(context):
     context.stage("data.statpop.density")
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.ovgk")
+    context.stage("data.constants")
 
 
 def execute(context):
-    df_persons = context.stage("data.statpop.persons")
+    df_persons    = context.stage("data.statpop.persons")
     df_households = context.stage("data.statpop.households")
-    df_link = context.stage("data.statpop.link")
+    df_link       = context.stage("data.statpop.link")
+    c             = context.stage("data.constants")
 
     # Filter non-main residence
     df_persons = df_persons[df_persons["type_of_residence"] == 1]
@@ -75,8 +74,8 @@ def execute(context):
     del df["marital_status_new"]
 
     # Some adjustments from KM
-    data.utils.fix_marital_status(df)
-    data.utils.assign_household_class(df)
+    data.utils.fix_marital_status(df, c)
+    data.utils.assign_household_class(df, "statpop")
 
     # Turn sex and nationality into an actual 0-based class
     df["sex"] -= 1
@@ -137,6 +136,7 @@ def execute(context):
         context, 
         context.stage("data.statpop.density"), df, 
         "home_x", "home_y", 
+        radius = c.POPULATION_DENSITY_RADIUS,
         chunk_size=1e5,
         point_type="home")
 
@@ -170,6 +170,6 @@ def execute(context):
         "home_municipality_id", "home_quarter_id", "canton_id", "population_density", "sp_region", "ovgk",
         "statpop_person_id", "statpop_household_id"]+children_columns]
 
-    df = data.statpop.head_of_household.impute(df)
+    df = data.statpop.head_of_household.impute(df, c)
 
     return df
