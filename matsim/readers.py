@@ -7,7 +7,7 @@ from .writers import NetworkWriter
 import gzip
 from tqdm import tqdm
 import os
-
+import numpy as np
 
 """
 This script is designed to read MATSim network files. It also include a function that simplifies the network, 
@@ -81,6 +81,7 @@ class Network:
 
         # Only treat road network obtained from osm, don't touch pt links
         sel = self.links.link_id.apply(lambda x: "pt" not in x)
+        sel &= (self.links.modes.apply(lambda x: "car" in x))
         df = self.links[sel]
         df_rest = self.links[~sel]
 
@@ -97,13 +98,21 @@ class Network:
         stats["removed_link_duplicates"] = len_df-len(df)
         print("There are %d link duplicates in the network that are removed." % stats["removed_link_duplicates"] )
         
+        print("Remove unconnected links")
+        df, num_removed = self.remove_unconnected_links(df)
+        stats["removed_unconnected_links"] = num_removed
+        
         # Removing nodes with no intersection
         print("Removing nodes that do not represent an intersection.")
         df, stats2 = self.merge_link_chains(df)
         df = pd.concat([df,df_rest], ignore_index=True)
         self.links = df
         stats.update(stats2)
-
+        
+        print("Change the infinit freespeed to 85.")
+        # This is also done in : https://github.com/eqasim-org/eqasim-java/blob/develop/core/src/main/java/org/eqasim/core/scenario/preparation/AdjustLinkLength.java#L9
+        self.links.loc[self.links.freespeed.apply(np.isinf),"freespeed"] = 85
+        
         unique_nodes = pd.concat([df.from_node, df.to_node]).unique()
         self.nodes = self.nodes[self.nodes.node_id.isin(unique_nodes)].reset_index(drop=True)
 
@@ -113,6 +122,36 @@ class Network:
         
         return stats
     
+    @classmethod
+    def remove_unconnected_links(self, df):        
+        """
+        Removes links that are not part of the largest connected component of the road network.
+        
+        Parameters:
+            df (pd.DataFrame): DataFrame with road network links. Required columns:
+                               ['from_node', 'to_node', 'link_id']
+        
+        Returns:
+            pd.DataFrame: Filtered DataFrame with only the connected links.
+        """
+        
+        import networkx as nx #only if we use this function
+        
+        print("    Converting network to networkx ...")
+        G = nx.Graph()    
+        G.add_edges_from(zip(df['from_node'], 
+                             df['to_node'], 
+                            ({'idx': idx, 'link_id': lid} for idx, lid in zip(df.index, df['link_id']))))
+    
+        # Get the largest connected component
+        largest_cc = max(nx.connected_components(G), key=len)
+    
+        # Keep only edges where both nodes are in the largest component
+        connected_links = df[df['from_node'].isin(largest_cc) & df['to_node'].isin(largest_cc)]
+    
+        return connected_links.reset_index(drop=True), len(df)-len(connected_links)
+    
+
     @classmethod
     def merge_link_chains(self, df):
         import networkx as nx #only if we use this function
@@ -266,7 +305,7 @@ class Network:
                              self.links['permlanes'],
                              self.links['oneway'],
                              self.links['modes'],
-                             self.links['attributes'],
+                             self.links['attributes'] if "attributes" in self.links else None,
                              write_attrbs = write_attrbs)
             writer.end_network()
 

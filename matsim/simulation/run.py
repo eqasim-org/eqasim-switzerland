@@ -37,7 +37,7 @@ def execute(context):
             "--config:controler.lastIteration", str(last_iteration),
             "--config:controler.writeEventsInterval", str(last_iteration),
             "--config:controler.writePlansInterval", str(last_iteration),
-            "--config:qsim.numberOfThreads", str(min(context.config("threads"),8)),
+            "--config:qsim.numberOfThreads", str(min(context.config("threads"),12)),
             "--config:linkStats.writeLinkStatsInterval", str(last_iteration),
             "--config:linkStats.averageLinkStatsOverIterations", str(1)          
         ])
