@@ -96,7 +96,7 @@ class FreightWriter:
 
     def write(self, writer):
         writer.start_person("freight_" + str(self.freight_agent[1]))
-        print("freight_" + str(self.freight_agent[1]))
+        # print("freight_" + str(self.freight_agent[1]))
         # Attributes
         writer.start_attributes()
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
