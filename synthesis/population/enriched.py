@@ -12,19 +12,15 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.constants")
 
-    context.config("census")
-
-
 def execute(context):
     df_matched, unmatched_ids = context.stage("synthesis.population.matched")
     df_sampled                = context.stage("synthesis.population.sampled")
     df_mz                     = context.stage("data.microcensus.persons")
     c                         = context.stage("data.constants")
-    census                    = context.config("census")
 
     assert (len(df_matched) == len(df_sampled) - len(unmatched_ids))
 
-    if census == "statpop":
+    if c.census == "statpop":
 
         # Attach matching information
         df_persons = pd.merge(df_sampled, df_matched, on=["person_id", "household_id"])
@@ -38,7 +34,8 @@ def execute(context):
         # Attach person attributes
         df_mz["mz_person_id"] = df_mz[["person_id"]]
         df_persons = pd.merge(df_persons,
-                            df_mz[["mz_person_id", "driving_license", "car_availability", "employed",
+                            df_mz[["mz_person_id", "driving_license",
+                                    "car_availability", "employed",
                                     "subscriptions_ga",
                                     "subscriptions_halbtax",
                                     "subscriptions_verbund",
@@ -55,9 +52,9 @@ def execute(context):
 
         # Reset children
         children_selector = df_persons["age"] < c.MZ_AGE_THRESHOLD
-        df_persons.loc[children_selector, "driving_license"] = False
-        df_persons.loc[children_selector, "employed"] = False
-        df_persons.loc[children_selector, "marital_status"] = c.MARITAL_STATUS_SINGLE
+        df_persons.loc[children_selector, "driving_license"]  = False
+        df_persons.loc[children_selector, "employed"]         = False
+        df_persons.loc[children_selector, "marital_status"]   = c.MARITAL_STATUS_SINGLE
         df_persons.loc[children_selector, "car_availability"] = c.CAR_AVAILABILITY_NEVER
 
         # Make sure we have now NaNs included (commented out, because home_quater_id MAY be NaN deliberately)
@@ -77,7 +74,7 @@ def execute(context):
         print("Fixing this to ensure consistency of the results.")
         df_persons.loc[df_persons["age"]<18, "driving_license"] = False
 
-    elif census == "are_synpop":
+    elif c.census == "are_synpop":
 
         # Attach matching information
         df_persons = pd.merge(df_sampled, df_matched, on=["person_id"])
@@ -85,7 +82,8 @@ def execute(context):
         # Attach person attributes
         df_mz["mz_person_id"] = df_mz[["person_id"]]
         df_persons = pd.merge(df_persons,
-                            df_mz[["mz_person_id", "car_availability", "employment_status",
+                            df_mz[["mz_person_id", "car_availability", 
+                                   "employment_status",
                                     "subscriptions_ga",
                                     "subscriptions_halbtax",
                                     "subscriptions_verbund",
@@ -104,7 +102,6 @@ def execute(context):
         children_selector = df_persons["age_class"] == 0
         df_persons.loc[children_selector, "driving_license"] = False
         df_persons.loc[children_selector, "employment_status"] = "student"
-        #df_persons.loc[children_selector, "marital_status"] = c.MARITAL_STATUS_SINGLE
         df_persons.loc[children_selector, "car_availability"] = c.CAR_AVAILABILITY_NEVER
 
         # Make sure we have now NaNs included (commented out, because home_quater_id MAY be NaN deliberately)

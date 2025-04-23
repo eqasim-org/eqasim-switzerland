@@ -5,35 +5,41 @@ import pyproj
 
 class Constants:
     def __init__(self, census = "statpop"):
-        self.CH1903 = "epsg:21781"
-        self.LV05 = self.CH1903
+        self.CH1903      = "epsg:21781"
+        self.LV05        = self.CH1903
         self.CH1903_PLUS = "epsg:2056"
-        self.LV95 = self.CH1903_PLUS
-        self.WGS84 = "epsg:4326"
+        self.LV95        = self.CH1903_PLUS
+        self.WGS84       = "epsg:4326"
 
-        self.MAXIMUM_HOUSEHOLD_SIZE = 12
+        self.MAXIMUM_HOUSEHOLD_SIZE    = 12
         self.MINIMUM_AGE_PER_HOUSEHOLD = 16
-        self.ACTIVE_AGE = 60
+        self.ACTIVE_AGE                = 60
 
-        self.MARITAL_STATUS_SINGLE = 0
-        self.MARITAL_STATUS_MARRIED = 1
+        self.MARITAL_STATUS_SINGLE   = 0
+        self.MARITAL_STATUS_MARRIED  = 1
         self.MARITAL_STATUS_SEPARATE = 2
 
         self.SEPARATE_SINGLE_THRESHOLD = 45
 
-        if census == "statpop":
-            self.AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 30, 45, 65, 80]
-        elif census == "are_synpop":
-            self.AGE_CLASS_UPPER_BOUNDS = [6, 18, 25, 45, 65, 75]
+        self.census = census
 
-        self.CAR_AVAILABILITY_ALWAYS = 0
+        if self.census == "statpop":
+            self.AGE_CLASS_UPPER_BOUNDS      = [6, 15, 18, 24, 30, 45, 65, 80]
+
+        elif self.census == "are_synpop":
+            self.AGE_CLASS_UPPER_BOUNDS      = [6, 18, 25, 45, 65, 75]
+
+        else:
+            raise RuntimeError(f"Unknown census type: {census}")
+
+        self.CAR_AVAILABILITY_ALWAYS    = 0
         self.CAR_AVAILABILITY_SOMETIMES = 1
-        self.CAR_AVAILABILITY_NEVER = 2
+        self.CAR_AVAILABILITY_NEVER     = 2
 
-        self.SEX_MALE = 0
+        self.SEX_MALE   = 0
         self.SEX_FEMALE = 1
 
-        self.BIKE_AVAILABILITY_FOR_ALL = 2
+        self.BIKE_AVAILABILITY_FOR_ALL  = 2
         self.BIKE_AVAILABILITY_FOR_SOME = 1
         self.BIKE_AVAILABILITY_FOR_NONE = 0
 
@@ -47,7 +53,7 @@ class Constants:
 
         self.BASE_SCALING_YEAR = 2015
         self.BASE_PROJECTED_YEAR = 2018
-
+        
 
 def configure(context):
     context.config("census")

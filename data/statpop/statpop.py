@@ -51,7 +51,7 @@ def execute(context):
     # Only allow plausible households
     df = df[df["plausible"] == 1]
 
-    # Only allow houesholds under a certian size
+    # Only allow houesholds under a certain size
     df = df[df["household_size"] <= c.MAXIMUM_HOUSEHOLD_SIZE]
 
     # Remove all households where ALL persons are under a certain age
@@ -75,7 +75,7 @@ def execute(context):
 
     # Some adjustments from KM
     data.utils.fix_marital_status(df, c)
-    data.utils.assign_household_class(df, "statpop")
+    data.utils.assign_household_class(df, c)
 
     # Turn sex and nationality into an actual 0-based class
     df["sex"] -= 1

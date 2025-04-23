@@ -15,7 +15,6 @@ def configure(context):
     context.config("random_seed")
     context.config("matching_minimum_observations", 20)
     context.config("weekend_scenario", False)
-    context.config("census", "statpop")
 
     context.stage("data.microcensus.persons")
     context.stage("synthesis.population.sampled")
@@ -303,7 +302,6 @@ def execute(context):
     df_mz               = context.stage("data.microcensus.persons")
     c                   = context.stage("data.constants")
     is_weekend_scenario = context.config("weekend_scenario")
-    census              = context.config("census")
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
     df_source = pd.DataFrame(df_mz[
@@ -316,7 +314,7 @@ def execute(context):
     df_source     = df_source.rename(columns={"person_id": "mz_id"})
     df_population = context.stage("synthesis.population.sampled")
 
-    if census == "statpop":
+    if c.census == "statpop":
 
         ## We first want to match by household to be able
         ## to add extra attributes to the persons
@@ -392,7 +390,7 @@ def execute(context):
             df_target[["person_id", "mz_id"]],
             on="person_id", how="left")
     
-    elif census == "are_synpop":
+    elif c.census == "are_synpop":
         number_of_population_persons    = len(np.unique(df_population["person_id"]))
 
         population_selector = df_population["age_class"] > 0
@@ -421,7 +419,7 @@ def execute(context):
     assert (len(df_matching) == len(df_population))
 
     # Check that all person who don't have a MZ id now are under age
-    if census == "statpop":
+    if c.census == "statpop":
         assert (np.all(df_population[
                     df_population["person_id"].isin(
                         df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
@@ -431,7 +429,7 @@ def execute(context):
     
         assert (not np.any(df_matching["mz_head_id"] == -1))
 
-    elif census == "are_synpop":
+    elif c.census == "are_synpop":
         assert (np.all(df_population[
                     df_population["person_id"].isin(
                         df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
@@ -440,7 +438,7 @@ def execute(context):
 
     print("Matching is done. In total, the following observations were removed from the census: ")
 
-    if census == "statpop":
+    if c.census == "statpop":
         removed_household_ids = removed_ids_list[1]
         print("  Households: %d (%.2f%%)" % ( len(removed_household_ids), 100.0 * len(removed_household_ids) / number_of_population_households))
 

@@ -16,7 +16,6 @@ import data.utils
 def configure(context):
     context.config("data_path")
     context.config("output_path")
-    context.config("census", "statpop")
 
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.zones")
@@ -29,7 +28,6 @@ def configure(context):
 def execute(context):
     data_path = context.config("data_path")
     c         = context.stage("data.constants")
-    census    = context.config("census")
 
     df_mz_households = pd.read_csv(
         "%s/microcensus/haushalte.csv" % data_path, sep=",", encoding="latin1")
@@ -67,7 +65,7 @@ def execute(context):
         "number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_ALL
 
     # Household size class
-    data.utils.assign_household_class(df_mz_households, census=census)
+    data.utils.assign_household_class(df_mz_households, c)
 
     # Region information
     # (acc. to Analyse der SP-Befragung 2015 zur Verkehrsmodus- und Routenwahl)

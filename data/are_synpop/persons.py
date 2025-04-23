@@ -25,8 +25,8 @@ def execute(context):
     synpop_path = "%s/SynpopAre/data/2754_SynPop2022_Data_v1.0.zip" % data_path
     df   = pd.read_csv(synpop_path, sep = ";")
 
-    df.loc[df["sex"]=="F", "sex"] = 1
-    df.loc[df["sex"]=="M", "sex"] = 0
+    df.loc[df["sex"]=="F", "sex"] = c.SEX_FEMALE
+    df.loc[df["sex"]=="M", "sex"] = c.SEX_MALE
 
     df.loc[df["nation"]=="swiss", "nationality"]     = 0
     df.loc[df["nation"]=="non-swiss", "nationality"] = 1
@@ -36,12 +36,10 @@ def execute(context):
 
     df["age_class"] = df["age"]
 
-    df["child_in_household"] = df["child_in_household"].astype(int)
-    df["driving_license"]    = df["driving_licence"].astype(int)
-
+    df["child_in_household"]   = df["child_in_household"].astype(int)
+    df["driving_license"]      = df["driving_licence"].astype(int)
     df["household_size_class"] = df["household_size"]
-
-    df["N_children_under_18"] = df["child_in_household"]
+    df["N_children_under_18"]  = df["child_in_household"]
 
     del df["nation"]
     del df["xcoord"]
@@ -54,7 +52,7 @@ def execute(context):
 
     # Identifying children under the age of 6 from the education variables
     df.loc[(df["age_class"]=="0-17") & (df["education"]=="primary") & (df["position_in_edu"].isna()) & (df["position_in_bus"].isna()), "age_class"] = "0-5"
-    df.loc[df["age_class"]=="0-17", "age_class"]                                                                                                    = "6-17"
+    df.loc[ df["age_class"]=="0-17", "age_class"]                                                                                                    = "6-17"
 
     # Age class to int
     df["age_class"] = df["age_class"].replace({"0-5":0, "6-17":1, "18-24": 2, "25-44":3, "45-64":4, "65-74":5, "75+":6})

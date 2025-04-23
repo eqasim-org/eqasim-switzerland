@@ -2,14 +2,14 @@ import numpy as np
 from sklearn.neighbors import KDTree
 
 import data.spatial.utils as spatial_utils
-
+import data.utils
 
 def configure(context):
     context.stage("data.statent.statent")
     context.stage("synthesis.population.enriched")
-    
+    context.stage("data.constants")
     context.config("random_seed")
-    context.config("census")
+
 
 
 # TODO: We only assign work here through OD matrices. However, we *can* generate
@@ -20,42 +20,12 @@ def configure(context):
 
 def execute(context):
     df_persons = context.stage("synthesis.population.enriched")
-
     df_statent = context.stage("data.statent.statent")
+    c          = context.stage("data.constants")
+    
     df_statent = df_statent[~df_statent["education_type"].isna()]
 
-    filters_persons   = []
-    filters_locations = [] 
-
-    if context.config("census") == "statpop":
-
-        age_bounds      = [(-np.inf, 6), (6, 12), (12, 16), (16, np.inf)]
-        education_types = ["kindergarten", "primary", "secondary", "tertiary"]
-        query_sizes     = (1, 1, 5, 10)
-
-        for (lower_bound, upper_bound), type, query_size in zip(age_bounds, education_types, query_sizes):
-            filter_persons  = (df_persons["age"] > lower_bound) & (df_persons["age"] <= upper_bound)
-            filter_location = df_statent["education_type"] == type
-
-            filters_persons.append(filter_persons)
-            filters_locations.append(filter_location)
-
-
-    elif context.config("census") == "are_synpop":
-
-        query_sizes     = (1, 3, 10)
-        education_types = ["kindergarten", "primary and secondary", "tertiary"]
-
-        f_under_6  = df_persons["age_class"] == 0
-        f_6_17     = df_persons["age_class"] == 1
-        f_above_18 = df_persons["age_class"] >= 2
-
-        f_kindergarden      = df_statent["education_type"] == "kindergarten"
-        f_primary_secondary = (df_statent["education_type"] == "primary") | (df_statent["education_type"] == "secondary")
-        f_tertiary          = df_statent["education_type"] == "tertiary"
-
-        filters_persons = [f_under_6, f_6_17, f_above_18]
-        filters_locations = [f_kindergarden, f_primary_secondary, f_tertiary]
+    filters_persons, filters_locations, education_types, query_sizes = data.utils.prepare_education_locations(df_persons, df_statent, c)
     
     # Set up RNG
     rng = np.random.RandomState(context.config("random_seed"))
