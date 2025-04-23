@@ -35,26 +35,26 @@ class PersonWriter:
         self.vehicles = vehicles
 
     def write(self, writer):
-        writer.start_person(str(self.person[1]))
+        writer.start_person(str(self.person[0]))
 
         # Attributes
         writer.start_attributes()
-        writer.add_attribute("age", "java.lang.Integer", str(self.person[2]))
-        writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(self.person[4]))
-        writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(self.person[5]))
-        writer.add_attribute("sex", "java.lang.String", ["m", "f"][self.person[6]])
-        writer.add_attribute("home_coordiante_x", "java.lang.Double", str(self.person[7]))
-        writer.add_attribute("home_coordiante_y", "java.lang.Double", str(self.person[8]))
-        writer.add_attribute("carAvail", "java.lang.String", ["always", "sometimes", "never"][int(self.person[3])])
-        writer.add_attribute("ptHasGA", "java.lang.Boolean", writer.true_false(self.person[9]))
-        writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[10]))
-        writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[11]))
-        writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[12]))
-        writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(self.person[14]))
-        writer.add_attribute("statpopPersonId", "java.lang.Long", str(self.person[15]))
-        writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[16]))
-        writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[17]))
-        writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[18]))
+        writer.add_attribute("age", "java.lang.Integer", str(self.person[1]))
+        writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(self.person[3]))
+        writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(self.person[4]))
+        writer.add_attribute("sex", "java.lang.String", ["m", "f"][self.person[5]])
+        writer.add_attribute("home_coordiante_x", "java.lang.Double", str(self.person[6]))
+        writer.add_attribute("home_coordiante_y", "java.lang.Double", str(self.person[7]))
+        writer.add_attribute("carAvail", "java.lang.String", ["always", "sometimes", "never"][int(self.person[2])])
+        writer.add_attribute("ptHasGA", "java.lang.Boolean", writer.true_false(self.person[8]))
+        writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[9]))
+        writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[10]))
+        writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[11]))
+        writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(self.person[13]))
+        writer.add_attribute("statpopPersonId", "java.lang.Long", str(self.person[14]))
+        writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[15]))
+        writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[16]))
+        writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[17]))
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
         writer.add_attribute("vehicles", "org.matsim.vehicles.PersonVehicles", "{{{content}}}".format(content = ",".join([
                 "\"{mode}\":\"{id}\"".format(mode = v[VEHICLE_FIELDS.index("mode")], id = v[VEHICLE_FIELDS.index("vehicle_id")])
@@ -65,23 +65,22 @@ class PersonWriter:
         # Plan
         writer.start_plan(selected=True)
 
-        home_location = writer.location(self.activities[0][8].x, self.activities[0][8].y, "home%s" % self.person[13])
+        home_location = writer.location(self.activities[0][7].x, self.activities[0][7].y, "home%s" % self.person[12])
 
         for i in range(len(self.activities)):
             activity = self.activities[i]
-            geometry = activity[8]
-            destination_id = activity[9]
+            geometry = activity[7]
+            destination_id = activity[8]
             location = home_location if destination_id == -1 else writer.location(geometry.x, geometry.y,
                                                                                   int(destination_id))
 
-            start_time = activity[3] if not np.isnan(activity[3]) else None
-            end_time = activity[4] if not np.isnan(activity[4]) else None
+            start_time = activity[2] if not np.isnan(activity[2]) else None
+            end_time = activity[3] if not np.isnan(activity[3]) else None
+            writer.add_activity(activity[5], location, start_time, end_time)
 
-            writer.add_activity(activity[6], location, start_time, end_time)
-
-            if not activity[7]:
+            if not activity[6]:
                 next_activity = self.activities[i + 1]
-                writer.add_leg(activity[10], activity[4], next_activity[3] - activity[4])
+                writer.add_leg(activity[9], activity[3], next_activity[2] - activity[3])
 
         writer.end_plan()
         writer.end_person()
@@ -97,7 +96,7 @@ class FreightWriter:
 
     def write(self, writer):
         writer.start_person("freight_" + str(self.freight_agent[1]))
-
+        print("freight_" + str(self.freight_agent[1]))
         # Attributes
         writer.start_attributes()
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
@@ -165,14 +164,14 @@ def execute(context):
     df_persons = df_persons.sort_values(by="person_id")
     df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
     df_vehicles = df_vehicles.sort_values(by=["owner_id"])
-
+    
     df_persons = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
     df_vehicles = df_vehicles[VEHICLE_FIELDS]
-
-    person_iterator = iter(df_persons.itertuples())
-    activity_iterator = iter(df_activities.itertuples())
-    vehicle_iterator = backlog_iterator(iter(df_vehicles[VEHICLE_FIELDS].itertuples(index = False)))
+    
+    person_iterator = iter(df_persons.itertuples(index = False))
+    activity_iterator = iter(df_activities.itertuples(index = False))
+    vehicle_iterator = backlog_iterator(iter(df_vehicles.itertuples(index = False)))
 
     number_of_written_persons = 0
     number_of_written_activities = 0
@@ -193,8 +192,9 @@ def execute(context):
                         vehicles = []
                         while not is_last:
                             activity = next(activity_iterator)
-                            is_last = activity[7]
-                            assert (person[1] == activity[1])
+
+                            is_last = activity[6]
+                            assert (person[0] == activity[0])
 
                             person_writer.add_activity(activity)
                             number_of_written_activities += 1
@@ -237,13 +237,13 @@ def execute(context):
                             owner_id = freight[1]
                             while vehicle_iterator.has_next():
                                 vehicle = vehicle_iterator.next()
-
                                 if not vehicle[VEHICLE_FIELDS.index("owner_id")] == owner_id:
                                     vehicle_iterator.previous()
                                     break
                                 else:
                                     vehicles.append(vehicle)
                             freight_writer.add_vehicles(vehicles)
+                            freight_writer.write(writer)
                             number_of_written_freight += 1
                             progress.update()
                     except StopIteration:
