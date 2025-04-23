@@ -1,11 +1,12 @@
 import gzip
 import io
+import itertools
 
 import numpy as np
 import pandas as pd
 
 import matsim.writers
-
+from matsim.writers import backlog_iterator
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -171,11 +172,12 @@ def execute(context):
 
     person_iterator = iter(df_persons.itertuples())
     activity_iterator = iter(df_activities.itertuples())
+    vehicle_iterator = backlog_iterator(iter(df_vehicles[VEHICLE_FIELDS].itertuples(index = False)))
 
     number_of_written_persons = 0
     number_of_written_activities = 0
 
-    with gzip.open("%s/population.xml.gz" % cache_path, "w+") as f:
+    with gzip.open("%s/population.xml.gz" % cache_path, "wb+", compresslevel=1) as f:
         with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:
             writer = matsim.writers.PopulationWriter(raw_writer)
             writer.start_population()
@@ -184,10 +186,11 @@ def execute(context):
                 try:
                     while True:
                         person = next(person_iterator)
+                        person_id = person[PERSON_FIELDS.index("person_id")]
                         is_last = False
 
                         person_writer = PersonWriter(person)
-
+                        vehicles = []
                         while not is_last:
                             activity = next(activity_iterator)
                             is_last = activity[7]
@@ -195,9 +198,16 @@ def execute(context):
 
                             person_writer.add_activity(activity)
                             number_of_written_activities += 1
-                        owner_id = person[1]
-                        person_writer.add_vehicles(df_vehicles[df_vehicles["owner_id"] == owner_id][["mode", "vehicle_id"]].values.tolist())
+                        # Track all vehicles for person
+                        while vehicle_iterator.has_next():
+                            vehicle = vehicle_iterator.next()
 
+                            if not vehicle[VEHICLE_FIELDS.index("owner_id")] == person_id:
+                                vehicle_iterator.previous()
+                                break
+                            else:
+                                vehicles.append(vehicle)
+                       
                         person_writer.write(writer)
                         number_of_written_persons += 1
                         progress.update()
@@ -209,6 +219,11 @@ def execute(context):
 
             if context.config("use_freight"):
                 df_freight = context.stage("synthesis.freight.trips")
+                df_vehicles = context.stage("synthesis.vehicles.vehicles")[2]
+                df_vehicles = df_vehicles.sort_values(by=["owner_id"])
+                
+                df_vehicles = df_vehicles[VEHICLE_FIELDS]
+                vehicle_iterator = backlog_iterator(iter(df_vehicles[VEHICLE_FIELDS].itertuples(index = False)))
 
                 freight_iterator = iter(df_freight.itertuples())
                 number_of_written_freight = 0
@@ -216,11 +231,18 @@ def execute(context):
                 with context.progress(total=len(df_freight), label="Writing freight agents ...") as progress:
                     try:
                         while True:
+                            vehicles = []
                             freight = next(freight_iterator)
                             freight_writer = FreightWriter(freight)
                             owner_id = freight[1]
-                            freight_writer.add_vehicles(df_vehicles[df_vehicles["owner_id"] == owner_id][["mode", "vehicle_id"]].values.tolist())
-                            freight_writer.write(writer)
+                            while vehicle_iterator.has_next():
+                                vehicle = vehicle_iterator.next()
+
+                                if not vehicle[VEHICLE_FIELDS.index("owner_id")] == person_id:
+                                    vehicle_iterator.previous()
+                                    break
+                                else:
+                                    vehicles.append(vehicle)
                             number_of_written_freight += 1
                             progress.update()
                     except StopIteration:
