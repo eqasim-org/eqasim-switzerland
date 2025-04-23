@@ -207,7 +207,7 @@ def execute(context):
                                 break
                             else:
                                 vehicles.append(vehicle)
-                       
+                        person_writer.add_vehicles(vehicles)
                         person_writer.write(writer)
                         number_of_written_persons += 1
                         progress.update()
@@ -238,11 +238,12 @@ def execute(context):
                             while vehicle_iterator.has_next():
                                 vehicle = vehicle_iterator.next()
 
-                                if not vehicle[VEHICLE_FIELDS.index("owner_id")] == person_id:
+                                if not vehicle[VEHICLE_FIELDS.index("owner_id")] == owner_id:
                                     vehicle_iterator.previous()
                                     break
                                 else:
                                     vehicles.append(vehicle)
+                            freight_writer.add_vehicles(vehicles)
                             number_of_written_freight += 1
                             progress.update()
                     except StopIteration:
