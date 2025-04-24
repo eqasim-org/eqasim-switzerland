@@ -8,3 +8,4 @@ config*.yml
 !config_docker.yml
 logs
 run*.sh
+analysis
