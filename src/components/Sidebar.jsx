@@ -7,16 +7,13 @@ import modesByCanton from "../utils/modes_by_canton.json";
 // Sidebar Modules / Graphs
 import AverageDist from "./AverageDist";
 import ActivityDist from "./ActivityDist";
-import ActivityDurationDist from "./ActivityDurationDist";
 import Histogram from "./Histogram";
 import StackedBarPlot from "./StackedBarPlot";
 import CantonModeShareTable from "./CantonModeShareTable";
 import CarAvailability from "./CarAvailabilityDist";
 import ChoroplethControls from "./ChoroplethControls";
 import DepatureTimes from "./DepartureTimes";
-import FrequentSequence from "./FrequentSequenceDist";
 import ModeShareLinePlot from "./ModeShareLinePlot";
-import OutOfHome from "./OutOfHomeDist";
 import PtSubscription from "./PtSubscriptionDist";
 import SegmentAttributesTable from "./SegmentAttributesTable";
 import SegmentVolumeHistogram from "./SegmentVolumeHistogram";
@@ -125,11 +122,8 @@ const Sidebar = ({canton, isOpen, toggleSidebar, onExpandGraph, setCanton, reset
             <option value="Graph 3">Stacked Bar Plot</option>
             <option value="Graph 4">Line Plot</option>
             <option value="Graph 5">Activity Distribution</option>
-            <option value="Graph 6">Frequent Activity Sequences</option>
-            <option value="Graph 7">Out of Home Activities</option>
             <option value="Graph 8">Public Transport Subscriptions</option>
             <option value="Graph 9">Car Availability Class</option>
-            <option value="Graph 10">Activity Durations</option>
             <option value="Graph 11">Departure Times</option>
             </select>
             </div>

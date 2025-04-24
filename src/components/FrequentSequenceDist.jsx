@@ -52,7 +52,11 @@ const FrequentSequence = ({ canton, onClose }) => {
             y: act_sequence.map((sequence) => (data["Synthetic"][sequence])),
             name: "Synthetic",
             marker: { color: DATASET_COLORS.Synthetic },
-            text: act_sequence.map((sequence) => (data["Synthetic"][sequence]).toFixed(2)),
+            text: act_sequence.map((sequence) => {
+              const val = data?.["Synthetic"]?.[sequence];
+              return typeof val === "number" ? val.toFixed(2) : "";
+            }),
+            
             textposition: "auto",
           },
         ]}

@@ -1,8 +1,5 @@
 import React, { useEffect, useState } from "react";
 import Plot from "react-plotly.js";
-import FrequentSequence from "./FrequentSequenceDist";
-import ActivityDurationDist from "./ActivityDurationDist";
-import OutOfHome from "./OutOfHomeDist";
 
 const DATASET_COLORS = {
   Microcensus: "#4A90E2",
@@ -79,9 +76,7 @@ const ActivityDist = ({ canton, onClose }) => {
             plot_bgcolor: "rgba(255,255,255,0)",
         }}
       />
-    <FrequentSequence canton={canton} onClose={onClose}> </FrequentSequence>
-    <OutOfHome canton={canton} onClose={onClose}> </OutOfHome>
-    <ActivityDurationDist canton={canton} onClose={onClose}> </ActivityDurationDist>
+
     </div>
   );
 };
