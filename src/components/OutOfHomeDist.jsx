@@ -43,7 +43,10 @@ const OutOfHome = ({ canton, onClose }) => {
             y: ooh_sequence.map((act) => (data["Microcensus"][act])),
             name: "Microcensus",
             marker: { color: DATASET_COLORS.Microcensus },
-            text: ooh_sequence.map((act) => (data["Microcensus"][act]).toFixed(2)),
+            text: ooh_sequence.map((sequence) => {
+              const val = data?.["Microcensus"]?.[sequence];
+              return typeof val === "number" ? val.toFixed(2) : "";
+            }),
             textposition: "auto",
           },
           {
@@ -52,7 +55,10 @@ const OutOfHome = ({ canton, onClose }) => {
             y: ooh_sequence.map((act) => (data["Synthetic"][act])),
             name: "Synthetic",
             marker: { color: DATASET_COLORS.Synthetic },
-            text: ooh_sequence.map((act) => (data["Synthetic"][act]).toFixed(2)),
+            text: ooh_sequence.map((sequence) => {
+              const val = data?.["Synthetic"]?.[sequence];
+              return typeof val === "number" ? val.toFixed(2) : "";
+            }),
             textposition: "auto",
           },
         ]}

@@ -46,7 +46,10 @@ const ActivityDist = ({ canton, onClose }) => {
             y: num_activities.map((count) => (data["Microcensus"][count])),
             name: "Microcensus",
             marker: { color: DATASET_COLORS.Microcensus },
-            text: num_activities.map((count) => (data["Microcensus"][count]).toFixed(2)),
+            text: num_activities.map((sequence) => {
+              const val = data?.["Microcensus"]?.[sequence];
+              return typeof val === "number" ? val.toFixed(2) : "";
+            }),
             textposition: "auto",
           },
           {
@@ -55,7 +58,10 @@ const ActivityDist = ({ canton, onClose }) => {
             y: num_activities.map((count) => (data["Synthetic"][count])),
             name: "Synthetic",
             marker: { color: DATASET_COLORS.Synthetic },
-            text: num_activities.map((count) => (data["Synthetic"][count]).toFixed(2)),
+            text: num_activities.map((sequence) => {
+                const val = data?.["Synthetic"]?.[sequence];
+                return typeof val === "number" ? val.toFixed(2) : "";
+            }),
             textposition: "auto",
           },
         ]}
