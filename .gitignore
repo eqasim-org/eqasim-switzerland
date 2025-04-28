@@ -7,3 +7,6 @@ config*.yml
 !config_gitlab.yml
 !config_docker.yml
 slurm*
+*.out
+*.sh
+!docker_run.sh

@@ -28,8 +28,8 @@ def execute(context):
         eqasim.run(context, "org.eqasim.switzerland.RunSimulation", [
             "--config-path", config_path,
             "--config:controler.lastIteration", str(60),
-            "--config:controler.writeEventsInterval", str(60),
-            "--config:controler.writePlansInterval", str(60),
+            "--config:controler.writeEventsInterval", str(10),
+            "--config:controler.writePlansInterval", str(10),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
     else:

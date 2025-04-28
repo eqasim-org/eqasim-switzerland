@@ -2,14 +2,13 @@ import numpy as np
 import pandas as pd
 import pyproj
 
-import data.constants as c
-
-
 def configure(context):
     context.config("data_path")
+    context.stage("data.constants")
 
 def execute(context):
     data_path = context.config("data_path")
+    c         = context.stage("data.constants")
 
     df_mz_trips = pd.read_csv("%s/microcensus/wege.csv" % data_path, encoding = "latin1")
     df_mz_stages = pd.read_csv("%s/microcensus/etappen.csv" % data_path, encoding = "latin1")
@@ -26,26 +25,26 @@ def execute(context):
 
     # First, adjust the modes
     df_mz_trips.loc[df_mz_trips["wmittel"] == -99, "mode"] = "unknown" # Pseudo stage
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 1, "mode"] = "pt" # Plane
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 2, "mode"] = "pt" # Train
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 3, "mode"] = "pt" # Postauto
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 4, "mode"] = "pt" # Ship
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 5, "mode"] = "pt" # Tram
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 6, "mode"] = "pt" # Bus
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 7, "mode"] = "pt" # other PT
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 8, "mode"] = "pt" # Reisecar -> I think this is a coach in Swiss German?
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 9, "mode"] = "car" # Car
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 10, "mode"] = "car" # Truck
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 11, "mode"] = "pt" # Taxi
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 12, "mode"] = "car" # Motorbike
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 13, "mode"] = "car" # Mofa
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 14, "mode"] = "bike" # Biciycle / E-bike
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 15, "mode"] = "walk" # Walking
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 16, "mode"] = "bike" # "Machines similar to a vehicle"
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 17, "mode"] = "unknown" # Other / don't know
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 1, "mode"]   = "pt"      # Plane
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 2, "mode"]   = "pt"      # Train
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 3, "mode"]   = "pt"      # Postauto
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 4, "mode"]   = "pt"      # Ship
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 5, "mode"]   = "pt"      # Tram
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 6, "mode"]   = "pt"      # Bus
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 7, "mode"]   = "pt"      # other PT
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 8, "mode"]   = "pt"      # Reisecar -> I think this is a coach in Swiss German?
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 9, "mode"]   = "car"     # Car
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 10, "mode"]  = "car"     # Truck
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 11, "mode"]  = "pt"      # Taxi
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 12, "mode"]  = "car"     # Motorbike
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 13, "mode"]  = "car"     # Mofa
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 14, "mode"]  = "bike"    # Biciycle / E-bike
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 15, "mode"]  = "walk"    # Walking
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 16, "mode"]  = "bike"    # "Machines similar to a vehicle"
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 17, "mode"]  = "unknown" # Other / don't know
 
     df_mz_trips["mode_detailed"] = df_mz_trips["mode"]
-    df_mz_trips.loc[df_mz_trips["wmittel"] == 1, "mode_detailed"] = "plane"
+    df_mz_trips.loc[df_mz_trips["wmittel"] == 1, "mode_detailed"]  = "plane"
     df_mz_trips.loc[df_mz_trips["wmittel"] == 11, "mode_detailed"] = "taxi"
 
     # Find passenger trips
