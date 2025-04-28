@@ -35,6 +35,11 @@ def execute(context):
         )
 
         content = content.replace(
+            '<param name="parseTurnRestrictions" value="false" />',
+            '<param name="parseTurnRestrictions" value="true" />'
+        )
+
+        content = content.replace(
             '</module>',
             """
                 <parameterset type="routableSubnetwork">
