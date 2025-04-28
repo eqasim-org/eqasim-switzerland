@@ -7,6 +7,6 @@ module load eth_proxy
 
 source /cluster/project/cmdp/asallard/eqasim_venv/bin/activate
 
-sbatch -n 1 --cpus-per-task=4 --time=00:30:00 --mem-per-cpu=4096 --wrap="python3 -m synpp config_aurore.yml"
+sbatch -n 1 --cpus-per-task=24 --time=06:30:00 --mem-per-cpu=8192 --wrap="python3 -m synpp config_aurore.yml"
 
 

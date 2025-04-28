@@ -52,5 +52,4 @@ def execute(context):
             # Create household id to avoid issues later in the pipeline
             df["household_id"] = df["person_id"]
 
-
     return df

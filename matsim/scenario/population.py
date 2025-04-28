@@ -39,12 +39,12 @@ class PersonWriter:
 
         # Attributes
         writer.start_attributes()
-        writer.add_attribute("age", "java.lang.Integer", str(self.person[1]))
+        writer.add_attribute("age", "java.lang.Integer", str(int(self.person[1])))
         writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(self.person[3]))
         writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(self.person[4]))
         writer.add_attribute("sex", "java.lang.String", ["m", "f"][self.person[5]])
-        writer.add_attribute("home_coordiante_x", "java.lang.Double", str(self.person[6]))
-        writer.add_attribute("home_coordiante_y", "java.lang.Double", str(self.person[7]))
+        writer.add_attribute("home_coordinate_x", "java.lang.Double", str(self.person[6]))
+        writer.add_attribute("home_coordinate_y", "java.lang.Double", str(self.person[7]))
         writer.add_attribute("carAvail", "java.lang.String", ["always", "sometimes", "never"][int(self.person[2])])
         writer.add_attribute("ptHasGA", "java.lang.Boolean", writer.true_false(self.person[8]))
         writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[9]))
@@ -96,7 +96,6 @@ class FreightWriter:
 
     def write(self, writer):
         writer.start_person("freight_" + str(self.freight_agent[1]))
-        # print("freight_" + str(self.freight_agent[1]))
         # Attributes
         writer.start_attributes()
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))

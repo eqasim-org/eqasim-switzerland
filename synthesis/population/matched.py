@@ -445,6 +445,9 @@ def execute(context):
     removed_person_ids = removed_ids_list[0]
     print("  Persons: %d (%.2f%%)" % (len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_population_persons))
 
+    print(df_matching.head())
+    print(df_matching.columns)
+
     # Return
     return df_matching, removed_person_ids
 
