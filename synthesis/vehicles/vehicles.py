@@ -16,7 +16,7 @@ def execute(context):
     df_passenger_types, df_passengers = context.stage("synthesis.vehicles.passengers.default")
     df_truck_types, df_trucks = context.stage("synthesis.vehicles.trucks.default")
 
-    df_vehicles = pd.concat([df_cars, df_passengers, df_trucks])
+    df_vehicles_person = pd.concat([df_cars, df_passengers])
     df_types = pd.concat([df_car_types, df_passenger_types, df_truck_types])
 
-    return df_types, df_vehicles
+    return df_types, df_vehicles_person, df_trucks

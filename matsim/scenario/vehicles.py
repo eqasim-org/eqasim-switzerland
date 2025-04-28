@@ -14,8 +14,8 @@ VEHICLE_FIELDS = ["vehicle_id", "type_id", "age", "euro"]
 def execute(context):
     output_path = "%s/vehicles.xml.gz" % context.path()
 
-    df_vehicle_types, df_vehicles = context.stage("synthesis.vehicles.vehicles")
-
+    df_vehicle_types, df_vehicles, df_trucks = context.stage("synthesis.vehicles.vehicles")
+    df_vehicles = pd.concat([df_vehicles, df_trucks])
     with gzip.open(output_path, 'wb+') as writer:
         with io.BufferedWriter(writer, buffer_size = 2 * 1024**3) as writer:
             writer = writers.VehiclesWriter(writer)

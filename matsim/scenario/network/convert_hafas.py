@@ -20,7 +20,7 @@ def execute(context):
         "%s/transit_schedule.xml.gz" % context.path(),
         "%s/transit_vehicles.xml.gz" % context.path(),
         context.config("hafas_date")
-    ])
+    ], [])
 
     assert (os.path.exists("%s/transit_schedule.xml.gz" % context.path()))
     assert (os.path.exists("%s/transit_vehicles.xml.gz" % context.path()))
