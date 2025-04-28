@@ -9,7 +9,7 @@ def configure(context):
     context.stage("matsim.runtime.pt2matsim")
     
     context.stage("matsim.scenario.network.convert_osm")
-    context.stage("matsim.scenario.network.convert_hafas")
+    context.stage("matsim.scenario.network.convert_pt_schedule")
     
     context.config("threads")
 
@@ -19,7 +19,7 @@ def execute(context):
     # java = context.stage("utils.java")
 
     unmapped_network_path = context.stage("matsim.scenario.network.convert_osm")
-    unmapped_schedule_path = context.stage("matsim.scenario.network.convert_hafas")["schedule"]
+    unmapped_schedule_path = context.stage("matsim.scenario.network.convert_pt_schedule")["schedule"]
 
     # Create and modify config file
     pt2matsim.run(context, "org.matsim.pt2matsim.run.CreateDefaultPTMapperConfig", [
@@ -121,11 +121,11 @@ def execute(context):
     assert (os.path.exists("%s/mapped_network.xml.gz" % context.path()))
     assert (os.path.exists("%s/mapped_schedule.xml.gz" % context.path()))
     assert (os.path.exists("%s/road_network.xml.gz" % context.path()))
-    assert (os.path.exists(context.stage("matsim.scenario.network.convert_hafas")["vehicles"]))
+    assert (os.path.exists(context.stage("matsim.scenario.network.convert_pt_schedule")["vehicles"]))
 
     return {
         "network": "%s/mapped_network.xml.gz" % context.path(),
         "schedule": "%s/mapped_schedule.xml.gz" % context.path(),
         "road_network": "%s/road_network.xml.gz" % context.path(),
-        "vehicles": context.stage("matsim.scenario.network.convert_hafas")["vehicles"]
+        "vehicles": context.stage("matsim.scenario.network.convert_pt_schedule")["vehicles"]
     }
