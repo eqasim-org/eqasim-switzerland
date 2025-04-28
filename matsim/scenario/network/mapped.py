@@ -65,6 +65,12 @@ def execute(context):
             '<param name="modesToKeepOnCleanUp" value="car,car_passenger,truck" />'
         )
 
+        content = content.replace(
+            '<param name="networkRouter" value="SpeedyALT" />',
+            '<param name="networkRouter" value="AStarLandmarks" />'
+        )
+        
+
         with open("%s/map_network.xml" % context.path(), "w+") as f:
             f.write(content)
 
