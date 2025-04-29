@@ -8,6 +8,7 @@ import gzip
 from tqdm import tqdm
 import os
 import numpy as np
+import warnings
 
 """
 This script is designed to read MATSim network files. It also include a function that simplifies the network, 
@@ -31,7 +32,22 @@ class Network:
 
         self.network_attrs = {}
         if net_attrs: self.network_attrs = net_attrs
-
+        
+        # This will add attributes as a column in the links dataframe
+        self.put_attributes_in_links()
+    
+    def put_attributes_in_links(self):
+        # As columns
+        # link_attrs = self.link_attrs.pivot(index="link_id", columns="name", values="value")
+        # self.links = self.links.merge(link_attrs, on="link_id")
+        # As a single column containing dicts
+        link_attrs = self.link_attrs.groupby('link_id').apply(lambda x: dict(zip(x['name'], x['value']))).reset_index(name='attributes')
+        self.links = self.links.merge(link_attrs, on="link_id",how="left")
+        self.links.loc[self.links["attributes"].isna(), "attributes"] = None
+        
+    def __len__(self):
+        return len(self.links)
+    
     def __str__(self):
         return 'Network: {nodes} nodes, {links} links, {crs}'.format(
             nodes=len(self.nodes),
@@ -80,10 +96,12 @@ class Network:
         stats = dict()
 
         # Only treat road network obtained from osm, don't touch pt links
-        sel = self.links.link_id.apply(lambda x: "pt" not in x)
-        sel &= (self.links.modes.apply(lambda x: "car" in x))
-        df = self.links[sel]
-        df_rest = self.links[~sel]
+        # sel = self.links.link_id.apply(lambda x: "pt" not in x)
+        # sel &= (self.links.modes.apply(lambda x: "car" in x))
+        # df = self.links[sel]
+        # df_rest = self.links[~sel]
+        """All network should be considered, because intersections could be with (pt) and (pt,car)"""
+        df = self.links
 
         # Removing loops
         sel = (df['from_node'] == df['to_node'])
@@ -98,6 +116,7 @@ class Network:
         stats["removed_link_duplicates"] = len_df-len(df)
         print("There are %d link duplicates in the network that are removed." % stats["removed_link_duplicates"] )
         
+        # Removed links that are not connected to the whole graph
         print("Remove unconnected links")
         df, num_removed = self.remove_unconnected_links(df)
         stats["removed_unconnected_links"] = num_removed
@@ -105,10 +124,11 @@ class Network:
         # Removing nodes with no intersection
         print("Removing nodes that do not represent an intersection.")
         df, stats2 = self.merge_link_chains(df)
-        df = pd.concat([df,df_rest], ignore_index=True)
+        # df = pd.concat([df,df_rest], ignore_index=True)
         self.links = df
         stats.update(stats2)
         
+        # Limit the speed limit in the network
         print("Change the infinit freespeed to 85.")
         # This is also done in : https://github.com/eqasim-org/eqasim-java/blob/develop/core/src/main/java/org/eqasim/core/scenario/preparation/AdjustLinkLength.java#L9
         self.links.loc[self.links.freespeed.apply(np.isinf),"freespeed"] = 85
@@ -116,10 +136,9 @@ class Network:
         
         unique_nodes = pd.concat([df.from_node, df.to_node]).unique()
         self.nodes = self.nodes[self.nodes.node_id.isin(unique_nodes)].reset_index(drop=True)
-
-        link_attrs = self.link_attrs.groupby('link_id').apply(lambda x: dict(zip(x['name'], x['value']))).reset_index(name='attributes')
-        self.links = self.links.merge(link_attrs, on="link_id",how="left")
-        self.links.loc[self.links["attributes"].isna(), "attributes"] = None
+        
+        if "attributes" not in self.links:
+            warnings.warn("Attributes are not present in the links dataframe.", category=UserWarning)
         
         return stats
     
@@ -138,6 +157,11 @@ class Network:
         
         import networkx as nx #only if we use this function
         
+        df = df.copy()
+        sel = df["modes"].apply(lambda x: "car" in x)
+        df_other = df[~sel]
+        df       = df[sel] #don't include pt links because maybe disconencted from the network (rail for example)
+        
         print("    Converting network to networkx ...")
         G = nx.Graph()    
         G.add_edges_from(zip(df['from_node'], 
@@ -149,8 +173,9 @@ class Network:
     
         # Keep only edges where both nodes are in the largest component
         connected_links = df[df['from_node'].isin(largest_cc) & df['to_node'].isin(largest_cc)]
-    
-        return connected_links.reset_index(drop=True), len(df)-len(connected_links)
+        
+        df = pd.concat([connected_links, df_other], ignore_index=True)
+        return df, len(sel)-len(connected_links)
     
 
     @classmethod
@@ -164,6 +189,7 @@ class Network:
                  "degree_is_2":0,  
                  "one_in_one_out":0,
                  "already_visited":0,        
+                 "ignored_no_car":0
                     }
                         
         # Step 1: Build directed graph
@@ -216,12 +242,16 @@ class Network:
                 if idx in visited_links:
                     stats["already_visited"]+=1
                     continue
-
+                                
+                if not "car" in df.loc[idx,"modes"]:
+                    stats["ignored_no_car"]+=1
+                    continue
+                
                 # Start building the chain
                 current_chain = [idx]
                 current_node = succ
                 current_attrs = df.loc[idx, ['freespeed', 'capacity', 'permlanes',
-                                             'oneway', 'modes']].to_dict()
+                                             'oneway', 'modes','attributes']].to_dict()
 
                 while is_degree2(current_node):
                     next_nodes = list(G.successors(current_node))
@@ -229,11 +259,13 @@ class Network:
                         break
 
                     next_node = next_nodes[0]
-                    edge_data = G.get_edge_data(current_node, next_node)[0]
-         
+                    edge_data = G.get_edge_data(current_node, next_node)[0]                    
 
                     next_idx = edge_data['idx']
                     next_row = df.loc[next_idx]
+
+                    if not "car" in next_row['modes']:
+                        break
 
                     # Check attribute consistency
                     if not ((next_row["modes"] == current_attrs["modes"])&
@@ -256,13 +288,15 @@ class Network:
                     last_node  = df.loc[current_chain[-1], 'to_node']
                     if first_node!=last_node:
                         # Otherwise, it would just create a loop               
-                        merged_links.append({
+                        new_link = {
                             'from_node': first_node,
                             'to_node': last_node,
-                            'link_id': "_".join(chain_rows['link_id'].tolist()),
+                            'link_id': current_attrs["link_id"], #we use the link_id of the first link
                             'length': chain_rows['length'].sum(),
                             **current_attrs
-                        })
+                        }
+                        new_link["attributes"]["old_link_id"] = "_".join(chain_rows['link_id'].tolist())
+                        merged_links.append(new_link)
                         visited_links.update(current_chain)
                         stats["successful_merge"]+=1
                     else:
@@ -291,6 +325,9 @@ class Network:
                                         'modes':str,
                                         })
         
+        if ("attributes" not in self.links) and (len(self.link_attrs)) and write_attrbs:
+            self.put_attributes_in_links()
+
         # save the network in xml file
         file_open = gzip.open if file_path.endswith('.gz') else open
         with file_open(file_path, 'wb+') as f_write:
@@ -415,5 +452,10 @@ def read_network(filename, skip_attributes=False):
     links = pd.DataFrame.from_records(links)
     node_attrs = pd.DataFrame.from_records(node_attrs)
     link_attrs = pd.DataFrame.from_records(link_attrs)
-
+    
+    # make sure all ids are str
+    nodes["node_id"] = nodes["node_id"].astype(str)
+    links["link_id"] = links["link_id"].astype(str)
+    link_attrs["link_id"] = link_attrs["link_id"].astype(str)
+    
     return Network(nodes, links, node_attrs, link_attrs, network_attrs)
