@@ -4,6 +4,13 @@ This change log is written in descending order. Changes that happen after versio
 - Update to eqasim 1.5.0
 - Added home coordiantes to each person
 - Speedup of analysis
+- Added VDF as a possible traffic model
+- Added a cutting stage matsim.cutter.run and matsim.cutter.runCutterV2 that can be run after the matsim.simulation.run
+- Improved statistical matching
+- Udpated pt2matsim to 25.3-SNAPSHOT version to include new features and use various routers; currently using AStarLandmarks
+- Added vehicles file containing a vehicle for each car and truck
+- Added an option to use simulated pt
+- Several speed improvements in vaious stages
 
 **4.0.0**
 - Specify random seed for all random number generators. `numpy.random.RandomState` is used as it is frozen and thus guaranteed to produce the same values.
