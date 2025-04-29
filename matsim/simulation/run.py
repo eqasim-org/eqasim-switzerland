@@ -9,7 +9,10 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
     context.config("use_vdf", default=False)
+
     context.config("useScheduleBasedTransport", default=True)
+    context.config("preventwaitingtoentertraffic", default = "no")
+    context.config("writeexperiencedplans", default = "no")
 
 
 def execute(context):
@@ -23,14 +26,24 @@ def execute(context):
     else:
         scheduleBasedPTconfig = "false"
 
+    if context.config("preventwaitingtoentertraffic") == "yes":
+        preventwaiting = "y"
+    else:
+        preventwaiting = "n"
+    writeExperiencedPlans = "false"
+    if context.config("writeexperiencedplans") =="yes":
+        writeExperiencedPlans = "true"
+
     if (not context.config("use_vdf")):
         # Run simulation
         eqasim.run(context, "org.eqasim.switzerland.RunSimulation", [
             "--config-path", config_path,
             "--config:controler.lastIteration", str(60),
             "--config:controler.writeEventsInterval", str(10),
-            "--config:controler.writePlansInterval", str(10),
+            "--config:controler.writePlansInterval", str(1),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
+            "--preventwaitingtoentertraffic", preventwaiting,
+            "--config.scoring.writeExperiencedPlans", writeExperiencedPlans
         ])
     else:
         # Run simulation with vdf
