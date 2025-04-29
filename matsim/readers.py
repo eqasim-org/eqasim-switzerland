@@ -159,8 +159,8 @@ class Network:
         
         df = df.copy()
         sel = df["modes"].apply(lambda x: "car" in x)
-        df_other = df[~sel]
-        df       = df[sel] #don't include pt links because maybe disconencted from the network (rail for example)
+        df_other = df[~sel].copy()
+        df       = df[sel].reset_index(drop=True) #don't include pt links because maybe disconencted from the network (rail for example)
         
         print("    Converting network to networkx ...")
         G = nx.Graph()    
@@ -172,10 +172,10 @@ class Network:
         largest_cc = max(nx.connected_components(G), key=len)
     
         # Keep only edges where both nodes are in the largest component
-        connected_links = df[df['from_node'].isin(largest_cc) & df['to_node'].isin(largest_cc)]
+        connected_links = df[df['from_node'].isin(largest_cc) | df['to_node'].isin(largest_cc)]
         
         df = pd.concat([connected_links, df_other], ignore_index=True)
-        return df, len(sel)-len(connected_links)
+        return df, len(sel)-len(df)
     
 
     @classmethod
@@ -187,9 +187,10 @@ class Network:
                  "skiped_loop":0,
                  "successful_merge":0,
                  "degree_is_2":0,  
-                 "one_in_one_out":0,
-                 "already_visited":0,        
-                 "ignored_no_car":0
+                 "one_in_one_out":0,                        
+                 "ignored_no_car":0,
+                 "break_no_car":0,
+                 "already_visited":0, 
                     }
                         
         # Step 1: Build directed graph
@@ -250,7 +251,7 @@ class Network:
                 # Start building the chain
                 current_chain = [idx]
                 current_node = succ
-                current_attrs = df.loc[idx, ['freespeed', 'capacity', 'permlanes',
+                current_attrs = df.loc[idx, ['link_id', 'freespeed', 'capacity', 'permlanes',
                                              'oneway', 'modes','attributes']].to_dict()
 
                 while is_degree2(current_node):
@@ -265,6 +266,7 @@ class Network:
                     next_row = df.loc[next_idx]
 
                     if not "car" in next_row['modes']:
+                        stats["break_no_car"]+=1
                         break
 
                     # Check attribute consistency
@@ -290,10 +292,9 @@ class Network:
                         # Otherwise, it would just create a loop               
                         new_link = {
                             'from_node': first_node,
-                            'to_node': last_node,
-                            'link_id': current_attrs["link_id"], #we use the link_id of the first link
+                            'to_node': last_node,                            
                             'length': chain_rows['length'].sum(),
-                            **current_attrs
+                            **current_attrs #we use the link_id of the first link
                         }
                         new_link["attributes"]["old_link_id"] = "_".join(chain_rows['link_id'].tolist())
                         merged_links.append(new_link)
