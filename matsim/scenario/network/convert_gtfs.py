@@ -18,7 +18,7 @@ def execute(context):
         context.config("gtfs_date"), crs,
         "%s/transit_schedule.xml.gz" % context.path(),
         "%s/transit_vehicles.xml.gz" % context.path()
-    ])
+    ],[])
 
     assert(os.path.exists("%s/transit_schedule.xml.gz" % context.path()))
     assert(os.path.exists("%s/transit_vehicles.xml.gz" % context.path()))
