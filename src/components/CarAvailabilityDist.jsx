@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
 import Plot from "react-plotly.js";
+import CarAvailabilityAge from "./CarAvailabilityAge";
+import CarAvailabilityGender from "./CarAvailabilityGender";
+import CarAvailabilityIncome from "./CarAvailabilityIncome";
 
 const DATASET_COLORS = {
   Microcensus: "#4A90E2",
@@ -77,6 +80,9 @@ const CarAvailability = ({ canton, onClose }) => {
         }}
       />
 
+      <CarAvailabilityAge canton={canton} onClose={onClose}></CarAvailabilityAge>
+      <CarAvailabilityGender canton={canton} onClose={onClose}></CarAvailabilityGender>
+      <CarAvailabilityIncome canont={canton} onClose={onClose}></CarAvailabilityIncome>
     </div>
   );
 };

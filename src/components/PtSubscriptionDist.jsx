@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
 import Plot from "react-plotly.js";
+import PtSubscriptionAge from "./PtSubscriptionAge";
+import PtSubscriptionGender from "./PtSubscriptionGender";
+import PtSubscriptionIncome from "./PtSubscriptionIncome";
 
 const DATASET_COLORS = {
   Microcensus: "#4A90E2",
@@ -34,7 +37,6 @@ const PtSubscription = ({ canton, onClose }) => {
 
       {/* <p><b>Sample Sizes:</b> Microcensus: {total_sample_microcensus}, Synthetic: {total_sample_synthetic}</p> */}
 
-      {/* Euclidean Distance Plot */}
       <Plot
         data={[
           {
@@ -76,7 +78,9 @@ const PtSubscription = ({ canton, onClose }) => {
             plot_bgcolor: "rgba(255,255,255,0)",
         }}
       />
-
+      <PtSubscriptionAge canton={canton} onClose={onClose} ></PtSubscriptionAge>
+      <PtSubscriptionGender canton={canton} onClose={onClose}></PtSubscriptionGender>
+      <PtSubscriptionIncome canton={canton} onClose={onClose}></PtSubscriptionIncome>
     </div>
   );
 };
