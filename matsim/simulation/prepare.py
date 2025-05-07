@@ -96,7 +96,8 @@ def execute(context):
         "--prefix", context.config("output_prefix"),
         "--sample-size", context.config("input_downsampling"),
         "--random-seed", context.config("random_seed"),
-        "--threads", context.config("threads")
+        "--threads", context.config("threads"),
+        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
     ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
@@ -105,7 +106,7 @@ def execute(context):
     transit_schedule_input_path = context.stage("matsim.scenario.network.mapped")["schedule"]
     transit_schedule_output_path = "%stransit_schedule.xml.gz" % context.config("output_prefix")
 
-    eqasim.run(context, "org.eqasim.switzerland.scenario.RunCalculateStopCategories", [
+    eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunCalculateStopCategories", [
         "--input-path", transit_schedule_input_path,
         "--output-path", transit_schedule_output_path
     ])
@@ -113,17 +114,17 @@ def execute(context):
     assert os.path.exists("%s/%stransit_schedule.xml.gz" % (context.path(), context.config("output_prefix")))
 
     # Adapt the config
-    eqasim.run(context, "org.eqasim.switzerland.scenario.RunAdaptConfig", [
+    eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunAdaptConfig", [
         "--input-path", config_path,
         "--output-path", config_path,
         "--downsamplingRate", context.config("input_downsampling"),
         "--replanningRate", "0.05",
         "--hasFreight", context.config("use_freight"),
-        "--prefix", context.config("output_prefix")
-    ])
+        "--prefix", context.config("output_prefix")    ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
-    
+
+
     # Route the population
     population_output_path = "%spopulation.xml.gz" % context.config("output_prefix")
     
@@ -131,7 +132,8 @@ def execute(context):
         "--config-path", config_path,
         "--output-path", population_output_path,
         "--threads", context.config("threads"),
-        "--config:plans.inputPlansFile", population_prepared_path
+        "--config:plans.inputPlansFile", population_prepared_path,
+        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
     ])
     
     assert os.path.exists("%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix")))

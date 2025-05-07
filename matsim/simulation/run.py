@@ -25,20 +25,21 @@ def execute(context):
 
     if (not context.config("use_vdf")):
         # Run simulation
-        eqasim.run(context, "org.eqasim.switzerland.RunSimulation", [
+        eqasim.run(context, "org.eqasim.switzerland.ch.RunSimulation", [
             "--config-path", config_path,
             "--config:controler.lastIteration", str(60),
-            "--config:controler.writeEventsInterval", str(10),
-            "--config:controler.writePlansInterval", str(10),
+            "--config:controler.writeEventsInterval", str(60),
+            "--config:controler.writePlansInterval", str(60),
+            "--config:controller.writeTripsInterval", str(0),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
     else:
         # Run simulation with vdf
-        eqasim.run(context, "org.eqasim.switzerland.RunVDFSimulation", [
+        eqasim.run(context, "org.eqasim.switzerland.ch.RunVDFSimulation", [
             "--config-path", config_path,
-            "--config:controler.lastIteration", str(1),
-            "--config:controler.writeEventsInterval", str(1),
-            "--config:controler.writePlansInterval", str(1),
+            "--config:controler.lastIteration", str(60),
+            "--config:controler.writeEventsInterval", str(60),
+            "--config:controler.writePlansInterval", str(60),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
     assert os.path.exists("%s/simulation_output/output_events.xml.gz" % context.path())
