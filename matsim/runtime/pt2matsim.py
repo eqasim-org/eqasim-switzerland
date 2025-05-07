@@ -11,7 +11,7 @@ def configure(context):
     context.stage("matsim.runtime.maven")
 
     context.config("pt2matsim_version", "25.3-SNAPSHOT")
-    context.config("pt2matsim_branch", "develop")
+    context.config("pt2matsim_branch", "master")
 
 def run(context, command, arguments, vm_arguments):
     version = context.config("pt2matsim_version")
