@@ -10,6 +10,7 @@ config*.yml
 !config_docker.yml
 *.sh
 *.md
+*.vite
 
 # Things that need to be ignored for the webapp
 dist/

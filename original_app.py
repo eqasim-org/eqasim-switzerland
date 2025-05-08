@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 
-from app_utils import *
+from analysis.app_utils import *
 
 # Initialize the Dash app
 app = dash.Dash(__name__)

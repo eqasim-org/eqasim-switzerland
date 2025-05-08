@@ -1,15 +1,17 @@
-import dash
 import pandas as pd
-from app_utils import *
+from .app_utils import *
 import json 
 import numbers
+import pickle
+import os
 
+# TODO these characters do not render well on the app
 cantons = [
     'Zürich', 'Basel-Stadt', 'St. Gallen', 'Bern', 'Fribourg', 'Vaud', 
     'Ticino', 'Aargau', 'Genève', 'Solothurn', 'Jura', 'Valais', 
     'Luzern', 'Basel-Landschaft', 'Neuchâtel', 'Thurgau', 'Uri', 
     'Schwyz', 'Nidwalden', 'Glarus', 'Graubünden', 'Schaffhausen', 
-    'Zug', 'Obwalden', 'Appenzell Ausserrhoden', 'Appenzell Innerrhoden'
+    'Zug', 'Obwalden', 'Appenzell Ausserrhoden', 'Appenzell Innerrhoden', 'All'
 ]
 
 def write_non_category_data(micro, synthetic, func):
@@ -18,12 +20,18 @@ def write_non_category_data(micro, synthetic, func):
 
     - func: The function to compute the data to write
     """
+    print("Synthetic columns:", synthetic.columns)
+    print("Micro columns:", micro.columns)
     write_data = dict()
     for canton in cantons:
         write_data[canton] = dict()
 
-        micro_split = micro.query(f"home_canton == '{canton}'")
-        synthetic_split = synthetic.query(f"home_canton == '{canton}'")
+        if canton == 'All':
+            micro_split = micro
+            synthetic_split = synthetic
+        else:
+            micro_split = micro.query(f"canton_name == '{canton}'")
+            synthetic_split = synthetic.query(f"canton_name == '{canton}'")
 
         act_micro, freq_micro = func(micro_split)
         act_out, freq_out = func(synthetic_split)
@@ -52,8 +60,12 @@ def write_category_data(micro, synthetic, category_name, category_options, func,
         write_data[canton] = dict()
         
         # select by canton
-        micro_split = micro.query(f"home_canton == '{canton}'")
-        synthetic_split = synthetic.query(f"home_canton == '{canton}'")
+        if canton == 'All':
+            micro_split = micro
+            synthetic_split = synthetic
+        else:
+            micro_split = micro.query(f"canton_name == '{canton}'")
+            synthetic_split = synthetic.query(f"canton_name == '{canton}'")
 
         # insert synthetic & microcensus data
         write_data[canton]['Synthetic'] = dict()
@@ -92,40 +104,40 @@ def write_category_data(micro, synthetic, category_name, category_options, func,
     return write_data
 
 
-def write_num_activities(activities, output_activities):
+def write_num_activities(activities, output_activities, save_directory):
     data = write_non_category_data(activities, output_activities, get_weighted_num_activities)
 
-    with open("plot_data/num_activities.json", "w") as json_file:
+    with open(f"{save_directory}/num_activities.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_frequent_sequences(activities, output_activities):
+def write_frequent_sequences(activities, output_activities, save_directory):
     data = write_non_category_data(activities, output_activities, frequent_weighted_sequences)
     
-    with open("plot_data/frequent_sequences.json", "w") as json_file:
+    with open(f"{save_directory}/frequent_sequences.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_out_of_home(activities, output_activities):
+def write_out_of_home(activities, output_activities, save_directory):
     data = write_non_category_data(activities, output_activities, frequent_out_of_home_activities)
    
-    with open("plot_data/out_of_home.json", "w") as json_file:
+    with open(f"{save_directory}/out_of_home.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_available_cars_general(households, output_households):
+def write_available_cars_general(households, output_households, save_directory):
     data = write_non_category_data(households, output_households, get_car_availability)
-    with open("plot_data/car_availability.json", "w") as json_file:
+    with open(f"{save_directory}/car_availability.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_pt_subscriptions_general(persons, output_persons):
+def write_pt_subscriptions_general(persons, output_persons, save_directory):
     data = write_non_category_data(persons, output_persons, get_subscription_proportions)
-    with open("plot_data/pt_subscriptions.json", "w") as json_file:
+    with open(f"{save_directory}/pt_subscriptions.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_trip_crowfly_distance(trips, output_trips):
+def write_trip_crowfly_distance(trips, output_trips, save_directory):
     options = ['All', 'home', 'work', 'leisure', 'shop', 'other', 'education']
     output_trips['person_weight'] = 1
 
@@ -135,10 +147,11 @@ def write_trip_crowfly_distance(trips, output_trips):
                         func=get_histogram,
                         feature='crowfly_distance',
                         bins=True)
-    with open("plot_data/trip_distance.json", "w") as json_file:
+    
+    with open(f"{save_directory}/trip_distance.json", "w") as json_file:
         json.dump(data, json_file, indent=4) 
 
-def write_activity_durations(activities, output_activities):
+def write_activity_durations(activities, output_activities, save_directory):
     for df in [activities, output_activities]:
         df["start_time"] = pd.to_numeric(df["start_time"], errors="coerce")
         df["end_time"] = pd.to_numeric(df["end_time"], errors="coerce")
@@ -156,11 +169,11 @@ def write_activity_durations(activities, output_activities):
                         func=get_histogram_time,
                         feature='duration',)
     
-    with open("plot_data/activity_durations.json", "w") as json_file:
+    with open(f"{save_directory}/activity_durations.json", "w") as json_file:
         json.dump(data, json_file, indent=4)  
 
 
-def write_departure_times(trips, output_trips):
+def write_departure_times(trips, output_trips, save_directory):
     output_trips['weight'] = 1
     purpose_types = sorted(trips['following_purpose'].unique())
     purpose_types.append('All')
@@ -171,11 +184,11 @@ def write_departure_times(trips, output_trips):
                         func=get_histogram_time,
                         feature='departure_time')
     
-    with open("plot_data/departure_times.json", "w") as json_file:
+    with open(f"{save_directory}/departure_times.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_num_cars_income(persons, output_persons):
+def write_num_cars_income(persons, output_persons, save_directory):
     incomes = sorted(persons[persons['household_income'] >= 0]['household_income'].unique())
 
     data = write_category_data(persons, output_persons, 
@@ -184,11 +197,11 @@ def write_num_cars_income(persons, output_persons):
                                func=get_individual_car_class,
                                feature=None)
     
-    with open("plot_data/num_cars_income.json", "w") as json_file:
+    with open(f"{save_directory}/num_cars_income.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_num_cars_gender(persons, output_persons):
+def write_num_cars_gender(persons, output_persons, save_directory):
     genders = [0, 1]
 
     data = write_category_data(persons, output_persons, 
@@ -197,11 +210,11 @@ def write_num_cars_gender(persons, output_persons):
                                func=get_individual_car_class,
                                feature=None)
     
-    with open("plot_data/num_cars_gender.json", "w") as json_file:
+    with open(f"{save_directory}/num_cars_gender.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_num_cars_age(persons, output_persons):
+def write_num_cars_age(persons, output_persons, save_directory):
     ages = [6, 15, 18, 24, 30, 45, 65, 80]
     labels = ['[6, 15)', '[15, 18)', '[18, 24)', '[24, 30)', '[30, 45)', '[45, 65)', '[65, 80)']
     persons['age_group'] = pd.cut(persons['age'], bins=ages, labels=labels, right=False)
@@ -213,11 +226,11 @@ def write_num_cars_age(persons, output_persons):
                                func=get_individual_car_class,
                                feature=None)
     
-    with open("plot_data/num_cars_age.json", "w") as json_file:
+    with open(f"{save_directory}/num_cars_age.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_pt_sub_income(persons, output_persons):
+def write_pt_sub_income(persons, output_persons, save_directory):
     # NOTE using household weight doesn't solve the issue
     incomes = sorted(persons[persons['household_income'] >= 0]['household_income'].unique())
 
@@ -227,11 +240,11 @@ def write_pt_sub_income(persons, output_persons):
                                 func=get_subscription_proportions,
                                 feature=None)
 
-    with open("plot_data/pt_sub_income.json", "w") as json_file:
+    with open(f"{save_directory}/pt_sub_income.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_pt_sub_gender(persons, output_persons):
+def write_pt_sub_gender(persons, output_persons, save_directory):
     genders = [0, 1]
     
     data = write_category_data(persons, output_persons, 
@@ -239,11 +252,11 @@ def write_pt_sub_gender(persons, output_persons):
                                category_options=genders, 
                                func=get_subscription_proportions,
                                feature=None)
-    with open("plot_data/pt_sub_gender.json", "w") as json_file:
+    with open(f"{save_directory}/pt_sub_gender.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-def write_pt_sub_age(persons, output_persons):
+def write_pt_sub_age(persons, output_persons, save_directory):
     ages = [6, 15, 18, 24, 30, 45, 65, 80]
     labels = ['[6, 15)', '[15, 18)', '[18, 24)', '[24, 30)', '[30, 45)', '[45, 65)', '[65, 80)']
     persons['age_group'] = pd.cut(persons['age'], bins=ages, labels=labels, right=False)
@@ -255,43 +268,129 @@ def write_pt_sub_age(persons, output_persons):
                                func=get_subscription_proportions,
                                feature=None)
     
-    with open("plot_data/pt_sub_age.json", "w") as json_file:
+    with open(f"{save_directory}/pt_sub_age.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
 
-if __name__ == '__main__':
-    
-    # TODO should be updated to pick up the "saved_directory" directly
-    prefix = '/cluster/project/cmdp/chaoch/'
-    activities = pd.read_csv(f'{prefix}microcensus_data/microcensus_act_geo.csv', sep=';', header=0)
-    trips = pd.read_csv(f'{prefix}microcensus_data/microcensus_trips_geo.csv', sep=',', header=0)
-    households = pd.read_csv(f'{prefix}microcensus_data/microcensus_households_geo.csv', sep=',', header=0)
-    persons = pd.read_csv(f'{prefix}microcensus_data/microcensus_persons_geo.csv', sep=',', header=0)
-    persons['home_canton'] = persons['canton_name']
-    households['home_canton'] = households['canton_name']
+def write_all_application_data(microcensus, synthetic, save_directory):
+    """
+    Writes all the data for the application, 
+    - microcensus_prefix: the full name of where the microcensus_data folder lies
+    - synthetic_prefix: the full name of where the switzterland_data folder lies
+    - save_directory: where the application data should be stored
+    """    
+    activities = microcensus['activities']
+    trips = microcensus['trips']
+    households = microcensus['households']
+    persons = microcensus['persons']
 
-    output_activities = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_activities_geo.csv', sep=',', header=0)
-    output_trips = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_trips_geo.csv', sep=',', header=0)
-    output_households = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_households_geo.csv', sep=',', header=0)
-    output_persons = pd.read_csv('/cluster/project/cmdp/chaoch/switzerland_data/output/switzerland_persons_geo.csv', sep=';', header=0)
+    output_activities = synthetic['activities']
+    output_trips = synthetic['trips']
+    output_households = synthetic['households']
+    output_persons = synthetic['persons']
     output_households['household_weight'] = 1
     output_trips['person_weight'] = 1
-    output_persons['home_canton'] = output_persons['canton_name']
-    output_households['home_canton'] = output_households['canton_name']
+
+    # Write general distribution
+    write_num_activities(activities, output_activities, save_directory)
+    write_frequent_sequences(activities, output_activities, save_directory)
+    write_out_of_home(activities, output_activities, save_directory)
+    write_available_cars_general(households, output_households, save_directory)
+    write_pt_subscriptions_general(persons, output_persons, save_directory)
+    
+    # Write marginal distribution
+    write_trip_crowfly_distance(trips, output_trips, save_directory)
+    write_activity_durations(activities, output_activities, save_directory)
+    write_pt_sub_age(persons, output_persons, save_directory)
+    write_pt_sub_income(persons, output_persons, save_directory)
+    write_pt_sub_gender(persons, output_persons, save_directory)
+    write_num_cars_age(persons, output_persons, save_directory)
+    write_num_cars_gender(persons, output_persons, save_directory)
+    write_num_cars_income(persons, output_persons, save_directory)
 
 
-    write_num_activities(activities, output_activities)
-    write_frequent_sequences(activities, output_activities)
-    write_out_of_home(activities, output_activities)
-    write_available_cars_general(households, output_households)
-    write_pt_subscriptions_general(persons, output_persons)
+def load_dataframes(microcensus_prefix, synthetic_prefix):
+    activities = pd.read_csv(f'{microcensus_prefix}/microcensus_activities.csv', sep=',', header=0)
+    trips = pd.read_csv(f'{microcensus_prefix}/microcensus_trips.csv', sep=',', header=0)
+    households = pd.read_csv(f'{microcensus_prefix}/microcensus_households.csv', sep=',', header=0)
+    persons = pd.read_csv(f'{microcensus_prefix}/microcensus_persons.csv', sep=',', header=0)
 
-    write_trip_crowfly_distance(trips, output_trips)
-    write_activity_durations(activities, output_activities)
-    write_pt_sub_age(persons, output_persons)
-    write_pt_sub_income(persons, output_persons)
-    write_pt_sub_gender(persons, output_persons)
-    write_num_cars_age(persons, output_persons)
-    write_num_cars_gender(persons, output_persons)
-    write_num_cars_income(persons, output_persons)
+    output_activities = pd.read_csv(f'{synthetic_prefix}/switzerland_activities_geo.csv', sep=',', header=0)
+    output_trips = pd.read_csv(f'{synthetic_prefix}/switzerland_trips_geo.csv', sep=',', header=0)
+    output_households = pd.read_csv(f'{synthetic_prefix}/switzerland_households_geo.csv', sep=',', header=0)
+    output_persons = pd.read_csv(f'{synthetic_prefix}/switzerland_persons_geo.csv', sep=',', header=0)
+    output_households['household_weight'] = 1
+    output_trips['person_weight'] = 1
 
+    microcensus = {'activities': activities, 'trips': trips, 'households': households, 'persons': persons}
+    synthetic = {'activities': output_activities, 'trips': output_trips, 'households': output_households, 'persons': output_persons}
+    return microcensus, synthetic
+
+
+def load_cache_data(directory, prefix):
+    files = dict()
+    for filename in os.listdir(directory):
+        if filename.startswith(prefix) and filename.endswith('.p'):
+            with open(directory + '/' + filename, 'rb') as file:
+                data = pickle.load(file)
+                files[filename] = data
+    return files
+
+
+def configure(context):
+    context.stage("analysis.process_output")
+    context.stage("analysis.process_microcensus")
+
+    context.config("working_directory")
+    context.config("analysis_path")
+
+
+def execute(context):
+    prefix = 'analysis'
+    directory = context.config('working_directory')
+    save_directory = context.config("analysis_path")
+
+    # Read in PKL data
+    microcensus = dict()
+    synthetic = dict()
+    files = load_cache_data(directory, prefix)
+    for filename, data in files.items():
+        if 'microcensus' in filename:
+            microcensus['persons'] = data[0]
+            microcensus['households'] = data[1]
+            microcensus['trips'] = data[2]
+            microcensus['activities'] = data[3]
+        if 'output' in filename: 
+            synthetic['persons'] = data[0]
+            synthetic['households'] = data[1]
+            synthetic['trips'] = data[2]
+            synthetic['activities'] = data[3]
+    
+    write_all_application_data(microcensus=microcensus,
+                               synthetic=synthetic,
+                               save_directory=save_directory)
+
+
+if __name__ == '__main__':
+    """ 
+    Paths for testing purposes
+    microcensus_prefix = '/cluster/project/cmdp/chaoch/microcensus_data_test'
+    synthetic_prefix = '/cluster/project/cmdp/chaoch/switzerland_data/output_test'
+    save_directory = '/cluster/home/chaoch/ch/ch-zh-synpop/plot_data'
+    """
+    microcensus_prefix = input('Enter the directory where the _processed_ microcensus data is stored:').strip()
+    synthetic_prefix = input('Enter the directory where the _processed_ synthetic data is stored:').strip()
+    save_directory= input('Enter the directory where plotting data should be stored').strip()
+    
+    microcensus, synthetic = load_dataframes(microcensus_prefix, synthetic_prefix)
+
+    write_all_application_data(
+        microcensus,
+        synthetic,
+        save_directory
+    )
+
+# process_output = {
+#     "configure": configure,
+#     "execute": execute
+# }

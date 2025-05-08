@@ -1,6 +1,13 @@
 import pandas as pd
 import geopandas as gpd
-from add_cantons import add_canton_name
+from .add_cantons import add_canton_name
+
+def configure(context):
+    context.config("output_path")
+
+    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.persons")
+    context.stage("synthesis.output")
 
 def inspect_gpkg_columns(file_path):
     """
@@ -37,12 +44,22 @@ def inspect_gpkg_columns(file_path):
             print("Time range:", gdf[column].min(), "to", gdf[column].max())
 
 
-def add_activities_coordinates(gpkg_path, csv_path):
+def add_activities_coordinates(gpkg_path, csv_path, add_coordinates=False):
     """
-    Adds coordinate information to the activity dataset
+    Optionally adds coordinate information to the activity dataset
     - the gpkg path contains the coordinates
     - the csv file to which the coordinates should be added
     """
+    print("Reading activities CSV...")
+    activities = pd.read_csv(
+        csv_path,
+        sep=';',
+    )
+    print(f"Loaded {len(activities):,} activity records")
+    
+    if not add_coordinates:
+        return activities
+
     print("Reading coordinates from GPKG...")
     coords = gpd.read_file(
         gpkg_path,
@@ -51,18 +68,9 @@ def add_activities_coordinates(gpkg_path, csv_path):
     
     coords['easting'] = coords.geometry.x
     coords['northing'] = coords.geometry.y
-    coords = coords[['person_id', 'activity_index', 'easting', 'northing']]
-    
+    coords = coords[['person_id', 'activity_index', 'easting', 'northing']]    
     print(f"Extracted {len(coords):,} coordinate records")
-    
-    print("Reading activities CSV...")
-    activities = pd.read_csv(
-        csv_path,
-        sep=';',
-    )
 
-    print(f"Loaded {len(activities):,} activity records")
-    
     print("Merging datasets...")
     merged = pd.merge(
         activities,
@@ -76,10 +84,26 @@ def add_activities_coordinates(gpkg_path, csv_path):
     return merged
 
 
-def add_trip_coordinates(trips_gpkg_path, trips_csv_path):
+def add_trip_coordinates(trips_gpkg_path, trips_csv_path, add_coordinates=False):
     """
-    Adds the trip origin and destination coordinates to the dataframe
+    Optionally adds the trip origin and destination coordinates to the dataframe
     """    
+    print("Reading trips CSV...")
+    trips = pd.read_csv(
+        trips_csv_path,
+        sep=';',
+        dtype={
+            'person_id': 'int32',
+            'trip_index': 'int8',
+            'preceding_activity_index': 'int8',
+            'following_activity_index': 'int8'
+        }
+    )
+
+    # Coordinates are not always needed
+    if not add_coordinates:
+        return trips
+    
     print("Reading trip geometries from GPKG...")
     trips_gdf = gpd.read_file(
         trips_gpkg_path,
@@ -97,18 +121,6 @@ def add_trip_coordinates(trips_gpkg_path, trips_csv_path):
         'origin_easting', 'origin_northing',
         'dest_easting', 'dest_northing'
     ]]
-    
-    print("Reading trips CSV...")
-    trips = pd.read_csv(
-        trips_csv_path,
-        sep=';',
-        dtype={
-            'person_id': 'int32',
-            'trip_index': 'int8',
-            'preceding_activity_index': 'int8',
-            'following_activity_index': 'int8'
-        }
-    )
     
     print("Merging trip data with coordinates...")
     trips_with_coords = pd.merge(
@@ -156,7 +168,7 @@ def add_home_coordinates(homes_gpkg_path, persons_csv_path, households_csv_path)
     print("=== VALIDATION ===")
     print(f"Households with coordinates: {households_with_coords['home_easting'].notna().sum()}/{len(households_with_coords)}")
     print(f"Persons with coordinates: {persons_with_coords['home_easting'].notna().sum()}/{len(persons_with_coords)}")
-    
+    print('columns of households', list(households_with_coords.columns))
     return households_with_coords, persons_with_coords
 
 
@@ -172,7 +184,7 @@ def modify_persons_households(person, household):
     return person
 
 
-def modify_activities_dataset(persons, activity):
+def filter_activities_dataset(persons, activity):
     """
     Modifies the activities dataset:
     - adds the weight 1 to each activity
@@ -189,18 +201,17 @@ def add_home_canton(persons, trips, activities):
     Adds the home canton of the person associated with the trip/activity
     - this is added because activities/trips should be assigned based on the person's home canton
     """
-    persons = persons.rename(columns={'canton_name': 'home_canton'})
-    trips = trips.merge(persons[['person_id', 'home_canton']], on='person_id', how='left')
-    activities = activities.merge(persons[['person_id', 'home_canton']], on='person_id', how='left')
+    trips = trips.merge(persons[['person_id', 'canton_name']], on='person_id', how='left')
+    activities = activities.merge(persons[['person_id', 'canton_name']], on='person_id', how='left')
 
     return activities, trips
 
-def preprocess_synthetic_data(directory, save_directory):
+def preprocess_synthetic_data(directory, save_directory=None):
     """
     Preprocesses the synthetic data for analysis. 
 
     - directory: The directory where the synthetic data is stored
-    - save_directory: The directory where the processed data is stored
+    - save_directory: The directory where the processed data is stored (optional). Can be passed to next stage directly
     """
     # Adds coordinates of activities
     activities = add_activities_coordinates(
@@ -221,24 +232,40 @@ def preprocess_synthetic_data(directory, save_directory):
         households_csv_path=f"{directory}/switzerland_households.csv",
     )
 
+    # Add cantons to each data point based on their household canton
     persons = add_canton_name(persons, x_col='home_easting', y_col='home_northing')
+    households = add_canton_name(households, x_col='home_easting', y_col='home_northing')
     persons = modify_persons_households(persons, households)
-    activities = modify_activities_dataset(persons, activities)
+    activities = filter_activities_dataset(persons, activities)
     activities, trips = add_home_canton(persons, trips, activities)
+    
+    if save_directory is not None:
+        # Write all data
+        persons.to_csv(f'{save_directory}/switzerland_persons_geo.csv', index=False, sep=',')
+        households.to_csv(f'{save_directory}/switzerland_households_geo.csv', index=False, sep=',')
+        trips.to_csv(f'{save_directory}/switzerland_trips_geo.csv', index=False, sep=',')
+        activities.to_csv(f'{save_directory}/switzerland_activities_geo.csv', index=False, sep=',')
 
-    # Write all data
-    persons.to_csv(f'{save_directory}/switzerland_persons_geo.csv', index=False, sep=';')
-    households.to_csv(f'{save_directory}/switzerland_households_geo.csv', index=False, sep=',')
-    trips.to_csv(f'{save_directory}/switzerland_trips_geo.csv', index=False, sep=',')
-    activities.to_csv(f'{save_directory}/switzerland_activities_geo.csv', index=False, sep=',')
+    # Return data for the next stage
+    return persons, households, trips, activities
 
+def execute(context):
+    directory = context.config("output_path")
+
+    persons, households, trips, activities = preprocess_synthetic_data(directory=directory)
+    return persons, households, trips, activities
 
 if __name__ == '__main__':
 
-    directory = input("Enter directory name where the synthetic data lies:")
-    save_directory = input("Enter directory where the processed data should be stored:")
+    # directory = input("Enter directory name where the synthetic data lies:")
+    # save_directory = input("Enter directory where the processed data should be stored:")
 
     directory = '/cluster/project/cmdp/chaoch/switzerland_data/output'
-    save_directory = '/cluster/project/cmdp/chaoch/switzerland_data/output'
+    save_directory = '/cluster/project/cmdp/chaoch/switzerland_data/output_test'
 
-    preprocess_synthetic_data(directory, save_directory)
+    persons, households, trips, activities = preprocess_synthetic_data(directory=directory, save_directory=save_directory)
+
+process_output = {
+    "configure": configure,
+    "execute": execute
+}
