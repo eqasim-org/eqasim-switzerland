@@ -389,8 +389,3 @@ if __name__ == '__main__':
         synthetic,
         save_directory
     )
-
-# process_output = {
-#     "configure": configure,
-#     "execute": execute
-# }

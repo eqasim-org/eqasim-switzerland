@@ -264,8 +264,3 @@ if __name__ == '__main__':
     save_directory = '/cluster/project/cmdp/chaoch/switzerland_data/output_test'
 
     persons, households, trips, activities = preprocess_synthetic_data(directory=directory, save_directory=save_directory)
-
-process_output = {
-    "configure": configure,
-    "execute": execute
-}

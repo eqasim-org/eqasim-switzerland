@@ -189,9 +189,3 @@ if __name__ == '__main__':
     prefix = 'data.microcensus'
 
     preprocess_microcensus_data(directory, save_directory, prefix=prefix)
-
-
-process_microcensus = {
-    "configure": configure,
-    "execute": execute
-}
