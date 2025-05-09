@@ -99,7 +99,7 @@ const PtSubscriptionAge = ({ canton, onClose }) => {
             margin: { l: 50, r: 20, t: 120, b: 80 },
             height: 350,
             width: 550,
-            showlegend: true, 
+            showlegend: true,
             barmode: "group",
             paper_bgcolor: "rgba(255,255,255,0)",
             plot_bgcolor: "rgba(255,255,255,0)",

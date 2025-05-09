@@ -3,10 +3,21 @@ import Plot from "react-plotly.js";
 import PtSubscriptionAge from "./PtSubscriptionAge";
 import PtSubscriptionGender from "./PtSubscriptionGender";
 import PtSubscriptionIncome from "./PtSubscriptionIncome";
+import GenericBarPlot from "./GenericBarPlot";
 
 const DATASET_COLORS = {
   Microcensus: "#4A90E2",
   Synthetic: "#E07A5F",
+};
+
+const AGE_VARIABLES = {
+  "[6, 15)": "[6, 15)",
+  "[15, 18)": "[15, 18)",
+  "[18, 24)": "[18, 24)",
+  "[24, 30)": "[24, 30)",
+  "[30, 45)": "[30, 45)",
+  "[45, 65)": "[45, 65)",
+  "[65, 80)": "[65, 80)",
 };
 
 const PtSubscription = ({ canton, onClose }) => {
@@ -79,6 +90,16 @@ const PtSubscription = ({ canton, onClose }) => {
         }}
       />
       <PtSubscriptionAge canton={canton} onClose={onClose} ></PtSubscriptionAge>
+      <GenericBarPlot
+          dataFile="/data/pt_sub_age.json"
+          title="Public Transport Subscriptions by Age"
+          xAxisTitle = "Public Transport Subscription Type"
+          variables={AGE_VARIABLES}
+          defaultVariable={AGE_VARIABLES['[6, 15)']}
+          canton={canton}
+          onClose={onClose}
+        />
+
       <PtSubscriptionGender canton={canton} onClose={onClose}></PtSubscriptionGender>
       <PtSubscriptionIncome canton={canton} onClose={onClose}></PtSubscriptionIncome>
     </div>
