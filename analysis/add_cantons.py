@@ -2,6 +2,15 @@ import pandas as pd
 import geopandas as gpd
 import pandas as pd
 import geopandas as gpd
+import unicodedata
+
+def remove_accents(text):
+    if isinstance(text, str):
+        return ''.join(
+            c for c in unicodedata.normalize('NFKD', text)
+            if not unicodedata.combining(c)
+        )
+    return text
 
 def add_canton_name(dataset, x_col, y_col, coord_system = 2056, distance=3500):
     """
@@ -52,7 +61,9 @@ def add_canton_name(dataset, x_col, y_col, coord_system = 2056, distance=3500):
 
     assert len(dataset) == len(result_filt), "Input/Output number of rows not matching"
 
-    return pd.DataFrame(result_filt)
+    result_df = pd.DataFrame(result_filt)
+    result_df["canton_name"] = result_df["canton_name"].apply(remove_accents)
+    return result_df
 
 
 def add_geo(file_path, x_col, y_col, coord_system = 2056, distance=3500, export=True):

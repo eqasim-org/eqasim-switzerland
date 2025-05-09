@@ -5,12 +5,11 @@ import numbers
 import pickle
 import os
 
-# TODO these characters do not render well on the app
 cantons = [
-    'Zürich', 'Basel-Stadt', 'St. Gallen', 'Bern', 'Fribourg', 'Vaud', 
-    'Ticino', 'Aargau', 'Genève', 'Solothurn', 'Jura', 'Valais', 
-    'Luzern', 'Basel-Landschaft', 'Neuchâtel', 'Thurgau', 'Uri', 
-    'Schwyz', 'Nidwalden', 'Glarus', 'Graubünden', 'Schaffhausen', 
+    'Zurich', 'Basel-Stadt', 'St. Gallen', 'Bern', 'Fribourg', 'Vaud', 
+    'Ticino', 'Aargau', 'Geneve', 'Solothurn', 'Jura', 'Valais', 
+    'Luzern', 'Basel-Landschaft', 'Neuchatel', 'Thurgau', 'Uri', 
+    'Schwyz', 'Nidwalden', 'Glarus', 'Graubunden', 'Schaffhausen', 
     'Zug', 'Obwalden', 'Appenzell Ausserrhoden', 'Appenzell Innerrhoden', 'All'
 ]
 
@@ -20,8 +19,6 @@ def write_non_category_data(micro, synthetic, func):
 
     - func: The function to compute the data to write
     """
-    print("Synthetic columns:", synthetic.columns)
-    print("Micro columns:", micro.columns)
     write_data = dict()
     for canton in cantons:
         write_data[canton] = dict()
