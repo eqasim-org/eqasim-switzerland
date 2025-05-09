@@ -31,8 +31,6 @@ const GenericBarPlot = ({
     }, [selectedVariable, canton, dataFile]);
 
     if (!data) return <p>Loading...</p>;
-    console.log(data[dataKeys[0]])
-    console.log(selectedVariable)
 
     const xLabels = Object.keys(data[dataKeys[0]][selectedVariable]);
 

@@ -10,11 +10,11 @@ import ActivityDist from "./ActivityDist";
 import Histogram from "./Histogram";
 import StackedBarPlot from "./StackedBarPlot";
 import CantonModeShareTable from "./CantonModeShareTable";
-import CarAvailability from "./CarAvailabilityDist";
+import CarAvailability from "./CarAvailability";
 import ChoroplethControls from "./ChoroplethControls";
-import DepatureTimes from "./DepartureTimes";
+import DepartureTimes from "./DepartureTimes";
 import ModeShareLinePlot from "./ModeShareLinePlot";
-import PtSubscription from "./PtSubscriptionDist";
+import PtSubscription from "./PtSubscription";
 import SegmentAttributesTable from "./SegmentAttributesTable";
 import SegmentVolumeHistogram from "./SegmentVolumeHistogram";
 
@@ -142,12 +142,9 @@ const Sidebar = ({canton, isOpen, toggleSidebar, onExpandGraph, setCanton, reset
             {selectedGraph === "Graph 3" && <div className="plot-container"><StackedBarPlot canton={canton || "All"} /></div>}
             {selectedGraph === "Graph 4" && <div className="plot-container"><ModeShareLinePlot canton={canton || "All"} /></div>}
             {selectedGraph === "Graph 5" && <div className="plot-container"><ActivityDist canton={canton || "All"} /></div>}            
-            {selectedGraph === "Graph 6" && <div className="plot-container"><FrequentSequence canton={canton || "All"} /></div>}
-            {selectedGraph === "Graph 7" && <div className="plot-container"><OutOfHome canton={canton || "All"} /></div>}
             {selectedGraph === "Graph 8" && <div className="plot-container"><PtSubscription canton={canton || "All"} /></div>}
             {selectedGraph === "Graph 9" && <div className="plot-container"><CarAvailability canton={canton || "All"} /></div>}
-            {selectedGraph === "Graph 10" && <div className="plot-container"><ActivityDurationDist canton={canton || "All"} /></div>}
-            {selectedGraph === "Graph 11" && <div className="plot-container"><DepatureTimes canton={canton || "All"} /></div>}
+            {selectedGraph === "Graph 11" && <div className="plot-container"><DepartureTimes canton={canton || "All"} /></div>}
             {/* Mode Share Choropleth Selection */}
             {selectedGraph === "Choropleth" && (
               <div>
