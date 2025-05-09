@@ -92,7 +92,8 @@ def get_subscription_proportions(data, feature=None, bins=None):
     values = []
     for cat in subscriptions:
         weighted_sum = (data[cat] * data['person_weight']).sum()
-        proportion = weighted_sum / total_weight
+        print(weighted_sum, total_weight)
+        proportion = weighted_sum / total_weight if total_weight != 0 else 0.0
         weighted_proportions[cat] = proportion
         values.append(proportion)
 

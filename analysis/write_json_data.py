@@ -307,6 +307,7 @@ def write_all_application_data(microcensus, synthetic, save_directory):
     write_num_cars_age(persons, output_persons, save_directory)
     write_num_cars_gender(persons, output_persons, save_directory)
     write_num_cars_income(persons, output_persons, save_directory)
+    write_departure_times(trips, output_trips, save_directory)
 
 
 def load_dataframes(microcensus_prefix, synthetic_prefix):
