@@ -84,8 +84,8 @@ def write_category_data(micro, synthetic, category_name, category_options, func,
                 micro_filtered = micro_split
                 synthetic_filtered = synthetic_split
             else:
-                micro_filtered = micro.loc[micro[category_name] == cat]
-                synthetic_filtered = synthetic.loc[synthetic[category_name] == cat]
+                micro_filtered = micro_split.loc[micro_split[category_name] == cat]
+                synthetic_filtered = synthetic_split.loc[synthetic_split[category_name] == cat]
 
             bin_edges = None
             if bins:
