@@ -1,7 +1,8 @@
 import shutil
 import os.path
-
+import xml.etree.ElementTree as ET
 import matsim.runtime.eqasim as eqasim
+import gzip
 
 def configure(context):
     context.stage("matsim.runtime.java")
@@ -9,6 +10,8 @@ def configure(context):
         
     context.stage("matsim.scenario.population")
     context.stage("matsim.scenario.households")
+    context.stage("matsim.scenario.vehicles")
+
     context.stage("matsim.scenario.facilities")
     context.stage("matsim.scenario.network.mapped")
         
@@ -17,13 +20,43 @@ def configure(context):
     context.config("random_seed")
     
     context.config("output_prefix", "switzerland_")
+    context.config("useScheduleBasedTransport", default = True)
 
 
 def execute(context):
     # Some files we just copy
     transit_vehicles_input_path = context.stage("matsim.scenario.network.mapped")["vehicles"]
     transit_vehicles_output_path = "%s/%stransit_vehicles.xml.gz" % (context.path(), context.config("output_prefix"))
-    shutil.copyfile(transit_vehicles_input_path, transit_vehicles_output_path)
+
+    sample_size     = context.config("input_downsampling")
+    flow_eff_factor = 1.0 / sample_size
+    print(f"INFO setting flow efficiency factors to {round(flow_eff_factor,2)} for PT vehicles.")
+    
+    if context.config("input_downsampling") < 1.0 and not context.config("useScheduleBasedTransport"):
+        # Register the namespace
+        namespace = {'m': 'http://www.matsim.org/files/dtd'}
+
+        # Read and parse the gzipped XML file
+        with gzip.open(transit_vehicles_input_path, 'rt', encoding='utf-8') as f:
+            tree = ET.parse(f)
+            root = tree.getroot()
+
+        # Find and update all <flowEfficiencyFactor> elements
+        for fe in root.findall('.//m:flowEfficiencyFactor', namespace):
+            fe.set('factor', str(flow_eff_factor))
+
+        ET.register_namespace('', 'http://www.matsim.org/files/dtd')
+
+        # Write the modified XML back to a gzipped file
+        with gzip.open(transit_vehicles_output_path, 'wt', encoding='utf-8') as f:
+            tree.write(f, encoding='unicode', xml_declaration=True)
+
+    else:
+        shutil.copyfile(transit_vehicles_input_path, transit_vehicles_output_path)
+
+    vehicles_input_path = context.stage("matsim.scenario.vehicles")
+    vehicles_output_path = "%s/%svehicles.xml.gz" % (context.path(), context.config("output_prefix"))
+    shutil.copyfile(vehicles_input_path, vehicles_output_path)
 
     households_input_path = context.stage("matsim.scenario.households")
     households_output_path = "%s/%shouseholds.xml.gz" % (context.path(), context.config("output_prefix"))
@@ -58,13 +91,13 @@ def execute(context):
 
     # Generate the config file
     config_path = "%sconfig.xml" % context.config("output_prefix")
-    
     eqasim.run(context, "org.eqasim.core.scenario.config.RunGenerateConfig", [
         "--output-path", config_path,
         "--prefix", context.config("output_prefix"),
         "--sample-size", context.config("input_downsampling"),
         "--random-seed", context.config("random_seed"),
-        "--threads", context.config("threads")
+        "--threads", context.config("threads"),
+        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
     ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
@@ -73,13 +106,25 @@ def execute(context):
     transit_schedule_input_path = context.stage("matsim.scenario.network.mapped")["schedule"]
     transit_schedule_output_path = "%stransit_schedule.xml.gz" % context.config("output_prefix")
 
-    eqasim.run(context, "org.eqasim.switzerland.scenario.RunCalculateStopCategories", [
+    eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunCalculateStopCategories", [
         "--input-path", transit_schedule_input_path,
         "--output-path", transit_schedule_output_path
     ])
     
     assert os.path.exists("%s/%stransit_schedule.xml.gz" % (context.path(), context.config("output_prefix")))
+
+    # Adapt the config
+    eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunAdaptConfig", [
+        "--input-path", config_path,
+        "--output-path", config_path,
+        "--downsamplingRate", context.config("input_downsampling"),
+        "--replanningRate", "0.05",
+        "--hasFreight", context.config("use_freight"),
+        "--prefix", context.config("output_prefix")    ])
     
+    assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
+
+
     # Route the population
     population_output_path = "%spopulation.xml.gz" % context.config("output_prefix")
     
@@ -87,7 +132,8 @@ def execute(context):
         "--config-path", config_path,
         "--output-path", population_output_path,
         "--threads", context.config("threads"),
-        "--config:plans.inputPlansFile", population_prepared_path
+        "--config:plans.inputPlansFile", population_prepared_path,
+        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
     ])
     
     assert os.path.exists("%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix")))
@@ -96,17 +142,6 @@ def execute(context):
     eqasim.run(context, "org.eqasim.core.scenario.validation.RunScenarioValidator", [
         "--config-path", config_path
     ])
-
-    # Adapt the config
-    eqasim.run(context, "org.eqasim.switzerland.scenario.RunAdaptConfig", [
-        "--input-path", config_path,
-        "--output-path", config_path,
-        "--downsamplingRate", context.config("input_downsampling"),
-        "--replanningRate", "0.05",
-        "--hasFreight", context.config("use_freight")
-    ])
-    
-    assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
     
     # Cleanup
     os.remove("%s/prepared_population.xml.gz" % context.path())

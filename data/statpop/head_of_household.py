@@ -1,29 +1,27 @@
 import pandas as pd
 
-import data.constants as c
 
-
-def impute(df):
+def impute(df, constants):
     df_head = pd.DataFrame(df)
 
     # 1) Only consider persons that have reached a certain age (remember, there are no complete underage households anymore!)
-    df_head = df_head[df_head["age"] >= c.MINIMUM_AGE_PER_HOUSEHOLD]
+    df_head = df_head[df_head["age"] >= constants.MINIMUM_AGE_PER_HOUSEHOLD]
 
     # 2) For households with at least one person under ACTIVE_AGE, filter out all persons above that age.
     # For all other houesholds, keep all persons:
 
-    df_head.loc[:, "is_in_active_age"] = df_head["age"] <= c.ACTIVE_AGE
+    df_head.loc[:, "is_in_active_age"] = df_head["age"] <= constants.ACTIVE_AGE
 
     df_filter = df_head[["household_id", "is_in_active_age"]].groupby("household_id").sum().reset_index()
     df_filter["active_count"] = df_filter["is_in_active_age"]
 
     df_head = pd.merge(df_head, df_filter[["household_id", "active_count"]])
-    df_head = df_head[(df_head["active_count"] == 0) | (df_head["age"] <= c.ACTIVE_AGE)]
+    df_head = df_head[(df_head["active_count"] == 0) | (df_head["age"] <= constants.ACTIVE_AGE)]
 
     # 3) TODO: Not completely sure: I think now we should keep all persons that are married in households where there are ANY
     # married persons. For other households, we keep all persons:
 
-    df_head.loc[:, "is_married"] = df_head["marital_status"] == c.MARITAL_STATUS_MARRIED
+    df_head.loc[:, "is_married"] = df_head["marital_status"] == constants.MARITAL_STATUS_MARRIED
     df_filter = df_head[["household_id", "is_married"]].groupby("household_id").sum().reset_index()
     df_filter["married_count"] = df_filter["is_married"]
     df_head = pd.merge(df_head, df_filter[["household_id", "married_count"]])

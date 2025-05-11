@@ -16,3 +16,7 @@ config*.yml
 dist/
 node_modules/
 public/
+slurm*
+*.out
+*.sh
+!docker_run.sh

@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-import data.constants as c
 from data.statpop.multilevelipf import multilevelipf
 from data.statpop.multilevelipf.multilevelipf import FittingProblem, IPUSolver
 
@@ -10,9 +9,10 @@ def configure(context):
     context.stage("data.statpop.statpop")
     context.stage("data.statpop.projections.households")
     context.stage("data.statpop.projections.population")
+    context.stage("data.constants")
 
     context.config("enable_scaling", default=False)
-    context.config("scaling_year", default=c.BASE_SCALING_YEAR)
+    context.config("scaling_year", default=2015)
     
     context.config("random_seed")
     context.config("threads")    

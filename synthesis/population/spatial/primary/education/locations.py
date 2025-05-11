@@ -2,13 +2,14 @@ import numpy as np
 from sklearn.neighbors import KDTree
 
 import data.spatial.utils as spatial_utils
-
+import data.utils
 
 def configure(context):
     context.stage("data.statent.statent")
     context.stage("synthesis.population.enriched")
-    
+    context.stage("data.constants")
     context.config("random_seed")
+
 
 
 # TODO: We only assign work here through OD matrices. However, we *can* generate
@@ -19,20 +20,19 @@ def configure(context):
 
 def execute(context):
     df_persons = context.stage("synthesis.population.enriched")
-
     df_statent = context.stage("data.statent.statent")
+    c          = context.stage("data.constants")
+    
     df_statent = df_statent[~df_statent["education_type"].isna()]
 
-    age_bounds = [(-np.inf, 6), (6, 12), (12, 16), (16, np.inf)]
-    education_types = ["kindergarten", "primary", "secondary", "tertiary"]
-    query_sizes = (1, 1, 5, 10)
+    filters_persons, filters_locations, education_types, query_sizes = data.utils.prepare_education_locations(df_persons, df_statent, c)
     
     # Set up RNG
     rng = np.random.RandomState(context.config("random_seed"))
 
-    for (lower_bound, upper_bound), type, query_size in zip(age_bounds, education_types, query_sizes):
-        f_persons = (df_persons["age"] > lower_bound) & (df_persons["age"] <= upper_bound)
-        df_candidates = df_statent[df_statent["education_type"] == type]
+    for person_selector, location_selector, type, query_size in zip(filters_persons, filters_locations, education_types, query_sizes):
+        f_persons = person_selector#(df_persons["age"] > lower_bound) & (df_persons["age"] <= upper_bound)
+        df_candidates = df_statent[location_selector]#[df_statent["education_type"] == type]
 
         education_coordinates = np.vstack([df_candidates["x"], df_candidates["y"]]).T
         home_coordinates = np.vstack([df_persons.loc[f_persons, "home_x"], df_persons.loc[f_persons, "home_y"]]).T

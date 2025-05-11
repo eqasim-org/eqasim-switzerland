@@ -1,0 +1,75 @@
+import data.gtfs.utils as gtfs
+import os, pathlib
+
+"""
+This file reads GTFS schedule.
+"""
+
+def configure(context):
+    context.config("data_path")
+    context.config("gtfs_name", default = "")
+
+def execute(context):
+    all_input_files = get_input_files("{}/{}".format(context.config("data_path"), "gtfs"))
+
+    if context.config("gtfs_name") == "":
+        # Keep all files
+        input_files = all_input_files
+
+    else:
+        # Look for the specified file name
+        input_files = []
+        for file in all_input_files:
+            if context.config("gtfs_name") in file:
+                input_files = [file]
+
+        # If the specified file name was not found
+        if len(input_files) == 0:
+            raise RuntimeError("Did not find any GTFS data matching the specified name.")
+
+    # Load feeds
+    feeds = []
+    for path in input_files:
+        feed = gtfs.read_feed(path)
+        feed = gtfs.clean_feed(feed)
+        
+        # This was fixed in pt2matsim, so we can remove one a new release (> 20.7) is available.
+        feed = gtfs.despace_stop_ids(feed) # Necessary as MATSim does not like stops/links with spaces
+
+        feeds.append(feed)
+
+    # Merge feeds
+    merged_feed = gtfs.merge_feeds(feeds) if len(feeds) > 1 else feeds[0]
+
+    # Fix for pt2matsim (will be fixed after PR #173)
+    # Order of week days must be fixed
+    
+    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    columns = list(merged_feed["calendar"].columns)
+    for day in days: columns.remove(day)
+    columns += ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    merged_feed["calendar"] = merged_feed["calendar"][columns]
+
+    # Write feed (not as a ZIP, but as files, for pt2matsim)
+    gtfs.write_feed(merged_feed, "%s/output" % context.path())
+
+    return "gtfs"
+
+def get_input_files(base_path):
+    gtfs_paths = [
+        str(child)
+        for child in pathlib.Path(base_path).glob("*")
+        if child.suffix.lower() == ".zip"
+    ]
+
+    if len(gtfs_paths) == 0:
+        raise RuntimeError("Did not find any GTFS data (.zip) in {}".format(base_path))
+    
+    return gtfs_paths
+
+def validate(context):
+    input_files = get_input_files("{}/{}".format(context.config("data_path"), "gtfs"))
+    total_size = 0
+    for path in input_files:
+        total_size += os.path.getsize(path)
+    return total_size
