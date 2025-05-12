@@ -1,5 +1,5 @@
 import os
-import matsim.scenario.network.osmosis
+import matsim.runtime.osmosis
 import matsim.runtime.pt2matsim as pt2matsim
 import sys
 import shutil
@@ -10,7 +10,7 @@ import re
 def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.pt2matsim")
-    context.stage("matsim.scenario.network.osmosis")
+    context.stage("matsim.runtime.osmosis")
     
     context.config("data_path")
     context.config("osm_path", "switzerland-latest.osm.gz")
@@ -66,7 +66,7 @@ def convert_pbf_to_osm_osmosis(context, input_file, output_file):
         os.remove(output_file)
     
     try:
-        matsim.scenario.network.osmosis.run(context, [
+        matsim.runtime.osmosis.run(context, [
                 "--read-pbf", input_file,            
                 "--tag-filter", "accept-ways", "highway=*", "railway=*",
                 #"--tag-filter","reject-ways","highway=service",

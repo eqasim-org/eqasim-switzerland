@@ -12,7 +12,7 @@ def run(context, arguments = [], cwd = None):
         This function calls osmosis.
     """
     # Make sure there is a dependency
-    context.stage("matsim.scenario.network.osmosis")
+    context.stage("matsim.runtime.osmosis")
 
     if cwd is None:
         cwd = context.path()
