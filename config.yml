@@ -1,24 +1,46 @@
 # General pipeline settings
-working_directory: /home/tchervec/Documents/data/switzerland/cache
-flowchart_path: /home/tchervec/Documents/data/switzerland/flowchart.json
+# path to the working directory/cache
+working_directory: 
+#p path where the pipeline flowchart should be stored
+flowchart_path:
 dryrun: false
 
 # Requested stages
 run:
-    - synthesis.population.enriched
+    - synthesis.output
+    - matsim.simulation.run
 
 # These are configuration options that we use in the pipeline
 config:
+    # path to the input data folder
+    data_path: 
     threads: 4
     random_seed: 0
-    hot_deck_matching_runners: 2
+    # it seems fastest is with 1
+    hot_deck_matching_runners: 1
     disable_progress_bar: false
     java_memory: 10G
     input_downsampling: 0.01
+
     enable_scaling: true
+    # to which year we want to scale the population
     scaling_year: 2020
+
+    # do we want to include freight demand int eh synthetic population, defailt is true
     use_freight: true
+    # there are two options to convert pt schedule: [hafas, gtfs]; default is gtfs
+    pt_schedule: gtfs
+    # name of the gtfs zip file, should be placed in gtfs folder within data_path
+    gtfs_name: gtfs_fp2024_2023-12-13_04-15
+    # date from which gtfs should be take. Options are [dayWithMostTrips, dayWithMostServices, <exact date>]
+    gtfs_date: "dayWithMostServices" 
+    # if hafas is used, the data needs to be specified
     hafas_date: 01.10.2018
-    data_path: /home/tchervec/Documents/data/switzerland/data
-    extent_path:
-    extent_prefix:
+    
+    # if we should use schedule based pt or simulated
+    useScheduleBasedTransport: true
+    # defines the prefix for the cutout scenario name; it should be of the zurich_ format
+    extent_prefix: zurich_
+
+    # specifies if we want to use VDF as the traffic model, default is false
+    use_vdf: false

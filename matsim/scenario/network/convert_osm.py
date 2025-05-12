@@ -99,7 +99,7 @@ def execute(context):
 
     pt2matsim.run(context, "org.matsim.pt2matsim.run.CreateDefaultOsmConfig", [
         "convert_network_template.xml"
-    ])
+    ],[])
 
     # Create MATSim network
     with open("%s/convert_network_template.xml" % context.path()) as f_read:
@@ -133,6 +133,11 @@ def execute(context):
             )
 
         content = content.replace(
+            '<param name="parseTurnRestrictions" value="false" />',
+            '<param name="parseTurnRestrictions" value="true" />'
+        )
+
+        content = content.replace(
             '</module>',
             """
                 <parameterset type="routableSubnetwork">
@@ -160,7 +165,7 @@ def execute(context):
             
     pt2matsim.run(context, "org.matsim.pt2matsim.run.Osm2MultimodalNetwork", [
         "%s/convert_network.xml" % context.path()
-    ])
+    ],[])
     
     if context.config("simplify_network_in_eqasim") or context.config("correct_links_capacity"):
         network_path =  "%s/converted_network.xml.gz" % context.path()

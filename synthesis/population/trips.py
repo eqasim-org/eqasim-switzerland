@@ -1,8 +1,6 @@
 import numpy as np
 import pandas as pd
 
-import data.constants as c
-
 """
 This stage attaches all trip relevant information to the synthetic population.
 """
@@ -11,14 +9,21 @@ This stage attaches all trip relevant information to the synthetic population.
 def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.microcensus.trips")
+    context.stage("data.constants")
     
     context.config("random_seed")
 
-
 def execute(context):
-    df_persons = context.stage("synthesis.population.enriched")[[
-        "person_id", "mz_person_id", "age"
-    ]]
+    c      = context.stage("data.constants")
+
+    if c.census == "statpop":
+        df_persons = context.stage("synthesis.population.enriched")[[
+            "person_id", "mz_person_id", "age"
+        ]]
+    elif c.census == "are_synpop":
+        df_persons = context.stage("synthesis.population.enriched")[[
+            "person_id", "mz_person_id", "age_class"
+        ]]    
 
     df_trips = pd.DataFrame(context.stage("data.microcensus.trips")[0], copy=True)[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose"
@@ -33,7 +38,10 @@ def execute(context):
 
     # Children do not have any trips from the microcensus
     f = np.isnan(df_trips["mz_person_id"])
-    assert ((df_trips[f]["age"] > c.MZ_AGE_THRESHOLD).all())
+    if c.census == "statpop":
+        assert ((df_trips[f]["age"] > c.MZ_AGE_THRESHOLD).all())
+    elif c.census == "are_synpop":
+        assert ((df_trips[f]["age_class"] >= 1).all())
 
     # We deliberately delete them here, since other persons also may not have any
     # trips. May be improved later. TODO

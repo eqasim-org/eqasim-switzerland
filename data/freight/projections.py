@@ -1,8 +1,6 @@
 import numpy as np
 import pandas as pd
 
-import data.constants as c
-
 INDEX_RENAMES = {0: "total",
                  1: "truck",
                  2: "delivery_van"}
@@ -11,10 +9,11 @@ INDEX_RENAMES = {0: "total",
 def configure(context):
     context.config("data_path")
     context.config("scaling_year")
-
+    context.stage("data.constants")
 
 def execute(context):
     data_path = context.config("data_path")
+    c         = context.stage("data.constants")
 
     # Select year in the future to project to
     scaling_year = np.max([c.BASE_SCALING_YEAR, context.config("scaling_year")])

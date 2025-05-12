@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import pyproj
 
-import data.constants as c
 import data.spatial.cantons
 import data.spatial.municipalities
 import data.spatial.municipality_types
@@ -16,15 +15,19 @@ import data.utils
 
 def configure(context):
     context.config("data_path")
+    context.config("output_path")
+
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.zones")
     context.stage("data.spatial.municipality_types")
     context.stage("data.statpop.density")
     context.stage("data.spatial.ovgk")
-
+    context.stage("data.microcensus.household_persons")
+    context.stage("data.constants")
 
 def execute(context):
     data_path = context.config("data_path")
+    c         = context.stage("data.constants")
 
     df_mz_households = pd.read_csv(
         "%s/microcensus/haushalte.csv" % data_path, sep=",", encoding="latin1")
@@ -62,7 +65,7 @@ def execute(context):
         "number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_ALL
 
     # Household size class
-    data.utils.assign_household_class(df_mz_households)
+    data.utils.assign_household_class(df_mz_households, c)
 
     # Region information
     # (acc. to Analyse der SP-Befragung 2015 zur Verkehrsmodus- und Routenwahl)
@@ -103,9 +106,14 @@ def execute(context):
     df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
     df_mz_households = pd.merge(df_mz_households, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
 
+    # Impute household person information, such as number of children
+    df_household_info = context.stage("data.microcensus.household_persons")[1].copy()
+    household_columns = context.stage("data.microcensus.household_persons")[2].copy()
+    df_mz_households  = pd.merge(df_mz_households, df_household_info, left_on="person_id", right_on="household_id", how="left")
+
     # Wrap it up
     return df_mz_households[[
         "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
-        "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id", "ovgk"
-    ]]
+        "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id", "ovgk",
+    ] + household_columns]

@@ -1,9 +1,6 @@
 import numpy as np
 from sklearn.neighbors import KDTree
 
-import data.constants as c
-
-
 def configure(context):
     context.stage("data.statpop.persons")
 
@@ -16,7 +13,7 @@ def execute(context):
     return kd_tree
 
 
-def impute(context, kd_tree, df, x="x", y="y", radius=c.POPULATION_DENSITY_RADIUS, point_type="", chunk_size=1e6):
+def impute(context, kd_tree, df, x="x", y="y", radius= 2.5 * 1e3, point_type="", chunk_size=1e6):
     print(f"Imputing population density within {radius} m of {len(df)} {point_type} coordinates...")
     counts = []
     chunk_count = max(1, int(len(df) / chunk_size))
