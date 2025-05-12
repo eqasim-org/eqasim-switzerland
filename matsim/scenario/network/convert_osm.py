@@ -14,6 +14,7 @@ def configure(context):
     context.config("export_detailed_network", False)
     context.config("simplify_network_in_eqasim", False)
     context.config("correct_links_capacity", False)
+    context.config("minimum_speed", 3) #in km/h
     context.config("input_downsampling")
 
 def execute(context):
@@ -101,7 +102,8 @@ def execute(context):
 
         if context.config("correct_links_capacity"):
             sampling_rate = context.config("input_downsampling")
-            net.correct_capacity(sampling_rate = sampling_rate,minimum_speed=2/3.6)
+            net.correct_capacity( sampling_rate = sampling_rate,
+                                  minimum_speed = context.config("minimum_speed")/3.6)
             
         # Do not remove the last version of the network, just rename it.
         shutil.move(network_path, network_path.replace("converted_network","converted_network_uncleaned"))
