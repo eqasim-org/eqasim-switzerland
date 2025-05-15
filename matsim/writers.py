@@ -465,9 +465,12 @@ class NetworkWriter(XmlWriter):
         self.indent -= 1
         self._write_line('</attributes>')
 
-    def add_attribute(self, name: str, value: Union[str, int, float, bool], typ: str = None):
+    def add_attribute(self, name: str, value: Union[str, int, float, bool], typ: str = None):             
         if not typ:
-            typ = self.get_java_type(type(value))
+            if name=="disallowedNextLinks":
+                typ = "org.matsim.core.network.turnRestrictions.DisallowedNextLinks"    
+            else:                
+                typ = self.get_java_type(type(value))
         self._write_line(f'<attribute name="{name}" class="{typ}">{value}</attribute>')
 
     def write_attributes(self, attributes: dict):
