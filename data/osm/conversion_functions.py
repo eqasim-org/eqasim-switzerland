@@ -1,7 +1,8 @@
 import os
 import matsim.runtime.osmosis as osmosis
 import sys
-
+import logging
+logger = logging.getLogger(__name__)
 
 
 """
@@ -24,29 +25,29 @@ def convert_pbf_to_osm_pyosmium(input_file, output_file):
         def relation(self, r):
             self.writer.add_relation(r)
 
-    print("using pyosmium to convert .pbf data")
+    logger.info("using pyosmium to convert .pbf data")
     if os.path.exists(output_file):
-        print("The file: %s already exists. It will be overridden." % output_file)
+        logger.info("The file: %s already exists. It will be overridden." % output_file)
         os.remove(output_file)
 
     writer = osmium.SimpleWriter(output_file)
     handler = OSMHandler(writer)
 
     try:
-        print(f"Processing {input_file} → {output_file} ...")
+        logger.info(f"Processing {input_file} → {output_file} ...")
         handler.apply_file(input_file)
-        print(f"Conversion successful: {output_file}")
+        logger.info(f"Conversion successful: {output_file}")
     except Exception as e:
-        print(f"Error during network conversion using pyosmium: {e}")
+        logger.info(f"Error during network conversion using pyosmium: {e}")
         sys.exit(1)
     finally:
         writer.close()
 
 def convert_pbf_to_osm_osmosis(context, input_file, output_file):
 
-    print("using osmosis to convert .pbf data")
+    logger.info("using osmosis to convert .pbf data")
     if os.path.exists(output_file):
-        print("The file: %s already exists. It will be overridden." % output_file)
+        logger.info("The file: %s already exists. It will be overridden." % output_file)
         os.remove(output_file)
     
     try:
@@ -60,7 +61,7 @@ def convert_pbf_to_osm_osmosis(context, input_file, output_file):
             ])
         
     except Exception as e:
-        print(f"Error during network conversion using osmosis: {e}")
+        logger.info(f"Error during network conversion using osmosis: {e}")
         sys.exit(1)
 
 def from_pbf_to_osm_gz(context, osm_file):

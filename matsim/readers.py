@@ -9,6 +9,8 @@ from tqdm import tqdm
 import os
 import numpy as np
 import warnings
+import logging
+logger = logging.getLogger(__name__)
 
 """
 This script is designed to read MATSim network files. It also include a function that simplifies the network, 
@@ -106,7 +108,7 @@ class Network:
         # Removing loops
         sel = (df['from_node'] == df['to_node'])
         stats["removed_loops"] = int(sel.sum())
-        print("There are %d loops in the network that are removed." % stats["removed_loops"] )
+        logger.info("There are %d loops in the network that are removed." % stats["removed_loops"] )
         df = df[~sel].reset_index(drop=True)
 
         # Remove replicated links
@@ -114,14 +116,14 @@ class Network:
         df = df.drop_duplicates(subset=['length','modes','from_node', 'to_node', 'capacity'],
                                 ignore_index=True)
         stats["removed_link_duplicates"] = len_df-len(df)
-        print("There are %d link duplicates in the network that are removed." % stats["removed_link_duplicates"] )                
+        logger.info("There are %d link duplicates in the network that are removed." % stats["removed_link_duplicates"] )                
         
         # Removing nodes with no intersection
-        print("Removing nodes that do not represent an intersection.")
+        logger.info("Removing nodes that do not represent an intersection.")
         df, stats2 = self.merge_link_chains(df)
         
         # Removed links that are not connected to the whole graph
-        print("Remove unconnected links")
+        logger.info("Remove unconnected links")
         cond = "disallowedNextLinks" in self.link_attrs["name"].unique()
         func = self.remove_unconnected_links_with_turns_restrictions if cond else self.remove_unconnected_links
         df, num_removed = func(df)        
@@ -131,7 +133,7 @@ class Network:
         stats.update(stats2)
         
         # Limit the speed limit in the network
-        print("Change the infinit freespeed to 85.")
+        logger.info("Change the infinit freespeed to 85.")
         # This is also done in : https://github.com/eqasim-org/eqasim-java/blob/develop/core/src/main/java/org/eqasim/core/scenario/preparation/AdjustLinkLength.java#L9
         self.links.loc[self.links.freespeed.apply(np.isinf),"freespeed"] = 85
         self.links.loc[self.links.freespeed<20/3.6,"freespeed"] = 20/3.6
@@ -163,7 +165,7 @@ class Network:
         df_other = df[~sel].copy()
         df       = df[sel].reset_index(drop=True) #don't include pt links because maybe disconencted from the network (rail for example)
         
-        print("    Converting network to networkx ...")
+        logger.info("    Converting network to networkx ...")
         G = nx.Graph()    
         G.add_edges_from(zip(df['from_node'], 
                              df['to_node'], 
@@ -197,7 +199,7 @@ class Network:
         df_other = df[~sel].copy()
         df = df[sel].reset_index(drop=True)
 
-        print("    Building turn-aware connectivity graph...")
+        logger.info("    Building turn-aware connectivity graph...")
 
         # Create a mapping from to_node to list of incoming links
         links_from_node = df.groupby('from_node')['link_id'].apply(list).to_dict()
@@ -208,9 +210,7 @@ class Network:
         for link_id, row in link_info.iterrows():
             to_node = row['to_node']
             disallowed = set()          
-            disallowed_links = row.attributes.get("disallowedNextLinks", {})
-            if isinstance(disallowed_links, str):
-                disallowed_links = eval(disallowed_links)
+            disallowed_links = eval(row.attributes.get("disallowedNextLinks", "{}"))
             if "car" in disallowed_links:                
                 disallowed.update([j for i in disallowed_links["car"] for j in i])
 
@@ -220,12 +220,17 @@ class Network:
                 if next_link_id not in disallowed:
                     G.add_edge(link_id, next_link_id)
 
-        # Get largest weakly connected component
-        largest_cc = max(nx.weakly_connected_components(G), key=len)
+        # Get largest strongly connected component
+        strongly_connected_components = list(nx.strongly_connected_components(G))
+        largest_scc = max(strongly_connected_components, key=len)
 
         # Filter to only links part of the largest component
-        connected_links = df[df['link_id'].isin(largest_cc)]
-
+        connected_links = df[df['link_id'].isin(largest_scc)]
+        
+        # print number of unconnected links
+        disconnected_components = [c for c in strongly_connected_components if len(c) < len(largest_scc)]
+        logger.info(f"{len(disconnected_components)} small disconnected components found. These are their sizes: {[len(c) for c in disconnected_components]}")   
+        
         # Add back non-car links
         df_final = pd.concat([connected_links, df_other], ignore_index=True)
 
@@ -247,7 +252,7 @@ class Network:
                     }
                         
         # Step 1: Build directed graph
-        print("    Converting network to networkx ...")
+        logger.info("    Converting network to networkx ...")
         G = nx.MultiDiGraph()    
         G.add_edges_from(zip(df['from_node'], 
                              df['to_node'], 
@@ -266,7 +271,7 @@ class Network:
             return G.in_degree(node) == 1 and G.out_degree(node) == 1
         
         
-        print("    Searching for nodes to remove")
+        logger.info("    Searching for nodes to remove")
         node_iterator = G.__iter__()
         iteration = 0
         progress_bar = tqdm(total=len(G), desc="Finding nodes to remove ", 

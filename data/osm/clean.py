@@ -1,6 +1,7 @@
 import data.osm.conversion_functions as cf
 import data.osm.merging_functions as mf
-
+import logging
+logger = logging.getLogger(__name__)
 
 def configure(context):
     context.stage("matsim.runtime.osmosis")
