@@ -10,7 +10,10 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.config("use_vdf", default=False)
 
+
     context.config("useScheduleBasedTransport", default=True)
+    context.config("preventwaitingtoentertraffic", default = "no")
+    context.config("writeexperiencedplans", default = "no")
     context.config("preventwaitingtoentertraffic", default = "no")
     context.config("writeexperiencedplans", default = "no")
 
@@ -42,7 +45,7 @@ def execute(context):
             "--config-path", config_path,
             "--config:controler.lastIteration", str(60),
             "--config:controler.writeEventsInterval", str(10),
-            "--config:controler.writePlansInterval", str(10),
+            "--config:controler.writePlansInterval", str(1),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
             "--preventwaitingtoentertraffic", preventwaitingtoentertraffic,
             "--config:scoring.writeExperiencedPlans", writeExperiencedPlans
