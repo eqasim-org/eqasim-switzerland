@@ -100,7 +100,7 @@ def execute(context):
         "--sample-size", context.config("input_downsampling"),
         "--random-seed", context.config("random_seed"),
         "--threads", context.config("threads"),
-        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator",
+        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
     ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
@@ -147,11 +147,11 @@ def execute(context):
         "--downsamplingRate", context.config("input_downsampling"),
         "--replanningRate", "0.05",
         "--hasFreight", context.config("use_freight"),
-        "--prefix", context.config("output_prefix")
-    ])
+        "--prefix", context.config("output_prefix")    ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
-    
+
+
     # Route the population
     population_output_path = "%spopulation.xml.gz" % context.config("output_prefix")
     
