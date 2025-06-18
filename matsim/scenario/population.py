@@ -51,6 +51,11 @@ class PersonWriter:
         writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[10]))
         writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[11]))
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(self.person[13]))
+        writer.add_attribute("hasWalkLoopTrip", "java.lang.Boolean", writer.true_false(self.person[18]))
+        writer.add_attribute("hasCarLoopTrip", "java.lang.Boolean", writer.true_false(self.person[19]))
+        writer.add_attribute("hasCarPassengerLoopTrip", "java.lang.Boolean", writer.true_false(self.person[20]))
+        writer.add_attribute("hasPtLoopTrip", "java.lang.Boolean", writer.true_false(self.person[21]))
+        writer.add_attribute("hasBikeLoopTrip", "java.lang.Boolean", writer.true_false(self.person[22]))
         writer.add_attribute("statpopPersonId", "java.lang.Long", str(self.person[14]))
         writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[15]))
         writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[16]))
@@ -139,40 +144,59 @@ class FreightWriter:
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y",
                  "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke",
                  "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id",
-                 "mz_head_id"]
+                 "mz_head_id", "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip"]
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
                    "geometry", "destination_id", "following_mode"]
 
 
 def execute(context):
-    cache_path = context.path()
-    df_persons = context.stage("synthesis.population.enriched")
+    cache_path    = context.path()
+    df_persons    = context.stage("synthesis.population.enriched")
     df_activities = context.stage("synthesis.population.activities")
-    df_vehicles = context.stage("synthesis.vehicles.vehicles")[1]
+    df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]
 
     # Attach following modes to activities
-    df_trips = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
+    df_trips         = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
     df_trips.columns = ["person_id", "activity_index", "following_mode"]
-    df_activities = pd.merge(df_activities, df_trips, on=["person_id", "activity_index"], how="left")
+    df_activities    = pd.merge(df_activities, df_trips, on=["person_id", "activity_index"], how="left")
 
     # Attach locations to activities
-    df_locations = context.stage("synthesis.population.spatial.locations")
+    df_locations  = context.stage("synthesis.population.spatial.locations")
     df_activities = pd.merge(df_activities, df_locations, on=["person_id", "activity_index"], how="left")
 
-    # Bring in correct order (although it should already be)
-    df_persons = df_persons.sort_values(by="person_id")
-    df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
-    df_vehicles = df_vehicles.sort_values(by=["owner_id"])
+    # Replace the primary-secondary purposes with normal ones
+    # Now that the secondary locations are assigned, no need to continue working with these purposes
+    df_activities["purpose"] = df_activities["purpose"].replace({"home_secondary":"home",
+                                                                 "work_secondary": "work",
+                                                                 "education_secondary":"education"})
     
-    df_persons = df_persons[PERSON_FIELDS]
-    df_activities = df_activities[ACTIVITY_FIELDS]
-    df_vehicles = df_vehicles[VEHICLE_FIELDS]
-    
-    person_iterator = iter(df_persons.itertuples(index = False))
-    activity_iterator = iter(df_activities.itertuples(index = False))
-    vehicle_iterator = backlog_iterator(iter(df_vehicles.itertuples(index = False)))
+    # Find the loop attribute in the following_modes
+    loop_modes = ["walk_loop", "car_loop", "car_passenger_loop", "pt_loop", "bike_loop"]
 
-    number_of_written_persons = 0
+    unique_modes_per_agent = df_activities.groupby("person_id")["following_mode"].apply(lambda x: list(set(x))).reset_index()
+    loop_columns           = ["person_id"]
+    for mode in loop_modes:
+        col = "has_" + mode + "_trip"
+        unique_modes_per_agent[col] = [mode in unique_modes for unique_modes in unique_modes_per_agent["following_mode"]]
+        loop_columns.append(col)
+
+    df_persons = df_persons.merge(unique_modes_per_agent[loop_columns], on = "person_id", how="left")
+    df_persons[loop_columns] = df_persons[loop_columns].fillna(False)
+    
+    # Bring in correct order (although it should already be)
+    df_persons    = df_persons.sort_values(by="person_id")
+    df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
+    df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
+    
+    df_persons    = df_persons[PERSON_FIELDS]
+    df_activities = df_activities[ACTIVITY_FIELDS]
+    df_vehicles   = df_vehicles[VEHICLE_FIELDS]
+    
+    person_iterator   = iter(df_persons.itertuples(index = False))
+    activity_iterator = iter(df_activities.itertuples(index = False))
+    vehicle_iterator  = backlog_iterator(iter(df_vehicles.itertuples(index = False)))
+
+    number_of_written_persons    = 0
     number_of_written_activities = 0
 
     with gzip.open("%s/population.xml.gz" % cache_path, "wb+", compresslevel=1) as f:

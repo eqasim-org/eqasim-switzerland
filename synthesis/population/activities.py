@@ -54,6 +54,7 @@ def execute(context):
 
     # Some cleanup
     df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
+    df_activities["start_time"] = df_activities["start_time"].fillna(0)
     df_activities.loc[:, "duration"] = df_activities.loc[:, "end_time"] - df_activities.loc[:, "start_time"]
 
     df_activities = df_activities[[

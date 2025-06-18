@@ -41,17 +41,11 @@ def execute(context):
 
     if (not context.config("use_vdf")):
         # Run simulation
-        eqasim.run(context, "org.eqasim.switzerland.ch.ch.RunSimulation", [
+        eqasim.run(context, "org.eqasim.switzerland.ch.RunSimulation", [
             "--config-path", config_path,
-            "--config:controler.lastIteration", str(60),
-<<<<<<< HEAD
-            "--config:controler.writeEventsInterval", str(10),
+            "--config:controler.lastIteration", str(1),
+            "--config:controler.writeEventsInterval", str(1),
             "--config:controler.writePlansInterval", str(1),
-=======
-            "--config:controler.writeEventsInterval", str(60),
-            "--config:controler.writePlansInterval", str(60),
-            "--config:controller.writeTripsInterval", str(0),
->>>>>>> 61e77300936c57fee01e30762bc090dc1511a299
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
             "--preventwaitingtoentertraffic", preventwaitingtoentertraffic,
             "--config:scoring.writeExperiencedPlans", writeExperiencedPlans
