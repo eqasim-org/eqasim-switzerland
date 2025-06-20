@@ -19,4 +19,16 @@ def execute(context):
     df_vehicles_person = pd.concat([df_cars, df_passengers])
     df_types = pd.concat([df_car_types, df_passenger_types, df_truck_types])
 
+    output_file = "/cluster/home/anding/ch/analysis/data/vehicles_person.csv"
+    df_vehicles_person.to_csv(output_file, index=False)
+    print(f"DataFrame successfully exported to {output_file}")
+
+    output_file = "/cluster/home/anding/ch/analysis/data/vehicles_types.csv"
+    df_types.to_csv(output_file, index=False)
+    print(f"DataFrame successfully exported to {output_file}")
+
+    output_file = "/cluster/home/anding/ch/analysis/data/vehicles_trucks.csv"
+    df_trucks.to_csv(output_file, index=False)
+    print(f"DataFrame successfully exported to {output_file}")
+
     return df_types, df_vehicles_person, df_trucks

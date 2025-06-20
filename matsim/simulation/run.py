@@ -30,7 +30,8 @@ def execute(context):
             "--config:controler.lastIteration", str(60),
             "--config:controler.writeEventsInterval", str(60),
             "--config:controler.writePlansInterval", str(60),
-            "--config:controller.writeTripsInterval", str(0),
+            "--config:controler.writeTripsInterval", str(60),
+            "--config:eqasim.analysisInterval", str(60),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
     else:

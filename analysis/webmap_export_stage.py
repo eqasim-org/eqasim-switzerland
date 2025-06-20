@@ -1,0 +1,98 @@
+import os
+import gzip
+import shutil
+import pandas as pd
+import geopandas as gpd
+import analysis.webmap_export as webmap_export
+from analysis.network_reader import read_network
+
+
+def configure(context):
+    context.stage("matsim.simulation.run")  # get working directory
+    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.persons")
+    context.stage("data.spatial.cantons") # get canton boundaries
+
+def execute(context):
+    matsim_dir = context.stage("matsim.simulation.run")
+    simulation_output = os.path.join(matsim_dir, "simulation_output")
+
+    # Create webmap output directory
+    output_dir = os.path.join(matsim_dir, "simulation_output", "webmap")
+    os.makedirs(output_dir, exist_ok=True)
+    webmap_export.DEFAULT_WORKDIR = output_dir
+
+    # Create all necessary subfolders
+    os.makedirs(os.path.join(output_dir, "public", "data", "matsim", "transit"), exist_ok=True)
+
+    # Input files
+    synthetic_gz_path = os.path.join(simulation_output, "output_trips.csv.gz")
+    linkstats_gz_path = os.path.join(simulation_output, "ITERS", "it.50", "50.linkstats.txt.gz")
+    linkstats_path = os.path.join(output_dir, "50.linkstats.txt")
+    matsim_network_path = os.path.join(simulation_output, "output_network.xml.gz")
+    transit_schedule_path = os.path.join(simulation_output, "output_transitSchedule.xml.gz")
+    volumes_path = os.path.join(simulation_output, "pt_passenger_counts.csv.gz")
+
+    # Microcensus files (fixed path)
+    microcensus_trips_df = context.stage("data.microcensus.trips")[0]  # first element of tuple
+    microcensus_persons_df = context.stage("data.microcensus.persons")
+
+    # Cantons
+    canton_boundaries = context.stage("data.spatial.cantons")
+
+    # === Unzip if needed ===
+    if not os.path.exists(linkstats_path):
+        with gzip.open(linkstats_gz_path, 'rb') as f_in, open(linkstats_path, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+
+    # === Add canton names to synthetic data if missing ===
+    synthetic_df = pd.read_csv(synthetic_gz_path, sep=';', compression='gzip', dtype={"person": str})
+
+    # For synthetic
+    if "canton_name" not in synthetic_df.columns:
+        print("Assigning cantons to synthetic data...")
+        synthetic_df = webmap_export.assign_cantons(synthetic_df, canton_boundaries)
+
+    # For microcensus
+    if "canton_name" not in microcensus_trips_df.columns:
+        print("Assigning cantons to microcensus data...")
+        microcensus_trips_df = webmap_export.assign_cantons(microcensus_trips_df, canton_boundaries, "origin_x", "origin_y")
+
+    # === Load microcensus and synthetic data ===
+    syn_df, mc_df = webmap_export.import_data(synthetic_df, microcensus_trips_df, microcensus_persons_df)
+
+    for agg_col in ["mode", "purpose"]:
+        webmap_export.export_by_aggregation(mc_df, syn_df, aggregation_col=agg_col)
+
+    print("Reading network...")
+    network = read_network(matsim_network_path)
+    geo = network.as_geo(projection="EPSG:2056")
+
+    print("Exporting network by canton...")
+    webmap_export.export_network_by_canton(geo, canton_boundaries)
+
+    print("Exporting volumes by canton...")
+    webmap_export.export_link_volumes_by_canton(canton_boundaries, linkstats_path)
+
+    print("Parsing transit stops from schedule XML...")
+    stops_gdf = webmap_export.parse_stops(transit_schedule_path)
+    stops_gdf = stops_gdf.to_crs(epsg=2056)
+    print(f"Parsed {len(stops_gdf)} stops")
+
+    print("Assigning each stop to a canton...")
+    joined = webmap_export.assign_cantons_stops(stops_gdf, canton_boundaries)
+
+    print("Exporting per-canton stop GeoJSONs...")
+    stops_dir = webmap_export.export_per_canton_stops(joined)
+
+    print("Generating modes_by_canton.json...")
+    webmap_export.generate_modes_by_canton(joined)
+
+    print("Building route line geometries...")
+    webmap_export.build_route_lines(transit_schedule_path, joined)
+
+    print("Computing passenger counts per canton...")
+    volumes_df = pd.read_csv(volumes_path, sep=',', compression='gzip')
+    webmap_export.compute_passenger_counts(joined, volumes_df)
+
+    print("Webmap export complete. Output saved to:", output_dir)
