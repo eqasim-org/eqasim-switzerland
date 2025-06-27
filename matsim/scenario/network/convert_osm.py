@@ -1,4 +1,5 @@
 import os
+import re
 
 import matsim.runtime.pt2matsim as pt2matsim
 
@@ -18,6 +19,17 @@ def execute(context):
     # Create MATSim network
     with open("%s/convert_network_template.xml" % context.path()) as f_read:
         content = f_read.read()
+
+        content = content.replace(
+            '<param name="allowedTransportModes" value="bus, car" />',
+            '<param name="allowedTransportModes" value="bus" />'
+        )
+        content = re.sub(
+            r'(<parameterset\s+type="wayDefaultParams"\s*>\s*<param\s+name="allowedTransportModes"\s+value=")car(")',
+            r'\1car,taxi,bus\2',
+            content,
+            flags=re.DOTALL
+        )
 
         content = content.replace(
             '<param name="osmFile" value="null" />',
@@ -60,6 +72,19 @@ def execute(context):
             </module>
             """
         )
+
+        content = content.replace(
+            '</module>',
+            """
+                <parameterset type="routableSubnetwork" >
+			        <param name="allowedTransportModes" value="taxi" />
+			        <param name="subnetworkMode" value="taxi" />
+		        </parameterset>
+            </module>
+            """
+        )
+
+        
 
 
         with open("%s/convert_network.xml" % context.path(), "w+") as f_write:
