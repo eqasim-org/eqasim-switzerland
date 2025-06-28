@@ -13,6 +13,7 @@ def configure(context):
     context.stage("synthesis.population.trips")
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.spatial.locations")
+    context.stage("data.spatial.cantons")
     context.config("use_freight", default=False)
     context.stage("synthesis.freight.trips")
 
@@ -53,6 +54,11 @@ class PersonWriter:
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(self.person[13]))
         writer.add_attribute("statpopPersonId", "java.lang.Long", str(self.person[14]))
         writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[15]))
+        writer.add_attribute("cantonName", "java.lang.String", str(self.person[18]))
+        writer.add_attribute("municipalityType", "java.lang.String", str(self.person[19]))
+        writer.add_attribute("incomeClass", "java.lang.Integer", str(self.person[20]))
+
+
         writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[16]))
         writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[17]))
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
@@ -139,7 +145,7 @@ class FreightWriter:
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y",
                  "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke",
                  "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id",
-                 "mz_head_id"]
+                 "mz_head_id", "canton_name", "municipality_type", "income_class"]
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
                    "geometry", "destination_id", "following_mode"]
 
@@ -149,6 +155,12 @@ def execute(context):
     df_persons = context.stage("synthesis.population.enriched")
     df_activities = context.stage("synthesis.population.activities")
     df_vehicles = context.stage("synthesis.vehicles.vehicles")[1]
+    df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name"]]
+    
+    # Attach canton name to agent
+    df_cantons["canton_name"] = df_cantons.canton_name.str.split('/').str[0]
+    df_persons = pd.merge(df_persons, df_cantons, left_on="canton_id", right_on="canton_id", how="left")
+    assert df_persons.canton_name.notnull().all(), "Not all persons have a canton name assigned. Check the canton data."
 
     # Attach following modes to activities
     df_trips = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]

@@ -14,3 +14,4 @@ slurm*
 logs
 run*.sh
 analysis
+server
