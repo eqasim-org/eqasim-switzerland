@@ -64,15 +64,15 @@ def execute(context):
     for agg_col in ["mode", "purpose"]:
         webmap_export.export_by_aggregation(mc_df, syn_df, aggregation_col=agg_col)
 
-    print("Reading network...")
-    network = read_network(matsim_network_path)
-    geo = network.as_geo(projection="EPSG:2056")
+    # print("Reading network...")
+    # network = read_network(matsim_network_path)
+    # geo = network.as_geo(projection="EPSG:2056")
 
-    print("Exporting network by canton...")
-    webmap_export.export_network_by_canton(geo, canton_boundaries)
+    # print("Exporting network by canton...")
+    # webmap_export.export_network_by_canton(geo, canton_boundaries)
 
-    print("Exporting volumes by canton...")
-    webmap_export.export_link_volumes_by_canton(canton_boundaries, linkstats_path)
+    # print("Exporting volumes by canton...")
+    # webmap_export.export_link_volumes_by_canton(canton_boundaries, linkstats_path)
 
     print("Parsing transit stops from schedule XML...")
     stops_gdf = webmap_export.parse_stops(transit_schedule_path)
@@ -94,5 +94,8 @@ def execute(context):
     print("Computing passenger counts per canton...")
     volumes_df = pd.read_csv(volumes_path, sep=',', compression='gzip')
     webmap_export.compute_passenger_counts(joined, volumes_df)
+
+    print("Exporting inter-cantonal stops with volume...")
+    webmap_export.export_inter_cantonal_stops(joined, volumes_df)
 
     print("Webmap export complete. Output saved to:", output_dir)

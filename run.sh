@@ -11,4 +11,4 @@ source ~/.bashrc
 
 source /cluster/home/anding/myenv/bin/activate
 
-sbatch -n 1 --cpus-per-task=12 --time=8:00:00 --mem-per-cpu=16192 --wrap="python3 -m synpp config_andrew.yml"
+sbatch -n 1 --cpus-per-task=8 --time=8:00:00 --mem-per-cpu=16192 --wrap="python3 -m synpp config_andrew.yml"

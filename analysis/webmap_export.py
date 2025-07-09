@@ -12,6 +12,7 @@ from collections import defaultdict, Counter
 
 
 from shapely.geometry import Point, LineString, mapping
+from shapely.ops import transform as shapely_transform
 from pyproj import Transformer
 
 
@@ -970,3 +971,84 @@ def compute_passenger_counts(joined_gdf, counts_df):
         fname = f"{clean_geo_name(canton)}_counts.json"
         with open(os.path.join(output_dir, fname), 'w', encoding='utf-8') as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
+
+def export_inter_cantonal_stops(joined_gdf, volumes_df):
+    """
+    Identify inter-cantonal stops and export them as GeoJSON with volume.
+    """
+    output_dir = os.path.join(DEFAULT_WORKDIR, "public", "data", "matsim", "transit", "stops_by_canton")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "inter_cantonal_stops.geojson")
+
+    # Transformer from original CRS to WGS84
+    transformer = Transformer.from_crs(joined_gdf.crs, "EPSG:4326", always_xy=True)
+
+    # Step 1: Build mapping from line_id → set of cantons
+    line_to_cantons = defaultdict(set)
+    all_features = []
+
+    for _, row in joined_gdf.iterrows():
+        
+        if pd.isna(row["assigned_canton"]):
+            continue
+        
+        props = row.drop("geometry").to_dict()
+        geometry = row.geometry
+        lines = props.get("lines", [])
+        for line in lines:
+            line_id = line.get("line_id")
+            if line_id:
+                line_to_cantons[line_id].add(props.get("assigned_canton"))
+        all_features.append({"properties": props, "geometry": geometry})
+
+    # Step 2: Identify inter-cantonal lines
+    inter_cantonal_lines = {lid for lid, cantons in line_to_cantons.items() if len(cantons) > 1}
+
+    # Step 3: Collect final features with deduplication and volume assignment
+    seen_keys = set()
+    final_features = []
+
+    for f in all_features:
+        props = f["properties"]
+        geometry = f["geometry"]
+        lines = props.get("lines", [])
+        stop_ids = props.get("stop_id", [])
+
+        stop_key = tuple(sorted(stop_ids)) if isinstance(stop_ids, list) else (stop_ids,)
+        if stop_key in seen_keys:
+            continue
+
+        if any(line.get("line_id") in inter_cantonal_lines for line in lines):
+            seen_keys.add(stop_key)
+
+            # Compute volume
+            ids = stop_ids if isinstance(stop_ids, list) else [stop_ids]
+            total_volume = sum(
+                volumes_df[volumes_df['stop_id'].isin(ids)]['boardings'].fillna(0) +
+                volumes_df[volumes_df['stop_id'].isin(ids)]['alightings'].fillna(0)
+            )
+
+            # Retain only desired props
+            keep_keys = ["name", "stop_id", "lines", "assigned_canton", "predominant_mode", "modes_list"]
+            filtered_props = {k: props[k] for k in keep_keys if k in props}
+            filtered_props["volume"] = total_volume
+
+            # Reproject geometry to WGS84
+            geometry_wgs = shapely_transform(transformer.transform, geometry)
+
+            final_features.append({
+                "type": "Feature",
+                "geometry": mapping(geometry_wgs),
+                "properties": filtered_props
+            })
+
+    # Save as GeoJSON
+    geojson = {
+        "type": "FeatureCollection",
+        "features": final_features
+    }
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(geojson, f, indent=2)
+
+    print(f"Saved {len(final_features)} inter-cantonal stops with volume to {output_path}")
