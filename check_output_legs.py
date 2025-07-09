@@ -67,174 +67,152 @@ def explore_output_legs():
     """
     Explores the output_legs.csv file to understand its structure and contents.
     """
-    print("\n" + "="*50)
-    print("EXPLORING OUTPUT_LEGS.CSV FILE")
-    print("="*50)
+    print("\n" + "="*60)
+    print("📊 EXPLORING OUTPUT_LEGS.CSV FILE")
+    print("="*60)
     
     legs_file = "output_legs.csv"
     
     try:
-        # Read the CSV file
-        print(f"Reading {legs_file}...")
-        df_legs = pd.read_csv(legs_file, sep=';')
+        # Read first 1000 rows for quick analysis
+        print(f"Reading {legs_file} (first 1000 rows)...")
+        df_legs = pd.read_csv(legs_file, sep=';', nrows=1000)
         
         print(f"✓ Successfully loaded {legs_file}")
-        print(f"Shape: {df_legs.shape} (rows, columns)")
+        print(f"📋 Shape: {df_legs.shape} (rows, columns)")
+        print(f"💾 Memory usage: {df_legs.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
         
-        # Basic information
-        print("\n--- BASIC INFORMATION ---")
-        print(f"Number of rows: {len(df_legs):,}")
-        print(f"Number of columns: {len(df_legs.columns)}")
-        print(f"Memory usage: {df_legs.memory_usage(deep=True).sum() / 1024**2:.2f} MB")
-        
-        # Column information
-        print("\n--- COLUMNS ---")
-        print("Column names:")
+        # Column overview
+        print(f"\n📄 COLUMNS ({len(df_legs.columns)} total):")
         for i, col in enumerate(df_legs.columns, 1):
-            print(f"{i:2d}. {col}")
+            print(f"  {i:2d}. {col}")
         
-        # Data types
-        print("\n--- DATA TYPES ---")
-        print(df_legs.dtypes)
-        
-        # Missing values
-        print("\n--- MISSING VALUES ---")
+        # Missing values summary
+        print(f"\n❌ MISSING VALUES:")
         missing_counts = df_legs.isnull().sum()
-        missing_pct = (missing_counts / len(df_legs)) * 100
-        missing_df = pd.DataFrame({
-            'Missing Count': missing_counts,
-            'Missing %': missing_pct
-        })
-        print(missing_df[missing_df['Missing Count'] > 0])
+        missing_with_data = missing_counts[missing_counts > 0]
+        if len(missing_with_data) > 0:
+            for col, count in missing_with_data.items():
+                pct = (count / len(df_legs)) * 100
+                print(f"  {col}: {count} ({pct:.1f}%)")
+        else:
+            print("  No missing values found")
         
-        # First few rows
-        print("\n--- FIRST 5 ROWS ---")
-        print(df_legs.head())
+        # Sample data
+        print(f"\n👁️  SAMPLE DATA (first 3 rows):")
+        print(df_legs.head(3).to_string())
         
-        # Unique values for categorical columns
-        print("\n--- UNIQUE VALUES IN KEY COLUMNS ---")
-        potential_categorical = ['mode', 'start_activity_type', 'end_activity_type']
-        
-        for col in potential_categorical:
-            if col in df_legs.columns:
-                unique_count = df_legs[col].nunique()
-                print(f"\n{col}: {unique_count} unique values")
-                if unique_count <= 20:
-                    value_counts = df_legs[col].value_counts()
-                    print(value_counts)
-                else:
-                    print("Top 10 most common values:")
-                    print(df_legs[col].value_counts().head(10))
-        
-        # Time-related analysis
-        time_columns = [col for col in df_legs.columns if 'time' in col.lower()]
-        if time_columns:
-            print(f"\n--- TIME COLUMNS ANALYSIS ---")
-            for col in time_columns:
-                print(f"\n{col}:")
-                print(f"  Min: {df_legs[col].min()}")
-                print(f"  Max: {df_legs[col].max()}")
-                print(f"  Sample values: {df_legs[col].dropna().head(5).tolist()}")
-        
-        # Distance analysis if available
-        distance_columns = [col for col in df_legs.columns if 'distance' in col.lower()]
-        if distance_columns:
-            print(f"\n--- DISTANCE COLUMNS ANALYSIS ---")
-            for col in distance_columns:
-                print(f"\n{col}:")
-                print(df_legs[col].describe())
-        
-        # Trip/Person ID analysis
-        id_columns = [col for col in df_legs.columns if 'id' in col.lower()]
-        if id_columns:
-            print(f"\n--- ID COLUMNS ANALYSIS ---")
-            for col in id_columns:
-                unique_count = df_legs[col].nunique()
-                print(f"{col}: {unique_count:,} unique values")
-        
-        # Sample of random rows
-        print("\n--- RANDOM SAMPLE (5 ROWS) ---")
-        print(df_legs.sample(5))
-        
-        # Summary statistics for numeric columns
-        print("\n--- NUMERIC COLUMNS SUMMARY ---")
-        numeric_cols = df_legs.select_dtypes(include=[np.number]).columns
-        if len(numeric_cols) > 0:
-            print(df_legs[numeric_cols].describe())
-        
-        # Link analysis (start_link and end_link)
-        link_columns = ['start_link', 'end_link']
-        existing_link_cols = [col for col in link_columns if col in df_legs.columns]
-        
-        if existing_link_cols:
-            print("\n--- LINK COLUMNS ANALYSIS ---")
-            for col in existing_link_cols:
-                print(f"\n{col}:")
-                unique_count = df_legs[col].nunique()
-                null_count = df_legs[col].isnull().sum()
-                print(f"  Unique values: {unique_count:,}")
-                print(f"  Null values: {null_count:,} ({null_count/len(df_legs)*100:.2f}%)")
-                
-                # Sample values
-                sample_values = df_legs[col].dropna().head(10).tolist()
-                print(f"  Sample values: {sample_values}")
-                
-                # Check for patterns in link IDs
-                non_null_links = df_legs[col].dropna()
-                if len(non_null_links) > 0:
-                    # Check if links contain certain patterns
-                    link_samples = non_null_links.astype(str)
-                    has_colon = link_samples.str.contains(':').sum()
-                    has_dot = link_samples.str.contains('\.').sum()
-                    has_underscore = link_samples.str.contains('_').sum()
-                    
-                    print(f"  Links with ':': {has_colon:,} ({has_colon/len(link_samples)*100:.1f}%)")
-                    print(f"  Links with '.': {has_dot:,} ({has_dot/len(link_samples)*100:.1f}%)")
-                    print(f"  Links with '_': {has_underscore:,} ({has_underscore/len(link_samples)*100:.1f}%)")
-                    
-                    # Check length distribution
-                    link_lengths = link_samples.str.len()
-                    print(f"  Link ID length - Min: {link_lengths.min()}, Max: {link_lengths.max()}, Mean: {link_lengths.mean():.1f}")
-            
-            # Compare start_link and end_link if both exist
-            if 'start_link' in df_legs.columns and 'end_link' in df_legs.columns:
-                print(f"\n--- START_LINK vs END_LINK COMPARISON ---")
-                
-                # Same link trips (where start_link == end_link)
-                same_link_mask = df_legs['start_link'] == df_legs['end_link']
-                same_link_count = same_link_mask.sum()
-                print(f"Trips with same start and end link: {same_link_count:,} ({same_link_count/len(df_legs)*100:.2f}%)")
-                
-                # Links that appear in both start and end
-                start_links = set(df_legs['start_link'].dropna())
-                end_links = set(df_legs['end_link'].dropna())
-                common_links = start_links.intersection(end_links)
-                print(f"Links that appear as both start and end: {len(common_links):,}")
-                print(f"Only start links: {len(start_links - end_links):,}")
-                print(f"Only end links: {len(end_links - start_links):,}")
-                
-                # Most frequent start and end links
-                print(f"\nTop 10 most frequent start_links:")
-                print(df_legs['start_link'].value_counts().head(10))
-                
-                print(f"\nTop 10 most frequent end_links:")
-                print(df_legs['end_link'].value_counts().head(10))
+        # Key categorical columns
+        print(f"\n🏷️  TRANSPORT MODES:")
+        if 'mode' in df_legs.columns:
+            mode_counts = df_legs['mode'].value_counts()
+            for mode, count in mode_counts.items():
+                pct = (count / len(df_legs)) * 100
+                print(f"  {mode}: {count} ({pct:.1f}%)")
         
         return df_legs
         
     except FileNotFoundError:
         print(f"❌ Error: {legs_file} not found in current directory")
-        print("Available CSV files:")
         csv_files = glob.glob("*.csv")
-        for f in csv_files:
-            print(f"  - {f}")
+        if csv_files:
+            print("Available CSV files:")
+            for f in csv_files:
+                print(f"  - {f}")
         return None
         
     except Exception as e:
         print(f"❌ Error reading {legs_file}: {str(e)}")
         return None
 
+def check_transit_missing_by_mode():
+    """
+    Checks how transit_line and transit_route values are missing for different transport modes
+    and provides examples of each transport mode.
+    """
+    print("\n" + "="*60)
+    print("🚌 TRANSIT LINE & ROUTE ANALYSIS BY MODE")
+    print("="*60)
+    
+    legs_file = "output_legs.csv"
+    
+    try:
+        # Read sample data
+        print(f"Reading {legs_file} (first 5000 rows for analysis)...")
+        df_legs = pd.read_csv(legs_file, sep=';', nrows=5000)
+        
+        print(f"✓ Loaded sample: {df_legs.shape}")
+        
+        # Check if required columns exist
+        required_cols = ['mode', 'transit_line', 'transit_route']
+        missing_cols = [col for col in required_cols if col not in df_legs.columns]
+        
+        if missing_cols:
+            print(f"❌ Missing columns: {missing_cols}")
+            print("Available columns:", ', '.join(df_legs.columns))
+            return
+        
+        # Transport modes overview
+        print(f"\n📊 TRANSPORT MODES:")
+        mode_counts = df_legs['mode'].value_counts()
+        total_trips = len(df_legs)
+        
+        for mode, count in mode_counts.items():
+            percentage = (count / total_trips) * 100
+            print(f"  {mode}: {count} ({percentage:.1f}%)")
+        
+        # Missing values analysis by mode
+        print(f"\n🚇 MISSING TRANSIT DATA BY MODE:")
+        print(f"{'Mode':<15} {'Total':<8} {'Line Missing':<15} {'Route Missing':<16}")
+        print("-" * 60)
+        
+        for mode in mode_counts.index:
+            mode_data = df_legs[df_legs['mode'] == mode]
+            mode_count = len(mode_data)
+            
+            line_missing = mode_data['transit_line'].isnull().sum()
+            route_missing = mode_data['transit_route'].isnull().sum()
+            
+            line_pct = (line_missing / mode_count) * 100
+            route_pct = (route_missing / mode_count) * 100
+            
+            print(f"{mode:<15} {mode_count:<8} {line_missing} ({line_pct:.1f}%){'':<5} {route_missing} ({route_pct:.1f}%)")
+        
+        # Examples by mode
+        print(f"\n🎯 EXAMPLES BY TRANSPORT MODE:")
+        for mode in mode_counts.index[:5]:  # Show first 5 modes
+            mode_data = df_legs[df_legs['mode'] == mode]
+            
+            # Get examples of lines and routes
+            line_examples = mode_data['transit_line'].dropna().unique()[:2]
+            route_examples = mode_data['transit_route'].dropna().unique()[:2]
+            
+            print(f"\n📍 {mode.upper()}:")
+            print(f"   Lines: {list(line_examples) if len(line_examples) > 0 else 'None'}")
+            print(f"   Routes: {list(route_examples) if len(route_examples) > 0 else 'None'}")
+        
+        # Overall summary
+        has_line = (~df_legs['transit_line'].isnull()).sum()
+        has_route = (~df_legs['transit_route'].isnull()).sum()
+        
+        print(f"\n📈 OVERALL SUMMARY:")
+        print(f"  Trips with transit line: {has_line} ({has_line/total_trips*100:.1f}%)")
+        print(f"  Trips with transit route: {has_route} ({has_route/total_trips*100:.1f}%)")
+        print(f"  Unique lines: {df_legs['transit_line'].nunique()}")
+        print(f"  Unique routes: {df_legs['transit_route'].nunique()}")
+        
+    except FileNotFoundError:
+        print(f"❌ Error: {legs_file} not found in current directory")
+        csv_files = glob.glob("*.csv")
+        if csv_files:
+            print("Available CSV files:", ', '.join(csv_files))
+    except Exception as e:
+        print(f"❌ Error analyzing transit data: {str(e)}")
+
 # Call both exploration functions
 if __name__ == "__main__":
     # Explore output_legs.csv
     df_legs = explore_output_legs()
+    
+    # Check transit missing values by mode
+    check_transit_missing_by_mode()

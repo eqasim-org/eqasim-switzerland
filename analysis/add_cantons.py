@@ -37,18 +37,42 @@ def add_canton_name(dataset, x_col, y_col, coord_system = 2056, distance=3500):
     print("Finished within canton matches!")
     print("Checking non-matches...")
 
-    non_match = within_canton.loc[within_canton['NAME'].isna()]
+    print("Columns in within_canton:", within_canton.columns.tolist())
+    print("First few rows of within_canton:")
+    print(within_canton.head())
+    
+    # Check if 'NAME' column exists, if not, it might be named differently
+    if 'NAME' in within_canton.columns:
+        print("NAME column found, checking for non-matches...")
+        non_match = within_canton.loc[within_canton['NAME'].isna()]
+    else:
+        print("NAME column not found! Available columns:", within_canton.columns.tolist())
+        # Let's assume all points matched if NAME column is missing
+        non_match = pd.DataFrame()  # Empty dataframe
+    
+    print(" Done with mathces")
+    if len(non_match) == 0:
+        print("All points matched within cantons!")
+        result_filt = within_canton.drop(columns=["geometry", "index_right"], errors="ignore")
+        result_filt = result_filt.rename(columns={
+            "NAME": "canton_name",
+            "KANTONSNUMMER": "canton_id"
+        })
+        result_df = pd.DataFrame(result_filt)
+        result_df["canton_name"] = result_df["canton_name"].apply(remove_accents)
+        return result_df
+    
+    print(" there are non-matches!! ")
+    # Continue with non-match processing
     match = within_canton.loc[within_canton['NAME'].notna()]
-
     non_match = non_match.drop(columns=["index_right", 'KANTONSNUMMER', 'NAME'], errors="ignore")
-    match_closest = non_match.sjoin_nearest(canton_boundaries[['KANTONSNUMMER', 'NAME', 'geometry']], how="left", max_distance=distance, distance_col="distance")
-
+    match_closest = non_match.sjoin_nearest(canton_boundaries[['KANTONSNUMMER', 'NAME', 'geometry']], how="left", max_distance=distance, distance_col="nearest_distance")
+    
     print("Non-matches finished!")
     print("Concatenating results...")
-
+    
     result = pd.concat([match, match_closest], ignore_index=True)
-
-    result_filt = result.drop(columns=["geometry", "index_right"], errors="ignore")
+    result_filt = result.drop(columns=["geometry", "index_right", "nearest_distance"], errors="ignore")
     result_filt = result_filt.rename(columns={
         "NAME": "canton_name",
         "KANTONSNUMMER": "canton_id"
@@ -67,7 +91,7 @@ def add_canton_name(dataset, x_col, y_col, coord_system = 2056, distance=3500):
 
 
 def add_geo(file_path, x_col, y_col, coord_system = 2056, distance=3500, export=True):
-    dataset = pd.read_csv(file_path, sep=';')
+    dataset = pd.read_csv(file_path, sep=',')
 
     if x_col not in dataset.columns or y_col not in dataset.columns:
         raise ValueError(f"Columns '{x_col}' and '{y_col}' must exist in the provided file.")
@@ -86,18 +110,44 @@ def add_geo(file_path, x_col, y_col, coord_system = 2056, distance=3500, export=
     print("Finished within canton matches!")
     print("Checking non-matches...")
 
-    non_match = within_canton.loc[within_canton['NAME'].isna()]
+    print("Columns in within_canton:", within_canton.columns.tolist())
+    
+    # Check if 'NAME' column exists, if not, it might be named differently
+    if 'NAME' in within_canton.columns:
+        print("NAME column found, checking for non-matches...")
+        non_match = within_canton.loc[within_canton['NAME'].isna()]
+    else:
+        print("NAME column not found! Available columns:", within_canton.columns.tolist())
+        # Let's assume all points matched if NAME column is missing
+        non_match = pd.DataFrame()  # Empty dataframe
+    
+    if len(non_match) == 0:
+        print("All points matched within cantons!")
+        result_filt = within_canton.drop(columns=["geometry", "index_right"], errors="ignore")
+        result_filt = result_filt.rename(columns={
+            "NAME": "canton_name",
+            "KANTONSNUMMER": "canton_id"
+        })
+        result_filt["canton_name"] = result_filt["canton_name"].apply(remove_accents)
+        
+        if export:
+            print("Exporting results...")
+            output_path = file_path.replace(".csv", "_geo.csv")
+            result_filt.to_csv(output_path, index=False)
+            print(f"DataFrame written to: {output_path}")
+        
+        return pd.DataFrame(result_filt)
+    
+    # Continue with non-match processing
     match = within_canton.loc[within_canton['NAME'].notna()]
-
     non_match = non_match.drop(columns=["index_right", 'KANTONSNUMMER', 'NAME'], errors="ignore")
-    match_closest = non_match.sjoin_nearest(canton_boundaries[['KANTONSNUMMER', 'NAME', 'geometry']], how="left", max_distance=distance, distance_col="distance")
-
+    match_closest = non_match.sjoin_nearest(canton_boundaries[['KANTONSNUMMER', 'NAME', 'geometry']], how="left", max_distance=distance, distance_col="nearest_distance")
+    
     print("Non-matches finished!")
     print("Concatenating results...")
-
+    
     result = pd.concat([match, match_closest], ignore_index=True)
-
-    result_filt = result.drop(columns=["geometry", "index_right"], errors="ignore")
+    result_filt = result.drop(columns=["geometry", "index_right", "nearest_distance"], errors="ignore")
     result_filt = result_filt.rename(columns={
         "NAME": "canton_name",
         "KANTONSNUMMER": "canton_id"
@@ -112,11 +162,11 @@ def add_geo(file_path, x_col, y_col, coord_system = 2056, distance=3500, export=
 
     if export:
         print("Exporting results...")
-
         output_path = file_path.replace(".csv", "_geo.csv")
-        result_filt.to_csv(output_path, index=False)
-
+        result_filt.to_csv(output_path, sep=";", index=False)
         print(f"DataFrame written to: {output_path}")
+
+    return pd.DataFrame(result_filt)
 
     return pd.DataFrame(result_filt)
 
