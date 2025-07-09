@@ -107,6 +107,17 @@ def get_histogram_time(data, feature, bins=None):
 
     return bin_labels, hist
 
+def write_demographics(data):
+    data = data.groupby('age_group').sum('person_weight').reset_index()
+    total = data['person_weight'].sum()
+
+    pairs = sorted(zip(data['age_group'], data['person_weight']), key=lambda x: x[0])
+    age_group = [pair[0] for pair in pairs]
+    proportions = [pair[1] / total for pair in pairs]
+
+    return age_group, proportions
+
+
 def get_histogram(data, feature, bins=None):
     hist, bin_edges = np.histogram(data[feature], bins=bins, weights=data['person_weight'], density=True)
     bins = 0.5 * (bin_edges[:-1] + bin_edges[1:])

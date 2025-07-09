@@ -148,55 +148,44 @@ def execute(context):
     df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
     df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y", coord_type="home")
 
-    # add WGS84 coordinates (longitude/latitude)
-    df_spatial = add_wgs84_coordinates(df_spatial, drop_geometry=False)
+    # ============= Adding geo noise =============
 
-    # copy original coordinates for comparison
-    df_spatial['orig_lat'] = df_spatial['latitude']
-    df_spatial['orig_lon'] = df_spatial['longitude']
-
-    # Add geo noise to coordinates (epsilon=1.0 for moderate privacy protection)
     epsilon = 1.0
-    noisy_lats, noisy_lons = zip(*[
-        add_geo_noise(lat, lon, epsilon) 
-        for lat, lon in zip(df_spatial['latitude'], df_spatial['longitude'])
-    ])
-    df_spatial['latitude'] = noisy_lats
-    df_spatial['longitude'] = noisy_lons
 
-    # Compute and display the distance change in kilometers for verification
-    df_spatial["delta_km"] = [
-        distance((orig_lat, orig_lon), (noisy_lat, noisy_lon)).km
-        for orig_lat, orig_lon, noisy_lat, noisy_lon in zip(
-            df_spatial["orig_lat"], df_spatial["orig_lon"],
-            df_spatial["latitude"], df_spatial["longitude"]
-        )
-    ]
-
-    # Print some basic stats
-    print("=== Geo Noise Effect Summary ===")
-    print(df_spatial["delta_km"].describe())
-    print("Max delta (km):", df_spatial["delta_km"].max())
-    print("Median delta (km):", df_spatial["delta_km"].median())
-
-    # Optionally: remove delta/temporary columns later if not needed
-    df_spatial.drop(columns=["delta_km", "orig_lat", "orig_lon"], inplace=True)
-
-    # Convert noisy WGS84 coordinates back to Swiss coordinates
-    points_df = gpd.GeoDataFrame(
-        df_spatial,
-        geometry=gpd.points_from_xy(df_spatial['longitude'], df_spatial['latitude'], crs="EPSG:4326")
-    )
-    points_df = points_df.to_crs("EPSG:2056")
-    df_spatial['home_x'] = points_df.geometry.x
-    df_spatial['home_y'] = points_df.geometry.y
+    # Ensure CRS is EPSG:2056
+    assert df_spatial.crs.to_epsg() == 2056, "Input GeoDataFrame is not in EPSG:2056"
     
-    # Update df_spatial geometry to match Swiss coordinates
-    df_spatial = gpd.GeoDataFrame(
-        df_spatial,
-        geometry=points_df.geometry,
-        crs="EPSG:2056"
+    #  save original coordinates and geometry for comparison
+    df_spatial['orig_x'] = df_spatial['home_x']
+    df_spatial['orig_y'] = df_spatial['home_y']
+    df_spatial['orig_geometry'] = df_spatial.geometry
+
+    # apply geo noise to home_x and home_y
+    dx_dy = np.array([geo_indistinguishability_noise_meters(epsilon) for _ in range(len(df_spatial))])
+    dxs, dys = dx_dy[:, 0], dx_dy[:, 1]
+
+    # apply noise
+    df_spatial['home_x'] += dxs
+    df_spatial['home_y'] += dys
+
+    # recreate geometry 
+    df_spatial['geometry'] = gpd.points_from_xy(df_spatial['home_x'], df_spatial['home_y'], crs="EPSG:2056")
+    df_spatial = gpd.GeoDataFrame(df_spatial, geometry='geometry', crs="EPSG:2056")
+
+    # verification
+    df_spatial['final_geometry'] = df_spatial.geometry
+
+    # Compute Euclidean distance in meters between original and final positions
+    df_spatial['true_distance'] = df_spatial.apply(
+        lambda row: row['orig_geometry'].distance(row['final_geometry']),
+        axis=1
     )
+
+    print("=== True Distance Moved (Post-Imputation) ===")
+    print(df_spatial['true_distance'].describe())
+    print("Number of points actually moved > 1 km:", (df_spatial['true_distance'] > 1000).sum())
+
+    # =======================================================================
 
     # Impute municipalities
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id",
@@ -223,6 +212,14 @@ def execute(context):
     assert (len(df) == len(df_spatial))
 
     del df["municipality_id"]
+    # overwrite this with the new home coordinates
+
+    print(" The columns of DF originally", list(df.columns))
+    print(" The columns of DF SPATIAL", list(df_spatial.columns))
+    
+    # Extract coordinates from geometry
+    df["home_x"] = df_spatial.geometry.x
+    df["home_y"] = df_spatial.geometry.y
     df = pd.merge(
         df, df_spatial[["person_id", "zone_id", "municipality_type", "municipality_id", "quarter_id", "canton_id"]],
         on="person_id"

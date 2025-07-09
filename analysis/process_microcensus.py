@@ -140,7 +140,7 @@ def convert_households(data):
     data = add_canton_name(data, x_col='home_x', y_col='home_y')
     return data
 
-def preprocess_microcensus_data(directory, save_directory=None, prefix='data.microcensus'):
+def preprocess_microcensus_data(directory, save_directory=None, prefix=''):
     print("Reading the .pkl files...")
     files = get_pkl_data(directory, prefix)
     

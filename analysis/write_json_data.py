@@ -1,5 +1,5 @@
 import pandas as pd
-from .app_utils import *
+from app_utils import *
 import json 
 import numbers
 import pickle
@@ -268,6 +268,17 @@ def write_pt_sub_age(persons, output_persons, save_directory):
     with open(f"{save_directory}/pt_sub_age.json", "w") as json_file:
         json.dump(data, json_file, indent=4)
 
+def write_demographic_data(persons, output_persons, save_directory):
+    ages = [6, 15, 18, 24, 30, 45, 65, 80]
+    labels = ['[6, 15)', '[15, 18)', '[18, 24)', '[24, 30)', '[30, 45)', '[45, 65)', '[65, 80)']
+    persons['age_group'] = pd.cut(persons['age'], bins=ages, labels=labels, right=False)
+    output_persons['age_group'] = pd.cut(output_persons['age'], bins=ages, labels=labels, right=False)
+    
+    data = write_non_category_data(persons, output_persons, write_demographics)
+
+    with open(f"{save_directory}/age.json", "w") as json_file:
+        json.dump(data, json_file, indent=4)
+
 
 def write_all_application_data(microcensus, synthetic, save_directory):
     """
@@ -376,14 +387,15 @@ if __name__ == '__main__':
     synthetic_prefix = '/cluster/project/cmdp/chaoch/switzerland_data/output_test'
     save_directory = '/cluster/home/chaoch/ch/ch-zh-synpop/plot_data'
     """
-    microcensus_prefix = input('Enter the directory where the _processed_ microcensus data is stored:').strip()
-    synthetic_prefix = input('Enter the directory where the _processed_ synthetic data is stored:').strip()
-    save_directory= input('Enter the directory where plotting data should be stored').strip()
+    # microcensus_prefix = input('Enter the directory where the _processed_ microcensus data is stored:').strip()
+    # synthetic_prefix = input('Enter the directory where the _processed_ synthetic data is stored:').strip()
+    # save_directory= input('Enter the directory where plotting data should be stored').strip()
+    
+    microcensus_prefix = '/cluster/project/cmdp/chaoch/microcensus_data_test'
+    synthetic_prefix = '/cluster/project/cmdp/chaoch/switzerland_data/output_test'
+    save_directory = '/cluster/home/chaoch/ch/ch-zh-synpop/plot_data'
     
     microcensus, synthetic = load_dataframes(microcensus_prefix, synthetic_prefix)
 
-    write_all_application_data(
-        microcensus,
-        synthetic,
-        save_directory
-    )
+    write_demographic_data(microcensus['persons'], synthetic['persons'], save_directory)
+
