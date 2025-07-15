@@ -20,10 +20,10 @@ def execute(context):
     data_path = context.config("data_path")
 
     df = pd.DataFrame(pd.read_csv(
-        "%s/statent/QUERY_FOR_2014_DEC_STATENT_LOC.csv" % data_path,
-        encoding = "latin1", sep = ";"))
+        "%s/statent/250221_STATENT_2022_LOC_17042025.csv" % data_path,
+        encoding = "latin1", sep = ","))
 
-    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08", "EMPTOT"]])
+    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08_CD", "EMPTOT"]])
     df.columns = ["x", "y", "noga", "number_employees"]
     df.loc[:, "noga"] = df["noga"].astype(np.str)
     df.loc[:, "enterprise_id"] = np.arange(len(df))
@@ -111,5 +111,5 @@ def execute(context):
         on = "enterprise_id"
     )
     df["zone_id"] = df["zone_id"].astype(np.int)
-
+    print(df)
     return df
