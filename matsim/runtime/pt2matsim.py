@@ -13,11 +13,9 @@ def configure(context):
 
     context.config("pt2matsim_version", "25.6")
     context.config("pt2matsim_branch", "v25.6")
+    context.config("pt2matsim_path", "")
 
 def run(context, command, arguments, vm_arguments):
-    version = context.config("pt2matsim_version")
-
-    # Make sure there is a dependency
     jar_path = context.stage("matsim.runtime.pt2matsim")    
     java.run(context, command, arguments, jar_path, vm_arguments)
 
@@ -34,9 +32,9 @@ def execute(context):
             "--depth", "1"
         ])
 
-    # Build pt2matsim
-    maven.run(context, ["package", "-Dskip.surefire.tests=true"], cwd = "%s/pt2matsim" % context.path())
-    jar_path = "%s/pt2matsim/target/pt2matsim-%s-shaded.jar" % (context.path(), version)
+        # Build pt2matsim
+        maven.run(context, ["package", "-Dskip.surefire.tests=true"], cwd = "%s/pt2matsim" % context.path())
+        jar_path = "%s/pt2matsim/target/pt2matsim-%s-shaded.jar" % (context.path(), version)
 
         # Test pt2matsim
         java.run(context, "org.matsim.pt2matsim.run.CreateDefaultOsmConfig", [
