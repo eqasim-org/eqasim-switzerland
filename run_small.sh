@@ -4,10 +4,10 @@
 #SBATCH --job-name=Eq_small # name f the job
 #SBATCH -n 1                    # Number of tasks
 #SBATCH --cpus-per-task=12      # CPUs per task
-#SBATCH --time=6:00:00          # Maximum runtime 
+#SBATCH --time=12:00:00          # Maximum runtime 
 #SBATCH --mem-per-cpu=8G        # Memory per CPU (8GB)
-#SBATCH -o /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_small_%j.log   # Output file
-#SBATCH -e /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_small_%j.log   # Error log file
+#SBATCH -o logs/synpp_small_%j.log   # Output file
+#SBATCH -e logs/synpp_small_%j.log   # Error log file
 
 
 # Source the interactive shell config (for osmosis)
@@ -36,7 +36,7 @@ unset DISPLAY
 # -----------------------------------------
 # Step 4: Run the Job
 # -----------------------------------------
-python3 -m synpp config_dib_small.yml
+python3 -m synpp config_dib_10_local.yml
 
 # -----------------------------------------
 # Step 5: Print Confirmation

@@ -75,6 +75,7 @@ def merge_link_chains_directed(df):
     attribute_consistency = True
     new_start_node = None
     
+    nodes_to_remove = []
     # Step 2: Identify nodes that are NOT degree-2 (start/end points)
     def is_degree2(node):
         return G.in_degree(node) == 1 and G.out_degree(node) == 1
@@ -95,6 +96,29 @@ def merge_link_chains_directed(df):
             stats['one_in_one_out']+=int(is_degree2(node))
         else:
             node = new_start_node            
+        
+        # # Simple way to capture nodes to be removed in case of two way link without intersection:
+        # if G.in_degree(node)==G.out_degree(node)==2:
+        #     if set(G.predecessors(node))==set(G.successors(node)):
+        #         neibors = list(G.predecessors(node))
+        #         edge1 = G.get_edge_data(neibors[0], node)
+        #         edge1c = G.get_edge_data(node, neibors[1])
+                
+        #         edge2 = G.get_edge_data(neibors[1], node)
+        #         edge2c = G.get_edge_data(node, neibors[0])
+        #         if ((edge1["modes"] == edge1c["modes"])&
+        #             (edge1["capacity"] == edge1c["capacity"])&
+        #             (abs(edge1["freespeed"]-edge1c["freespeed"])<1)&
+        #             (edge2["modes"] == edge2c["modes"])&
+        #             (edge2["capacity"] == edge2c["capacity"])&
+        #             (abs(edge2["freespeed"]-edge2c["freespeed"])<1)): 
+                    
+        #             nodes_to_remove.append(node)
+        #             # I can do that, or build tuples of links to merge and merge them later
+        #             # However, it is not a good thing to do, because if they share the same 
+        #             # node, it means vehicles can turn at that node. If the two links are merged
+        #             # The vehicle cannot turn.
+        
         
         #Skip if not potential chain start            
         if (G.degree(node) <= 2 or G.out_degree(node) == 0) and attribute_consistency:        
