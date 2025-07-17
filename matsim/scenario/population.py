@@ -13,6 +13,7 @@ def configure(context):
     context.stage("synthesis.population.trips")
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.spatial.locations")
+    context.stage("data.spatial.cantons")
     context.config("use_freight", default=False)
     context.stage("synthesis.freight.trips")
 
@@ -58,6 +59,11 @@ class PersonWriter:
         writer.add_attribute("hasBikeLoopTrip", "java.lang.Boolean", writer.true_false(self.person[22]))
         writer.add_attribute("statpopPersonId", "java.lang.Long", str(self.person[14]))
         writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[15]))
+        writer.add_attribute("cantonName", "java.lang.String", str(self.person[18]))
+        writer.add_attribute("municipalityType", "java.lang.String", str(self.person[19]))
+        writer.add_attribute("incomeClass", "java.lang.Integer", str(self.person[20]))
+
+
         writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[16]))
         writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[17]))
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))

@@ -114,7 +114,7 @@ def execute(context):
         "is_vehicular" : "sum"
     }).reset_index()
 
-    df_aggregated["line_switches"] = np.maximum(0, df_aggregated["is_vehicular"])
+    df_aggregated["line_switches"] = np.maximum(0, df_aggregated["is_vehicular"]-1) # This is how it is estimated in eqasim-java
     del df_aggregated["is_vehicular"]
 
     df_trips = pd.merge(df_trips, df_aggregated)

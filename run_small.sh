@@ -1,26 +1,13 @@
-module load stack/2024-06
-module load gcc/12.2.0
-module load python/3.10.13
-module load openjdk/21.0.3_9
-module load maven
-module load eth_proxy
-
-source /cluster/project/cmdp/asallard/eqasim_venv/bin/activate
-
-sbatch -n 1 --cpus-per-task=12 --time=00:30:00 --mem-per-cpu=8192 --wrap="python3 -m synpp config_aurore.yml"
-
-
-
 #!/bin/bash
 # Author: dabdelkader
 
-#SBATCH --job-name=Eq_100  # name f the job
-#SBATCH -n 1                 # Number of tasks
-#SBATCH --cpus-per-task=24    # CPUs per task
-#SBATCH --time=96:00:00       # Maximum runtime 
-#SBATCH --mem-per-cpu=18G     # Memory per CPU (8GB)
-#SBATCH -o logs/synpp_vdf100_%j.log   # Output file
-#SBATCH -e logs/synpp_vdf100_%j.log   # Error log file
+#SBATCH --job-name=Eq_small # name f the job
+#SBATCH -n 1                    # Number of tasks
+#SBATCH --cpus-per-task=12      # CPUs per task
+#SBATCH --time=6:00:00          # Maximum runtime 
+#SBATCH --mem-per-cpu=8G        # Memory per CPU (8GB)
+#SBATCH -o /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_small_%j.log   # Output file
+#SBATCH -e /cluster/project/cmdp/dabdelkader/ch-zh-synpop/logs/synpp_small_%j.log   # Error log file
 
 
 # Source the interactive shell config (for osmosis)
@@ -49,7 +36,7 @@ unset DISPLAY
 # -----------------------------------------
 # Step 4: Run the Job
 # -----------------------------------------
-python3 -m synpp config_dib.yml
+python3 -m synpp config_dib_small.yml
 
 # -----------------------------------------
 # Step 5: Print Confirmation

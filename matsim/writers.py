@@ -1,5 +1,6 @@
 import numpy as np
 from xml.sax.saxutils import escape
+from typing import Dict, Union
 
 class XmlWriter:
     def __init__(self, writer):
@@ -54,6 +55,21 @@ class XmlWriter:
     def location(self, x, y, facility_id = None):
         return (x, y,
                 None if facility_id is None or (type(facility_id) == float and np.isnan(facility_id)) else facility_id)
+    
+    @staticmethod
+    def get_java_type(python_type: type):
+        if 'float' in str(python_type):
+            return "java.lang.Double"
+        elif 'int64' in str(python_type):
+            return "java.lang.Long"
+        elif 'int' in str(python_type):
+            return "java.lang.Integer"
+        elif 'str' in str(python_type):
+            return "java.lang.String"
+        elif 'bool' in str(python_type):
+            return "java.lang.Boolean"
+        else:
+            return "java.lang.Object"
 
 def _write_preface_attributes(writer, attributes):
     if len(attributes) > 0:
@@ -376,3 +392,103 @@ class backlog_iterator:
             return True
         except StopIteration:
             return False
+
+
+
+
+        
+class NetworkWriter(XmlWriter):
+
+    def __init__(self, writer, write_attrbs = True):
+        XmlWriter.__init__(self, writer)
+        self.write_attrbs = write_attrbs
+
+    def start_network(self, attributes: Dict[str, str] = None):
+        self._write_line('<?xml version="1.0" encoding="utf-8"?>')
+        self._write_line('<!DOCTYPE network SYSTEM "http://www.matsim.org/files/dtd/network_v2.dtd">\n')
+        self._write_line('<network>')
+        self._write_line('\n<!-- ====================================================================== --> \n ')
+        self.indent += 2
+        if attributes is not None:
+            self.write_attributes(attributes)
+
+    def end_network(self):
+        self.indent -= 2
+        self._write_line("\n<!-- ====================================================================== -->")
+        self._write_line('</network>')
+
+        
+    def start_nodes(self, attributes: Dict[str, str] = None):
+        self._write_line('<nodes>')
+        self.indent += 1
+        if attributes is not None:
+            self.write_attributes(attributes)
+
+    def end_nodes(self):
+        self.indent -= 1
+        self._write_line('</nodes>')
+
+        
+    def start_links(self, attributes: Dict[str, str] = None):
+        self._write_line('\n \n<links capperiod="01:00:00" effectivecellsize="7.5" effectivelanewidth="3.75"> \n \n')
+        self.indent += 1
+        if attributes is not None:
+            self.write_attributes(attributes)
+
+    def end_links(self):
+        self.indent -= 1
+        self._write_line('</links>')
+   
+
+    def write_node(self, _id: str, x: float, y:float):
+        self._write_line(f'<node  id="{_id}"  x="{x}"  y="{y}"/>')        
+
+    def write_link(self, _id: str, _from:str, to:str, length:float,
+                   freespeed:float, capacity:int, permlanes:int,
+                   oneway:int, modes=str,attributes: Dict[str, str] = None):
+        
+        self._write_line(f'<link id="{_id}" from="{_from}" to="{to}" length="{length}" freespeed="{freespeed}" capacity="{capacity}" permlanes="{permlanes}" oneway="{oneway}" modes="{modes}">')        
+        if isinstance(attributes,dict) and self.write_attrbs:
+            self.indent += 1
+            self.start_attributes()
+            for k, v in attributes.items():                
+                self.add_attribute(k, v)
+            self.end_attributes()
+            self.indent -= 1
+        self._write_line('</link>')
+
+    def start_attributes(self):
+        self._write_line('<attributes>')
+        self.indent += 1
+
+    def end_attributes(self):
+        self.indent -= 1
+        self._write_line('</attributes>')
+
+    def add_attribute(self, name: str, value: Union[str, int, float, bool], typ: str = None):             
+        if not typ:
+            if name=="disallowedNextLinks":
+                typ = "org.matsim.core.network.turnRestrictions.DisallowedNextLinks"    
+            else:                
+                typ = self.get_java_type(type(value))
+        self._write_line(f'<attribute name="{name}" class="{typ}">{value}</attribute>')
+
+    def write_attributes(self, attributes: dict):
+        self.start_attributes()
+        for name, value in attributes.items():
+            self.add_attribute(name, value)
+        self.end_attributes()
+
+    def add_nodes(self,_id, x, y):
+        self.start_nodes()
+        list(map(self.write_node,_id,x,y))
+        self.end_nodes()
+    
+    def add_links(self, _id, _from, to, length, freespeed, capacity, permlanes,
+                   oneway, modes, attributes, write_attrbs=True):
+        self.write_attrbs = write_attrbs
+        self.start_links()
+        list(map(self.write_link, _id, _from, to, length, freespeed, capacity, 
+                 permlanes, oneway, modes, attributes))
+        self.end_links()      
+                            

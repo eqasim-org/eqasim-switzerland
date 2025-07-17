@@ -6,10 +6,14 @@ def configure(context):
     context.stage("matsim.simulation.run")
     context.stage("matsim.simulation.prepare")
     context.stage("contracts.contracts")
-    
+    context.stage("matsim.runtime.eqasim")
+    context.stage("matsim.scenario.network.convert_osm")
+
     context.config("output_path")
     context.config("output_id")    
     context.config("output_prefix", "switzerland_")
+    context.config("export_detailed_network", False)
+    context.config("write_jar", True)
 
 
 def execute(context):
@@ -40,6 +44,7 @@ def execute(context):
         "%snetwork.xml.gz" % context.config("output_prefix"),
         "%stransit_schedule.xml.gz" % context.config("output_prefix"),
         "%stransit_vehicles.xml.gz" % context.config("output_prefix"),
+        "%svehicles.xml.gz" % context.config("output_prefix"),
         "%sconfig.xml" % context.config("output_prefix")
     ]
     
@@ -47,6 +52,25 @@ def execute(context):
         shutil.copyfile("%s/%s" % (source_path, file), 
                         "%s/%s" % (target_path, file))
 
+    # copy the detailed geometry
+    if context.config("export_detailed_network"):
+        shutil.copy(
+            "%s/%s" % (context.path("matsim.scenario.network.convert_osm"), "detailed_network.csv"),
+            "%s/%s" % (target_path, "%sdetailed_network.csv" % context.config("output_prefix"))
+        )
+    
+    # copy the jar file
+    if context.config("write_jar"):
+        shutil.copy(
+            "%s/%s" % (context.path("matsim.runtime.eqasim"), context.stage("matsim.runtime.eqasim")),
+            "%s/%srun.jar" % (target_path, context.config("output_prefix"))
+        )
+    
+    # move the results to the output
+    path_to_results =  "%s/simulation_output" % context.path("matsim.simulation.run")
+    shutil.move(path_to_results, 
+                "%s/simulation_output" % target_path)
+    
     # copy contract information
     contracts_path = context.stage("contracts.contracts")
     shutil.copyfile(contracts_path, "%s/CONTRACTS.html" % target_path)

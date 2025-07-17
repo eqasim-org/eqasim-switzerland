@@ -1,5 +1,6 @@
 __pycache__
-cache
+cache*
+output*
 .idea
 .vscode
 config*.yml
@@ -10,3 +11,7 @@ slurm*
 *.out
 *.sh
 !docker_run.sh
+logs
+run*.sh
+analysis
+server
