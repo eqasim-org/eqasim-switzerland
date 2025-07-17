@@ -13,6 +13,7 @@ def configure(context):
 
     context.config("pt2matsim_version", "25.6")
     context.config("pt2matsim_branch", "v25.6")
+    context.config("pt2matsim_path", "") 
 
 def run(context, command, arguments, vm_arguments):
     version = context.config("pt2matsim_version")
@@ -21,9 +22,10 @@ def run(context, command, arguments, vm_arguments):
     jar_path = context.stage("matsim.runtime.pt2matsim")    
     java.run(context, command, arguments, jar_path, vm_arguments)
 
+
 def execute(context):
     version = context.config("pt2matsim_version")
-    branch = context.config("pt2matsim_branch")
+    branch  = context.config("pt2matsim_branch")
     
     if context.config("pt2matsim_path") == "":
         # Clone repository and checkout version
@@ -34,9 +36,9 @@ def execute(context):
             "--depth", "1"
         ])
 
-    # Build pt2matsim
-    maven.run(context, ["package", "-Dskip.surefire.tests=true"], cwd = "%s/pt2matsim" % context.path())
-    jar_path = "%s/pt2matsim/target/pt2matsim-%s-shaded.jar" % (context.path(), version)
+        # Build pt2matsim
+        maven.run(context, ["package", "-Dskip.surefire.tests=true"], cwd = "%s/pt2matsim" % context.path())
+        jar_path = "%s/pt2matsim/target/pt2matsim-%s-shaded.jar" % (context.path(), version)
 
         # Test pt2matsim
         java.run(context, "org.matsim.pt2matsim.run.CreateDefaultOsmConfig", [
@@ -44,7 +46,7 @@ def execute(context):
         ], jar_path)
         
         jar_path = "%s/pt2matsim/target/pt2matsim-%s-shaded.jar" % (
-                        context.path("matsim.runtime.pt2matsim"), version
+                        context.path(), version
                     )
     
     else:

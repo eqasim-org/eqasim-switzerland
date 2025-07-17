@@ -1,7 +1,7 @@
 # General pipeline settings
 # path to the working directory/cache
 working_directory: 
-#p path where the pipeline flowchart should be stored
+# path where the pipeline flowchart should be stored
 flowchart_path:
 dryrun: false
 
@@ -26,7 +26,10 @@ config:
     # to which year we want to scale the population
     scaling_year: 2020
 
-    # do we want to include freight demand int eh synthetic population, defailt is true
+    # which population census we want to use. There are two options: statpop and are_synpop; default is statpop.
+    census: statpop
+
+    # do we want to include freight demand in the synthetic population, defailt is true
     use_freight: true
     # there are two options to convert pt schedule: [hafas, gtfs]; default is gtfs
     pt_schedule: gtfs
@@ -58,3 +61,4 @@ config:
     # path to the osm file, should be placed in data_path/osm (it can be list of files)
     osm_path: switzerland-latest.osm.pbf
     border_offset: 20000 # offset for border extension in meters, default is 20000
+    osmosis_binary: path_to_the_osmosis_directory/bin/osmosis

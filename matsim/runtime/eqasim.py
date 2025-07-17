@@ -45,7 +45,7 @@ def execute(context):
         ])
 
         # Select the configured commit or tag
-        commit = context.config("eqasim_commit")
+        commit = str(context.config("eqasim_commit"))
 
         git.run(context, [
             "checkout", commit

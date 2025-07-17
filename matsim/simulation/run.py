@@ -10,10 +10,9 @@ def configure(context):
     
     context.config("use_vdf", default=False)
 
-
     context.config("useScheduleBasedTransport", default=True)
     context.config("threads")
-    context.config("last_iteration", 60)    context.config("preventwaitingtoentertraffic", default = "no")
+    context.config("last_iteration", 60)    
     context.config("writeexperiencedplans", default = "no")
     context.config("preventwaitingtoentertraffic", default = "no")
     context.config("writeexperiencedplans", default = "no")

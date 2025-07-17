@@ -59,11 +59,9 @@ class PersonWriter:
         writer.add_attribute("hasBikeLoopTrip", "java.lang.Boolean", writer.true_false(self.person[22]))
         writer.add_attribute("statpopPersonId", "java.lang.Long", str(self.person[14]))
         writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[15]))
-        writer.add_attribute("cantonName", "java.lang.String", str(self.person[18]))
-        writer.add_attribute("municipalityType", "java.lang.String", str(self.person[19]))
-        writer.add_attribute("incomeClass", "java.lang.Integer", str(self.person[20]))
-
-
+        #writer.add_attribute("cantonName", "java.lang.String", str(self.person[18]))
+        #writer.add_attribute("municipalityType", "java.lang.String", str(self.person[19]))
+        writer.add_attribute("incomeClass", "java.lang.Integer", str(self.person[23]))
         writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[16]))
         writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[17]))
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
@@ -147,10 +145,14 @@ class FreightWriter:
         writer.end_person()
 
 
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y",
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", 
+                 "home_x", "home_y",
                  "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke",
-                 "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id",
-                 "mz_head_id", "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip"]
+                 "household_id", "is_car_passenger", 
+                 "statpop_person_id", "statpop_household_id", "mz_person_id", "mz_head_id", 
+                 "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
+                 "income_class"]
+
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
                    "geometry", "destination_id", "following_mode"]
 

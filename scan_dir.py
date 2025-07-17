@@ -3,8 +3,6 @@ import xml.etree.ElementTree as ET
 from xmldiff import main
 
 
-
-
 def scan_for_use_vdf(directory, item="use_vdf"):
     """
     Scans all Python (.py) files in the given directory and its subdirectories
