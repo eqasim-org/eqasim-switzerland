@@ -44,3 +44,17 @@ config:
 
     # specifies if we want to use VDF as the traffic model, default is false
     use_vdf: false
+
+    # Export detailed network in eqasim, default is false
+    export_detailed_network: false
+
+    # last iteration when runing MATSim
+    last_iteration: 2
+
+    # If you want to simplify the network (merge short links) in eqasim and correct their capacity, default is false
+    simplify_network_in_eqasim: false
+    correct_links_capacity: false
+
+    # path to the osm file, should be placed in data_path/osm (it can be list of files)
+    osm_path: switzerland-latest.osm.pbf
+    border_offset: 20000 # offset for border extension in meters, default is 20000
