@@ -27,7 +27,9 @@ def execute(context):
         if buffer>0:
             border["geometry"] = border.geometry.buffer(buffer)
             border["geometry"] = border.geometry.simplify(min(buffer, 3000), preserve_topology=True) #Simplify: Faster
-            border = border.to_crs("EPSG:4326")        
+        
+        # project to WGS84 (to be compatible with osm data)
+        border = border.to_crs("EPSG:4326")        
 
         # Merge and cut to the area
         return mf.merge_files(context, osm_files, border)
