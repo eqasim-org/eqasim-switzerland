@@ -12,11 +12,14 @@ def execute(context):
                                     copy=True)
     df.columns = ["destination_id", "destination_x", "destination_y", "noga"]
 
-    df.loc[:, "offers_work"] = True
+    df.loc[:, "offers_work"]  = True
     df.loc[:, "offers_other"] = True
+    df.loc[:, "offers_work_secondary"] = True
+    df.loc[:, "offers_home_secondary"] = True
 
     # 85 = education
     df.loc[:, "offers_education"] = df["noga"].str.startswith("85")
+    df.loc[:, "offers_education_secondary"] = df["noga"].str.startswith("85")
 
     # 90 = arts, entertainment, leisure; 56 = gastronomy
     df.loc[:, "offers_leisure"] = df["noga"].str.startswith("90") | df[
@@ -31,4 +34,5 @@ def execute(context):
 
     return df[["destination_id", "destination_x", "destination_y",
                "offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other",
+               "offers_work_secondary", "offers_education_secondary", "offers_home_secondary",
                "geometry"]]

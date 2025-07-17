@@ -7,10 +7,14 @@ def check_feasibility(distances, direct_distance, consider_total_distance=True):
 
 def calculate_feasibility(distances, direct_distance, consider_total_distance=True):
     total_distance = np.sum(distances)
+    delta_distance = 0.0
+
     remaining_distance = total_distance - distances
-    delta = np.max(distances - direct_distance - remaining_distance)
+    delta = max(distances - direct_distance - remaining_distance)
+
     if consider_total_distance:
         delta = max(delta, direct_distance - total_distance)
+
     return float(max(delta, 0))
 
 
@@ -32,28 +36,65 @@ class AssignmentObjective:
 
 class AssignmentSolver:
     def __init__(self, distance_sampler, relaxation_solver, discretization_solver, objective, maximum_iterations=1000):
-        self.maximum_iterations = maximum_iterations
-        self.relaxation_solver = relaxation_solver
-        self.distance_sampler = distance_sampler
+        self.maximum_iterations    = maximum_iterations
+        self.relaxation_solver     = relaxation_solver
+        self.distance_sampler      = distance_sampler
         self.discretization_solver = discretization_solver
-        self.objective = objective
+        self.objective             = objective
 
     def solve(self, problem):
         best_result = None
+
         for assignment_iteration in range(self.maximum_iterations):
             distance_result = self.distance_sampler.sample(problem)
-            relaxation_result = self.relaxation_solver.solve(problem, distance_result["distances"])
+
+            relaxation_result     = self.relaxation_solver.solve(problem, distance_result["distances"])
             discretization_result = self.discretization_solver.solve(problem, relaxation_result["locations"])
+
             assignment_result = self.objective.evaluate(problem, distance_result, relaxation_result, discretization_result)
+
             if best_result is None or assignment_result["objective"] < best_result["objective"]:
                 best_result = assignment_result
-                assignment_result["distance"] = distance_result
-                assignment_result["relaxation"] = relaxation_result
+
+                assignment_result["distance"]       = distance_result
+                assignment_result["relaxation"]     = relaxation_result
                 assignment_result["discretization"] = discretization_result
-                assignment_result["iterations"] = assignment_iteration
+                assignment_result["iterations"]     = assignment_iteration
+
             if best_result["valid"]:
                 break
+
         return best_result
+    
+
+class GeneralRelaxationSolver(RelaxationSolver):
+    def __init__(self, chain_solver, tail_solver = None, free_solver = None):
+        self.chain_solver = chain_solver
+        self.tail_solver = tail_solver
+        self.free_solver = free_solver
+
+    def solve(self, problem, distances):
+        if problem["origin"] is None and problem["destination"] is None:
+            return self.free_solver.solve(problem, distances)
+
+        elif problem["origin"] is None or problem["destination"] is None:
+            return self.tail_solver.solve(problem, distances)
+
+        else:
+            return self.chain_solver.solve(problem, distances)
+        
+
+def sample_tail(random, anchor, distances):
+    angles = random.random_sample(len(distances)) * 2.0 * np.pi
+    offsets = np.vstack([np.cos(angles), np.sin(angles)]).T * distances[:, np.newaxis]
+
+    locations = [anchor]
+
+    for k in range(len(distances)):
+        locations.append(locations[-1] + offsets[k])
+
+    return np.vstack(locations[1:])
+
 
 
 class ChainTailRelaxationSolver(RelaxationSolver):
@@ -90,18 +131,11 @@ class AngularTailSolver(RelaxationSolver):
         else:
             raise RuntimeError("Invalid chain for AngularTailSolver")
 
-        angles = self.random.random_sample(len(distances)) * 2.0 * np.pi
-        offsets = np.vstack([np.cos(angles), np.sin(angles)]).T * distances[:, np.newaxis]
+        locations = sample_tail(self.random, anchor, distances)
+        if reverse: locations = locations[::-1,:]
 
-        locations = [anchor]
-
-        for k in range(len(reference)):
-            locations.append(locations[-1] + offsets[k])
-
-        locations = np.vstack(locations[1:])
-        if reverse: locations = locations[::-1, :]
-
-        return dict(valid=True, locations=locations)
+        assert len(locations) == len(distances)
+        return dict(valid = True, locations = locations)
 
 
 # ---------------------------
@@ -153,10 +187,11 @@ def _gravity_simulation_loop(locations, distances, alpha, eps, maximum_iteration
             locations[i, 1] += adj1
     return locations, maximum_iterations, valid
 
+
 class GravityChainSolver:
     def __init__(self, random, alpha=0.3, eps=1e-2, maximum_iterations=1000, lateral_deviation=None):
         self.alpha = alpha
-        self.eps = eps
+        self.eps   = eps
         self.maximum_iterations = maximum_iterations
         self.random = random
         self.lateral_deviation = lateral_deviation
@@ -164,36 +199,49 @@ class GravityChainSolver:
     def solve_two_points(self, problem, origin, destination, distances, direction, direct_distance):
         if direct_distance == 0.0:
             location = origin + direction * distances[0]
+
             return dict(
                 valid=(distances[0] == distances[1]),
                 locations=location.reshape(-1, 2),
                 iterations=None
             )
+        
         elif direct_distance > np.sum(distances):
-            ratio = distances[0] / np.sum(distances) if (distances[0] > 0.0 or distances[1] > 0.0) else 1.0
+            ratio = 1.0
+
+            if distances[0] > 0.0 or distances[1] > 0.0:
+                ratio = distances[0] / np.sum(distances)
+
             location = origin + direction * ratio * direct_distance
+
             return dict(
-                valid=False,
-                locations=location.reshape(-1, 2),
-                iterations=None
+                valid = False, locations = location.reshape(-1, 2), iterations = None
             )
+        
         elif direct_distance < np.abs(distances[0] - distances[1]):
-            ratio = distances[0] / np.sum(distances) if (distances[0] > 0.0 or distances[1] > 0.0) else 1.0
+            ratio = 1.0
+
+            if distances[0] > 0.0 or distances[1] > 0.0:
+                ratio = distances[0] / np.sum(distances)
+
             maximum_distance = max(distances)
             location = origin + direction * ratio * maximum_distance
+
             return dict(
-                valid=False,
-                locations=location.reshape(-1, 2),
-                iterations=None
+                valid = False, locations = location.reshape(-1, 2), iterations = None
             )
+        
         else:
             A = 0.5 * (distances[0]**2 - distances[1]**2 + direct_distance**2) / direct_distance
             H = np.sqrt(max(0, distances[0]**2 - A**2))
             r = self.random.random_sample()
+
             center = origin + direction * A
             offset = direction * H
             offset = np.array([offset[0, 1], -offset[0, 0]])
+
             location = center + (1.0 if r < 0.5 else -1.0) * offset
+
             return dict(
                 valid=True,
                 locations=location.reshape(-1, 2),
@@ -202,15 +250,22 @@ class GravityChainSolver:
 
     def solve(self, problem, distances):
         origin, destination = problem["origin"], problem["destination"]
+
         if origin is None or destination is None:
+            print(problem)
             raise RuntimeError("Invalid chain for GravityChainSolver")
 
         direct_distance = la.norm(destination - origin)
-        if direct_distance < 1e-12:
-            angle = self.random.random() * 2 * np.pi
-            direction = np.array([[np.cos(angle), np.sin(angle)]])
+
+        if direct_distance < 1e-12: # We have a zero direct distance, choose a direction randomly
+            angle = self.random.random() * 2.0 * np.pi
+            direction = np.array([
+                np.cos(angle), np.sin(angle)
+            ]).reshape((1, 2))
+
         else:
-            direction = ((destination - origin) / direct_distance).reshape((1, 2))
+            direction = (destination - origin) / direct_distance
+
         normal = np.array([direction[0, 1], -direction[0, 0]])
 
         if problem["size"] == 1:
@@ -221,8 +276,9 @@ class GravityChainSolver:
             shares = np.linspace(0, 1, len(distances) - 1)
         else:
             shares = np.cumsum(distances[:-1]) / np.sum(distances)
-        initial_points = origin + direction * shares[:, None] * direct_distance
-        locations = np.vstack([origin, initial_points, destination])
+
+        initial_points = origin + direction * shares[:, np.newaxis] * direct_distance
+        locations      = np.vstack([origin, initial_points, destination])
 
         if not check_feasibility(distances, direct_distance):
             return dict(valid=False, locations=locations[1:-1], iterations=None)
@@ -259,11 +315,16 @@ class FeasibleDistanceSampler(DistanceSampler):
         origin, destination = problem["origin"], problem["destination"]
 
         if origin is None and destination is None:
-            raise RuntimeError("Invalid chain for FeasibleDistanceSampler")
-
-        elif origin is None or destination is None:  # This is a tail
             distances = self.sample_distances(problem)
-            return dict(valid=True, distances=distances, iterations=None)
+            return dict(valid = True, distances = distances, iterations = None)
+
+        elif origin is None: # This is a left tail
+            distances = self.sample_distances(problem)
+            return dict(valid = True, distances = distances, iterations = None)
+
+        elif destination is None: # This is a right tail
+            distances = self.sample_distances(problem)
+            return dict(valid = True, distances = distances, iterations = None)
 
         direct_distance = la.norm(destination - origin, axis=1)
 
@@ -303,11 +364,13 @@ class DiscretizationErrorObjective(AssignmentObjective):
     def evaluate(self, problem, distance_result, relaxation_result, discretization_result):
         sampled_distances = distance_result["distances"]
 
-        discretized_locations = np.vstack((
-            problem["origin"], discretization_result["locations"], problem["destination"]
-        ))
-        discretized_distances = la.norm(discretized_locations[:-1] - discretized_locations[1:], axis=1)
+        discretized_locations = []
+        if not problem["origin"] is None: discretized_locations.append(problem["origin"])
+        discretized_locations.append(discretization_result["locations"])
+        if not problem["destination"] is None: discretized_locations.append(problem["destination"])
+        discretized_locations = np.vstack(discretized_locations)
 
+        discretized_distances = la.norm(discretized_locations[:-1] - discretized_locations[1:], axis=1)
         discretization_error = np.abs(sampled_distances - discretized_distances)
 
         objective = 0.0

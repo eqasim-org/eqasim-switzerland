@@ -1,6 +1,7 @@
 import shutil
 import os.path
 import xml.etree.ElementTree as ET
+from lxml import etree
 import matsim.runtime.eqasim as eqasim
 import gzip
 
@@ -29,10 +30,12 @@ def execute(context):
     transit_vehicles_output_path = "%s/%stransit_vehicles.xml.gz" % (context.path(), context.config("output_prefix"))
 
     sample_size     = context.config("input_downsampling")
-    flow_eff_factor = 1.0 / sample_size
-    print(f"INFO setting flow efficiency factors to {round(flow_eff_factor,2)} for PT vehicles.")
     
     if context.config("input_downsampling") < 1.0 and not context.config("useScheduleBasedTransport"):
+
+        pce =  sample_size
+        print(f"INFO setting PCE to {round(pce,2)} for PT vehicles.")
+
         # Register the namespace
         namespace = {'m': 'http://www.matsim.org/files/dtd'}
 
@@ -42,8 +45,8 @@ def execute(context):
             root = tree.getroot()
 
         # Find and update all <flowEfficiencyFactor> elements
-        for fe in root.findall('.//m:flowEfficiencyFactor', namespace):
-            fe.set('factor', str(flow_eff_factor))
+        for fe in root.findall('.//m:passengerCarEquivalents', namespace):
+            fe.set('pce', str(pce))
 
         ET.register_namespace('', 'http://www.matsim.org/files/dtd')
 
@@ -101,6 +104,30 @@ def execute(context):
     ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
+
+    # If we want to simulate buses, some lines have to be added to the config.
+    if not context.config("useScheduleBasedTransport"):
+        config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
+        assert os.path.exists(config_path)
+
+        # Parse XML and preserve DOCTYPE and comments
+        parser = etree.XMLParser(remove_blank_text=True)
+        tree = etree.parse(config_path, parser)
+        root = tree.getroot()
+
+        # Create new module
+        module = etree.Element("module", name="SBBPt")
+
+        etree.SubElement(module, "param", name="deterministicServiceModes",
+                        value="rail,subway,ferry,tram,funicular,cable-car,gondola,other")
+        etree.SubElement(module, "param", name="createLinkEventsInterval", value="10")
+
+        # Append to root
+        root.append(module)
+
+        # Write back to file with DOCTYPE
+        doctype_str = '<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">'
+        tree.write(config_path, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
     
     # Calculate the stop categories
     transit_schedule_input_path = context.stage("matsim.scenario.network.mapped")["schedule"]
@@ -108,7 +135,7 @@ def execute(context):
 
     eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunCalculateStopCategories", [
         "--input-path", transit_schedule_input_path,
-        "--output-path", transit_schedule_output_path
+        "--output-path", transit_schedule_output_path,
     ])
     
     assert os.path.exists("%s/%stransit_schedule.xml.gz" % (context.path(), context.config("output_prefix")))

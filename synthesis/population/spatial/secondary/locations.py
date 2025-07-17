@@ -3,10 +3,10 @@ import numpy as np
 import pandas as pd
 import shapely.geometry as geo
 
-from synthesis.population.spatial.secondary.components import CustomDistanceSampler, CustomDiscretizationSolver
+from synthesis.population.spatial.secondary.components import CustomDistanceSampler, CustomDiscretizationSolver, CandidateIndex, CustomFreeChainSolver
 from synthesis.population.spatial.secondary.problems import find_assignment_problems
 from synthesis.population.spatial.secondary.rda import AssignmentSolver, DiscretizationErrorObjective, \
-    GravityChainSolver
+    GravityChainSolver, AngularTailSolver, GeneralRelaxationSolver
 
 
 def configure(context):
@@ -28,25 +28,31 @@ def prepare_locations(context):
     df_home = context.stage("synthesis.population.spatial.home.locations").rename(columns={"geometry": "home"})
     df_work = context.stage("synthesis.population.spatial.primary.locations")[0].rename(columns={"geometry": "work"})
     df_education = context.stage("synthesis.population.spatial.primary.locations")[1].rename(columns={"geometry": "education"})
+
     df_locations = context.stage("synthesis.population.sampled")[["person_id", "household_id"]]
     df_locations = pd.merge(df_locations, df_home[["household_id", "home"]], how="left", on="household_id")
     df_locations = pd.merge(df_locations, df_work[["person_id", "work"]], how="left", on="person_id")
     df_locations = pd.merge(df_locations, df_education[["person_id", "education"]], how="left", on="person_id")
+
     return df_locations[["person_id", "home", "work", "education"]].sort_values(by="person_id")
 
 
 def prepare_destinations(context):
     df_destinations = context.stage("synthesis.population.destinations")
+
     identifiers = df_destinations["destination_id"].values
-    # Use vectorized extraction from the geometry column:
-    locations = np.column_stack((df_destinations.geometry.x, df_destinations.geometry.y))
+    locations   = np.vstack(df_destinations["geometry"].apply(lambda x: np.array([x.x, x.y])).values)
+
     data = {}
-    for purpose in ("shop", "leisure", "other"):
+
+    for purpose in ("shop", "leisure", "other", "work_secondary", "education_secondary", "home_secondary"):
         f = df_destinations["offers_%s" % purpose].values
+
         data[purpose] = dict(
             identifiers=identifiers[f],
             locations=locations[f]
         )
+
     return data
 
 
@@ -81,7 +87,7 @@ def execute(context):
 
     # Resampling for calibration
     resample_distributions(distance_distributions, dict(
-        car=0.8, car_passenger=1.0, pt=1.0, bike=0.0, walk=0.0
+        car=0.8, car_passenger=1.0, pt=1.0, bike=0.0, walk=0.0, walk_loop=0.0, bike_loop=0.0, car_loop=0.8, pt_loop=1.0
     ))
 
     # Segment into subsamples
@@ -107,9 +113,9 @@ def execute(context):
 
     # Run algorithm in parallel
     with context.progress(label="Assigning secondary locations to persons", total=number_of_persons):
-        with context.parallel(processes=processes, data=dict(
-                distance_distributions=distance_distributions,
-                destinations=destinations
+        with context.parallel(processes = processes, data=dict(
+                distance_distributions = distance_distributions,
+                destinations = destinations
         )) as parallel:
             df_locations, df_convergence = [], []
 
@@ -139,18 +145,26 @@ def process(context, arguments):
         distributions=distance_distributions)
 
     # Set up relaxation solver; currently, we do not consider tail problems.
-    relaxation_solver = GravityChainSolver(
+    chain_solver = GravityChainSolver(
         random=rng, eps=75.0, lateral_deviation=10.0, alpha=0.1
     )
 
     # Set up discretization solver
     destinations = context.data("destinations")
-    discretization_solver = CustomDiscretizationSolver(destinations)
+    candidate_index = CandidateIndex(destinations)
+    discretization_solver = CustomDiscretizationSolver(candidate_index)
+
+    tail_solver = AngularTailSolver(random = rng)
+    free_solver = CustomFreeChainSolver(rng, candidate_index)
+
+    relaxation_solver = GeneralRelaxationSolver(chain_solver, tail_solver, free_solver)
 
     # Set up assignment solver
     thresholds = dict(
         car=200.0, car_passenger=200.0, pt=200.0,
-        bike=100.0, walk=100.0
+        bike=100.0, walk=100.0,
+        bike_loop=100.0, walk_loop=100.0,
+        car_loop=200.0, pt_loop=200.0
     )
 
     assignment_objective = DiscretizationErrorObjective(thresholds=thresholds)
