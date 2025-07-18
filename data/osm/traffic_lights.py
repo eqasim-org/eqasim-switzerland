@@ -25,7 +25,7 @@ class NodesHandler(osmium.SimpleHandler):
         if n.tags.get('highway') == 'traffic_signals':
             lon, lat = n.location.lon, n.location.lat
             direction = n.tags.get("traffic_signals:direction")
-            self.traffic_lights.append({'id': n.id,'x': lon, 'y': lat,'direction': direction, 'geometry': Point(lon, lat)})
+            self.traffic_lights.append({'node_id': n.id,'x': lon, 'y': lat,'direction': direction, 'geometry': Point(lon, lat)})
 
 def get_region(context):
     # Bounding Area
@@ -77,10 +77,11 @@ def execute(context):
         df = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
         df = df.to_crs(epsg=2056)
         
-        # only keep the traffic light located i the interest area
-        region = get_region(context)
-        df = df[df.geometry.within(region)].reset_index(drop=True)
-        logger.info(f"    Number of traffic lights within the region of interest is: {len(df)}.")
+        if len(osm_files)>1:
+            # only keep the traffic light located i the interest area
+            region = get_region(context)
+            df = df[df.geometry.within(region)].reset_index(drop=True)
+            logger.info(f"    Number of traffic lights within the region of interest is: {len(df)}.")
 
         # Save the traffic lights to a file
         output_path = "%s/traffic_lights.shp" % context.path()
@@ -88,4 +89,4 @@ def execute(context):
         
         logger.info(f"    Traffic lights saved to {output_path}.")
 
-    return df if not df.empty else None
+    return output_path

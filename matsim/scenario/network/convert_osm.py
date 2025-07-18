@@ -10,12 +10,14 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.pt2matsim")
     context.stage("data.osm.clean")
+    context.stage("data.osm.traffic_lights")
         
     context.config("export_detailed_network", False)
     context.config("simplify_network_in_eqasim", False)
     context.config("correct_links_capacity", False)
     context.config("minimum_speed", 3) #in km/h
     context.config("input_downsampling")
+    context.config("add_trafic_lights", False)
 
 def execute(context):
     network_file = context.stage("data.osm.clean")
@@ -52,7 +54,7 @@ def execute(context):
         if context.config("export_detailed_network"):
             content = content.replace(
                 '<param name="outputDetailedLinkGeometryFile" value="null" />',
-                '<param name="outputDetailedLinkGeometryFile" value="detailed_network.csv" />',
+                '<param name="outputDetailedLinkGeometryFile" value="%s/detailed_network.csv" />' % context.path(),
             )
 
         content = content.replace(
@@ -90,16 +92,32 @@ def execute(context):
         "%s/convert_network.xml" % context.path()
     ],[])
     
-    if context.config("simplify_network_in_eqasim") or context.config("correct_links_capacity"):
+
+    # Here we correct the capacity, simplify the network or include the traffic lights if required
+    # The network is read once because reading it multiple times is slow (around 1.3 minutes)
+
+    if (context.config("simplify_network_in_eqasim") or 
+        context.config("correct_links_capacity") or
+        context.config("add_trafic_lights")):
+       
+        # Read the network
         network_path =  "%s/converted_network.xml.gz" % context.path()
         net = read_network(network_path)
 
+        # If traffic lights are requested, process them first (before simplifying the network)
+        if context.config("add_trafic_lights"):
+            traffic_lights_path = context.stage("data.osm.traffic_lights")
+            detailed_network_path = "%s/detailed_network.csv" % context.path()
+            net.add_traffic_lights(traffic_lights_path, detailed_network_path)
+
+        # Simplify the network if requested, merge short links and remove loops and unconnected links
         if context.config("simplify_network_in_eqasim") :
             stats = net.clean_network()
             # Save stats
             with open("%s/statistics_of_cleaning_network.json" % context.path(), "w") as f:
                 json.dump(stats, f, indent=4) 
 
+        # correct link capacity for short links
         if context.config("correct_links_capacity"):
             sampling_rate = context.config("input_downsampling")
             net.correct_capacity( sampling_rate = sampling_rate,
