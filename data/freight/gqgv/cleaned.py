@@ -42,7 +42,8 @@ def execute(context):
     df = df.rename(RENAMES, axis=1)
 
     # apply divisor to weight
-    df["weight"] /= df["divisor"]
+    # not used anymore in the 2019 data
+    # df["weight"] /= df["divisor"]
 
     # rename vehicle types
     df["vehicle_type"] = df["vehicle_type"].replace(VEHICLE_TYPES)
