@@ -5,6 +5,7 @@ import shutil
 from matsim.readers import read_network
 import json
 import re
+from matsim.scenario.network.networkUtils import TrafficLightsMatcher, CapacityCorrector
 
 def configure(context):
     context.stage("matsim.runtime.java")
@@ -21,6 +22,8 @@ def configure(context):
 
 def execute(context):
     network_file = context.stage("data.osm.clean")
+    # Export the detailed network if the traffic lights are added
+    export_detailed_network = context.config("export_detailed_network") if not context.config("add_trafic_lights") else True
 
     pt2matsim.run(context, "org.matsim.pt2matsim.run.CreateDefaultOsmConfig", [
         "convert_network_template.xml"
@@ -51,7 +54,7 @@ def execute(context):
             '<param name="maxLinkLength" value="99999.0" />'
         )
         # Export detailed geometry of the links if needed
-        if context.config("export_detailed_network"):
+        if export_detailed_network:
             content = content.replace(
                 '<param name="outputDetailedLinkGeometryFile" value="null" />',
                 '<param name="outputDetailedLinkGeometryFile" value="%s/detailed_network.csv" />' % context.path(),
@@ -108,7 +111,7 @@ def execute(context):
         if context.config("add_trafic_lights"):
             traffic_lights_path = context.stage("data.osm.traffic_lights")
             detailed_network_path = "%s/detailed_network.csv" % context.path()
-            net.add_traffic_lights(traffic_lights_path, detailed_network_path)
+            net.links = TrafficLightsMatcher(net).run(traffic_lights_path, detailed_network_path)             
 
         # Simplify the network if requested, merge short links and remove loops and unconnected links
         if context.config("simplify_network_in_eqasim") :
@@ -120,8 +123,10 @@ def execute(context):
         # correct link capacity for short links
         if context.config("correct_links_capacity"):
             sampling_rate = context.config("input_downsampling")
-            net.correct_capacity( sampling_rate = sampling_rate,
-                                  minimum_speed = context.config("minimum_speed")/3.6)
+            net.links = CapacityCorrector(net).run(  sampling_rate=sampling_rate,
+                                                     minimum_speed=context.config("minimum_speed")/3.6)
+            
+
             
         # Do not remove the last version of the network, just rename it.
         shutil.move(network_path, network_path.replace("converted_network","converted_network_uncleaned"))

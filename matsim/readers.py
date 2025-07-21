@@ -13,6 +13,7 @@ import warnings
 from shapely import wkt
 from shapely.errors import WKTReadingError
 from shapely.geometry import Point
+import networkx as nx 
 
 import logging
 logger = logging.getLogger(__name__)
@@ -98,7 +99,25 @@ class Network:
     
         return geo_net
     
-    
+    def as_nx(self):
+        G = nx.Graph()  
+        links = self.links
+        nodes = self.nodes  
+
+        # Add nodes with coordinates        
+        G.add_nodes_from(
+            zip(nodes['node_id'], 
+                ({'x': x, 'y': y} for x, y in zip(nodes['x'], nodes['y'])))
+        )
+
+        # Add edges with attributes
+        G.add_edges_from(
+            zip(links['from_node'], links['to_node'],
+                ({'link_id': lid, 'free_travel_time': tt} for lid, tt in zip(links['link_id'], links['free_travel_time'])))
+        )
+
+        return G
+
     def clean_network(self):
         stats = dict()
 
@@ -413,76 +432,6 @@ class Network:
             writer.end_network()
 
     
-    def _correct_capacity(self, row, sampling_rate, minimum_speed):
-        current_capacity = row["capacity"]
-        length = row["length"]
-        return np.maximum(current_capacity, 3600*minimum_speed/(length*sampling_rate))
-    
-    
-    def correct_capacity(self, sampling_rate, minimum_speed=2/3.6):
-        """        
-        This function here correct the capacity of a link based on its length and 
-        the sampling rate of teh population. It will only impact small links.
-        """
-        car_links = self.links.modes.apply(lambda x: "car" in x)
-        
-        self.links.loc[car_links, "capacity"] = \
-            self.links.loc[car_links, ["capacity", "length"]].apply(
-            lambda x: self._correct_capacity(x, sampling_rate, minimum_speed),
-            axis=1)
-    
-    def add_traffic_lights(self, traffic_lights_path, detailed_network_path):
-        """
-        Add traffic lights to the network.
-        
-        Parameters:
-            traffic_lights_path (str): Path to the traffic lights data.
-            detailed_network_path (str): Path to save the detailed network with traffic lights.
-        """        
-        # Read the traffic lights data
-        traffic_lights = gpd.read_file(traffic_lights_path)
-        
-        #Read the geometry of the detailed network
-        detailed_geo = pd.read_csv(detailed_network_path)
-        detailed_geo = detailed_geo.rename(columns={"Geometry":"geometry", "LinkId":"link_id"})
-        
-        id_type = type(self.links.link_id.iloc[0])
-        detailed_geo.loc[:,"link_id"] = detailed_geo["link_id"].astype(id_type)
-        
-        # Add the nodes to the detailed geometry
-        detailed_geo = detailed_geo.merge(self.links[["link_id","from_node","to_node", "modes"]])
-        detailed_geo = detailed_geo[(detailed_geo["modes"].str.contains("car"))&(~detailed_geo["link_id"].str.contains("pt"))]
-
-        # Correct the geometry (because it is str)
-        def safe_load_wkt(wkt_str):
-            try:
-                return wkt.loads(wkt_str)
-            except (WKTReadingError, ValueError, AttributeError, TypeError):
-                return None
-        detailed_geo["geometry"] = detailed_geo["geometry"].map(safe_load_wkt)
-        detailed_geo = gpd.GeoDataFrame(detailed_geo, geometry = "geometry", crs = "EPSG:2056")
-        
-        # Make the geospatial join to find the traffic lights on the links
-        assert traffic_lights.crs==detailed_geo.crs, "Traffic lights and detailed network must have the same CRS."
-        df = traffic_lights.sjoin_nearest(detailed_geo, how="left", lsuffix="_tl", rsuffix="_link", max_distance=5)        
-        df = df[df.link_id.notna()]
-        df = df.merge(detailed_geo[["link_id","geometry"]].rename(columns={"geometry":"link_geometry"}), on="link_id", how="left")
-
-        # Now, transfer the traffic light to the node. It should be transfered to the node that is closest to the traffic light.
-        # Note that this might result sometimes in traffic light in the wrong node. because of links merging in pt2matsim.
-        # This means that the traffic light in the middle of the link (node that was deleted in pt2matsim) can be transfered to 
-        # upstream or downstream. 
-        def get_right_node(g):
-            entry, exit = map(Point, [g.link_geometry.coords[0], g.link_geometry.coords[-1]])
-            entry_distance, exit_distance = entry.distance(g.geometry), exit.distance(g.geometry)               
-            return g["from_node"] if entry_distance < exit_distance else g["to_node"]
-
-        df["matsim_node"] = df.apply(get_right_node, axis=1)
-        traffic_light_nodes = df.matsim_node.unique()
-        link_having_traffic_lights = self.links.to_node.isin(traffic_light_nodes)
-        self.links.loc[link_having_traffic_lights, "attributes"] = self.links.loc[link_having_traffic_lights, "attributes"].apply(
-            lambda x: {**x, "traffic_light":True}
-        )
 
 
 def read_network(filename, skip_attributes=False):
