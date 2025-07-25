@@ -5,7 +5,10 @@ import shutil
 from matsim.readers import read_network
 import json
 import re
-from matsim.scenario.network.networkUtils import TrafficLightsMatcher, CapacityCorrector
+from matsim.scenario.network.utils.capacity_corrector import CapacityCorrector
+from matsim.scenario.network.utils.traffic_lights_matcher import TrafficLightsMatcher
+
+
 
 def configure(context):
     context.stage("matsim.runtime.java")

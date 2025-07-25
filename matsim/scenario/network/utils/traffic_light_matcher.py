@@ -5,7 +5,7 @@ from shapely import wkt
 from shapely.errors import WKTReadingError
 from shapely.geometry import Point
 import numpy as np
-
+from matsim.readers import Network
 
 class TrafficLightsMatcher:
     """
@@ -15,7 +15,7 @@ class TrafficLightsMatcher:
         links (pd.DataFrame): DataFrame containing the network links.
     """
     
-    def __init__(self, network):
+    def __init__(self, network: Network):
         self.links = network.links
         self.nodes = network.nodes        
 
@@ -94,13 +94,13 @@ class TrafficLightsMatcher:
         sel = (self.links["modes"].str.contains("car"))&(~self.links["link_id"].str.contains("pt"))
         sel|= (self.links.from_node.isin(traffic_light_nodes)|self.links.to_node.isin(traffic_light_nodes))
         
-        links = self.links[sel].copy()
+        links = self.links[sel]
         all_nodes = set([*links['from_node'], *links['to_node']])
         degrees = dict(G.degree(all_nodes))
         two_degree_nodes = [k for k,v in degrees.items() if v==2]
         
         # Create a mapping from node → (to_node, length)
-        target_links = links[(links['from_node'].isin(two_degree_nodes))&(links['length'] < threshold)]
+        target_links = links[(links['from_node'].isin(two_degree_nodes))&(links['length'] < threshold)].copy()
         target_links["downstream_degree"] = target_links["to_node"].apply(lambda x: G.degree(x) )
         target_links["class_distance"] = target_links["length"] - 5*(target_links["downstream_degree"]-2) #5 meters by additional degree
         
@@ -171,7 +171,9 @@ class TrafficLightsMatcher:
 
         ### PROCESS THESE NODES, SOME OF WHICH HAVE A DEGREE OF 2 (TO BE REMOVED). AND SOME OF WHICH ARE IN THE WRONG INTERSECTION
         traffic_light_nodes = self.preprocess_matched_traffic_light_nodes(G, traffic_light_nodes)        
-        traffic_light_nodes = [node for node in traffic_light_nodes if G.degree(node)>2]
+        
+        nodes_degree_two = set(n for n, d in G.degree() if d == 2)
+        traffic_light_nodes = [n for n in traffic_light_nodes if n not in nodes_degree_two]
         
         # Now all the links that are going to the node where traffic lights are assigned, are taged in their attributes
         links_having_traffic_lights = self.links.to_node.isin(traffic_light_nodes)
@@ -179,45 +181,5 @@ class TrafficLightsMatcher:
             self.links.loc[links_having_traffic_lights, "attributes"].apply(lambda x: {**x, "traffic_light":True})
         
         return self.links
-
-
-
-class CapacityCorrector:
-    """
-    Class to correct the capacity of the links in the network.
-    
-    Parameters:
-        network (Network): The network object containing the links.
-    """
-    
-    def __init__(self, network):
-        self.links = network.links
-
-    def _correct_capacity(self, row, sampling_rate, minimum_speed):
-        current_capacity = row["capacity"]
-        length = row["length"]
-        return np.maximum(current_capacity, 3600*minimum_speed/(length*sampling_rate))
-    
-    
-    def run(self, sampling_rate, minimum_speed=2/3.6):
-        """        
-        This function here correct the capacity of a link based on its length and 
-        the sampling rate of teh population. It will only impact small links.
-        """
-        car_links = self.links.modes.apply(lambda x: "car" in x)
-        
-        self.links.loc[car_links, "capacity"] = \
-            self.links.loc[car_links, ["capacity", "length"]].apply(
-            lambda x: self._correct_capacity(x, sampling_rate, minimum_speed),
-            axis=1)
-        return self.links
-
-
-
-
-
-
-
-
 
 
