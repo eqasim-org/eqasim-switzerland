@@ -58,3 +58,8 @@ config:
     # path to the osm file, should be placed in data_path/osm (it can be list of files)
     osm_path: switzerland-latest.osm.pbf
     border_offset: 20000 # offset for border extension in meters, default is 20000
+
+    # whether to add traffic lights to the network, default is false
+    add_trafic_lights: false
+    # whether to assign elevations to the nodes, default is false
+    assign_elevations: false

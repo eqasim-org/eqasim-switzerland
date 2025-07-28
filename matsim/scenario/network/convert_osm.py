@@ -6,8 +6,8 @@ from matsim.readers import read_network
 import json
 import re
 from matsim.scenario.network.utils.capacity_corrector import CapacityCorrector
-from matsim.scenario.network.utils.traffic_lights_matcher import TrafficLightsMatcher
-
+from matsim.scenario.network.utils.traffic_light_matcher import TrafficLightsMatcher
+from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
 
 
 def configure(context):
@@ -15,13 +15,15 @@ def configure(context):
     context.stage("matsim.runtime.pt2matsim")
     context.stage("data.osm.clean")
     context.stage("data.osm.traffic_lights")
-        
+    
+    context.config("data_path")        
     context.config("export_detailed_network", False)
     context.config("simplify_network_in_eqasim", False)
     context.config("correct_links_capacity", False)
     context.config("minimum_speed", 3) #in km/h
     context.config("input_downsampling")
     context.config("add_trafic_lights", False)
+    context.config("assign_elevations", False)
 
 def execute(context):
     network_file = context.stage("data.osm.clean")
@@ -104,11 +106,16 @@ def execute(context):
 
     if (context.config("simplify_network_in_eqasim") or 
         context.config("correct_links_capacity") or
-        context.config("add_trafic_lights")):
+        context.config("add_trafic_lights") or
+        context.config("assign_elevations")):
        
         # Read the network
         network_path =  "%s/converted_network.xml.gz" % context.path()
         net = read_network(network_path)
+        
+        # Assign elevations to the nodes if requested
+        if context.config("assign_elevations"):            
+            net = ElevationEstimator(net, context.config("data_path")).run()
 
         # If traffic lights are requested, process them first (before simplifying the network)
         if context.config("add_trafic_lights"):

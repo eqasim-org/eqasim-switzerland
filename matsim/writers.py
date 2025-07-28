@@ -440,8 +440,11 @@ class NetworkWriter(XmlWriter):
         self._write_line('</links>')
    
 
-    def write_node(self, _id: str, x: float, y:float):
-        self._write_line(f'<node  id="{_id}"  x="{x}"  y="{y}"/>')        
+    def write_node(self, _id: str, x: float, y:float, z:float=None):
+        if z is None:
+            self._write_line(f'<node  id="{_id}"  x="{x}"  y="{y}"/>')        
+        else:
+            self._write_line(f'<node  id="{_id}"  x="{x}"  y="{y}"  z="{z}"/>')        
 
     def write_link(self, _id: str, _from:str, to:str, length:float,
                    freespeed:float, capacity:int, permlanes:int,
@@ -479,9 +482,12 @@ class NetworkWriter(XmlWriter):
             self.add_attribute(name, value)
         self.end_attributes()
 
-    def add_nodes(self,_id, x, y):
+    def add_nodes(self,_id, x, y, z=None):
         self.start_nodes()
-        list(map(self.write_node,_id,x,y))
+        if z is None:
+            list(map(self.write_node,_id,x,y))
+        else:
+            list(map(self.write_node,_id,x,y,z))
         self.end_nodes()
     
     def add_links(self, _id, _from, to, length, freespeed, capacity, permlanes,

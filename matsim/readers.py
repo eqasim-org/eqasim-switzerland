@@ -398,6 +398,9 @@ class Network:
     def save(self,file_path,write_attrbs=True):        
         # set the types
         self.nodes = self.nodes.astype({'node_id':str,'x':float,'y':float})
+        if "z" in self.nodes:
+            self.nodes = self.nodes.astype({'z':float})
+
         self.links = self.links.astype({'link_id':str,
                                         'from_node':str, 
                                         'to_node':str, 
@@ -417,7 +420,10 @@ class Network:
         with file_open(file_path, 'wb+') as f_write:
             writer = NetworkWriter(f_write)
             writer.start_network()
-            writer.add_nodes(self.nodes['node_id'],self.nodes.x, self.nodes.y)
+            writer.add_nodes(self.nodes['node_id'],
+                             self.nodes.x, 
+                             self.nodes.y, 
+                             self.nodes.z if "z" in self.nodes else None)
             writer.add_links(self.links['link_id'],
                              self.links['from_node'],
                              self.links['to_node'],
