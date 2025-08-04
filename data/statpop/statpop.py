@@ -40,14 +40,13 @@ def execute(context):
     # Only allow permanent residents
     df_persons = df_persons[df_persons["population_type"] == 1]
 
-    # Merge STATPOP persons and households into a list of persons with houeshold attributes
+    # Merge STATPOP persons and households into a list of persons with household attributes
     df = pd.merge(df_persons, df_link, on=("person_id", "municipality_id"))
     df = pd.merge(df, df_households, on="household_id")
 
     # Impute the houeshold size for each STATPOP person
     df_size = df.groupby("household_id").size().reset_index(name="household_size")
     df = pd.merge(df, df_size, on="household_id")
-
     # Only allow plausible households
     df = df[df["plausible"] == 1]
 
