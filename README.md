@@ -1,10 +1,13 @@
-This repository contains all the scripts that are used to create the
-IVT Switzerland / Zurich MATSim scenario. It uses a custom build pipeline
-with `python` modules that call each other in the sense of incremental builds.
+This repository contains the documentation and the code used to create the
+Switzerland synthetic population and corresponding travel. It also provides stages that can be used to convert it and run a MATSim/eqasim agent-based simulations. Furthermore, it provides a visualization of the data at the end of the pipeline.
 
-A more flexible version is being made public at [https://github.com/eqasim-org/synpp](https://github.com/eqasim-org/synpp). The documentation is more thorough, and may be helpful.
+The pipeline uses the `synpp` Python package for stage chaining avaialble at [here](https://github.com/eqasim-org/synpp).
 
 # Installation
+
+Before using the pipeline one needs to have the Python environment set up. This can be done either by setting up the `conda` environment or a `python` environment.
+
+For setting up the conda environment (not continuously tested):
 
 Two bash scripts which set up everything that is needed to run the pipeline on Linux machines, as well as a requirements.txt file, can be found in `environment`:
 
@@ -19,9 +22,14 @@ To clean, simply delete the environment directory (here `myenv`).
 
 In case you are using a Mac machine there are minoconda paths within the `environment/setup.sh` file that you can use.
 
+For settign up the python environment:
+- Install `Python 3.10.13`
+- Install packages in `euler_requirements.txt`
+- How to do this in detail on our Euler server can be found [here](https://gitlab.ethz.ch/csfm/csfm-documentation/-/wikis/MATSim/Eqasim-on-Euler).
+
 # Run
 
-Once you have set up your environment, all dependencies should have been installed, including synpp. At this point, all you need to do is adjust the config file (**DO NOT MODIFY** `config_gitlab.yml`, as this is the one that is used for gitlab testing) to run the stages you required, and then:
+Once you have set up your environment, all dependencies should have been installed, including synpp. At this point, all you need to do is adjust the config file (**DO NOT MODIFY** `config.yml`) to run the stages you required, and then:
 
 `python3 -m synpp config.yml`
 
@@ -45,17 +53,10 @@ Type `python3 visualize_pipeline.py -h` for further explanations.
 
 # Output
 
-To create a full scenario, add the `matsim.final` stage to the config file. The
-configuration options `output_path` and `output_id` must be set. The option
+To create a full scenario, add the `matsim.simulation.run` stage to the config file. The
+configuration option `output_path` must be set. The option
 `output_path` must point to an existing directory, where results of the pipeline
-will be saved. For a specific run, the scenario output will be written to the
-folder `output_path/output_id`, i.e. the subfolder "output_id" *may be overwritten*
-if it exists already.
-
-# Deployment
-
-No deployment yet, still work in progress. Later new updates will be automatically
-deployed to NAS.
+will be saved. 
 
 # Setting up and running on Windows
 
@@ -83,31 +84,31 @@ file is given in `config_docker.yml`. Note that also there the paths must be adj
 
 # Raw data
 
-The raw data that is used in the process can be found on either of our servers
-(pikelot, ifalik, nama) under:
+The raw data that is used in the process can be found on our server
+(Euler) under (only available to CSFM members):
 
 ```
-/nas/ivtmatsim/scenarios/switzerland/data OR /nas/ivtmatsim/scenario/raw/raw
+/cluster/project/cmdp/ch_data
 ```
 
 **Microcensus Transport and Mobility**
 - Content: `microcensus/` contains the Mikrozensus Verkehr und Mobilität in CSV
 format with 60'000 daily trips of Swiss residents.
-- Year: 2015 (published 2017)
-- Contract: Rahmenvertrag with BfS
+- Year: 2015 (published 2017), 2021
+- Contract: BfS
 
 **STATPOP**
 - Content: `statpop/` contains the Registererhebung (STATPOP) with socio-demographic
 information on around 8M Swiss residents.
-- Year: 2012
-- Contract: Until end of 2018
+- Year: 2023
+- Contract: BfS
 
 **Structural Survey**
 - Content: `structural_survey/` contains the Strukturerhebung with socio-demographic
 and work and household related information about ~20% of the Swiss population in each
 data set.
-- Year: 2010, 2011, 2012
-- Contract: Until end of 2018
+- Year: 2021, 2022, 2023
+- Contract: BfS
 
 **Municipality Borders**
 - Content: `municipality_borders/` contains the shape files for Swiss municipalities
@@ -142,20 +143,25 @@ classifications for all municipalities in 2018
 **STATENT**
 - Content: `statent/` contains the enterprise register for Switzerland with coordinates,
 number of employees and classifications of the enterprises.
-- Year: 2014
-- Contract: Until end of 2018?
+- Year: 2021
+- Contract: BfS
 
 **OSM**
 - Content: `osm/` contains a snapshot of the OSM database for Switzerland
 from [geofabrik][5]. Originally, the format is bz2, but pt2matsim can only work
 with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
-- State: 7 Oct 2018
+- State: 2025
 - Contract: [Open Data][5]
 
 **HAFAS**
 - Content: `hafas/` contains the official SBB HAFAS schedule for Switzerland.
-- State: 17 Sep 2018
+- State: 2025
 - Contract: [Open Data][6]
+
+**GTFS**
+- Content: `gtfs/` contains the official GTFS schedule for Switzerland.
+- State: 2025
+- Contract: [Open Data][17]
 
 **ÖV Güteklasse**
 - Content: `ov_guteklasse/` contains the shape files of ARE for the "ÖV Güteklasse",
@@ -203,12 +209,12 @@ subdivisions.
 **Freight**
 - GTE:
     - Content: `freight/gte` contains data from GTE survey which examines freight travel for freight vehicles registered in Switzerland.
-    - State: 2017
-    - Contract: BFS contract until ?
+    - State: 2023
+    - Contract: BfS
 - GQGV:
     - Content: `freight/gqgv` contains data from GQGV survey which examines freight travel for freight vehicles registered abroad.
-    - State: 2014
-    - Contract: BFS contract until ?
+    - State: 2019
+    - Contract: BfS
 - Departure times:
     - Content: `freight/departure_times.csv` contains data on the probability of a freight vehicle departing within a certain time bin.
     - State: 2008
@@ -235,3 +241,4 @@ subdivisions.
 [14]: https://www.cadastre.ch/en/services/service/plz.html
 [15]: https://www.are.admin.ch/are/en/home/transport-and-infrastructure/data/transport-perspectives.html
 [16]: https://trimis.ec.europa.eu/sites/default/files/project/documents/20150826_232657_83989_SVI_1999_328.pdf
+[17]: https://data.opentransportdata.swiss/de/dataset/timetable-2025-gtfs2020
