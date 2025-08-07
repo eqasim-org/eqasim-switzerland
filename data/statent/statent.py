@@ -99,17 +99,28 @@ def execute(context):
     df_spatial = df_spatial[columns]
 
     # impute zones
+    df2 = df_spatial.drop("quarter_id", axis=1)
+    df2 = data.spatial.zones.impute(df2, df_zones)
+    df2.rename(columns={"zone_id": "zone_municipality_id"}, inplace=True)
+    df2 = df2[["enterprise_id", "zone_municipality_id"]]
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
 
+    df_spatial = df_spatial.merge(
+        df2,   
+        on="enterprise_id",         
+        how="left"       
+    )
     assert(len(df) == len(df_spatial))
     assert(len(df_spatial) == len(df_spatial["zone_id"].dropna()))
 
     columns.extend(["zone_id"])
+    columns.extend(["zone_municipality_id"])
 
     df = pd.merge(
         df, df_spatial[columns],
         on = "enterprise_id"
     )
     df["zone_id"] = df["zone_id"].astype(np.int)
+    df["zone_municipality_id"] = df["zone_municipality_id"].astype(np.int)
     print(df)
     return df
