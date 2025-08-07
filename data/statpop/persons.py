@@ -23,7 +23,6 @@ def execute(context):
         "POPULATIONTYPE": int,
         "TYPEOFRESIDENCE": int,
         "REPORTINGMUNICIPALITYID": int,
-        #"FEDERALBUILDINGID": int,
     }
 
     renames = {
@@ -36,8 +35,7 @@ def execute(context):
         "GEOCOORDE": "home_x",
         "POPULATIONTYPE": "population_type",
         "TYPEOFRESIDENCE": "type_of_residence",
-        "REPORTINGMUNICIPALITYID": "municipality_id",
-       # "FEDERALBUILDINGID": "federal_building_id",
+        "REPORTINGMUNICIPALITYID": "municipality_id"  
     }
 
     with open(part_1, mode="rb") as f1, open(part_2, mode="rb") as f2:
