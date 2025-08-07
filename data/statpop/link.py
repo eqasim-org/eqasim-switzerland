@@ -8,17 +8,17 @@ def execute(context):
     import lzma as xz
     import data.utils
 
-    with xz.open("%s/statpop/STATPOP_2012_Link_Pers_HH.csv.xz" % data_path) as f:
+    with open("%s/statpop/STATPOP_2023_LINK_CH.csv" % data_path, mode="rb") as f:
         fields = {
-            "personPseudoID" : int,
-            "householdIdNum" : int,
+            "personPseudoId" : int,
+            "HOUSEHOLDID" : int,
             "REPORTINGMUNICIPALITYID" : int
         }
 
         renames = {
-            "personPseudoID" : "person_id",
-            "householdIdNum" : "household_id",
+            "personPseudoId" : "person_id",
+            "HOUSEHOLDID" : "household_id",
             "REPORTINGMUNICIPALITYID" : "municipality_id"
         }
 
-        return data.utils.read_csv(context, f, fields, renames, total = 8261094)
+        return data.utils.read_csv(context, f, fields, renames, total = 9191057)
