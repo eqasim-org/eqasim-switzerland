@@ -11,6 +11,7 @@ This change log is written in descending order. Changes that happen after versio
 - Added vehicles file containing a vehicle for each car and truck
 - Added an option to use simulated pt
 - Several speed improvements in vaious stages
+- Updated all data sources to the newest versions and made several speed and quality of life improvements
 
 **4.0.0**
 - Specify random seed for all random number generators. `numpy.random.RandomState` is used as it is frozen and thus guaranteed to produce the same values.

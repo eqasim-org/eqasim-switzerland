@@ -8,16 +8,10 @@ def configure(context):
 
 
 SHAPEFILES = [
-    (2016, "nuts_borders/ref-nuts-2016-01m.shp/NUTS_RG_01M_2016_4326.shp/NUTS_RG_01M_2016_4326.shp", "NUTS_ID",
+    (2024, "nuts_borders/NUTS_RG_01M_2024_4326.shp/NUTS_RG_01M_2024_4326.shp", "NUTS_ID",
      "NUTS_NAME", "LEVL_CODE"),
-    (2013, "nuts_borders/ref-nuts-2013-01m.shp/NUTS_RG_01M_2013_4326.shp/NUTS_RG_01M_2013_4326.shp", "NUTS_ID",
+    (2021, "nuts_borders/NUTS_RG_01M_2021_4326.shp/NUTS_RG_01M_2021_4326.shp", "NUTS_ID",
      "NUTS_NAME", "LEVL_CODE"),
-    (2010, "nuts_borders/ref-nuts-2010-01m.shp/NUTS_RG_01M_2010_4326.shp/NUTS_RG_01M_2010_4326.shp", "NUTS_ID",
-     "NUTS_NAME", "LEVL_CODE"),
-    (2006, "nuts_borders/ref-nuts-2006-01m.shp/NUTS_RG_01M_2006_4326.shp/NUTS_RG_01M_2006_4326.shp", "NUTS_ID",
-     "NUTS_NAME", "LEVL_CODE"),
-    (2003, "nuts_borders/ref-nuts-2003-01m.shp/NUTS_RG_01M_2003_4326.shp/NUTS_RG_01M_2003_4326.shp", "NUTS_ID",
-     "NUTS_NAME", "LEVL_CODE")
 ]
 
 
@@ -50,5 +44,4 @@ def execute(context):
         all_ids |= df_new_ids
 
     df_all = pd.concat(df_all)
-
     return df_all

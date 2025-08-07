@@ -14,11 +14,11 @@ def execute(context):
     data_frames = []
 
     for path, weight_column, total, sep in [
-        ("%s/structural_survey/se_zpers_2012_CH.csv.xz" % data_path, "WEIGHT2012", 286016, ","),
-        ("%s/structural_survey/se_zpers_2011_CH.csv.xz" % data_path, "WEIGHT2011", 282750, ";"),
-        ("%s/structural_survey/se_zpers_2010_CH.csv.xz" % data_path, "WEIGHT2010", 317222, ","),
+        ("%s/structural_survey/se_zpers_2021_ch.csv" % data_path, "WEIGHT2021", 286016, ";"),
+        ("%s/structural_survey/se_zpers_2022_ch.csv" % data_path, "WEIGHT2022", 282750, ";"),
+        ("%s/structural_survey/se_zpers_2023_ch.csv" % data_path, "WEIGHT2023", 317222, ";"),
     ]:
-        with xz.open(path) as f:
+        with open(path, mode="rb") as f:
             fields = {
                 "RES_MUN": int,
                 "RES_QUARTER": int,
