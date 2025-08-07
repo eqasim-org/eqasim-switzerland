@@ -73,8 +73,6 @@ def execute(context):
                  (np.isnan(df_se["work_municipality_id"])) & 
                  (np.isnan(df_se["work_quarter_id"])))
 
-    print(df_se)
-
     print("Found %d observations without home location information" % np.count_nonzero(f_no_home))
     print("Found %d observations without work location information" % np.count_nonzero(f_no_work))
 
