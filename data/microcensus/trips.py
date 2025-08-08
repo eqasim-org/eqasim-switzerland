@@ -82,8 +82,8 @@ def execute(context):
         3: "education",     # Education
         4: "shop",          # Shopping
         5: "other",         # Chores, use of public services
-        6: "work",          # Business activity
-        7: "work",          # Business trip
+        6: "work_secondary",          # Business activity
+        7: "work_secondary",          # Business trip
         8: "leisure",       # Leisure
         9: "other",         # Bring children
         10: "other",        # Bring others (disabled, etc.)
@@ -246,24 +246,30 @@ def execute(context):
 
     # Identify and fix activity chains for the individuals with consecutive "work" or "education" activities
     df_act_chains = df_mz_trips.copy()
-    df_act_chains = df_act_chains.sort_values(['person_id', 'trip_id'])
+    df_act_chains = df_act_chains.sort_values(["person_id", "trip_id"])
 
     # Create the activity chain
     def build_activity_chain(trips):
-        chain = [trips.iloc[0]['origin_purpose']]
-        chain += trips['purpose'].tolist()
-        return '-'.join(chain)
+        chain = [trips.iloc[0]["origin_purpose"]]
+        chain += trips["purpose"].tolist()
+        return "-".join(chain)
 
     # Apply it per person
-    activity_chains         = df_act_chains.groupby('person_id').apply(build_activity_chain).reset_index()
-    activity_chains.columns = ['person_id', 'activity_chain']
+    activity_chains = (
+        df_act_chains
+        .drop(columns="person_id")  
+        .groupby(df_act_chains["person_id"])
+        .apply(build_activity_chain)
+        .reset_index(name="activity_chain") 
+    )
+    activity_chains.columns = ["person_id", "activity_chain"]
 
     # Identify people with multiple "work" or "education" in a row - excluding work_secondary
     def has_consecutive_work_or_edu(chain):
-        activities = chain.split('-')
+        activities = chain.split("-")
         i = 0
         while i < len(activities) -1:
-            if activities[i] in ['work', 'education', 'work_main', 'education_main'] and activities[i+1] in ['work', 'education', 'work_main', 'education_main']:
+            if activities[i] in ["work", "education", "work_main", "education_main"] and activities[i+1] in ["work", "education", "work_main", "education_main"]:
                 if activities[i] == activities[i+1] or activities[i].split("_")[0] == activities[i+1].split("_")[0]:
                     return True
                 else:
@@ -272,21 +278,21 @@ def execute(context):
                 i = i+1
         return False
 
-    activity_chains['has_consecutive_work_or_edu'] = activity_chains['activity_chain'].apply(has_consecutive_work_or_edu)
-    have_consecutive_work_or_edu                   = activity_chains[activity_chains['has_consecutive_work_or_edu']]["person_id"].values
+    activity_chains["has_consecutive_work_or_edu"] = activity_chains["activity_chain"].apply(has_consecutive_work_or_edu)
+    have_consecutive_work_or_edu                   = activity_chains[activity_chains["has_consecutive_work_or_edu"]]["person_id"].values
 
     if len(have_consecutive_work_or_edu) > 0:
         print(f"INFO fixing consecutive work and education activities for {len(have_consecutive_work_or_edu)} agents.")
 
         def consecutive_work_or_edu_indices(chain):
-            activities = chain.split('-')
+            activities = chain.split("-")
             indices = []
             i = 0
             while i < len(activities) - 1:
-                if activities[i] in ['work', 'education', 'work_main', 'education_main'] and activities[i+1] in ['work', 'education', 'work_main', 'education_main']:
+                if activities[i] in ["work", "education", "work_main", "education_main"] and activities[i+1] in ["work", "education", "work_main", "education_main"]:
                     if activities[i] == activities[i+1] or activities[i].split("_")[0] == activities[i+1].split("_")[0]:
                         start = i
-                        while i + 1 < len(activities) and activities[i+1] in ['work', 'education',  'work_main', 'education_main']:
+                        while i + 1 < len(activities) and activities[i+1] in ["work", "education",  "work_main", "education_main"]:
                             i += 1
                         end = i
                         indices.append(range(start, end + 1))
@@ -296,8 +302,8 @@ def execute(context):
                     i += 1
             return indices
         
-        consecutive_actchains = activity_chains[activity_chains['has_consecutive_work_or_edu']]
-        consecutive_actchains['consecutive_indices'] = consecutive_actchains['activity_chain'].apply(consecutive_work_or_edu_indices)
+        consecutive_actchains = activity_chains[activity_chains["has_consecutive_work_or_edu"]]
+        consecutive_actchains["consecutive_indices"] = consecutive_actchains["activity_chain"].apply(consecutive_work_or_edu_indices)
 
         df_mz_trips_no_issues = df_mz_trips[~df_mz_trips["person_id"].isin(have_consecutive_work_or_edu)].copy()
         fixed_df_mz_trips = []
@@ -308,18 +314,18 @@ def execute(context):
             
             for group in trip_indices:
                 flat_group = [i for r in group for i in r]
-                trips = df_person[df_person['trip_id'].isin(flat_group)]
-                df_person.loc[df_person['trip_id'].isin(flat_group), 'purpose'] = df_person['purpose'] + '_secondary'
+                trips = df_person[df_person["trip_id"].isin(flat_group)]
+                df_person.loc[df_person["trip_id"].isin(flat_group), "purpose"] = df_person["purpose"] + "_secondary"
         
                 if not trips.empty:
                     if 0 in flat_group:
                         # Handle special case with trip_id == 0 (initial activity)
                         # Get departure time of trip_id 1 as proxy for activity duration before first trip
-                        trip1 = df_person[df_person['trip_id'] == 1]
-                        initial_duration = trip1['departure_time'].values[0] if not trip1.empty else 0
+                        trip1 = df_person[df_person["trip_id"] == 1]
+                        initial_duration = trip1["departure_time"].values[0] if not trip1.empty else 0
             
                         # Get all trips with valid activity_duration
-                        activity_durations = trips.set_index('trip_id')['activity_duration'].copy()
+                        activity_durations = trips.set_index("trip_id")["activity_duration"].copy()
                         activity_durations.loc[0] = initial_duration
             
                         # Find max
@@ -327,33 +333,33 @@ def execute(context):
             
                         if trip_with_max == 0:
                             # Initial activity is the main one
-                            df_person.loc[df_person['trip_id'] == 1, 'origin_purpose'] = \
-                                df_person.loc[df_person['trip_id'] == 1, 'origin_purpose'] + '_main'
+                            df_person.loc[df_person["trip_id"] == 1, "origin_purpose"] = \
+                                df_person.loc[df_person["trip_id"] == 1, "origin_purpose"] + "_main"
                             
                         else:
                             # Usual case
-                            df_person.loc[df_person['trip_id'] == trip_with_max, 'purpose'] = \
-                                df_person.loc[df_person['trip_id'] == trip_with_max, 'purpose'].replace('_secondary', '_main')
+                            df_person.loc[df_person["trip_id"] == trip_with_max, "purpose"] = \
+                                df_person.loc[df_person["trip_id"] == trip_with_max, "purpose"].replace("_secondary", "_main")
                     else:
-                        idx_max = trips['activity_duration'].idxmax()
+                        idx_max = trips["activity_duration"].idxmax()
                     
                         # Update that one to _main
-                        df_person.loc[idx_max, 'purpose'] = df_person.loc[idx_max, 'purpose'].replace('_secondary', '_main')
+                        df_person.loc[idx_max, "purpose"] = df_person.loc[idx_max, "purpose"].replace("_secondary", "_main")
         
-            df_person = df_person.sort_values(by='trip_id')
+            df_person = df_person.sort_values(by="trip_id")
             df_person.loc[df_person["origin_purpose"]=="work_main_main", "origin_purpose"] = "work_main"
             df_person.loc[df_person["purpose"]=="work_main_main", "purpose"]               = "work_main"
             df_person.loc[df_person["purpose"]=="work_main_secondary", "purpose"]          = "work_secondary"
             df_person.loc[df_person["purpose"]=="education_main_secondary", "purpose"]     = "education_secondary"
             df_person.loc[df_person["purpose"]=="education_main_main", "purpose"]          = "education_main"
             
-            shifted_purpose = df_person['purpose'].shift(1)
+            shifted_purpose = df_person["purpose"].shift(1)
         
-            mask = df_person['trip_id'] != 1
-            df_person.loc[mask, 'origin_purpose'] = shifted_purpose.loc[mask].values
+            mask = df_person["trip_id"] != 1
+            df_person.loc[mask, "origin_purpose"] = shifted_purpose.loc[mask].values
         
             if df_person.loc[df_person["trip_id"]==1]["origin_purpose"].values[0] == df_person.loc[df_person["trip_id"]==1]["purpose"].values[0]:
-                df_person.loc[df_person['trip_id'] == 1, 'origin_purpose'] = df_person.loc[df_person["trip_id"]==1]["origin_purpose"].replace("main", "secondary")
+                df_person.loc[df_person["trip_id"] == 1, "origin_purpose"] = df_person.loc[df_person["trip_id"]==1]["origin_purpose"].replace("main", "secondary")
         
         
             fixed_df_mz_trips.append(df_person)
@@ -374,11 +380,17 @@ def execute(context):
         
         # Check that everything is correct now
         df_act_chains = df_mz_trips.copy()
-        df_act_chains = df_act_chains.sort_values(['person_id', 'trip_id'])
+        df_act_chains = df_act_chains.sort_values(["person_id", "trip_id"])
         
         # Apply it per person
-        activity_chains = df_act_chains.groupby('person_id').apply(build_activity_chain).reset_index()
-        activity_chains.columns = ['person_id', 'activity_chain']
+        activity_chains = (
+            df_act_chains
+            .drop(columns="person_id")  
+            .groupby(df_act_chains["person_id"])
+            .apply(build_activity_chain)
+            .reset_index(name="activity_chain") 
+        )
+        activity_chains.columns = ["person_id", "activity_chain"]
 
         assert len(list(activity_chains[activity_chains["activity_chain"].str.contains("work-work-")]["activity_chain"].unique())) == 0
         assert len(list(activity_chains[activity_chains["activity_chain"].str.contains("education-education-")]["activity_chain"].unique())) == 0
@@ -398,19 +410,19 @@ def execute(context):
     # Finding all home coordinates reported for each agent
     df_home_coordinates = pd.concat([df_purpose_home.drop_duplicates(), df_origin_purpose_home.drop_duplicates()]).sort_values(by="person_id", ascending=True).drop_duplicates()
 
-    df_home_coordinates["home_location_count"] = df_home_coordinates.groupby('person_id')['person_id'].transform("count")
-    df_home_coordinates["home_id"]             = df_home_coordinates.groupby('person_id').cumcount() + 1
+    df_home_coordinates["home_location_count"] = df_home_coordinates.groupby("person_id")["person_id"].transform("count")
+    df_home_coordinates["home_id"]             = df_home_coordinates.groupby("person_id").cumcount() + 1
     df_home_coordinates["is_reported_home"]    = (df_home_coordinates["x"] == df_home_coordinates["home_x"]) & (df_home_coordinates["y"] == df_home_coordinates["home_y"])
 
-    person_summary = df_home_coordinates.groupby('person_id').agg(
-        home_location_count=('person_id', 'count'),
-        has_home_match=('is_reported_home', 'any')
+    person_summary = df_home_coordinates.groupby("person_id").agg(
+        home_location_count=("person_id", "count"),
+        has_home_match=("is_reported_home", "any")
     ).reset_index()
 
     df_new_list = []
 
     # 1st case: one home location found, corresponds to reported home
-    cond1  = (person_summary['home_location_count'] == 1) & (person_summary['has_home_match'])
+    cond1  = (person_summary["home_location_count"] == 1) & (person_summary["has_home_match"])
     share1 = cond1.sum() / len(person_summary) * 100
     print(f"  INFO for {round(share1, 2)}% of the agents, only one home location was found and it corresponds to the reported home location.")
     print(f"    Nothing to do for them!")
@@ -420,7 +432,7 @@ def execute(context):
     df_new_list.append(df_mz_trips[df_mz_trips["person_id"].isin(df_home_1stcase_ids)])
 
     # 2nd case: one home location found, does not correspond to the reported home
-    cond2  = (person_summary['home_location_count'] == 1) & (~person_summary['has_home_match'])
+    cond2  = (person_summary["home_location_count"] == 1) & (~person_summary["has_home_match"])
     share2 = cond2.sum() / len(person_summary) * 100
     print(f"  INFO for {round(share2, 2)}% of the agents, only one home location was found and it does not correspond to the reported home location.")
     print(f"    Check the origin_purpose of the initial trip and adjust the purpose to home if needed.")
@@ -442,7 +454,7 @@ def execute(context):
     print(f"    INFO fixed origin purpose to home for {cpt} activity chains.")
 
     # 3rd case: multiple home locations found, one corresponds to the reported home.
-    cond3  = (person_summary['home_location_count'] > 1) & (person_summary['has_home_match'])
+    cond3  = (person_summary["home_location_count"] > 1) & (person_summary["has_home_match"])
     share3 = cond3.sum() / len(person_summary) * 100
     print(f"  INFO for {round(share3, 2)}% of the agents, multiple home locations were found. One corresponds to the reported home location.")
     print(f"    For these agents, create home_secondary activities.")
@@ -458,24 +470,24 @@ def execute(context):
         other_home_coord["home_id"] = "home_secondary" + other_home_coord["home_id"].astype(str)
 
         secondary_home_coords = {
-            (round(row['x']), round(row['y'])): row['home_id']
+            (round(row["x"]), round(row["y"])): row["home_id"]
             for _, row in other_home_coord.iterrows()
         }
 
         def match_secondary_home(x, y):
             return secondary_home_coords.get((int(x), int(y)), None)
         
-        df_person['purpose'] = df_person.apply(
-            lambda row: match_secondary_home(row['destination_x'], row['destination_y']) 
-                        if match_secondary_home(row['destination_x'], row['destination_y']) and row["purpose"]=="home" 
-                        else row['purpose'],
+        df_person["purpose"] = df_person.apply(
+            lambda row: match_secondary_home(row["destination_x"], row["destination_y"]) 
+                        if match_secondary_home(row["destination_x"], row["destination_y"]) and row["purpose"]=="home" 
+                        else row["purpose"],
             axis=1
         )
 
-        df_person['origin_purpose'] = df_person.apply(
-            lambda row: match_secondary_home(row['origin_x'], row['origin_y']) 
-                        if match_secondary_home(row['origin_x'], row['origin_y']) and row["origin_purpose"]=="home" 
-                        else row['origin_purpose'],
+        df_person["origin_purpose"] = df_person.apply(
+            lambda row: match_secondary_home(row["origin_x"], row["origin_y"]) 
+                        if match_secondary_home(row["origin_x"], row["origin_y"]) and row["origin_purpose"]=="home" 
+                        else row["origin_purpose"],
             axis=1
         )    
         df_new_list.append(df_person) 
@@ -483,7 +495,7 @@ def execute(context):
 
     # 4th case: multiple home locations found, none corresponds to the reported home.
     # 0.09% of the cases
-    cond4  = (person_summary['home_location_count'] > 1) & (~person_summary['has_home_match'])
+    cond4  = (person_summary["home_location_count"] > 1) & (~person_summary["has_home_match"])
     share4 = cond4.sum() / len(person_summary) * 100
     print(f"  INFO for {round(share4, 2)}% of the agents, multiple home locations were found. None of them corresponds to the reported home location.")
     print(f"    For these agents, create home_secondary activities after identifying the main home location.")
@@ -497,65 +509,65 @@ def execute(context):
         home_coord["home_id"] = "home_secondary" + home_coord["home_id"].astype(str)
 
         secondary_home_coords = {
-            (round(row['x']), round(row['y'])): row['home_id']
+            (round(row["x"]), round(row["y"])): row["home_id"]
             for _, row in home_coord.iterrows()
         }
 
         def match_secondary_home(x, y):
             return secondary_home_coords.get((int(x), int(y)), None)
         
-        df_person['purpose'] = df_person.apply(
-            lambda row: match_secondary_home(row['destination_x'], row['destination_y']) 
-                        if match_secondary_home(row['destination_x'], row['destination_y']) 
-                        else row['purpose'],
+        df_person["purpose"] = df_person.apply(
+            lambda row: match_secondary_home(row["destination_x"], row["destination_y"]) 
+                        if match_secondary_home(row["destination_x"], row["destination_y"]) 
+                        else row["purpose"],
             axis=1
         )
 
-        df_person['origin_purpose'] = df_person.apply(
-            lambda row: match_secondary_home(row['origin_x'], row['origin_y']) 
-                        if match_secondary_home(row['origin_x'], row['origin_y']) 
-                        else row['origin_purpose'],
+        df_person["origin_purpose"] = df_person.apply(
+            lambda row: match_secondary_home(row["origin_x"], row["origin_y"]) 
+                        if match_secondary_home(row["origin_x"], row["origin_y"]) 
+                        else row["origin_purpose"],
             axis=1
         ) 
 
         home_locs = []
-        for col_x, col_y in [('origin_x', 'origin_y'), ('destination_x', 'destination_y')]:
-            home_rows = df_person[df_person['purpose'].str.startswith('home') | df_person['origin_purpose'].str.startswith('home')]
+        for col_x, col_y in [("origin_x", "origin_y"), ("destination_x", "destination_y")]:
+            home_rows = df_person[df_person["purpose"].str.startswith("home") | df_person["origin_purpose"].str.startswith("home")]
             home_locs.extend(list(zip(home_rows[col_x], home_rows[col_y])))   
 
         unique_home_locs = set(home_locs)
         home_time = {}
         for x, y in unique_home_locs:
-            mask = ((df_person['origin_x'] == x) & (df_person['origin_y'] == y)) | \
-                ((df_person['destination_x'] == x) & (df_person['destination_y'] == y))
-            home_time[(x, y)] = df_person.loc[mask, 'activity_duration'].sum()
+            mask = ((df_person["origin_x"] == x) & (df_person["origin_y"] == y)) | \
+                ((df_person["destination_x"] == x) & (df_person["destination_y"] == y))
+            home_time[(x, y)] = df_person.loc[mask, "activity_duration"].sum()
 
         first_trip = df_person.iloc[0]
-        if first_trip['origin_purpose'].startswith('home'):
-            loc = (first_trip['origin_x'], first_trip['origin_y'])
-            home_time[loc] += first_trip['activity_duration']
+        if first_trip["origin_purpose"].startswith("home"):
+            loc = (first_trip["origin_x"], first_trip["origin_y"])
+            home_time[loc] += first_trip["activity_duration"]
 
         main_home = max(home_time, key=home_time.get)
 
         home_label_map = {}
         for idx, loc in enumerate(sorted(home_time, key=home_time.get, reverse=True)):
             if loc == main_home:
-                home_label_map[loc] = 'home'
+                home_label_map[loc] = "home"
             else:
-                home_label_map[loc] = f'home_secondary{idx}'
+                home_label_map[loc] = f"home_secondary{idx}"
 
         def get_home_label(row):
             if "home" in row["purpose"]:
-                return home_label_map.get((row['destination_x'], row['destination_y']), row['purpose'])
+                return home_label_map.get((row["destination_x"], row["destination_y"]), row["purpose"])
             return row["purpose"]
         
         def get_home_label_origin(row):
             if "home" in row["origin_purpose"]:
-                return home_label_map.get((row['origin_x'], row['origin_y']), row['origin_purpose'])
+                return home_label_map.get((row["origin_x"], row["origin_y"]), row["origin_purpose"])
             return row["origin_purpose"]
         
-        df_person['purpose']        = df_person.apply(get_home_label, axis=1)
-        df_person['origin_purpose'] = df_person.apply(get_home_label_origin, axis=1)
+        df_person["purpose"]        = df_person.apply(get_home_label, axis=1)
+        df_person["origin_purpose"] = df_person.apply(get_home_label_origin, axis=1)
 
         df_new_list.append(df_person) 
         
@@ -570,16 +582,17 @@ def execute(context):
     # Finding all home coordinates reported for each agent
     df_home_coordinates = pd.concat([df_purpose_home.drop_duplicates(), df_origin_purpose_home.drop_duplicates()]).sort_values(by="person_id", ascending=True).drop_duplicates()
 
-    df_home_coordinates["home_location_count"] = df_home_coordinates.groupby('person_id')['person_id'].transform("count")
-    df_home_coordinates["home_id"]             = df_home_coordinates.groupby('person_id').cumcount() + 1
+    df_home_coordinates["home_location_count"] = df_home_coordinates.groupby("person_id")["person_id"].transform("count")
+    df_home_coordinates["home_id"]             = df_home_coordinates.groupby("person_id").cumcount() + 1
+    df_home_coordinates["home_id"]             = df_home_coordinates["home_id"].astype(str)
 
     def merge_close_home_locations(df, threshold=30):
         merged_rows = []
         coord_map   = {}  # Maps (person_id, old_x, old_y) -> (person_id, kept_x, kept_y)
         label_map   = {}  # Maps (person_id, old_x, old_y) -> home_id label
 
-        for person_id, group in df.groupby('person_id'):
-            coords  = group[['x', 'y']].values
+        for person_id, group in df.groupby("person_id"):
+            coords  = group[["x", "y"]].values
             keep    = np.ones(len(coords), dtype=bool)
             rep_idx = np.arange(len(coords))  # index of representative for each point
 
@@ -593,15 +606,15 @@ def execute(context):
                         rep_idx[j] = i 
 
             merged = group.iloc[keep].copy()
-            merged['home_location_count'] = keep.sum()
-            # Assign home_id labels: first kept is 'home', others are 'home_secondaryX'
+            merged["home_location_count"] = keep.sum()
+            # Assign home_id labels: first kept is "home", others are "home_secondaryX"
             merged = merged.reset_index(drop=True)
             for idx, row in merged.iterrows():
                 if idx == 0:
-                    home_id = 'home'
+                    home_id = "home"
                 else:
-                    home_id = f'home_secondary{idx}'
-                merged.at[idx, 'home_id'] = home_id
+                    home_id = f"home_secondary{idx}"
+                merged.at[idx, "home_id"] = home_id
 
             merged_rows.append(merged)
 
@@ -609,7 +622,7 @@ def execute(context):
             for pos, row in enumerate(group.itertuples(index=False)):
                 rep = rep_idx[pos]
                 rep_x, rep_y = coords[rep]
-                rep_label = merged.loc[merged['x'].eq(rep_x) & merged['y'].eq(rep_y), 'home_id'].values[0]
+                rep_label = merged.loc[merged["x"].eq(rep_x) & merged["y"].eq(rep_y), "home_id"].values[0]
                 coord_map[(person_id, row.x, row.y)] = (person_id, rep_x, rep_y)
                 label_map[(person_id, row.x, row.y)] = rep_label
 
@@ -624,9 +637,9 @@ def execute(context):
     df_home_coordinates = pd.concat([single_homes, multiple_homes]).sort_values(by="person_id")
 
     def map_home_label_and_coords(row, x_col, y_col, purpose_col):
-        key = (row['person_id'], row[x_col], row[y_col])
+        key = (row["person_id"], row[x_col], row[y_col])
         # Only adjust if this is a home purpose and the key exists in the mapping
-        if row[purpose_col].startswith('home') and key in label_map:
+        if row[purpose_col].startswith("home") and key in label_map:
             # Update purpose
             new_purpose = label_map[key]
             # Update coordinates
@@ -638,12 +651,12 @@ def execute(context):
         return pd.Series([row[purpose_col], row[x_col], row[y_col]])
 
     # Update purposes for all trips
-    df_mz_trips[['purpose', 'destination_x', 'destination_y']] = df_mz_trips.apply(
-        lambda row: map_home_label_and_coords(row, 'destination_x', 'destination_y', 'purpose'), axis=1
+    df_mz_trips[["purpose", "destination_x", "destination_y"]] = df_mz_trips.apply(
+        lambda row: map_home_label_and_coords(row, "destination_x", "destination_y", "purpose"), axis=1
     )
 
-    df_mz_trips[['origin_purpose', 'origin_x', 'origin_y']] = df_mz_trips.apply(
-        lambda row: map_home_label_and_coords(row, 'origin_x', 'origin_y', 'origin_purpose'), axis=1
+    df_mz_trips[["origin_purpose", "origin_x", "origin_y"]] = df_mz_trips.apply(
+        lambda row: map_home_label_and_coords(row, "origin_x", "origin_y", "origin_purpose"), axis=1
     )
 
     # Now fix the home->home trips
@@ -660,7 +673,7 @@ def execute(context):
 
     stages = stages[stages["person_trip_id"].isin(loops["person_trip_id"])]
 
-    stages['stage_count'] = stages.groupby('person_trip_id')['stage_id'].transform('count')
+    stages["stage_count"] = stages.groupby("person_trip_id")["stage_id"].transform("count")
     multi_stages  = stages[stages["stage_count"]>1]
     single_stages = stages[stages["stage_count"]==1]
 
@@ -725,13 +738,13 @@ def execute(context):
             coords = multi_stages[[attribute + "_x", attribute + "_y"]].values
             transformer = pyproj.Transformer.from_crs("epsg:21781", "epsg:2056")
             x, y = transformer.transform(coords[:, 0], coords[:, 1])
-            multi_stages.loc[:, attribute + "_x"] = x
-            multi_stages.loc[:, attribute + "_y"] = y
-
+            multi_stages.loc[:, attribute + "_x"] = [int(xelem) for xelem in x]
+            multi_stages.loc[:, attribute + "_y"] = [int(yelem) for yelem in y]
+            
         def time_to_seconds(t):
-            if t == '24:00:00':
+            if t == "24:00:00":
                 return 24 * 3600  # 86400 seconds
-            h, m, s = map(int, t.split(':'))
+            h, m, s = map(int, t.split(":"))
             return h * 3600 + m * 60 + s
 
         cpt_ok  = 0
@@ -739,24 +752,24 @@ def execute(context):
         for person_trip_id, group in multi_stages.groupby("person_trip_id"):
             cpt_all += 1
 
-            origin_counts = group[['origin_x', 'origin_y']].nunique()
-            origin_counts['multiple_origins'] = (origin_counts['origin_x'] > 1) | (origin_counts['origin_y'] > 1)
+            origin_counts = group[["origin_x", "origin_y"]].nunique()
+            origin_counts["multiple_origins"] = (origin_counts["origin_x"] > 1) | (origin_counts["origin_y"] > 1)
 
-            destination_counts = group[['destination_x', 'destination_y']].nunique()
-            destination_counts['multiple_destinations'] = (destination_counts['destination_x'] > 1) | (destination_counts['destination_y'] > 1)
+            destination_counts = group[["destination_x", "destination_y"]].nunique()
+            destination_counts["multiple_destinations"] = (destination_counts["destination_x"] > 1) | (destination_counts["destination_y"] > 1)
 
             if origin_counts["multiple_origins"] | destination_counts["multiple_destinations"]:
                 cpt_ok += 1
-                group['arrival_time']   = [time_to_seconds(t) for t in group["arrival_time"]]
-                group['departure_time'] = [time_to_seconds(t) for t in group["departure_time"]]
-                group = group.sort_values(['person_trip_id', 'stage_id'])
-                group['next_departure_time'] = group.groupby('person_trip_id')['departure_time'].shift(-1)
-                group['activity_duration'] = (group['next_departure_time'] - group['arrival_time'])
+                group["arrival_time"]   = [time_to_seconds(t) for t in group["arrival_time"]]
+                group["departure_time"] = [time_to_seconds(t) for t in group["departure_time"]]
+                group = group.sort_values(["person_trip_id", "stage_id"])
+                group["next_departure_time"] = group.groupby("person_trip_id")["departure_time"].shift(-1)
+                group["activity_duration"] = (group["next_departure_time"] - group["arrival_time"])
 
-                valid = group['activity_duration'].notna()
-                idx_longest_time =  group.loc[valid, 'activity_duration'].idxmax()            
+                valid = group["activity_duration"].notna()
+                idx_longest_time =  group.loc[valid, "activity_duration"].idxmax()            
 
-                unique_list = list(set(group['purpose']).union(set(group['origin_purpose'])))
+                unique_list = list(set(group["purpose"]).union(set(group["origin_purpose"])))
                 unique_list = [p for p in unique_list if p not in ["pseudostage", "connection"]]
 
                 x, y      = group.loc[idx_longest_time, ["destination_x", "destination_y"]]
@@ -807,8 +820,8 @@ def execute(context):
     df_mz_trips["trip_id"] = df_mz_trips.groupby(["person_id"]).cumcount() + 1
 
     df_mz_trips[["origin_purpose", "purpose"]] = df_mz_trips[["origin_purpose", "purpose"]].replace(
-        ['home_secondary1', 'home_secondary2'],
-        'home_secondary'
+        ["home_secondary1", "home_secondary2"],
+        "home_secondary"
     )
 
     # Network distance

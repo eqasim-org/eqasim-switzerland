@@ -7,6 +7,8 @@ import data.utils
 
 def configure(context):
     context.config("data_path")
+    context.config("weekend", default = False)
+
     context.stage("data.microcensus.households")
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
@@ -101,11 +103,11 @@ def execute(context):
     columns.append("subscriptions")
 
     # Education
-    df_mz_persons["highest_education"] = np.nan
-    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([1, 2, 3, 4]), "highest_education"] = "primary"
+    df_mz_persons["highest_education"]                                                               = "secondary"
+    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([1, 2, 3, 4]), "highest_education"]                = "primary"
     df_mz_persons.loc[df_mz_persons["HAUSB"].isin([5, 6, 7, 8, 9, 10, 11, 12]), "highest_education"] = "secondary"
-    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([13, 14, 15, 16]), "highest_education"] = "tertiary_professional"
-    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([17, 18, 19]), "highest_education"] = "tertiary_academic"
+    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([13, 14, 15, 16]), "highest_education"]            = "tertiary_professional"
+    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([17, 18, 19]), "highest_education"]                = "tertiary_academic"
     df_mz_persons["highest_education"] = df_mz_persons["highest_education"].astype("category")
 
     columns.append("highest_education")
@@ -153,7 +155,12 @@ def execute(context):
     # This will only filter out persons that do not have enough information in the trips file
     # it will still keep persons that did not report any trips
     df_mz_persons = df_mz_persons[~df_mz_persons["person_id"].isin(filterout_person_ids)]
-    df_mz_persons = df_mz_persons[df_mz_persons["weekend"] == False]
+
+    if context.config("weekend"):
+        df_mz_persons = df_mz_persons[df_mz_persons["weekend"]]
+    else:
+        df_mz_persons = df_mz_persons[~df_mz_persons["weekend"]]
+
     then_size = len(df_mz_persons)
     home_ids = set(df_mz_persons["person_id"]) - set(df_mz_trips["person_id"])
 

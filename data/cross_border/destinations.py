@@ -1,0 +1,74 @@
+import numpy as np
+import pandas as pd
+import geopandas as gpd
+
+def configure(context):
+    context.config("random_seed")
+
+    context.stage("data.cross_border.match_activity_chain")
+    context.stage("data.spatial.municipalities")
+    context.stage("data.statent.statent")
+
+
+def execute(context):
+    df = context.stage("data.cross_border.match_activity_chain")
+
+    destinations = gpd.GeoSeries.from_xy(df["destination_x"], df["destination_y"])
+    destinations = gpd.GeoDataFrame(geometry = destinations, crs = "EPSG:2056")
+
+    del df["destination_x"]
+    del df["destination_y"]
+
+    municipalities = context.stage("data.spatial.municipalities")[0]
+
+    merged = gpd.sjoin(destinations, municipalities, 
+                       how = "left", predicate="within")
+    
+    df["destination_municipality_id"]   = merged["municipality_id"].values
+    df["destination_municipality_name"] = merged["municipality_name"].values
+    
+    statent         = context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga", "municipality_id"]].copy()
+    statent.columns = ["destination_id", "destination_x", "destination_y", "noga", "municipality_id"]
+
+    statent["offers_work"]           = True
+    statent["offers_other"]          = True
+    statent["offers_work_secondary"] = True
+    statent["offers_leisure"]        = statent["noga"].str.startswith("90") | statent["noga"].str.startswith("56")
+    statent["offers_education"]      = statent["noga"].str.startswith("85")
+    statent["offers_shop"]           = statent["noga"].str.startswith("47")
+
+    for purpose in ["work", "work_secondary", "other", "education", "leisure", "shop"]:
+        mask_purpose         = df["trip_purpose"] == purpose
+        mask_statent_purpose = statent[f"offers_{purpose}"]
+
+        mun_ids = list(set(df[mask_purpose]["destination_municipality_id"]))
+
+        for mun_id in mun_ids:
+            mask_mun = df["destination_municipality_id"] == mun_id
+            mask     = mask_purpose & mask_mun
+
+            mask_statent_mun = statent["municipality_id"] == mun_id
+            mask_statent     = mask_statent_purpose & mask_statent_mun
+
+            candidates = statent[mask_statent]
+            N_sample   = np.sum(mask)
+
+            if len(candidates) == 0:
+                candidates = statent[mask_statent_mun]
+
+            sampled    = candidates.sample(
+                n = N_sample,
+                random_state = context.config("random_seed"),
+                replace = True
+            )
+
+            df.loc[mask, "destination_id"] = sampled["destination_id"].values
+            df.loc[mask, "destination_x"]  = sampled["destination_x"].values
+            df.loc[mask, "destination_y"]  = sampled["destination_y"].values
+
+    df = df[["cross_border_person_id", "mz_person_id",
+             "residence_x", "residence_y", 
+             "trip_mode", "trip_purpose", "destination_id",
+             "origin_x", "origin_y", "destination_x", "destination_y"]]
+
+    return df

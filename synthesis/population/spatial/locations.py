@@ -42,7 +42,7 @@ def execute(context):
 
     # Secondary locations
     df_secondary_locations = df_locations[~df_locations["purpose"].isin(("home", "work", "education"))].copy()
-    df_secondary["activity_index"] = df_secondary["trip_index"] + 1
+    df_secondary["activity_index"] = df_secondary["trip_index"] 
     df_secondary_locations = pd.merge(df_secondary_locations,
                                       df_secondary[["person_id", "activity_index", "destination_id", "geometry"]],
                                       on=["person_id", "activity_index"], how="left")

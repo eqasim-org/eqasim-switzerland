@@ -5,6 +5,9 @@ import geopandas as gpd
 import shapely.geometry as geo
 from sklearn.neighbors import KDTree
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, message=".*GeoDataFrame.swapaxes.*")
+
 
 def sample_coordinates(row, count, random_seed=0):
     samples = []

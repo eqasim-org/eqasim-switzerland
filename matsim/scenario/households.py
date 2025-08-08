@@ -2,6 +2,7 @@ import gzip
 import io
 
 import numpy as np
+import pandas as pd
 
 import matsim.writers
 
@@ -9,6 +10,10 @@ import matsim.writers
 def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.constants")
+
+    context.config("include_cross_border", default = False)
+    if context.config("include_cross_border"):
+        context.stage("data.cross_border.generate_cross_border_traffic")
 
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class",
@@ -60,6 +65,26 @@ def execute(context):
 
     df_persons = context.stage("synthesis.population.enriched").sort_values(by=["household_id", "person_id"])
     df_persons = df_persons[FIELDS]
+
+    if context.config("include_cross_border"):
+        cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
+
+        id_person_max = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
+        N             = id_person_max + 1
+
+        cross_border_persons    = cross_border_persons.sort_values(by="person_id")
+
+        cross_border_persons["household_id"] = range(N, N + len(cross_border_persons), 1)
+        cross_border_persons["person_id"]    = cross_border_persons["household_id"].values
+
+        cross_border_persons["municipality_type"] = "crossborder"
+        cross_border_persons["sp_region"]         = -1
+        cross_border_persons["canton_id"]         = 0
+        cross_border_persons["ovgk"]              = "crossborder"
+
+        cross_border_persons = cross_border_persons[FIELDS]
+        df_persons = pd.concat([df_persons, cross_border_persons])
+
 
     with gzip.open("%s/households.xml.gz" % cache_path, "w+") as f:
         with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:

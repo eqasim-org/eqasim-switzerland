@@ -132,7 +132,4 @@ def execute(context):
         print("Fixing this to ensure consistency of the results.")
         df_persons.loc[df_persons["age_class"]<=1, "driving_license"] = False
 
-        print(df_persons.columns)
-        print(df_persons.head())
-
     return df_persons

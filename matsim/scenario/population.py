@@ -19,6 +19,10 @@ def configure(context):
 
     context.stage("synthesis.vehicles.vehicles")
 
+    context.config("include_cross_border", default = False)
+    if context.config("include_cross_border"):
+        context.stage("data.cross_border.generate_cross_border_traffic")
+
 VEHICLE_FIELDS = [
     "mode", "vehicle_id", "owner_id"
 ]
@@ -74,13 +78,13 @@ class PersonWriter:
         # Plan
         writer.start_plan(selected=True)
 
-        home_location = writer.location(self.activities[0][7].x, self.activities[0][7].y, "home%s" % self.person[12])
+        home_location = writer.location(self.person[6], self.person[7], "home%s" % self.person[12])
 
         for i in range(len(self.activities)):
             activity = self.activities[i]
             geometry = activity[7]
             destination_id = activity[8]
-            location = home_location if destination_id == -1 else writer.location(geometry.x, geometry.y,
+            location = home_location if destination_id == -1 else writer.location(int(geometry.x), int(geometry.y),
                                                                                   int(destination_id))
 
             start_time = activity[2] if not np.isnan(activity[2]) else None
@@ -174,7 +178,7 @@ def execute(context):
 
     # Replace the primary-secondary purposes with normal ones
     # Now that the secondary locations are assigned, no need to continue working with these purposes
-    df_activities["purpose"] = df_activities["purpose"].replace({"home_secondary":"home",
+    df_activities["purpose"] = df_activities["purpose"].replace({"home_secondary":"other",
                                                                  "work_secondary": "work",
                                                                  "education_secondary":"education"})
     
@@ -195,7 +199,55 @@ def execute(context):
     df_persons    = df_persons.sort_values(by="person_id")
     df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
     df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
-    
+
+    if context.config("include_cross_border"):
+        cross_border_persons    = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
+        cross_border_activities = context.stage("data.cross_border.generate_cross_border_traffic")[1].copy()
+        cross_border_vehicles   = context.stage("data.cross_border.generate_cross_border_traffic")[2].copy()
+
+        cross_border_persons    = cross_border_persons.sort_values(by="person_id")
+        cross_border_activities = cross_border_activities.sort_values(by=["person_id", "activity_index"])
+        cross_border_vehicles   = cross_border_vehicles.sort_values(by=["owner_id"])
+
+        id_person_max = np.max(df_persons["person_id"].values)
+        N             = id_person_max + 1
+
+        cross_border_persons["new_person_id"]    = range(N, N + len(cross_border_persons), 1)
+
+        id_map = cross_border_persons.set_index("person_id")["new_person_id"]
+        cross_border_activities["person_id"] = cross_border_activities["person_id"].map(id_map).fillna(cross_border_activities["person_id"])
+
+        cross_border_persons["person_id"]    = cross_border_persons["new_person_id"].values
+        cross_border_persons["household_id"] = cross_border_persons["new_person_id"].values
+
+        del cross_border_persons["new_person_id"]
+
+        cross_border_activities["purpose"] = cross_border_activities["purpose"].replace({"home_secondary":"other",
+                                                                 "work_secondary": "work",
+                                                                 "education_secondary":"education"})
+        
+        cross_border_vehicles["person_id"]    = cross_border_vehicles["vehicle_id"].str.split(":").str[0]
+        cross_border_vehicles["vehicle_type"] = cross_border_vehicles["vehicle_id"].str.split(":").str[1]
+        cross_border_vehicles["person_id"]    = cross_border_vehicles["person_id"].map(id_map).fillna(cross_border_vehicles["person_id"])
+        cross_border_vehicles["vehicle_id"]   = cross_border_vehicles["person_id"].astype(str) + ":" + cross_border_vehicles["vehicle_type"]
+        cross_border_vehicles["owner_id"]     = cross_border_vehicles["person_id"].values
+
+        del cross_border_vehicles["person_id"]
+        del cross_border_vehicles["vehicle_type"]
+
+        df_persons    = pd.concat([df_persons, cross_border_persons])
+        df_activities = pd.concat([df_activities, cross_border_activities])
+        df_vehicles   = pd.concat([df_vehicles, cross_border_vehicles])
+
+        df_persons["mz_person_id"] = df_persons["mz_person_id"].astype(int)
+        df_persons["mz_head_id"]   = df_persons["mz_head_id"].astype(int)
+        df_persons["home_x"]       = df_persons["home_x"].astype(int)
+        df_persons["home_y"]       = df_persons["home_y"].astype(int)
+
+        df_persons    = df_persons.sort_values(by="person_id")
+        df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
+        df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
+        
     df_persons    = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
     df_vehicles   = df_vehicles[VEHICLE_FIELDS]
@@ -215,12 +267,13 @@ def execute(context):
             with context.progress(total=len(df_persons), label="Writing persons ...") as progress:
                 try:
                     while True:
-                        person = next(person_iterator)
+                        person    = next(person_iterator)
                         person_id = person[PERSON_FIELDS.index("person_id")]
-                        is_last = False
+                        is_last   = False
 
                         person_writer = PersonWriter(person)
                         vehicles = []
+
                         while not is_last:
                             activity = next(activity_iterator)
 
@@ -229,6 +282,7 @@ def execute(context):
 
                             person_writer.add_activity(activity)
                             number_of_written_activities += 1
+
                         # Track all vehicles for person
                         while vehicle_iterator.has_next():
                             vehicle = vehicle_iterator.next()
@@ -238,10 +292,12 @@ def execute(context):
                                 break
                             else:
                                 vehicles.append(vehicle)
+
                         person_writer.add_vehicles(vehicles)
                         person_writer.write(writer)
                         number_of_written_persons += 1
                         progress.update()
+                        
                 except StopIteration:
                     pass
 

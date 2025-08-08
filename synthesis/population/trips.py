@@ -26,13 +26,9 @@ def execute(context):
         ]]    
 
     df_trips = pd.DataFrame(context.stage("data.microcensus.trips")[0], copy=True)[[
-        "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose"
+        "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "origin_purpose"
     ]]
-    df_trips.columns = ["mz_person_id", "trip_id", "departure_time", "arrival_time", "mode", "following_purpose"]
-
-    # Assume the preceeding purpose for all trips is home
-    df_trips["preceding_purpose"] = df_trips["following_purpose"].shift(1)
-    df_trips.loc[df_trips["trip_id"] == 1, "preceding_purpose"] = "home"
+    df_trips.columns = ["mz_person_id", "trip_id", "departure_time", "arrival_time", "mode", "following_purpose", "preceding_purpose"]
 
     df_trips = pd.merge(df_persons, df_trips, on="mz_person_id")
 

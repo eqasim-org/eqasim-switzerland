@@ -78,5 +78,5 @@ def execute(context):
                                          axis=1)
 
     df = spatial_utils.to_gpd(context, df, coord_type="work")
-
+    
     return df[["person_id", "destination_id", "geometry"]]

@@ -128,6 +128,8 @@ def execute(context):
 
     print("Success rate:", df_convergence["valid"].mean())
 
+    df_locations.to_csv("/cluster/project/cmdp/asallard/analysis/Crossborder/MZ/secondary_destinations.csv", index=False)
+
     return df_locations, df_convergence
 
 
@@ -136,6 +138,11 @@ def process(context, arguments):
 
     # Set up RNG
     rng = np.random.RandomState(random_seed)
+
+    # Set up discretization solver
+    destinations = context.data("destinations")
+    candidate_index = CandidateIndex(destinations)
+    discretization_solver = CustomDiscretizationSolver(candidate_index)
 
     # Set up distance sampler
     distance_distributions = context.data("distance_distributions")
@@ -148,11 +155,6 @@ def process(context, arguments):
     chain_solver = GravityChainSolver(
         random=rng, eps=75.0, lateral_deviation=10.0, alpha=0.1
     )
-
-    # Set up discretization solver
-    destinations = context.data("destinations")
-    candidate_index = CandidateIndex(destinations)
-    discretization_solver = CustomDiscretizationSolver(candidate_index)
 
     tail_solver = AngularTailSolver(random = rng)
     free_solver = CustomFreeChainSolver(rng, candidate_index)
@@ -184,13 +186,12 @@ def process(context, arguments):
     for problem in find_assignment_problems(df_trips, df_primary):
         result = assignment_solver.solve(problem)
 
-        starting_trip_index = problem["trip_index"]
+        starting_activity_index = problem["activity_index"]
 
-        for index, (identifier, location) in enumerate(
-                zip(result["discretization"]["identifiers"], result["discretization"]["locations"])):
-            df_locations.append((
-                problem["person_id"], starting_trip_index + index, identifier, geo.Point(location)
-            ))
+        for index, (identifier, location) in enumerate(zip(result["discretization"]["identifiers"], result["discretization"]["locations"])):
+          df_locations.append((
+              problem["person_id"], starting_activity_index + index, identifier, geo.Point(location)
+          ))
 
         df_convergence.append((
             result["valid"], problem["size"]
@@ -202,7 +203,9 @@ def process(context, arguments):
 
     df_locations = pd.DataFrame.from_records(df_locations,
                                              columns=["person_id", "trip_index", "destination_id", "geometry"])
+
     df_locations = gpd.GeoDataFrame(df_locations, crs=crs)
+    assert not df_locations["geometry"].isna().any()
 
     df_convergence = pd.DataFrame.from_records(df_convergence, columns=["valid", "size"])
     return df_locations, df_convergence

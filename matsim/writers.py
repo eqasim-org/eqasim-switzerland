@@ -165,7 +165,6 @@ class PopulationWriter(XmlWriter):
 
     def add_activity(self, type, location, start_time = None, end_time = None):
         self._require_scope(self.PLAN_SCOPE)
-
         self._start_activity(type, location, start_time, end_time)
         self._write('/>\n')
 
