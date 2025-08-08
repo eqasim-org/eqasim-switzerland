@@ -10,7 +10,7 @@ def execute(context):
     data_path = context.config("data_path")
 
     df = gpd.read_file(
-        "%s/municipality_borders/swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shp" % data_path,
+        "%s/spatial/canton/swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shp" % data_path,
         encoding="latin1"
     ).to_crs("epsg:2056")
 

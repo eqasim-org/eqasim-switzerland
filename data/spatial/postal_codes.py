@@ -7,7 +7,7 @@ def execute(context):
     data_path = context.config("data_path")
 
     df = gpd.read_file(
-        "%s/postal_codes/AMTOVZ_SHP_LV95/AMTOVZ_ZIP.shp" % data_path,
+        "%s/spatial/postal_codes/AMTOVZ_ZIP.shp" % data_path,
         encoding = "latin1"
     ).to_crs("epsg:2056")
     df.crs = "epsg:2056"

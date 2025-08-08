@@ -11,9 +11,9 @@ def configure(context):
 REFERENCE_YEAR = 2023
 
 SHAPEFILES = [
-    (2023, "municipality_borders/swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp", "BFS_NUMMER", "NAME"),
-    (2022, "municipality_borders/swissboundaries3d_2022-05_2056_5728/swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp", "BFS_NUMMER", "NAME"),
-    (2021, "municipality_borders/swissboundaries3d_2021-07_2056_5728.shp/swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp", "BFS_NUMMER", "NAME"),
+    (2023, "spatial/municipality/2023/swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp", "BFS_NUMMER", "NAME"),
+    (2022, "spatial/municipality/2022/swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp", "BFS_NUMMER", "NAME"),
+    (2021, "spatial/municipality/2021/swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp", "BFS_NUMMER", "NAME"),
     # (2017, "municipality_borders/gd-b-00.03-875-gg17/ggg_2017/shp/LV95/g1g17.shp", "GMDNR", "GMDNAME"),
     # (2016, "municipality_borders/gd-b-00.03-875-gg16/ggg_2016/shp/g1g16.shp", "GMDNR", "GMDNAME"),
     # (2015, "municipality_borders/gd-b-00.03-876-gg15/GGG_15_V161025/shp/g1g15.shp", "GMDNR", "GMDNAME"),
