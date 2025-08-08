@@ -8,9 +8,8 @@ This file contains functions that merge multiple osm files, and cut to the borde
 """
 
 
-def merge_using_pyosmium(context, osm_files, border):
-    import osmium 
-    buffer = context.config("border_offset") 
+def merge_using_pyosmium(context, osm_files, border, output_path):
+    import osmium     
     area = border["geometry"].iloc[0]
     # Read identifiers that are relevant
     tracker = osmium.IdTracker()
@@ -32,8 +31,7 @@ def merge_using_pyosmium(context, osm_files, border):
         osmium.FileProcessor(osm_file).with_filter(tracker.id_filter()).with_locations()
         for osm_file in osm_files
     ]
-
-    output_path = "%s/merged_network_%.1fkm.osm.gz" %(context.path(), buffer / 1000)        
+        
     with osmium.SimpleWriter(output_path) as writer:
         for items in context.progress(osmium.zip_processors(*processors), label = "Writing ..."):
             for item_index, item in enumerate(items):
@@ -79,13 +77,11 @@ def save_as_osmosis_poly(gdf, path, name="boundary"):
         f.write("END\n")
 
 
-def merge_using_osmosis(context, osm_files, border):
+def merge_using_osmosis(context, osm_files, border, output_path):
     buffer = context.config("border_offset")    
     poly_path = "%s/swiss_buffered_%dm_to_border.poly" % (context.path(), int(buffer))
     poly_path = os.path.abspath(poly_path)  # Ensure absolute path
     save_as_osmosis_poly(border, poly_path)
-
-    output_path = "%s/merged_network_%dm_to_border.osm.gz" % (context.path(), int(buffer))
 
     osmosis_cmd = []
 
@@ -107,8 +103,11 @@ def merge_using_osmosis(context, osm_files, border):
     return output_path
 
 
-def merge_files(context, osm_files, border):
-        if osmosis.is_osmosis_installed(context):
-            return merge_using_osmosis(context, osm_files, border)
-        else:
-            return merge_using_pyosmium(context, osm_files, border)
+def merge_files(context, osm_files, border, output_file):
+    if osmosis.is_osmosis_installed(context):
+        new_file_path = output_file.replace(".osm.gz","-osmosis.osm.gz")
+        return merge_using_osmosis(context, osm_files, border, new_file_path)
+    else:
+        new_file_path = output_file.replace(".osm.gz","-pyosmium.osm")
+        return merge_using_pyosmium(context, osm_files, border, new_file_path)
+        

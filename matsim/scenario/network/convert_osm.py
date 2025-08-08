@@ -24,6 +24,7 @@ def configure(context):
     context.config("input_downsampling")
     context.config("add_trafic_lights", False)
     context.config("assign_elevations", False)
+    context.config("parseTurnRestrictions", True)
 
 def execute(context):
     network_file = context.stage("data.osm.clean")
@@ -65,10 +66,11 @@ def execute(context):
                 '<param name="outputDetailedLinkGeometryFile" value="%s/detailed_network.csv" />' % context.path(),
             )
 
-        content = content.replace(
-            '<param name="parseTurnRestrictions" value="false" />',
-            '<param name="parseTurnRestrictions" value="true" />'
-        )
+        if context.config("parseTurnRestrictions"):
+            content = content.replace(
+                '<param name="parseTurnRestrictions" value="false" />',
+                '<param name="parseTurnRestrictions" value="true" />'
+            )
 
         content = content.replace(
             '</module>',
