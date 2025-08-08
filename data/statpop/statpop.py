@@ -23,6 +23,7 @@ def configure(context):
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.ovgk")
     context.stage("data.constants")
+    context.config("threads")
 
 
 def execute(context):
@@ -32,24 +33,25 @@ def execute(context):
     c             = context.stage("data.constants")
 
     # Filter non-main residence
+    initial_count = len(df_persons)
     df_persons = df_persons[df_persons["type_of_residence"] == 1]
-
-    # Only allow people with a building ID
-    df_persons = df_persons[df_persons["federal_building_id"] < 999990000]
-
+    final_count = len(df_persons)
+    print(f"{initial_count - final_count} persons were filtered out based on the type of residence.")
+    
     # Only allow permanent residents
+    initial_count = len(df_persons)
     df_persons = df_persons[df_persons["population_type"] == 1]
+    final_count = len(df_persons)
+    print(f"{initial_count - final_count} persons without permanent residence filtered out.")
 
-    # Merge STATPOP persons and households into a list of persons with houeshold attributes
+
+    # Merge STATPOP persons and households into a list of persons with household attributes
     df = pd.merge(df_persons, df_link, on=("person_id", "municipality_id"))
     df = pd.merge(df, df_households, on="household_id")
 
     # Impute the houeshold size for each STATPOP person
     df_size = df.groupby("household_id").size().reset_index(name="household_size")
     df = pd.merge(df, df_size, on="household_id")
-
-    # Only allow plausible households
-    df = df[df["plausible"] == 1]
 
     # Only allow houesholds under a certain size
     df = df[df["household_size"] <= c.MAXIMUM_HOUSEHOLD_SIZE]
@@ -61,7 +63,7 @@ def execute(context):
     df = pd.merge(df, df_filter[["household_id", "all_under_age"]], on="household_id")
     df = df[~df["all_under_age"]]
 
-    # This mapping comes from KM
+    # This mapping comes Strukturerhebung (as it is the same as in STATPOP) Codelist
     for from_value, to_value in zip((1, 2, 3, 4, 5, 6, 7, -9), (
             c.MARITAL_STATUS_SINGLE, c.MARITAL_STATUS_MARRIED,
             c.MARITAL_STATUS_SEPARATE, c.MARITAL_STATUS_SEPARATE,
@@ -132,13 +134,14 @@ def execute(context):
     df = data.spatial.cantons.impute_sp_region(df)
 
     # Impute population density
-    data.statpop.density.impute(
+    data.statpop.density.impute_parallel(
         context, 
         context.stage("data.statpop.density"), df, 
         "home_x", "home_y", 
         radius = c.POPULATION_DENSITY_RADIUS,
-        chunk_size=1e5,
-        point_type="home")
+        chunk_size=10000, # it looks that 10k is better than 1k, did not test more
+        point_type="home",
+        n_jobs=context.config("threads"))
 
     # Impute OV Guteklasse
     df_ovgk = context.stage("data.spatial.ovgk")

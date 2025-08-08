@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.neighbors import KDTree
+from joblib import Parallel, delayed
 
 def configure(context):
     context.stage("data.statpop.persons")
@@ -25,3 +26,27 @@ def impute(context, kd_tree, df, x="x", y="y", radius= 2.5 * 1e3, point_type="",
         counts.extend(kd_tree.query_radius(coordinates, radius, count_only=True))
     
     df["population_density"] = counts # / (np.pi * c.POPULATION_DENSITY_RADIUS**2)
+
+def impute_parallel(context, kd_tree, df, x="x", y="y", radius=2.5 * 1e3, point_type="", chunk_size=1000, n_jobs=10):
+
+    total_points = len(df)
+    print(f"Imputing population density within {radius} m of {total_points} {point_type} coordinates...")
+
+    # Split DataFrame into roughly equal chunks
+    chunk_count = max(1, int(np.ceil(total_points / chunk_size)))
+    df_splits = np.array_split(df, chunk_count)
+
+    def process_chunk(chunk):
+        coords = np.vstack([chunk[x], chunk[y]]).T
+        return kd_tree.query_radius(coords, radius, count_only=True)
+
+    # Run in parallel
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(process_chunk)(chunk)
+        for chunk in context.progress(df_splits, total=chunk_count, label="Imputing population density...")
+    )
+
+    # Flatten list of arrays
+    counts = np.concatenate(results)
+    df["population_density"] = counts
+    return df

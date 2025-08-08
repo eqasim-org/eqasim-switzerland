@@ -11,13 +11,9 @@ import re
 def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.pt2matsim")
-    context.stage("data.osm.clean")
-        
-    context.config("export_detailed_network", False)
-    context.config("simplify_network_in_eqasim", False)
-    context.config("correct_links_capacity", False)
-    context.config("minimum_speed", 3) #in km/h
-    context.config("input_downsampling")
+    context.config("data_path")
+
+    context.config("export_detailed_network")
 
 def execute(context):
     network_file = context.stage("data.osm.clean")
@@ -44,6 +40,13 @@ def execute(context):
         content = content.replace(
             '<param name="osmFile" value="null" />',
             '<param name="osmFile" value="%s" />' % network_file
+        )
+
+        # Export detailed geometry of the links if needed
+        if context.config("export_detailed_network"):
+            content = content.replace(
+                '<param name="outputDetailedLinkGeometryFile" value="null" />',
+                '<param name="outputDetailedLinkGeometryFile" value="%s/detailed_network.csv" />' % context.path(),
             )
         
         content = content.replace(
