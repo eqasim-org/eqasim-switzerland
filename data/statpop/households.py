@@ -8,7 +8,7 @@ def execute(context):
     import lzma as xz
     import data.utils
 
-    with open("%s/statpop/DSV250221_STATPOP_HH_2021-2023/STATPOP_2023_HOUSEHOLD_CH_K.csv" % data_path, mode="rb") as f:
+    with open("%s/statpop/STATPOP_2023_HOUSEHOLD_CH_K.csv" % data_path, mode="rb") as f:
         fields = {
             "HOUSEHOLDID": int
             #"Plausibel": int
