@@ -124,60 +124,60 @@ number of employees and classifications of the enterprises.
 - Content: `spatial/country/` contains the shape file for Swiss border.
 - Go to the link below and download the file `swissboundaries3d_2023-01_2056_5728.shp.zip`, unpack its contents and place `LANDESGEBIET` files to : `spatial/country/`
 - Year: 2025
-- Location: [Open data][https://www.swisstopo.admin.ch/en/landscape-model-swissboundaries3d#swissBOUNDARIES3D---Download]
+- Location: [Open data](https://www.swisstopo.admin.ch/en/landscape-model-swissboundaries3d#swissBOUNDARIES3D---Download)
 
 **Canton Borders**
 - Content: `spatial/country/` contains the shape file for Cantonal borders.
 - Go to the link below and download the file `swissboundaries3d_2023-01_2056_5728.shp.zip` (if you followed the previous step you already have this file), unpack its contents and place `KANTONSGEBIET` files to : `spatial/canton/`
 - Year: 2025
-- Location: [Open data][https://www.swisstopo.admin.ch/en/landscape-model-swissboundaries3d#swissBOUNDARIES3D---Download]
+- Location: [Open data](https://www.swisstopo.admin.ch/en/landscape-model-swissboundaries3d#swissBOUNDARIES3D---Download)
 
 **Municipality Borders**
 - Content: `spatial/municipality/` contains the shape files for Swiss municipalities
 for different years.
 - Go to the link below and download the file `swissboundaries3d_2023-01_2056_5728.shp.zip` (if you followed the previous step you already have this file), `swissboundaries3d_2022-01_2056_5728.shp.zip`, and `swissboundaries3d_2021-01_2056_5728.shp.zip`, unpack them and place `HOHEITSGEBIET` files to corresponding years : `spatial/canton/2023`, `spatial/canton/2022`, `spatial/canton/2021`
 - Year: 2021, 2022, 2023
-- Location: [Open data][https://www.swisstopo.admin.ch/en/landscape-model-swissboundaries3d#swissBOUNDARIES3D---Download]
+- Location: [Open data](https://www.swisstopo.admin.ch/en/landscape-model-swissboundaries3d#swissBOUNDARIES3D---Download)
 
 **Statistical Quarters**
 - Content: `spatial/statistical_quarter_borders/` contains the borders of the Statistische Quartiere,
 which further divide large cities into smaller pieces. This file is unfortunately, no longer avaialble online. Therefore, we provide a version to download below.
-- Download the file and place it within `spatial/statistical_quarter_borders/`
+- Download the file below, unpack it and place it within `spatial/statistical_quarter_borders/`
 - Year: 2017
-- Contract: [Open Data][XXX]
+- Contract: Open data available in the `opendata` folder in this repository.
 
 **NUTS**
 - Content: `spatial/nuts_borders` contains the borders of the Nomenclature of Territorial Units for Statistics (NUTS) country
 subdivisions.
 - Download the data for two years 2021 and 2024 with the following attributes: Scale: 01M; FileFormat: SHP; coordinate system: EPSG:4326; GeometryType: Polygons(RG), and place the unpacked files into `spatial/nuts_borders`.
 - State: 2021, 2024
-- Contract: [Open Data][https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/territorial-units-statistics]
+- Contract: [Open Data](https://ec.europa.eu/eurostat/web/gisco/geodata/statistical-units/territorial-units-statistics)
 
 **ÖV Güteklasse**
 - Content: `spatial/ov_guteklasse/` contains the shape files of ARE for the "ÖV Güteklasse",
 which is a spatial classification of public transport level of service.
 - Download the 2023 ov gueteklassen file, unzip it and place the `OeV_Gueteklassen_ARE.gpkg` file into `spatial/ov_guteklasse/`
 - State: 2023
-- Contract: [Open Data][https://data.geo.admin.ch/browser/index.html#/collections/ch.are.gueteklassen_oev?.language=en]
+- Contract: [Open Data](https://data.geo.admin.ch/browser/index.html#/collections/ch.are.gueteklassen_oev?.language=en)
 
 **Postal codes**
 - Content: `spatial/postal_codes` contains shapefiles for postcodes in Switzerland.
 - Download `ortschaftenverzeichnis_plz_2056.shp.zip` file, and unpack its contents into `spatial/postal_codes`
 - State: 01.01.2024
-- Contract: [Open Data][https://www.swisstopo.admin.ch/de/amtliches-ortschaftenverzeichnis#Download]
+- Contract: [Open Data](https://www.swisstopo.admin.ch/de/amtliches-ortschaftenverzeichnis#Download)
 
 **Municipality Types**
 - Content: `spatial/Raumgliederungen.xlsx` is an Excel sheet with all kinds of spatial
 classifications for all municipalities on 01.01.2024
 - Fo to the link below, type 01.01.2024 as the date and select `Raum mit städtischem Charakter 2020` click on `Suche` and doenload the `xlsx` file provided at the bottom and place it in the `spatial` folder.
 - Year: 01.01.2024
-- Contract: [Open Data][https://www.agvchapp.bfs.admin.ch/de/typologies/query]
+- Contract: [Open Data](https://www.agvchapp.bfs.admin.ch/de/typologies/query)
 
 **Country Codes**
 - Content: `spatial/be-b-00.04-sg-01.xlsx` contains the official BfS country codes
 - Download the xlsx file available at the below link and add it to the `spatial` folder
 - Year: 2024
-- Contract [Open Data][https://www.bfs.admin.ch/bfs/de/home/grundlagen/stgb.assetdetail.32028071.html]
+- Contract [Open Data](https://www.bfs.admin.ch/bfs/de/home/grundlagen/stgb.assetdetail.32028071.html)
 
 
 **OSM**
@@ -185,18 +185,19 @@ classifications for all municipalities on 01.01.2024
 from [geofabrik][5]. Originally, the format is bz2, but pt2matsim can only work
 with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
 - State: 2025
-- Contract: [Open Data][https://download.geofabrik.de/europe/switzerland.html]
+- Contract: [Open Data](https://download.geofabrik.de/europe/switzerland.html)
 
 **HAFAS**
 - Content: `hafas/` contains the official SBB HAFAS schedule for Switzerland.
+- Use it only if you do not want to use gtfs below.
 - State: 2025
-- Contract: [Open Data][6]
+- Contract: [Open Data](https://data.opentransportdata.swiss/dataset/timetable-54-2025-hrdf)
 
 **GTFS**
 - Content: `gtfs/` contains the official GTFS schedule for Switzerland.
 - Download the file below and place it in  `gtfs/` folder, the code itself will unpack it.
 - State: 2025
-- Contract: [Open Data][https://data.opentransportdata.swiss/de/dataset/timetable-2025-gtfs2020]
+- Contract: [Open Data](https://data.opentransportdata.swiss/de/dataset/timetable-2025-gtfs2020)
 
 **Freight**
 - GTE:
@@ -211,21 +212,21 @@ with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
 - Departure times:
     - Content: `freight/departure_times.csv` contains data on the probability of a freight vehicle departing within a certain time bin. This data is not avaialble online. Please use the file provided below.
     - State: 2008
-    - Contract: [Open Data][XXX]
+    - Contract: Open data available in the `opendata` folder in this repository.
 
-**Projections not used; need an update**
+**Projections not used; need an update tot he code**
 - Households:
     - Content: `projections/households` contains data for household sizes per canton from 2012-2017 and projections of household sizes per canton in 2020 and 2050.
     All projections are according to the BfS reference scenario.
     - State: 2024
     - Contract:
-        - Projections: [Open Data][https://www.bfs.admin.ch/bfs/de/home/statistiken/katalog.assetdetail.16344851.html]
+        - Projections: [Open Data](https://www.bfs.admin.ch/bfs/de/home/statistiken/katalog.assetdetail.16344851.html)
 - Population:
     - Content: `projections/population` contains data of population per canton, nationality, gender and age from 2010-2017 and projections from 2020 to 2050.
     All projections are according to the BfS reference scenario.
     - State: 2024
     - Contract:
-        - Projections: [Open Data][https://www.pxweb.bfs.admin.ch/pxweb/de/px-x-0104020000_101/px-x-0104020000_101/px-x-0104020000_101.px]
+        - Projections: [Open Data](https://www.pxweb.bfs.admin.ch/pxweb/de/px-x-0104020000_101/px-x-0104020000_101/px-x-0104020000_101.px)
 - Freight:
     - Content: `projections/are/freight` contains projections for freight traffic from 2010 to 2040.
     All projections are according to the ARE Transport Outlook 2050 reference scenario.
