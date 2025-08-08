@@ -13,24 +13,24 @@ def execute(context):
     # Load data
     data_path = context.config("data_path")
 
-    df_types = pd.read_excel("%s/spatial_structure_2018.xlsx" % data_path,
+    df_types = pd.read_excel("%s/spatial/Raumgliederungen.xlsx" % data_path,
                              names=["municipality_id", "TYP"],
-                             usecols=[0, 21],
-                             skiprows=6,
-                             nrows=2229,
+                             usecols=[0, 7],
+                             skiprows=2,
+                             nrows=2132,
                              )
     df_municipalities = context.stage("data.spatial.municipalities")[0]
 
-    # Rewrite classification
-    df_types.loc[df_types["TYP"] == 1, "municipality_type"] = "urban"
-    df_types.loc[df_types["TYP"] == 2, "municipality_type"] = "urban"
-    df_types.loc[df_types["TYP"] == 3, "municipality_type"] = "suburban"
-    df_types.loc[df_types["TYP"] == 4, "municipality_type"] = "urban"
-    df_types.loc[df_types["TYP"] == 5, "municipality_type"] = "suburban"
-    df_types.loc[df_types["TYP"] == 6, "municipality_type"] = "rural"
-    df_types.loc[df_types["TYP"] == 7, "municipality_type"] = "rural"
-    df_types.loc[df_types["TYP"] == 8, "municipality_type"] = "rural"
-    df_types.loc[df_types["TYP"] == 9, "municipality_type"] = "rural"
+    # Rewrite classification based on the official division
+    df_types.loc[df_types["TYP"] == 11, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 12, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 13, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 21, "municipality_type"] = "suburban"
+    df_types.loc[df_types["TYP"] == 22, "municipality_type"] = "suburban"
+    df_types.loc[df_types["TYP"] == 23, "municipality_type"] = "suburban"
+    df_types.loc[df_types["TYP"] == 31, "municipality_type"] = "rural"
+    df_types.loc[df_types["TYP"] == 32, "municipality_type"] = "rural"
+    df_types.loc[df_types["TYP"] == 33, "municipality_type"] = "rural"
 
     df_types["municipality_type"] = df_types["municipality_type"].astype("category")
     df_types = df_types[["municipality_id", "municipality_type"]]

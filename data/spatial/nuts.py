@@ -8,9 +8,9 @@ def configure(context):
 
 
 SHAPEFILES = [
-    (2024, "nuts_borders/NUTS_RG_01M_2024_4326.shp/NUTS_RG_01M_2024_4326.shp", "NUTS_ID",
+    (2024, "spatial/nuts_borders//NUTS_RG_01M_2024_4326.shp", "NUTS_ID",
      "NUTS_NAME", "LEVL_CODE"),
-    (2021, "nuts_borders/NUTS_RG_01M_2021_4326.shp/NUTS_RG_01M_2021_4326.shp", "NUTS_ID",
+    (2021, "spatial/nuts_borders//NUTS_RG_01M_2021_4326.shp", "NUTS_ID",
      "NUTS_NAME", "LEVL_CODE"),
 ]
 

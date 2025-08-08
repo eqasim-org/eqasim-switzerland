@@ -9,8 +9,8 @@ def execute(context):
     import lzma as xz
     import data.utils
 
-    part_1 = f"{data_path}/statpop/STATPOP_PP_2023_TEIL_1_2/STATPOP_PP_2023_TEIL_1.csv"
-    part_2 = f"{data_path}/statpop/STATPOP_PP_2023_TEIL_1_2/STATPOP_PP_2023_TEIL_2.csv"
+    part_1 = f"{data_path}/statpop/STATPOP_PP_2023_TEIL_1.csv"
+    part_2 = f"{data_path}/statpop/STATPOP_PP_2023_TEIL_2.csv"
 
     fields = {
         "personPseudoID": int,
