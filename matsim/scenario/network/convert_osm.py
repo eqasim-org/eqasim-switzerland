@@ -9,8 +9,10 @@ def configure(context):
     context.stage("matsim.runtime.pt2matsim")
     context.config("data_path")
 
+    context.config("export_detailed_network")
 
 def execute(context):
+    network_file = context.stage("data.osm.clean")
 
     pt2matsim.run(context, "org.matsim.pt2matsim.run.CreateDefaultOsmConfig", [
         "convert_network_template.xml"
@@ -33,8 +35,15 @@ def execute(context):
 
         content = content.replace(
             '<param name="osmFile" value="null" />',
-            '<param name="osmFile" value="%s/osm/switzerland-latest.osm.gz" />' % context.config("data_path")
+            '<param name="osmFile" value="%s" />' % network_file
         )
+
+        # Export detailed geometry of the links if needed
+        if context.config("export_detailed_network"):
+            content = content.replace(
+                '<param name="outputDetailedLinkGeometryFile" value="null" />',
+                '<param name="outputDetailedLinkGeometryFile" value="%s/detailed_network.csv" />' % context.path(),
+            )
         
         content = content.replace(
             '<param name="outputCoordinateSystem" value="null" />',
