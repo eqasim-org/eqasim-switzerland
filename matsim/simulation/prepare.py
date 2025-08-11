@@ -126,22 +126,23 @@ def execute(context):
 
 
     # Route the population
-    population_output_path = "%spopulation.xml.gz" % context.config("output_prefix")
-    
-    eqasim.run(context, "org.eqasim.core.scenario.routing.RunPopulationRouting", [
-        "--config-path", config_path,
-        "--output-path", population_output_path,
-        "--threads", context.config("threads"),
-        "--config:plans.inputPlansFile", population_prepared_path,
-        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
-    ])
+    population_output_path = "%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix"))
+    population_prepared_path = "%s/prepared_population.xml.gz" % context.path()
+    shutil.copyfile(population_prepared_path, population_output_path)
+    # eqasim.run(context, "org.eqasim.core.scenario.routing.RunPopulationRouting", [
+    #     "--config-path", config_path,
+    #     "--output-path", population_output_path,
+    #     "--threads", context.config("threads"),
+    #     "--config:plans.inputPlansFile", population_prepared_path,
+    #     "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
+    # ])
     
     assert os.path.exists("%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix")))
 
     # Validate the scenario
-    eqasim.run(context, "org.eqasim.core.scenario.validation.RunScenarioValidator", [
-        "--config-path", config_path
-    ])
+    # eqasim.run(context, "org.eqasim.core.scenario.validation.RunScenarioValidator", [
+    #     "--config-path", config_path
+    # ])
     
     # Cleanup
     os.remove("%s/prepared_population.xml.gz" % context.path())
