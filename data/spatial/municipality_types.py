@@ -66,6 +66,8 @@ def execute(context):
     df_mapping = pd.DataFrame(df_mapping[["municipality_id", "municipality_type", "imputed_municipality_type"]])
     df_mapping["municipality_type"] = df_mapping["municipality_type"].astype("category")
 
+    print(df_mapping)
+
     return df_mapping
 
 

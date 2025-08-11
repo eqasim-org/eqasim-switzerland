@@ -11,9 +11,14 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.maven")
 
+<<<<<<< HEAD
     context.config("pt2matsim_version", "25.6")
     context.config("pt2matsim_branch", "v25.6")
     context.config("pt2matsim_path", "") 
+=======
+    context.config("pt2matsim_version", "25.8")
+    context.config("pt2matsim_branch", "v25.8")
+>>>>>>> origin/develop
 
 def run(context, command, arguments, vm_arguments):
     jar_path = context.stage("matsim.runtime.pt2matsim")    

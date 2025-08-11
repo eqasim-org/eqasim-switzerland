@@ -3,15 +3,12 @@ import pandas as pd
 import pyproj
 
 import data.spatial.cantons
-import data.spatial.municipalities
 import data.spatial.municipality_types
 import data.spatial.ovgk
 import data.spatial.utils
 import data.spatial.zones
 import data.statpop.density
 import data.utils
-import data.utils
-
 
 def configure(context):
     context.config("data_path")

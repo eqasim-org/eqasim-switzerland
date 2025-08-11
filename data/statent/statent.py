@@ -4,7 +4,7 @@ import pandas as pd
 import data.spatial.municipalities
 import data.spatial.quarters
 import data.spatial.utils
-import data.spatial.zones
+from data.spatial.zones import impute
 import data.utils
 
 
@@ -100,10 +100,10 @@ def execute(context):
 
     # impute zones
     df2 = df_spatial.drop("quarter_id", axis=1)
-    df2 = data.spatial.zones.impute(df2, df_zones)
+    df2 = impute(df2, df_zones)
     df2.rename(columns={"zone_id": "zone_municipality_id"}, inplace=True)
     df2 = df2[["enterprise_id", "zone_municipality_id"]]
-    df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
+    df_spatial = impute(df_spatial, df_zones)
 
     df_spatial = df_spatial.merge(
         df2,   
@@ -122,5 +122,4 @@ def execute(context):
     )
     df["zone_id"] = df["zone_id"].astype(np.int)
     df["zone_municipality_id"] = df["zone_municipality_id"].astype(np.int)
-    print(df)
     return df

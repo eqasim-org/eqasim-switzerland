@@ -7,7 +7,7 @@ This change log is written in descending order. Changes that happen after versio
 - Added VDF as a possible traffic model
 - Added a cutting stage matsim.cutter.run and matsim.cutter.runCutterV2 that can be run after the matsim.simulation.run
 - Improved statistical matching
-- Udpated pt2matsim to 25.3-SNAPSHOT version to include new features and use various routers; currently using AStarLandmarks
+- Udpated pt2matsim to 25.8 version to include new features, use various routers, and mode-specific mapping; currently using AStarLandmarks
 - Added vehicles file containing a vehicle for each car and truck
 - Added an option to use simulated pt
 - Several speed improvements in vaious stages
