@@ -7,8 +7,8 @@ import matsim.runtime.pt2matsim as pt2matsim
 def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.pt2matsim")
+    context.stage("data.osm.clean")
     context.config("data_path")
-
     context.config("export_detailed_network")
 
 def execute(context):
