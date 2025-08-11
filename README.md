@@ -231,7 +231,7 @@ classifications for all municipalities on 01.01.2024
     - State: 2024
     - Contract: 
 
-Finally your data fodler should look somethign like this:
+Finally your data folder should look something like this:
 ```
 +--- statpop
 |   +--- STATPOP_2023_LINK_CH.csv
