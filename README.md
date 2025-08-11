@@ -321,7 +321,6 @@ Finally your data folder should look something like this:
 |   +--- AuGQPV_2021
 |   |   +--- AGQPV21_finale_Auswertungsdatenbank.csv
 |   |   +--- AGQPV21_finale_Auswertungsdatenbank_Codebuch.xlsx
-+--- structure.txt
 +--- projections
 |   +--- households
 |   |   +--- px-x-0102020000_402.csv
