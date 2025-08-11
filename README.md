@@ -317,20 +317,6 @@ Finally your data folder should look something like this:
 |   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.shp
 |   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.shx
 |   +--- be-b-00.04-sg-01.xlsx
-+--- crossborder
-|   +--- AuGQPV_2021
-|   |   +--- AGQPV21_finale_Auswertungsdatenbank.csv
-|   |   +--- AGQPV21_finale_Auswertungsdatenbank_Codebuch.xlsx
-+--- projections
-|   +--- households
-|   |   +--- px-x-0102020000_402.csv
-|   |   +--- su-d-01.03.03.03.01.xlsx
-|   +--- population
-|   |   +--- px-x-0102010000_101.csv
-|   |   +--- px-x-0104020000_101.csv
-|   +--- are
-|   |   +--- freight
-|   |   |   +--- Verkehrsperspektiven_2040_Ergebnisse_Gueterverkehr_de.xlsx
 +--- structural_survey
 |   +--- se_zpers_2021_ch.csv
 |   +--- se_zpers_2022_ch.csv
