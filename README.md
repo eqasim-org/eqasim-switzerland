@@ -181,9 +181,7 @@ classifications for all municipalities on 01.01.2024
 
 
 **OSM**
-- Content: `osm/` contains a snapshot of the OSM database for Switzerland
-from [geofabrik][5]. Originally, the format is bz2, but pt2matsim can only work
-with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
+- Content: `osm/` contains a snapshot of the OSM database for Switzerland. 
 - State: 2025
 - Contract: [Open Data](https://download.geofabrik.de/europe/switzerland.html)
 
@@ -232,5 +230,97 @@ with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
     All projections are according to the ARE Transport Outlook 2050 reference scenario.
     - State: 2024
     - Contract: 
+
+Finally your data folder should look something like this:
+```
++--- statpop
+|   +--- STATPOP_2023_LINK_CH.csv
+|   +--- STATPOP_2023_HOUSEHOLD_CH_K.csv
+|   +--- STATPOP_PP_2023_TEIL_1.csv
+|   +--- STATPOP_PP_2023_TEIL_2.csv
++--- statent
+|   +--- 250221_STATENT_2022_LOC_17042025.csv
++--- osm
+|   +--- switzerland-latest-2025.osm.pbf
++--- freight
+|   +--- GTE_2023
+|   |   +--- journeych.csv
+|   |   +--- transport.csv
+|   |   +--- week.csv
+|   +--- GQGV_2019
+|   |   +--- GQGV_2019_Mikrodaten.csv
+|   +--- departure_times.csv
++--- gtfs
+|   +--- gtfs_fp2024_2024-11-11.zip
++--- hafas
++--- microcensus
+|   +--- haushalte.csv
+|   +--- zielpersonen.csv
+|   +--- wege.csv
+|   +--- etappen.csv
+|   +--- haushaltspersonen.csv
++--- spatial
+|   +--- municipality
+|   |   +--- 2023
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.cpg
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.dbf
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.prj
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shx
+|   |   +--- 2022
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.cpg
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.dbf
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.prj
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shx
+|   |   +--- 2021
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.cpg
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.dbf
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.prj
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shx
+|   +--- Raumgliederungen.xlsx
+|   +--- nuts_borders
+|   |   +--- NUTS_RG_01M_2024_4326.cpg
+|   |   +--- NUTS_RG_01M_2024_4326.dbf
+|   |   +--- NUTS_RG_01M_2024_4326.prj
+|   |   +--- NUTS_RG_01M_2024_4326.shp
+|   |   +--- NUTS_RG_01M_2024_4326.shx
+|   |   +--- NUTS_RG_01M_2021_4326.cpg
+|   |   +--- NUTS_RG_01M_2021_4326.dbf
+|   |   +--- NUTS_RG_01M_2021_4326.prj
+|   |   +--- NUTS_RG_01M_2021_4326.shp
+|   |   +--- NUTS_RG_01M_2021_4326.shx
+|   +--- ov_guteklasse
+|   |   +--- OeV_Gueteklassen_ARE.gpkg
+|   +--- canton
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.cpg
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.dbf
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.prj
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shp
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shx
+|   +--- statistical_quarter_borders
+|   |   +--- quart17.dbf
+|   |   +--- quart17.prj
+|   |   +--- quart17.shp
+|   |   +--- quart17.shx
+|   +--- postal_codes
+|   |   +--- AMTOVZ_ZIP.cpg
+|   |   +--- AMTOVZ_ZIP.dbf
+|   |   +--- AMTOVZ_ZIP.prj
+|   |   +--- AMTOVZ_ZIP.shp
+|   |   +--- AMTOVZ_ZIP.shx
+|   +--- country
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.cpg
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.dbf
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.prj
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.shp
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.shx
+|   +--- be-b-00.04-sg-01.xlsx
++--- structural_survey
+|   +--- se_zpers_2021_ch.csv
+|   +--- se_zpers_2022_ch.csv
+|   +--- se_zpers_2023_ch.csv
+```
 
 
