@@ -129,6 +129,9 @@ def execute(context):
     population_output_path = "%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix"))
     population_prepared_path = "%s/prepared_population.xml.gz" % context.path()
     shutil.copyfile(population_prepared_path, population_output_path)
+
+    # routing class does not work with turn restrictions; it seems something to do with multi-threading as
+    # it works when we use 1 thread; this ius however not an issue as MATSim routes teverything in iteration 0
     # eqasim.run(context, "org.eqasim.core.scenario.routing.RunPopulationRouting", [
     #     "--config-path", config_path,
     #     "--output-path", population_output_path,
