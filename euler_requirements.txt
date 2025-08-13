@@ -22,3 +22,4 @@ osmnx==1.4.0
 Rtree==1.2.0
 synpp==1.5.1
 osmium=4.0.2
+lxml==6.0.0
