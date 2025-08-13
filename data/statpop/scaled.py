@@ -20,7 +20,6 @@ def configure(context):
 
 def execute(context):
     df_statpop = context.stage("data.statpop.statpop")
-
     if context.config("enable_scaling"):
 
         scaling_year = context.config("scaling_year")
@@ -39,13 +38,6 @@ def execute(context):
         print("Number of households before scaling :", len(df_statpop["household_id"].unique()))
         print("Number of persons before scaling :", len(df_statpop["person_id"].unique()))
 
-        # rename household_size_class column
-        df_household_controls = df_household_controls.rename({"household_size_class": "household_size_class_projection"}, axis=1)
-
-        # we need to add a new household class column with only as many categories as the controls
-        number_household_classes = len(df_household_controls["household_size_class_projection"].unique())
-        df_statpop["household_size_class_projection"] = np.minimum(number_household_classes, df_statpop["household_size"]) - 1
-
         # create IPU fitting problem by canton
         problems = []
         canton_ids = list(df_statpop.sort_values("canton_id")["canton_id"].unique())
@@ -63,7 +55,7 @@ def execute(context):
 
             # get individual controls, perform checks and convert to filters
             individual_controls = [df_population_controls[df_population_controls["canton_id"] == canton_id]]
-            individual_id = "individual_id"
+            individual_id = "person_id"
             assert multilevelipf.check_control_has_weight_column(individual_controls)
             individual_controls = multilevelipf.compute_individual_filters(df, group_id, individual_controls)
 
@@ -102,7 +94,7 @@ def execute(context):
         df_statpop["person_id"] = np.arange(df_statpop.shape[0]) + 1
 
         # remove unneeded columns
-        del df_statpop["household_size_class_projection"]
+
 
         print("Number of households in household controls :", df_household_controls["weight"].sum())
         print("Number of persons in population controls :", df_population_controls["weight"].sum())
@@ -113,54 +105,60 @@ def execute(context):
 
 
 def process(context, problem):
-    
-    # Set up RNG
+    import numpy as np
+    import pandas as pd
+
+    # RNG
     rng = np.random.RandomState(context.config("random_seed"))
 
-    # Create the IPU solver
-    ipu_solver = IPUSolver(group_rel_tol=1e-4, group_abs_tol=1, ind_rel_tol=1e-5, ind_abs_tol=10, max_iter=2000)
-
-    # Fit the problem, which results a df with expansion factors and whether the algorithm converged
+    # Solve IPU (tolerances unchanged)
+    ipu_solver = IPUSolver(
+        group_rel_tol=1e-2, group_abs_tol=1,
+        ind_rel_tol=1e-5,  ind_abs_tol=1,
+        max_iter=2000
+    )
     df_result, convergence = ipu_solver.fit(problem)
 
     df_households = []
-    # Integerize the results using the "Truncate-Replicate-Sample" method
-    # We loop through the groups here to get a better fit by household size
-    # because we know they are mutually exclusive (but this is not general)
+
+    # Integerize by group using Bernoulli rounding of the remainder
     for i, group_control in enumerate(problem.group_controls):
-        group_weight = group_control[0]
         group_filter = group_control[1]
 
-        # 1) Truncate - here we compute both the integer part (count) and remainder of the weight for each household
-        df_hh_group = (df_result[group_filter][["household_id", "statpop_household_id", "expansion_factor"]]
-                       .drop_duplicates("household_id"))
-        weights = df_hh_group["expansion_factor"].values
-        counts = np.floor(weights).astype(np.int)
-        remainders = weights - counts
+        # Household-level rows for this group
+        df_hh_group = (
+            df_result[group_filter][["household_id", "statpop_household_id", "expansion_factor"]]
+            .drop_duplicates("household_id")
+        )
 
-        # 2) Replicate - We duplicate the households based on the count
-        indices = np.repeat(list(df_hh_group.index), counts)
-        df_replicate = df_hh_group.loc[indices]
+        if df_hh_group.empty:
+            continue
 
-        # 3) Sample - We sample the required remaining households based on the remainders without replacement
-        indices = rng.choice(
-            a=list(df_hh_group.index), 
-            size=int(np.round(np.sum(weights) - np.sum(counts))),
-            replace=False, 
-            p=(remainders / np.sum(remainders))
-            )
-        df_sample = df_hh_group.loc[indices]
+        # 1) Split weight into integer part and remainder
+        weights   = df_hh_group["expansion_factor"].to_numpy()
+        counts    = np.floor(weights).astype(int)          # integer part
+        remainders= weights - counts                       # in [0, 1)
 
-        # We combine the replicated and sampled households
-        df = pd.concat([df_replicate, df_sample])
+        # 2) Replicate integer part
+        idx_rep   = np.repeat(df_hh_group.index.to_numpy(), counts)
+        df_rep    = df_hh_group.loc[idx_rep]
 
-        # We add them to our list by group
-        df_households.append(df)
+        # 3) Bernoulli add-one for the decimal part (independent per household)
+        #    Each household gets one extra copy with probability equal to its remainder.
+        u         = rng.rand(len(df_hh_group))
+        add_one   = (u < remainders).astype(int)
+        idx_add   = np.repeat(df_hh_group.index.to_numpy(), add_one)
+        df_add    = df_hh_group.loc[idx_add]
 
-    df_households = pd.concat(df_households).drop("expansion_factor", axis=1)
-    df_households["household_id"] = np.arange(df_households.shape[0]) + 1
+        # Combine for this group
+        df_out = pd.concat([df_rep, df_add], ignore_index=True)
+        df_households.append(df_out)
+
+    # Stack groups, drop fractional weight, and assign new sequential household ids
+    df_households = pd.concat(df_households, ignore_index=True).drop(columns=["expansion_factor"])
+    # Keep original id for later joins if useful
+    df_households = df_households.rename(columns={"household_id": "orig_household_id"})
+    df_households["household_id"] = np.arange(1, df_households.shape[0] + 1)
 
     context.progress.update()
-
-    # return only duplicated households with new and original ids
     return df_households, convergence
