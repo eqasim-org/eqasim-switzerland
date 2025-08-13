@@ -39,7 +39,7 @@ config:
     hafas_date: 01.10.2018
     
     # if we should use schedule based pt or simulated
-    useScheduleBasedTransport: true
+    useScheduleBasedTransport: false
     # defines the prefix for the cutout scenario name; it should be of the zurich_ format
     extent_prefix: zurich_
 
