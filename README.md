@@ -169,7 +169,7 @@ which is a spatial classification of public transport level of service.
 **Municipality Types**
 - Content: `spatial/Raumgliederungen.xlsx` is an Excel sheet with all kinds of spatial
 classifications for all municipalities on 01.01.2024
-- Fo to the link below, type 01.01.2024 as the date and select `Raum mit städtischem Charakter 2020` click on `Suche` and doenload the `xlsx` file provided at the bottom and place it in the `spatial` folder.
+- Go to the link below, type 01.01.2024 as the date and select `Raum mit städtischem Charakter 2020` click on `Suche` and doenload the `xlsx` file provided at the bottom and place it in the `spatial` folder.
 - Year: 01.01.2024
 - Contract: [Open Data](https://www.agvchapp.bfs.admin.ch/de/typologies/query)
 
@@ -212,16 +212,16 @@ classifications for all municipalities on 01.01.2024
     - State: 2008
     - Contract: Open data available in the `opendata` folder in this repository.
 
-**Projections not used; need an update tot he code**
+**Projections are used currently only for the population and not freight; need an update to the code**
 - Households:
-    - Content: `projections/households` contains data for household sizes per canton from 2012-2017 and projections of household sizes per canton in 2020 and 2050.
-    All projections are according to the BfS reference scenario.
+    - Content: `projections/households` should contain data for number of households per canton from 2020-2050 (unfortunately it is no lonegr avaialble to download household size distribution per canton). All projections are according to the BfS reference scenario.
+    - Download the `xlsx` file and place it in the `projections/households` folder
     - State: 2024
     - Contract:
         - Projections: [Open Data](https://www.bfs.admin.ch/bfs/de/home/statistiken/katalog.assetdetail.16344851.html)
 - Population:
-    - Content: `projections/population` contains data of population per canton, nationality, gender and age from 2010-2017 and projections from 2020 to 2050.
-    All projections are according to the BfS reference scenario.
+    - Content: `projections/population` contains data of population per canton, nationality, gender and age from 2024-2055. All projections are according to the BfS reference scenario.
+    - On the webpage below select for Kanton: all except Schweiz; Staatsangehörigkeit (Kategorie): Schweiz and Ausland; Geschlecht: Mann and Frau; Alter: all except Total; Jahr: all; Beobachtungseinheit: Bevölkerungsstand am 1. Januar. Click on Weiter. On the left side in the dropdwon menu select `Ergebnis speichern asl... Excel`, and place the downloaded file in the `projections/population` folder
     - State: 2024
     - Contract:
         - Projections: [Open Data](https://www.pxweb.bfs.admin.ch/pxweb/de/px-x-0104020000_101/px-x-0104020000_101/px-x-0104020000_101.px)
@@ -259,6 +259,11 @@ Finally your data folder should look something like this:
 |   +--- wege.csv
 |   +--- etappen.csv
 |   +--- haushaltspersonen.csv
++--- projections
+|   +--- households
+|   |   +--- su-d-01.03.03.01.xlsx
+|   +--- population
+|   |   +--- px-x-0104020000_101_20250808-151932.csv
 +--- spatial
 |   +--- municipality
 |   |   +--- 2023

@@ -40,44 +40,24 @@ def execute(context):
     # Select year in the future to project to
     scaling_year = np.max([c.BASE_SCALING_YEAR, context.config("scaling_year")])
 
-    if scaling_year < c.BASE_PROJECTED_YEAR:
-
-        # load excel data
-        df = pd.read_csv("%s/projections/population/px-x-0102010000_101.csv" % data_path, sep=";",
-                         encoding="latin1", skiprows=1).rename({
-            "Kanton (-) / Bezirk (>>) / Gemeinde (......)":"canton_id",
-            "Jahr":"year",
-            "Staatsangehörigkeit (Kategorie)":"nationality",
-            "Geschlecht":"sex",
-            "Bevölkerungstyp":"population_type"
-        }, axis=1)
-
-        # add up permanent and non-permanent residents
-        df = df.groupby(["year", "canton_id", "nationality", "sex"]).sum().reset_index()
-
-        # long format
-        df = df.melt(id_vars=["year", "canton_id", "nationality", "sex"], var_name="age", value_name="weight")
-
-        # clean canton names and convert to id
-        df["canton_id"] = df["canton_id"].str.split("- ", expand=True)[1]
-        df = df.replace(CANTON_TO_ID)
-
-    else:
-
-        # load csv projection data
-        df = pd.read_csv("%s/projections/population/px-x-0104020000_101.csv" % data_path, sep=";",
-                         encoding="latin1", skiprows=1).rename({
-            "Kanton": "canton_id",
-            "Staatsangehörigkeit (Kategorie)":"nationality",
-            "Geschlecht": "sex",
-            "Alter": "age",
-            "Jahr": "year",
-            "Bevölkerungsstand am 1. Januar": "weight"
-        }, axis=1)
-
-        # replace canton names with ids
-        df = df.replace(CANTON_TO_ID)
-
+    # load csv projection data
+    df = pd.read_csv("%s/projections/population/px-x-0104020000_101_20250808-151932.csv" % data_path, sep=";",
+                        encoding="latin1", skiprows=0).rename({
+        "Kanton": "canton_id",
+        "Staatsangehörigkeit (Kategorie)":"nationality",
+        "Geschlecht": "sex",
+        "Alter": "age",
+        "Jahr": "year",
+        "Bevölkerungsstand am 1. Januar": "weight"
+    }, axis=1)
+    # Ensure scaling_year is valid
+    if scaling_year not in df["year"].unique():
+        raise ValueError(
+            f"scaling_year {scaling_year} is not present in the 'year' column. "
+            f"Available years: {sorted(df['year'].unique())}"
+        )
+    # replace canton names with ids
+    df = df.replace(CANTON_TO_ID)
 
     # turn sex and nationality into an actual 0-based class
     df = df.replace({"Mann": 0, "Frau": 1}).replace({"Schweiz": 0, "Ausland": 1})
@@ -92,35 +72,9 @@ def execute(context):
     df = df[["canton_id", "sex", "nationality", "age_class", "year", "weight"]]
     df = df.groupby(["canton_id", "sex", "nationality", "age_class", "year"]).sum().reset_index()
 
-    if (scaling_year in list(df["year"].unique())):
-        df = df[df["year"] == scaling_year].drop("year", axis=1).reset_index().drop("index", axis=1)
-    else:
-        # Pivot years to columns
-        df = df.pivot_table(
-            index=["canton_id", "sex", "nationality", "age_class"], columns=["year"]
-        )
-
-        # Add new interpolated column based on last five years
-        df[("weight", scaling_year)] = df.apply(
-            lambda x: max(0, np.round(
-                np.dot(
-                    np.polyfit(
-                        [2041, 2042, 2043, 2044, 2045],
-                        [x[("weight"), 2041], x[("weight"), 2042], x[("weight"), 2043], x[("weight"), 2044],
-                         x[("weight"), 2045]],
-                        1
-                    ),
-                    [scaling_year, 1]
-                )
-            ))
-            , axis=1)
-
-        # Reformat
-        df = df[("weight", scaling_year)].reset_index()
-        df.columns = ["canton_id", "sex", "nationality", "age_class", "weight"]
+    df = df[df["year"] == scaling_year].drop("year", axis=1).reset_index().drop("index", axis=1)
 
     # round weights and convert to integer
     df["weight"] = np.round(df["weight"])
     df["weight"] = df["weight"].astype(int)
-
     return df, scaling_year
