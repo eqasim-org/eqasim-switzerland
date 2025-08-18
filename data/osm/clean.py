@@ -4,7 +4,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 def configure(context):
-    context.stage("matsim.runtime.osmosis")
     context.stage("data.spatial.swiss_border")
     
     context.config("data_path")
