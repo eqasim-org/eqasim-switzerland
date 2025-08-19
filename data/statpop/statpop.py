@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-import data.spatial.cantons
+import data.spatial.cantons as cantons
 import data.spatial.municipality_types
 import data.spatial.ovgk
 import data.spatial.utils
@@ -131,7 +131,7 @@ def execute(context):
     df["home_quarter_id"] = df["quarter_id"]
 
     # Impute SP region
-    df = data.spatial.cantons.impute_sp_region(df)
+    df = cantons.impute_sp_region(df)
 
     # Impute population density
     data.statpop.density.impute_parallel(
