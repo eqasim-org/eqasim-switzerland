@@ -163,9 +163,6 @@ def execute(context):
         "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
         "mode_detailed"
     ]]
-    output_file = "/cluster/home/anding/ch/analysis/data/microcensus_trips.csv"
-    output_df.to_csv(output_file, index=False)
-    print(f"DataFrame successfully exported to {output_file}")
 
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y", "origin_x", "origin_y",

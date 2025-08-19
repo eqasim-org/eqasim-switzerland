@@ -171,8 +171,4 @@ def execute(context):
     car_passenger_ids = df_mz_trips.loc[df_mz_trips["mode"] == "car_passenger", "person_id"].unique()
     df_mz_persons["is_car_passenger"] = df_mz_persons["person_id"].isin(car_passenger_ids)
 
-    output_file = "/cluster/home/anding/ch/analysis/data/microcensus_persons.csv"
-    df_mz_persons.to_csv(output_file, index=False)
-    print(f"DataFrame successfully exported to {output_file}")
-
     return df_mz_persons
