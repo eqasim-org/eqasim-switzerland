@@ -139,8 +139,8 @@ def execute(context):
         module = etree.Element("module", name="SBBPt")
         # everything else will be simulated
         etree.SubElement(module, "param", name="deterministicServiceModes",
-                        value="rail,subway,ferry,tram,funicular,cable-car,gondola,other")
-        etree.SubElement(module, "param", name="createLinkEventsInterval", value="10")
+                        value="ferry,funicular,cable-car,gondola,other")
+        etree.SubElement(module, "param", name="createLinkEventsInterval", value="1")
 
         # Append to root
         root.append(module)
