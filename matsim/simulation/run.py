@@ -27,20 +27,22 @@ def execute(context):
         # Run simulation
         eqasim.run(context, "org.eqasim.switzerland.ch.RunSimulation", [
             "--config-path", config_path,
-            "--config:controler.lastIteration", str(60),
-            "--config:controler.writeEventsInterval", str(60),
-            "--config:controler.writePlansInterval", str(60),
-            "--config:controler.writeTripsInterval", str(60),
-            "--config:eqasim.analysisInterval", str(60),
+            "--config:controler.lastIteration", str(1),
+            "--config:controler.writeEventsInterval", str(1),
+            "--config:controler.writePlansInterval", str(1),
+            # if one wants to visualize outputs, trips file needs to be generated 
+            # so one should set this to something other than 0, and preferebly to something 
+            # that will output trips file at the end of the simulation
+            "--config:controller.writeTripsInterval", str(0),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
     else:
         # Run simulation with vdf
         eqasim.run(context, "org.eqasim.switzerland.ch.RunVDFSimulation", [
             "--config-path", config_path,
-            "--config:controler.lastIteration", str(60),
-            "--config:controler.writeEventsInterval", str(60),
-            "--config:controler.writePlansInterval", str(60),
+            "--config:controler.lastIteration", str(1),
+            "--config:controler.writeEventsInterval", str(1),
+            "--config:controler.writePlansInterval", str(1),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
     assert os.path.exists("%s/simulation_output/output_events.xml.gz" % context.path())

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import KDTree
-
+from shapely import get_coordinates
 
 def configure(context):
     context.stage("data.freight.gqgv.od")
@@ -67,8 +67,9 @@ def execute(context):
     df_nuts = context.stage("data.spatial.nuts")
     swiss_border = context.stage("data.spatial.swiss_border")
 
-    swiss_border = np.vstack(
-        [swiss_border.values[0].boundary.coords.xy[0], swiss_border.values[0].boundary.coords.xy[1]]).T
+    geom = swiss_border.values[0]
+    coords = get_coordinates(geom.boundary)
+    swiss_border = np.asarray(coords)
     kd_tree = KDTree(swiss_border)
 
     coordinates = np.vstack([df_nuts["geometry"].centroid.x, df_nuts["geometry"].centroid.y]).T

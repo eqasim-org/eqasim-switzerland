@@ -9,7 +9,7 @@ def execute(context):
     data_path = context.config("data_path")
 
     df = pd.read_excel(
-        "%s/country_codes_2018.xlsx" % data_path
+        "%s/spatial/be-b-00.04-sg-01.xlsx" % data_path
     )
 
     df["country_id"] = df["Ländercode BFS\nCode des pays OFS\nCodice del paese UST"]

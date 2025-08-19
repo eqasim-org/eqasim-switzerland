@@ -1,4 +1,5 @@
 import os
+import re
 
 import matsim.runtime.pt2matsim as pt2matsim
 
@@ -6,10 +7,12 @@ import matsim.runtime.pt2matsim as pt2matsim
 def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.pt2matsim")
+    context.stage("data.osm.clean")
     context.config("data_path")
-
+    context.config("export_detailed_network")
 
 def execute(context):
+    network_file = context.stage("data.osm.clean")
 
     pt2matsim.run(context, "org.matsim.pt2matsim.run.CreateDefaultOsmConfig", [
         "convert_network_template.xml"
@@ -20,9 +23,27 @@ def execute(context):
         content = f_read.read()
 
         content = content.replace(
-            '<param name="osmFile" value="null" />',
-            '<param name="osmFile" value="%s/osm/switzerland-latest.osm.gz" />' % context.config("data_path")
+            '<param name="allowedTransportModes" value="bus, car" />',
+            '<param name="allowedTransportModes" value="bus" />'
         )
+        content = re.sub(
+            r'(<parameterset\s+type="wayDefaultParams"\s*>\s*<param\s+name="allowedTransportModes"\s+value=")car(")',
+            r'\1car,taxi,bus\2',
+            content,
+            flags=re.DOTALL
+        )
+
+        content = content.replace(
+            '<param name="osmFile" value="null" />',
+            '<param name="osmFile" value="%s" />' % network_file
+        )
+
+        # Export detailed geometry of the links if needed
+        if context.config("export_detailed_network"):
+            content = content.replace(
+                '<param name="outputDetailedLinkGeometryFile" value="null" />',
+                '<param name="outputDetailedLinkGeometryFile" value="%s/detailed_network.csv" />' % context.path(),
+            )
         
         content = content.replace(
             '<param name="outputCoordinateSystem" value="null" />',
@@ -60,6 +81,19 @@ def execute(context):
             </module>
             """
         )
+
+        content = content.replace(
+            '</module>',
+            """
+                <parameterset type="routableSubnetwork" >
+			        <param name="allowedTransportModes" value="taxi" />
+			        <param name="subnetworkMode" value="taxi" />
+		        </parameterset>
+            </module>
+            """
+        )
+
+        
 
 
         with open("%s/convert_network.xml" % context.path(), "w+") as f_write:
