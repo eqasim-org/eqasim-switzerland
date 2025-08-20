@@ -971,8 +971,121 @@ def compute_passenger_counts(joined_gdf, counts_df):
         fname = f"{clean_geo_name(canton)}_counts.json"
         with open(os.path.join(output_dir, fname), 'w', encoding='utf-8') as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
+def _to_list(x):
+    if isinstance(x, list): return x
+    if x is None or (isinstance(x, float) and pd.isna(x)): return []
+    return [x]
 
-def export_inter_cantonal_stops(joined_gdf, volumes_df):
+def _extract_line_ids(lines):
+    # lines is typically a list[dict], but be defensive
+    if isinstance(lines, (list, tuple)):
+        out = []
+        for d in lines:
+            if isinstance(d, dict):
+                lid = d.get("line_id")
+                if lid is not None:
+                    out.append(lid)
+        return set(out)
+    # if someone stored a single dict
+    if isinstance(lines, dict):
+        lid = lines.get("line_id")
+        return {lid} if lid is not None else set()
+    # otherwise nothing useful
+    return set()
+
+def export_inter_cantonal_stops(joined_gdf: gpd.GeoDataFrame, volumes_df: pd.DataFrame):
+    """
+    Faster version:
+      - vectorized line→cantons detection
+      - one-time volume aggregation
+      - dedupe by canonical stop_key
+      - bulk reprojection
+    Requires column 'assigned_canton' to decide inter-cantonal lines.
+    """
+    # ---- sanity checks (fail fast but friendly) ----
+    required_cols = {"stop_id", "lines", "geometry"}
+    missing = [c for c in required_cols if c not in joined_gdf.columns]
+    if missing:
+        raise ValueError(f"joined_gdf is missing columns: {missing}")
+    if "assigned_canton" not in joined_gdf.columns:
+        raise ValueError("joined_gdf must contain 'assigned_canton' to determine inter-cantonal lines.")
+    if not {"stop_id", "boardings", "alightings"}.issubset(volumes_df.columns):
+        raise ValueError("volumes_df must contain 'stop_id', 'boardings', 'alightings'.")
+
+    output_dir = os.path.join(DEFAULT_WORKDIR, "public", "data", "matsim", "transit", "stops_by_canton")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "inter_cantonal_stops.geojson")
+
+    # 0) prune rows without canton early
+    gdf = joined_gdf[~joined_gdf["assigned_canton"].isna()].copy()
+
+    # 1) normalize stop_ids and line_ids
+    gdf["stop_ids_list"] = gdf["stop_id"].map(_to_list)
+    gdf["line_ids_set"] = gdf["lines"].map(_extract_line_ids)
+    gdf["assigned_canton"] = gdf["assigned_canton"].apply(clean_geo_name)
+    # 2) line_id -> distinct canton count (vectorized)
+    # explode line sets to rows; skip entries with no lines
+    tmp = gdf.loc[gdf["line_ids_set"].map(bool), ["assigned_canton", "line_ids_set"]].copy()
+    # convert sets to lists before explode
+    tmp["line_ids_list"] = tmp["line_ids_set"].map(list)
+    exploded = tmp.explode("line_ids_list").rename(columns={"line_ids_list": "line_id"})
+    cantons_per_line = exploded.groupby("line_id", sort=False)["assigned_canton"].nunique()
+    inter_cantonal_lines = set(cantons_per_line[cantons_per_line > 1].index)
+
+    # 3) keep only stops on inter-cantonal lines
+    if inter_cantonal_lines:
+        mask = gdf["line_ids_set"].apply(lambda s: bool(s & inter_cantonal_lines))
+        gdf = gdf[mask].copy()
+    else:
+        gdf = gdf.iloc[0:0].copy()  # nothing qualifies
+
+    if gdf.empty:
+        # write a valid empty GeoJSON
+        empty = gpd.GeoDataFrame(geometry=[], crs=(joined_gdf.crs or "EPSG:4326"))
+        empty.to_crs("EPSG:4326").to_file(output_path, driver="GeoJSON")
+        print(f"Saved 0 inter-cantonal stops with volume to {output_path}")
+        return
+
+    # 4) dedupe by canonical stop_key
+    gdf["stop_key"] = gdf["stop_ids_list"].apply(lambda lst: tuple(sorted(lst)))
+    gdf = gdf.drop_duplicates(subset="stop_key").copy()
+
+    # 5) pre-aggregate volumes once
+    vol = volumes_df[["stop_id", "boardings", "alightings"]].copy()
+    vol["boardings"] = vol["boardings"].fillna(0)
+    vol["alightings"] = vol["alightings"].fillna(0)
+    vol["volume"] = vol["boardings"] + vol["alightings"]
+    volume_by_stop = vol.groupby("stop_id", dropna=False)["volume"].sum().to_dict()
+
+    gdf["volume"] = gdf["stop_ids_list"].apply(lambda ids: int(sum(volume_by_stop.get(s, 0) for s in ids)))
+
+    # 6) keep props (adapt to what you actually have; these are safe w/ your dtypes)
+    keep_keys = ["name", "stop_id", "lines", "assigned_canton", "predominant_mode", "modes_list"]
+    present = [k for k in keep_keys if k in gdf.columns]
+    gdf["properties"] = gdf.apply(lambda r: {k: r[k] for k in present} | {"volume": r["volume"]}, axis=1)
+
+    # 7) bulk reproject to WGS84
+    src = joined_gdf.crs or "EPSG:4326"
+    gdf = gdf.set_geometry("geometry")
+    gdf = gdf.set_crs(src, allow_override=True)
+    gdf_wgs84 = gdf.to_crs("EPSG:4326")
+
+    # 8) write GeoJSON (keep nested properties as-is)
+    features = [
+    {
+        "type": "Feature",
+        "geometry": mapping(gdf_wgs84.geometry.iloc[i]),
+        "properties": gdf_wgs84.properties.iloc[i],
+    }
+    for i in range(len(gdf_wgs84))
+    ]
+    geojson = {"type": "FeatureCollection", "features": features}
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(geojson, f, ensure_ascii=False, indent=2)
+    print(f"Saved {len(features)} inter-cantonal stops with volume to {output_path}")
+
+
+def export_inter_cantonal_stops_2(joined_gdf, volumes_df):
     """
     Identify inter-cantonal stops and export them as GeoJSON with volume.
     """
@@ -1032,7 +1145,7 @@ def export_inter_cantonal_stops(joined_gdf, volumes_df):
             keep_keys = ["name", "stop_id", "lines", "assigned_canton", "predominant_mode", "modes_list"]
             filtered_props = {k: props[k] for k in keep_keys if k in props}
             filtered_props["volume"] = total_volume
-
+            filtered_props["assigned_canton"] = clean_geo_name(filtered_props["assigned_canton"])
             # Reproject geometry to WGS84
             geometry_wgs = shapely_transform(transformer.transform, geometry)
 
