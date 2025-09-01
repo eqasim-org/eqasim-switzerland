@@ -12,19 +12,19 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
 
 
-def sample_rows_by_weight(df, weight_col='weight'):
-    df = df.copy()
+def sample_rows_by_weight(df2, weight_col="weight"):
+    df = df2.copy()
     
     # Separate integer and fractional parts
-    df['int_part'] = df[weight_col].astype(int)
-    df['frac_part'] = df[weight_col] - df['int_part']
+    df["int_part"] = df[weight_col].astype(int)
+    df["frac_part"] = df[weight_col] - df["int_part"]
     
     # Repeat rows according to integer part
-    repeated = df.loc[df.index.repeat(df['int_part'])].drop(columns=['int_part', 'frac_part'])
+    repeated = df.iloc[np.repeat(np.arange(len(df)), df["int_part"])].drop(columns=["int_part", "frac_part"])
     
     # Handle fractional part with Bernoulli sampling
-    fractional_mask = np.random.rand(len(df)) < df['frac_part']
-    fractional = df[fractional_mask].drop(columns=['int_part', 'frac_part'])
+    fractional_mask = np.random.rand(len(df)) < df["frac_part"]
+    fractional = df[fractional_mask].drop(columns=["int_part", "frac_part"])
     
     # Combine both
     sampled_df = pd.concat([repeated, fractional], ignore_index=True)
@@ -41,10 +41,174 @@ def sample_points_in_polygon(polygon, n):
     return points
 
 
-def execute(context):
+def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context):
+    points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df[x], df[y]), crs = "EPSG:4326").to_crs("EPSG:2056")
+    points["record"] = range(len(points))
+
+    ch_borders        = context.stage("data.spatial.swiss_border")[0]
+    ch_borders_simple = ch_borders.simplify(50)
+
+    points["dist_to_border"] = points.geometry.apply(lambda g: g.distance(ch_borders_simple)) / 1000
+    close_mask               = points["dist_to_border"] < distance_threshold
+    far_mask                 = ~close_mask
+
+    far_points   = points[far_mask]
+    close_points = points[close_mask]
+
+    close_points_registry = close_points.copy().drop_duplicates(subset = ["geometry"], keep = "first")
+    merging_aux_df        = close_points_registry.copy().rename(columns = {"geometry": "close_point_geometry"})
+    del merging_aux_df["dist_to_border"]     
+
+    nearest = far_points.sjoin_nearest(close_points_registry[["geometry", "record"]], how="left")
+    del nearest["index_right"]  
+    nearest = pd.merge(nearest, merging_aux_df, left_on = "record_right", right_on = "record", how = "left")
+    nearest = nearest[["record_left", "dist_to_border", "close_point_geometry", "geometry"]]
+    nearest.columns = ["record", "dist_to_border", "geometry", "geometry_before_projection"]
+    nearest["purpose"] = projected_purpose
+
+    close_points["geometry_before_projection"] = close_points["geometry"]
+    close_points["purpose"]             = default_purpose
+
+    points = pd.concat([nearest, close_points])
+    points = points.sort_values(by = "record")
+
+    df[column_name + "_point"]             = points["geometry"].values
+    df[column_name + "_before_projection"] = points["geometry_before_projection"].values
+    df[column_name + "_purpose"]           = points["purpose"].values
+    
+    del df[x]
+    del df[y]
+
+    df[column_name +  "_x"] = df[column_name + "_point"].apply(lambda p : p.x)
+    df[column_name +  "_y"] = df[column_name + "_point"].apply(lambda p : p.y)
+
+    return df
+
+
+def expand_and_sample(df, expand_column, weight_column):
+    # Expand
+    df_expanded = df.loc[df.index.repeat(df[expand_column])]
+    df_expanded["passenger_index"] = df_expanded.groupby(df_expanded.index).cumcount() + 1
+    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]==1), "trip_mode"] = "car"
+    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]>1), "trip_mode"]  = "car_passenger"
+    
+    del df_expanded[expand_column]
+    del df_expanded["passenger_index"]
+
+    # Sample
+    df_sampled = sample_rows_by_weight(df_expanded, weight_col = weight_column)
+    del df_sampled[weight_column]
+
+    return df_sampled.copy().reset_index()
+
+
+def process_from_to_trips(df_trips, context):
     # Load municipalities
     df_municipalities, _ = context.stage("data.spatial.municipalities")
 
+    # 1. Remove "through" trips that were not classified properly
+    trips    = df_trips[(df_trips["origin_country"]=="CH") | (df_trips["destination_country"]=="CH")]
+    trips_od = trips[["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers"]]
+
+    # 2. Remove trips with missing information on start or end point
+    mask_missing_start = (trips_od["start_x"].str.strip() == "") # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
+    mask_missing_end   = (trips_od["end_x"].str.strip() == "")   # Same with destinations
+    
+     # This removes 1.49% of the records
+    df = trips_od[~(mask_missing_start) & ~(mask_missing_end)]
+
+    # Reorder start and end so that all trips end in CH
+    mask = df["origin_country"] == "CH"
+    df.loc[mask, ["origin_country", "destination_country"]] = df.loc[mask, ["destination_country", "origin_country"]].values
+    df.loc[mask, ["start_x", "end_x"]] = df.loc[mask, ["end_x", "start_x"]].values
+    df.loc[mask, ["start_y", "end_y"]] = df.loc[mask, ["end_y", "start_y"]].values
+
+    # Prepare to sample points from destination municipality
+    destinations = df.apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
+    destinations = gpd.GeoSeries(destinations, crs = "EPSG:4326")
+    destinations = destinations.to_crs("EPSG:2056")
+
+    joined = gpd.sjoin(gpd.GeoDataFrame(geometry = destinations), df_municipalities, how='left', predicate='within')
+
+    df.loc[:, "destination_municipality"] = joined["municipality_id"].values
+
+    # In 23 cases, corresponding mostly to people going to Liechtenstein or to points exactly on the border
+    # in le Locle or Saint-Gingolph, the municipality cannot be found. 
+    # Let's remove these observations.
+    df = df[df["destination_municipality"].notna()]
+
+    df = expand_and_sample(df, "nb_passengers", "weight")
+
+    # Fix the origins
+    df = project_point_series_close_to_border(df, "start_x", "start_y", 20, "home", "other", "origin", context)
+
+    # Re-create the destinations
+    destinations = df.apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
+    destinations = gpd.GeoSeries(destinations, crs = "EPSG:4326")
+    destinations = destinations.to_crs("EPSG:2056")
+
+    df["destination_x"] = destinations.apply(lambda p : p.x)
+    df["destination_y"] = destinations.apply(lambda p : p.y)
+
+    df["cross_border_person_id"] = range(len(df))
+    df["cross_border_person_id"] = "CBS_" + df["cross_border_person_id"].astype(str)
+
+    df["residence_x"] =  df["origin_before_projection"].apply(lambda p: p.x)
+    df["residence_y"] =  df["origin_before_projection"].apply(lambda p: p.y)
+
+    df["label"] = "From-To"
+
+    df = df[["cross_border_person_id", "label",
+        "origin_x", "origin_y", "destination_x", "destination_y",
+        "residence_x", "residence_y",
+        "trip_mode", "trip_purpose"]]
+    
+    return df
+
+
+def process_through_trips(through_trips, N, context):
+    through_od = through_trips[
+        ["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers"]
+    ]
+
+    mask_missing_start = (through_od["start_x"].str.strip() == "") # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
+    mask_missing_end   = (through_od["end_x"].str.strip() == "")    
+
+    df = through_od[~(mask_missing_start) & ~(mask_missing_end)] # This removes 9% / 11.3% of the records (unweighted/weighted)
+
+    df_expanded = df.loc[df.index.repeat(df["nb_passengers"])]
+    df_expanded["passenger_index"] = df_expanded.groupby(df_expanded.index).cumcount() + 1
+    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]==1), "trip_mode"] = "car"
+    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]>1), "trip_mode"]  = "car_passenger"
+
+    del df_expanded["nb_passengers"]
+    del df_expanded["passenger_index"]
+
+    df_sampled = sample_rows_by_weight(df_expanded, weight_col = "weight")
+    del df_sampled["weight"]
+
+    df = df_sampled.copy().reset_index()
+
+    df = project_point_series_close_to_border(df, "start_x", "start_y", 20, "other", "other", "origin", context)
+    df = project_point_series_close_to_border(df, "end_x", "end_y", 20, "other", "other", "destination", context)
+
+    df["cross_border_person_id"] = range(N, N + len(df))
+    df["cross_border_person_id"] = "CBS_" + df["cross_border_person_id"].astype(str)
+
+    df["residence_x"] =  df["origin_before_projection"].apply(lambda p: p.x)
+    df["residence_y"] =  df["origin_before_projection"].apply(lambda p: p.y)
+
+    df["label"] = "Through"
+
+    df = df[["cross_border_person_id", "label",
+        "origin_x", "origin_y", "destination_x", "destination_y",
+        "residence_x", "residence_y",
+        "trip_mode", "trip_purpose"]]
+
+    return df
+
+
+def execute(context):
     # Load data
     # We are using the 2021 release because the 2015 one doesn't provide reliable destination coordinates.
     # Obviously there are some covid-related biases but this is the best we currently have.
@@ -128,188 +292,37 @@ def execute(context):
     del df2021["train_type"]
 
     # 11. Adjust weight
-    # Not sure how we should include the number of passengers here. Is the weight corresponding to the entire group? To one single person?
-    # Deciding that the weight weighs the entire group leads to the best approximation of daily border crossings - 2.2 persons according to https://www.bazg.admin.ch/bazg/de/home/das-bazg/fakten-und-zahlen/ein-tag-an-der-grenze.html 
-    df2021["weight"] = df2021["weight"] #/ df2021["nb_passengers"]
-    df2021["weight"] = df2021["weight"] / 2 # Because the persons entering the country have to leave it too
+    days    = {"Mo-Fr": 5, "WE": 2}
+    day_key = "Mo-Fr"
+
+    if context.config("weekend"):
+        day_key = "WE"
+
+    day_value = days[day_key]
+    df_days   = df2021[df2021["day_cat"]==day_key]
+    df_days.loc[:, "weight"] = df_days["weight"] / (52 * day_value)
+
+    df_days["weight"] = df_days["weight"] / 2 # Because the persons entering the country have to leave it too
+    del df_days["day_cat"]
 
     # 12. Only select border crossing data - remove Alps crossing data
-    borders = df2021[df2021["crossing_cat"]==1]
-    alps    = df2021[df2021["crossing_cat"]==2]
+    borders = df_days[df_days["crossing_cat"]==1]
     
     del borders["crossing_cat"]
-    del alps["crossing_cat"]
     del borders["direction_alps"]
 
     # 13. Remove Swiss residents, their mobility should be covered in the Microcensus
     residents_ch_mask = borders["residence_country"] == "CH"
-
     borders = borders[~ residents_ch_mask]
 
-    # 76.5% are entering CH, 3.1% are leaving CH, 20.3% are going through CH,
-    # 0.1% is traffic within CH.
-    # Not sure why there is this dissimetry between people entering and leaving the country.
-    # Differences in where the data was collected? Wrong categorization of responses? 
-    # Unclear question formulation?
-    # We decided to thus group together people entering and leaving CH, as long as they are not CH residents.
-    # Here we will start by focusing on traffic from/to CH, we will add traffic through CH later.
-    # And we do not include traffic within CH.
-    #print(borders.groupby(["travel_cat"])["weight"].sum() / np.sum(borders["weight"]) * 100)
+    # Now process the trips
+    trips = borders[borders["travel_cat"].isin(["From CH", "To CH"])]   
+    from_to_trips = process_from_to_trips(trips, context)
 
     # TODO process people crossing Switzerland
     through = borders[borders["travel_cat"]=="Through CH"]
+    through_trips = process_through_trips(through, len(from_to_trips), context)
 
-    # Now process the trips
-    trips = borders[borders["travel_cat"].isin(["From CH", "To CH"])]    
-
-    # 1. Remove "through" trips that were not classified properly
-    trips    = trips[(trips["origin_country"]=="CH") | (trips["destination_country"]=="CH")]
-    trips_od = trips[["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "day_cat", "trip_purpose", "weight", "nb_passengers"]]
-
-    # 2. Remove trips with missing information on start or end point
-    mask_missing_start = (trips_od["start_x"].str.strip() == "") # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
-    mask_missing_end   = (trips_od["end_x"].str.strip() == "")   # Same with destinations
-    
-    trips_od_with_info = trips_od[~(mask_missing_start) & ~(mask_missing_end)]
-
-    # This removes 1.49% of the records
-    # print(trips_od_with_info["weight"].sum() / trips_od["weight"].sum() * 100)
-
-    # 3. Adjust the weight
-    df                  = trips_od_with_info[trips_od_with_info["day_cat"]=="Mo-Fr"].copy()
-    df.loc[:, "weight"] = df["weight"] / (5*52) # Approximation of the number of weekend days per year
-
-    if context.config("weekend"):
-        df                  = trips_od_with_info[trips_od_with_info["day_cat"]=="WE"]
-        df.loc[:, "weight"] = df["weight"] / (2*52) # Approximation of the number of weekend days per year
-
-    # Because the number of trips from/to CH is assymetric, reorder start and end so that all trips end in CH
-    mask = df["origin_country"] == "CH"
-    df.loc[mask, ["origin_country", "destination_country"]] = df.loc[mask, ["destination_country", "origin_country"]].values
-    df.loc[mask, ["start_x", "end_x"]] = df.loc[mask, ["end_x", "start_x"]].values
-    df.loc[mask, ["start_y", "end_y"]] = df.loc[mask, ["end_y", "start_y"]].values
-
-    # Prepare to sample points from destination municipality
-    destinations = df.apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
-    destinations = gpd.GeoSeries(destinations, crs = "EPSG:4326")
-    destinations = destinations.to_crs("EPSG:2056")
-
-    joined = gpd.sjoin(gpd.GeoDataFrame(geometry = destinations), df_municipalities, how='left', predicate='within')
-
-    df.loc[:, "destination_municipality"] = joined["municipality_id"].values
-
-    # In 23 cases, corresponding mostly to people going to Liechtenstein or to points exactly on the border
-    # in le Locle or Saint-Gingolph, the municipality cannot be found. 
-    # Let's remove these observations.
-    df = df[df["destination_municipality"].notna()]
-
-    # Adjust trip mode when sharing the vehicle
-    df_expanded = df.loc[df.index.repeat(df["nb_passengers"])]
-    df_expanded["passenger_index"] = df_expanded.groupby(df_expanded.index).cumcount() + 1
-    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]==1), "trip_mode"] = "car"
-    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]>1), "trip_mode"]  = "car_passenger"
-    
-    del df_expanded["nb_passengers"]
-    del df_expanded["passenger_index"]
-
-    # Sample
-
-    df_sampled = sample_rows_by_weight(df_expanded, weight_col = "weight")
-
-    del df_sampled["end_x"]
-    del df_sampled["end_y"]
-
-    # Sample random point in destination municipality. First join the geometry, then sample 100 points per municipality
-    # and select randomly one of them as the destination
-    df_sampled['destination_municipality'] = df_sampled['destination_municipality'].astype(int)
-    df_municipalities['municipality_id']   = df_municipalities['municipality_id'].astype(int)
-    
-    df_sampled = df_sampled.merge(df_municipalities[['municipality_id', 'geometry']],
-                  left_on='destination_municipality',
-                  right_on='municipality_id',
-                  how='left')
-
-    samples_per_municipality = 100
-    municipality_points      = {}
-    
-    for _, row in df_municipalities.iterrows():
-        code = row['municipality_id']
-        geom = row['geometry']
-        municipality_points[code] = sample_points_in_polygon(geom, samples_per_municipality)
-
-    def assign_random_point(muni_code):
-        candidates = municipality_points.get(muni_code, [])
-        if candidates:
-            return random.choice(candidates)
-        else:
-            return None  
-    
-    df_sampled['destination_point'] = df_sampled['destination_municipality'].apply(assign_random_point)
-
-    del df_sampled["geometry"]
-    del df_sampled["day_cat"]
-    del df_sampled["municipality_id"]
-    del df_sampled["destination_municipality"]
-    del df_sampled["weight"]
-
-    df = df_sampled.copy().reset_index()
-
-    # Fix the origins
-    origins = gpd.GeoDataFrame(
-        geometry=gpd.points_from_xy(df["start_x"], df["start_y"]),
-        crs="EPSG:4326"
-    ).to_crs("EPSG:2056")
-
-    origins["record"] = range(len(origins))
-    ch_borders        = context.stage("data.spatial.swiss_border")[0]
-    ch_borders_simple = ch_borders.simplify(50)
-
-    origins["dist_to_ch"] =  origins.geometry.apply(lambda g: g.distance(ch_borders_simple)) / 1000
-
-    close_mask = origins["dist_to_ch"] < 20
-    far_mask = ~close_mask
-
-    far_points            = origins[far_mask]
-    close_points          = origins[close_mask]
-    close_points_registry = close_points.copy().drop_duplicates(subset = ["geometry"], keep = "first")
-    merging_aux_df        = close_points_registry.copy().rename(columns = {"geometry": "close_point_geometry"})
-    del merging_aux_df["dist_to_ch"]    
-
-    nearest = far_points.sjoin_nearest(close_points_registry[["geometry", "record"]], how="left")
-    del nearest["index_right"]  
-    nearest = pd.merge(nearest, merging_aux_df, left_on = "record_right", right_on = "record", how = "left")
-    nearest = nearest[["record_left", "dist_to_ch", "close_point_geometry", "geometry"]]
-    nearest.columns = ["record", "dist_to_ch", "geometry", "geometry_before_projection"]
-    nearest["origin_purpose"] = "other"
-
-    close_points["geometry_before_projection"] = close_points["geometry"]
-    close_points["origin_purpose"]             = "home"
-
-    origins = pd.concat([nearest, close_points])
-    origins = origins.sort_values(by="record")
-
-    df["origin_point"]                          = origins["geometry"].values
-    df["origin_before_projection_to_ch_border"] = origins["geometry_before_projection"].values
-    df["origin_purpose"]                        = origins["origin_purpose"].values
-
-    del df["start_x"]
-    del df["start_y"]
-
-    df["cross_border_person_id"] = range(len(df))
-    df["cross_border_person_id"] = "CBS_" + df["cross_border_person_id"].astype(str)
-
-    df["origin_x"] =  df["origin_point"].apply(lambda p: p.x)
-    df["origin_y"] =  df["origin_point"].apply(lambda p: p.y)
-
-    df["destination_x"] =  df["destination_point"].apply(lambda p: p.x)
-    df["destination_y"] =  df["destination_point"].apply(lambda p: p.y)
-
-    df["residence_x"] =  df["origin_before_projection_to_ch_border"].apply(lambda p: p.x)
-    df["residence_y"] =  df["origin_before_projection_to_ch_border"].apply(lambda p: p.y)
-
-    df = df[["cross_border_person_id",
-        "origin_x", "origin_y", "destination_x", "destination_y",
-        "residence_x", "residence_y",
-        "trip_mode", "trip_purpose"]]
+    df = pd.concat([from_to_trips, through_trips])
 
     return df

@@ -14,6 +14,7 @@ def configure(context):
     context.stage("data.osm.clean")
     context.config("data_path")
     context.config("export_detailed_network")
+    
 
 def execute(context):
     network_file = context.stage("data.osm.clean")
@@ -30,6 +31,7 @@ def execute(context):
             '<param name="allowedTransportModes" value="bus, car" />',
             '<param name="allowedTransportModes" value="bus" />'
         )
+
         content = re.sub(
             r'(<parameterset\s+type="wayDefaultParams"\s*>\s*<param\s+name="allowedTransportModes"\s+value=")car(")',
             r'\1car,taxi,bus\2',
@@ -58,18 +60,6 @@ def execute(context):
             '<param name="outputNetworkFile" value="null" />',
             '<param name="outputNetworkFile" value="%s/converted_network.xml.gz" />' % context.path()
         )
-        
-        # higher link length
-        content = content.replace(
-            '<param name="maxLinkLength" value="500.0" />',
-            '<param name="maxLinkLength" value="99999.0" />'
-        )
-        # Export detailed geometry of the links if needed
-        if context.config("export_detailed_network"):
-            content = content.replace(
-                '<param name="outputDetailedLinkGeometryFile" value="null" />',
-                '<param name="outputDetailedLinkGeometryFile" value="detailed_network.csv" />',
-            )
 
         content = content.replace(
             '<param name="parseTurnRestrictions" value="false" />',
@@ -109,35 +99,12 @@ def execute(context):
             """
         )
 
-        
-
-
         with open("%s/convert_network.xml" % context.path(), "w+") as f_write:
             f_write.write(content)
             
     pt2matsim.run(context, "org.matsim.pt2matsim.run.Osm2MultimodalNetwork", [
         "%s/convert_network.xml" % context.path()
     ],[])
-    
-    if context.config("simplify_network_in_eqasim") or context.config("correct_links_capacity"):
-        network_path =  "%s/converted_network.xml.gz" % context.path()
-        net = read_network(network_path)
-
-        if context.config("simplify_network_in_eqasim") :
-            stats = net.clean_network()
-            # Save stats
-            with open("%s/statistics_of_cleaning_network.json" % context.path(), "w") as f:
-                json.dump(stats, f, indent=4) 
-
-        if context.config("correct_links_capacity"):
-            sampling_rate = context.config("input_downsampling")
-            net.correct_capacity( sampling_rate = sampling_rate,
-                                  minimum_speed = context.config("minimum_speed")/3.6)
-            
-        # Do not remove the last version of the network, just rename it.
-        shutil.move(network_path, network_path.replace("converted_network","converted_network_uncleaned"))
-        net.save(network_path)
-        
 
     assert (os.path.exists("%s/converted_network.xml.gz" % context.path()))
     return "%s/converted_network.xml.gz" % context.path()

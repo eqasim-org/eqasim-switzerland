@@ -12,9 +12,10 @@ def execute(context):
     df       = context.stage("data.cross_border.destinations").copy()
     mz_trips = context.stage("data.microcensus.trips")[0].copy()
 
-    population = df[["cross_border_person_id", "mz_person_id",
+    population = df[["cross_border_person_id", "label", "mz_person_id",
                      "origin_x", "origin_y", 
                      "destination_x", "destination_y", "destination_id"]]
+    
     mz_trips   = mz_trips[["person_id", "trip_id", 
                            "departure_time", "arrival_time", 
                            "mode", "purpose"]].rename(columns = {"purpose": "following_purpose"})
@@ -25,7 +26,7 @@ def execute(context):
     df_trips = pd.merge(population, mz_trips, left_on="mz_person_id", right_on = "person_id")
     del df_trips["person_id"]
 
-    df_trips = df_trips[["cross_border_person_id", "trip_id",
+    df_trips = df_trips[["cross_border_person_id", "label", "trip_id",
                          "origin_x", "origin_y",
                          "destination_x", "destination_y",
                          "destination_id",
@@ -71,8 +72,13 @@ def execute(context):
     
     df_trips = df_trips.sort_values(by=["person_id", "trip_index"]).reset_index(drop=True)
 
+    # For the people going through Switzerland (label = "Through"), only the first trip is relevant
+    mask = (df_trips["label"] != "Through") | ((df_trips["label"] == "Through") & (df_trips["trip_index"] == 1))
+    df_trips = df_trips[mask]
+
     activities = pd.DataFrame({
         "person_id": df_trips["person_id"],
+        "label": df_trips["label"],
         "activity_index": df_trips["trip_index"],
         "end_time": df_trips["departure_time"],
         "purpose": df_trips["preceding_purpose"],
@@ -91,6 +97,7 @@ def execute(context):
     last_activities = df_trips.groupby("person_id").tail(1).copy()
     final_activities = pd.DataFrame({
         "person_id": last_activities["person_id"],
+        "label": last_activities["label"],
         "activity_index": last_activities["trip_index"] + 1,
         "start_time": last_activities["arrival_time"],
         "end_time": 30*3600,
@@ -112,10 +119,12 @@ def execute(context):
     df_activities["duration"] = df_activities["end_time"] - df_activities["start_time"]
     df_activities["is_last"]  = df_activities["following_mode"].isna()
 
-    df_activities = df_activities[["person_id", "activity_index",
+    df_activities = df_activities[["person_id", "activity_index", "label",
                                    "start_time", "end_time", "duration",
                                    "purpose", "is_last",
                                    "geometry", "destination_id", "following_mode"
                                    ]]
+    
+    df_activities.to_csv("/cluster/project/cmdp/asallard/eqasim/Improvements/Cross border/Results_eqasim_20250901/activities.csv", index=False)
 
     return df_activities

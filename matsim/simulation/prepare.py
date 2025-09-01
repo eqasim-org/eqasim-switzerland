@@ -151,10 +151,36 @@ def execute(context):
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
 
+    # If we want to simulate buses, some lines have to be added to the config.
+    if not context.config("useScheduleBasedTransport"):
+        config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
+        assert os.path.exists(config_path)
+
+        # Parse XML and preserve DOCTYPE and comments
+        parser = etree.XMLParser(remove_blank_text=True)
+        tree = etree.parse(config_path, parser)
+        root = tree.getroot()
+
+        # Create new module
+        module = etree.Element("module", name="SBBPt")
+        # everything else will be simulated
+        etree.SubElement(module, "param", name="deterministicServiceModes",
+                        value="rail,subway,ferry,tram,funicular,cable-car,gondola,other")
+        etree.SubElement(module, "param", name="createLinkEventsInterval", value="10")
+
+        # Append to root
+        root.append(module)
+
+        # Write back to file with DOCTYPE
+        doctype_str = '<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">'
+        tree.write(config_path, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
+
 
     # Route the population
-    population_output_path = "%spopulation.xml.gz" % context.config("output_prefix")
-    
+    population_output_path = "%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix"))
+
+    # routing class does not work with turn restrictions; it seems something to do with multi-threading as
+    # it works when we use 1 thread; this ius however not an issue as MATSim routes teverything in iteration 0
     eqasim.run(context, "org.eqasim.core.scenario.routing.RunPopulationRouting", [
         "--config-path", config_path,
         "--output-path", population_output_path,

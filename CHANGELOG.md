@@ -1,7 +1,7 @@
 This change log is written in descending order. Changes that happen after version X was released, are written above that version number, because they will be included in the (note yet determined) next version number.
 
 **Development version**
-- Update to eqasim 1.5.0
+- Update to eqasim 2.0.0 commit acf065f
 - Added home coordiantes to each person
 - Speedup of analysis
 - Added VDF as a possible traffic model

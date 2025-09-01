@@ -11,7 +11,10 @@ def configure(context):
 
 
 def execute(context):
-    df = context.stage("data.cross_border.match_activity_chain")
+    df_all = context.stage("data.cross_border.match_activity_chain")
+
+    df_through = df_all[df_all["label"]=="Through"]
+    df = df_all[df_all["label"]=="From-To"]
 
     destinations = gpd.GeoSeries.from_xy(df["destination_x"], df["destination_y"])
     destinations = gpd.GeoDataFrame(geometry = destinations, crs = "EPSG:2056")
@@ -38,7 +41,7 @@ def execute(context):
     statent["offers_shop"]           = statent["noga"].str.startswith("47")
 
     for purpose in ["work", "work_secondary", "other", "education", "leisure", "shop"]:
-        mask_purpose         = df["trip_purpose"] == purpose
+        mask_purpose         = (df["trip_purpose"] == purpose)
         mask_statent_purpose = statent[f"offers_{purpose}"]
 
         mun_ids = list(set(df[mask_purpose]["destination_municipality_id"]))
@@ -56,7 +59,7 @@ def execute(context):
             if len(candidates) == 0:
                 candidates = statent[mask_statent_mun]
 
-            sampled    = candidates.sample(
+            sampled = candidates.sample(
                 n = N_sample,
                 random_state = context.config("random_seed"),
                 replace = True
@@ -66,7 +69,11 @@ def execute(context):
             df.loc[mask, "destination_x"]  = sampled["destination_x"].values
             df.loc[mask, "destination_y"]  = sampled["destination_y"].values
 
-    df = df[["cross_border_person_id", "mz_person_id",
+    df = pd.concat([df, df_through])
+
+    df["destination_id"] = df["destination_id"].fillna(-1)
+
+    df = df[["cross_border_person_id", "mz_person_id", "label",
              "residence_x", "residence_y", 
              "trip_mode", "trip_purpose", "destination_id",
              "origin_x", "origin_y", "destination_x", "destination_y"]]

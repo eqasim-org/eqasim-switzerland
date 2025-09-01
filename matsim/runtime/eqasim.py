@@ -5,9 +5,9 @@ import matsim.runtime.git as git
 import matsim.runtime.java as java
 import matsim.runtime.maven as maven
 
-DEFAULT_EQASIM_VERSION = "1.5.0"
+DEFAULT_EQASIM_VERSION = "2.0.0"
 DEFAULT_EQASIM_BRANCH = "cmdp"
-DEFAULT_EQASIM_COMMIT = "5f63000"
+DEFAULT_EQASIM_COMMIT = "acf065f"
 
 def configure(context):
     context.stage("matsim.runtime.git")
@@ -21,14 +21,8 @@ def configure(context):
     context.config("eqasim_path", "")
 
 def run(context, command, arguments):
-    version = context.config("eqasim_version")
-
-    # Make sure there is a dependency
-    context.stage("matsim.runtime.eqasim")
-
-    jar_path = "%s/eqasim-java/switzerland/target/switzerland-%s.jar" % (
-        context.path("matsim.runtime.eqasim"), version
-    )
+    jar_path = context.stage("matsim.runtime.eqasim")
+    jar_path = "{}/{}".format(context.path("matsim.runtime.eqasim"), jar_path)
     java.run(context, command, arguments, jar_path)
 
 def execute(context):

@@ -51,8 +51,8 @@ class Constants:
 
         self.POPULATION_DENSITY_RADIUS = 2.5 * 1e3
 
-        self.BASE_SCALING_YEAR = 2015
-        self.BASE_PROJECTED_YEAR = 2018
+        self.BASE_SCALING_YEAR = 2023
+        self.BASE_PROJECTED_YEAR = 2040
         
 
 def configure(context):

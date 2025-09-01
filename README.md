@@ -169,7 +169,7 @@ which is a spatial classification of public transport level of service.
 **Municipality Types**
 - Content: `spatial/Raumgliederungen.xlsx` is an Excel sheet with all kinds of spatial
 classifications for all municipalities on 01.01.2024
-- Fo to the link below, type 01.01.2024 as the date and select `Raum mit städtischem Charakter 2020` click on `Suche` and doenload the `xlsx` file provided at the bottom and place it in the `spatial` folder.
+- Go to the link below, type 01.01.2024 as the date and select `Raum mit städtischem Charakter 2020` click on `Suche` and doenload the `xlsx` file provided at the bottom and place it in the `spatial` folder.
 - Year: 01.01.2024
 - Contract: [Open Data](https://www.agvchapp.bfs.admin.ch/de/typologies/query)
 
@@ -181,9 +181,7 @@ classifications for all municipalities on 01.01.2024
 
 
 **OSM**
-- Content: `osm/` contains a snapshot of the OSM database for Switzerland
-from [geofabrik][5]. Originally, the format is bz2, but pt2matsim can only work
-with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
+- Content: `osm/` contains a snapshot of the OSM database for Switzerland. 
 - State: 2025
 - Contract: [Open Data](https://download.geofabrik.de/europe/switzerland.html)
 
@@ -214,16 +212,16 @@ with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
     - State: 2008
     - Contract: Open data available in the `opendata` folder in this repository.
 
-**Projections not used; need an update tot he code**
+**Projections are used currently only for the population and not freight; need an update to the code**
 - Households:
-    - Content: `projections/households` contains data for household sizes per canton from 2012-2017 and projections of household sizes per canton in 2020 and 2050.
-    All projections are according to the BfS reference scenario.
+    - Content: `projections/households` should contain data for number of households per canton from 2020-2050 (unfortunately it is no lonegr avaialble to download household size distribution per canton). All projections are according to the BfS reference scenario.
+    - Download the `xlsx` file and place it in the `projections/households` folder
     - State: 2024
     - Contract:
         - Projections: [Open Data](https://www.bfs.admin.ch/bfs/de/home/statistiken/katalog.assetdetail.16344851.html)
 - Population:
-    - Content: `projections/population` contains data of population per canton, nationality, gender and age from 2010-2017 and projections from 2020 to 2050.
-    All projections are according to the BfS reference scenario.
+    - Content: `projections/population` contains data of population per canton, nationality, gender and age from 2024-2055. All projections are according to the BfS reference scenario.
+    - On the webpage below select for Kanton: all except Schweiz; Staatsangehörigkeit (Kategorie): Schweiz and Ausland; Geschlecht: Mann and Frau; Alter: all except Total; Jahr: all; Beobachtungseinheit: Bevölkerungsstand am 1. Januar. Click on Weiter. On the left side in the dropdwon menu select `Ergebnis speichern asl... Excel`, and place the downloaded file in the `projections/population` folder
     - State: 2024
     - Contract:
         - Projections: [Open Data](https://www.pxweb.bfs.admin.ch/pxweb/de/px-x-0104020000_101/px-x-0104020000_101/px-x-0104020000_101.px)
@@ -232,5 +230,102 @@ with gz. Therefore, it has been repackaged (see `utils/repackage_osm.sh`)!
     All projections are according to the ARE Transport Outlook 2050 reference scenario.
     - State: 2024
     - Contract: 
+
+Finally your data folder should look something like this:
+```
++--- statpop
+|   +--- STATPOP_2023_LINK_CH.csv
+|   +--- STATPOP_2023_HOUSEHOLD_CH_K.csv
+|   +--- STATPOP_PP_2023_TEIL_1.csv
+|   +--- STATPOP_PP_2023_TEIL_2.csv
++--- statent
+|   +--- 250221_STATENT_2022_LOC_17042025.csv
++--- osm
+|   +--- switzerland-latest-2025.osm.pbf
++--- freight
+|   +--- GTE_2023
+|   |   +--- journeych.csv
+|   |   +--- transport.csv
+|   |   +--- week.csv
+|   +--- GQGV_2019
+|   |   +--- GQGV_2019_Mikrodaten.csv
+|   +--- departure_times.csv
++--- gtfs
+|   +--- gtfs_fp2024_2024-11-11.zip
++--- hafas
++--- microcensus
+|   +--- haushalte.csv
+|   +--- zielpersonen.csv
+|   +--- wege.csv
+|   +--- etappen.csv
+|   +--- haushaltspersonen.csv
++--- projections
+|   +--- households
+|   |   +--- su-d-01.03.03.01.xlsx
+|   +--- population
+|   |   +--- px-x-0104020000_101_20250808-151932.csv
++--- spatial
+|   +--- municipality
+|   |   +--- 2023
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.cpg
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.dbf
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.prj
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shx
+|   |   +--- 2022
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.cpg
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.dbf
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.prj
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shx
+|   |   +--- 2021
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.cpg
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.dbf
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.prj
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp
+|   |   |   +--- swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shx
+|   +--- Raumgliederungen.xlsx
+|   +--- nuts_borders
+|   |   +--- NUTS_RG_01M_2024_4326.cpg
+|   |   +--- NUTS_RG_01M_2024_4326.dbf
+|   |   +--- NUTS_RG_01M_2024_4326.prj
+|   |   +--- NUTS_RG_01M_2024_4326.shp
+|   |   +--- NUTS_RG_01M_2024_4326.shx
+|   |   +--- NUTS_RG_01M_2021_4326.cpg
+|   |   +--- NUTS_RG_01M_2021_4326.dbf
+|   |   +--- NUTS_RG_01M_2021_4326.prj
+|   |   +--- NUTS_RG_01M_2021_4326.shp
+|   |   +--- NUTS_RG_01M_2021_4326.shx
+|   +--- ov_guteklasse
+|   |   +--- OeV_Gueteklassen_ARE.gpkg
+|   +--- canton
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.cpg
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.dbf
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.prj
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shp
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shx
+|   +--- statistical_quarter_borders
+|   |   +--- quart17.dbf
+|   |   +--- quart17.prj
+|   |   +--- quart17.shp
+|   |   +--- quart17.shx
+|   +--- postal_codes
+|   |   +--- AMTOVZ_ZIP.cpg
+|   |   +--- AMTOVZ_ZIP.dbf
+|   |   +--- AMTOVZ_ZIP.prj
+|   |   +--- AMTOVZ_ZIP.shp
+|   |   +--- AMTOVZ_ZIP.shx
+|   +--- country
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.cpg
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.dbf
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.prj
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.shp
+|   |   +--- swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.shx
+|   +--- be-b-00.04-sg-01.xlsx
++--- structural_survey
+|   +--- se_zpers_2021_ch.csv
+|   +--- se_zpers_2022_ch.csv
+|   +--- se_zpers_2023_ch.csv
+```
 
 

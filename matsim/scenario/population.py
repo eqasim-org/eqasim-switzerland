@@ -194,6 +194,9 @@ def execute(context):
 
     df_persons = df_persons.merge(unique_modes_per_agent[loop_columns], on = "person_id", how="left")
     df_persons[loop_columns] = df_persons[loop_columns].fillna(False)
+
+    # TODO remove ASAP
+    df_activities["following_mode"] = df_activities["following_mode"].str.replace("_loop", "", regex=False)
     
     # Bring in correct order (although it should already be)
     df_persons    = df_persons.sort_values(by="person_id")
