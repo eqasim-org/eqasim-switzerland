@@ -1,0 +1,87 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import logging
+import os
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def configure(context):
+    # Path to the csv file containing the dataset of routed trips  
+    context.config("routed_trips_path", "Routed_alternatives_v3_FINAL.txt")
+
+
+def execute(context):
+    path_to_data = context.config("routed_trips_path")
+    assert os.path.exists(path_to_data), f"The provided path for routed_trips_path ({path_to_data}) does not exist."
+
+    df = pd.read_csv(path_to_data, sep=";")
+
+    modes = ["pt","car","walk","bike"]
+    choice_cols = ["choice_"+m for m in modes]
+
+    # Remove trips with less than two routed choices
+    keep_row  = df[choice_cols].notna().sum(axis=1)>1    
+    df = df[keep_row].reset_index(drop=True)
+    logger.info((~keep_row).sum()," trips are removed because they have less than 2 routed modes.")
+
+    # Remove trips with no mode selected
+    keep_row  = df["w_verkehrsmittel"].notna()  
+    df = df[keep_row].reset_index(drop=True)
+    logger.info((~keep_row).sum()," trips are removed because their mode is nan.")
+
+    # Sort by person and trip id
+    df = df.sort_values(by=["HHNR","WEGNR"]).reset_index(drop=True)
+
+    # only keep selected alternatives
+    modes_cols = {mode: [col for col in df.columns if "_"+mode in col] for mode in modes}
+
+    filtered_df = df[['HHNR', 'WEGNR', "w_verkehrsmittel"]].copy()
+    filtered_df = filtered_df.rename(columns={"HHNR":"person_id","WEGNR":"trip_id","w_verkehrsmittel":"mode"})
+
+    ### Set the right mode (pt, car, walk, bike, car_passenger)
+    MOD_DICT = {**{k: 'pt' for k in [2,3,5,6,7]},
+                **{k: 'car' for k in [9,10]},
+                **{k: 'walk' for k in [15]},
+                **{k: 'bike' for k in [14]},
+                **{k: 'unknown' for k in [-99,17,1,4,8,11,12,13,16]}}
+    filtered_df["mode"] = filtered_df["mode"].map(MOD_DICT)
+
+    for mode, cols in modes_cols.items():    
+        selected_alternative = "choice_"+mode
+        mode_new_cols = set([col.split('.')[0] for col in cols if col!=selected_alternative])
+        
+        for col in mode_new_cols:
+            all_alternatives = [c for c in cols if col in c]
+            
+            if len(all_alternatives):
+                df["sel_col"] = df[selected_alternative].map(lambda x: col+'.'+str(int(x)) if (not np.isnan(x)) else "noCol")
+                get_col = lambda x: x[x["sel_col"]] if x["sel_col"]!="noCol" else np.nan
+                filtered_df[col] = df[["sel_col",*all_alternatives]].apply(get_col, axis=1)
+            else:
+                print(f"No alternatives found for {mode_new_cols}")
+
+    df = df.drop(columns="sel_col")
+
+    # Filtering
+    ### Start with unknown modes
+    to_remove = filtered_df["mode"] == "unknown"
+
+
+    ### If mode is selected but its attributes are missings -> filter out
+    for mode in modes:
+        mode_is_selected = filtered_df["mode"] == mode
+        
+        mode_cols = [col for col in filtered_df.columns if f"_{mode}" in col]
+        mode_routed  = ((filtered_df[mode_cols].isna()).sum(axis=1)==0) 
+        mode_routed &= filtered_df[f"expectedModeUsed_{mode}"]
+        
+        to_remove |= (mode_is_selected & ~mode_routed)
+
+    ### Apply filter
+    filtered_df = filtered_df[~to_remove].reset_index(drop=True)
+    logger.info("%d trips are removed because they have less than 2 routed modes or the selected mode is not routed.", to_remove.sum())
+
+    return filtered_df

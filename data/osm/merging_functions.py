@@ -1,6 +1,7 @@
 import os
 import matsim.runtime.osmosis as osmosis
 import shapely.geometry as sgeo
+import osmium
 
 
 """
@@ -8,8 +9,7 @@ This file contains functions that merge multiple osm files, and cut to the borde
 """
 
 
-def merge_using_pyosmium(context, osm_files, border, output_path):
-    import osmium     
+def merge_using_pyosmium(context, osm_files, border, output_path):    
     area = border["geometry"].iloc[0]
     # Read identifiers that are relevant
     tracker = osmium.IdTracker()
@@ -42,72 +42,8 @@ def merge_using_pyosmium(context, osm_files, border, output_path):
     return output_path
 
 
-def save_as_osmosis_poly(gdf, path, name="boundary"):
-    """
-    Save a GeoDataFrame (single-row, Polygon or MultiPolygon) as an Osmosis .poly file.
-    
-    Parameters:
-        gdf (GeoDataFrame): The GeoDataFrame to convert (should have one row).
-        path (str): Path to save the .poly file.
-        name (str): Name to use as the polygon name.
-    """
-    from shapely.geometry import Polygon, MultiPolygon
-    
-    geom = gdf.iloc[0].geometry
-
-    with open(path, 'w') as f:
-        f.write(f"{name}\n")
-        
-        if isinstance(geom, Polygon):
-            rings = [geom.exterior] + list(geom.interiors)
-        elif isinstance(geom, MultiPolygon):
-            rings = []
-            for poly in geom.geoms:
-                rings.append(poly.exterior)
-                rings.extend(poly.interiors)
-        else:
-            raise ValueError("Geometry must be Polygon or MultiPolygon")
-        
-        for i, ring in enumerate(rings):
-            f.write(f"Area{i}\n")
-            for x, y in ring.coords:
-                f.write(f" {x} {y}\n")
-            f.write("END\n")
-        
-        f.write("END\n")
-
-
-def merge_using_osmosis(context, osm_files, border, output_path):
-    buffer = context.config("border_offset")    
-    poly_path = "%s/swiss_buffered_%dm_to_border.poly" % (context.path(), int(buffer))
-    poly_path = os.path.abspath(poly_path)  # Ensure absolute path
-    save_as_osmosis_poly(border, poly_path)
-
-    osmosis_cmd = []
-
-    # Read and chain merge for all files
-    for i, osm_file in enumerate(osm_files):
-        osmosis_cmd.extend(["--read-pbf", osm_file])
-        if i > 0:
-            osmosis_cmd.append("--merge")
-
-    osmosis_cmd.extend([
-        "--bounding-polygon", f"file={poly_path}", "completeWays=yes",
-        "--tag-filter", "accept-ways", "highway=*", "railway=*",
-        "--used-node",
-        "--write-xml", "compressionMethod=gzip", output_path
-    ])
-
-    osmosis.run(context, osmosis_cmd)
-
-    return output_path
-
 
 def merge_files(context, osm_files, border, output_file):
-    if osmosis.is_osmosis_installed(context):
-        new_file_path = output_file.replace(".osm.gz","-osmosis.osm.gz")
-        return merge_using_osmosis(context, osm_files, border, new_file_path)
-    else:
-        new_file_path = output_file.replace(".osm.gz","-pyosmium.osm")
-        return merge_using_pyosmium(context, osm_files, border, new_file_path)
+    new_file_path = output_file.replace(".osm.gz","-pyosmium.osm")
+    return merge_using_pyosmium(context, osm_files, border, new_file_path)
         

@@ -11,7 +11,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
 
     context.config("data_path")
-    context.config("osm_path", "switzerland-latest.osm.gz")
+    context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 20000) 
     context.config("add_trafic_lights", False) 
 
@@ -66,8 +66,8 @@ def execute(context):
         return
     
     logger.info("Processing traffic lights...")
-    # If osm_path is not a list, convert it to a list (generalize for single file or multiple files)
-    osm_files = context.config("osm_path")
+    # If osm_file is not a list, convert it to a list (generalize for single file or multiple files)
+    osm_files = context.config("osm_file")
     if not isinstance(osm_files,list):
         osm_files = [osm_files]
     

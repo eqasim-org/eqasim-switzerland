@@ -6,7 +6,9 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 from io import StringIO
+from shapely import vectorized
 import time
+from typing import List, Tuple
 
 os.chdir(os.path.join("..","..","..",".."))
 from matsim.readers import Network, read_network
@@ -25,60 +27,101 @@ class ElevationEstimator:
     """
     logger = logging.getLogger("ElevationEstimator")
 
-    # --- Constants for better readability and maintenance ---
-    DISTANCE_THRESHOLD = 2  # Max distance in meters to use cached elevation
-    API_BATCH_SIZE  = 64     # Number of coordinates per API batch request
-    API_MAX_RETRIES = 3     # Max retries for API requests  
+    # --- Constants ---
+    DISTANCE_THRESHOLD = 3    # Max distance in meters to use cached elevation
+    API_BATCH_SIZE  = 64      # Number of coordinates per API batch request
+    API_MAX_RETRIES = 3       # Max retries for one API request  
     API_RETRY_DELAY = 0.2     # Seconds to wait between retries
     API_DELAY       = 0.1     # Seconds to wait between API requests
-    SWISSTOPO_HEIGHT_URL = "https://api3.geo.admin.ch/rest/services/height"
+    SWISSTOPO_HEIGHT_URL  = "https://api3.geo.admin.ch/rest/services/height"
     SWISSTOPO_PROFILE_URL = "https://api3.geo.admin.ch/rest/services/profile.csv"
 
-    def __init__(self, network, data_path: str):
+    def __init__(self, network=None, data_path: str = None, coordinates:List[Tuple[float, float]] = None, polygone = None):
+        # you can provide either the network, or a list of coordinates
+        # when polygone is provided, only the nodes within the polygone will be processed
         self.network = network
         self.data_path = data_path
+        self.coordinates = coordinates
+        self.polygone = polygone
+
+        self._build_nodes()
+
         self.elevation_file = os.path.join(data_path, "osm", "elevations.csv")
-        self.elevations_df = None
-        # Use a requests.Session for connection pooling, improving performance
+        self.elevations_df = None        
         self.session = requests.Session()
 
+    def _build_nodes(self):
+        if self.network is None and self.coordinates is None:
+            raise ValueError("Either network or coordinates must be provided.")
+        if self.network is not None and self.coordinates is not None:
+            raise ValueError("Provide either network or coordinates, not both.")
+
+        if self.network is not None:
+            self.nodes = self.network.nodes
+        if self.coordinates is not None:
+            self.nodes = pd.DataFrame(self.coordinates, columns=["x", "y"])
+        
+        self.nodes["within_polygone"] = True
+        if self.polygone is not None:
+            self.nodes["within_polygone"] = vectorized.contains(self.polygone, self.nodes["x"].values, self.nodes["y"].values)
+
     def run(self):
+        nodes = self.nodes
+        nodes["z"] = np.nan  # Initialize elevation column
+        
+        nodes_within_polygone = nodes[nodes["within_polygone"]].copy() # copy to avoid the warnings later
+        if not nodes_within_polygone.empty:        
+            nodes_within_polygone = self.run_on_nodes(nodes_within_polygone)
+            nodes.update(nodes_within_polygone)
+        
+        nodes["z"] = nodes["z"].fillna(0) # fill all nans by 0, these nans are coming from points outside the polygone (or switzerland for the api)
+        self.nodes = nodes.copy()
+
+        nodes = nodes.drop(columns=["within_polygone"])
+        if self.network is not None:
+            self.network.nodes = nodes
+            return self.network
+        if self.coordinates is not None:
+            return nodes
+        
+    def run_on_nodes(self, nodes):
+        if not isinstance(nodes, pd.DataFrame) or nodes.empty or "x" not in nodes or "y" not in nodes:
+            raise ValueError("nodes must be a non-empty DataFrame with 'x' and 'y' columns.")
+                
         """Main method to run elevation estimation."""
         if os.path.exists(self.elevation_file):
             self.logger.info("Elevation file found. Loading and assigning elevations.")
-            self._assign_from_cache_and_fetch_missing()
+            nodes = self._assign_from_cache_and_fetch_missing(nodes)
         else:
             self.logger.info("Elevation file not found. Fetching all elevations from swisstopo.")
-            self._fetch_all_elevations()
+            nodes = self._fetch_all_elevations(nodes)
 
+        # whenever I request elevations, I store the new dataframe, because maybe it containes more locations, hence enriching the database with more usage
         if self.elevations_df is not None and not self.elevations_df.empty:
             self._save_elevations_to_csv()
         
-        self.fill_nans()  # Fill any remaining NaNs after initial assignment
-        return self.network
+        nodes = self.fill_nans(nodes)  # Fill any remaining NaNs after initial assignment
+        return nodes
 
-    def _assign_from_cache_and_fetch_missing(self):
+    def _assign_from_cache_and_fetch_missing(self, nodes):
         """
         Loads elevations from cache, assigns them, and fetches any that are missing or too far away.        
         """
-        self.elevations_df = pd.read_csv(self.elevation_file)
-        nodes = self.network.nodes
+        self.elevations_df = pd.read_csv(self.elevation_file)        
         
         if self.elevations_df.empty:
-            self._fetch_all_elevations()
-            return
+            return self._fetch_all_elevations(nodes)            
 
         # Use cKDTree for efficient nearest neighbor search
         tree = cKDTree(self.elevations_df[["x", "y"]].values)
         dists, idxs = tree.query(nodes[["x", "y"]].values, k=1)
 
-        # Vectorized assignment for nodes within the distance threshold
-        nodes["z"] = np.nan
+        # Vectorized assignment for nodes within the distance threshold        
         mask_close = dists <= self.DISTANCE_THRESHOLD
         nodes.loc[mask_close, "z"] = self.elevations_df["z"].values[idxs[mask_close]]
 
         # Identify nodes that need fetching from the API
-        mask_fetch = ~mask_close
+        mask_fetch = nodes["z"].isna()
         nodes_to_fetch = nodes[mask_fetch]
         
         if not nodes_to_fetch.empty:
@@ -95,14 +138,13 @@ class ElevationEstimator:
             new_data['z'] = fetched_elevations
             new_data.dropna(inplace=True)
             
-            self.elevations_df = pd.concat([self.elevations_df, new_data]).drop_duplicates(subset=["x", "y"], keep="last")
-
-        self.network.nodes = nodes
+            self.update_elevations(new_data, False, False)            
+        
         self.logger.info(f"Finished assigning elevations. Total nodes with elevation: {nodes['z'].notna().sum()}/{len(nodes)}")
+        return nodes
 
-    def _fetch_all_elevations(self):
-        """Fetches elevations for all network nodes when no cache file exists."""
-        nodes = self.network.nodes
+    def _fetch_all_elevations(self, nodes):
+        """Fetches elevations for all network nodes when no cache file exists."""        
         coords = list(nodes[["x", "y"]].itertuples(index=False, name=None))
         
         self.logger.info(f"Fetching elevations for all {len(nodes)} nodes.")
@@ -110,18 +152,16 @@ class ElevationEstimator:
         nodes["z"] = elevations
 
         # Create the elevations DataFrame from scratch or update it
-        if os.path.exists(self.elevation_file):
-            self.elevations_df = pd.read_csv(self.elevation_file)
-            self.elevations_df = pd.concat([self.elevations_df, nodes[["x", "y", "z"]].dropna()]).drop_duplicates(subset=["x", "y"], keep="last")
-        else:
-            self.elevations_df = nodes[["x", "y", "z"]].dropna().drop_duplicates(subset=["x", "y"], keep="last")
+        self.update_elevations(nodes, from_csv=True)
 
         self.logger.info(f"Successfully fetched {self.elevations_df.shape[0]} elevations.")
+        
+        return nodes
 
     def _fetch_elevations_in_batches(self, coords: list[tuple[float, float]]) -> list[float]:
         """Fetch a list of coordinates in batches with retries."""
         all_elevations = []
-        total_batches = -(-len(coords) // self.API_BATCH_SIZE)  # Ceiling division for total batches
+        total_batches = -(-len(coords) // self.API_BATCH_SIZE)
         for i in range(0, len(coords), self.API_BATCH_SIZE):
             batch_coords = coords[i:i + self.API_BATCH_SIZE]
             
@@ -134,6 +174,7 @@ class ElevationEstimator:
                     if batch_num % 10 == 0 or batch_num == total_batches:                        
                         self.logger.info(f"Fetched batch {batch_num}/{total_batches} successfully.")
                     break  # Success, exit retry loop
+
                 except (requests.RequestException, ValueError, AssertionError) as e:
                     self.logger.warning(f"Error fetching batch (attempt {attempt + 1}/{self.API_MAX_RETRIES})")
                     if attempt + 1 == self.API_MAX_RETRIES:
@@ -142,6 +183,8 @@ class ElevationEstimator:
                     else:
                         time.sleep(self.API_RETRY_DELAY)
             time.sleep(self.API_DELAY) 
+        
+        assert len(all_elevations) == len(coords), "Mismatch in number of elevations fetched."
         return all_elevations
     
     def get_swisstopo_point_elevation(self, x, y):
@@ -207,12 +250,11 @@ class ElevationEstimator:
         
         return response_data["Altitude"].tolist()
 
-    def fill_nans(self):
-        """Fills NaN elevations by fetching from swisstopo for each node."""
-        nodes = self.network.nodes
+    def fill_nans(self, nodes):
+        """Fills NaN elevations by fetching from swisstopo for each node."""        
         is_nans = nodes["z"].isna()
         if not is_nans.any():            
-            return
+            return nodes
                 
         missing_elevations = nodes[is_nans]
         correct_elevations = nodes[~is_nans]
@@ -221,8 +263,20 @@ class ElevationEstimator:
         dists, idxs = tree.query(missing_elevations[["x", "y"]].values, k=1)
         
         nodes.loc[is_nans, "z"] = correct_elevations["z"].values[idxs]
-        self.network.nodes = nodes
+        return nodes
                     
+    def update_elevations(self, nodes, from_csv, save_to_csv = False):
+        if os.path.exists(self.elevation_file) and from_csv:
+            self.elevations_df = pd.read_csv(self.elevation_file)
+        else:
+            if self.elevations_df is None:
+                self.elevations_df = pd.DataFrame(columns=["x", "y", "z"])
+
+        self.elevations_df = pd.concat([self.elevations_df, nodes[["x", "y", "z"]].dropna()]).drop_duplicates(subset=["x", "y"], keep="last")
+
+        if save_to_csv:
+            self._save_elevations_to_csv()
+
     def _save_elevations_to_csv(self):
         """Saves the consolidated node elevations to a CSV file."""
         self.elevations_df.to_csv(self.elevation_file, index=False)
