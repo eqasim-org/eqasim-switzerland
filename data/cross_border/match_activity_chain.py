@@ -4,7 +4,7 @@ def configure(context):
     context.config("data_path")
     context.config("input_downsampling")
     context.config("random_seed")
-    context.config("weekend", default = False)
+    context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.cross_border.sample")
     context.stage("data.microcensus.activity_chains")
@@ -23,7 +23,13 @@ def execute(context):
         "other": ["home-other-home"]
     }
 
-    mz_actchains = mz_actchains[mz_actchains["weekend"] == context.config("weekend")]
+    day = context.config("specific_day_scenario")
+    if day == "weekend":
+        mz_actchains = mz_actchains[mz_actchains["weekend"]]
+    elif day == "workday":
+        mz_actchains = mz_actchains[mz_actchains["workday"]]
+    elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
+        mz_actchains = mz_actchains[mz_actchains["day"]==day]
 
     for purpose, chains in purpose_to_actchain.items():
         for trip_mode in ["car", "pt", "car_passenger"]:

@@ -44,4 +44,4 @@ def execute(context):
 
     #df_persons.to_csv("/cluster/project/cmdp/asallard/analysis/Crossborder/MZ/actchains.csv")
         
-    return df_persons[["person_id", "person_weight", "weekend", "activity_chain", "mode_chain"]]
+    return df_persons[["person_id", "person_weight", "weekend", "workday", "day", "activity_chain", "mode_chain"]]
