@@ -67,3 +67,19 @@ config:
     add_trafic_lights: false
     # whether to assign elevations to the nodes, default is false
     assign_elevations: false
+
+    # Cross-border traffic
+    include_cross_border: true
+    weekend: false # if false, the working days will be selected. 
+    # TODO: this parameter should be applied also to micro-census
+    # TODO: add distance to CH border as parameter 
+
+    # PT pricing
+    generate_pt_pricing_inputs: false
+
+    # Pt routing parameters
+    calibrate_pt_routing_params: false # Please make sure you really want to switch this parameter to true because the calibration takes 12+ hours!
+    calibration_jar_path: /cluster/project/cmdp/asallard/java/eqasim-java/switzerland/target/switzerland-2.0.0.jar:/cluster/project/cmdp/asallard/java/eqasim-java/server/target/server-2.0.0.jar # We need the two jars: switzerland and server
+    # TODO: find a way to generate both jars from the eqasim stage
+    calibration_config_path: /cluster/project/cmdp/asallard/inputs/1pct_pt_simulated/switzerland_config_baseline.xml
+    # TODO: we should probably use a default config example stored somewhere. Using the matsim.run.prepare one will not work as this stage requires the final pt_routing parameters.
