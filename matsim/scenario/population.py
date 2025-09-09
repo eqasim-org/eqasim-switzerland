@@ -160,17 +160,11 @@ class FreightWriter:
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", 
                  "home_x", "home_y",
                  "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke",
-<<<<<<< HEAD
                  "household_id", "is_car_passenger", 
                  "statpop_person_id", "statpop_household_id", "mz_person_id", "mz_head_id", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
                  "income_class", "person_type"]
 
-=======
-                 "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id",
-                 "mz_head_id", "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
-                 "mz_head_id","subscriptions_gleis7","subscriptions_junior"]
->>>>>>> origin/cmdp
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
                    "geometry", "destination_id", "following_mode", "municipality_type","municipality_id"]
 

@@ -163,12 +163,6 @@ class PopulationWriter(XmlWriter):
         self._pop_scope()
         self._write_line('</activity>')
 
-<<<<<<< HEAD
-    def add_activity(self, type, location, start_time = None, end_time = None):
-        self._require_scope(self.PLAN_SCOPE)
-        self._start_activity(type, location, start_time, end_time)
-        self._write('/>\n')
-=======
     def add_activity(self, activity_type, location, start_time = None, end_time = None, attributes = None):        
         self.start_activity(activity_type, location, start_time, end_time)
         if attributes is not None:
@@ -177,7 +171,6 @@ class PopulationWriter(XmlWriter):
                 self.add_attribute(key, self.get_java_type(type(item)), item)
             self.end_attributes()
         self.end_activity()
->>>>>>> origin/cmdp
 
     def add_leg(self, mode, departure_time, travel_time):
         self._require_scope(self.PLAN_SCOPE)
