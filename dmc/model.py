@@ -1,5 +1,10 @@
+import os
 import pandas as pd
 import numpy as np
+
+from dmc.constants import constants
+from dmc.writer import writer
+from dmc.vot.functions import vot_utils
 
 import biogeme.database as db
 import biogeme.biogeme as bio
@@ -11,8 +16,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MODES = ['car', 'pt', 'bike', 'walk', 'car_passenger']
-MEAN_EUCLIDEAN_DISTANCE_KM = 8.0
-MEAN_INCOME_CHF = 3700
+MEAN_EUCLIDEAN_DISTANCE_KM = constants.MEAN_EUCLIDEAN_DISTANCE_KM
+MEAN_INCOME_CHF = constants.MEAN_INCOME_CHF
 
 def configure(context):
     context.stage("dmc.data.training_data")
@@ -125,9 +130,6 @@ def define_betas(ignore_car_passenger):
 
         # cost
         "beta_cost_CHF": Beta("beta_cost_CHF", -0.126, None, None, 0),        
-        "beta_cost_pt_CHF": Beta("beta_cost_pt_CHF", -0.126, None, None, 0),
-        "beta_cost_home_CHF": Beta("beta_cost_home_CHF", 0.0, None, None, 1),
-        "beta_car_parking": Beta("beta_car_parking", 1, None, None, 1), # does not converge
 
         # car
         "beta_car_asc": Beta("beta_car_asc", 0, None, None, 0),
@@ -178,6 +180,7 @@ def define_betas(ignore_car_passenger):
         "beta_bike_elevation": Beta("beta_bike_elevation", 0, None, None, 0),
         "beta_bike_short_distance": Beta("beta_bike_short_distance", 0, None, None, 0),
         "beta_bike_medium_distance": Beta("beta_bike_medium_distance", 0, None, None, 0),
+        "beta_bike_work": Beta("beta_bike_work", 0, None, None, 0),
         # walk
         "beta_walk_asc": Beta("beta_walk_asc", 0, None, None, 0),
         "beta_walk_travel_time_min": Beta("beta_walk_travel_time_min", 0, None, None, 0),
@@ -188,7 +191,10 @@ def define_betas(ignore_car_passenger):
         "beta_walk_region_3": Beta("beta_walk_region_3", 0, None, None, 0),
         "beta_walk_elevation": Beta("beta_walk_elevation", 0, None, None, 0),
         "beta_walk_short_distance": Beta("beta_walk_short_distance", 0, None, None, 0),
-        "beta_walk_medium_distance": Beta("beta_walk_medium_distance", 0, None, None, 0)
+        "beta_walk_medium_distance": Beta("beta_walk_medium_distance", 0, None, None, 0),
+        "beta_walk_origin_home": Beta("beta_walk_origin_home", 0, None, None, 0),
+        "beta_walk_work": Beta("beta_walk_work", 0, None, None, 0),
+        "beta_walk_destination": Beta("beta_walk_destination", 0, None, None, 0)
     }
     if not ignore_car_passenger:
         betas.update({
@@ -204,7 +210,8 @@ def define_betas(ignore_car_passenger):
             "beta_car_passenger_region_2": Beta("beta_car_passenger_region_2", 0, None, None, 0),
             "beta_car_passenger_region_3": Beta("beta_car_passenger_region_3", 0, None, None, 0),
             "beta_car_passenger_short_distance": Beta("beta_car_passenger_short_distance", 0, None, None, 0),
-            "beta_car_passenger_medium_distance": Beta("beta_car_passenger_medium_distance", 0, None, None, 0)
+            "beta_car_passenger_medium_distance": Beta("beta_car_passenger_medium_distance", 0, None, None, 0),
+            "beta_car_passenger_origin_home": Beta("beta_car_passenger_origin_home", 0, None, None, 0),
         })
     return betas
 
@@ -221,13 +228,14 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
 
     cost_interaction = euclidean_interaction_cost * income_interaction_cost    
     
-    car_cost = (vars["car_cost_CHF"] + betas["beta_car_parking"] * vars["parking_cost_CHF"])
+    car_cost = (vars["car_cost_CHF"] + vars["parking_cost_CHF"])
     car_time = (vars["car_travel_time_min"] + vars["parking_searching_duration_min"])
     transformed_car_time = car_time ** betas["lambda_car_travel_time"]    
     car_utility = (
         betas["beta_car_asc"]
         + betas["beta_car_travel_time_min"] * transformed_car_time        
         + betas["beta_cost_CHF"] * car_cost * cost_interaction
+
         + betas["beta_car_work"] * vars["destination_work"]
         + betas["beta_car_destination"] * vars["urban_destination"]
         + betas["beta_car_sex"] * vars["sex"]
@@ -235,8 +243,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_car_region_2"] * vars["region_2"]
         + betas["beta_car_region_3"] * vars["region_3"]
         + betas["beta_car_origin_home"] * vars["origin_home"]    
-        + betas["beta_car_short_distance"] * vars["short_distance"]
-        # + betas["beta_car_medium_distance"] * vars["medium_distance"] * vars["car_travel_time_min"]
+        + betas["beta_car_short_distance"] * vars["short_distance"]        
     )
 
     transformed_pt_in_vehicle_time = vars["pt_in_vehicle_time_min"]** betas["lambda_pt_in_vehicle_time"]
@@ -249,59 +256,55 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
 
     pt_utility = (
         betas["beta_pt_asc"]
-        + betas["beta_pt_access_egress_time_min"] * transformed_access_egress_time
-        # + betas["beta_pt_in_vehicle_time_min2"] * log(1 + transformed_pt_in_vehicle_time)
+        + betas["beta_pt_access_egress_time_min"] * transformed_access_egress_time        
         + betas["beta_pt_in_vehicle_time_min"] * transformed_pt_in_vehicle_time
         + betas["beta_pt_transfer_time_min"] * transformed_pt_transfer_time
         + betas["beta_pt_transfers"] * transformed_pt_transfers        
         + betas["beta_cost_CHF"] * pt_cost * cost_interaction
+
         + betas["beta_pt_sex"] * vars["sex"]
         + betas["beta_pt_age"] * bioMax(0, vars["age"] - 18)
-        # + betas["beta_pt_work"] * vars["destination_work"]
-        + betas["beta_pt_destination"] * vars["urban_destination"] #vars["destination_municipality"]        
+        + betas["beta_pt_work"] * vars["destination_work"]
+        + betas["beta_pt_destination"] * vars["urban_destination"]        
         + betas["beta_pt_region_2"] * vars["region_2"]
         + betas["beta_pt_region_3"] * vars["region_3"]
         + betas["beta_pt_origin_home"] * vars["origin_home"]
-        # + betas["beta_pt_distance_km"] * bioMin(vars["euclidean_distance_km"], 10.0)**betas["lambda_pt_distance"]
-        # + betas["beta_pt_elevation"] * elevation_angle
         + betas["beta_pt_short_distance"] * vars["short_distance"]
-        # + betas["beta_pt_medium_distance"] * vars["medium_distance"] * vars["pt_travel_time_min"]
     )
 
     bike_utility = (
         betas["beta_bike_asc"]
         + betas["beta_bike_travel_time_min"] * (vars["bike_travel_time_min"]**betas["lambda_bike"])
-        # + betas["beta_bike_distance_km"] * (vars["bike_distance_km"]**betas["lambda_bike"])
+
         + betas["beta_bike_age"] * bioMax(0, vars["age"] - 18)
         + betas["beta_bike_sex"] * vars["sex"]
-        # + betas["beta_bike_destination"] * vars["urban_destination"] #vars["destination_municipality"]
+        + betas["beta_bike_destination"] * vars["urban_destination"] 
         + betas["beta_bike_region_2"] * vars["region_2"]
         + betas["beta_bike_region_3"] * vars["region_3"]
-        + betas["beta_bike_origin_home"] * vars["origin_home"]
-        # + betas["beta_bike_elevation"] * elevation_angle
+        + betas["beta_bike_origin_home"] * vars["origin_home"]        
         + betas["beta_bike_short_distance"] * vars["short_distance"]
-        # + betas["beta_bike_medium_distance"] * vars["medium_distance"]
+        + betas["beta_bike_work"] * vars["destination_work"]
     )
 
     walk_utility = (
         betas["beta_walk_asc"]
         + betas["beta_walk_travel_time_min"] * (vars["walk_travel_time_min"]**betas["lambda_walk"])
-        # + betas["beta_walk_distance_km"] * (vars["walk_distance_km"]**betas["lambda_walk"])
+
         + betas["beta_walk_age"] * bioMax(0, vars["age"] - 18)
-        # + betas["beta_walk_sex"] * vars["sex"]
+        + betas["beta_walk_sex"] * vars["sex"]
         + betas["beta_walk_region_2"] * vars["region_2"]
-        + betas["beta_walk_region_3"] * vars["region_3"]
-        # + betas["beta_walk_elevation"] * elevation_angle
+        + betas["beta_walk_region_3"] * vars["region_3"]        
         + betas["beta_walk_short_distance"] * vars["short_distance"]
-        # + betas["beta_walk_medium_distance"] * vars["medium_distance"]
+        + betas["beta_walk_origin_home"] * vars["origin_home"]
+        + betas["beta_walk_work"] * vars["destination_work"]
+        + betas["beta_walk_destination"] * vars["urban_destination"]
     )
 
     if not ignore_car_passenger:
         cp_tt = vars["car_passenger_travel_time_min"]**betas["lambda_car_passenger_travel_time"]
         # cp_dis = vars["car_passenger_distance_km"]**betas["lambda_car_passenger_distance"]
         car_passenger_utility = (
-            betas["beta_car_passenger_asc"]
-            #+ betas["beta_is_car_passenger"] * vars["is_car_passenger"]
+            betas["beta_car_passenger_asc"]            
             + betas["beta_car_passenger_travel_time_min"] * cp_tt
             # + betas["beta_car_passenger_distance_km"] * cp_dis
             + betas["beta_car_passenger_driving_permit"] * vars["driving_license"]
@@ -312,7 +315,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
             + betas["beta_car_passenger_region_2"] * vars["region_2"]
             + betas["beta_car_passenger_region_3"] * vars["region_3"]
             + betas["beta_car_passenger_short_distance"] * vars["short_distance"]
-            # + betas["beta_car_passenger_medium_distance"] * vars["medium_distance"]
+            + betas["beta_car_passenger_origin_home"] * vars["origin_home"]
         )
 
     utilities = {
@@ -364,11 +367,21 @@ def execute(context):
     null_loglikelihood = biogeme.calculateNullLoglikelihood(availability)
     result = biogeme.estimate()
 
-    #logger.info(result.getGeneralStatistics())
-    #logger.info(result.getEstimatedParameters())
+    logger.info(result.shortSummary())
 
-    parameters = {index: row["Value"] for index, row in result.getEstimatedParameters().iterrows()}
-    logger.info("Car VOT: %s CHF/h", round(60 * parameters["beta_car_travel_time_min"] / parameters["beta_cost_CHF"], 2))
-    logger.info("PT VOT: %s CHF/h", round(60 * parameters["beta_pt_in_vehicle_time_min"] / parameters["beta_cost_CHF"], 2))
+    # write the optimal parameters to a yaml file in MATSim input format
+    path_to_params = os.path.join(context.path(),"model_parameters.yaml")
+    writer(result, path_to_params).write()
+
+    # Compute the VOT for car users
+    vot_car = vot_utils.get_car_vot(df, result, utilities, modes, eps=1e-2)
+    vot_pt = vot_utils.get_pt_vot(df, result, utilities, modes, eps=1e-2)
+
+    logger.info("The average VOT for car users is %.2f CHF/hour", vot_car.mean())
+    logger.info("The average VOT for pt users is %.2f CHF/hour", vot_pt.mean())
+
+    path_to_figure = os.path.join(context.path(),"vot_distribution.png")
+    vot_utils.plot_vot(vot_car, vot_pt, figure_path = path_to_figure)
+    logger.info("The VOT distribution figure is saved to %s", path_to_figure)
     
-    return result, df
+    return (result, df, path_to_params, path_to_figure)
