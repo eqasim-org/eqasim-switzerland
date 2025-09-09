@@ -7,7 +7,7 @@ import data.utils
 
 def configure(context):
     context.config("data_path")
-    context.config("weekend", default = False)
+    #context.config("weekend", default = False)
 
     context.stage("data.microcensus.households")
     context.stage("data.microcensus.trips")
@@ -69,10 +69,22 @@ def execute(context):
 
     # Day of the observation
     df_mz_persons["weekend"] = False
-    df_mz_persons.loc[df_mz_persons["tag"] == 6, "weekend"] = True
-    df_mz_persons.loc[df_mz_persons["tag"] == 7, "weekend"] = True
+    df_mz_persons.loc[df_mz_persons["tag"] >= 6, "weekend"] = True
+
+    df_mz_persons["workday"] = False
+    df_mz_persons.loc[df_mz_persons["tag"] <= 5, "workday"] = True
+
+    df_mz_persons["day"] = "Monday"
+    df_mz_persons.loc[df_mz_persons["tag"] == 2, "day"] = "Tuesday"
+    df_mz_persons.loc[df_mz_persons["tag"] == 3, "day"] = "Wednesday"
+    df_mz_persons.loc[df_mz_persons["tag"] == 4, "day"] = "Thursday"
+    df_mz_persons.loc[df_mz_persons["tag"] == 5, "day"] = "Friday"
+    df_mz_persons.loc[df_mz_persons["tag"] == 6, "day"] = "Saturday"
+    df_mz_persons.loc[df_mz_persons["tag"] == 7, "day"] = "Sunday"
 
     columns.append("weekend")
+    columns.append("workday")
+    columns.append("day")
 
     # Here we extract a bit more than Kirill, but most likely it will be useful later
 
@@ -156,10 +168,10 @@ def execute(context):
     # it will still keep persons that did not report any trips
     df_mz_persons = df_mz_persons[~df_mz_persons["person_id"].isin(filterout_person_ids)]
 
-    if context.config("weekend"):
-        df_mz_persons = df_mz_persons[df_mz_persons["weekend"]]
-    else:
-        df_mz_persons = df_mz_persons[~df_mz_persons["weekend"]]
+    #if context.config("weekend"):
+    #    df_mz_persons = df_mz_persons[df_mz_persons["weekend"]]
+    #else:
+    #    df_mz_persons = df_mz_persons[~df_mz_persons["weekend"]]
 
     then_size = len(df_mz_persons)
     home_ids = set(df_mz_persons["person_id"]) - set(df_mz_trips["person_id"])

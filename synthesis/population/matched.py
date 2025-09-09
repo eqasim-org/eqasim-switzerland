@@ -14,7 +14,7 @@ def configure(context):
     context.config("hot_deck_matching_runners")
     context.config("random_seed")
     context.config("matching_minimum_observations", 20)
-    context.config("weekend_scenario", False)
+    context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.microcensus.persons")
     context.stage("synthesis.population.sampled")
@@ -299,17 +299,21 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     
 
 def execute(context):
-    df_mz               = context.stage("data.microcensus.persons")
-    c                   = context.stage("data.constants")
-    is_weekend_scenario = context.config("weekend_scenario")
+    df_mz        = context.stage("data.microcensus.persons")
+    c            = context.stage("data.constants")
+    scenario_day = context.config("specific_day_scenario")
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
-    df_source = pd.DataFrame(df_mz[
-                                 (is_weekend_scenario & df_mz[
-                                     "weekend"])  # use only weekend samples for a weekend scenario
-                                 |
-                                 (~is_weekend_scenario & ~df_mz["weekend"])  # and only weekday samples for a weekday
-                                 ])
+    df_source = df_mz.copy()
+    if scenario_day == "workday":
+        df_source = df_mz[df_mz["workday"]]
+    elif scenario_day == "weekend":
+        df_source = df_mz[df_mz["weekend"]]
+    elif scenario_day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
+        df_source = df_mz[df_mz["day"] == scenario_day]
+    else:
+        raise ValueError(f"Unimplemented day for scenario: {scenario_day}")
+
     
     df_source     = df_source.rename(columns={"person_id": "mz_id"})
     df_population = context.stage("synthesis.population.sampled")

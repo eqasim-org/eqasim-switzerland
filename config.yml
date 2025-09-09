@@ -68,9 +68,11 @@ config:
     # whether to assign elevations to the nodes, default is false
     assign_elevations: false
 
+    # Specific day scenario (default: workday, also possible: weekend, Monday, ... Sunday)
+    specific_day_scenario: workday
+
     # Cross-border traffic
     include_cross_border: true
-    weekend: false # if false, the working days will be selected. 
     # TODO: this parameter should be applied also to micro-census
     # TODO: add distance to CH border as parameter 
 

@@ -6,7 +6,7 @@ import random
 
 def configure(context):
     context.config("data_path")
-    context.config("weekend", default = False)
+    context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.swiss_border")
@@ -293,9 +293,16 @@ def execute(context):
 
     # 11. Adjust weight
     days    = {"Mo-Fr": 5, "WE": 2}
-    day_key = "Mo-Fr"
 
-    if context.config("weekend"):
+    day = context.config("specific_day_scenario")
+
+    if day == "weekend":
+        day_key = "WE"
+    elif day == "workday":
+        day_key = "Mo-Fr"
+    elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
+        day_key = "Mo-FR"
+    elif day in ["Saturday", "Sunday"]:
         day_key = "WE"
 
     day_value = days[day_key]
