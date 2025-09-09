@@ -9,6 +9,7 @@ dryrun: false
 run:
     - synthesis.output
     - matsim.simulation.run
+    # - dmc.model # uncomment if you want to estimte the dmc model using biogeme
 
 # These are configuration options that we use in the pipeline
 config:
@@ -59,14 +60,33 @@ config:
     simplify_network_in_eqasim: false
     correct_links_capacity: false
 
-    # path to the osm file, should be placed in data_path/osm (it can be list of files)
-    osm_path: switzerland-latest.osm.pbf
+    # path to the osm file, should be placed in data_path/osm (it can be list of files)    
+    osm_file: switzerland-latest.osm.pbf
     border_offset: 20000 # offset for border extension in meters, default is 20000
+
+    # wether to parse turn restrictions or not
+    parseTurnRestrictions: false
 
     # whether to add traffic lights to the network, default is false
     add_trafic_lights: false
+
     # whether to assign elevations to the nodes, default is false
     assign_elevations: false
+
+    # when estimating the dmc model using biogeme (TODO: add pt cost params)
+    routed_trips_path: "Routed_alternatives_v3_FINAL.txt" # absolute path to the data
+    ignore_car_passenger: false
+    distance_cost_interaction: true
+    income_cost_interaction: true
+    car_cost_per_km: 0.26 #CHF per km
+    parking_cost_per_hour_CHF_urban: 1.0 #CHF per hour
+    parking_cost_per_hour_CHF_suburban: 0.5 #CHF per hour
+    parking_price_reduction_for_work: 1.0
+    urban_parking_search_min: 2.0 #minutes
+    suburban_parking_search_min: 1.0 #minutes
+    only_from_home_trips: false
+
+    
 
     # Cross-border traffic
     include_cross_border: true
