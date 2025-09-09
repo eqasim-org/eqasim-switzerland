@@ -69,6 +69,9 @@ class PersonWriter:
         writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[16]))
         writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[17]))
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
+        writer.add_attribute("isCrossBorder", "java.lang.Boolean", writer.true_false(self.person[24]=="crossborder"))
+        if self.person[24]=="crossborder":
+            writer.add_attribute("subpopulation", "java.lang.String", "crossborder")
         writer.add_attribute("vehicles", "org.matsim.vehicles.PersonVehicles", "{{{content}}}".format(content = ",".join([
                 "\"{mode}\":\"{id}\"".format(mode = v[VEHICLE_FIELDS.index("mode")], id = v[VEHICLE_FIELDS.index("vehicle_id")])
                 for v in self.vehicles
@@ -155,7 +158,7 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
                  "household_id", "is_car_passenger", 
                  "statpop_person_id", "statpop_household_id", "mz_person_id", "mz_head_id", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
-                 "income_class"]
+                 "income_class", "person_type"]
 
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
                    "geometry", "destination_id", "following_mode"]
@@ -196,12 +199,14 @@ def execute(context):
     df_persons[loop_columns] = df_persons[loop_columns].fillna(False)
 
     # TODO remove ASAP
-    df_activities["following_mode"] = df_activities["following_mode"].str.replace("_loop", "", regex=False)
+    #df_activities["following_mode"] = df_activities["following_mode"].str.replace("_loop", "", regex=False)
     
     # Bring in correct order (although it should already be)
     df_persons    = df_persons.sort_values(by="person_id")
     df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
     df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
+
+    df_persons["person_type"] = "normal"
 
     if context.config("include_cross_border"):
         cross_border_persons    = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
@@ -237,6 +242,8 @@ def execute(context):
 
         del cross_border_vehicles["person_id"]
         del cross_border_vehicles["vehicle_type"]
+
+        cross_border_persons["person_type"] = "crossborder"
 
         df_persons    = pd.concat([df_persons, cross_border_persons])
         df_activities = pd.concat([df_activities, cross_border_activities])

@@ -5,6 +5,8 @@ from lxml import etree
 import matsim.runtime.eqasim as eqasim
 import gzip
 
+import matsim.simulation.config_utils as config_utils
+
 def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
@@ -15,6 +17,9 @@ def configure(context):
 
     context.stage("matsim.scenario.facilities")
     context.stage("matsim.scenario.network.mapped")
+
+    context.stage("data.pt_pricing.pt_pricing")
+    context.stage("calibration.pt_routing.pt_routing_parameters")
         
     context.config("input_downsampling")
     context.config("threads")
@@ -64,7 +69,17 @@ def execute(context):
     households_input_path = context.stage("matsim.scenario.households")
     households_output_path = "%s/%shouseholds.xml.gz" % (context.path(), context.config("output_prefix"))
     shutil.copyfile(households_input_path, households_output_path)
-        
+
+    # PT pricing
+    sbb_path, zones_path = context.stage("data.pt_pricing.pt_pricing")
+
+    sbb_output_path =  f"{context.path()}/SBB_all_distances.csv" 
+    shutil.copy(sbb_path, sbb_output_path)
+
+    zones_output_path =  f"{context.path()}/gtfs_zones.csv" 
+    shutil.copy(zones_path, zones_output_path)
+
+
     # Some files we send through several preparation scripts
     
     # Run preparation
@@ -104,30 +119,6 @@ def execute(context):
     ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
-
-    # If we want to simulate buses, some lines have to be added to the config.
-    if not context.config("useScheduleBasedTransport"):
-        config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
-        assert os.path.exists(config_path)
-
-        # Parse XML and preserve DOCTYPE and comments
-        parser = etree.XMLParser(remove_blank_text=True)
-        tree = etree.parse(config_path, parser)
-        root = tree.getroot()
-
-        # Create new module
-        module = etree.Element("module", name="SBBPt")
-
-        etree.SubElement(module, "param", name="deterministicServiceModes",
-                        value="rail,subway,ferry,tram,funicular,cable-car,gondola,other")
-        etree.SubElement(module, "param", name="createLinkEventsInterval", value="10")
-
-        # Append to root
-        root.append(module)
-
-        # Write back to file with DOCTYPE
-        doctype_str = '<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">'
-        tree.write(config_path, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
     
     # Calculate the stop categories
     transit_schedule_input_path = context.stage("matsim.scenario.network.mapped")["schedule"]
@@ -153,27 +144,14 @@ def execute(context):
 
     # If we want to simulate buses, some lines have to be added to the config.
     if not context.config("useScheduleBasedTransport"):
-        config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
-        assert os.path.exists(config_path)
+        config_utils.add_SBBPT_module(context)
 
-        # Parse XML and preserve DOCTYPE and comments
-        parser = etree.XMLParser(remove_blank_text=True)
-        tree = etree.parse(config_path, parser)
-        root = tree.getroot()
+    # Create the module for PT pricing
+    config_utils.add_ptZones_module(context)
 
-        # Create new module
-        module = etree.Element("module", name="SBBPt")
-        # everything else will be simulated
-        etree.SubElement(module, "param", name="deterministicServiceModes",
-                        value="rail,subway,ferry,tram,funicular,cable-car,gondola,other")
-        etree.SubElement(module, "param", name="createLinkEventsInterval", value="10")
-
-        # Append to root
-        root.append(module)
-
-        # Write back to file with DOCTYPE
-        doctype_str = '<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">'
-        tree.write(config_path, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
+    # Write PT routing parameters within the config
+    pt_parameters = context.stage("calibration.pt_routing.pt_routing_parameters")
+    config_utils.adjust_pt_routing_parameters(context, pt_parameters)
 
 
     # Route the population
