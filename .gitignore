@@ -10,8 +10,13 @@ config*.yml
 slurm*
 *.out
 *.sh
+*.pickle
+*.iter
 !docker_run.sh
 logs
 run*.sh
 analysis
 server
+cutterZone
+.ipynb_checkpoints
+*.ipynb

@@ -41,7 +41,7 @@ def is_osmosis_installed(context):
     Returns True if the Osmosis binary is found in PATH, otherwise False.
     """
     osmosis_path = shutil.which(context.config("osmosis_binary"))
-    return shutil.which(osmosis_path) not in ["", None]
+    return osmosis_path not in ["", None]
 
 
 def validate(context):

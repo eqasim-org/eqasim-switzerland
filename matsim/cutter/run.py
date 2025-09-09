@@ -59,7 +59,10 @@ def execute(context):
             '%s/%s/output_vehicles.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
         )
         
-
+        # content = content.replace(
+        #     '<param name="outputDirectory" value="simulation_output" />',
+        #     '<param name="outputDirectory" value="/cluster/work/ivt_vpl/dabdelkader/simulation_output" />'
+        # )
 
         with open("%s/config_cutter.xml" % context.path(), "w+") as f_write:
             f_write.write(content)
@@ -68,7 +71,6 @@ def execute(context):
     # use the new config to run the cutter
 
     config_path = "%s/config_cutter.xml" % context.path()
-    
     eqasim.run(context, "org.eqasim.core.scenario.cutter.RunScenarioCutter", [
         "--config-path", config_path,
         "--output-path", "%s/output" % context.path(),
