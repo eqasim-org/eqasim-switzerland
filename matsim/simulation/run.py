@@ -9,11 +9,11 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     
     context.config("use_vdf", default=False)
-
+    context.config("threads")
+    context.config("last_iteration", 60)    
 
     context.config("useScheduleBasedTransport", default=True)
-    context.config("threads")
-    context.config("last_iteration", 60)    context.config("preventwaitingtoentertraffic", default = "no")
+    context.config("preventwaitingtoentertraffic", default = "no")
     context.config("writeexperiencedplans", default = "no")
     context.config("preventwaitingtoentertraffic", default = "no")
     context.config("writeexperiencedplans", default = "no")
@@ -55,7 +55,7 @@ def execute(context):
             # if one wants to visualize outputs, trips file needs to be generated 
             # so one should set this to something other than 0, and preferebly to something 
             # that will output trips file at the end of the simulation
-            "--config:controller.writeTripsInterval", str(0),
+            "--config:controller.writeTripsInterval", str(last_iteration),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
             "--preventwaitingtoentertraffic", preventwaitingtoentertraffic,
             "--config:scoring.writeExperiencedPlans", writeExperiencedPlans

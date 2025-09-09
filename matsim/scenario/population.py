@@ -150,7 +150,8 @@ class FreightWriter:
         writer.end_person()
 
 
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y",
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", 
+                 "home_x", "home_y",
                  "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke",
                  "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id",
                  "mz_head_id", "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
