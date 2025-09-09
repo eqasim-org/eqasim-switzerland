@@ -21,7 +21,7 @@ def configure(context):
     context.config("car_cost_per_km", 0.26) #CHF per km
     context.config("parking_cost_per_hour_CHF_urban", 1.0) #CHF per hour
     context.config("parking_cost_per_hour_CHF_suburban", 0.5) #CHF per hour
-    context.config("parking_price_reduction_for_work", 1.0) #CHF per hour
+    context.config("parking_price_reduction_for_work", 1.0)
     context.config("urban_parking_search_min", 2.0) #minutes (source1: https://www.sciencedirect.com/science/article/pii/S0965856424000934)
     #                                                        (source2(zurich, see validation data): https://link.springer.com/article/10.1007/s11116-017-9832-9)
     #                                                        (source3(page 114): https://www.research-collection.ethz.ch/entities/publication/19cf9faa-55b4-4f01-96ab-fdfb9587032a)

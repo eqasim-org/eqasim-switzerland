@@ -21,9 +21,9 @@ MEAN_INCOME_CHF = constants.MEAN_INCOME_CHF
 
 def configure(context):
     context.stage("dmc.data.training_data")
-    context.config("ignore_car_passenger", True)
+    context.config("ignore_car_passenger", False)
     context.config("distance_cost_interaction", True)
-    context.config("income_cost_interaction", False)
+    context.config("income_cost_interaction", True)
 
 def preprocess_data(df, ignore_car_passenger):
     modes = MODES.copy()
