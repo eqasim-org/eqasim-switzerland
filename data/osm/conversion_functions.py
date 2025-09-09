@@ -1,16 +1,16 @@
 import os
 import sys
+import osmium
 import logging
 import osmium
 logger = logging.getLogger(__name__)
 
 """
-This file contains functions that convert .pbf file into .osm file. It uses osmosis, but if osmosis is not installed, it uses osmium.
+This file contains functions that convert .pbf file into .osm file. 
 """
 
-def convert_pbf_to_osm_pyosmium(input_file, output_file): 
-    # import it here, because doesn't need to be installed in the environment if osmosis is installed
-      
+def convert_pbf_to_osm_pyosmium(input_file, output_file):      
+
     class OSMHandler(osmium.SimpleHandler):
         def __init__(self, writer):
             super(OSMHandler, self).__init__()

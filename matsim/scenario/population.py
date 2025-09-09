@@ -4,6 +4,7 @@ import itertools
 
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 
 import matsim.writers
 from matsim.writers import backlog_iterator
@@ -18,6 +19,8 @@ def configure(context):
     context.stage("synthesis.freight.trips")
 
     context.stage("synthesis.vehicles.vehicles")
+    context.stage("data.spatial.municipality_types")
+    context.stage("data.spatial.municipalities")
 
     context.config("include_cross_border", default = False)
     if context.config("include_cross_border"):
@@ -55,6 +58,8 @@ class PersonWriter:
         writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[9]))
         writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[10]))
         writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[11]))
+        writer.add_attribute("ptHasGleis7", "java.lang.Boolean", writer.true_false(self.person[24]))
+        writer.add_attribute("ptHasJunior", "java.lang.Boolean", writer.true_false(self.person[25]))
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(self.person[13]))
         writer.add_attribute("hasWalkLoopTrip", "java.lang.Boolean", writer.true_false(self.person[18]))
         writer.add_attribute("hasCarLoopTrip", "java.lang.Boolean", writer.true_false(self.person[19]))
@@ -63,9 +68,8 @@ class PersonWriter:
         writer.add_attribute("hasBikeLoopTrip", "java.lang.Boolean", writer.true_false(self.person[22]))
         writer.add_attribute("statpopPersonId", "java.lang.Long", str(self.person[14]))
         writer.add_attribute("statpopHouseholdId", "java.lang.Long", str(self.person[15]))
-        #writer.add_attribute("cantonName", "java.lang.String", str(self.person[18]))
-        #writer.add_attribute("municipalityType", "java.lang.String", str(self.person[19]))
-        writer.add_attribute("incomeClass", "java.lang.Integer", str(self.person[23]))
+
+
         writer.add_attribute("mzPersonId", "java.lang.Long", str(self.person[16]))
         writer.add_attribute("mzHeadId", "java.lang.Long", str(self.person[17]))
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
@@ -92,7 +96,8 @@ class PersonWriter:
 
             start_time = activity[2] if not np.isnan(activity[2]) else None
             end_time = activity[3] if not np.isnan(activity[3]) else None
-            writer.add_activity(activity[5], location, start_time, end_time)
+            attributes = dict(municipalityType = activity[10], municipalityId = activity[11])
+            writer.add_activity(activity[5], location, start_time, end_time, attributes = attributes)
 
             if not activity[6]:
                 next_activity = self.activities[i + 1]
@@ -155,13 +160,19 @@ class FreightWriter:
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", 
                  "home_x", "home_y",
                  "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke",
+<<<<<<< HEAD
                  "household_id", "is_car_passenger", 
                  "statpop_person_id", "statpop_household_id", "mz_person_id", "mz_head_id", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
                  "income_class", "person_type"]
 
+=======
+                 "household_id", "is_car_passenger", "statpop_person_id", "statpop_household_id", "mz_person_id",
+                 "mz_head_id", "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
+                 "mz_head_id","subscriptions_gleis7","subscriptions_junior"]
+>>>>>>> origin/cmdp
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
-                   "geometry", "destination_id", "following_mode"]
+                   "geometry", "destination_id", "following_mode", "municipality_type","municipality_id"]
 
 
 def execute(context):
@@ -169,6 +180,9 @@ def execute(context):
     df_persons    = context.stage("synthesis.population.enriched")
     df_activities = context.stage("synthesis.population.activities")
     df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]
+    df_vehicles = context.stage("synthesis.vehicles.vehicles")[1]
+    df_municipality_type = context.stage("data.spatial.municipality_types")
+    df_municipalities,_ = context.stage("data.spatial.municipalities")
 
     # Attach following modes to activities
     df_trips         = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
@@ -178,6 +192,13 @@ def execute(context):
     # Attach locations to activities
     df_locations  = context.stage("synthesis.population.spatial.locations")
     df_activities = pd.merge(df_activities, df_locations, on=["person_id", "activity_index"], how="left")
+
+    # Attach municipality to activities (TODO: Maybe this can be done in previous stages by keeping track of municipality id)
+    df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_type","municipality_id", "geometry"]]
+    df_activities = gpd.GeoDataFrame(df_activities, geometry="geometry", crs="EPSG:2056")
+    assert df_activities.crs == df_municipalities.crs
+    df_activities = gpd.sjoin_nearest(df_activities, df_municipalities, how="left").drop(columns=["index_right"]) # way faster than sjoin   
+
 
     # Replace the primary-secondary purposes with normal ones
     # Now that the secondary locations are assigned, no need to continue working with these purposes

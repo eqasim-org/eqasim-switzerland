@@ -163,10 +163,21 @@ class PopulationWriter(XmlWriter):
         self._pop_scope()
         self._write_line('</activity>')
 
+<<<<<<< HEAD
     def add_activity(self, type, location, start_time = None, end_time = None):
         self._require_scope(self.PLAN_SCOPE)
         self._start_activity(type, location, start_time, end_time)
         self._write('/>\n')
+=======
+    def add_activity(self, activity_type, location, start_time = None, end_time = None, attributes = None):        
+        self.start_activity(activity_type, location, start_time, end_time)
+        if attributes is not None:
+            self.start_attributes()
+            for key, item in attributes.items():
+                self.add_attribute(key, self.get_java_type(type(item)), item)
+            self.end_attributes()
+        self.end_activity()
+>>>>>>> origin/cmdp
 
     def add_leg(self, mode, departure_time, travel_time):
         self._require_scope(self.PLAN_SCOPE)
@@ -439,8 +450,11 @@ class NetworkWriter(XmlWriter):
         self._write_line('</links>')
    
 
-    def write_node(self, _id: str, x: float, y:float):
-        self._write_line(f'<node  id="{_id}"  x="{x}"  y="{y}"/>')        
+    def write_node(self, _id: str, x: float, y:float, z:float=None):
+        if z is None:
+            self._write_line(f'<node  id="{_id}"  x="{x}"  y="{y}"/>')        
+        else:
+            self._write_line(f'<node  id="{_id}"  x="{x}"  y="{y}"  z="{z}"/>')        
 
     def write_link(self, _id: str, _from:str, to:str, length:float,
                    freespeed:float, capacity:int, permlanes:int,
@@ -478,9 +492,12 @@ class NetworkWriter(XmlWriter):
             self.add_attribute(name, value)
         self.end_attributes()
 
-    def add_nodes(self,_id, x, y):
+    def add_nodes(self,_id, x, y, z=None):
         self.start_nodes()
-        list(map(self.write_node,_id,x,y))
+        if z is None:
+            list(map(self.write_node,_id,x,y))
+        else:
+            list(map(self.write_node,_id,x,y,z))
         self.end_nodes()
     
     def add_links(self, _id, _from, to, length, freespeed, capacity, permlanes,

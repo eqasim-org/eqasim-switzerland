@@ -7,15 +7,15 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     
     context.config("data_path")
-    context.config("osm_path", "switzerland-latest.osm.gz")
-    context.config("border_offset", 20000) 
+    context.config("osm_file", "switzerland-latest.osm.gz")
+    context.config("border_offset", 20000)
 
 
 def execute(context):
     # if the path is not a list, treat it as a single file, else treat it as a list of files, merge them, and keep only
     # the network within 'border_offset' distance to the border
     output_file = '%s/osm_network.osm.gz' % context.path()
-    osm_file = context.config("osm_path")
+    osm_file = context.config("osm_file")
 
     if not isinstance(osm_file,list):
         osm_file = '%s/osm/%s' % (context.config("data_path"), osm_file)
@@ -35,3 +35,7 @@ def execute(context):
         border = border.to_crs("EPSG:4326") # because osm in in wgs84       
         # Merge and cut to the area
         return mf.merge_files(context, osm_files, border, output_file)
+
+
+
+ 

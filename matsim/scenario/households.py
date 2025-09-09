@@ -10,14 +10,10 @@ import matsim.writers
 def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.constants")
-
-    context.config("include_cross_border", default = False)
-    if context.config("include_cross_border"):
-        context.stage("data.cross_border.generate_cross_border_traffic")
-
+    context.stage("data.spatial.cantons")
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class",
-          "municipality_type", "sp_region", "canton_id", "ovgk"]
+          "municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"]
 
 INCOME_VALUES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]
 
@@ -50,6 +46,8 @@ def add_household(writer, household, member_ids, c):
     writer.add_attribute("municipalityType", "java.lang.String", str(household[7]))
     writer.add_attribute("spRegion", "java.lang.Integer", str(household[8]))
     writer.add_attribute("ovgk", "java.lang.String", str(household[10]))
+    writer.add_attribute("cantonName", "java.lang.String", str(household[11]))
+    writer.add_attribute("incomePerCapita", "java.lang.Double", str(household[12]))
 
     canton_id = str(household[9]) if not np.isnan(household[9]) else "-1"
     writer.add_attribute("cantonId", "java.lang.Double", canton_id)
@@ -64,6 +62,18 @@ def execute(context):
     c          = context.stage("data.constants")
 
     df_persons = context.stage("synthesis.population.enriched").sort_values(by=["household_id", "person_id"])
+    df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name"]].copy()
+    
+    # Attach canton name to agent (TODO: do it in previous stages, keep track of canton name)
+    df_cantons["canton_name"] = df_cantons["canton_name"].str.split('/').str[0].str.strip()
+    df_persons = pd.merge(df_persons, df_cantons, left_on="canton_id", right_on="canton_id", how="left")
+    assert df_persons.canton_name.notnull().all(), "Not all persons have a canton name assigned. Check the canton data."
+
+    # Attach real average income per person per household
+    INCOME_CLASS_MAP = {0: 2000, 1: 3000, 2: 4500, 3: 7000, 4: 9000, 5: 11000,  6: 13000, 7: 15000, 8: 17000}
+    df_persons["income"] = df_persons["income_class"].astype(int).map(INCOME_CLASS_MAP)
+    df_persons["income_per_capita"] = df_persons["income"] / df_persons["household_size"].fillna(1).clip(lower=1, upper=7)
+
     df_persons = df_persons[FIELDS]
 
     if context.config("include_cross_border"):
