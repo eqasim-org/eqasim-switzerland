@@ -32,7 +32,7 @@ def get_alpha_calibration_args(context):
                                 "--config:eqasim:calibration.bounds", bounds,
                                 "--config:eqasim:calibration.distanceBins", "0,275,451,683,995,1513,2400,3853,5026,6674,9261,13788,22976,1000000",
                                 "--config:eqasim:calibration.maxEval", "1000",
-                                "--config:eqasim:calibration.repoCommit", "1de98c60cf0ca5c3f48d2342ea776f54cad05ffd",
+                                "--config:eqasim:calibration.repoCommit", "90766480623cc638cddc3b60c268709b5d46ca6c",
                                 ])
     else:
         if context.config("calibrate_alphas_in_matsim"):
