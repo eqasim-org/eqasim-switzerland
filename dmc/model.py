@@ -21,9 +21,12 @@ MEAN_INCOME_CHF = constants.MEAN_INCOME_CHF
 
 def configure(context):
     context.stage("dmc.data.training_data")
-    context.config("ignore_car_passenger", True)
+    context.config("ignore_car_passenger", False)
     context.config("distance_cost_interaction", True)
-    context.config("income_cost_interaction", False)
+    context.config("income_cost_interaction", True)
+    context.config("urban_parking_search_min", 2.0) #used in the writer
+    context.config("suburban_parking_search_min", 1.0) #used in the writer
+    context.config("use_exponents", True)
 
 def preprocess_data(df, ignore_car_passenger):
     modes = MODES.copy()
@@ -111,22 +114,23 @@ def define_variables(database, ignore_car_passenger):
         })
     return variables
 
-def define_betas(ignore_car_passenger):
+def define_betas(ignore_car_passenger, use_exponents):
+    trainable = 0 if use_exponents else 1
     betas = {
         # lambdas
         "lambda_cost_distance": Beta("lambda_cost_distance", -0.1, None, -0.001, 0),
         "lambda_cost_income": Beta("lambda_cost_income", -0.01, None, -0.001, 0),
 
-        "lambda_car_travel_time": Beta("lambda_car_travel_time", 0.9, 0.01, None, 0),
-        "lambda_pt_in_vehicle_time": Beta("lambda_pt_in_vehicle_time", 0.95, None, None, 0),
-        "lambda_pt_access_egress_time": Beta("lambda_pt_access_egress_time", 1.0, 0.01, None, 0),
-        "lambda_pt_transfers": Beta("lambda_pt_transfers", 1.0, 0.01, None, 0),
+        "lambda_car_travel_time": Beta("lambda_car_travel_time", 1.0, 0.01, None, trainable),
+        "lambda_pt_in_vehicle_time": Beta("lambda_pt_in_vehicle_time", 1.0, None, None, trainable),
+        "lambda_pt_access_egress_time": Beta("lambda_pt_access_egress_time", 1.0, 0.01, None, trainable),
+        "lambda_pt_transfers": Beta("lambda_pt_transfers", 1.0, 0.01, None, trainable),
         "lambda_pt_transfer_time": Beta("lambda_pt_transfer_time", 1.0, 0.01, None, 1), #doesn't converge
         "lambda_pt_distance": Beta("lambda_pt_distance", 1.0, 0.01, None, 0),
-        "lambda_car_passenger_travel_time": Beta("lambda_car_passenger_travel_time", 1.0, 0.01, None, 0),
-        "lambda_car_passenger_distance": Beta("lambda_car_passenger_distance", 1.0, 0.01, None, 0),        
-        "lambda_bike": Beta("lambda_bike", 1.0, 0.01, None, 0),
-        "lambda_walk": Beta("lambda_walk", 1.0, 0.01, None, 0),
+        "lambda_car_passenger_travel_time": Beta("lambda_car_passenger_travel_time", 1.0, 0.01, None, trainable),
+        "lambda_car_passenger_distance": Beta("lambda_car_passenger_distance", 1.0, 0.01, None, trainable),        
+        "lambda_bike": Beta("lambda_bike", 1.0, 0.01, None, trainable),
+        "lambda_walk": Beta("lambda_walk", 1.0, 0.01, None, trainable),
 
         # cost
         "beta_cost_CHF": Beta("beta_cost_CHF", -0.126, None, None, 0),        
@@ -349,12 +353,13 @@ def log_trip_stats(df, modes):
 def execute(context):
     df = context.stage("dmc.data.training_data")
     ignore_car_passenger = context.config("ignore_car_passenger")
+    use_exponents = context.config("use_exponents")
     df, modes = preprocess_data(df, ignore_car_passenger)
     log_trip_stats(df, modes)
 
     database = db.Database("data", df)
     vars = define_variables(database, ignore_car_passenger)
-    betas = define_betas(ignore_car_passenger)
+    betas = define_betas(ignore_car_passenger, use_exponents)
     utilities, availability = build_utilities(context, vars, betas, modes, ignore_car_passenger)
 
     # Training the model
@@ -371,7 +376,7 @@ def execute(context):
 
     # write the optimal parameters to a yaml file in MATSim input format
     path_to_params = os.path.join(context.path(),"model_parameters.yaml")
-    writer(result, path_to_params).write()
+    writer(context, result, path_to_params).write()
 
     # Compute the VOT for car users
     vot_car = vot_utils.get_car_vot(df, result, utilities, modes, eps=1e-2)

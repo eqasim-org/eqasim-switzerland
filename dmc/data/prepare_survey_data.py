@@ -71,8 +71,8 @@ def execute(context):
     df_trips["is_first"] = df_trips["person_id"].shift(1) != df_trips["person_id"]
     df_trips["is_last"]  = df_trips["person_id"].shift(-1) != df_trips["person_id"]
 
-    parking_duration_min = (np.clip(df_trips["departure_time"].shift(-1), 7*3600, 20*3600) - 
-                            np.clip(df_trips["departure_time"], 7*3600, 20*3600)) / 60.0
+    parking_duration_min = (np.clip(df_trips["departure_time"].shift(-1), 8*3600, 19*3600) - 
+                            np.clip(df_trips["departure_time"], 8*3600, 19*3600)) / 60.0
 
     parking_duration_min[parking_duration_min<=0] = np.nan  # doesn't pay parking (duration out of bounds)
     parking_duration_min[df_trips["is_last"].values] = np.nan # doesn't pay parking (home parking at night)

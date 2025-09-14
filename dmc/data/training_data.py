@@ -21,7 +21,7 @@ def configure(context):
     context.config("car_cost_per_km", 0.26) #CHF per km
     context.config("parking_cost_per_hour_CHF_urban", 1.0) #CHF per hour
     context.config("parking_cost_per_hour_CHF_suburban", 0.5) #CHF per hour
-    context.config("parking_price_reduction_for_work", 1.0) #CHF per hour
+    context.config("parking_price_reduction_for_work", 1.0) 
     context.config("urban_parking_search_min", 2.0) #minutes (source1: https://www.sciencedirect.com/science/article/pii/S0965856424000934)
     #                                                        (source2(zurich, see validation data): https://link.springer.com/article/10.1007/s11116-017-9832-9)
     #                                                        (source3(page 114): https://www.research-collection.ethz.ch/entities/publication/19cf9faa-55b4-4f01-96ab-fdfb9587032a)
@@ -44,12 +44,15 @@ def execute(context):
 
     # Availabilities
     persons = context.stage("data.microcensus.persons")
-    persons = persons[["person_id","car_availability","number_of_cars_class","number_of_bikes_class","driving_license"]].reset_index(drop=True)
-    
-    persons["car_availability"] = ((persons["car_availability"] != c.CAR_AVAILABILITY_NEVER)&
+    persons = persons[["person_id","car_availability","number_of_cars","number_of_bikes_class",
+                       "driving_license","is_car_passenger"]].reset_index(drop=True)
+
+    persons["car_availability"] = persons["number_of_cars"]>0 # I noticed that this is better than using the car availability stated in the survey
+
+    persons["car_availability"] = ((persons["car_availability"])&
                                    (persons["driving_license"]==True))
     persons["bike_availability"] = persons["number_of_bikes_class"] != c.BIKE_AVAILABILITY_FOR_NONE
-    persons["car_passenger_availability"] = persons["car_availability"]
+    persons["car_passenger_availability"] = persons["car_availability"] | persons["is_car_passenger"]
     persons["walk_availability"] = True
     persons["pt_availability"] = True
 
@@ -57,11 +60,13 @@ def execute(context):
     df = df.merge(persons, on="person_id", how="left")
 
     """
-    Car availability is removed if :
-    - no route is generated
-    - travel time < 1 min for car and pt
-    - distance higher than 20km for bike
-    - distance higher than 5km for walk
+    availabilities are removed if :
+        - no route is generated (in routed data)
+        - travel time < 1 min for car and pt
+        - pt_transfers > 5 or pt_transfer_time_min > 50min or in_vehicle_time_min > 300min for pt
+        - distance higher than 300km for car
+        - distance higher than 20km for bike
+        - distance higher than 5km for walk
     """
     for mode in ['car', 'car_passenger', 'pt', 'walk', 'bike']:   
         not_routed = df[f"{mode}_travel_time_min"].isna()     
@@ -97,8 +102,10 @@ def execute(context):
     df["car_cost_CHF"] = car_cost.get_cost(df, context)
     
     ## parking cost    
-    df["parking_cost_CHF"] = parking_cost.get_cost(df, context)
-    
+    parking_cost_CHF, parking_duration_min = parking_cost.get_cost(df, context)
+    df["parking_cost_CHF"] = parking_cost_CHF
+    df["actual_parking_duration_min"] = parking_duration_min
+
     ##public transport cost
     df["pt_cost_CHF"] = pt_cost.get_cost(df, context, distance_threshold_km = 10.0)
 
@@ -150,7 +157,7 @@ def execute(context):
     df = df[~f_remove]
 
     ### remove very short and very long trips
-    out_of_range_distance = ((df.euclidean_distance_km < 0.1) | (df.euclidean_distance_km > 150))
+    out_of_range_distance = ((df.euclidean_distance_km < 0.1) | (df.euclidean_distance_km > 100))
     df = df[~out_of_range_distance]
 
     ########################### RETURN ################################

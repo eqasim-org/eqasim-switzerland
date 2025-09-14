@@ -9,19 +9,25 @@ logging.basicConfig(level=logging.INFO)
 
 
 class writer:
-    def __init__(self, biogeme_model, output_path):
+    def __init__(self, context, biogeme_model, output_path):
+        self.context = context
         self.model = biogeme_model
         self.output_path = output_path
         self.params = biogeme_model.getEstimatedParameters()["Value"].to_dict()
 
     def write(self):
         params_dict = {self.rename(k): float(v) for k, v in self.params.items()}
+        # interactions reference values
         params_dict["referenceIncome"] = constants.MEAN_INCOME_CHF
         params_dict["referenceEuclideanDistance_km"] = constants.MEAN_EUCLIDEAN_DISTANCE_KM
+        # parking informations
+        params_dict["parking.urbanParkingSearchDuration_min"] = self.context.config("urban_parking_search_min")
+        params_dict["parking.suburbanParkingSearchDuration_min"] = self.context.config("suburban_parking_search_min")
+        # set the rest to 0 and 1 for exponents
         params_dict = self.set_the_rest_to_zeros(params_dict)
 
         # Organize parameters by mode
-        modes = ["car",  "pt", "bike", "walk", "cp"]
+        modes = ["car",  "pt", "bike", "walk", "cp", "parking"]
         grouped_params = {}
         for mode in modes:
             grouped_params[mode] = {k: v for k, v in params_dict.items() if k.startswith(mode + ".")}
