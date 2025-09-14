@@ -132,7 +132,7 @@ def execute(context):
     assert os.path.exists("%s/%stransit_schedule.xml.gz" % (context.path(), context.config("output_prefix")))
 
     # Adapt the config
-    eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunAdaptConfig", [
+    eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.scenario.RunAdaptConfig", [
         "--input-path", config_path,
         "--output-path", config_path,
         "--downsamplingRate", context.config("input_downsampling"),

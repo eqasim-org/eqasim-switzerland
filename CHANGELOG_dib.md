@@ -61,6 +61,17 @@ Add these parameters to the pipeline config:
 - `suburban_parking_search_min`: float (default: 1.0) - Minutes
 - `only_from_home_trips`: bool (default: False)
 
+## Automatic Calibration
+This section explains how to perform mode choice calibration:
+1. Set the `estimate_dmc` parameter to `true`. This will estimate the parameters and use them when running MATSim.  
+2. Set either `calibrate_alphas_in_matsim` or `calibrate_betas_in_matsim` to `true` to adjust the estimated values within the simulation so they align with the actual mode shares.  
+
+## Activate Delays at Intersections
+To activate delays at intersections in MATSim, follow these steps:
+1. Enable traffic light intersection delays: set `activate_traffic_light_delays` in the config to `true`.  
+2. Enable unsignalized intersection delays: set `activate_unsignalized_intersections_delays` in the config to `true`.  
+
+
 ## Other Changes
 
 ### Population Data
