@@ -368,6 +368,8 @@ def execute(context):
     biogeme.modelName = "DMC_model"
     biogeme.generateHtml = False
     biogeme.generate_pickle = False
+    biogeme.loadSavedIterations = False
+    biogeme.saveIterations = False
 
     null_loglikelihood = biogeme.calculateNullLoglikelihood(availability)
     result = biogeme.estimate()
