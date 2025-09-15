@@ -49,7 +49,7 @@ You can specify this file path in the MATSim config (`eqasim.modeParametersPath`
 ### New Parameters for DMC Model
 Add these parameters to the pipeline config:
 
-- `routed_trips_path`: str (default: "Routed_alternatives_v3_FINAL.txt") - absolute path to the Google routed trips
+- `routed_trips_file`: str (default: "Routed_alternatives_v3_FINAL.txt") - filename of the Google routed trips data. Should be located in data_path/dmc.
 - `ignore_car_passenger`: bool (default: False) - Whether to consider car passenger as a mode in the model
 - `distance_cost_interaction`: bool (default: True) - Whether to consider cost-distance interaction
 - `income_cost_interaction`: bool (default: True) - Whether to consider cost-income interaction

@@ -10,11 +10,12 @@ logger = logging.getLogger(__name__)
 
 def configure(context):
     # Path to the csv file containing the dataset of routed trips  
-    context.config("routed_trips_path", "Routed_alternatives_v3_FINAL.txt")
+    context.config("data_path")    
+    context.config("routed_trips_file", "Routed_alternatives_v3_FINAL.txt")
 
 
 def execute(context):
-    path_to_data = context.config("routed_trips_path")
+    path_to_data = os.path.join(context.config("data_path"),"dmc",context.config("routed_trips_file"))
     assert os.path.exists(path_to_data), f"The provided path for routed_trips_path ({path_to_data}) does not exist."
 
     df = pd.read_csv(path_to_data, sep=";")
@@ -25,12 +26,12 @@ def execute(context):
     # Remove trips with less than two routed choices
     keep_row  = df[choice_cols].notna().sum(axis=1)>1    
     df = df[keep_row].reset_index(drop=True)
-    logger.info((~keep_row).sum()," trips are removed because they have less than 2 routed modes.")
+    logger.info("%d trips are removed because they have less than 2 routed modes.", (~keep_row).sum())
 
     # Remove trips with no mode selected
     keep_row  = df["w_verkehrsmittel"].notna()  
     df = df[keep_row].reset_index(drop=True)
-    logger.info((~keep_row).sum()," trips are removed because their mode is nan.")
+    logger.info("%d trips are removed because their mode is nan.", (~keep_row).sum())
 
     # Sort by person and trip id
     df = df.sort_values(by=["HHNR","WEGNR"]).reset_index(drop=True)

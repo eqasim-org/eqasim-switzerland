@@ -19,7 +19,7 @@ def configure(context):
     context.config("activate_unsignalized_intersections_delays", default=False)
 
     if context.config("estimate_dmc"):
-        context.stage("eqasim.dmc.model")
+        context.stage("dmc.model")
 
     context.config("useScheduleBasedTransport", default=True)
     context.config("preventwaitingtoentertraffic", default = "no")
