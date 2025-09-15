@@ -364,16 +364,19 @@ def execute(context):
 
     # Training the model
     logprob = models.loglogit(utilities, availability, vars["mode"])
+    cwd = os.getcwd()
+    os.chdir(context.working_directory)
     biogeme = bio.BIOGEME(database, {"loglike": logprob, "weight": vars["weight"]})
     biogeme.modelName = "DMC_model"
     biogeme.generateHtml = False
     biogeme.generate_pickle = False
     biogeme.loadSavedIterations = False
     biogeme.saveIterations = False
-
+    
     null_loglikelihood = biogeme.calculateNullLoglikelihood(availability)
     result = biogeme.estimate()
-
+    os.chdir(cwd)
+    
     logger.info(result.shortSummary())
 
     # write the optimal parameters to a yaml file in MATSim input format

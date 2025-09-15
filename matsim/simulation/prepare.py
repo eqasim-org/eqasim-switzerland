@@ -164,7 +164,7 @@ def execute(context):
         "--output-path", population_output_path,
         "--threads", context.config("threads"),
         "--config:plans.inputPlansFile", population_prepared_path,
-        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
+        "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator"
     ])
     
     assert os.path.exists("%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix")))
