@@ -11,6 +11,8 @@ def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.constants")
     context.stage("data.spatial.cantons")
+    context.config("include_cross_border")
+    context.stage("data.cross_border.generate_cross_border_traffic")
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class",
           "municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"]
@@ -91,6 +93,9 @@ def execute(context):
         cross_border_persons["sp_region"]         = -1
         cross_border_persons["canton_id"]         = 0
         cross_border_persons["ovgk"]              = "crossborder"
+
+        cross_border_persons["canton_name"] = "outsideCH"
+        cross_border_persons["income_per_capita"] = 0
 
         cross_border_persons = cross_border_persons[FIELDS]
         df_persons = pd.concat([df_persons, cross_border_persons])

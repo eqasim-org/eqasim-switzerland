@@ -199,6 +199,8 @@ def parallel_statistical_matching(context, df_source, source_identifier, weight,
     rng = np.random.RandomState(random_seed)
     chunks = np.array_split(df_target, processes)
 
+    print(processes)
+
     with context.progress(label="Statistical matching ...", total=len(df_target)):
         with context.parallel({
             "df_source": df_source, "source_identifier": source_identifier, "weight": weight,
@@ -212,6 +214,15 @@ def parallel_statistical_matching(context, df_source, source_identifier, weight,
             df_target = pd.concat([r[0] for r in results])
 
             return df_target, levels
+        
+
+def nonparallel_statistical_matching(context, df_source, source_identifier, weight, df_target, target_identifier, columns,
+                                  mandatory_columns, minimum_observations=0):
+    
+    random_seed = context.config("random_seed")
+    
+    return statistical_matching(context.progress, df_source, source_identifier, weight, df_target, target_identifier,
+                                columns, mandatory_columns, random_seed, minimum_observations)
 
 
 def run_statistical_matching_extended(context, df_source, source_identifier, weight,
@@ -225,7 +236,7 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     if population_selector is not None:
         df_target = pd.DataFrame(df_target[population_selector])
 
-    df_assignment, levels = parallel_statistical_matching(
+    df_assignment, levels = nonparallel_statistical_matching(
         context,
         df_source, source_identifier, weight,
         df_target, target_identifier,
@@ -339,6 +350,8 @@ def execute(context):
                                                              minimum_observations = context.config("matching_minimum_observations"), 
                                                              population_selector=population_selector,
                                                              option="household")
+        
+        print("First statistical matching done")
 
         # Convert IDs
         df_target["mz_id"] = df_target["mz_id"].astype(np.int)
@@ -378,6 +391,8 @@ def execute(context):
 
         columns_individual_matching           = ["number_of_cars_class", "N_children_under_12", "ovgk", "age_class", "sex", "marital_status"]
         mandatory_columns_individual_matching = columns_individual_matching[:4]
+
+        print("Second statistical matching starting")
 
         df_target, df_population, removed_ids_list  = run_statistical_matching_extended(context, 
                                                               df_source, "mz_id", "household_weight",

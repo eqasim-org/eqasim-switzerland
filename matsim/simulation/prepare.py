@@ -132,7 +132,8 @@ def execute(context):
     assert os.path.exists("%s/%stransit_schedule.xml.gz" % (context.path(), context.config("output_prefix")))
 
     # Adapt the config
-    eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.scenario.RunAdaptConfig", [
+    #eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.scenario.RunAdaptConfig", [
+    eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunAdaptConfig", [
         "--input-path", config_path,
         "--output-path", config_path,
         "--downsamplingRate", context.config("input_downsampling"),
@@ -152,7 +153,6 @@ def execute(context):
     # Write PT routing parameters within the config
     pt_parameters = context.stage("calibration.pt_routing.pt_routing_parameters")
     config_utils.adjust_pt_routing_parameters(context, pt_parameters)
-
 
     # Route the population
     population_output_path = "%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix"))

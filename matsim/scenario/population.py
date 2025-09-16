@@ -58,8 +58,8 @@ class PersonWriter:
         writer.add_attribute("ptHasHalbtax", "java.lang.Boolean", writer.true_false(self.person[9]))
         writer.add_attribute("ptHasVerbund", "java.lang.Boolean", writer.true_false(self.person[10]))
         writer.add_attribute("ptHasStrecke", "java.lang.Boolean", writer.true_false(self.person[11]))
-        writer.add_attribute("ptHasGleis7", "java.lang.Boolean", writer.true_false(self.person[24]))
-        writer.add_attribute("ptHasJunior", "java.lang.Boolean", writer.true_false(self.person[25]))
+        writer.add_attribute("ptHasGleis7", "java.lang.Boolean", writer.true_false(self.person[25]))
+        writer.add_attribute("ptHasJunior", "java.lang.Boolean", writer.true_false(self.person[26]))
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(self.person[13]))
         writer.add_attribute("hasWalkLoopTrip", "java.lang.Boolean", writer.true_false(self.person[18]))
         writer.add_attribute("hasCarLoopTrip", "java.lang.Boolean", writer.true_false(self.person[19]))
@@ -161,7 +161,8 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
                  "household_id", "is_car_passenger", 
                  "statpop_person_id", "statpop_household_id", "mz_person_id", "mz_head_id", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
-                 "income_class", "person_type"]
+                 "income_class", "person_type",
+                 "subscriptions_gleis7", "subscriptions_junior"]
 
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
                    "geometry", "destination_id", "following_mode", "municipality_type","municipality_id"]
@@ -246,6 +247,9 @@ def execute(context):
         cross_border_activities["purpose"] = cross_border_activities["purpose"].replace({"home_secondary":"other",
                                                                  "work_secondary": "work",
                                                                  "education_secondary":"education"})
+        
+        cross_border_activities["municipality_type"] = 0
+        cross_border_activities["municipality_id"] = 0
         
         cross_border_vehicles["person_id"]    = cross_border_vehicles["vehicle_id"].str.split(":").str[0]
         cross_border_vehicles["vehicle_type"] = cross_border_vehicles["vehicle_id"].str.split(":").str[1]

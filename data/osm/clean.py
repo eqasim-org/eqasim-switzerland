@@ -20,6 +20,7 @@ def execute(context):
     if not isinstance(osm_file,list):
         osm_file = '%s/osm/%s' % (context.config("data_path"), osm_file)
         return cf.from_pbf_to_osm_gz(context, osm_file, output_file)
+    
     else:
         osm_files = ['%s/osm/%s' % (context.config("data_path"), f) for f in osm_file]
 
