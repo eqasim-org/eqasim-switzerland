@@ -5,22 +5,15 @@ import os
 def get_alpha_calibration_args(context):
     additional_args = []
     if context.config("calibrate_betas_in_matsim"):
-        cache_path = os.path.dirname(os.path.dirname(context.path()))  
+        cache_path = context.working_directory
         bounds = """car.alpha_u:4.0,
                     walk.alpha_u:3.0,
                     bike.alpha_u:3.0,
                     cp.alpha_u:3.0,
                     cp.travelTimeExponent:0.2,
-                    pt.inVehicleTimeExponent:0.5,
                     walk.travelTimeExponent:0.2,
-                    car.travelTimeExponent:0.2,
-                    bike.travelTimeExponent:0.2,
-                    car.betaTravelTime_u_min:0.5,
-                    walk.betaTravelTime_u_min:0.5,
-                    bike.betaTravelTime_u_min:0.5,
-                    pt.betaInVehicleTime_u_min:0.5,
-                    cp.betaTravelTime_u_min:0.5,
-                    pt.betaWaitingTime_u_min: 0.2,
+                    car.travelTimeExponent:0.2,                   
+                    car.betaShortDistance_u:0.5,
                     pt.betaShortDistance_u:0.5"""
                 
         additional_args.extend(["--config:eqasim:calibration.activate", "true",
@@ -32,7 +25,8 @@ def get_alpha_calibration_args(context):
                                 "--config:eqasim:calibration.bounds", bounds,
                                 "--config:eqasim:calibration.distanceBins", "0,275,451,683,995,1513,2400,3853,5026,6674,9261,13788,22976,1000000",
                                 "--config:eqasim:calibration.maxEval", "1000",
-                                "--config:eqasim:calibration.repoCommit", "90766480623cc638cddc3b60c268709b5d46ca6c",
+                                "--config:eqasim:calibration.repoCommit", "130c86cdeb4adbf19644e97757b30bf219d116e4",
+                                "--config:eqasim:calibration.optimizerPath", "optimizer"
                                 ])
     else:
         if context.config("calibrate_alphas_in_matsim"):
