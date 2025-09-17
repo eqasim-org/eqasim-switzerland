@@ -52,8 +52,6 @@ def adjust_pt_routing_parameters(context, parameters):
     config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
     assert os.path.exists(config_path)
 
-    print(parameters)
-
     pt_modes = ["rail", "subway", "ferry", "tram", "funicular", "cable-car", "gondola", "other"]
     penalty_intermodal = parameters["raptorPenalties:transfer_intermodal"]
     penalty_rail       = parameters["raptorPenalties:transfer_rail"]
@@ -92,3 +90,24 @@ def adjust_pt_routing_parameters(context, parameters):
     # Write back to file with DOCTYPE
     doctype_str = '<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">'
     tree.write(config_path, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
+
+
+def change_param(context, module_name, param_name, new_value):
+    config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
+    assert os.path.exists(config_path)
+
+    parser = etree.XMLParser(remove_blank_text=True)
+    tree = etree.parse(config_path, parser)
+    root = tree.getroot()
+
+    for module in root.findall(".//module"):
+        if module.get("name") == module_name:
+            for param in module.findall("param"):
+                if param_name == param.get("name"):
+                    param.set("value", new_value)
+
+    doctype_str = '<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">'
+    tree.write(config_path, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
+
+
+
