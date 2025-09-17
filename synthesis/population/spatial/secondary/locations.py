@@ -128,7 +128,7 @@ def execute(context):
 
     print("Success rate:", df_convergence["valid"].mean())
 
-    df_locations.to_csv("/cluster/project/cmdp/asallard/analysis/Crossborder/MZ/secondary_destinations.csv", index=False)
+    # df_locations.to_csv("/cluster/project/cmdp/asallard/analysis/Crossborder/MZ/secondary_destinations.csv", index=False)
 
     return df_locations, df_convergence
 

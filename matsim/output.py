@@ -14,6 +14,7 @@ def configure(context):
     context.config("output_prefix", "switzerland_")
     context.config("export_detailed_network", False)
     context.config("write_jar", True)
+    context.config("estimate_dmc", default=False)
 
 
 def execute(context):
@@ -47,6 +48,8 @@ def execute(context):
         "%svehicles.xml.gz" % context.config("output_prefix"),
         "%sconfig.xml" % context.config("output_prefix")
     ]
+    if context.config("estimate_dmc"):
+        file_names.append("estimated_dmc_parameters.yml")
     
     for file in file_names:
         shutil.copyfile("%s/%s" % (source_path, file), 
@@ -70,6 +73,7 @@ def execute(context):
     path_to_results =  "%s/simulation_output" % context.path("matsim.simulation.run")
     shutil.move(path_to_results, 
                 "%s/simulation_output" % target_path)
+    # TODO: if calibration is activated, copy the calibrated parameters
     
     # copy contract information
     contracts_path = context.stage("contracts.contracts")

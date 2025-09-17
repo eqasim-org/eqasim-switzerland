@@ -18,7 +18,7 @@ def execute(context):
     path_to_data = os.path.join(context.config("data_path"),"dmc",context.config("routed_trips_file"))
     assert os.path.exists(path_to_data), f"The provided path for routed_trips_path ({path_to_data}) does not exist."
 
-    df = pd.read_csv(path_to_data, sep=";")
+    df = pd.read_csv(path_to_data, sep=";", low_memory=False)
 
     modes = ["pt","car","walk","bike"]
     choice_cols = ["choice_"+m for m in modes]
