@@ -1,7 +1,7 @@
 import os.path
 import shutil
 import matsim.runtime.eqasim as eqasim
-from matsim.simulation.utils import get_alpha_calibration_args, get_delays_args
+from matsim.simulation.utils import get_calibration_args, get_delays_args
 
 def configure(context):
     context.stage("matsim.simulation.prepare")    
@@ -53,11 +53,11 @@ def execute(context):
     additional_args = []
     if context.config("estimate_dmc"):
         _, _, estimated_parameters_path, _ = context.stage("eqasim.dmc.model")
-        mode_parameters_path = "%s/estimated_dmc_parameters.csv" % context.path("matsim.simulation.prepare")
+        mode_parameters_path = "%s/estimated_dmc_parameters.yml" % context.path("matsim.simulation.prepare")
         shutil.copy(estimated_parameters_path, mode_parameters_path)
-        additional_args.extend(["--config:eqasim.modeParametersPath", mode_parameters_path])
+        additional_args.extend(["--config:eqasim.modeParametersPath", "estimated_dmc_parameters.yml"])
 
-    additional_args.extend(get_alpha_calibration_args(context))
+    additional_args.extend(get_calibration_args(context))
     # delays (signalized intersections delays using webster formula, and unsignalized intersection delays using BPR based approach)
     additional_args.extend(get_delays_args(context))
 

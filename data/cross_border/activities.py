@@ -125,6 +125,6 @@ def execute(context):
                                    "geometry", "destination_id", "following_mode"
                                    ]]
     
-    df_activities.to_csv("/cluster/project/cmdp/asallard/eqasim/Improvements/Cross border/Results_eqasim_20250901/activities.csv", index=False)
+    #df_activities.to_csv("/cluster/project/cmdp/asallard/eqasim/Improvements/Cross border/Results_eqasim_20250901/activities.csv", index=False)
 
     return df_activities

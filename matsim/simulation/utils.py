@@ -2,7 +2,7 @@ import os
 
 
 
-def get_alpha_calibration_args(context):
+def get_calibration_args(context):
     additional_args = []
     if context.config("calibrate_betas_in_matsim"):
         cache_path = context.working_directory
