@@ -52,10 +52,10 @@ def execute(context):
     # dmc estimation and calibration
     additional_args = []
     if context.config("estimate_dmc"):
-        _, _, estimated_parameters_path, _ = context.stage("eqasim.dmc.model")
+        _, _, estimated_parameters_path, _ = context.stage("dmc.model")
         mode_parameters_path = "%s/estimated_dmc_parameters.yml" % context.path("matsim.simulation.prepare")
         shutil.copy(estimated_parameters_path, mode_parameters_path)
-        additional_args.extend(["--config:eqasim.modeParametersPath", "estimated_dmc_parameters.yml"])
+        additional_args.extend(["--config:eqasim.modeParametersPath", mode_parameters_path])
 
     additional_args.extend(get_calibration_args(context))
     # delays (signalized intersections delays using webster formula, and unsignalized intersection delays using BPR based approach)

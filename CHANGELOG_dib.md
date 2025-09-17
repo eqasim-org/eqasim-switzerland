@@ -62,9 +62,10 @@ Add these parameters to the pipeline config:
 - `only_from_home_trips`: bool (default: False)
 
 ## Automatic Calibration
-This section explains how to perform mode choice calibration:
+This section explains how to perform mode choice estimation and calibration:
 1. Set the `estimate_dmc` parameter to `true`. This will estimate the parameters and use them when running MATSim.  
 2. Set either `calibrate_alphas_in_matsim` or `calibrate_betas_in_matsim` to `true` to adjust the estimated values within the simulation so they align with the actual mode shares.  
+3. After the simulation, the optimal parameters are location in the last iteration folder (as optimal_parameters.yml or alphas.csv)
 
 ## Activate Delays at Intersections
 To activate delays at intersections in MATSim, follow these steps:
