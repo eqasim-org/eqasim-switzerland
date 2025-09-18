@@ -502,141 +502,438 @@ def compute_aggregation_share(microcensus_data, synthetic_data, weighted=True):
     with open(output_path, 'w') as f:
         json.dump(result, f, indent=4)
 
-def export_network_by_canton(network_gdf, cantons_gdf, skip_cantons=None):
+
+# ==== MERGED NETWORK LINKS ====     
+
+def _norm_key(coords):
+    fwd = tuple(map(tuple, coords))
+    rev = tuple(map(tuple, reversed(coords)))
+    return min(fwd, rev)
+
+def _angle_for_segment(coords):
+    if not coords or len(coords) < 2:
+        return None
+    x0, y0 = coords[0][:2]
+    x1, y1 = coords[-1][:2]
+    dx, dy = (x1 - x0), (y1 - y0)
+    if dx == 0 and dy == 0:
+        return None
+    return math.degrees(math.atan2(dy, dx))
+
+def _arrow_for_segment(coords):
+    if not coords or len(coords) < 2:
+        return None
+    start_lon, start_lat = coords[0][:2]
+    end_lon,   end_lat   = coords[-1][:2]
+    if start_lon > end_lon:
+        return "←"
+    elif start_lon < end_lon:
+        return "→"
+
+## todo? add case for perfectly vertical roads, north should be <-, south should be ->
+
+def _sanitize_for_json(obj):
+    """Recursively replace NaN/inf with None (-> null in JSON)."""
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    elif isinstance(obj, float):
+        if math.isinf(obj) or math.isnan(obj):
+            return None
+        return obj
+    else:
+        return obj
+
+def _parse_modes(val):
     """
-    Intersects a MATSim network with canton geometries and exports each as a GeoJSON.
-    Also saves a JSON of available transport modes per canton.
+    Accepts a string like 'car,car_passenger,truck' or a list; returns a list of unique modes.
+    """
+    modes = []
+    if isinstance(val, str):
+        modes = [m.strip() for m in val.split(",")]
+    elif isinstance(val, (list, tuple)):
+        modes = [str(m).strip() for m in val]
+    # dedupe, keep stable order
+    seen = set()
+    uniq = []
+    for m in modes:
+        if m and m not in seen:
+            seen.add(m)
+            uniq.append(m)
+    return uniq
+
+def merge_geojson_segments_per_id(
+    input_df,
+    output_path,
+    id_key="id",
+    per_id_key="per_id",
+    # NOTE: 'modes' is intentionally EXCLUDED here so it's NOT stored per-id.
+    per_id_fields=("length", "freespeed", "capacity", "permlanes", "daily_avg_volume"),
+    sum_field="daily_avg_volume",
+    props_to_ignore=None,
+    debug=True,
+):
+    """
+    Merge reversed-duplicate LineStrings (A->B == B->A) ONLY IF the coordinate
+    sequence is an EXACT forward or EXACT reverse match to the base geometry.
+
+    Outputs per feature:
+      - properties.angle : float degrees (0=east, 90=north)
+      - properties.per_id: { "<id>": { per-id fields..., direction, arrow }, ... }
+      - properties.daily_avg_volume : sum of per-id sum_field
+      - properties.modes : comma-separated union across all member segments (top-level only)
+    """
+    data = input_df
+
+    features = data.get("features", [])
+    if props_to_ignore is None:
+        props_to_ignore = set()
+    else:
+        props_to_ignore = set(props_to_ignore)
+
+    # We exclude id/per_id/per-id fields from shared-prop merging, and also exclude 'modes'
+    always_ignore = {id_key, per_id_key, *per_id_fields}
+    ignore_set = props_to_ignore | always_ignore | {"modes"}
     
-    Parameters:
-    - network_gdf: GeoDataFrame of the MATSim network (already projected).
-    - cantons_gdf: GeoDataFrame of canton geometries.
-    - skip_cantons: Optional list of canton names to skip.
+    groups = {}
+
+    for feat in features:
+        geom = feat.get("geometry", {})
+        ftype = geom.get("type")
+        coords = geom.get("coordinates", [])
+        props = dict(feat.get("properties", {}))
+        feat_id = props.pop(id_key, None)
+
+        # collect modes for this source feature (used for link-level union)
+        src_modes = set(_parse_modes(props.get("modes")))
+
+        # Non-LineStrings: pass-through
+        if ftype != "LineString" or not coords:
+            key = ("__non_linestring__", id(feat))
+            base_feature = {
+                "type": "Feature",
+                "geometry": geom.copy() if isinstance(geom, dict) else geom,  # shallow copy
+                "properties": {k: v for k, v in props.items() if k not in ignore_set},
+            }
+            entry = {
+                "feature": base_feature,
+                "per_id": {} if feat_id is None else {
+                    str(feat_id): {
+                        **{fld: props[fld] for fld in per_id_fields if fld in props},
+                        "direction": None,
+                        "arrow": None,
+                    }
+                },
+                "base_coords": tuple(map(tuple, coords)) if coords else (),
+                "base_id": str(feat_id) if feat_id is not None else None,
+                "modes_union": set(src_modes),
+            }
+            groups.setdefault(key, []).append(entry)
+            continue
+
+        key = _norm_key(coords)
+        fwd_tuple = tuple(map(tuple, coords))
+        rev_tuple = tuple(map(tuple, reversed(coords)))
+
+        # Build per-id payload (NO 'modes' per-id)
+        base_per_id_payload = {}
+        if feat_id is not None:
+            for fld in per_id_fields:
+                if fld in props:
+                    base_per_id_payload[fld] = props[fld]
+            base_per_id_payload["arrow"] = _arrow_for_segment(coords)
+
+        bucket = groups.setdefault(key, [])
+        placed = False
+
+        # Try to merge into an existing entry that has exact fwd or exact rev coords
+        for entry in bucket:
+            base_coords = entry["base_coords"]
+            eq_fwd = (fwd_tuple == base_coords)
+            eq_rev = (rev_tuple == base_coords)
+            if eq_fwd or eq_rev:
+                if debug:
+                    print(f"[merge check] base_id={entry['base_id']} curr_id={feat_id} "
+                          f"eq_fwd={eq_fwd} eq_rev={eq_rev}")
+
+                # Merge shared (non per-id) props (keep first on mismatch)
+                base_props = entry["feature"]["properties"]
+                for k, v in props.items():
+                    if k in ignore_set:
+                        continue
+                    if k not in base_props:
+                        base_props[k] = v
+                    elif base_props[k] != v:
+                        print(
+                            f"[merge warn] Property mismatch on key '{k}' for merged segment. "
+                            f"Keeping first value.\n"
+                            f"  first: {base_props[k]!r}\n"
+                            f"  this : {v!r}\n"
+                            f"  base_id: {entry['base_id']}  curr_id: {feat_id}"
+                        )
+
+                # Update union of modes at the link level
+                entry["modes_union"].update(src_modes)
+
+                # Add per-id info
+                if feat_id is not None and base_per_id_payload:
+                    per_id_payload = dict(base_per_id_payload)  # copy
+                    per_id_payload["direction"] = "forward" if eq_fwd else "reverse"
+                    entry["per_id"][str(feat_id)] = per_id_payload
+
+                placed = True
+                break
+
+        if not placed:
+            if debug and key in groups:
+                for entry in bucket:
+                    base_coords = entry["base_coords"]
+                    eq_fwd = (fwd_tuple == base_coords)
+                    eq_rev = (rev_tuple == base_coords)
+                    print(f"[no-merge] base_id={entry['base_id']} curr_id={feat_id} "
+                          f"eq_fwd={eq_fwd} eq_rev={eq_rev} -> creating new group for this geometry")
+
+            existing_angle = props.get("angle", None)
+            angle = existing_angle if isinstance(existing_angle, (int, float)) else _angle_for_segment(coords)
+            props_clean = {k: v for k, v in props.items() if k not in ignore_set}
+            if angle is not None:
+                props_clean["angle"] = angle
+
+            base_feature = {
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": list(coords) if isinstance(coords, list) else coords},
+                "properties": props_clean,
+            }
+            entry = {
+                "feature": base_feature,
+                "per_id": {},
+                "base_coords": fwd_tuple,
+                "base_id": str(feat_id) if feat_id is not None else None,
+                "modes_union": set(src_modes),
+            }
+            if feat_id is not None and base_per_id_payload:
+                per_id_payload = dict(base_per_id_payload)
+                per_id_payload["direction"] = "forward"  # base geometry defines forward
+                entry["per_id"][str(feat_id)] = per_id_payload
+
+            bucket.append(entry)
+
+    # Finalize: inject per_id, summed daily_avg_volume, and unioned modes
+    merged = []
+    for bucket in groups.values():
+        for entry in bucket:
+            f = entry["feature"]
+            per_id_map = entry["per_id"]
+
+            # per_id mapping
+            if per_id_map:
+                f["properties"][per_id_key] = per_id_map
+
+                # Sum the chosen field across per-id entries
+                total = 0.0
+                for v in per_id_map.values():
+                    if sum_field in v:
+                        try:
+                            total += float(v[sum_field])
+                        except (TypeError, ValueError):
+                            pass
+                f["properties"][sum_field] = total
+
+                cap_total = 0.0
+                for v in per_id_map.values():
+                    if "capacity" in v:
+                        try:
+                            cap_total += float(v["capacity"])
+                        except (TypeError, ValueError):
+                            pass
+                f["properties"]["capacity"] = cap_total
+
+                freespeed_max = None
+                for v in per_id_map.values():
+                    if "freespeed" in v:
+                        try:
+                            fv = float(v["freespeed"])
+                        except (TypeError, ValueError):
+                            continue
+                        if freespeed_max is None or fv > freespeed_max:
+                            freespeed_max = fv
+                # store in top-level 'freespeed' so your Mapbox color ramp still works
+                f["properties"]["freespeed"] = freespeed_max if freespeed_max is not None else None
+            else:
+                if sum_field in f["properties"]:
+                    del f["properties"][sum_field]
+
+            # angle (safety)
+            if "angle" not in f["properties"]:
+                geom = f.get("geometry", {})
+                if geom.get("type") == "LineString" and geom.get("coordinates"):
+                    ang = _angle_for_segment(geom["coordinates"])
+                    if ang is not None:
+                        f["properties"]["angle"] = ang
+
+            # modes (top-level): union across all member segments
+            modes_union = entry.get("modes_union", set())
+            # store as comma-separated string (matches your existing Mapbox filter logic)
+            f["properties"]["modes"] = ",".join(sorted(modes_union)) if modes_union else ""
+
+            merged.append(f)
+
+    out = {
+        "type": "FeatureCollection",
+        **({"crs": data["crs"]} if "crs" in data else {}),
+        "features": merged,
+    }
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(_sanitize_for_json(out), f, ensure_ascii=False, indent=2)
+
+    print(f"Merged GeoJSON written to: {output_path}")
+
+def export_merged_segments_by_canton(
+    network_gdf: gpd.GeoDataFrame,
+    cantons_gdf: gpd.GeoDataFrame,
+    linkstats_path: str,
+    output_dir: str,
+    skip_cantons=None,
+    id_col="link_id",
+    canton_name_col="canton_name",
+    network_modes_col="modes",
+    target_crs="EPSG:4326",
+    write_link_hourly_json=True,
+):
     """
+    SAME logic as before, but reordered:
+    1) Build a MASTER on the full network (rename id→'id', normalize 'modes', join daily_avg_volume)
+    2) For each canton: select/intersect geometry ONLY, keep attributes, then export/merge.
+    """
+    os.makedirs(output_dir, exist_ok=True)
     if skip_cantons is None:
         skip_cantons = []
 
-    matsim_output_dir = os.path.join(DEFAULT_WORKDIR, "public", "data", "matsim")
+    # --- linkstats ----------------------------------------------------
+    linkstats = pd.read_csv(linkstats_path, sep="\t", comment="#", dtype=str)
+    linkstats.columns = linkstats.columns.str.strip()
+    linkstats = linkstats.apply(pd.to_numeric, errors="ignore")
+    if "LINK" not in linkstats.columns or "HRS0-24avg" not in linkstats.columns:
+        raise ValueError("linkstats must contain 'LINK' and 'HRS0-24avg' columns.")
 
+    # pre-compute hourly cols for optional JSON
+    hourly_avg_cols = [
+        c for c in linkstats.columns
+        if c.startswith("HRS") and c.endswith("avg") and c != "HRS0-24avg"
+    ]
+
+    # --- CRS reconcile ------------------------------------------------
+    if network_gdf.crs is None:
+        raise ValueError("network_gdf must have a CRS.")
+    if cantons_gdf.crs is None:
+        cantons_gdf = cantons_gdf.set_crs(network_gdf.crs)
+    elif cantons_gdf.crs != network_gdf.crs:
+        cantons_gdf = cantons_gdf.to_crs(network_gdf.crs)
+
+    # --- add attributes on the full network -------------
+    # Drop Z on LineStrings
+    def _drop_z_linestring(g):
+        if g is None or g.is_empty:
+            return g
+        # ignore the z argument for any input geometry
+        return shapely_transform(lambda x, y, z=None: (x, y), g)
+
+    net = network_gdf.copy()
+    net["geometry"] = net["geometry"].map(_drop_z_linestring)
+    net = net[net.geometry.notna() & ~net.geometry.is_empty]
+    net = net[net.geometry.geom_type == "LineString"]
+
+    # keep requried attributes
+    essential = [id_col, "geometry", "length", "freespeed", "capacity", "permlanes", network_modes_col]
+    missing = [c for c in essential if c not in net.columns]
+    if missing:
+        raise ValueError(f"Network missing columns: {missing}")
+
+    master = net[essential].rename(columns={id_col: "id", network_modes_col: "modes"}).copy()
+    master["id"] = master["id"].astype(str)
+    linkstats["LINK"] = linkstats["LINK"].astype(str)
+
+    # Normalize modes once
+    master["modes"] = master["modes"].apply(lambda v: ",".join(sorted(set(_parse_modes(v)))))
+
+    # Join daily average volume ON THE FULL NETWORK
+    master = master.merge(
+        linkstats[["LINK", "HRS0-24avg"]],
+        left_on="id", right_on="LINK", how="left"
+    ).rename(columns={"HRS0-24avg": "daily_avg_volume"}).drop(columns=["LINK"])
+
+    # --- Per-canton export (clip geometries) -------
     canton_modes = {}
 
-    for _, canton in cantons_gdf.iterrows():
-        canton_name = canton["canton_name"]
+    for _, row in cantons_gdf.iterrows():
+        canton_name = row[canton_name_col]
         if canton_name in skip_cantons:
             print(f"Skipping {canton_name}")
             continue
 
         print(f"Processing {canton_name}")
-        canton_geom = canton.geometry
+        geom = row.geometry
 
-        intersected = network_gdf[network_gdf.intersects(canton_geom)].copy()
-        intersected["geometry"] = intersected.geometry.intersection(canton_geom)
+        # Select from MASTER
+        sub = master[master.intersects(geom)].copy()
+        if sub.empty:
+            print(f"  → No features in {canton_name}")
+            continue
 
-        essential_cols = ["link_id", "geometry", "length", "freespeed", "capacity", "permlanes", "modes"]
-        intersected = intersected[essential_cols].rename(columns={"link_id": "id"})
+        # Clip geometry ONLY; keep attributes (id, modes, daily_avg_volume, etc.)
+        sub["geometry"] = sub.geometry.intersection(geom)
+        sub = sub[~sub.geometry.is_empty]
 
-        intersected = intersected.sort_values(by="capacity", ascending=True).reset_index(drop=True)
-        intersected = intersected.to_crs("EPSG:4326")
-
-        output_canton_name = clean_geo_name(canton_name)
-        output_path = os.path.join(matsim_output_dir, f"matsim_network_{output_canton_name}.geojson")
-        intersected.to_file(output_path, driver="GeoJSON")
-        print(f"Saved: {output_path}")
-
-        # Extract and store modes
+        # modes summary per canton
         mode_set = set()
-        for mode_str in intersected["modes"]:
-            mode_set.update(mode_str.split(","))
-        canton_modes[output_canton_name] = sorted(mode_set)
+        for s in sub["modes"]:
+            mode_set.update(_parse_modes(s))
+        canton_modes[clean_geo_name(canton_name)] = sorted(mode_set)
 
-    # Save all modes to JSON
-    output_dir = os.path.join(DEFAULT_WORKDIR, "public", "data")
-    modes_path = os.path.join(output_dir, "modes_by_canton.json")
-    with open(modes_path, "w") as f:
+        # optional per-link hourly JSON 
+        if write_link_hourly_json:
+            merged_full = sub.merge(
+                linkstats[["LINK", "HRS0-24avg"] + hourly_avg_cols].rename(columns={"LINK": "id"}),
+                on="id", how="left"
+            )
+            link_summaries = []
+            for _, r in merged_full.iterrows():
+                hourly = {c: r.get(c, None) for c in hourly_avg_cols}
+                link_summaries.append({
+                    "link_id": r["id"],
+                    "hourly_avg_volumes": hourly,
+                    "daily_avg_volume": r.get("HRS0-24avg", r.get("daily_avg_volume")),
+                })
+            json_path = os.path.join(output_dir, f"{clean_geo_name(canton_name)}_link_traffic_volumes.json")
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(link_summaries, f, indent=2)
+            print(f"Saved: {json_path}")
+
+        # to WGS84 + in-memory FeatureCollection
+        gdf_wgs84 = sub.to_crs(target_crs)
+        fc = json.loads(gdf_wgs84.to_json())
+
+        out_path = os.path.join(output_dir, f"{clean_geo_name(canton_name)}_merged_segments.geojson")
+        merge_geojson_segments_per_id(
+            input_df=fc,
+            output_path=str(out_path),
+            id_key="id", 
+            per_id_key="per_id",
+            per_id_fields=("length", "freespeed", "capacity", "permlanes", "daily_avg_volume"),
+            sum_field="daily_avg_volume",
+            props_to_ignore=None,
+            debug=False,
+        )
+
+    # modes_by_canton.json (to keep track of which modes exist per canton for filtering)
+    modes_path = os.path.join(os.path.dirname(output_dir), "modes_by_canton.json")
+    with open(modes_path, "w", encoding="utf-8") as f:
         json.dump(canton_modes, f, indent=2)
     print(f"Saved mode summary to: {modes_path}")
 
-def export_link_volumes_by_canton(cantons_gdf, linkstats_path, skip_cantons=None):
-    """
-    Merges link traffic volumes from linkstats.txt with MATSim canton GeoJSONs and exports:
-    - A JSON of hourly and daily volumes per link
-    - An updated GeoJSON with daily_avg_volume
-    
-    Parameters:
-    - cantons_gdf: GeoDataFrame containing canton geometries and names
-    - linkstats_path: Path to the linkstats file (e.g. "50.linkstats.txt")
-    - skip_cantons: Optional set of canton names to skip
-    """
-
-    if skip_cantons is None:
-        skip_cantons = set()
-
-    output_dir = os.path.join(DEFAULT_WORKDIR, "public", "data", "matsim")
-
-    linkstats = pd.read_csv(linkstats_path, sep='\t', comment='#', dtype=str)
-    linkstats.columns = linkstats.columns.str.strip()
-    linkstats = linkstats.apply(pd.to_numeric, errors='ignore')
-
-    for _, canton in cantons_gdf.iterrows():
-        canton_name = canton['canton_name']
-        if canton_name in skip_cantons:
-            print(f"Skipping {canton_name}")
-            continue
-
-        print(f"Processing {canton_name}")
-        clean_name = clean_geo_name(canton_name)
-
-        # Load the matching GeoJSON
-        geojson_path = os.path.join(output_dir, f"matsim_network_{clean_name}.geojson")
-        if not os.path.exists(geojson_path):
-            print(f"  → Skipped: GeoJSON not found for {canton_name}")
-            continue
-
-        gdf = gpd.read_file(geojson_path)
-
-        # Ensure string type for merging
-        gdf["id"] = gdf["id"].astype(str)
-        linkstats["LINK"] = linkstats["LINK"].astype(str)
-
-        # Merge linkstats into GeoDataFrame
-        merged = gdf.merge(linkstats, left_on="id", right_on="LINK", how="inner")
-
-        # Extract hourly averages
-        hourly_avg_cols = [col for col in merged.columns if col.startswith("HRS") and col.endswith("avg") and col != "HRS0-24avg"]
-
-        # Create JSON summary
-        link_summaries = []
-        for _, row in merged.iterrows():
-            hourly_data = {col: row[col] for col in hourly_avg_cols}
-            summary = {
-                "link_id": row["id"],
-                "hourly_avg_volumes": hourly_data,
-                "daily_avg_volume": row["HRS0-24avg"]
-            }
-            link_summaries.append(summary)
-
-        # Save JSON file
-        json_path = os.path.join(output_dir, f"{clean_name}_link_traffic_volumes.json")
-        with open(json_path, "w") as f:
-            json.dump(link_summaries, f, indent=2)
-        print(f"Saved: {json_path}")
-
-        # Overwrite if col already exists in geojson
-        if "daily_avg_volume" in gdf.columns:
-            gdf = gdf.drop(columns=["daily_avg_volume"])
-
-        # Merge daily avg back into GeoDataFrame and export
-        gdf_with_avg = gdf.merge(
-            linkstats[["LINK", "HRS0-24avg"]],
-            left_on="id",
-            right_on="LINK",
-            how="left"
-        ).rename(columns={"HRS0-24avg": "daily_avg_volume"})
-
-        gdf_with_avg.drop(columns=["LINK"], inplace=True)
-
-        geojson_with_avg_path = os.path.join(output_dir, f"matsim_network_{clean_name}.geojson")
-        gdf_with_avg.to_file(geojson_with_avg_path, driver="GeoJSON")
-        print(f"Saved: {geojson_with_avg_path}")
+# PROCESS JSONS FOR GRAPHS
 
 def export_by_aggregation(mc_data, syn_data, aggregation_col):
     """Run only the exports that depend on AGGREGATION_COL."""
@@ -1032,6 +1329,8 @@ def export_inter_cantonal_stops(joined_gdf, volumes_df):
             keep_keys = ["name", "stop_id", "lines", "assigned_canton", "predominant_mode", "modes_list"]
             filtered_props = {k: props[k] for k in keep_keys if k in props}
             filtered_props["volume"] = total_volume
+            filtered_props["assigned_canton"] = clean_geo_name(filtered_props["assigned_canton"])
+            
 
             # Reproject geometry to WGS84
             geometry_wgs = shapely_transform(transformer.transform, geometry)

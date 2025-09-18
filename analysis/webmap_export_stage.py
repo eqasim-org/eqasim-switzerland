@@ -27,8 +27,10 @@ def execute(context):
 
     # Input files
     synthetic_gz_path = os.path.join(simulation_output, "output_trips.csv.gz")
-    linkstats_gz_path = os.path.join(simulation_output, "ITERS", "it.50", "50.linkstats.txt.gz")
-    linkstats_path = os.path.join(output_dir, "50.linkstats.txt")
+
+    ## temp set iterations to 1 for testing (final should be 50)
+    linkstats_gz_path = os.path.join(simulation_output, "ITERS", "it.1", "1.linkstats.txt.gz")
+    linkstats_path = os.path.join(output_dir, "1.linkstats.txt")
     matsim_network_path = os.path.join(simulation_output, "output_network.xml.gz")
     transit_schedule_path = os.path.join(simulation_output, "output_transitSchedule.xml.gz")
     volumes_path = os.path.join(simulation_output, "pt_passenger_counts.csv.gz")
@@ -61,18 +63,27 @@ def execute(context):
     # === Load microcensus and synthetic data ===
     syn_df, mc_df = webmap_export.import_data(synthetic_df, microcensus_trips_df, microcensus_persons_df)
 
-    for agg_col in ["mode", "purpose"]:
-        webmap_export.export_by_aggregation(mc_df, syn_df, aggregation_col=agg_col)
+    # commented to make testing faster.
+    # for agg_col in ["mode", "purpose"]:
+    #     webmap_export.export_by_aggregation(mc_df, syn_df, aggregation_col=agg_col)
 
-    # print("Reading network...")
-    # network = read_network(matsim_network_path)
-    # geo = network.as_geo(projection="EPSG:2056")
+    print("Reading network...")
+    network = read_network(matsim_network_path)
+    geo = network.as_geo(projection="EPSG:2056")
 
-    # print("Exporting network by canton...")
-    # webmap_export.export_network_by_canton(geo, canton_boundaries)
-
-    # print("Exporting volumes by canton...")
-    # webmap_export.export_link_volumes_by_canton(canton_boundaries, linkstats_path)
+    print("Exporting merged network segments per canton...")
+    webmap_export.export_merged_segments_by_canton(
+        network_gdf=geo,
+        cantons_gdf=canton_boundaries,
+        linkstats_path=linkstats_path,
+        output_dir=os.path.join(output_dir, "public", "data", "matsim"),
+        skip_cantons=None,
+        id_col="link_id",
+        canton_name_col="canton_name",
+        network_modes_col="modes",
+        target_crs="EPSG:4326",
+        write_link_hourly_json=True,
+    )
 
     print("Parsing transit stops from schedule XML...")
     stops_gdf = webmap_export.parse_stops(transit_schedule_path)
