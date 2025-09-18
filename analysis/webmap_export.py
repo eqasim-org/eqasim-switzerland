@@ -1236,40 +1236,207 @@ def build_route_lines(schedule_path, stops_gdf):
     output_path = os.path.join(output_dir, "transit_routes.geojson")
     routes_gdf.to_file(output_path, driver="GeoJSON")
 
-def compute_passenger_counts(joined_gdf, counts_df):
+def _dumps(obj):
+    return json.dumps(obj, ensure_ascii=False, indent=2)
+
+def _normalize_stop_ids_col(df):
+    """Ensure df['stop_id'] is a list[str] for explode()."""
+    s = df["stop_id"]
+    # Fast path: many values already list-like? fall back safely
+    def as_list(x):
+        if isinstance(x, list): return x
+        if pd.isna(x): return []
+        if isinstance(x, str) and ("," in x):
+            return [t.strip() for t in x.split(",") if t.strip()]
+        return [x]
+    return s.apply(as_list)
+
+def compute_passenger_counts(joined_gdf: pd.DataFrame, counts_df: pd.DataFrame):
     """
-    Generate per-canton passenger counts JSON files.
-    joined_gdf: GeoDataFrame (possibly aggregated) with columns
-                'stop_id' (either list[str] or comma-joined str) and 'assigned_canton'.
-    counts_csv: path to pt_passenger_counts.csv with a column 'stop_id'.
+    Faster pipeline:
+      1) Build stop_id -> assigned_canton dict once (explode only the mapping, not the fact table)
+      2) Pre-aggregate counts_df by (stop_id, line_id) to lists
+      3) Map canton onto that aggregated table
+      4) Split & write per canton
     """
 
-    # 1) pull out stop_id ↔ canton mapping and explode to one row per stop_id
-    stop_canton = joined_gdf[['stop_id','assigned_canton']].copy()
-    stop_canton = stop_canton.explode('stop_id').reset_index(drop=True)
+    # ---- 1) stop -> canton mapping (small) ----
+    map_df = joined_gdf[["stop_id", "assigned_canton"]].copy()
+    map_df["stop_id"] = _normalize_stop_ids_col(map_df)
+    map_df = map_df.explode("stop_id", ignore_index=True)
+    map_df = map_df.dropna(subset=["stop_id", "assigned_canton"])
+    # If a stop_id appears multiple times (rare), keep first (or choose your rule)
+    map_df = map_df.drop_duplicates(subset=["stop_id"])
+    stop_to_canton = pd.Series(map_df["assigned_canton"].values, index=map_df["stop_id"].values)
 
-    # 2) merge passenger counts to their canton
-    merged = (
-        counts_df
-        .merge(stop_canton, on='stop_id', how='left')
-        .dropna(subset=['assigned_canton'])
+    # ---- 2) pre-aggregate counts_df once (heavy but only 2 keys) ----
+    counts = counts_df[["stop_id","line_id","time_bin","boardings","alightings"]].copy()
+
+    # Ensure numeric
+    for col in ("boardings", "alightings"):
+        counts[col] = pd.to_numeric(counts[col], errors="coerce").fillna(0)
+
+    # Optional: keep time_bin order stable without full sort by pre-sorting only necessary cols
+    counts = counts.sort_values(["stop_id","line_id","time_bin"], kind="stable")
+
+    agg = (
+        counts.groupby(["stop_id","line_id"], sort=False, as_index=False)
+              .agg({
+                  "time_bin": list,
+                  "boardings": list,
+                  "alightings": list,
+              })
     )
 
-    # 3) write one JSON per canton
-    output_dir = os.path.join(DEFAULT_WORKDIR, "public", "data", "matsim", "transit", "per_canton_counts")
+    # ---- 3) map canton after aggregation ----
+    agg["assigned_canton"] = agg["stop_id"].map(stop_to_canton)
+    agg = agg.dropna(subset=["assigned_canton"])
+
+    # Optional memory/speed: category helps splitting/groupby
+    if agg["assigned_canton"].dtype != "category":
+        agg["assigned_canton"] = agg["assigned_canton"].astype("category")
+
+    # Build per-row 'data' payloads using list(zip(...)) which is fast
+    # (Construct once per (stop_id,line_id))
+    agg["data"] = [
+        [{"time_bin": tb, "boardings": b, "alightings": a}
+         for tb, b, a in zip(tbs, bs, als)]
+        for tbs, bs, als in zip(agg["time_bin"], agg["boardings"], agg["alightings"])
+    ]
+    agg = agg.drop(columns=["time_bin","boardings","alightings"])
+
+    # ---- 4) write per-canton files (I/O often the real bottleneck) ----
+    output_dir = os.path.join(
+        DEFAULT_WORKDIR, "public", "data", "matsim", "transit", "per_canton_counts"
+    )
     os.makedirs(output_dir, exist_ok=True)
 
-    for canton, grp in merged.groupby('assigned_canton'):
+    # Avoid Python for-loops inside inner groups; just loop cantons once
+    for canton, df_c in agg.groupby("assigned_canton", sort=False):
+        # Construct final records in one go
+        out_records = [
+            {"stop_id": sid, "line_id": lid, "data": data}
+            for sid, lid, data in zip(df_c["stop_id"].values, df_c["line_id"].values, df_c["data"].values)
+        ]
+        fname = f"{clean_geo_name(str(canton))}_counts.json"
+        with open(os.path.join(output_dir, fname), "w", encoding="utf-8") as f:
+            f.write(_dumps(out_records))
+
+def _to_list(x):
+    if isinstance(x, list): return x
+    if x is None or (isinstance(x, float) and pd.isna(x)): return []
+    return [x]
+
+def _extract_line_ids(lines):
+    # lines is typically a list[dict], but be defensive
+    if isinstance(lines, (list, tuple)):
         out = []
-        for (sid, lid), sub in grp.groupby(['stop_id','line_id']):
-            data = sub[['time_bin','boardings','alightings']].to_dict('records')
-            out.append({'stop_id': sid, 'line_id': lid, 'data': data})
+        for d in lines:
+            if isinstance(d, dict):
+                lid = d.get("line_id")
+                if lid is not None:
+                    out.append(lid)
+        return set(out)
+    # if someone stored a single dict
+    if isinstance(lines, dict):
+        lid = lines.get("line_id")
+        return {lid} if lid is not None else set()
+    # otherwise nothing useful
+    return set()
 
-        fname = f"{clean_geo_name(canton)}_counts.json"
-        with open(os.path.join(output_dir, fname), 'w', encoding='utf-8') as f:
-            json.dump(out, f, ensure_ascii=False, indent=2)
+def export_inter_cantonal_stops(joined_gdf: gpd.GeoDataFrame, volumes_df: pd.DataFrame):
+    """
+    Faster version:
+      - vectorized line→cantons detection
+      - one-time volume aggregation
+      - dedupe by canonical stop_key
+      - bulk reprojection
+    Requires column 'assigned_canton' to decide inter-cantonal lines.
+    """
+    # ---- sanity checks (fail fast but friendly) ----
+    required_cols = {"stop_id", "lines", "geometry"}
+    missing = [c for c in required_cols if c not in joined_gdf.columns]
+    if missing:
+        raise ValueError(f"joined_gdf is missing columns: {missing}")
+    if "assigned_canton" not in joined_gdf.columns:
+        raise ValueError("joined_gdf must contain 'assigned_canton' to determine inter-cantonal lines.")
+    if not {"stop_id", "boardings", "alightings"}.issubset(volumes_df.columns):
+        raise ValueError("volumes_df must contain 'stop_id', 'boardings', 'alightings'.")
 
-def export_inter_cantonal_stops(joined_gdf, volumes_df):
+    output_dir = os.path.join(DEFAULT_WORKDIR, "public", "data", "matsim", "transit", "stops_by_canton")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "inter_cantonal_stops.geojson")
+
+    # 0) prune rows without canton early
+    gdf = joined_gdf[~joined_gdf["assigned_canton"].isna()].copy()
+
+    # 1) normalize stop_ids and line_ids
+    gdf["stop_ids_list"] = gdf["stop_id"].map(_to_list)
+    gdf["line_ids_set"] = gdf["lines"].map(_extract_line_ids)
+    gdf["assigned_canton"] = gdf["assigned_canton"].apply(clean_geo_name)
+    # 2) line_id -> distinct canton count (vectorized)
+    # explode line sets to rows; skip entries with no lines
+    tmp = gdf.loc[gdf["line_ids_set"].map(bool), ["assigned_canton", "line_ids_set"]].copy()
+    # convert sets to lists before explode
+    tmp["line_ids_list"] = tmp["line_ids_set"].map(list)
+    exploded = tmp.explode("line_ids_list").rename(columns={"line_ids_list": "line_id"})
+    cantons_per_line = exploded.groupby("line_id", sort=False)["assigned_canton"].nunique()
+    inter_cantonal_lines = set(cantons_per_line[cantons_per_line > 1].index)
+
+    # 3) keep only stops on inter-cantonal lines
+    if inter_cantonal_lines:
+        mask = gdf["line_ids_set"].apply(lambda s: bool(s & inter_cantonal_lines))
+        gdf = gdf[mask].copy()
+    else:
+        gdf = gdf.iloc[0:0].copy()  # nothing qualifies
+
+    if gdf.empty:
+        # write a valid empty GeoJSON
+        empty = gpd.GeoDataFrame(geometry=[], crs=(joined_gdf.crs or "EPSG:4326"))
+        empty.to_crs("EPSG:4326").to_file(output_path, driver="GeoJSON")
+        print(f"Saved 0 inter-cantonal stops with volume to {output_path}")
+        return
+
+    # 4) dedupe by canonical stop_key
+    gdf["stop_key"] = gdf["stop_ids_list"].apply(lambda lst: tuple(sorted(lst)))
+    gdf = gdf.drop_duplicates(subset="stop_key").copy()
+
+    # 5) pre-aggregate volumes once
+    vol = volumes_df[["stop_id", "boardings", "alightings"]].copy()
+    vol["boardings"] = vol["boardings"].fillna(0)
+    vol["alightings"] = vol["alightings"].fillna(0)
+    vol["volume"] = vol["boardings"] + vol["alightings"]
+    volume_by_stop = vol.groupby("stop_id", dropna=False)["volume"].sum().to_dict()
+
+    gdf["volume"] = gdf["stop_ids_list"].apply(lambda ids: int(sum(volume_by_stop.get(s, 0) for s in ids)))
+
+    # 6) keep props (adapt to what you actually have; these are safe w/ your dtypes)
+    keep_keys = ["name", "stop_id", "lines", "assigned_canton", "predominant_mode", "modes_list"]
+    present = [k for k in keep_keys if k in gdf.columns]
+    gdf["properties"] = gdf.apply(lambda r: {k: r[k] for k in present} | {"volume": r["volume"]}, axis=1)
+
+    # 7) bulk reproject to WGS84
+    src = joined_gdf.crs or "EPSG:4326"
+    gdf = gdf.set_geometry("geometry")
+    gdf = gdf.set_crs(src, allow_override=True)
+    gdf_wgs84 = gdf.to_crs("EPSG:4326")
+
+    # 8) write GeoJSON (keep nested properties as-is)
+    features = [
+    {
+        "type": "Feature",
+        "geometry": mapping(gdf_wgs84.geometry.iloc[i]),
+        "properties": gdf_wgs84.properties.iloc[i],
+    }
+    for i in range(len(gdf_wgs84))
+    ]
+    geojson = {"type": "FeatureCollection", "features": features}
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(geojson, f, ensure_ascii=False, indent=2)
+    print(f"Saved {len(features)} inter-cantonal stops with volume to {output_path}")
+
+
+def export_inter_cantonal_stops_2(joined_gdf, volumes_df):
     """
     Identify inter-cantonal stops and export them as GeoJSON with volume.
     """
@@ -1330,8 +1497,6 @@ def export_inter_cantonal_stops(joined_gdf, volumes_df):
             filtered_props = {k: props[k] for k in keep_keys if k in props}
             filtered_props["volume"] = total_volume
             filtered_props["assigned_canton"] = clean_geo_name(filtered_props["assigned_canton"])
-            
-
             # Reproject geometry to WGS84
             geometry_wgs = shapely_transform(transformer.transform, geometry)
 

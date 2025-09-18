@@ -12,6 +12,25 @@ def configure(context):
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
     context.stage("data.spatial.cantons") # get canton boundaries
+# def fix_mojibake(s):
+#     if s is None:
+#         return s
+#     if isinstance(s, bytes):
+#         # If somehow bytes slipped through, decode properly first
+#         try:
+#             return s.decode("utf-8")
+#         except UnicodeDecodeError:
+#             return s.decode("latin1", errors="replace")
+
+#     # Heuristic: try latin1→utf8 roundtrip if it looks like mojibake
+#     try:
+#         repaired = s.encode("latin1").decode("utf-8")
+#         # Only accept if it actually improved the text
+#         if "Ã" in s or "Â" in s or repaired != s:
+#             return repaired
+#     except UnicodeEncodeError:
+#         pass
+#     return s
 
 def execute(context):
     matsim_dir = context.stage("matsim.simulation.run")
@@ -31,6 +50,8 @@ def execute(context):
     ## temp set iterations to 1 for testing (final should be 50)
     linkstats_gz_path = os.path.join(simulation_output, "ITERS", "it.1", "1.linkstats.txt.gz")
     linkstats_path = os.path.join(output_dir, "1.linkstats.txt")
+    linkstats_gz_path = os.path.join(simulation_output, "ITERS", "it.1", "1.linkstats.txt.gz")
+    linkstats_path = os.path.join(output_dir, "50.linkstats.txt")
     matsim_network_path = os.path.join(simulation_output, "output_network.xml.gz")
     transit_schedule_path = os.path.join(simulation_output, "output_transitSchedule.xml.gz")
     volumes_path = os.path.join(simulation_output, "pt_passenger_counts.csv.gz")
@@ -41,7 +62,7 @@ def execute(context):
 
     # Cantons
     canton_boundaries = context.stage("data.spatial.cantons")
-
+    #canton_boundaries["canton_name"] = canton_boundaries["canton_name"].apply(fix_mojibake)
     # === Unzip if needed ===
     if not os.path.exists(linkstats_path):
         with gzip.open(linkstats_gz_path, 'rb') as f_in, open(linkstats_path, 'wb') as f_out:
