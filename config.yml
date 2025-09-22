@@ -36,7 +36,7 @@ config:
     # there are two options to convert pt schedule: [hafas, gtfs]; default is gtfs
     pt_schedule: gtfs
     # name of the gtfs zip file, should be placed in gtfs folder within data_path
-    gtfs_name: gtfs_fp2024_2023-12-13_04-15
+    gtfs_name: gtfs_fp2024_2024-11-11
     # date from which gtfs should be take. Options are [dayWithMostTrips, dayWithMostServices, <exact date>]
     gtfs_date: "dayWithMostServices" 
     # if hafas is used, the data needs to be specified
@@ -81,15 +81,9 @@ config:
 
     # Cross-border traffic
     include_cross_border: true
-    # TODO: this parameter should be applied also to micro-census
-    # TODO: add distance to CH border as parameter 
 
     # PT pricing
     generate_pt_pricing_inputs: false
 
     # Pt routing parameters
     calibrate_pt_routing_params: false # Please make sure you really want to switch this parameter to true because the calibration takes 12+ hours!
-    calibration_jar_path: /cluster/project/cmdp/asallard/java/eqasim-java/switzerland/target/switzerland-2.0.0.jar:/cluster/project/cmdp/asallard/java/eqasim-java/server/target/server-2.0.0.jar # We need the two jars: switzerland and server
-    # TODO: find a way to generate both jars from the eqasim stage
-    calibration_config_path: /cluster/project/cmdp/asallard/inputs/1pct_pt_simulated/switzerland_config_baseline.xml
-    # TODO: we should probably use a default config example stored somewhere. Using the matsim.run.prepare one will not work as this stage requires the final pt_routing parameters.
