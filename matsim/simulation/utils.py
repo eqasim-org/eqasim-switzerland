@@ -6,26 +6,24 @@ def get_calibration_args(context):
     additional_args = []
     if context.config("calibrate_betas_in_matsim"):
         cache_path = context.working_directory
-        bounds = """car.alpha_u:4.0,
-                    walk.alpha_u:3.0,
-                    bike.alpha_u:3.0,
-                    cp.alpha_u:3.0,
-                    cp.travelTimeExponent:0.2,
-                    walk.travelTimeExponent:0.2,
-                    car.travelTimeExponent:0.2,                   
-                    car.betaShortDistance_u:0.5,
-                    pt.betaShortDistance_u:0.5"""
+        bounds = """car.alpha_u:5.0,
+                    walk.alpha_u:5.0,
+                    bike.alpha_u:5.0,
+                    cp.alpha_u:5.0,
+                    cp.travelTimeExponent:0.3,
+                    walk.travelTimeExponent:0.3,
+                    car.betaTravelTime_u_min:0.3"""
                 
         additional_args.extend(["--config:eqasim:calibration.activate", "true",
                                 "--config:eqasim:calibration.runCalibration", "true",
                                 "--config:eqasim:calibration.optimizer", "Nelder-Mead",
-                                "--config:eqasim:calibration.metric", "kl",
-                                "--config:eqasim:calibration.betaMomentum", "0.5",
+                                "--config:eqasim:calibration.metric", "mse",
+                                "--config:eqasim:calibration.betaMomentum", "0.4",
                                 "--config:eqasim:calibration.eqasimCachePath", cache_path,
                                 "--config:eqasim:calibration.bounds", bounds,
-                                "--config:eqasim:calibration.distanceBins", "0,275,451,683,995,1513,2400,3853,5026,6674,9261,13788,22976,1000000",
-                                "--config:eqasim:calibration.maxEval", "1000",
-                                "--config:eqasim:calibration.repoCommit", "130c86cdeb4adbf19644e97757b30bf219d116e4",
+                                "--config:eqasim:calibration.distanceBins", "0,451,995,1513,2400,3853,5026,6674,9261,13788,22976,1000000",
+                                "--config:eqasim:calibration.maxEval", "4000",
+                                "--config:eqasim:calibration.repoCommit", "b72fae6c3860169f5a837d4648dbf4b2dc7ac3a0",
                                 "--config:eqasim:calibration.optimizerPath", "optimizer"
                                 ])
     else:
