@@ -14,9 +14,8 @@ def configure(context):
 
     context.config("estimate_dmc", default=False)
     context.config("calibrate_alphas_in_matsim", default=False)
-    context.config("alphaCalibration.level","global")
-    context.config("alphaCalibration.filePath", "cantons_mode_shares.csv")
-
+    context.config("alphaCalibration.level", default="global")
+    context.config("alphaCalibration.filePath", default="cantons_mode_shares.csv")
 
     context.config("calibrate_betas_in_matsim", default=False)
     context.config("activate_traffic_light_delays", default=False)
