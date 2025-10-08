@@ -15,13 +15,13 @@ run:
 config:
     # path to the input data folder
     data_path: 
-    threads: 4
+    threads: 48
     random_seed: 0
     # it seems fastest is with 1
     hot_deck_matching_runners: 1
     disable_progress_bar: false
     java_memory: 10G
-    input_downsampling: 0.01
+    input_downsampling: 0.10
 
     # default to false until we fix projections
     enable_scaling: true
@@ -54,13 +54,13 @@ config:
     export_detailed_network: true
 
     # last iteration when runing MATSim
-    last_iteration: 2
+    last_iteration: 60
 
     # If you want to simplify the network (merge short links) in eqasim and correct their capacity, default is false
     simplify_network_in_eqasim: false
     correct_links_capacity: false
 
-    # path to the osm file, should be placed in data_path/osm (it can be list of files)    
+    # path to the osm file, should be placed in data_path/osm (it can be list of comma separated files)    
     osm_file: switzerland-latest-2025.osm.pbf
     border_offset: 20000 # offset for border extension in meters, default is 20000
 
@@ -74,6 +74,7 @@ config:
     assign_elevations: false
 
     # Specific day scenario (default: workday, also possible: weekend, Monday, ... Sunday)
+    # workday takes Monday-Friday
     specific_day_scenario: workday
 
     # when estimating the dmc model using biogeme (TODO: add pt cost params)
@@ -83,7 +84,16 @@ config:
     include_cross_border: true
 
     # PT pricing
+    # default is false; true does nto work on Euler
     generate_pt_pricing_inputs: false
 
     # Pt routing parameters
+    # can run on Euler but takes huge amount of time
     calibrate_pt_routing_params: false # Please make sure you really want to switch this parameter to true because the calibration takes 12+ hours!
+
+    # calibration and dmc model estimation  
+    estimate_dmc: true
+    calibrate_alphas_in_matsim: true
+    calibrate_betas_in_matsim: false
+    activate_traffic_light_delays: false
+    activate_unsignalized_intersections_delays: false
