@@ -259,31 +259,21 @@ if __name__ == '__main__':
     # Explore the dataframe
     print(list(df.columns))
     print(df.head(10))
-    print("\nFirst 20 lines and their names:")
-    print(df[['line_id', 'line_name']].head(20))
+ 
+    # Step 1: Add canton information to passenger data
+    print("============== ADDING CANTON INFORMATION TO PASSENGER DATA ==============")
+    add_canton_to_pt_passenger(df)
 
-
-    # Run multi-canton analysis
-    print("\n" + "="*60)
-    print("STARTING MULTI-CANTON LINE ANALYSIS")
-    print("="*60)
+    # Step 2: Run multi-canton analysis
+    print("============== STARTING MULTI-CANTON LINE ANALYSIS ==============")
     output_filename = 'pt_passenger_counts_with_cantons.csv'
     multi_canton_results = analyze_multi_canton_lines(output_filename)
 
-    # # Add canton information to passenger data
-    # print("\n" + "="*60)
-    # print("ADDING CANTON INFORMATION TO PASSENGER DATA")
-    # print("="*60)
-    # add_canton_to_pt_passenger(df)
-
-    # Create JSON structure for boarding data
-    # print("\n" + "="*60)
-    # print("CREATING JSON STRUCTURE FOR BOARDING DATA")
-    # print("="*60)
+    # Step 3: Create JSON structure for boarding data
+    print("CREATING JSON STRUCTURE FOR BOARDING DATA")
     json_data = create_boarding_json()
-    # Write the JSON data to a file
-    # output_file = 'boarding_data_by_line.json'
-    # with open(output_file, 'w', encoding='utf-8') as f:
-    #     json.dump(json_data, f, ensure_ascii=False, indent=2)
+    output_file = 'boarding_data_by_line.json'
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(json_data, f, ensure_ascii=False, indent=2)
 
-    # print(f"\nJSON data has been written to {output_file}")
+    print(f"\nJSON data has been written to {output_file}")

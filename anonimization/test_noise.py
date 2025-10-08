@@ -48,4 +48,4 @@ def analyze_noise_impact(n_samples=1000, epsilon=1.0):
     print(f"Maximum distance: {np.max(distances):.2f} km")
 
 if __name__ == "__main__":
-    analyze_noise_impact(n_samples=10000, epsilon=1.0)  # Using the same epsilon as in your code
+    analyze_noise_impact(n_samples=10000, epsilon=1.0)
