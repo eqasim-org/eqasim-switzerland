@@ -220,7 +220,8 @@ def configure(context):
 def execute(context):
     data_path       = context.config("data_path")
     t603_path       = f"{data_path}/pt_pricing/t603"
-    gtfs_stops_path = f"{data_path}/gtfs/{context.config("gtfs_name")}/stops.txt"
+    gtfs_name       = context.config("gtfs_name")
+    gtfs_stops_path = f"{data_path}/gtfs/{gtfs_name}/stops.txt"
 
     t603_2018_pdf_path = f"{t603_path}/T603_2018.pdf"
     t603_2025_pdf_path = f"{t603_path}/T603_2025.pdf"

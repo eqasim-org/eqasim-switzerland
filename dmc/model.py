@@ -137,8 +137,7 @@ def define_betas(ignore_car_passenger, use_exponents):
 
         # car
         "beta_car_asc": Beta("beta_car_asc", 0, None, None, 0),
-        "beta_car_travel_time_min": Beta("beta_car_travel_time_min", -0.01, None, None, 0),
-        "beta_car_travel_time_min2": Beta("beta_car_travel_time_min2", -0.01, None, None, 0),
+        "beta_car_travel_time_min": Beta("beta_car_travel_time_min", -0.01, None, None, 0),        
         "beta_car_distance_km": Beta("beta_car_distance_km", 0, None, None, 0),
         "beta_car_distance2_km": Beta("beta_car_distance2_km", 0, None, None, 0),
         "beta_car_work": Beta("beta_car_work", 0, None, None, 0),
@@ -154,8 +153,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         # pt
         "beta_pt_asc": Beta("beta_pt_asc", 0, None, None, 1),
         "beta_pt_access_egress_time_min": Beta("beta_pt_access_egress_time_min", 0, None, None, 0),
-        "beta_pt_in_vehicle_time_min": Beta("beta_pt_in_vehicle_time_min", -0.05, None, None, 0),
-        "beta_pt_in_vehicle_time_min2": Beta("beta_pt_in_vehicle_time_min2", 0, None, None, 0),
+        "beta_pt_in_vehicle_time_min": Beta("beta_pt_in_vehicle_time_min", -0.05, None, None, 0),        
         "beta_pt_travel_time_min": Beta("beta_pt_travel_time_min", 0, None, None, 0),
         "beta_pt_transfers": Beta("beta_pt_transfers", 0, None, None, 0),
         "beta_pt_transfer_time_min": Beta("beta_pt_transfer_time_min", 0, None, None, 0),
@@ -164,8 +162,8 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_pt_work": Beta("beta_pt_work", 0, None, None, 0),
         "beta_pt_destination": Beta("beta_pt_destination", 0, None, None, 0),
         "beta_pt_age": Beta("beta_pt_age", 0, None, None, 0),
-        "beta_pt_region_2": Beta("beta_pt_region_2", 0, None, None, 0),
-        "beta_pt_region_3": Beta("beta_pt_region_3", 0, None, None, 0),
+        "beta_pt_region_2": Beta("beta_pt_region_2", 0, None, None, 1),
+        "beta_pt_region_3": Beta("beta_pt_region_3", 0, None, None, 1),
         "beta_pt_origin_home": Beta("beta_pt_origin_home", 0, None, None, 0),
         "beta_pt_cost": Beta("beta_pt_cost", 0, None, None, 0),
         "beta_pt_elevation": Beta("beta_pt_elevation", 0, None, None, 0),

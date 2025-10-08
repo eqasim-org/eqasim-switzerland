@@ -57,7 +57,7 @@ def execute(context):
     config_path = os.path.join(output_path, config)
     assert os.path.exists(config_path)
 
-    eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunAdaptConfig", [
+    eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.scenario.RunAdaptConfig", [
         "--input-path", config_path,
         "--output-path", config_path,
         "--downsamplingRate", context.config("input_downsampling"),
@@ -68,7 +68,7 @@ def execute(context):
 
     if (not context.config("use_vdf")):
         # Run simulation
-        eqasim.run(context, "org.eqasim.switzerland.ch.RunSimulation", [
+        eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunSimulation", [
             "--config-path", config_path,
             "--config:controler.outputDirectory", os.path.join(output_path, "simulation_output"),
             "--config:controler.lastIteration", str(1),

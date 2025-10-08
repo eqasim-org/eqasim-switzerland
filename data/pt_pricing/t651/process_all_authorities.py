@@ -442,14 +442,19 @@ def execute(context):
         .reset_index()
     )
 
+    gtfs_networks = t651utils.add_zpass_from_zones(gtfs_networks)
+
     gtfs_networks.loc[gtfs_networks["stop_name"].str.startswith("Grenzach"), "zones"] = [[np.nan]]
     gtfs_networks.loc[gtfs_networks["stop_name"].str.startswith("Grenzach"), "tarif network"] =  [[np.nan]]
     gtfs_networks.loc[gtfs_networks["stop_name"].str.startswith("Grenzach"), "local network"] =  [[np.nan]]
 
     gtfs_networks = gpd.GeoDataFrame(gtfs_networks, crs = "EPSG:2056")
 
+    print(len(gtfs_networks))
+
     # Save the outputs
-    #gtfs_networks.to_file(f"{context.path()}/gtfs_with_zone_info.shp")
+    output_path = context.path()
+    #gtfs_networks.to_file(f"{output_path}/gtfs_with_zone_info.shp")
 
     del gtfs_networks["geometry"]
 

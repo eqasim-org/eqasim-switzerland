@@ -64,8 +64,10 @@ Add these parameters to the pipeline config:
 ## Automatic Calibration
 This section explains how to perform mode choice estimation and calibration:
 1. Set the `estimate_dmc` parameter to `true`. This will estimate the parameters and use them when running MATSim.  
-2. Set either `calibrate_alphas_in_matsim` or `calibrate_betas_in_matsim` to `true` to adjust the estimated values within the simulation so they align with the actual mode shares.  
+2. Set either `calibrate_alphas_in_matsim` or `calibrate_betas_in_matsim` to `true` to adjust the estimated values within the simulation so they align with the actual mode shares. IMPORTANT: if you decide to calibrate the alphas, make sure you expect to have the mode shares that are set in matsim.simulation.utils.get_calibration_args (in calibrate alphas case).
+
 3. After the simulation, the optimal parameters are location in the last iteration folder (as optimal_parameters.yml or alphas.csv)
+4. if you want to calibrate the alpha for each canton, this can be done after this stage. In MATSim config, go to `eqasim:alphaCalibration`, and set `level=canton`, and `filePath=cantons_mode_shares.csv`, which is a csv file, containing canton name as first column (same canton names as in households), and the remaining columns contain the mode shares for the five modes. If you want to do this calibration at the regional level (cluster of cantons, each cluster have its alpha), you can similarly set `level=cluster` and provide the csv file of the mode shares within each cluster. 
 
 ## Activate Delays at Intersections
 To activate delays at intersections in MATSim, follow these steps:
