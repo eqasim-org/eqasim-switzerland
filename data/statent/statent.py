@@ -4,7 +4,7 @@ import pandas as pd
 import data.spatial.municipalities
 import data.spatial.quarters
 import data.spatial.utils
-import data.spatial.zones
+from data.spatial.zones import impute
 import data.utils
 
 
@@ -20,10 +20,10 @@ def execute(context):
     data_path = context.config("data_path")
 
     df = pd.DataFrame(pd.read_csv(
-        "%s/statent/QUERY_FOR_2014_DEC_STATENT_LOC.csv" % data_path,
-        encoding = "latin1", sep = ";"))
+        "%s/statent/250221_STATENT_2022_LOC_17042025.csv" % data_path,
+        encoding = "latin1", sep = ","))
 
-    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08", "EMPTOT"]])
+    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08_CD", "EMPTOT"]])
     df.columns = ["x", "y", "noga", "number_employees"]
     df.loc[:, "noga"] = df["noga"].astype(np.str)
     df.loc[:, "enterprise_id"] = np.arange(len(df))
@@ -99,17 +99,27 @@ def execute(context):
     df_spatial = df_spatial[columns]
 
     # impute zones
-    df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
+    df2 = df_spatial.drop("quarter_id", axis=1)
+    df2 = impute(df2, df_zones)
+    df2.rename(columns={"zone_id": "zone_municipality_id"}, inplace=True)
+    df2 = df2[["enterprise_id", "zone_municipality_id"]]
+    df_spatial = impute(df_spatial, df_zones)
 
+    df_spatial = df_spatial.merge(
+        df2,   
+        on="enterprise_id",         
+        how="left"       
+    )
     assert(len(df) == len(df_spatial))
     assert(len(df_spatial) == len(df_spatial["zone_id"].dropna()))
 
     columns.extend(["zone_id"])
+    columns.extend(["zone_municipality_id"])
 
     df = pd.merge(
         df, df_spatial[columns],
         on = "enterprise_id"
     )
     df["zone_id"] = df["zone_id"].astype(np.int)
-
+    df["zone_municipality_id"] = df["zone_municipality_id"].astype(np.int)
     return df

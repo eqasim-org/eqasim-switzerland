@@ -28,8 +28,10 @@ def execute(context):
     rng = np.random.RandomState(context.config("random_seed"))
 
     # First handle the national commuters
-    df_national = df_demand[df_demand["zone_level"].isin(("municipality", "quarter"))]
     empty_zones = []
+    df_national = df_demand[df_demand["zone_level"]=="quarter"]
+    # we should split the demand into those reporting municpality and those reporting quarters
+    # then use the appropriate sample from statent
 
     for zone_id, count in context.progress(zip(df_national["work_zone_id"], df_national["count"]),
                                            label="Assigning national locations ...", total=len(df_demand)):
@@ -46,11 +48,31 @@ def execute(context):
             df.loc[f, "work_location_id"] = df_statent.iloc[indices]["enterprise_id"].values
         else:
             empty_zones.append(zone_id)
+    
+    # now take care of the municipality level   
+    df_national = df_demand[df_demand["zone_level"]=="municipality"]
 
+    for zone_id, count in context.progress(zip(df_national["work_zone_id"], df_national["count"]),
+                                           label="Assigning national locations ...", total=len(df_demand)):
+        indices = np.where(df_statent["zone_municipality_id"] == zone_id)[0]
+        weights = df_statent.iloc[indices]["number_employees"]
+        weights /= np.sum(weights)
+
+        if len(indices) > 0:
+            indices = np.repeat(indices, rng.multinomial(n=count, pvals=weights))
+
+            f = df["work_zone_id"] == zone_id
+            df.loc[f, "work_x"] = df_statent.iloc[indices]["x"].values
+            df.loc[f, "work_y"] = df_statent.iloc[indices]["y"].values
+            df.loc[f, "work_location_id"] = df_statent.iloc[indices]["enterprise_id"].values
+            try:
+                empty_zones.remove(zone_id)
+            except ValueError:
+                pass
+        else:
+            empty_zones.append(zone_id)
     print("Found %d zones which do not have any samples in STATENT" % len(empty_zones))
-
-    # There are some empty zones (mainly border zones to Italy, which are under shared administration)
-    # There, we just sample a random location inside of the zone
+    # In case there are empty zones we sample randomly from that zone
 
     df_shapes = context.stage("data.spatial.zone_shapes")
 

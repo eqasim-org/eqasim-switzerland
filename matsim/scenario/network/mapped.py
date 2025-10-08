@@ -62,21 +62,42 @@ def execute(context):
 
         content = content.replace(
             '<param name="modesToKeepOnCleanUp" value="car" />',
-            '<param name="modesToKeepOnCleanUp" value="car,car_passenger,truck" />'
+            '<param name="modesToKeepOnCleanUp" value="car,car_passenger,truck,taxi" />'
         )
 
         content = content.replace(
             '<param name="networkRouter" value="SpeedyALT" />',
             '<param name="networkRouter" value="AStarLandmarks" />'
         )
+
+        content = content.replace(
+            '<param name="networkModes" value="car,bus" />',
+            '<param name="networkModes" value="bus" />'
+        )
+        
+        content = content.replace(
+            '<param name="modeSpecificRules" value="false" />',
+            '<param name="modeSpecificRules" value="true" />'
+        )
+
+        content = content.replace(
+            '</module>',
+            """
+               <parameterset type="transportModeAssignment" >
+			        <param name="maxLinkCandidateDistance" value="90.0" />
+			        <param name="nLinkThreshold" value="1" />
+			        <param name="networkModes" value="rail,light_rail" />
+			        <param name="scheduleMode" value="rail" />
+			        <param name="strictLinkRule" value="true" />
+		        </parameterset>
+            </module>
+            """
+        )
         
 
         with open("%s/map_network.xml" % context.path(), "w+") as f:
             f.write(content)
 
-    # java(jar, "org.matsim.pt2matsim.run.PublicTransitMapper", [
-    #     "map_network.xml"
-    # ], cwd=context.path(), vm_arguments=["-Djava.io.tmpdir=%s" % tmp_path])
     log4j_content = """<?xml version="1.0" encoding="UTF-8"?>
         <Configuration status="WARN">
         <Appenders>

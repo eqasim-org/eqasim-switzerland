@@ -8,19 +8,21 @@ def configure(context):
     context.config("data_path")
 
 
-REFERENCE_YEAR = 2018
+REFERENCE_YEAR = 2023
 
 SHAPEFILES = [
-    (2018, "municipality_borders/gd-b-00.03-875-gg18/ggg_2018-LV95/shp/g1g18.shp", "GMDNR", "GMDNAME"),
-    (2017, "municipality_borders/gd-b-00.03-875-gg17/ggg_2017/shp/LV95/g1g17.shp", "GMDNR", "GMDNAME"),
-    (2016, "municipality_borders/gd-b-00.03-875-gg16/ggg_2016/shp/g1g16.shp", "GMDNR", "GMDNAME"),
-    (2015, "municipality_borders/gd-b-00.03-876-gg15/GGG_15_V161025/shp/g1g15.shp", "GMDNR", "GMDNAME"),
-    (2014, "municipality_borders/gd-b-00.03-877-gg14/ggg_2014/shp/g1g14.shp", "GMDNR", "GMDNAME"),
-    (2013, "municipality_borders/gd-b-00.03-877-gg13_r1/ggg_2013/shp/g1g13.shp", "GMDNR", "GMDNAME"),
-    (2012, "municipality_borders/gd-b-00.03-878-gg12/g1g12_shp_121130/G1G12.shp", "GMDE", "NAME"),
-    (2011, "municipality_borders/gd-b-00.03-879-gg11/g1g11_shp_121130/G1G11.shp", "GMDE", "NAME"),
-    (2010, "municipality_borders/gd-b-00.03-880-gg10/g1g10_shp_121130/G1G10.shp", "GMDE", "NAME"),
-    (2009, "municipality_borders/gd-b-00.03-881-gg09g1/g1g09_shp_090626/G1G09.shp", "GMDE", "NAME")
+    (2023, "spatial/municipality/2023/swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp", "BFS_NUMMER", "NAME"),
+    (2022, "spatial/municipality/2022/swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp", "BFS_NUMMER", "NAME"),
+    (2021, "spatial/municipality/2021/swissBOUNDARIES3D_1_5_TLM_HOHEITSGEBIET.shp", "BFS_NUMMER", "NAME"),
+    # (2017, "municipality_borders/gd-b-00.03-875-gg17/ggg_2017/shp/LV95/g1g17.shp", "GMDNR", "GMDNAME"),
+    # (2016, "municipality_borders/gd-b-00.03-875-gg16/ggg_2016/shp/g1g16.shp", "GMDNR", "GMDNAME"),
+    # (2015, "municipality_borders/gd-b-00.03-876-gg15/GGG_15_V161025/shp/g1g15.shp", "GMDNR", "GMDNAME"),
+    # (2014, "municipality_borders/gd-b-00.03-877-gg14/ggg_2014/shp/g1g14.shp", "GMDNR", "GMDNAME"),
+    # (2013, "municipality_borders/gd-b-00.03-877-gg13_r1/ggg_2013/shp/g1g13.shp", "GMDNR", "GMDNAME"),
+    # (2012, "municipality_borders/gd-b-00.03-878-gg12/g1g12_shp_121130/G1G12.shp", "GMDE", "NAME"),
+    # (2011, "municipality_borders/gd-b-00.03-879-gg11/g1g11_shp_121130/G1G11.shp", "GMDE", "NAME"),
+    # (2010, "municipality_borders/gd-b-00.03-880-gg10/g1g10_shp_121130/G1G10.shp", "GMDE", "NAME"),
+    # (2009, "municipality_borders/gd-b-00.03-881-gg09g1/g1g09_shp_090626/G1G09.shp", "GMDE", "NAME")
 ]
 
 
@@ -66,32 +68,10 @@ def execute(context):
         df_reference, df_deprecated, predicate="contains"
     ).reset_index()[["municipality_id", "deprecated_municipality_id"]]
 
-    # Now we are left over with some old municipalities whose centroids
-    # are not covered by any new municipality (mainly at the border and
-    # close to lakes). Therefore, we do another run and find the current
-    # municipality with the closes distance (more expensive operation).
-
-    missing_ids = set(
-        np.unique(df_deprecated["deprecated_municipality_id"])
-    ) - set(np.unique(df_mapping["deprecated_municipality_id"]))
-
-    df_missing = df_deprecated[
-        df_deprecated["deprecated_municipality_id"].isin(missing_ids)
-    ][["deprecated_municipality_id", "geometry"]]
-
-    coordinates = np.vstack([df_reference["geometry"].centroid.x, df_reference["geometry"].centroid.y]).T
-    kd_tree = KDTree(coordinates)
-
-    coordinates = np.vstack([df_missing["geometry"].x, df_missing["geometry"].y]).T
-    indices = kd_tree.query(coordinates, return_distance=False).flatten()
-
-    df_missing.loc[:, "municipality_id"] = df_reference.iloc[indices]["municipality_id"].values
-    df_missing = df_missing[["municipality_id", "deprecated_municipality_id"]]
-
     df_existing = pd.DataFrame(df_reference[["municipality_id"]])
     df_existing["deprecated_municipality_id"] = df_existing["municipality_id"]
 
-    df_mapping = pd.concat([df_existing, df_mapping, df_missing])
+    df_mapping = pd.concat([df_existing, df_mapping])
     df_reference = df_reference[["municipality_id", "municipality_name", "geometry"]]
 
     return df_reference, df_mapping
