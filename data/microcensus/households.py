@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 
-import data.spatial.cantons
+import data.spatial.cantons as cantons
 import data.spatial.municipalities
 import data.spatial.municipality_types
 import data.spatial.ovgk
@@ -70,7 +70,7 @@ def execute(context):
     # Region information
     # (acc. to Analyse der SP-Befragung 2015 zur Verkehrsmodus- und Routenwahl)
     df_mz_households["canton_id"] = df_mz_households["W_KANTON"]
-    df_mz_households = data.spatial.cantons.impute_sp_region(df_mz_households)
+    df_mz_households = cantons.impute_sp_region(df_mz_households)
 
     # Impute spatial information
     df_municipalities = context.stage("data.spatial.municipalities")[0]

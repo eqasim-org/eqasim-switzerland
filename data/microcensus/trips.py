@@ -158,6 +158,12 @@ def execute(context):
     # Network distance
     df_mz_trips["network_distance"] = df_mz_trips["w_rdist"] * 1000.0
 
+    output_df = df_mz_trips[[
+        "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y", "origin_x", "origin_y",
+        "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
+        "mode_detailed"
+    ]]
+
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y", "origin_x", "origin_y",
         "activity_duration", "crowfly_distance", "parking_cost", "network_distance",

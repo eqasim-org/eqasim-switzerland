@@ -18,5 +18,5 @@ def execute(context):
 
     df_vehicles_person = pd.concat([df_cars, df_passengers])
     df_types = pd.concat([df_car_types, df_passenger_types, df_truck_types])
-
+    
     return df_types, df_vehicles_person, df_trucks

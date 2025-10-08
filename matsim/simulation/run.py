@@ -33,7 +33,9 @@ def execute(context):
             # if one wants to visualize outputs, trips file needs to be generated 
             # so one should set this to something other than 0, and preferebly to something 
             # that will output trips file at the end of the simulation
-            "--config:controller.writeTripsInterval", str(0),
+            "--config:controller.writeTripsInterval", str(1),
+            "--config:linkStats.writeLinkStatsInterval", str(1),
+            "--config:linkStats.averageLinkStatsOverIterations", str(1),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
     else:

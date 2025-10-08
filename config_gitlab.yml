@@ -18,6 +18,6 @@ config:
     scaling_year: 2045
     use_freight: true
     hafas_date: 01.10.2018
-    data_path: /nas/ivtmatsim/scenarios/switzerland/data
+    data_path: /cluster/home/anding/ch/data/ch_raw_data/switzerland_data
     output_path: cache/scenarios/
     output_id: test

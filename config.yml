@@ -37,6 +37,8 @@ config:
     gtfs_date: "dayWithMostServices" 
     # if hafas is used, the data needs to be specified
     hafas_date: 01.10.2018
+
+    osm_path: switzerland-latest.osm.pbf
     
     # if we should use schedule based pt or simulated
     useScheduleBasedTransport: false

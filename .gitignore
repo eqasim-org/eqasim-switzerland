@@ -19,4 +19,4 @@ public/
 slurm*
 *.out
 *.sh
-!docker_run.sh
+!docker_run.shconfig_andrew.yml
