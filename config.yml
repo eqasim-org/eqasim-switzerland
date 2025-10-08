@@ -87,3 +87,13 @@ config:
 
     # Pt routing parameters
     calibrate_pt_routing_params: false # Please make sure you really want to switch this parameter to true because the calibration takes 12+ hours!
+
+    # calibration and dmc model estimation
+    estimate_dmc: true
+    calibrate_alphas_in_matsim: true
+    alphaCalibration.level: global # possible values are global, canton, cluster
+    alphaCalibration.filePath: absolute/path/to/cantons_mode_shares.csv # path to the file containing mode shares per canton or cluster
+
+    calibrate_betas_in_matsim: false
+    activate_traffic_light_delays: false
+    activate_unsignalized_intersections_delays: false

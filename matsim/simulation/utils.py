@@ -16,7 +16,7 @@ def get_calibration_args(context):
                 
         additional_args.extend(["--config:eqasim:calibration.activate", "true",
                                 "--config:eqasim:calibration.runCalibration", "true",
-                                "--config:eqasim:calibration.optimizer", "Nelder-Mead",
+                                "--config:eqasim:calibration.optimizer", "cmaes",
                                 "--config:eqasim:calibration.metric", "mse",
                                 "--config:eqasim:calibration.betaMomentum", "0.4",
                                 "--config:eqasim:calibration.eqasimCachePath", cache_path,
@@ -28,6 +28,9 @@ def get_calibration_args(context):
                                 ])
     else:
         if context.config("calibrate_alphas_in_matsim"):
+            level = context.config("alphaCalibration.level")
+            filePath = context.config("alphaCalibration.filePath")
+
             additional_args.extend([
                 "--config:eqasim:alphaCalibration.activate", "true",
                 "--config:eqasim:alphaCalibration.beta", "0.2",
@@ -36,7 +39,10 @@ def get_calibration_args(context):
                 "--config:eqasim:alphaCalibration.ptModeShare", "0.146",
                 "--config:eqasim:alphaCalibration.walkModeShare", "0.256",
                 "--config:eqasim:alphaCalibration.bikeModeShare", "0.083",
-                "--config:eqasim:alphaCalibration.carPassengerModeShare", "0.092"
+                "--config:eqasim:alphaCalibration.carPassengerModeShare", "0.092",
+                "--config:eqasim:alphaCalibration.level", level,
+                "--config:eqasim:alphaCalibration.filePath", filePath
+
             ])
 
     return additional_args
