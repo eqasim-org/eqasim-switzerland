@@ -1,10 +1,7 @@
 import numpy as np
 import pandas as pd
-import geopandas as gpd
-from geopy.distance import distance
-from geopy.point import Point
 
-import data.spatial.cantons as cantons
+import data.spatial.cantons
 import data.spatial.municipality_types
 import data.spatial.ovgk
 import data.spatial.utils
@@ -28,57 +25,6 @@ def configure(context):
     context.stage("data.constants")
     context.config("threads")
 
-
-def add_wgs84_coordinates(gdf, drop_geometry=True):
-    gdf = gdf.copy()
-    
-    # convert geometry to WGS84
-    wgs84_geom = gdf.geometry.to_crs(epsg=4326)
-    
-    gdf['longitude'] = wgs84_geom.x
-    gdf['latitude'] = wgs84_geom.y
-    
-    if drop_geometry:
-        gdf = gdf.drop(columns=['geometry'])
-    
-    return gdf
-
-def geo_indistinguishability_noise(epsilon, sensitivity=1.0):
-    # Sample radius from exponential distribution
-    r = np.random.exponential(scale=sensitivity / epsilon)
-
-    # Sample angle uniformly
-    theta = np.random.uniform(0, 2 * np.pi)
-
-    # Convert polar to Cartesian
-    dx = r * np.cos(theta)
-    dy = r * np.sin(theta)
-    return dx, dy
-
-def add_geo_noise(lat, lon, epsilon):
-    dx, dy = geo_indistinguishability_noise(epsilon)
-    
-    # Convert dx/dy in kilometers
-    noisy_point = distance(kilometers=dy).destination(Point(lat, lon), bearing=0)
-    noisy_point = distance(kilometers=dx).destination(noisy_point, bearing=90)
-    
-    return noisy_point.latitude, noisy_point.longitude
-
-def geo_indistinguishability_noise_meters(epsilon, sensitivity=1000.0):
-    """
-    Generate noise dx, dy in meters (Swiss coordinate units)
-    sensitivity defaults to 1000 meters (1 km) here to scale properly.
-    """
-    # Sample radius from exponential distribution (in meters)
-    r = np.random.exponential(scale=sensitivity / epsilon)
-
-    # Sample angle uniformly
-    theta = np.random.uniform(0, 2 * np.pi)
-
-    # Convert polar to Cartesian offsets in meters
-    dx = r * np.cos(theta)
-    dy = r * np.sin(theta)
-    return dx, dy
 
 def execute(context):
     df_persons    = context.stage("data.statpop.persons")
@@ -150,45 +96,6 @@ def execute(context):
     df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
     df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y", coord_type="home")
 
-    # ============= Adding geo noise =============
-
-    epsilon = 1.0
-
-    # Ensure CRS is EPSG:2056
-    assert df_spatial.crs.to_epsg() == 2056, "Input GeoDataFrame is not in EPSG:2056"
-    
-    #  save original coordinates and geometry for comparison
-    df_spatial['orig_x'] = df_spatial['home_x']
-    df_spatial['orig_y'] = df_spatial['home_y']
-    df_spatial['orig_geometry'] = df_spatial.geometry
-
-    # apply geo noise to home_x and home_y
-    dx_dy = np.array([geo_indistinguishability_noise_meters(epsilon) for _ in range(len(df_spatial))])
-    dxs, dys = dx_dy[:, 0], dx_dy[:, 1]
-
-    # apply noise
-    df_spatial['home_x'] += dxs
-    df_spatial['home_y'] += dys
-
-    # recreate geometry 
-    df_spatial['geometry'] = gpd.points_from_xy(df_spatial['home_x'], df_spatial['home_y'], crs="EPSG:2056")
-    df_spatial = gpd.GeoDataFrame(df_spatial, geometry='geometry', crs="EPSG:2056")
-
-    # verification
-    df_spatial['final_geometry'] = df_spatial.geometry
-
-    # Compute Euclidean distance in meters between original and final positions
-    df_spatial['true_distance'] = df_spatial.apply(
-        lambda row: row['orig_geometry'].distance(row['final_geometry']),
-        axis=1
-    )
-
-    print("=== True Distance Moved (Post-Imputation) ===")
-    print(df_spatial['true_distance'].describe())
-    print("Number of points actually moved > 1 km:", (df_spatial['true_distance'] > 1000).sum())
-
-    # =======================================================================
-
     # Impute municipalities
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id",
                                             zone_type="municipality", point_type="home")[
@@ -214,14 +121,6 @@ def execute(context):
     assert (len(df) == len(df_spatial))
 
     del df["municipality_id"]
-    # overwrite this with the new home coordinates
-
-    print(" The columns of DF originally", list(df.columns))
-    print(" The columns of DF SPATIAL", list(df_spatial.columns))
-    
-    # Extract coordinates from geometry
-    df["home_x"] = df_spatial.geometry.x
-    df["home_y"] = df_spatial.geometry.y
     df = pd.merge(
         df, df_spatial[["person_id", "zone_id", "municipality_type", "municipality_id", "quarter_id", "canton_id"]],
         on="person_id"
@@ -232,7 +131,7 @@ def execute(context):
     df["home_quarter_id"] = df["quarter_id"]
 
     # Impute SP region
-    df = cantons.impute_sp_region(df)
+    df = data.spatial.cantons.impute_sp_region(df)
 
     # Impute population density
     data.statpop.density.impute_parallel(
