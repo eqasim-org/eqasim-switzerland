@@ -64,8 +64,10 @@ def execute(context):
             if context.config("include_cross_border"):
                 cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
 
-                id_person_max = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
-                N             = id_person_max + 1
+                #id_person_max = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
+                #N             = id_person_max + 1
+                id_hhl_max     = np.max(df_households["household_id"].values)
+                N              = id_hhl_max + 1
 
                 cross_border_persons    = cross_border_persons.sort_values(by="person_id")
 

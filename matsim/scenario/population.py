@@ -232,15 +232,18 @@ def execute(context):
         cross_border_vehicles   = cross_border_vehicles.sort_values(by=["owner_id"])
 
         id_person_max = np.max(df_persons["person_id"].values)
-        N             = id_person_max + 1
+        N_px          = id_person_max + 1
 
-        cross_border_persons["new_person_id"]    = range(N, N + len(cross_border_persons), 1)
+        cross_border_persons["new_person_id"]    = range(N_px, N_px + len(cross_border_persons), 1)
 
         id_map = cross_border_persons.set_index("person_id")["new_person_id"]
         cross_border_activities["person_id"] = cross_border_activities["person_id"].map(id_map).fillna(cross_border_activities["person_id"])
 
         cross_border_persons["person_id"]    = cross_border_persons["new_person_id"].values
-        cross_border_persons["household_id"] = cross_border_persons["new_person_id"].values
+
+        id_hhl_max     = np.max(df_persons["household_id"].values)
+        N_hhl              = id_hhl_max + 1
+        cross_border_persons["household_id"] = range(N_hhl, N_hhl + len(cross_border_persons), 1)
 
         del cross_border_persons["new_person_id"]
 
