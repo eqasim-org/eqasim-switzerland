@@ -23,4 +23,6 @@ Rtree==1.2.0
 synpp==1.6.1
 osmium==4.0.2
 lxml==6.0.0
-biogeme==3.2.10
+biogeme==3.2.11
+xopen==2.0.2
+seaborn==0.13.2
