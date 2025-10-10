@@ -366,7 +366,7 @@ def execute(context):
     os.chdir(context.working_directory)
     biogeme = bio.BIOGEME(database, {"loglike": logprob, "weight": vars["weight"]})
     biogeme.modelName = "DMC_model"
-    biogeme.generateHtml = False
+    biogeme.generate_html = False
     biogeme.generate_pickle = False
     biogeme.loadSavedIterations = False
     biogeme.saveIterations = False
@@ -375,6 +375,7 @@ def execute(context):
     result = biogeme.estimate()
     os.chdir(cwd)
     
+    # Print summary of the results
     logger.info(result.shortSummary())
 
     # write the optimal parameters to a yaml file in MATSim input format
@@ -382,14 +383,14 @@ def execute(context):
     writer(context, result, path_to_params).write()
 
     # Compute the VOT for car users
-    vot_car = vot_utils.get_car_vot(df, result, utilities, modes, eps=1e-2)
-    vot_pt = vot_utils.get_pt_vot(df, result, utilities, modes, eps=1e-2)
+    # vot_car = vot_utils.get_car_vot(df, result, utilities, modes, eps=1e-2)
+    # vot_pt = vot_utils.get_pt_vot(df, result, utilities, modes, eps=1e-2)
 
-    logger.info("The average VOT for car users is %.2f CHF/hour", vot_car.mean())
-    logger.info("The average VOT for pt users is %.2f CHF/hour", vot_pt.mean())
+    # logger.info("The average VOT for car users is %.2f CHF/hour", vot_car.mean())
+    # logger.info("The average VOT for pt users is %.2f CHF/hour", vot_pt.mean())
 
     path_to_figure = os.path.join(context.path(),"vot_distribution.png")
-    vot_utils.plot_vot(vot_car, vot_pt, figure_path = path_to_figure)
-    logger.info("The VOT distribution figure is saved to %s", path_to_figure)
+    # vot_utils.plot_vot(vot_car, vot_pt, figure_path = path_to_figure)
+    # logger.info("The VOT distribution figure is saved to %s", path_to_figure)
     
     return (result, df, path_to_params, path_to_figure)
