@@ -33,7 +33,7 @@ class AnonymizationAnalyzer:
                                    masked_x: np.ndarray, 
                                    masked_y: np.ndarray) -> Dict[str, float]:
         """Calculate displacement statistics between original and masked coordinates."""
-        
+
         orig_coords = self.project_to_meters(original_x, original_y)
         masked_coords = self.project_to_meters(masked_x, masked_y)
         
