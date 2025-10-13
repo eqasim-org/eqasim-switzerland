@@ -52,7 +52,7 @@ def execute(context):
     print("Found %d persons without activities" % len(missing_ids))
 
     df_missing = pd.DataFrame.from_records([
-        (person_id, 1, "home", True) for person_id in missing_ids
+        (person_id, 0, "home", True) for person_id in missing_ids
     ], columns=["person_id", "activity_index", "purpose", "is_last"])
 
     df_activities = pd.concat([df_activities, df_missing], sort=True)
