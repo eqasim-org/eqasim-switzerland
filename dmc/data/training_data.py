@@ -18,6 +18,10 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
+    context.stage("calibration.pt_pricing.generate_config")
+    context.stage("matsim.runtime.eqasim")
+    context.stage("matsim.runtime.java")
+
     context.config("car_cost_per_km", 0.26) #CHF per km
     context.config("parking_cost_per_hour_CHF_urban", 1.0) #CHF per hour
     context.config("parking_cost_per_hour_CHF_suburban", 0.5) #CHF per hour

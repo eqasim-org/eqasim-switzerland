@@ -375,6 +375,7 @@ def execute(context):
     result = biogeme.estimate()
     os.chdir(cwd)
     
+    # Print summary of the results
     logger.info(result.shortSummary())
 
     # write the optimal parameters to a yaml file in MATSim input format
