@@ -91,8 +91,8 @@ def execute(context):
 
         if context.config("parseTurnRestrictions"):
             content = content.replace(
-                '<param name="parseTurnRestrictions" value="false" />',
-                '<param name="parseTurnRestrictions" value="true" />'
+                '<param name="parseTurnRestrictions" value="true" />',
+                '<param name="parseTurnRestrictions" value="false" />'
             )
 
         content = content.replace(
