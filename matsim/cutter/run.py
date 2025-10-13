@@ -77,5 +77,5 @@ def execute(context):
         "--extent-path", context.config("extent_path"),
         "--threads", context.config("threads"),
         "--prefix", context.config("extent_prefix"),
-        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
+        "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator"
     ])
