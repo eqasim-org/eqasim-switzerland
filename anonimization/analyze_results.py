@@ -1,819 +1,222 @@
 """
-Analysis and comparison of anonymization methods results.
+Concise analysis of anonymization results.
+Creates two key plots:
+1. Distribution of anonymization distances
+2. Distribution of original neighbors within displacement radius
 """
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.spatial import KDTree
-import pyproj
-from typing import List, Dict, Tuple
 import os
 
-# Import enhanced metrics
-from enhanced_metrics import calculate_all_enhanced_metrics
-
-class AnonymizationAnalyzer:
-    """Analyze and compare anonymization results."""
+def create_anonymization_plots():
+    """Create the two main analysis plots."""
     
-    def __init__(self, crs_from="EPSG:2056", crs_to="EPSG:3857"):
-        self.crs_from = crs_from
-        self.crs_to = crs_to
-        self.transformer_to_meters = pyproj.Transformer.from_crs(crs_from, crs_to, always_xy=True)
-    
-    def project_to_meters(self, x_coords: np.ndarray, y_coords: np.ndarray) -> np.ndarray:
-        """Project coordinates to metric CRS."""
-        x_proj, y_proj = self.transformer_to_meters.transform(x_coords, y_coords)
-        return np.column_stack([x_proj, y_proj])
-    
-
-    def calculate_displacement_stats(self, 
-                                   original_x: np.ndarray, 
-                                   original_y: np.ndarray,
-                                   masked_x: np.ndarray, 
-                                   masked_y: np.ndarray) -> Dict[str, float]:
-        """Calculate displacement statistics between original and masked coordinates."""
-
-        orig_coords = self.project_to_meters(original_x, original_y)
-        masked_coords = self.project_to_meters(masked_x, masked_y)
-        
-        # Calculate Euclidean distances
-        distances = np.sqrt(np.sum((orig_coords - masked_coords)**2, axis=1))
-        
-        return {
-            'mean_displacement_m': np.mean(distances),
-            'median_displacement_m': np.median(distances),
-            'min_displacement_m': np.min(distances),
-            'max_displacement_m': np.max(distances),
-            'std_displacement_m': np.std(distances),
-            'q25_displacement_m': np.percentile(distances, 25),
-            'q75_displacement_m': np.percentile(distances, 75),
-            'q95_displacement_m': np.percentile(distances, 95),
-            'q99_displacement_m': np.percentile(distances, 99)
-        }
-    
-    def calculate_privacy_metrics(self, 
-                                original_x: np.ndarray, 
-                                original_y: np.ndarray,
-                                masked_x: np.ndarray, 
-                                masked_y: np.ndarray,
-                                k_values: List[int] = [3, 5, 10]) -> Dict:
-        """Calculate privacy-related metrics."""
-        
-        orig_coords = self.project_to_meters(original_x, original_y)
-        masked_coords = self.project_to_meters(masked_x, masked_y)
-        
-        metrics = {}
-        
-        # Build trees for nearest neighbor queries
-        orig_tree = KDTree(orig_coords)
-        masked_tree = KDTree(masked_coords)
-        
-        for k in k_values:
-            # Calculate k-anonymity preservation
-            k_preserved = 0
-            
-            for i in range(min(1000, len(orig_coords))):  # Sample for efficiency
-                # Find k nearest neighbors in original data
-                orig_dists, orig_idxs = orig_tree.query(orig_coords[i].reshape(1, -1), k=k+1)
-                orig_neighbors = set(orig_idxs[0][1:])  # Exclude self
-                
-                # Find k nearest neighbors in masked data
-                masked_dists, masked_idxs = masked_tree.query(masked_coords[i].reshape(1, -1), k=k+1)
-                masked_neighbors = set(masked_idxs[0][1:])  # Exclude self
-                
-                # Check if neighborhoods overlap significantly
-                overlap = len(orig_neighbors.intersection(masked_neighbors))
-                if overlap >= k // 2:  # At least half of neighbors preserved
-                    k_preserved += 1
-            
-            metrics[f'k{k}_anonymity_preservation'] = k_preserved / min(1000, len(orig_coords))
-        
-        # Calculate displacement metrics
-        displacements = np.sqrt(np.sum((orig_coords - masked_coords)**2, axis=1))
-        metrics['mean_displacement_m'] = np.mean(displacements)
-        metrics['median_displacement_m'] = np.median(displacements)
-        metrics['max_displacement_m'] = np.max(displacements)
-        metrics['std_displacement_m'] = np.std(displacements)
-        
-        return metrics
-    
-    def calculate_utility_metrics(self, 
-                                original_x: np.ndarray, 
-                                original_y: np.ndarray,
-                                masked_x: np.ndarray, 
-                                masked_y: np.ndarray) -> Dict:
-        """Calculate data utility metrics."""
-        
-        # Spatial distribution preservation
-        orig_center = np.array([np.mean(original_x), np.mean(original_y)])
-        masked_center = np.array([np.mean(masked_x), np.mean(masked_y)])
-        
-        orig_coords_proj = self.project_to_meters(original_x, original_y)
-        masked_coords_proj = self.project_to_meters(masked_x, masked_y)
-        
-        center_shift = np.linalg.norm(
-            self.project_to_meters(masked_center.reshape(1), orig_center.reshape(1))[0] - 
-            self.project_to_meters(orig_center.reshape(1), orig_center.reshape(1))[0]
-        )
-        
-        # Standard deviation preservation
-        orig_std = np.std(orig_coords_proj, axis=0)
-        masked_std = np.std(masked_coords_proj, axis=0)
-        
-        return {
-            'center_shift_m': center_shift,
-            'x_std_preservation': masked_std[0] / orig_std[0] if orig_std[0] > 0 else 1.0,
-            'y_std_preservation': masked_std[1] / orig_std[1] if orig_std[1] > 0 else 1.0,
-            'area_coverage_ratio': (
-                (np.max(masked_x) - np.min(masked_x)) * (np.max(masked_y) - np.min(masked_y))
-            ) / (
-                (np.max(original_x) - np.min(original_x)) * (np.max(original_y) - np.min(original_y))
-            ) if (np.max(original_x) - np.min(original_x)) > 0 and (np.max(original_y) - np.min(original_y)) > 0 else 1.0
-        }
-    
-    def analyze_all_methods(self, original_file: str, anonymized_files: Dict[str, str]) -> pd.DataFrame:
-        """Analyze all anonymization methods and compare results."""
-        
-        # Load original data
-        print(f"Loading original data from {original_file}")
-        df_orig = pd.read_csv(original_file)
-        print(f"Analyzing {len(df_orig)} records")
-        
-        results = []
-        
-        for method_name, file_path in anonymized_files.items():
-            print(f"\nAnalyzing {method_name}...")
-            
-            try:
-                df_anon = pd.read_csv(file_path)
-                
-                if len(df_anon) != len(df_orig):
-                    print(f"Warning: Size mismatch for {method_name}: {len(df_anon)} vs {len(df_orig)}")
-                    continue
-                
-                # Extract coordinates
-                orig_x = df_orig['home_x'].values
-                orig_y = df_orig['home_y'].values
-                masked_x = df_anon['home_x'].values
-                masked_y = df_anon['home_y'].values
-                
-                # Remove NaN values
-                valid_mask = (~pd.isna(orig_x) & ~pd.isna(orig_y) & 
-                             ~pd.isna(masked_x) & ~pd.isna(masked_y))
-                
-                orig_x = orig_x[valid_mask]
-                orig_y = orig_y[valid_mask]
-                masked_x = masked_x[valid_mask]
-                masked_y = masked_y[valid_mask]
-                
-                if len(orig_x) == 0:
-                    print(f"Warning: No valid coordinates for {method_name}")
-                    continue
-                
-                print(f"  Comparing {len(orig_x)} coordinate pairs...")
-                
-                # Basic privacy metrics
-                metrics = self.calculate_privacy_metrics(orig_x, orig_y, masked_x, masked_y)
-                metrics['method'] = method_name
-                
-                # Add enhanced metrics
-                print(f"  Computing enhanced metrics...")
-                orig_coords_meters = self.project_to_meters(orig_x, orig_y)
-                mask_coords_meters = self.project_to_meters(masked_x, masked_y)
-                enhanced = calculate_all_enhanced_metrics(orig_coords_meters, mask_coords_meters)
-                
-                # Flatten enhanced metrics into main metrics dict
-                for category, value in enhanced.items():
-                    if isinstance(value, dict):
-                        for k, v in value.items():
-                            if isinstance(v, (int, float, bool, np.integer, np.floating)):
-                                metrics[f'{category}_{k}'] = float(v)
-                    elif isinstance(value, (int, float, bool, np.integer, np.floating)):
-                        metrics[category] = float(value)
-                    elif isinstance(value, np.ndarray):
-                        # For arrays like Ripley's K, store as string or skip
-                        metrics[f'{category}_array'] = str(value.tolist())
-                
-                results.append(metrics)
-                print(f"  ✓ Completed analysis for {method_name}")
-                
-            except Exception as e:
-                print(f"Error analyzing {method_name}: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        if not results:
-            print("No results to display")
-            return pd.DataFrame()
-        
-        return pd.DataFrame(results)
-    
-    def create_comparison_plots(self, original_file: str, anonymized_files: Dict[str, str], output_dir: str = "."):
-        """Create comparison plots for anonymization methods."""
-        
-        # Set seaborn style
-        sns.set_style("whitegrid")
-        sns.set_palette("husl")
-        
-        # Load original data (sample for plotting to avoid overcrowding)
-        df_orig = pd.read_csv(original_file)
-        if len(df_orig) > 2000:
-            plot_sample = df_orig.sample(n=2000, random_state=42)
-        else:
-            plot_sample = df_orig
-        
-        orig_x = plot_sample['home_x'].values
-        orig_y = plot_sample['home_y'].values
-        valid_mask = ~(pd.isna(orig_x) | pd.isna(orig_y))
-        orig_x = orig_x[valid_mask]
-        orig_y = orig_y[valid_mask]
-        
-        n_methods = len(anonymized_files)
-        
-        # Create overlay comparison plots (original + anonymized on same plot)
-        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
-        axes = axes.flatten()
-        
-        # Use bright, saturated colors for better visibility
-        colors = ['#FF1744', '#00E676', '#2979FF', '#FFD600']  # Bright red, green, blue, yellow
-        
-        for i, (method_name, file_path) in enumerate(anonymized_files.items()):
-            if i >= 4:
-                break
-                
-            try:
-                df_anon = pd.read_csv(file_path)
-                
-                # Use same sample indices for comparison
-                if len(df_anon) > 2000:
-                    anon_sample = df_anon.sample(n=2000, random_state=42)
-                else:
-                    anon_sample = df_anon
-                
-                masked_x = anon_sample['home_x'].values
-                masked_y = anon_sample['home_y'].values
-                
-                # Remove NaN values
-                mask_valid = ~(pd.isna(masked_x) | pd.isna(masked_y))
-                masked_x = masked_x[mask_valid]
-                masked_y = masked_y[mask_valid]
-                
-                if len(masked_x) > 0:
-                    # Plot original points in dark gray with higher opacity
-                    axes[i].scatter(orig_x, orig_y, alpha=0.6, s=8, color='#424242', 
-                                  label='Original', edgecolors='none', zorder=1)
-                    # Plot anonymized points in bright color with higher opacity
-                    axes[i].scatter(masked_x, masked_y, alpha=0.8, s=8, 
-                                  color=colors[i], label='Anonymized', edgecolors='none', zorder=2)
-                    axes[i].set_title(f'{method_name.replace("_", " ").title()}', 
-                                     fontsize=14, fontweight='bold')
-                    axes[i].set_xlabel('X Coordinate', fontsize=12)
-                    axes[i].set_ylabel('Y Coordinate', fontsize=12)
-                    axes[i].legend(loc='upper right', markerscale=2, fontsize=11)
-                    axes[i].grid(True, alpha=0.3)
-                
-            except Exception as e:
-                print(f"Error plotting {method_name}: {e}")
-        
-        # Hide unused subplots
-        for i in range(len(anonymized_files), len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        plt.savefig(f"{output_dir}/anonymization_comparison_overlay.png", dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"Saved overlay comparison plot to {output_dir}/anonymization_comparison_overlay.png")
-        
-        # Create displacement vector plots (showing movement with arrows)
-        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
-        axes = axes.flatten()
-        
-        # Sample fewer points for arrow visualization
-        n_arrows = min(200, len(plot_sample))
-        arrow_indices = np.random.choice(len(orig_x), size=min(n_arrows, len(orig_x)), replace=False)
-        
-        for i, (method_name, file_path) in enumerate(anonymized_files.items()):
-            if i >= 4:
-                break
-                
-            try:
-                df_anon = pd.read_csv(file_path)
-                
-                # Get corresponding anonymized points
-                if len(df_anon) > 2000:
-                    anon_sample = df_anon.sample(n=2000, random_state=42)
-                else:
-                    anon_sample = df_anon
-                
-                masked_x = anon_sample['home_x'].values
-                masked_y = anon_sample['home_y'].values
-                
-                # Remove NaN values
-                mask_valid = ~(pd.isna(masked_x) | pd.isna(masked_y))
-                masked_x = masked_x[mask_valid]
-                masked_y = masked_y[mask_valid]
-                
-                if len(masked_x) > 0:
-                    # Plot all original points in background with darker color
-                    axes[i].scatter(orig_x, orig_y, alpha=0.3, s=4, color='#9E9E9E', label='Original (all)')
-                    
-                    # Plot displacement arrows for sample with more visible color
-                    n_plot = min(len(arrow_indices), len(orig_x), len(masked_x))
-                    for j in range(n_plot):
-                        idx = arrow_indices[j] if j < len(arrow_indices) else j
-                        if idx < len(orig_x) and idx < len(masked_x):
-                            axes[i].annotate('', 
-                                           xy=(masked_x[idx], masked_y[idx]), 
-                                           xytext=(orig_x[idx], orig_y[idx]),
-                                           arrowprops=dict(arrowstyle='->', color=colors[i], 
-                                                         alpha=0.7, lw=1.2))
-                    
-                    # Plot sample of original and anonymized points with more intense colors
-                    axes[i].scatter(orig_x[arrow_indices], orig_y[arrow_indices], 
-                                  alpha=0.8, s=25, color='#1565C0', marker='o', 
-                                  label='Original (sample)', zorder=3, edgecolors='white', linewidths=0.5)
-                    axes[i].scatter(masked_x[arrow_indices], masked_y[arrow_indices], 
-                                  alpha=0.9, s=30, color=colors[i], marker='x', 
-                                  label='Anonymized', zorder=4, linewidths=2)
-                    
-                    axes[i].set_title(f'{method_name.replace("_", " ").title()}\nDisplacement Vectors', 
-                                     fontsize=14, fontweight='bold')
-                    axes[i].set_xlabel('X Coordinate', fontsize=12)
-                    axes[i].set_ylabel('Y Coordinate', fontsize=12)
-                    axes[i].legend(loc='upper right', markerscale=1.5, fontsize=11)
-                    axes[i].grid(True, alpha=0.3)
-                
-            except Exception as e:
-                print(f"Error creating displacement plot for {method_name}: {e}")
-        
-        # Hide unused subplots
-        for i in range(len(anonymized_files), len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        plt.savefig(f"{output_dir}/displacement_vectors.png", dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"Saved displacement vector plot to {output_dir}/displacement_vectors.png")
-        
-        # Create house snapping validation plots
-        self.create_house_snapping_validation_plots(original_file, anonymized_files, output_dir)
-        """Create comparison plots for anonymization methods."""
-        
-        # Set seaborn style
-        sns.set_style("whitegrid")
-        sns.set_palette("husl")
-        
-        # Load original data
-        df_orig = pd.read_csv(original_file)
-        
-        # For plotting, sample if dataset is too large
-        if len(df_orig) > 5000:
-            df_plot = df_orig.sample(n=5000, random_state=42)
-        else:
-            df_plot = df_orig
-        
-        orig_x = df_plot['home_x'].values
-        orig_y = df_plot['home_y'].values
-        valid_mask_orig = ~(pd.isna(orig_x) | pd.isna(orig_y))
-        orig_x = orig_x[valid_mask_orig]
-        orig_y = orig_y[valid_mask_orig]
-        
-        n_methods = len(anonymized_files)
-        fig, axes = plt.subplots(2, (n_methods + 1) // 2 + 1, figsize=(20, 12))
-        axes = axes.flatten()
-        
-        # Plot original data
-        sns.scatterplot(x=orig_x, y=orig_y, alpha=0.5, s=1, color='black', ax=axes[0])
-        axes[0].set_title('Original Data', fontsize=14, fontweight='bold')
-        axes[0].set_xlabel('X Coordinate')
-        axes[0].set_ylabel('Y Coordinate')
-        
-        # Plot anonymized data
-        colors = sns.color_palette("husl", n_methods)
-        for i, (method_name, file_path) in enumerate(anonymized_files.items()):
-            try:
-                df_anon = pd.read_csv(file_path)
-                
-                # Use same subset for plotting
-                if len(df_anon) > 5000:
-                    df_anon_plot = df_anon.sample(n=5000, random_state=42)
-                else:
-                    df_anon_plot = df_anon
-                
-                masked_x = df_anon_plot['home_x'].values
-                masked_y = df_anon_plot['home_y'].values
-                
-                # Remove NaN values
-                mask_valid = ~(pd.isna(masked_x) | pd.isna(masked_y))
-                masked_x = masked_x[mask_valid]
-                masked_y = masked_y[mask_valid]
-                
-                if len(masked_x) > 0:
-                    sns.scatterplot(x=masked_x, y=masked_y, alpha=0.5, s=1, 
-                                  color=colors[i], ax=axes[i+1])
-                    axes[i+1].set_title(f'{method_name.replace("_", " ").title()}', 
-                                       fontsize=14, fontweight='bold')
-                    axes[i+1].set_xlabel('X Coordinate')
-                    axes[i+1].set_ylabel('Y Coordinate')
-                
-            except Exception as e:
-                print(f"Error plotting {method_name}: {e}")
-        
-        # Hide unused subplots
-        for i in range(len(anonymized_files) + 1, len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        plt.savefig(f"{output_dir}/anonymization_comparison.png", dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Create displacement histogram with seaborn
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-        axes = axes.flatten()
-        
-        # Use the same bright colors as overlay plots
-        bright_colors = ['#FF1744', '#00E676', '#2979FF', '#FFD600']
-        
-        for i, (method_name, file_path) in enumerate(anonymized_files.items()):
-            if i >= 4:
-                break
-                
-            try:
-                df_anon = pd.read_csv(file_path)
-                
-                if len(df_anon) != len(df_orig):
-                    print(f"Warning: Size mismatch for displacement calculation: {method_name}")
-                    continue
-                
-                # Use full dataset for displacement (not just plot sample)
-                masked_x = df_anon['home_x'].values
-                masked_y = df_anon['home_y'].values
-                orig_x_full = df_orig['home_x'].values
-                orig_y_full = df_orig['home_y'].values
-                
-                # Remove NaN values
-                mask_valid = (~pd.isna(masked_x) & ~pd.isna(masked_y) & 
-                              ~pd.isna(orig_x_full) & ~pd.isna(orig_y_full))
-                masked_x = masked_x[mask_valid]
-                masked_y = masked_y[mask_valid]
-                orig_x_full = orig_x_full[mask_valid]
-                orig_y_full = orig_y_full[mask_valid]
-                
-                if len(masked_x) > 0:
-                    # Calculate displacements
-                    orig_coords = self.project_to_meters(orig_x_full, orig_y_full)
-                    masked_coords = self.project_to_meters(masked_x, masked_y)
-                    distances = np.sqrt(np.sum((orig_coords - masked_coords)**2, axis=1))
-                    
-                    sns.histplot(distances, bins=50, alpha=0.75, kde=True, 
-                               color=bright_colors[i], ax=axes[i], linewidth=1.5)
-                    axes[i].set_title(f'{method_name.replace("_", " ").title()}\nMean: {np.mean(distances):.1f}m', 
-                                    fontsize=12, fontweight='bold')
-                    axes[i].set_xlabel('Displacement (meters)', fontsize=11)
-                    axes[i].set_ylabel('Frequency', fontsize=11)
-                
-            except Exception as e:
-                print(f"Error creating histogram for {method_name}: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        plt.tight_layout()
-        plt.savefig(f"{output_dir}/displacement_histograms.png", dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        print(f"Plots saved to {output_dir}/")
-    
-    def create_house_snapping_validation_plots(self, original_file: str, anonymized_files: Dict[str, str], output_dir: str = "."):
-        """Create plots to validate that anonymized points are snapped to valid house locations."""
-        
-        print("Creating house snapping validation plots...")
-        
-        # Load original data
-        df_orig = pd.read_csv(original_file)
-        orig_x = df_orig['home_x'].values
-        orig_y = df_orig['home_y'].values
-        valid_mask = ~(pd.isna(orig_x) | pd.isna(orig_y))
-        orig_x = orig_x[valid_mask]
-        orig_y = orig_y[valid_mask]
-        
-        # Create set of all original house locations for validation
-        # Round to avoid floating point precision issues
-        precision = 6  # 6 decimal places should be sufficient for coordinate precision
-        orig_coords_set = set(zip(np.round(orig_x, precision), np.round(orig_y, precision)))
-        print(f"Created validation set with {len(orig_coords_set)} unique house locations")
-        
-        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
-        axes = axes.flatten()
-        colors = ['#FF1744', '#00E676', '#2979FF', '#FFD600']
-        
-        for i, (method_name, file_path) in enumerate(anonymized_files.items()):
-            if i >= 4:
-                break
-                
-            try:
-                df_anon = pd.read_csv(file_path)
-                masked_x = df_anon['home_x'].values
-                masked_y = df_anon['home_y'].values
-                
-                # Remove NaN values
-                mask_valid = ~(pd.isna(masked_x) | pd.isna(masked_y))
-                masked_x = masked_x[mask_valid]
-                masked_y = masked_y[mask_valid]
-                
-                # Check which anonymized points are valid house locations
-                valid_houses = []
-                invalid_houses = []
-                
-                # Round anonymized coordinates to same precision for comparison
-                for x, y in zip(masked_x, masked_y):
-                    rounded_coord = (np.round(x, precision), np.round(y, precision))
-                    if rounded_coord in orig_coords_set:
-                        valid_houses.append((x, y))
-                    else:
-                        invalid_houses.append((x, y))
-                
-                # Plot all original house locations in light gray
-                axes[i].scatter(orig_x, orig_y, alpha=0.3, s=2, color='lightgray', 
-                              label=f'All Houses ({len(orig_x)})', zorder=1)
-                
-                # Plot valid anonymized locations (should be all of them if snapping works)
-                if valid_houses:
-                    valid_x, valid_y = zip(*valid_houses)
-                    axes[i].scatter(valid_x, valid_y, alpha=0.8, s=15, color=colors[i], 
-                                  marker='o', label=f'Valid Anon ({len(valid_houses)})', 
-                                  zorder=3, edgecolors='white', linewidths=0.5)
-                
-                # Plot invalid anonymized locations (should be none if snapping works)
-                if invalid_houses:
-                    invalid_x, invalid_y = zip(*invalid_houses)
-                    axes[i].scatter(invalid_x, invalid_y, alpha=0.9, s=20, color='red', 
-                                  marker='X', label=f'Invalid Anon ({len(invalid_houses)})', 
-                                  zorder=4, linewidths=2)
-                
-                # Calculate validation statistics
-                total_anon = len(masked_x)
-                valid_count = len(valid_houses)
-                invalid_count = len(invalid_houses)
-                validation_rate = (valid_count / total_anon * 100) if total_anon > 0 else 0
-                
-                axes[i].set_title(f'{method_name.replace("_", " ").title()}\n'
-                                f'Validation: {valid_count}/{total_anon} = {validation_rate:.1f}%', 
-                                fontsize=14, fontweight='bold')
-                axes[i].set_xlabel('X Coordinate', fontsize=12)
-                axes[i].set_ylabel('Y Coordinate', fontsize=12)
-                axes[i].legend(loc='upper right', fontsize=10)
-                axes[i].grid(True, alpha=0.3)
-                
-                print(f"  {method_name}: {valid_count}/{total_anon} ({validation_rate:.1f}%) points are valid houses")
-                
-            except Exception as e:
-                print(f"Error creating validation plot for {method_name}: {e}")
-        
-        # Hide unused subplots
-        for i in range(len(anonymized_files), len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        plt.savefig(f"{output_dir}/house_snapping_validation.png", dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"Saved house snapping validation plot to {output_dir}/house_snapping_validation.png")
-        
-        # Create a zoomed-in comparison plot showing before/after snapping
-        self.create_snapping_detail_plot(original_file, anonymized_files, output_dir)
-    
-    def create_snapping_detail_plot(self, original_file: str, anonymized_files: Dict[str, str], output_dir: str = "."):
-        """Create detailed plots showing the snapping process in a specific region."""
-        
-        print("Creating detailed snapping comparison plots...")
-        
-        # Load original data
-        df_orig = pd.read_csv(original_file)
-        orig_x = df_orig['home_x'].values
-        orig_y = df_orig['home_y'].values
-        valid_mask = ~(pd.isna(orig_x) | pd.isna(orig_y))
-        orig_x = orig_x[valid_mask]
-        orig_y = orig_y[valid_mask]
-        
-        # Choose a specific region to zoom in on (center region)
-        center_x, center_y = np.mean(orig_x), np.mean(orig_y)
-        zoom_radius = np.std(orig_x) * 0.3  # About 30% of the spread
-        
-        # Filter to points in zoom region
-        zoom_mask = ((orig_x - center_x)**2 + (orig_y - center_y)**2) <= zoom_radius**2
-        zoom_orig_x = orig_x[zoom_mask]
-        zoom_orig_y = orig_y[zoom_mask]
-        
-        if len(zoom_orig_x) < 10:
-            print("Not enough points in zoom region for detailed plot")
-            return
-        
-        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
-        axes = axes.flatten()
-        colors = ['#FF1744', '#00E676', '#2979FF', '#FFD600']
-        
-        for i, (method_name, file_path) in enumerate(anonymized_files.items()):
-            if i >= 4:
-                break
-                
-            try:
-                df_anon = pd.read_csv(file_path)
-                
-                # Get corresponding anonymized points for the zoom region
-                anon_x = df_anon['home_x'].values[zoom_mask]
-                anon_y = df_anon['home_y'].values[zoom_mask]
-                
-                # Plot all houses in the region as small gray dots
-                axes[i].scatter(zoom_orig_x, zoom_orig_y, alpha=0.4, s=8, color='lightgray', 
-                              label='Available Houses', zorder=1)
-                
-                # Plot original locations as blue circles
-                axes[i].scatter(zoom_orig_x, zoom_orig_y, alpha=0.7, s=25, color='blue', 
-                              marker='o', label='Original Locations', zorder=2, 
-                              edgecolors='darkblue', linewidths=1)
-                
-                # Plot anonymized locations as colored squares
-                axes[i].scatter(anon_x, anon_y, alpha=0.9, s=40, color=colors[i], 
-                              marker='s', label='Anonymized (Snapped)', zorder=3, 
-                              edgecolors='black', linewidths=1)
-                
-                # Draw lines connecting original to anonymized for a sample
-                n_connections = min(20, len(zoom_orig_x))
-                sample_indices = np.random.choice(len(zoom_orig_x), n_connections, replace=False)
-                
-                for idx in sample_indices:
-                    axes[i].plot([zoom_orig_x[idx], anon_x[idx]], 
-                               [zoom_orig_y[idx], anon_y[idx]], 
-                               color='gray', alpha=0.5, linewidth=0.8, zorder=1)
-                
-                axes[i].set_title(f'{method_name.replace("_", " ").title()}\nZoomed Detail View', 
-                                fontsize=14, fontweight='bold')
-                axes[i].set_xlabel('X Coordinate', fontsize=12)
-                axes[i].set_ylabel('Y Coordinate', fontsize=12)
-                axes[i].legend(loc='upper right', fontsize=10)
-                axes[i].grid(True, alpha=0.3)
-                
-                # Set equal aspect ratio and tight limits
-                axes[i].set_aspect('equal', adjustable='box')
-                margin = zoom_radius * 0.1
-                axes[i].set_xlim(center_x - zoom_radius - margin, center_x + zoom_radius + margin)
-                axes[i].set_ylim(center_y - zoom_radius - margin, center_y + zoom_radius + margin)
-                
-            except Exception as e:
-                print(f"Error creating detail plot for {method_name}: {e}")
-        
-        # Hide unused subplots
-        for i in range(len(anonymized_files), len(axes)):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        plt.savefig(f"{output_dir}/house_snapping_detail.png", dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"Saved detailed snapping plot to {output_dir}/house_snapping_detail.png")
-
-
-def run_comprehensive_analysis():
-    """Run comprehensive analysis of anonymization results."""
-    
-    # File paths - using the fixed 10k sample
-    original_file = "statpop_sample_10k.csv"
-    anonymized_files = {
+    # File mapping
+    files = {
         'Donut Geomask': 'anonymized_10k_donut_geomask.csv',
-        'K-Anonymity': 'anonymized_10k_k_anonymity.csv',
+        'K-Anonymity': 'anonymized_10k_k_anonymity.csv', 
         'Differential Privacy': 'anonymized_10k_differential_privacy.csv',
         'Voronoi Mask': 'anonymized_10k_voronoi_mask.csv'
     }
     
-    # Check if files exist
-    import os
-    available_files = {k: v for k, v in anonymized_files.items() if os.path.exists(v)}
+    # Colors for each method
+    colors = ['#FF1744', '#00E676', '#2979FF', '#FFD600']
     
-    if not available_files:
-        print("No anonymized files found. Please run the anonymization methods first.")
-        return
+    # Create figure with 2 subplots
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    fig.suptitle('Anonymization Analysis', fontsize=16, fontweight='bold')
     
-    print(f"Found {len(available_files)} anonymized datasets to analyze")
+    # Plot 1: Anonymization Distance Distribution
+    ax1 = axes[0]
+    distance_bins = [0, 50, 100, 200, 500, 1000, float('inf')]
+    distance_labels = ['0-50m', '50-100m', '100-200m', '200-500m', '500-1000m', '>1000m']
     
-    # Initialize analyzer
-    analyzer = AnonymizationAnalyzer()
+    x_pos = np.arange(len(distance_labels))
+    width = 0.2
     
-    # Perform analysis
-    results_df = analyzer.analyze_all_methods(original_file, available_files)
-    
-    # Display results
-    if not results_df.empty:
-        print("\n" + "="*80)
-        print("ANONYMIZATION METHODS COMPARISON - COMPREHENSIVE RESULTS")
-        print("="*80)
-        
-        print("\n1. DISPLACEMENT METRICS:")
-        print("-" * 80)
-        for _, row in results_df.iterrows():
-            print(f"\n{row['method'].upper()}:")
-            print(f"  Mean displacement: {row['mean_displacement_m']:.1f} m")
-            print(f"  Median displacement: {row['median_displacement_m']:.1f} m")
-            print(f"  Max displacement: {row['max_displacement_m']:.1f} m")
-            print(f"  Std displacement: {row['std_displacement_m']:.1f} m")
-        
-        print("\n" + "-" * 80)
-        print("2. K-ANONYMITY PRESERVATION RATES:")
-        print("-" * 80)
-        for _, row in results_df.iterrows():
-            print(f"\n{row['method'].upper()}:")
-            for k in [3, 5, 10]:
-                col = f'k{k}_anonymity_preservation'
-                if col in row:
-                    print(f"  k={k}: {row[col]:.3f}")
-        
-        print("\n" + "-" * 80)
-        print("3. RE-IDENTIFICATION RISK:")
-        print("-" * 80)
-        for _, row in results_df.iterrows():
-            print(f"\n{row['method'].upper()}:")
-            if 'reidentification_reidentification_rate' in row:
-                print(f"  Re-identification rate: {row['reidentification_reidentification_rate']:.3f}")
-            if 'reidentification_unique_points_ratio' in row:
-                print(f"  Unique points ratio: {row['reidentification_unique_points_ratio']:.3f}")
-            if 'reidentification_avg_confusion_distance' in row:
-                print(f"  Avg confusion distance: {row['reidentification_avg_confusion_distance']:.1f} m")
-        
-        print("\n" + "-" * 80)
-        print("4. SPATIAL DISTRIBUTION PRESERVATION:")
-        print("-" * 80)
-        for _, row in results_df.iterrows():
-            print(f"\n{row['method'].upper()}:")
-            if 'entropy_preservation' in row:
-                print(f"  Entropy preservation: {row['entropy_preservation']:.3f}")
-            if 'ripleys_k_correlation' in row:
-                print(f"  Ripley's K correlation: {row['ripleys_k_correlation']:.3f}")
-        
-        print("\n" + "-" * 80)
-        print("5. NEIGHBOR PRESERVATION:")
-        print("-" * 80)
-        for _, row in results_df.iterrows():
-            print(f"\n{row['method'].upper()}:")
-            if 'neighbor_preservation_mean_neighbor_preservation' in row:
-                print(f"  Mean neighbor preservation: {row['neighbor_preservation_mean_neighbor_preservation']:.3f}")
-            if 'neighbor_preservation_mean_rank_correlation' in row:
-                print(f"  Mean rank correlation: {row['neighbor_preservation_mean_rank_correlation']:.3f}")
-        
-        print("\n" + "-" * 80)
-        print("6. DIRECTIONAL BIAS:")
-        print("-" * 80)
-        for _, row in results_df.iterrows():
-            print(f"\n{row['method'].upper()}:")
-            if 'direction_bias_directional_bias' in row:
-                print(f"  Directional bias: {row['direction_bias_directional_bias']:.3f}")
-            if 'direction_bias_circular_variance' in row:
-                print(f"  Circular variance: {row['direction_bias_circular_variance']:.3f}")
-            if 'direction_bias_is_biased' in row:
-                print(f"  Is biased: {bool(row['direction_bias_is_biased'])}")
-        
-        print("\n" + "-" * 80)
-        print("7. DENSITY CORRELATION:")
-        print("-" * 80)
-        for _, row in results_df.iterrows():
-            print(f"\n{row['method'].upper()}:")
-            if 'density_correlation_density_pearson_correlation' in row:
-                print(f"  Pearson correlation: {row['density_correlation_density_pearson_correlation']:.3f}")
-            if 'density_correlation_density_similarity' in row:
-                print(f"  Density similarity: {row['density_correlation_density_similarity']:.3f}")
-            if 'density_correlation_density_js_divergence' in row:
-                print(f"  JS divergence: {row['density_correlation_density_js_divergence']:.3f}")
-        
-        print("\n" + "-" * 80)
-        print("8. QUERY ACCURACY:")
-        print("-" * 80)
-        for _, row in results_df.iterrows():
-            print(f"\n{row['method'].upper()}:")
-            if 'query_accuracy_query_accuracy' in row:
-                print(f"  Query accuracy: {row['query_accuracy_query_accuracy']:.3f}")
-            if 'query_accuracy_mean_count_error' in row:
-                print(f"  Mean count error: {row['query_accuracy_mean_count_error']:.1f}")
-            if 'query_accuracy_mean_precision' in row:
-                print(f"  Mean precision: {row['query_accuracy_mean_precision']:.3f}")
-            if 'query_accuracy_mean_recall' in row:
-                print(f"  Mean recall: {row['query_accuracy_mean_recall']:.3f}")
-        
-        # Save detailed results
-        results_df.to_csv('anonymization_analysis_results.csv', index=False)
-        print(f"\n" + "="*80)
-        print(f"Detailed results saved to: anonymization_analysis_results.csv")
-        print("="*80)
-        
-        # Create plots
+    for i, (method, file_path) in enumerate(files.items()):
         try:
-            analyzer.create_comparison_plots(original_file, available_files)
-            print("Comparison plots created successfully")
+            df = pd.read_csv(file_path)
+            distances = df['anonymization_distance_m'].values
+            
+            # Count in each bin
+            bin_counts = []
+            for j in range(len(distance_bins)-1):
+                start, end = distance_bins[j], distance_bins[j+1]
+                if end == float('inf'):
+                    count = np.sum(distances >= start)
+                else:
+                    count = np.sum((distances >= start) & (distances < end))
+                bin_counts.append(count)
+            
+            # Plot bars
+            offset = (i - 1.5) * width
+            bars = ax1.bar(x_pos + offset, bin_counts, width, 
+                          label=method, color=colors[i], alpha=0.8)
+            
+            # Add value labels on bars
+            for bar in bars:
+                height = bar.get_height()
+                if height > 0:
+                    ax1.text(bar.get_x() + bar.get_width()/2., height + max(bin_counts)*0.01,
+                            f'{int(height)}', ha='center', va='bottom', fontsize=8)
+                    
         except Exception as e:
-            print(f"Error creating plots: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error processing {method}: {e}")
     
-    else:
-        print("No results to display")
-
+    ax1.set_xlabel('Anonymization Distance')
+    ax1.set_ylabel('Number of Households')
+    ax1.set_title('How Far Are Homes Moved?')
+    ax1.set_xticks(x_pos)
+    ax1.set_xticklabels(distance_labels, rotation=45)
+    ax1.legend()
+    ax1.grid(True, alpha=0.3, axis='y')
+    
+    # Plot 2: Original Neighbors Within Displacement
+    ax2 = axes[1]
+    neighbor_bins = [0, 5, 10, 20, 50, float('inf')]
+    neighbor_labels = ['0-5', '6-10', '11-20', '21-50', '>50']
+    
+    x_pos2 = np.arange(len(neighbor_labels))
+    
+    for i, (method, file_path) in enumerate(files.items()):
+        try:
+            df = pd.read_csv(file_path)
+            neighbors = df['original_neighbors_within_displacement'].values
+            
+            # Count in each bin
+            bin_counts = []
+            for j in range(len(neighbor_bins)-1):
+                start, end = neighbor_bins[j], neighbor_bins[j+1]
+                if j == 0:  # First bin: 0-5
+                    count = np.sum((neighbors >= start) & (neighbors <= end))
+                elif end == float('inf'):  # Last bin: >50
+                    count = np.sum(neighbors > neighbor_bins[j])
+                else:  # Middle bins: 6-10, 11-20, 21-50
+                    count = np.sum((neighbors > start) & (neighbors <= end))
+                bin_counts.append(count)
+            
+            # Plot bars
+            offset = (i - 1.5) * width
+            bars = ax2.bar(x_pos2 + offset, bin_counts, width,
+                          label=method, color=colors[i], alpha=0.8)
+            
+            # Add value labels on bars
+            for bar in bars:
+                height = bar.get_height()
+                if height > 0:
+                    ax2.text(bar.get_x() + bar.get_width()/2., height + max(bin_counts)*0.01,
+                            f'{int(height)}', ha='center', va='bottom', fontsize=8)
+                    
+        except Exception as e:
+            print(f"Error processing {method}: {e}")
+    
+    ax2.set_xlabel('Number of Original Homes Within Displacement')
+    ax2.set_ylabel('Number of Households')
+    ax2.set_title('How Many Neighbors Are Within Anonymization Radius?')
+    ax2.set_xticks(x_pos2)
+    ax2.set_xticklabels(neighbor_labels)
+    ax2.legend()
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    plt.savefig('anonymization_analysis.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Create spatial visualization plot
+    fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+    axes = axes.flatten()
+    
+    colors = ['#FF1744', '#00E676', '#2979FF', '#FFD600']
+    method_labels = ['Donut Geomask', 'K-Anonymity', 'Differential Privacy', 'Voronoi Mask']
+    
+    # Load original data for comparison
+    spatial_files = [
+        'anonymized_10k_donut_geomask.csv',
+        'anonymized_10k_k_anonymity.csv', 
+        'anonymized_10k_differential_privacy.csv',
+        'anonymized_10k_voronoi_mask.csv'
+    ]
+    
+    # Get original coordinates from first file
+    df_orig = pd.read_csv('statpop_sample_10k.csv')
+    orig_x = df_orig['home_x'].values
+    orig_y = df_orig['home_y'].values
+    
+    # Sample for visualization (to avoid overcrowding)
+    n_sample = min(2000, len(orig_x))
+    sample_idx = np.random.choice(len(orig_x), n_sample, replace=False)
+    orig_x_sample = orig_x[sample_idx]
+    orig_y_sample = orig_y[sample_idx]
+    
+    for i, (file, color, label) in enumerate(zip(spatial_files, colors, method_labels)):
+        if os.path.exists(file):
+            df = pd.read_csv(file)
+            anon_x = df['home_x'].values[sample_idx]
+            anon_y = df['home_y'].values[sample_idx]
+            
+            # Plot original locations (light gray background)
+            axes[i].scatter(orig_x, orig_y, alpha=0.2, s=0.5, color='lightgray', 
+                          label='All original', rasterized=True)
+            
+            # Plot sample original locations
+            axes[i].scatter(orig_x_sample, orig_y_sample, alpha=0.6, s=8, color='black', 
+                          label='Original (sample)', zorder=2)
+            
+            # Plot anonymized locations
+            axes[i].scatter(anon_x, anon_y, alpha=0.8, s=10, color=color, 
+                          label='Anonymized', zorder=3)
+            
+            # Draw displacement vectors for a subset
+            vector_sample = min(200, len(orig_x_sample))
+            for j in range(vector_sample):
+                if j < len(orig_x_sample) and j < len(anon_x):
+                    axes[i].plot([orig_x_sample[j], anon_x[j]], 
+                               [orig_y_sample[j], anon_y[j]], 
+                               color=color, alpha=0.3, linewidth=0.5, zorder=1)
+            
+            axes[i].set_title(f'{label}\nSpatial Distribution', fontsize=14, fontweight='bold')
+            axes[i].set_xlabel('X Coordinate (m)')
+            axes[i].set_ylabel('Y Coordinate (m)')
+            axes[i].legend(markerscale=2)
+            axes[i].grid(True, alpha=0.3)
+            axes[i].set_aspect('equal', adjustable='box')
+    
+    plt.tight_layout()
+    plt.savefig('spatial_anonymization_map.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print("Analysis complete! Plots saved to:")
+    print("- anonymization_analysis.png")
+    print("- spatial_anonymization_map.png")
+    
+    # Print summary statistics
+    print("\nSummary Statistics:")
+    print("-" * 60)
+    
+    for method, file_path in files.items():
+        try:
+            df = pd.read_csv(file_path)
+            distances = df['anonymization_distance_m'].values
+            neighbors = df['original_neighbors_within_displacement'].values
+            
+            print(f"\n{method}:")
+            print(f"  Distance - Mean: {np.mean(distances):.1f}m, Median: {np.median(distances):.1f}m")
+            print(f"  Neighbors - Mean: {np.mean(neighbors):.1f}, Median: {np.median(neighbors):.1f}")
+            print(f"  Zero displacement: {np.sum(distances == 0)} ({np.sum(distances == 0)/len(distances)*100:.1f}%)")
+            print(f"  Zero neighbors: {np.sum(neighbors == 0)} ({np.sum(neighbors == 0)/len(neighbors)*100:.1f}%)")
+            print(f"  5+ neighbors: {np.sum(neighbors >= 5)} ({np.sum(neighbors >= 5)/len(neighbors)*100:.1f}%)")
+            
+        except Exception as e:
+            print(f"Error analyzing {method}: {e}")
 
 if __name__ == "__main__":
-    run_comprehensive_analysis()
+    # Set style
+    sns.set_style("whitegrid")
+    plt.style.use('seaborn-v0_8')
+    
+    print("Creating anonymization analysis plots...")
+    create_anonymization_plots()

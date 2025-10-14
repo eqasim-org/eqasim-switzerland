@@ -447,23 +447,25 @@ def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymize
     
     # Apply methods
     methods = {
-        'donut_geomask': {
-            'func': anonymizer.density_aware_donut_geomask,
-            'params': {'k_target': 5, 'r_min': 100.0, 'beta': 1.5, 'r_global_max': 2000.0}
-        },
-        'k_anonymity': {
-            'func': anonymizer.spatial_k_anonymity,
-            'params': {'k_target': 5, 'strategy': 'random_in_circle'}
-        },
-        'differential_privacy': {
-            'func': anonymizer.geo_dp_mask,
-            'params': {'epsilon': 0.1}
-        },
+        # 'donut_geomask': {
+        #     'func': anonymizer.density_aware_donut_geomask,
+        #     'params': {'k_target': 5, 'r_min': 100.0, 'beta': 1.5, 'r_global_max': 2000.0}
+        # },
+        # 'k_anonymity': {
+        #     'func': anonymizer.spatial_k_anonymity,
+        #     'params': {'k_target': 5, 'strategy': 'random_in_circle'}
+        # },
+        # 'differential_privacy': {
+        #     'func': anonymizer.geo_dp_mask,
+        #     'params': {'epsilon': 0.1}
+        # },
         'voronoi_mask': {
             'func': anonymizer.adaptive_voronoi_mask,
             'params': {'k_target': 5}
         }
     }
+
+    print("created the original tree")
     
     for method_name, method_info in methods.items():
         try:
@@ -534,5 +536,5 @@ def check_anonymization_displacement(original_coords: np.ndarray, anonymized_coo
 
 
 if __name__ == "__main__":
-    input_file = "statpop_sample_10k.csv"
-    apply_anonymization_methods(input_file, "anonymized_10k")
+    input_file = "statpop_original_zurich.csv"
+    apply_anonymization_methods(input_file, "full")
