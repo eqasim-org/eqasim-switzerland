@@ -13,7 +13,6 @@ from scipy.spatial import KDTree
 from sklearn.cluster import KMeans
 from scipy.spatial import ConvexHull
 from scipy.stats import gamma
-import pyproj
 import warnings
 import math
 from typing import Tuple, List, Optional, Union
@@ -26,81 +25,85 @@ class GeographicalAnonymizer:
     A class for applying various geographical anonymization methods to coordinate data.
     """
     
-    def __init__(self, crs_from="EPSG:2056", crs_to="EPSG:3857"):
+    def __init__(self, house_coords=None):
         """
-        Initialize the anonymizer with coordinate reference systems.
+        Initialize the anonymizer with house coordinates for snapping.
         
         Args:
-            crs_from: Source CRS (default: Swiss LV95 - EPSG:2056)
-            crs_to: Target metric CRS for calculations (default: Web Mercator - EPSG:3857)
+            house_coords: Array of valid house coordinates (N x 2) in Swiss LV95 meters
         """
-        self.crs_from = crs_from
-        self.crs_to = crs_to
-        self.transformer_to_meters = pyproj.Transformer.from_crs(crs_from, crs_to, always_xy=True)
-        self.transformer_from_meters = pyproj.Transformer.from_crs(crs_to, crs_from, always_xy=True)
+        # Set up house snapping - coordinates are already in meters (Swiss LV95)
+        if house_coords is not None:
+            self.house_coords = house_coords
+            self.house_tree = KDTree(house_coords)
+        else:
+            self.house_coords = None
+            self.house_tree = None
     
-    def project_to_meters(self, x_coords: np.ndarray, y_coords: np.ndarray) -> np.ndarray:
+    def snap_to_nearest_house(self, point: np.ndarray) -> np.ndarray:
         """
-        Project coordinates to metric CRS for distance calculations.
+        Snap a point to the nearest valid house coordinate.
         
         Args:
-            x_coords: Array of x coordinates
-            y_coords: Array of y coordinates
+            point: Point in Swiss LV95 coordinates
             
         Returns:
-            Array of projected coordinates in meters
+            Nearest house coordinate in Swiss LV95
         """
-        x_proj, y_proj = self.transformer_to_meters.transform(x_coords, y_coords)
-        return np.column_stack([x_proj, y_proj])
+        if self.house_tree is None:
+            return point
+        
+        # Find nearest house
+        _, idx = self.house_tree.query(point.reshape(1, -1), k=1)
+        return self.house_coords[idx[0]]
     
-    def inverse_project(self, coords_meters: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def batch_snap_to_houses(self, points: np.ndarray) -> np.ndarray:
         """
-        Inverse project coordinates back to original CRS.
+        Batch snap multiple points to nearest houses for better performance.
         
         Args:
-            coords_meters: Array of coordinates in meters
+            points: Points in Swiss LV95 coordinates (N x 2)
             
         Returns:
-            Tuple of (x_coords, y_coords) in original CRS
+            Array of nearest house coordinates in Swiss LV95
         """
-        x_orig, y_orig = self.transformer_from_meters.transform(
-            coords_meters[:, 0], coords_meters[:, 1]
-        )
-        return x_orig, y_orig
+        if self.house_tree is None:
+            return points
+        
+        distances, indices = self.house_tree.query(points, k=1)
+        return self.house_coords[indices]
     
+    def validate_house_snapping(self, masked_x: np.ndarray, masked_y: np.ndarray, tolerance: float = 1.0) -> dict:
+        """Validate that all masked coordinates are actually valid house locations."""
+        if self.house_coords is None:
+            return {"valid_houses": 0, "total": len(masked_x), "validation_rate": 0.0}
+        
+        masked_coords = np.column_stack([masked_x, masked_y])
+        
+        min_distances = []
+        for masked_coord in masked_coords:
+            distances = np.sqrt(np.sum((self.house_coords - masked_coord)**2, axis=1))
+            min_distances.append(np.min(distances))
+        
+        min_distances = np.array(min_distances)
+        valid_count = np.sum(min_distances <= tolerance)
+        
+        return {
+            "valid_houses": valid_count,
+            "total": len(masked_x),
+            "validation_rate": valid_count / len(masked_x),
+            "mean_min_distance": np.mean(min_distances),
+            "max_min_distance": np.max(min_distances),
+            "distances_under_1m": np.sum(min_distances < 1.0),
+            "distances_under_10m": np.sum(min_distances < 10.0)
+        }
     def is_valid_location(self, point: np.ndarray, bounds: Optional[Tuple] = None) -> bool:
-        """
-        Check if a point is within valid bounds (simplified version).
-        
-        Args:
-            point: [x, y] coordinate
-            bounds: Optional bounds as (min_x, min_y, max_x, max_y)
-            
-        Returns:
-            True if point is valid
-        """
+        """Check if a point is within valid bounds."""
         if bounds is None:
             return True
         min_x, min_y, max_x, max_y = bounds
         return min_x <= point[0] <= max_x and min_y <= point[1] <= max_y
-    
-    def fallback_location(self, original_point: np.ndarray, tree: KDTree, k_target: int) -> np.ndarray:
-        """
-        Generate a fallback location when sampling fails.
-        
-        Args:
-            original_point: Original point coordinates
-            tree: KDTree for neighbor queries
-            k_target: Number of neighbors to consider
-            
-        Returns:
-            Fallback coordinate
-        """
-        # Use centroid of k nearest neighbors as fallback
-        dists, idxs = tree.query(original_point.reshape(1, -1), k=k_target+1)
-        neighbors = tree.data[idxs[0]]
-        return np.mean(neighbors, axis=0)
-    
+
     def density_aware_donut_geomask(self, 
                                   x_coords: np.ndarray, 
                                   y_coords: np.ndarray,
@@ -114,8 +117,8 @@ class GeographicalAnonymizer:
         Apply density-aware donut geomask anonymization.
         
         Args:
-            x_coords: Array of x coordinates
-            y_coords: Array of y coordinates
+            x_coords: Array of x coordinates in Swiss LV95
+            y_coords: Array of y coordinates in Swiss LV95
             k_target: Target number of neighbors for density estimation
             r_min: Minimum radius for donut sampling (meters)
             beta: Multiplier for k-th neighbor distance
@@ -126,17 +129,17 @@ class GeographicalAnonymizer:
         Returns:
             Tuple of (masked_x, masked_y) coordinates
         """
-        print(f"Applying density-aware donut geomask with k={k_target}, r_min={r_min}m, beta={beta}")
-        
-        # Project to metric coordinates
-        coords = self.project_to_meters(x_coords, y_coords)
+        print("Computing Density Aware Donut Masking Anonymization....")
+
+        # Work directly with Swiss LV95 coordinates (already in meters)
+        coords = np.column_stack([x_coords, y_coords])
         tree = KDTree(coords)
         
         if bounds is None:
             bounds = (coords[:, 0].min(), coords[:, 1].min(), 
                      coords[:, 0].max(), coords[:, 1].max())
         
-        masked_coords = np.zeros_like(coords)
+        candidate_coords = np.zeros_like(coords)
         
         for i in range(len(coords)):
             p = coords[i]
@@ -151,9 +154,7 @@ class GeographicalAnonymizer:
             # Sample in donut
             success = False
             for attempt in range(max_iter):
-                # Sample distance uniformly in [r_min, r_upper]
                 d = np.random.uniform(r_min, r_upper)
-                # Sample angle uniformly
                 theta = np.random.uniform(0, 2 * np.pi)
                 
                 new_point = np.array([
@@ -162,16 +163,20 @@ class GeographicalAnonymizer:
                 ])
                 
                 if self.is_valid_location(new_point, bounds):
-                    masked_coords[i] = new_point
+                    candidate_coords[i] = new_point
                     success = True
                     break
             
             if not success:
                 # Fallback to centroid of k neighbors
-                masked_coords[i] = self.fallback_location(p, tree, k_target)
+                dists, idxs = tree.query(p.reshape(1, -1), k=k_target+1)
+                neighbors = tree.data[idxs[0]]
+                candidate_coords[i] = np.mean(neighbors, axis=0)
         
-        # Inverse project back to original CRS
-        return self.inverse_project(masked_coords)
+        # Snap all candidates to nearest houses
+        masked_coords = self.batch_snap_to_houses(candidate_coords)
+        
+        return masked_coords[:, 0], masked_coords[:, 1]
     
     def spatial_k_anonymity(self,
                           x_coords: np.ndarray,
@@ -183,8 +188,8 @@ class GeographicalAnonymizer:
         Apply spatial k-anonymity anonymization.
         
         Args:
-            x_coords: Array of x coordinates
-            y_coords: Array of y coordinates
+            x_coords: Array of x coordinates in Swiss LV95
+            y_coords: Array of y coordinates in Swiss LV95
             k_target: Target k for k-anonymity
             strategy: "random_in_circle", "centroid", or "region_id"
             bounds: Optional bounds for validity checking
@@ -192,16 +197,16 @@ class GeographicalAnonymizer:
         Returns:
             Tuple of (masked_x, masked_y) coordinates
         """
-        print(f"Applying spatial k-anonymity with k={k_target}, strategy={strategy}")
-        
-        coords = self.project_to_meters(x_coords, y_coords)
+        print("Computing Spatial K Anonymization....")
+
+        coords = np.column_stack([x_coords, y_coords])
         tree = KDTree(coords)
         
         if bounds is None:
             bounds = (coords[:, 0].min(), coords[:, 1].min(), 
                      coords[:, 0].max(), coords[:, 1].max())
         
-        masked_coords = np.zeros_like(coords)
+        candidate_coords = np.zeros_like(coords)
         
         for i in range(len(coords)):
             p = coords[i]
@@ -212,11 +217,8 @@ class GeographicalAnonymizer:
             neighbors = coords[idxs[0]]
             
             if strategy == "centroid":
-                # Use centroid of k neighbors
-                masked_coords[i] = np.mean(neighbors, axis=0)
-            
+                candidate_coords[i] = np.mean(neighbors, axis=0)
             elif strategy == "random_in_circle":
-                # Sample uniformly inside circle with radius R_k
                 success = False
                 for attempt in range(50):
                     u = np.random.uniform(0, 1)
@@ -229,18 +231,17 @@ class GeographicalAnonymizer:
                     ])
                     
                     if self.is_valid_location(candidate, bounds):
-                        masked_coords[i] = candidate
+                        candidate_coords[i] = candidate
                         success = True
                         break
                 
                 if not success:
-                    masked_coords[i] = np.mean(neighbors, axis=0)
-            
-            elif strategy == "region_id":
-                # For region_id, we'll use the centroid as a simplified implementation
-                masked_coords[i] = np.mean(neighbors, axis=0)
+                    candidate_coords[i] = np.mean(neighbors, axis=0)
+            else:  # region_id
+                candidate_coords[i] = np.mean(neighbors, axis=0)
         
-        return self.inverse_project(masked_coords)
+        masked_coords = self.batch_snap_to_houses(candidate_coords)
+        return masked_coords[:, 0], masked_coords[:, 1]
     
     def sample_planar_laplace(self, epsilon: float) -> Tuple[float, float]:
         """
@@ -267,8 +268,8 @@ class GeographicalAnonymizer:
         Apply differential privacy with planar Laplace noise.
         
         Args:
-            x_coords: Array of x coordinates
-            y_coords: Array of y coordinates
+            x_coords: Array of x coordinates in Swiss LV95
+            y_coords: Array of y coordinates in Swiss LV95
             epsilon: Privacy parameter (smaller = more privacy)
             max_resample: Maximum resampling attempts
             bounds: Optional bounds for validity checking
@@ -276,15 +277,14 @@ class GeographicalAnonymizer:
         Returns:
             Tuple of (masked_x, masked_y) coordinates
         """
-        print(f"Applying differential privacy with epsilon={epsilon}")
-        
-        coords = self.project_to_meters(x_coords, y_coords)
+        print("Computing Geo DP Anonymization....")
+        coords = np.column_stack([x_coords, y_coords])
         
         if bounds is None:
             bounds = (coords[:, 0].min(), coords[:, 1].min(), 
                      coords[:, 0].max(), coords[:, 1].max())
         
-        masked_coords = np.zeros_like(coords)
+        candidate_coords = np.zeros_like(coords)
         
         for i in range(len(coords)):
             p = coords[i]
@@ -295,15 +295,15 @@ class GeographicalAnonymizer:
                 candidate = np.array([p[0] + dx, p[1] + dy])
                 
                 if self.is_valid_location(candidate, bounds):
-                    masked_coords[i] = candidate
+                    candidate_coords[i] = candidate
                     success = True
                     break
             
             if not success:
-                # If all resampling fails, use the last candidate or original point
-                masked_coords[i] = candidate if 'candidate' in locals() else p
+                candidate_coords[i] = candidate if 'candidate' in locals() else p
         
-        return self.inverse_project(masked_coords)
+        masked_coords = self.batch_snap_to_houses(candidate_coords)
+        return masked_coords[:, 0], masked_coords[:, 1]
     
     def sample_uniform_in_polygon(self, hull: ConvexHull, max_attempts: int = 100) -> Optional[np.ndarray]:
         """
@@ -356,17 +356,16 @@ class GeographicalAnonymizer:
         Apply adaptive Voronoi mask anonymization.
         
         Args:
-            x_coords: Array of x coordinates
-            y_coords: Array of y coordinates
+            x_coords: Array of x coordinates in Swiss LV95
+            y_coords: Array of y coordinates in Swiss LV95
             k_target: Target number of points per cluster
             bounds: Optional bounds for validity checking
             
         Returns:
             Tuple of (masked_x, masked_y) coordinates
         """
-        print(f"Applying adaptive Voronoi mask with k_target={k_target}")
-        
-        coords = self.project_to_meters(x_coords, y_coords)
+        print("Computing Adaptive Voronoi Anonymization....")
+        coords = np.column_stack([x_coords, y_coords])
         n_regions = max(1, int(np.ceil(len(coords) / k_target)))
         
         # Cluster points into regions
@@ -394,26 +393,23 @@ class GeographicalAnonymizer:
                 except:
                     polygons[r] = None
         
-        # Sample points for each cluster
-        masked_coords = np.zeros_like(coords)
+        candidate_coords = np.zeros_like(coords)
         
         for i in range(len(coords)):
             r = labels[i]
             poly = polygons[r]
             
             if poly is None:
-                # Use centroid if no valid polygon
-                masked_coords[i] = centroids[r]
+                candidate_coords[i] = centroids[r]
             else:
-                # Try to sample inside polygon
                 candidate = self.sample_uniform_in_polygon(poly)
                 if candidate is None:
-                    # Fallback to centroid
-                    masked_coords[i] = centroids[r]
+                    candidate_coords[i] = centroids[r]
                 else:
-                    masked_coords[i] = candidate
+                    candidate_coords[i] = candidate
         
-        return self.inverse_project(masked_coords)
+        masked_coords = self.batch_snap_to_houses(candidate_coords)
+        return masked_coords[:, 0], masked_coords[:, 1]
 
 
 def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymized"):
@@ -424,12 +420,8 @@ def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymize
         input_file: Path to input CSV file
         output_prefix: Prefix for output files
     """
-    print(f"Loading data from {input_file}")
-    
-    # Load data
     try:
         df = pd.read_csv(input_file)
-        print(f"Loaded {len(df)} records")
     except Exception as e:
         print(f"Error loading data: {e}")
         return
@@ -444,10 +436,14 @@ def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymize
     x_coords = df_clean['home_x'].values
     y_coords = df_clean['home_y'].values
     
-    print(f"Processing {len(df_clean)} valid coordinate pairs")
+    # Create array of all house coordinates for snapping
+    house_coords = np.column_stack([x_coords, y_coords])
     
-    # Initialize anonymizer (assuming Swiss LV95 coordinates)
-    anonymizer = GeographicalAnonymizer(crs_from="EPSG:2056", crs_to="EPSG:3857")
+    # Create KDTree for original coordinates (for neighbor counting)
+    original_tree = KDTree(house_coords)
+    
+    # Initialize anonymizer with house snapping (Swiss LV95 coordinates already in meters)
+    anonymizer = GeographicalAnonymizer(house_coords=house_coords)
     
     # Apply methods
     methods = {
@@ -470,33 +466,42 @@ def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymize
     }
     
     for method_name, method_info in methods.items():
-        print(f"\n--- Applying {method_name} ---")
-        
         try:
-            # Apply anonymization
             masked_x, masked_y = method_info['func'](x_coords, y_coords, **method_info['params'])
             
-            # Create output dataframe
+            # Calculate distance from original to anonymized location (in meters)
+            distances = np.sqrt((x_coords - masked_x)**2 + (y_coords - masked_y)**2)
+            
+            # For each original house, count how many original houses are within its anonymization distance
+            neighbors_within_displacement = []
+            
+            for i in range(len(x_coords)):
+                original_point = [x_coords[i], y_coords[i]]
+                displacement_distance = distances[i]
+                
+                # Count original houses within the displacement distance of this original house
+                neighbor_indices = original_tree.query_ball_point(original_point, displacement_distance)
+                # Subtract 1 to exclude the house itself
+                neighbor_count = len(neighbor_indices) - 1
+                neighbors_within_displacement.append(neighbor_count)
+            
             df_output = df_clean.copy()
             df_output['home_x'] = masked_x
             df_output['home_y'] = masked_y
+            df_output['anonymization_distance_m'] = distances
+            df_output['original_neighbors_within_displacement'] = neighbors_within_displacement
             
-            # Save to file
             output_file = f"{output_prefix}_{method_name}.csv"
             df_output.to_csv(output_file, index=False)
-            print(f"Saved {method_name} results to {output_file}")
             
-            # Calculate basic statistics
-            orig_coords = anonymizer.project_to_meters(x_coords, y_coords)
-            masked_coords = anonymizer.project_to_meters(masked_x, masked_y)
-            distances = np.sqrt(np.sum((orig_coords - masked_coords)**2, axis=1))
-            
-            print(f"Distance statistics (meters):")
-            print(f"  Mean: {np.mean(distances):.1f}")
-            print(f"  Median: {np.median(distances):.1f}")
-            print(f"  Min: {np.min(distances):.1f}")
-            print(f"  Max: {np.max(distances):.1f}")
-            print(f"  Std: {np.std(distances):.1f}")
+            # Print summary statistics
+            print(f"\n{method_name.upper()} Results:")
+            print(f"  Mean displacement: {np.mean(distances):.1f}m")
+            print(f"  Median displacement: {np.median(distances):.1f}m")
+            print(f"  Mean neighbors within displacement: {np.mean(neighbors_within_displacement):.1f}")
+            print(f"  Median neighbors within displacement: {np.median(neighbors_within_displacement):.1f}")
+            print(f"  Houses with 0 neighbors within displacement: {np.sum(np.array(neighbors_within_displacement) == 0)}")
+            print(f"  Houses with 5+ neighbors within displacement: {np.sum(np.array(neighbors_within_displacement) >= 5)}")
             
         except Exception as e:
             print(f"Error applying {method_name}: {e}")
@@ -504,13 +509,30 @@ def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymize
             traceback.print_exc()
 
 
+def check_anonymization_displacement(original_coords: np.ndarray, anonymized_coords: np.ndarray, method_name: str):
+    """Check if anonymized coordinates actually moved to different locations."""
+    same_location = np.all(np.abs(original_coords - anonymized_coords) < 1e-6, axis=1)
+    displacements = np.sqrt(np.sum((original_coords - anonymized_coords)**2, axis=1))
+    
+    moved_to_existing = 0
+    for i in range(len(anonymized_coords)):
+        if not same_location[i]:
+            matches = np.all(np.abs(original_coords - anonymized_coords[i]) < 0.1, axis=1)
+            if np.any(matches):
+                moved_to_existing += 1
+    
+    return {
+        'method': method_name,
+        'n_same_location': np.sum(same_location),
+        'n_moved': len(original_coords) - np.sum(same_location),
+        'n_moved_to_existing': moved_to_existing,
+        'mean_displacement': np.mean(displacements),
+        'median_displacement': np.median(displacements),
+        'min_displacement': np.min(displacements),
+        'max_displacement': np.max(displacements)
+    }
+
+
 if __name__ == "__main__":
-    # Use the fixed sample file
     input_file = "statpop_sample_10k.csv"
-    
-    print("Applying all anonymization methods to fixed 10k sample...")
     apply_anonymization_methods(input_file, "anonymized_10k")
-    
-    # Uncomment to process full dataset
-    # print("\nProcessing full dataset...")
-    # apply_anonymization_methods(input_file, "full_anonymized")

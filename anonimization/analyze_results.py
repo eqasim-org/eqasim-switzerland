@@ -27,6 +27,7 @@ class AnonymizationAnalyzer:
         x_proj, y_proj = self.transformer_to_meters.transform(x_coords, y_coords)
         return np.column_stack([x_proj, y_proj])
     
+
     def calculate_displacement_stats(self, 
                                    original_x: np.ndarray, 
                                    original_y: np.ndarray,
@@ -355,6 +356,9 @@ class AnonymizationAnalyzer:
         plt.savefig(f"{output_dir}/displacement_vectors.png", dpi=300, bbox_inches='tight')
         plt.close()
         print(f"Saved displacement vector plot to {output_dir}/displacement_vectors.png")
+        
+        # Create house snapping validation plots
+        self.create_house_snapping_validation_plots(original_file, anonymized_files, output_dir)
         """Create comparison plots for anonymization methods."""
         
         # Set seaborn style
@@ -480,6 +484,193 @@ class AnonymizationAnalyzer:
         plt.close()
         
         print(f"Plots saved to {output_dir}/")
+    
+    def create_house_snapping_validation_plots(self, original_file: str, anonymized_files: Dict[str, str], output_dir: str = "."):
+        """Create plots to validate that anonymized points are snapped to valid house locations."""
+        
+        print("Creating house snapping validation plots...")
+        
+        # Load original data
+        df_orig = pd.read_csv(original_file)
+        orig_x = df_orig['home_x'].values
+        orig_y = df_orig['home_y'].values
+        valid_mask = ~(pd.isna(orig_x) | pd.isna(orig_y))
+        orig_x = orig_x[valid_mask]
+        orig_y = orig_y[valid_mask]
+        
+        # Create set of all original house locations for validation
+        # Round to avoid floating point precision issues
+        precision = 6  # 6 decimal places should be sufficient for coordinate precision
+        orig_coords_set = set(zip(np.round(orig_x, precision), np.round(orig_y, precision)))
+        print(f"Created validation set with {len(orig_coords_set)} unique house locations")
+        
+        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+        axes = axes.flatten()
+        colors = ['#FF1744', '#00E676', '#2979FF', '#FFD600']
+        
+        for i, (method_name, file_path) in enumerate(anonymized_files.items()):
+            if i >= 4:
+                break
+                
+            try:
+                df_anon = pd.read_csv(file_path)
+                masked_x = df_anon['home_x'].values
+                masked_y = df_anon['home_y'].values
+                
+                # Remove NaN values
+                mask_valid = ~(pd.isna(masked_x) | pd.isna(masked_y))
+                masked_x = masked_x[mask_valid]
+                masked_y = masked_y[mask_valid]
+                
+                # Check which anonymized points are valid house locations
+                valid_houses = []
+                invalid_houses = []
+                
+                # Round anonymized coordinates to same precision for comparison
+                for x, y in zip(masked_x, masked_y):
+                    rounded_coord = (np.round(x, precision), np.round(y, precision))
+                    if rounded_coord in orig_coords_set:
+                        valid_houses.append((x, y))
+                    else:
+                        invalid_houses.append((x, y))
+                
+                # Plot all original house locations in light gray
+                axes[i].scatter(orig_x, orig_y, alpha=0.3, s=2, color='lightgray', 
+                              label=f'All Houses ({len(orig_x)})', zorder=1)
+                
+                # Plot valid anonymized locations (should be all of them if snapping works)
+                if valid_houses:
+                    valid_x, valid_y = zip(*valid_houses)
+                    axes[i].scatter(valid_x, valid_y, alpha=0.8, s=15, color=colors[i], 
+                                  marker='o', label=f'Valid Anon ({len(valid_houses)})', 
+                                  zorder=3, edgecolors='white', linewidths=0.5)
+                
+                # Plot invalid anonymized locations (should be none if snapping works)
+                if invalid_houses:
+                    invalid_x, invalid_y = zip(*invalid_houses)
+                    axes[i].scatter(invalid_x, invalid_y, alpha=0.9, s=20, color='red', 
+                                  marker='X', label=f'Invalid Anon ({len(invalid_houses)})', 
+                                  zorder=4, linewidths=2)
+                
+                # Calculate validation statistics
+                total_anon = len(masked_x)
+                valid_count = len(valid_houses)
+                invalid_count = len(invalid_houses)
+                validation_rate = (valid_count / total_anon * 100) if total_anon > 0 else 0
+                
+                axes[i].set_title(f'{method_name.replace("_", " ").title()}\n'
+                                f'Validation: {valid_count}/{total_anon} = {validation_rate:.1f}%', 
+                                fontsize=14, fontweight='bold')
+                axes[i].set_xlabel('X Coordinate', fontsize=12)
+                axes[i].set_ylabel('Y Coordinate', fontsize=12)
+                axes[i].legend(loc='upper right', fontsize=10)
+                axes[i].grid(True, alpha=0.3)
+                
+                print(f"  {method_name}: {valid_count}/{total_anon} ({validation_rate:.1f}%) points are valid houses")
+                
+            except Exception as e:
+                print(f"Error creating validation plot for {method_name}: {e}")
+        
+        # Hide unused subplots
+        for i in range(len(anonymized_files), len(axes)):
+            axes[i].set_visible(False)
+        
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/house_snapping_validation.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"Saved house snapping validation plot to {output_dir}/house_snapping_validation.png")
+        
+        # Create a zoomed-in comparison plot showing before/after snapping
+        self.create_snapping_detail_plot(original_file, anonymized_files, output_dir)
+    
+    def create_snapping_detail_plot(self, original_file: str, anonymized_files: Dict[str, str], output_dir: str = "."):
+        """Create detailed plots showing the snapping process in a specific region."""
+        
+        print("Creating detailed snapping comparison plots...")
+        
+        # Load original data
+        df_orig = pd.read_csv(original_file)
+        orig_x = df_orig['home_x'].values
+        orig_y = df_orig['home_y'].values
+        valid_mask = ~(pd.isna(orig_x) | pd.isna(orig_y))
+        orig_x = orig_x[valid_mask]
+        orig_y = orig_y[valid_mask]
+        
+        # Choose a specific region to zoom in on (center region)
+        center_x, center_y = np.mean(orig_x), np.mean(orig_y)
+        zoom_radius = np.std(orig_x) * 0.3  # About 30% of the spread
+        
+        # Filter to points in zoom region
+        zoom_mask = ((orig_x - center_x)**2 + (orig_y - center_y)**2) <= zoom_radius**2
+        zoom_orig_x = orig_x[zoom_mask]
+        zoom_orig_y = orig_y[zoom_mask]
+        
+        if len(zoom_orig_x) < 10:
+            print("Not enough points in zoom region for detailed plot")
+            return
+        
+        fig, axes = plt.subplots(2, 2, figsize=(20, 16))
+        axes = axes.flatten()
+        colors = ['#FF1744', '#00E676', '#2979FF', '#FFD600']
+        
+        for i, (method_name, file_path) in enumerate(anonymized_files.items()):
+            if i >= 4:
+                break
+                
+            try:
+                df_anon = pd.read_csv(file_path)
+                
+                # Get corresponding anonymized points for the zoom region
+                anon_x = df_anon['home_x'].values[zoom_mask]
+                anon_y = df_anon['home_y'].values[zoom_mask]
+                
+                # Plot all houses in the region as small gray dots
+                axes[i].scatter(zoom_orig_x, zoom_orig_y, alpha=0.4, s=8, color='lightgray', 
+                              label='Available Houses', zorder=1)
+                
+                # Plot original locations as blue circles
+                axes[i].scatter(zoom_orig_x, zoom_orig_y, alpha=0.7, s=25, color='blue', 
+                              marker='o', label='Original Locations', zorder=2, 
+                              edgecolors='darkblue', linewidths=1)
+                
+                # Plot anonymized locations as colored squares
+                axes[i].scatter(anon_x, anon_y, alpha=0.9, s=40, color=colors[i], 
+                              marker='s', label='Anonymized (Snapped)', zorder=3, 
+                              edgecolors='black', linewidths=1)
+                
+                # Draw lines connecting original to anonymized for a sample
+                n_connections = min(20, len(zoom_orig_x))
+                sample_indices = np.random.choice(len(zoom_orig_x), n_connections, replace=False)
+                
+                for idx in sample_indices:
+                    axes[i].plot([zoom_orig_x[idx], anon_x[idx]], 
+                               [zoom_orig_y[idx], anon_y[idx]], 
+                               color='gray', alpha=0.5, linewidth=0.8, zorder=1)
+                
+                axes[i].set_title(f'{method_name.replace("_", " ").title()}\nZoomed Detail View', 
+                                fontsize=14, fontweight='bold')
+                axes[i].set_xlabel('X Coordinate', fontsize=12)
+                axes[i].set_ylabel('Y Coordinate', fontsize=12)
+                axes[i].legend(loc='upper right', fontsize=10)
+                axes[i].grid(True, alpha=0.3)
+                
+                # Set equal aspect ratio and tight limits
+                axes[i].set_aspect('equal', adjustable='box')
+                margin = zoom_radius * 0.1
+                axes[i].set_xlim(center_x - zoom_radius - margin, center_x + zoom_radius + margin)
+                axes[i].set_ylim(center_y - zoom_radius - margin, center_y + zoom_radius + margin)
+                
+            except Exception as e:
+                print(f"Error creating detail plot for {method_name}: {e}")
+        
+        # Hide unused subplots
+        for i in range(len(anonymized_files), len(axes)):
+            axes[i].set_visible(False)
+        
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/house_snapping_detail.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"Saved detailed snapping plot to {output_dir}/house_snapping_detail.png")
 
 
 def run_comprehensive_analysis():
