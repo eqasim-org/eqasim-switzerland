@@ -1,7 +1,7 @@
 import os.path
 import shutil
 import matsim.runtime.eqasim as eqasim
-from matsim.simulation.utils import get_calibration_args, get_delays_args
+from matsim.simulation.config_utils import get_calibration_args, get_delays_args
 
 def configure(context):
     context.stage("matsim.simulation.prepare")    
@@ -15,7 +15,9 @@ def configure(context):
     context.config("estimate_dmc", default=False)
     context.config("calibrate_alphas_in_matsim", default=False)
     context.config("alphaCalibration.level", default="global")
-    context.config("alphaCalibration.filePath", default="cantons_mode_shares.csv")
+    
+    if context.config("calibrate_alphas_in_matsim"):
+        context.stage("data.microcensus.shares")
 
     context.config("calibrate_betas_in_matsim", default=False)
     context.config("activate_traffic_light_delays", default=False)
