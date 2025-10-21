@@ -16,6 +16,7 @@ from scipy.stats import gamma
 import warnings
 import math
 from typing import Tuple, List, Optional, Union
+from tqdm import tqdm
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
@@ -353,7 +354,7 @@ class GeographicalAnonymizer:
                             k_target: int = 5,
                             bounds: Optional[Tuple] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Apply adaptive Voronoi mask anonymization.
+        Apply adaptive Voronoi mask anonymization with performance optimization.
         
         Args:
             x_coords: Array of x coordinates in Swiss LV95
@@ -366,50 +367,143 @@ class GeographicalAnonymizer:
         """
         print("Computing Adaptive Voronoi Anonymization....")
         coords = np.column_stack([x_coords, y_coords])
-        n_regions = max(1, int(np.ceil(len(coords) / k_target)))
+        n_points = len(coords)
         
-        # Cluster points into regions
-        kmeans = KMeans(n_clusters=n_regions, random_state=42, n_init=10)
+        # More aggressive clustering - create smaller regions to reduce displacement
+        if n_points < 10000:
+            # Small dataset: no clustering limit, use high-quality convex hull
+            n_regions = max(1, int(np.ceil(n_points / k_target)))
+            use_convex_hull = True
+            print(f"Small dataset ({n_points} points): Using convex hull, {n_regions} clusters")
+        elif n_points < 50000:
+            # Medium dataset: still aim for target k, use convex hull
+            n_regions = max(1, int(np.ceil(n_points / k_target)))
+            use_convex_hull = True
+            print(f"Medium dataset ({n_points} points): Using convex hull, {n_regions} clusters")
+        else:
+            # Large dataset: increase clusters significantly to reduce bounding box size
+            # Allow more clusters but use faster bounding box method
+            n_regions = max(1, int(np.ceil(n_points / (k_target * 0.7))))  # Smaller clusters
+            use_convex_hull = False
+            print(f"Large dataset ({n_points} points): Using bounding box with smaller clusters, {n_regions} clusters")
+        
+        # Adaptive KMeans parameters
+        if n_points < 10000:
+            n_init = 10
+            max_iter = 300
+        elif n_points < 100000:
+            n_init = 5
+            max_iter = 200
+        else:
+            n_init = 3
+            max_iter = 100
+        
+        # Cluster points into regions with progress tracking
+        print(f"Performing K-means clustering into {n_regions} regions...")
+        kmeans = KMeans(n_clusters=n_regions, random_state=42, n_init=n_init, max_iter=max_iter)
         labels = kmeans.fit_predict(coords)
         
         if bounds is None:
             bounds = (coords[:, 0].min(), coords[:, 1].min(), 
                      coords[:, 0].max(), coords[:, 1].max())
         
-        # Compute polygons for each cluster
-        polygons = {}
-        centroids = {}
+        # Choose processing method
+        if use_convex_hull:
+            candidate_coords = self._process_with_convex_hull(coords, labels, n_regions)
+        else:
+            candidate_coords = self._process_with_bounding_box_improved(coords, labels, n_regions)
         
-        for r in range(n_regions):
-            pts_r = coords[labels == r]
-            centroids[r] = np.mean(pts_r, axis=0)
-            
-            if len(pts_r) < 3:
-                polygons[r] = None
-            else:
-                try:
-                    hull = ConvexHull(pts_r)
-                    polygons[r] = hull
-                except:
-                    polygons[r] = None
-        
-        candidate_coords = np.zeros_like(coords)
-        
-        for i in range(len(coords)):
-            r = labels[i]
-            poly = polygons[r]
-            
-            if poly is None:
-                candidate_coords[i] = centroids[r]
-            else:
-                candidate = self.sample_uniform_in_polygon(poly)
-                if candidate is None:
-                    candidate_coords[i] = centroids[r]
-                else:
-                    candidate_coords[i] = candidate
-        
+        # Batch snap to houses with progress
+        print("Snapping to nearest houses...")
         masked_coords = self.batch_snap_to_houses(candidate_coords)
         return masked_coords[:, 0], masked_coords[:, 1]
+
+    def _process_with_convex_hull(self, coords, labels, n_regions):
+        """High-quality processing using convex hulls."""
+        candidate_coords = np.zeros_like(coords)
+        
+        for r in tqdm(range(n_regions), desc="Processing clusters (convex hull)", unit="cluster"):
+            cluster_mask = labels == r
+            if not cluster_mask.any():
+                continue
+                
+            cluster_points = coords[cluster_mask]
+            cluster_indices = np.where(cluster_mask)[0]
+            
+            if len(cluster_points) < 3:
+                # Small cluster: use centroid
+                centroid = np.mean(cluster_points, axis=0)
+                candidate_coords[cluster_indices] = centroid
+            else:
+                # Large cluster: use convex hull
+                try:
+                    hull = ConvexHull(cluster_points)
+                    
+                    # For very large clusters, add inner progress bar
+                    if len(cluster_indices) > 2000:
+                        iterator = tqdm(cluster_indices, desc=f"Sampling in cluster {r}", leave=False, unit="point")
+                    else:
+                        iterator = cluster_indices
+                    
+                    # Generate candidates for all points in this cluster
+                    for idx in iterator:
+                        candidate = self.sample_uniform_in_polygon(hull)
+                        candidate_coords[idx] = candidate if candidate is not None else np.mean(cluster_points, axis=0)
+                        
+                except Exception:
+                    # Fallback to centroid if convex hull fails
+                    centroid = np.mean(cluster_points, axis=0)
+                    candidate_coords[cluster_indices] = centroid
+        
+        return candidate_coords
+
+    def _process_with_bounding_box_improved(self, coords, labels, n_regions):
+        """Improved bounding box processing with displacement control."""
+        candidate_coords = np.zeros_like(coords)
+        
+        for r in tqdm(range(n_regions), desc="Processing clusters (improved bounding box)", unit="cluster"):
+            cluster_mask = labels == r
+            if not cluster_mask.any():
+                continue
+                
+            cluster_points = coords[cluster_mask]
+            n_cluster_points = len(cluster_points)
+            
+            if n_cluster_points < 3:
+                # Small cluster: use centroid
+                centroid = np.mean(cluster_points, axis=0)
+                candidate_coords[cluster_mask] = centroid
+            else:
+                # Calculate cluster statistics
+                min_coords = np.min(cluster_points, axis=0)
+                max_coords = np.max(cluster_points, axis=0)
+                centroid = np.mean(cluster_points, axis=0)
+                
+                # Calculate cluster diameter and set maximum displacement
+                diameter = np.sqrt(np.sum((max_coords - min_coords)**2))
+                
+                # Adaptive displacement control based on cluster size
+                if diameter > 500:  # Large cluster (>500m diameter)
+                    # Use centroid with small random noise to avoid exact overlap
+                    noise_scale = min(50, diameter * 0.05)  # Max 50m noise
+                    noise = np.random.normal(0, noise_scale, size=(n_cluster_points, 2))
+                    candidate_coords[cluster_mask] = centroid + noise
+                else:
+                    # Smaller cluster: use constrained bounding box
+                    # Limit padding to maximum 10% of diameter or 25m, whichever is smaller
+                    max_padding = min(25, diameter * 0.1)
+                    padding = np.minimum((max_coords - min_coords) * 0.05, max_padding)
+                    
+                    constrained_min = min_coords - padding
+                    constrained_max = max_coords + padding
+                    
+                    # Vectorized random sampling
+                    random_points = np.random.uniform(
+                        constrained_min, constrained_max, size=(n_cluster_points, 2)
+                    )
+                    candidate_coords[cluster_mask] = random_points
+        
+        return candidate_coords
 
 
 def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymized"):
@@ -493,7 +587,7 @@ def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymize
             df_output['anonymization_distance_m'] = distances
             df_output['original_neighbors_within_displacement'] = neighbors_within_displacement
             
-            output_file = f"{output_prefix}_{method_name}.csv"
+            output_file = f"/cluster/home/chaoch/new_{output_prefix}_{method_name}.csv"
             df_output.to_csv(output_file, index=False)
             
             # Print summary statistics
