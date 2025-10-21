@@ -15,9 +15,7 @@ def configure(context):
     context.config("estimate_dmc", default=False)
     context.config("calibrate_alphas_in_matsim", default=False)
     context.config("alphaCalibration.level", default="global")
-    
-    if context.config("calibrate_alphas_in_matsim"):
-        context.stage("data.microcensus.shares")
+    context.stage("data.microcensus.shares")
 
     context.config("calibrate_betas_in_matsim", default=False)
     context.config("activate_traffic_light_delays", default=False)

@@ -21,6 +21,8 @@ def configure(context):
     context.stage("data.pt_pricing.pt_pricing")
     context.stage("calibration.pt_routing.pt_routing_parameters")
         
+    context.stage("data.microcensus.shares")
+    
     context.config("input_downsampling")
     context.config("threads")
     context.config("random_seed")
@@ -79,7 +81,14 @@ def execute(context):
     zones_output_path =  f"{context.path()}/gtfs_zones.csv" 
     shutil.copy(zones_path, zones_output_path)
 
-
+    # copy the mode shares        
+    global_shares_path, cantonal_shares_path = context.stage("data.microcensus.shares")
+    shutil.copyfile(global_shares_path, 
+                    "%s/%sglobal_mode_shares.yml" % (context.path(), context.config("output_prefix")))
+    shutil.copyfile(cantonal_shares_path, 
+                    "%s/%scantonal_mode_shares.yml" % (context.path(), context.config("output_prefix")))
+    
+    
     # Some files we send through several preparation scripts
     
     # Run preparation
@@ -115,7 +124,7 @@ def execute(context):
         "--sample-size", context.config("input_downsampling"),
         "--random-seed", context.config("random_seed"),
         "--threads", context.config("threads"),
-        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
+        "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator"
     ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))

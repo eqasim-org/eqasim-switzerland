@@ -49,8 +49,8 @@ def execute(context):
     final_trips = trips_with_weights[final_filter_mask].reset_index(drop=True)
 
     # Attach canton name
-    df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name"]].copy()
-    df_cantons["canton_name"] = df_cantons["canton_name"].str.split('/').str[0].str.strip() # this should be the same as in matsim.scenario.households
+    df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name_en"]].copy()
+    df_cantons = df_cantons.rename(columns={"canton_name_en": "canton_name"})
     
     df_cantons["canton_id"] = df_cantons["canton_id"].astype(int)
     final_trips["canton_id"] = final_trips["canton_id"].astype(int)
