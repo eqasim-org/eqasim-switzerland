@@ -1,5 +1,0 @@
-Method,Mean Distance (m),Median Distance (m),Mean Neighbors,Median Neighbors,Zero Neighbors (%),5+ Neighbors (%)
-Donut Geomask,205.8,157.1,5.3,4.0,12.8%,47.9%
-K-Anonymity,142.5,96.0,2.7,2.0,27.3%,20.3%
-Differential Privacy,3.3,0.0,0.2,0.0,84.2%,0.1%
-Voronoi Mask,125.2,118.8,3.5,2.0,22.9%,27.5%

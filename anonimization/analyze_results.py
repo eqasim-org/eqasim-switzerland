@@ -16,10 +16,10 @@ def create_anonymization_plots():
     
     # File mapping
     files = {
-        'Donut Geomask': 'anonymized_10k_donut_geomask.csv',
-        'K-Anonymity': 'anonymized_10k_k_anonymity.csv', 
-        'Differential Privacy': 'anonymized_10k_differential_privacy.csv',
-        'Voronoi Mask': 'anonymized_10k_voronoi_mask.csv'
+        'Donut Geomask': '/cluster/home/chaoch/full_donut_geomask.csv',
+        'K-Anonymity': '/cluster/home/chaoch/full_k_anonymity.csv', 
+        'Differential Privacy': '/cluster/home/chaoch/full_differential_privacy.csv',
+        'Voronoi Mask': '/cluster/home/chaoch/full_voronoi_mask.csv'
     }
     
     # Colors for each method
