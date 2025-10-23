@@ -5,6 +5,8 @@ import pandas as pd
 import geopandas as gpd
 import analysis.webmap_export as webmap_export
 from analysis.network_reader import read_network
+from analysis.matsim_pt_analysis import generate_source_destination_data
+from analysis.canton_pt_lines import add_canton_to_pt_passenger, create_boarding_json
 
 
 def configure(context):
@@ -129,5 +131,15 @@ def execute(context):
 
     print("Exporting inter-cantonal stops with volume...")
     webmap_export.export_inter_cantonal_stops(joined, volumes_df)
+
+    # === Additional functionality from matsim_destination_zones.py ===
+    print("Generating trip origin-destination data by canton...")
+    generate_source_destination_data(synthetic_gz_path, work_dir=output_dir, canton_boundaries=canton_boundaries)
+
+    # === Additional functionality from canton_pt_lines.py ===
+    print("Processing passenger boarding data by canton and line...")
+    stops_dir = os.path.join(output_dir, "public", "data", "matsim", "transit", "stops_by_canton")
+    df_with_cantons = add_canton_to_pt_passenger(volumes_path, stops_dir)
+    create_boarding_json(df_with_cantons, output_dir)
 
     print("Webmap export complete. Output saved to:", output_dir)
