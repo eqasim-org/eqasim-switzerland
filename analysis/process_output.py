@@ -1,6 +1,6 @@
 import pandas as pd
 import geopandas as gpd
-from .add_cantons import add_canton_name
+from .webmap_export import assign_cantons
 
 def configure(context):
     context.config("output_path")
@@ -8,6 +8,8 @@ def configure(context):
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
     context.stage("synthesis.output")
+    context.stage("data.spatial.cantons") # get canton boundaries
+
 
 def inspect_gpkg_columns(file_path):
     """
@@ -206,7 +208,7 @@ def add_home_canton(persons, trips, activities):
 
     return activities, trips
 
-def preprocess_synthetic_data(directory, save_directory=None):
+def preprocess_synthetic_data(directory, canton_boundaries, save_directory=None):
     """
     Preprocesses the synthetic data for analysis. 
 
@@ -233,8 +235,8 @@ def preprocess_synthetic_data(directory, save_directory=None):
     )
 
     # Add cantons to each data point based on their household canton
-    persons = add_canton_name(persons, x_col='home_easting', y_col='home_northing')
-    households = add_canton_name(households, x_col='home_easting', y_col='home_northing')
+    persons = assign_cantons(persons, canton_boundaries, x_col='home_easting', y_col='home_northing')
+    households = assign_cantons(households, canton_boundaries, x_col='home_easting', y_col='home_northing')
     persons = modify_persons_households(persons, households)
     activities = filter_activities_dataset(persons, activities)
     activities, trips = add_home_canton(persons, trips, activities)
@@ -252,7 +254,8 @@ def preprocess_synthetic_data(directory, save_directory=None):
 def execute(context):
     directory = context.config("output_path")
 
-    persons, households, trips, activities = preprocess_synthetic_data(directory=directory)
+    canton_boundaries = context.stage("data.spatial.cantons")
+    persons, households, trips, activities = preprocess_synthetic_data(directory=directory, canton_boundaries=canton_boundaries)
     return persons, households, trips, activities
 
 if __name__ == '__main__':

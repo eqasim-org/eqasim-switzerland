@@ -2,7 +2,8 @@ import pickle
 import os 
 import numpy as np
 import pandas as pd
-from .add_cantons import add_canton_name
+import geopandas as gpd
+from .webmap_export import assign_cantons
 
 def configure(context):
     context.config("output_path")
@@ -10,6 +11,8 @@ def configure(context):
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
     context.stage("synthesis.output")
+    context.stage("data.spatial.cantons") # get canton boundaries
+
 
 def process_filename(file_path):
     temp = file_path.split(".")[2:] # skip synthesis.population
@@ -135,12 +138,14 @@ def convert_trips(trips, persons):
 
     return trips
 
-def convert_households(data):
+def convert_households(data, canton_boundaries):
     data = data.rename(columns={'income_class': 'income'})
-    data = add_canton_name(data, x_col='home_x', y_col='home_y')
+    
+    # Use assign_cantons with the same canton_boundaries
+    data = assign_cantons(data, canton_boundaries, x_col='home_x', y_col='home_y')
     return data
 
-def preprocess_microcensus_data(directory, save_directory=None, prefix=''):
+def preprocess_microcensus_data(directory, canton_boundaries, save_directory=None, prefix=''):
     print("Reading the .pkl files...")
     files = get_pkl_data(directory, prefix)
     
@@ -159,7 +164,7 @@ def preprocess_microcensus_data(directory, save_directory=None, prefix=''):
             trips = file[0]
 
     print("Preprocessing the data files...")
-    households = convert_households(households)
+    households = convert_households(households, canton_boundaries)
     persons = convert_persons(persons, households)
     trips = convert_trips(trips, persons)
     activities = create_activities(trips, persons)
@@ -175,8 +180,9 @@ def preprocess_microcensus_data(directory, save_directory=None, prefix=''):
 
 def execute(context):
     directory = context.config('working_directory')
+    canton_boundaries = context.stage("data.spatial.cantons")
 
-    persons, households, trips, activities = preprocess_microcensus_data(directory=directory)
+    persons, households, trips, activities = preprocess_microcensus_data(directory=directory, canton_boundaries=canton_boundaries)
     return persons, households, trips, activities
 
 if __name__ == '__main__':

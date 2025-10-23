@@ -4,11 +4,13 @@ import pandas as pd
 import geopandas as gpd
 import unicodedata
 import json
+from webmap_export import assign_cantons  # Import the function
 
 def configure(context):
     context.stage("matsim.simulation.run")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
+    context.stage("data.spatial.cantons") # get canton boundaries
 
 def remove_accents(text):
     if isinstance(text, str):
@@ -18,69 +20,7 @@ def remove_accents(text):
         )
     return text
 
-def add_canton_name(dataset, x_col, y_col, coord_system=2056, distance=3500, canton_name="canton_name"):
-    """
-    Adds the cantons of a datapoint based on coordinates.
-    Adapted from Andrew 
-
-    Args:
-        x_col: column for x-coordinate
-        y_col: column for y-coordinate
-        coord_system: input coordinate system (default 2056 for LV95)
-        distance: maximum distance for nearest canton matching
-        canton_name: name for the canton column
-    """
-    if x_col not in dataset.columns or y_col not in dataset.columns:
-        raise ValueError(f"Columns '{x_col}' and '{y_col}' must exist in the provided file.")
-
-    geojson_path = "/cluster/work/ivt_vpl/anding/data/TLM_KANTONSGEBIET.json"
-    canton_boundaries = gpd.read_file(geojson_path).to_crs(epsg=coord_system)
-
-    geometry = gpd.points_from_xy(dataset[x_col], dataset[y_col])
-
-    dataset_gdf = gpd.GeoDataFrame(dataset, geometry=geometry, crs=f"EPSG:{coord_system}")
-
-    print("Finished assigning points!")
-
-    within_canton = dataset_gdf.sjoin(canton_boundaries[['KANTONSNUMMER', 'NAME', 'geometry']], how="left", predicate='within')
-
-    print("Finished within canton matches!")
-    print("Checking non-matches...")
-
-    non_match = within_canton.loc[within_canton['NAME'].isna()]
-    match = within_canton.loc[within_canton['NAME'].notna()]
-
-    non_match = non_match.drop(columns=["index_right", 'KANTONSNUMMER', 'NAME'], errors="ignore")
-    # Use a unique distance column name to avoid conflicts
-    distance_col_name = f"distance_{canton_name}"
-    match_closest = non_match.sjoin_nearest(canton_boundaries[['KANTONSNUMMER', 'NAME', 'geometry']], how="left", max_distance=distance, distance_col=distance_col_name)
-
-    print("Non-matches finished!")
-    print("Concatenating results...")
-
-    result = pd.concat([match, match_closest], ignore_index=True)
-
-    result_filt = result.drop(columns=["geometry", "index_right"], errors="ignore")
-    # Keep the distance column if it exists
-    if "distance" not in result_filt.columns and "distance" in result.columns:
-        result_filt["distance"] = result["distance"]
-    result_filt = result_filt.rename(columns={
-        "NAME": canton_name,
-        "KANTONSNUMMER": "canton_id"
-    })
-
-    missing_matches = len(result_filt.loc[result_filt[canton_name].isna()])
-
-    if missing_matches > 0:
-        print(f'Warning: {missing_matches} trips not assigned a canton (try increasing the distance parameter)')
-
-    assert len(dataset) == len(result_filt), "Input/Output number of rows not matching"
-
-    result_df = pd.DataFrame(result_filt)
-    result_df[canton_name] = result_df[canton_name].apply(remove_accents)
-    return result_df
-
-def preprocess_trips(input_path="output_trips.csv"):
+def preprocess_trips(input_path, canton_boundaries):
     """
     Preprocesses the trips file to add canton information for start and end coordinates.
     Returns the processed DataFrame in memory without saving to file.
@@ -92,10 +32,12 @@ def preprocess_trips(input_path="output_trips.csv"):
     print(df.columns.tolist())
     
     # Add start canton information
-    df_with_start = add_canton_name(df, 'start_x', 'start_y', canton_name='start_canton')
+    df_with_start = assign_cantons(df, canton_boundaries, x_col='start_x', y_col='start_y')
+    df_with_start = df_with_start.rename(columns={'canton_name': 'start_canton'})
     
     # Add end canton information to the same DataFrame
-    df_final = add_canton_name(df_with_start, 'end_x', 'end_y', canton_name='end_canton')
+    df_final = assign_cantons(df_with_start, canton_boundaries, x_col='end_x', y_col='end_y')
+    df_final = df_final.rename(columns={'canton_name': 'end_canton'})
     
     print(f"\nProcessed dataset columns: {list(df_final.columns)}")
 
@@ -210,12 +152,12 @@ def get_canton_trip_data(df, work_dir):
             json.dump(records, f, ensure_ascii=False, indent=2)
 
 
-def generate_source_destination_data(input_path, work_dir):
+def generate_source_destination_data(input_path, work_dir, canton_boundaries):
     """
     Complete pipeline: preprocesses trips to add canton info, then generates canton trip data.
     """
     print("Step 1: Adding canton information to trips...")
-    df_with_cantons = preprocess_trips(input_path)
+    df_with_cantons = preprocess_trips(input_path, canton_boundaries)
     
     print("\nStep 2: Generating canton trip data...")
     get_canton_trip_data(df_with_cantons, work_dir)
@@ -241,7 +183,8 @@ def execute(context):
 
     # functions for creating the jsons
     print("Generating modes_by_canton.json...")
-    generate_source_destination_data(trips_path, work_dir=output_dir)
+    canton_boundaries = context.stage("data.spatial.cantons")
+    generate_source_destination_data(trips_path, work_dir=output_dir, canton_boundaries=canton_boundaries)
 
     print("Webmap export complete. Output saved to:", output_dir)
 
