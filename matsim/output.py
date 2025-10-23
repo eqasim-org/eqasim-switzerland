@@ -47,8 +47,8 @@ def execute(context):
         "%stransit_vehicles.xml.gz" % context.config("output_prefix"),
         "%svehicles.xml.gz" % context.config("output_prefix"),
         "%sconfig.xml" % context.config("output_prefix"),
-        "%sglobal_mode_shares.yml" % context.config("output_prefix"),
-        "%scantonal_mode_shares.yml" % context.config("output_prefix")
+        "%sglobal_mode_shares.csv" % context.config("output_prefix"),
+        "%scantonal_mode_shares.csv" % context.config("output_prefix")
     ]
     if context.config("estimate_dmc"):
         file_names.append("estimated_dmc_parameters.yml")

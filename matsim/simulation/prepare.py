@@ -84,9 +84,9 @@ def execute(context):
     # copy the mode shares        
     global_shares_path, cantonal_shares_path = context.stage("data.microcensus.shares")
     shutil.copyfile(global_shares_path, 
-                    "%s/%sglobal_mode_shares.yml" % (context.path(), context.config("output_prefix")))
+                    "%s/%sglobal_mode_shares.csv" % (context.path(), context.config("output_prefix")))
     shutil.copyfile(cantonal_shares_path, 
-                    "%s/%scantonal_mode_shares.yml" % (context.path(), context.config("output_prefix")))
+                    "%s/%scantonal_mode_shares.csv" % (context.path(), context.config("output_prefix")))
     
     
     # Some files we send through several preparation scripts
