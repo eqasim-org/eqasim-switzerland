@@ -1,8 +1,8 @@
+from .synth_micro_comparison import preprocess_microcensus_data, preprocess_synthetic_data
 import pandas as pd
 from app_utils import *
 import json 
 import numbers
-import pickle
 import os
 
 cantons = [
@@ -12,6 +12,15 @@ cantons = [
     'Schwyz', 'Nidwalden', 'Glarus', 'Graubunden', 'Schaffhausen', 
     'Zug', 'Obwalden', 'Appenzell Ausserrhoden', 'Appenzell Innerrhoden', 'All'
 ]
+
+def configure(context):
+    context.config("output_path")
+    context.config("working_directory")
+    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.persons")
+    context.stage("synthesis.output")
+    context.stage("data.spatial.cantons") # get canton boundaries
+
 
 def write_non_category_data(micro, synthetic, func):
     """
@@ -318,84 +327,33 @@ def write_all_application_data(microcensus, synthetic, save_directory):
     write_departure_times(trips, output_trips, save_directory)
 
 
-def load_dataframes(microcensus_prefix, synthetic_prefix):
-    activities = pd.read_csv(f'{microcensus_prefix}/microcensus_activities.csv', sep=',', header=0)
-    trips = pd.read_csv(f'{microcensus_prefix}/microcensus_trips.csv', sep=',', header=0)
-    households = pd.read_csv(f'{microcensus_prefix}/microcensus_households.csv', sep=',', header=0)
-    persons = pd.read_csv(f'{microcensus_prefix}/microcensus_persons.csv', sep=',', header=0)
-
-    output_activities = pd.read_csv(f'{synthetic_prefix}/switzerland_activities_geo.csv', sep=',', header=0)
-    output_trips = pd.read_csv(f'{synthetic_prefix}/switzerland_trips_geo.csv', sep=',', header=0)
-    output_households = pd.read_csv(f'{synthetic_prefix}/switzerland_households_geo.csv', sep=',', header=0)
-    output_persons = pd.read_csv(f'{synthetic_prefix}/switzerland_persons_geo.csv', sep=',', header=0)
-    output_households['household_weight'] = 1
-    output_trips['person_weight'] = 1
-
-    microcensus = {'activities': activities, 'trips': trips, 'households': households, 'persons': persons}
-    synthetic = {'activities': output_activities, 'trips': output_trips, 'households': output_households, 'persons': output_persons}
-    return microcensus, synthetic
-
-
-def load_cache_data(directory, prefix):
-    files = dict()
-    for filename in os.listdir(directory):
-        if filename.startswith(prefix) and filename.endswith('.p'):
-            with open(directory + '/' + filename, 'rb') as file:
-                data = pickle.load(file)
-                files[filename] = data
-    return files
-
-
-def configure(context):
-    context.stage("analysis.process_output")
-    context.stage("analysis.process_microcensus")
-
-    context.config("working_directory")
-    context.config("analysis_path")
-
-
 def execute(context):
-    prefix = 'analysis'
-    directory = context.config('working_directory')
-    save_directory = context.config("analysis_path")
-
-    # Read in PKL data
-    microcensus = dict()
-    synthetic = dict()
-    files = load_cache_data(directory, prefix)
-    for filename, data in files.items():
-        if 'microcensus' in filename:
-            microcensus['persons'] = data[0]
-            microcensus['households'] = data[1]
-            microcensus['trips'] = data[2]
-            microcensus['activities'] = data[3]
-        if 'output' in filename: 
-            synthetic['persons'] = data[0]
-            synthetic['households'] = data[1]
-            synthetic['trips'] = data[2]
-            synthetic['activities'] = data[3]
     
+    canton_boundaries = context.stage("data.spatial.cantons")
+    microcensus_directory = context.config('working_directory')
+    synthetic_directory = context.config("output_path")
+    matsim_dir = context.stage("matsim.simulation.run")
+    save_directory = os.path.join(matsim_dir, "simulation_output", "webmap")
+    
+    # Get processed microcensus dataframes
+    persons_micro, households_micro, trips_micro, activities_micro = preprocess_microcensus_data(directory=microcensus_directory, canton_boundaries=canton_boundaries)
+    microcensus = {
+        'persons': persons_micro,
+        'households': households_micro,
+        'trips': trips_micro,
+        'activities': activities_micro
+    }
+
+    # Get processed synthetic dataframes
+    persons_synth, households_synth, trips_synth, activities_synth = preprocess_synthetic_data(directory=synthetic_directory, canton_boundaries=canton_boundaries)
+    synthetic = {
+        'persons': persons_synth,
+        'households': households_synth,
+        'trips': trips_synth,
+        'activities': activities_synth
+    }
+    
+    # Use the updated dataframes to obtain all JSON for webmap
     write_all_application_data(microcensus=microcensus,
                                synthetic=synthetic,
                                save_directory=save_directory)
-
-
-if __name__ == '__main__':
-    """ 
-    Paths for testing purposes
-    microcensus_prefix = '/cluster/project/cmdp/chaoch/microcensus_data_test'
-    synthetic_prefix = '/cluster/project/cmdp/chaoch/switzerland_data/output_test'
-    save_directory = '/cluster/home/chaoch/ch/ch-zh-synpop/plot_data'
-    """
-    # microcensus_prefix = input('Enter the directory where the _processed_ microcensus data is stored:').strip()
-    # synthetic_prefix = input('Enter the directory where the _processed_ synthetic data is stored:').strip()
-    # save_directory= input('Enter the directory where plotting data should be stored').strip()
-    
-    microcensus_prefix = '/cluster/project/cmdp/chaoch/microcensus_data_test'
-    synthetic_prefix = '/cluster/project/cmdp/chaoch/switzerland_data/output_test'
-    save_directory = '/cluster/home/chaoch/ch/ch-zh-synpop/plot_data'
-    
-    microcensus, synthetic = load_dataframes(microcensus_prefix, synthetic_prefix)
-
-    write_demographic_data(microcensus['persons'], synthetic['persons'], save_directory)
-

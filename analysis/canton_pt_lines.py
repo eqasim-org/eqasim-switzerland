@@ -177,8 +177,6 @@ def execute(context):
     Main execution function that creates individual GeoJSON files for each canton's transit stops.
     This is a simplified version that focuses only on the transit stop processing.
     """
-
-
     
     # Get required inputs from pipeline context
     matsim_dir = context.stage("matsim.simulation.run")
