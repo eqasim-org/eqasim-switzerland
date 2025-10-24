@@ -514,12 +514,16 @@ def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymize
         input_file: Path to input CSV file
         output_prefix: Prefix for output files
     """
+    print("====== Started ======")
     try:
+        print("Loading in the data")
         df = pd.read_csv(input_file)
     except Exception as e:
         print(f"Error loading data: {e}")
         return
     
+    print("===== Loaded in all data =====")
+
     # Extract coordinates
     x_coords = df['home_x'].values
     y_coords = df['home_y'].values
@@ -532,10 +536,12 @@ def apply_anonymization_methods(input_file: str, output_prefix: str = "anonymize
     
     # Create array of all house coordinates for snapping
     house_coords = np.column_stack([x_coords, y_coords])
-    
+
+    print("===== Starting to create KD tree =====")
     # Create KDTree for original coordinates (for neighbor counting)
     original_tree = KDTree(house_coords)
-    
+
+    print("===== Initializing geographical anonymizer =====")
     # Initialize anonymizer with house snapping (Swiss LV95 coordinates already in meters)
     anonymizer = GeographicalAnonymizer(house_coords=house_coords)
     
