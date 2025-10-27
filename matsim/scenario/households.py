@@ -64,10 +64,10 @@ def execute(context):
     c          = context.stage("data.constants")
 
     df_persons = context.stage("synthesis.population.enriched").sort_values(by=["household_id", "person_id"])
-    df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name"]].copy()
+    df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name_en"]].copy()
     
     # Attach canton name to agent (TODO: do it in previous stages, keep track of canton name)
-    df_cantons["canton_name"] = df_cantons["canton_name"].str.split('/').str[0].str.strip()
+    df_cantons = df_cantons.rename(columns={"canton_name_en": "canton_name"})
     df_persons = pd.merge(df_persons, df_cantons, left_on="canton_id", right_on="canton_id", how="left")
     assert df_persons.canton_name.notnull().all(), "Not all persons have a canton name assigned. Check the canton data."
 

@@ -81,7 +81,7 @@ class networkCleaner():
         """        
         
         df = df.copy()
-        sel = df["modes"].apply(lambda x: "car" in x)
+        sel = df["modes"].str.split(',').map(lambda x: "car" in x)
         df_other = df[~sel].copy()
         df       = df[sel].reset_index(drop=True) #don't include pt links because maybe disconencted from the network (rail for example)
         
@@ -113,7 +113,7 @@ class networkCleaner():
         df = df.copy()
         
         # Filter to car-accessible links
-        sel = df["modes"].apply(lambda x: "car" in x)
+        sel = df["modes"].str.split(',').map(lambda x: "car" in x)
         df_other = df[~sel].copy()
         df = df[sel].reset_index(drop=True)
 
@@ -218,8 +218,8 @@ class networkCleaner():
                 if idx in visited_links:
                     stats["already_visited"]+=1
                     continue
-                                
-                if not "car" in df.loc[idx,"modes"]:
+
+                if not "car" in df.loc[idx,"modes"].split(','):
                     stats["ignored_no_car"]+=1
                     continue
                 
@@ -240,7 +240,7 @@ class networkCleaner():
                     next_idx = edge_data['idx']
                     next_row = df.loc[next_idx]
 
-                    if not "car" in next_row['modes']:
+                    if not "car" in next_row['modes'].split(','):
                         stats["break_no_car"]+=1
                         break
 
