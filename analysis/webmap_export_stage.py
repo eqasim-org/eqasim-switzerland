@@ -85,8 +85,8 @@ def execute(context):
     syn_df, mc_df = webmap_export.import_data(synthetic_df, microcensus_trips_df, microcensus_persons_df)
 
     # commented to make testing faster.
-    # for agg_col in ["mode", "purpose"]:
-    #     webmap_export.export_by_aggregation(mc_df, syn_df, aggregation_col=agg_col)
+    for agg_col in ["mode", "purpose"]:
+        webmap_export.export_by_aggregation(mc_df, syn_df, aggregation_col=agg_col)
 
     print("Reading network...")
     network = read_network(matsim_network_path)

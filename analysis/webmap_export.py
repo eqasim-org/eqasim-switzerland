@@ -505,6 +505,33 @@ def compute_aggregation_share(microcensus_data, synthetic_data, weighted=True):
 
 # ==== MERGED NETWORK LINKS ====     
 
+def _round_to(value, decimals=0):
+    """Round to specified decimals, return None if not finite."""
+    if value is None or not math.isfinite(value):
+        return None
+    factor = 10 ** decimals
+    return round(value * factor) / factor
+
+def _mps_to_kmh(mps):
+    """Convert m/s to km/h, return None if not valid."""
+    if mps is None:
+        return None
+    try:
+        n = float(mps)
+        return n * 3.6 if math.isfinite(n) else None
+    except (TypeError, ValueError):
+        return None
+
+def _to_num(v):
+    """Convert to number, return None if not finite."""
+    if v is None:
+        return None
+    try:
+        n = float(v)
+        return n if math.isfinite(n) else None
+    except (TypeError, ValueError):
+        return None
+
 def _norm_key(coords):
     fwd = tuple(map(tuple, coords))
     rev = tuple(map(tuple, reversed(coords)))
@@ -568,7 +595,6 @@ def merge_geojson_segments_per_id(
     output_path,
     id_key="id",
     per_id_key="per_id",
-    # NOTE: 'modes' is intentionally EXCLUDED here so it's NOT stored per-id.
     per_id_fields=("length", "freespeed", "capacity", "permlanes", "daily_avg_volume"),
     sum_field="daily_avg_volume",
     props_to_ignore=None,
@@ -580,10 +606,16 @@ def merge_geojson_segments_per_id(
 
     Outputs per feature:
       - properties.angle : float degrees (0=east, 90=north)
-      - properties.per_id: { "<id>": { per-id fields..., direction, arrow }, ... }
+      - properties.per_id_keys : pipe-delimited link IDs
+      - properties.per_id_capacities : pipe-delimited capacities
+      - properties.per_id_lengths : pipe-delimited lengths (rounded to 1 decimal)
+      - properties.per_id_freespeeds : pipe-delimited freespeeds in km/h (rounded to 1 decimal)
+      - properties.per_id_daily_avgs : pipe-delimited daily avg volumes
+      - properties.searchable_text : all values concatenated for search
       - properties.daily_avg_volume : sum of per-id sum_field
       - properties.modes : comma-separated union across all member segments (top-level only)
     """
+
     data = input_df
 
     features = data.get("features", [])
@@ -613,7 +645,7 @@ def merge_geojson_segments_per_id(
             key = ("__non_linestring__", id(feat))
             base_feature = {
                 "type": "Feature",
-                "geometry": geom.copy() if isinstance(geom, dict) else geom,  # shallow copy
+                "geometry": geom.copy() if isinstance(geom, dict) else geom,
                 "properties": {k: v for k, v in props.items() if k not in ignore_set},
             }
             entry = {
@@ -678,7 +710,7 @@ def merge_geojson_segments_per_id(
 
                 # Add per-id info
                 if feat_id is not None and base_per_id_payload:
-                    per_id_payload = dict(base_per_id_payload)  # copy
+                    per_id_payload = dict(base_per_id_payload)
                     per_id_payload["direction"] = "forward" if eq_fwd else "reverse"
                     entry["per_id"][str(feat_id)] = per_id_payload
 
@@ -714,55 +746,111 @@ def merge_geojson_segments_per_id(
             }
             if feat_id is not None and base_per_id_payload:
                 per_id_payload = dict(base_per_id_payload)
-                per_id_payload["direction"] = "forward"  # base geometry defines forward
+                per_id_payload["direction"] = "forward"
                 entry["per_id"][str(feat_id)] = per_id_payload
 
             bucket.append(entry)
 
-    # Finalize: inject per_id, summed daily_avg_volume, and unioned modes
+    # Finalize: inject flattened per_id arrays and searchable text
     merged = []
     for bucket in groups.values():
         for entry in bucket:
             f = entry["feature"]
             per_id_map = entry["per_id"]
 
-            # per_id mapping
+            # Flatten per_id into pipe-delimited arrays
             if per_id_map:
-                f["properties"][per_id_key] = per_id_map
-
-                # Sum the chosen field across per-id entries
-                total = 0.0
-                for v in per_id_map.values():
-                    if sum_field in v:
-                        try:
-                            total += float(v[sum_field])
-                        except (TypeError, ValueError):
-                            pass
-                f["properties"][sum_field] = total
-
-                cap_total = 0.0
-                for v in per_id_map.values():
-                    if "capacity" in v:
-                        try:
-                            cap_total += float(v["capacity"])
-                        except (TypeError, ValueError):
-                            pass
-                f["properties"]["capacity"] = cap_total
-
-                freespeed_max = None
-                for v in per_id_map.values():
-                    if "freespeed" in v:
-                        try:
-                            fv = float(v["freespeed"])
-                        except (TypeError, ValueError):
-                            continue
-                        if freespeed_max is None or fv > freespeed_max:
-                            freespeed_max = fv
-                # store in top-level 'freespeed' so your Mapbox color ramp still works
-                f["properties"]["freespeed"] = freespeed_max if freespeed_max is not None else None
+                link_ids = []
+                capacities = []
+                lengths = []
+                freespeeds = []
+                daily_avgs = []
+                permlanes_list = []
+                arrows = []
+                directions = []
+                
+                total_volume = 0.0
+                total_capacity = 0.0
+                max_freespeed = None
+                
+                for key in sorted(per_id_map.keys()):
+                    data = per_id_map[key]
+                    
+                    # Extract and transform values exactly like client-side
+                    length = _to_num(data.get("length"))
+                    freespeed_mps = _to_num(data.get("freespeed"))
+                    freespeed_kmh = _mps_to_kmh(freespeed_mps)
+                    capacity = _to_num(data.get("capacity"))
+                    daily_avg = _to_num(data.get("daily_avg_volume"))
+                    permlanes = _to_num(data.get("permlanes"))
+                    arrow = data.get("arrow", "")
+                    direction = data.get("direction", "")
+                    
+                    # Add to arrays (with appropriate formatting)
+                    link_ids.append(key)
+                    
+                    if capacity is not None:
+                        capacities.append(str(int(capacity)))
+                        total_capacity += capacity
+                    else:
+                        capacities.append("")
+                        
+                    if length is not None:
+                        lengths.append(str(_round_to(length, 1)))
+                    else:
+                        lengths.append("")
+                        
+                    if freespeed_kmh is not None:
+                        freespeeds.append(str(_round_to(freespeed_kmh, 1)))
+                        if max_freespeed is None or freespeed_kmh > max_freespeed:
+                            max_freespeed = freespeed_kmh
+                    else:
+                        freespeeds.append("")
+                        
+                    if daily_avg is not None:
+                        daily_avgs.append(str(int(daily_avg)))
+                        total_volume += daily_avg
+                    else:
+                        daily_avgs.append("")
+                    
+                    if permlanes is not None:
+                        permlanes_list.append(str(int(permlanes)))
+                    else:
+                        permlanes_list.append("")
+                    
+                    # Arrow and direction are already strings (or empty)
+                    arrows.append(str(arrow) if arrow else "")
+                    directions.append(str(direction) if direction else "")
+                
+                # Store as pipe-delimited strings
+                f["properties"]["per_id_keys"] = "|".join(link_ids)
+                f["properties"]["per_id_capacities"] = "|".join(capacities)
+                f["properties"]["per_id_lengths"] = "|".join(lengths)
+                f["properties"]["per_id_freespeeds"] = "|".join(freespeeds)
+                f["properties"]["per_id_daily_avgs"] = "|".join(daily_avgs)
+                f["properties"]["per_id_permlanes"] = "|".join(permlanes_list)
+                f["properties"]["per_id_arrows"] = "|".join(arrows)
+                f["properties"]["per_id_directions"] = "|".join(directions)
+                
+                # Create searchable text (include all non-empty values)
+                all_values = link_ids + [c for c in capacities if c] + [l for l in lengths if l] + \
+                            [f for f in freespeeds if f] + [d for d in daily_avgs if d]
+                modes_str = f["properties"].get("modes", "")
+                if modes_str:
+                    all_values.append(modes_str)
+                f["properties"]["searchable_text"] = "|".join(all_values).lower()
+                
+                # Set aggregate values
+                f["properties"]["daily_avg_volume"] = total_volume
+                f["properties"]["capacity"] = total_capacity
+                f["properties"]["freespeed"] = max_freespeed
             else:
-                if sum_field in f["properties"]:
-                    del f["properties"][sum_field]
+                # Remove fields if no per_id data
+                for key in ["daily_avg_volume", "capacity", "freespeed",
+                        "per_id_keys", "per_id_capacities", "per_id_lengths", 
+                        "per_id_freespeeds", "per_id_daily_avgs", "per_id_permlanes",
+                        "per_id_arrows", "per_id_directions", "searchable_text"]:
+                    f["properties"].pop(key, None)
 
             # angle (safety)
             if "angle" not in f["properties"]:
@@ -774,7 +862,6 @@ def merge_geojson_segments_per_id(
 
             # modes (top-level): union across all member segments
             modes_union = entry.get("modes_union", set())
-            # store as comma-separated string (matches your existing Mapbox filter logic)
             f["properties"]["modes"] = ",".join(sorted(modes_union)) if modes_union else ""
 
             merged.append(f)
@@ -803,7 +890,6 @@ def export_merged_segments_by_canton(
     write_link_hourly_json=True,
 ):
     """
-    SAME logic as before, but reordered:
     1) Build a MASTER on the full network (rename id→'id', normalize 'modes', join daily_avg_volume)
     2) For each canton: select/intersect geometry ONLY, keep attributes, then export/merge.
     """
@@ -898,13 +984,23 @@ def export_merged_segments_by_canton(
                 linkstats[["LINK", "HRS0-24avg"] + hourly_avg_cols].rename(columns={"LINK": "id"}),
                 on="id", how="left"
             )
+
             link_summaries = []
             for _, r in merged_full.iterrows():
-                hourly = {c: r.get(c, None) for c in hourly_avg_cols}
+                # extract hourly volumes in the correct order (0–23)
+                hourly_values = [
+                    _to_num(r.get(c, None)) for c in sorted(
+                        hourly_avg_cols,
+                        key=lambda col: int(col.split("HRS")[1].split("-")[0])
+                    )
+                ]
+
                 link_summaries.append({
-                    "link_id": r["id"],
-                    "hourly_avg_volumes": hourly,
-                    "daily_avg_volume": r.get("HRS0-24avg", r.get("daily_avg_volume")),
+                    "link_id": str(r["id"]),
+                    "hourly_avg_volumes": hourly_values,  # compact array instead of dict
+                    "daily_avg_volume": _to_num(
+                        r.get("HRS0-24avg", r.get("daily_avg_volume"))
+                    ),
                 })
             json_path = os.path.join(output_dir, f"{clean_geo_name(canton_name)}_link_traffic_volumes.json")
             with open(json_path, "w", encoding="utf-8") as f:
@@ -1144,6 +1240,7 @@ def generate_modes_by_canton(joined_gdf):
     modes_per = (
         joined_gdf
         .dropna(subset=['assigned_canton'])
+        .assign(assigned_canton=lambda df: df['assigned_canton'].apply(clean_geo_name))
         .groupby('assigned_canton')['modes_list']
         .apply(lambda lists:
                sorted({mode for sub in lists for mode in sub}))
@@ -1151,7 +1248,7 @@ def generate_modes_by_canton(joined_gdf):
     )
 
     # write out
-    output_path = os.path.join(output_dir, "modes_by_canton.json")
+    output_path = os.path.join(output_dir, "transit_modes_by_canton.json")
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(modes_per, f, ensure_ascii=False, indent=2)
 
