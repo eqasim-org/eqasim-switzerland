@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import json
-from webmap_export import assign_cantons  # Import the function
+from analysis.webmap_export import assign_cantons  # Import the function
 import glob
 
 def preprocess_trips(input_path, canton_boundaries):

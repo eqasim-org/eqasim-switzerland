@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from .webmap_export import assign_cantons
+from analysis.webmap_export import assign_cantons, clean_geo_name
 
 def process_filename(file_path):
     temp = file_path.split(".")[2:] # skip synthesis.population
@@ -20,6 +20,7 @@ def get_pkl_data(directory, prefix):
         if filename.startswith(prefix) and filename.endswith('.p'):
             with open(directory + '/' + filename, 'rb') as file:
                 data = pickle.load(file)
+                print("filename", filename)
                 processed_name = process_filename(filename)
                 files[processed_name] = data
     return files
@@ -134,11 +135,12 @@ def convert_households(data, canton_boundaries):
     
     # Use assign_cantons with the same canton_boundaries
     data = assign_cantons(data, canton_boundaries, x_col='home_x', y_col='home_y')
+    data['canton_name'] = data['canton_name'].transform(clean_geo_name)
     return data
 
 def preprocess_microcensus_data(directory, canton_boundaries, save_directory=None, prefix=''):
     print("Reading the .pkl files...")
-    files = get_pkl_data(directory, prefix)
+    files = get_pkl_data(directory, prefix='data.microcensus')
     
     households = None
     trips = None
@@ -214,16 +216,7 @@ def add_trip_coordinates(trips_gpkg_path, trips_csv_path, add_coordinates=False)
     Optionally adds the trip origin and destination coordinates to the dataframe
     """    
     print("Reading trips CSV...")
-    trips = pd.read_csv(
-        trips_csv_path,
-        sep=';',
-        dtype={
-            'person_id': 'int32',
-            'trip_index': 'int8',
-            'preceding_activity_index': 'int8',
-            'following_activity_index': 'int8'
-        }
-    )
+    trips = pd.read_csv(trips_csv_path, sep=';')
 
     # Coordinates are not always needed
     if not add_coordinates:
@@ -326,9 +319,8 @@ def add_home_canton(persons, trips, activities):
     Adds the home canton of the person associated with the trip/activity
     - this is added because activities/trips should be assigned based on the person's home canton
     """
-    trips = trips.merge(persons[['person_id', 'canton_name']], on='person_id', how='left')
     activities = activities.merge(persons[['person_id', 'canton_name']], on='person_id', how='left')
-
+    trips = trips.merge(persons[['person_id', 'canton_name']], on='person_id', how='left')
     return activities, trips
 
 def preprocess_synthetic_data(directory, canton_boundaries, save_directory=None):
@@ -360,6 +352,9 @@ def preprocess_synthetic_data(directory, canton_boundaries, save_directory=None)
     # Add cantons to each data point based on their household canton
     persons = assign_cantons(persons, canton_boundaries, x_col='home_easting', y_col='home_northing')
     households = assign_cantons(households, canton_boundaries, x_col='home_easting', y_col='home_northing')
+    persons['canton_name'] = persons['canton_name'].transform(clean_geo_name)
+    households['canton_name'] = households['canton_name'].transform(clean_geo_name)
+    
     persons = modify_persons_households(persons, households)
     activities = filter_activities_dataset(persons, activities)
     activities, trips = add_home_canton(persons, trips, activities)

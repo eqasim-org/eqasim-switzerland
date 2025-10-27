@@ -1,17 +1,14 @@
-from .synth_micro_comparison import preprocess_microcensus_data, preprocess_synthetic_data
+from analysis.synth_micro_comparison import preprocess_microcensus_data, preprocess_synthetic_data
 import pandas as pd
-from app_utils import *
+from analysis.app_utils import *
 import json 
 import numbers
 import os
 
-cantons = [
-    'Zurich', 'Basel-Stadt', 'St. Gallen', 'Bern', 'Fribourg', 'Vaud', 
-    'Ticino', 'Aargau', 'Geneve', 'Solothurn', 'Jura', 'Valais', 
-    'Luzern', 'Basel-Landschaft', 'Neuchatel', 'Thurgau', 'Uri', 
-    'Schwyz', 'Nidwalden', 'Glarus', 'Graubunden', 'Schaffhausen', 
-    'Zug', 'Obwalden', 'Appenzell Ausserrhoden', 'Appenzell Innerrhoden', 'All'
-]
+cantons = ['Zurich', 'Bern', 'Basel-Landschaft', 'Neuchatel', 'AppenzellAusserrhoden',
+ 'Graubunden', 'Valais', 'Aargau', 'Fribourg', 'Basel-Stadt','Schaffhausen', 
+ 'Ticino', 'Luzern', 'Solothurn', 'Glarus', 'StGallen', 'Schwyz', 'Zug', 'Geneve',
+ 'Uri', 'Obwalden', 'Thurgau', 'Jura', 'Vaud', 'Nidwalden', 'AppenzellInnerrhoden']
 
 def configure(context):
     context.config("output_path")
@@ -19,6 +16,7 @@ def configure(context):
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
     context.stage("synthesis.output")
+    context.stage("matsim.simulation.run")
     context.stage("data.spatial.cantons") # get canton boundaries
 
 
@@ -328,13 +326,14 @@ def write_all_application_data(microcensus, synthetic, save_directory):
 
 
 def execute(context):
-    
+
     canton_boundaries = context.stage("data.spatial.cantons")
     microcensus_directory = context.config('working_directory')
     synthetic_directory = context.config("output_path")
     matsim_dir = context.stage("matsim.simulation.run")
     save_directory = os.path.join(matsim_dir, "simulation_output", "webmap")
-    
+    os.makedirs(save_directory, exist_ok=True)
+
     # Get processed microcensus dataframes
     persons_micro, households_micro, trips_micro, activities_micro = preprocess_microcensus_data(directory=microcensus_directory, canton_boundaries=canton_boundaries)
     microcensus = {
@@ -352,7 +351,7 @@ def execute(context):
         'trips': trips_synth,
         'activities': activities_synth
     }
-    
+
     # Use the updated dataframes to obtain all JSON for webmap
     write_all_application_data(microcensus=microcensus,
                                synthetic=synthetic,

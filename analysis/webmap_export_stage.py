@@ -6,7 +6,7 @@ import geopandas as gpd
 import analysis.webmap_export as webmap_export
 from analysis.network_reader import read_network
 from analysis.matsim_pt_analysis import generate_source_destination_data
-from analysis.canton_pt_lines import add_canton_to_pt_passenger, create_boarding_json
+from analysis.matsim_pt_analysis import add_canton_to_pt_passenger, create_boarding_json
 
 
 def configure(context):
