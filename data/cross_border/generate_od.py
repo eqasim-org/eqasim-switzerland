@@ -11,6 +11,8 @@ def configure(context):
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.swiss_border")
 
+    context.config("cross_border_countries", default = "All")
+
 
 def sample_rows_by_weight(df2, weight_col="weight"):
     df = df2.copy()
@@ -321,6 +323,30 @@ def execute(context):
     # 13. Remove Swiss residents, their mobility should be covered in the Microcensus
     residents_ch_mask = borders["residence_country"] == "CH"
     borders = borders[~ residents_ch_mask]
+
+    # 14. Selector by origin country
+    allowed_countries  = ["FR", "DE", "AT", "LI", "IT"]
+    selected_countries = context.config("cross_border_countries")
+
+    if selected_countries != "All":
+        if isinstance(selected_countries, list):
+            selected_countries = [c for c in selected_countries if c in allowed_countries]
+            if not selected_countries:
+                raise ValueError(
+                    f"No valid countries in selection. Must be within {allowed_countries}."
+                )
+            
+            borders = borders[borders["origin_country"].within(selected_countries)]
+
+        elif isinstance(selected_countries, str):
+            if selected_countries not in allowed_countries:
+                raise ValueError(
+                    f"Invalid country code '{selected_countries}'. Must be one of {allowed_countries}."
+                )
+            borders = borders[borders["origin_country"] == selected_countries]
+
+        else:
+            raise TypeError("cross_border_countries must be a list, string, or 'All'.")
 
     # Now process the trips
     trips = borders[borders["travel_cat"].isin(["From CH", "To CH"])]   
