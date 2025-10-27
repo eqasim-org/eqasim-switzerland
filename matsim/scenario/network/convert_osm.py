@@ -54,11 +54,24 @@ def execute(context):
             '<param name="outputNetworkFile" value="null" />',
             '<param name="outputNetworkFile" value="%s/converted_network.xml.gz" />' % context.path()
         )
-
+        
+        # higher link length
         content = content.replace(
-            '<param name="parseTurnRestrictions" value="false" />',
-            '<param name="parseTurnRestrictions" value="true" />'
+            '<param name="maxLinkLength" value="500.0" />',
+            '<param name="maxLinkLength" value="100.0" />'
         )
+        # Export detailed geometry of the links if needed
+        if export_detailed_network:
+            content = content.replace(
+                '<param name="outputDetailedLinkGeometryFile" value="null" />',
+                '<param name="outputDetailedLinkGeometryFile" value="%s/detailed_network.csv" />' % context.path(),
+            )
+
+        if not context.config("parseTurnRestrictions"):
+            content = content.replace(
+                '<param name="parseTurnRestrictions" value="true" />',
+                '<param name="parseTurnRestrictions" value="false" />'
+            )
 
         content = content.replace(
             '</module>',

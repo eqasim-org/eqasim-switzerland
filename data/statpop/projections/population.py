@@ -31,9 +31,13 @@ CANTON_TO_ID = {"Zürich": 1,
 def configure(context):
     context.config("data_path")
     context.config("scaling_year")
+    context.config("enable_scaling")
     context.stage("data.constants")
 
 def execute(context):
+    if not context.config("enable_scaling"):
+        print("Skipping projecting population as scaling is disabled!")
+        return
     data_path = context.config("data_path")
     c         = context.stage("data.constants")
 
