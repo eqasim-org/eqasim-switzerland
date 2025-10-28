@@ -7,13 +7,16 @@ import analysis.webmap_export as webmap_export
 from analysis.network_reader import read_network
 from analysis.matsim_pt_analysis import generate_source_destination_data
 from analysis.matsim_pt_analysis import add_canton_to_pt_passenger, create_boarding_json
-
+from analysis.synth_micro_comparison import *
 
 def configure(context):
     context.stage("matsim.simulation.run")  # get working directory
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
     context.stage("data.spatial.cantons") # get canton boundaries
+    context.config("working_directory")
+    context.config("output_path")
+
 # def fix_mojibake(s):
 #     if s is None:
 #         return s
@@ -137,8 +140,14 @@ def execute(context):
 
     # === Additional functionality from canton_pt_lines.py ===
     stops_dir = os.path.join(output_dir, "public", "data", "matsim", "transit", "stops_by_canton")
-    os.makedirs(stops_dir, exist_ok=True)
     df_with_cantons = add_canton_to_pt_passenger(volumes_path, stops_dir)
     create_boarding_json(df_with_cantons, output_dir)
 
+    # === Generate plots for comparing activities from microcensus and synthetic datasets
+    microcensus_directory = context.config('working_directory')
+    synthetic_directory = context.config("output_path")
+    save_directory = os.path.join(output_dir, "public", "data")
+    os.makedirs(save_directory, exist_ok=True)
+    generate_microcensus_synthetic_comparison(microcensus_directory, synthetic_directory, canton_boundaries, save_directory)
+    
     print("Webmap export complete. Output saved to:", output_dir)

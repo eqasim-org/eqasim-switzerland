@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import json
-from analysis.webmap_export import assign_cantons  # Import the function
+from analysis.webmap_export import assign_cantons, clean_geo_name  # Import the function
 import glob
 
 def preprocess_trips(input_path, canton_boundaries):
@@ -16,9 +16,13 @@ def preprocess_trips(input_path, canton_boundaries):
 
     df_with_start = assign_cantons(df, canton_boundaries, x_col='start_x', y_col='start_y')
     df_with_start = df_with_start.rename(columns={'canton_name': 'start_canton'})
+    # Remove accents
+    df_with_start['start_canton'] = df_with_start['start_canton'].transform(clean_geo_name)
 
     df_with_end = assign_cantons(df, canton_boundaries, x_col='end_x', y_col='end_y')
     df_with_end = df_with_end.rename(columns={'canton_name': 'end_canton'})
+    # Remove accents
+    df_with_start['end_canton'] = df_with_start['end_canton'].transform(clean_geo_name)
   
     # combine start and end canton
     df_final = pd.merge(df_with_start, df_with_end[['trip_id', 'end_canton']], on='trip_id', how='left')
@@ -293,7 +297,8 @@ def create_boarding_json(df, output_dir, csv_file=None):
     
     # Save to file
     output_file = 'boarding_data_by_line.json'
-    with open(os.path.join(output_dir, output_file), "w", encoding="utf-8") as f:
+    save_dir = os.path.join(output_dir, 'public', 'data', output_file)
+    with open(save_dir, "w", encoding="utf-8") as f:
         json.dump(json_data, f, ensure_ascii=False, indent=2)
 
     # Calculate statistics
