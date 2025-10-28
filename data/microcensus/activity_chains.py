@@ -41,7 +41,5 @@ def execute(context):
     
     df_persons = pd.merge(df_persons, act_df, on = "person_id", how = "left")
     df_persons = df_persons.fillna({"activity_chain": "home", "mode_chain": "no trip"})
-
-    #df_persons.to_csv("/cluster/project/cmdp/asallard/analysis/Crossborder/MZ/actchains.csv")
-        
+    
     return df_persons[["person_id", "person_weight", "weekend", "workday", "day", "activity_chain", "mode_chain"]]

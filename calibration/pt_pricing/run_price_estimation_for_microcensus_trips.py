@@ -9,7 +9,6 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.stage("calibration.pt_pricing.generate_config")
-    #context.stage("matsim.simulation.prepare")
 
 
 def execute(context):
@@ -63,7 +62,6 @@ def execute(context):
 
     output_path = context.path() + "/mzRequests_price.csv"
     config_path = context.stage("calibration.pt_pricing.generate_config")
-    #config_path = context.path("matsim.simulation.prepare") + "/" + context.stage("matsim.simulation.prepare")
 
     eqasim.run(context, "org.eqasim.switzerland.ch.utils.pricing.RunComputeTransitPrices",
                ["--config-path", config_path,

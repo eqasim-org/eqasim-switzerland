@@ -132,4 +132,5 @@ def execute(context):
         print("Fixing this to ensure consistency of the results.")
         df_persons.loc[df_persons["age_class"]<=1, "driving_license"] = False
 
+    print(df_persons["collective_housing_resident"].value_counts())
     return df_persons

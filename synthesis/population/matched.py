@@ -17,6 +17,7 @@ def configure(context):
     context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.activity_chains")
     context.stage("synthesis.population.sampled")
     context.stage("data.constants")
 
@@ -199,8 +200,6 @@ def parallel_statistical_matching(context, df_source, source_identifier, weight,
     rng = np.random.RandomState(random_seed)
     chunks = np.array_split(df_target, processes)
 
-    print(processes)
-
     with context.progress(label="Statistical matching ...", total=len(df_target)):
         with context.parallel({
             "df_source": df_source, "source_identifier": source_identifier, "weight": weight,
@@ -234,7 +233,7 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     df_target = df_population.copy()
     
     if population_selector is not None:
-        df_target = pd.DataFrame(df_target[population_selector])
+        df_target = pd.DataFrame(df_target[population_selector]).copy()
 
     df_assignment, levels = nonparallel_statistical_matching(
         context,
@@ -340,7 +339,7 @@ def execute(context):
         population_selector  = df_population["age"] >= c.MZ_AGE_THRESHOLD
         population_selector &= df_population["is_head"]
 
-        columns_household_matching           = [ "ovgk", "N_children_under_12", "age_class", "canton_id", "sex"]
+        columns_household_matching           = ["ovgk", "N_children_under_12", "age_class", "canton_id", "sex"]
         mandatory_columns_household_matching = columns_household_matching[:3]
 
         df_target, df_population, removed_ids_list = run_statistical_matching_extended(context, 
@@ -385,29 +384,62 @@ def execute(context):
         del df_attributes
 
         ## Now that we have added attributes
-        ## SECOND MATCHING
+        ## SECOND MATCHING - NORMAL PEOPLE
 
-        population_selector = df_population["age"] >= c.MZ_AGE_THRESHOLD
+        population_selector_normal = (df_population["age"] >= c.MZ_AGE_THRESHOLD) & ~(df_population["collective_housing_resident"])
 
         columns_individual_matching           = ["number_of_cars_class", "N_children_under_12", "ovgk", "age_class", "sex", "marital_status"]
         mandatory_columns_individual_matching = columns_individual_matching[:4]
 
         print("Second statistical matching starting")
 
-        df_target, df_population, removed_ids_list  = run_statistical_matching_extended(context, 
+        df_target_normal, df_population_normal, removed_ids_list_normal  = run_statistical_matching_extended(context, 
                                                               df_source, "mz_id", "household_weight",
                                                               df_population.copy(), "person_id",
                                                               columns_individual_matching, mandatory_columns_individual_matching,
                                                               minimum_observations = context.config("matching_minimum_observations"), 
-                                                              population_selector=population_selector,
+                                                              population_selector = population_selector_normal,
                                                               option = "household")
         
         # Extract only the matching information
 
-        df_matching = pd.merge(
-            df_population[["person_id", "household_id", "mz_head_id"]],
-            df_target[["person_id", "mz_id"]],
+        df_matching_normal = pd.merge(
+            df_population_normal[["person_id", "household_id", "mz_head_id"]],
+            df_target_normal[["person_id", "mz_id"]],
             on="person_id", how="left")
+        
+        df_matching_normal = df_matching_normal.rename(columns = {"mz_id": "mz_id_normal"})
+        
+        ## SECOND MATCHING - STATPOP PEOPLE WITH WEIRD RESIDENCE
+
+        population_selector_weird = (df_population["age"] >= c.MZ_AGE_THRESHOLD) & (df_population["collective_housing_resident"])
+
+        df_source_weird = df_source.merge(context.stage("data.microcensus.activity_chains")[["person_id", "activity_chain"]], how = "left", right_on = "person_id", left_on = "mz_id")
+        df_source_weird = df_source_weird[df_source_weird["activity_chain"]=="home"]
+
+        print("Second statistical matching starting - people with weird residence")
+
+        df_target_weird, df_population_weird, removed_ids_list_weird  = run_statistical_matching_extended(context, 
+                                                              df_source_weird, "mz_id", "household_weight",
+                                                              df_population.copy(), "person_id",
+                                                              columns_individual_matching, mandatory_columns_individual_matching,
+                                                              minimum_observations = context.config("matching_minimum_observations"), 
+                                                              population_selector = population_selector_weird,
+                                                              option = "household")
+        
+        df_matching_weird = pd.merge(
+            df_population_weird[["person_id", "household_id", "mz_head_id"]],
+            df_target_weird[["person_id", "mz_id"]],
+            on="person_id", how="left")     
+
+        df_matching_weird = df_matching_weird.rename(columns = {"mz_id": "mz_id_weird"})  
+
+        removed_ids_list = removed_ids_list + removed_ids_list_weird + removed_ids_list_normal
+        df_matching      = pd.merge(df_matching_normal, df_matching_weird, on = ["person_id", "household_id", "mz_head_id"])
+        df_matching["mz_id"] = df_matching["mz_id_normal"].combine_first(df_matching["mz_id_weird"])
+
+        del df_matching["mz_id_normal"]
+        del df_matching["mz_id_weird"]
     
     elif c.census == "are_synpop":
         number_of_population_persons    = len(np.unique(df_population["person_id"]))
@@ -463,9 +495,6 @@ def execute(context):
 
     removed_person_ids = removed_ids_list[0]
     print("  Persons: %d (%.2f%%)" % (len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_population_persons))
-
-    print(df_matching.head())
-    print(df_matching.columns)
 
     # Return
     return df_matching, removed_person_ids
