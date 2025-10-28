@@ -13,18 +13,15 @@ def preprocess_trips(input_path, canton_boundaries):
     """
     # Read the CSV file
     df = pd.read_csv(input_path, sep=';')
-    
-    print("Columns in the dataset:")
-    print(df.columns.tolist())
-    
-    # Add start canton information
+
     df_with_start = assign_cantons(df, canton_boundaries, x_col='start_x', y_col='start_y')
     df_with_start = df_with_start.rename(columns={'canton_name': 'start_canton'})
-    
-    # Add end canton information to the same DataFrame
-    df_final = assign_cantons(df_with_start, canton_boundaries, x_col='end_x', y_col='end_y')
-    df_final = df_final.rename(columns={'canton_name': 'end_canton'})
-    
+
+    df_with_end = assign_cantons(df, canton_boundaries, x_col='end_x', y_col='end_y')
+    df_with_end = df_with_end.rename(columns={'canton_name': 'end_canton'})
+  
+    # combine start and end canton
+    df_final = pd.merge(df_with_start, df_with_end[['trip_id', 'end_canton']], on='trip_id', how='left')
     print(f"\nProcessed dataset columns: {list(df_final.columns)}")
 
     return df_final
@@ -32,14 +29,14 @@ def preprocess_trips(input_path, canton_boundaries):
 def to_time_bin(time_str):
     # Parse hours, minutes, seconds from string
     hours, minutes, _ = map(int, time_str.split(":"))
-    
+
     total_minutes = hours * 60 + minutes
-    
+
     bin_minutes = (total_minutes // 15) * 15
-    
+
     binned_hours = bin_minutes // 60
     binned_minutes = bin_minutes % 60
-    
+
     return f"{binned_hours:02d}:{binned_minutes:02d}"
 
 def get_canton_trip_data(df, work_dir):
@@ -58,7 +55,7 @@ def get_canton_trip_data(df, work_dir):
         "main_mode": "mode",
         "end_activity_type": "purpose"
     })
-    
+
     # Remove rows with missing canton information
     df = df.dropna(subset=['origin', 'destination'])
     print(f"Processing {len(df)} trips after removing entries with missing canton data")

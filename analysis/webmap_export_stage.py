@@ -133,12 +133,11 @@ def execute(context):
     webmap_export.export_inter_cantonal_stops(joined, volumes_df)
 
     # === Additional functionality from matsim_destination_zones.py ===
-    print("Generating trip origin-destination data by canton...")
     generate_source_destination_data(synthetic_gz_path, work_dir=output_dir, canton_boundaries=canton_boundaries)
 
     # === Additional functionality from canton_pt_lines.py ===
-    print("Processing passenger boarding data by canton and line...")
     stops_dir = os.path.join(output_dir, "public", "data", "matsim", "transit", "stops_by_canton")
+    os.makedirs(stops_dir, exist_ok=True)
     df_with_cantons = add_canton_to_pt_passenger(volumes_path, stops_dir)
     create_boarding_json(df_with_cantons, output_dir)
 
