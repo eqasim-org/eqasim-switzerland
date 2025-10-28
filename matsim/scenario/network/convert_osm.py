@@ -80,7 +80,7 @@ def execute(context):
         # higher link length
         content = content.replace(
             '<param name="maxLinkLength" value="500.0" />',
-            '<param name="maxLinkLength" value="99999.0" />'
+            '<param name="maxLinkLength" value="100.0" />'
         )
         # Export detailed geometry of the links if needed
         if export_detailed_network:
@@ -89,7 +89,7 @@ def execute(context):
                 '<param name="outputDetailedLinkGeometryFile" value="%s/detailed_network.csv" />' % context.path(),
             )
 
-        if context.config("parseTurnRestrictions"):
+        if not context.config("parseTurnRestrictions"):
             content = content.replace(
                 '<param name="parseTurnRestrictions" value="true" />',
                 '<param name="parseTurnRestrictions" value="false" />'
