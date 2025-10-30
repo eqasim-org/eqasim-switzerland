@@ -1,24 +1,208 @@
-#!/usr/bin/env python3
-"""
-Complete transfer data processing pipeline:
-1. Load transfer analysis data from pt_transfer_analysis.csv
-2. Generate stop-level transfer JSON with full stop IDs as keys
-3. Group transfer data by Swiss cantons
-4. Output both stop_transfer_data.json and stop_transfer_data_by_canton.json
-
-This script combines the functionality of generate_stop_transfer_json.py and group_transfers_by_canton.py
-"""
-
 import pandas as pd
 import json
 import os
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 
-# =============================================================================
-# UTILITY FUNCTIONS
-# =============================================================================
+def extract_base_stop_id(stop_id):
+    """
+    Extract the base stop ID (number before first colon) from a full stop ID.
+    Example: '8508318:0:1.link:pt_8508318:0:1' -> '8508318'
+    """
+    if pd.isna(stop_id) or stop_id == '':
+        return None
+    
+    stop_str = str(stop_id).strip()
+    base_id = stop_str.split(':')[0]
+    return base_id
+
+
+def parse_time_24plus(time_str):
+    """
+    Parse time string that may have hours >= 24 (transit times past midnight).
+    Convert to datetime object by handling 24+ hour format.
+    """
+    if pd.isna(time_str) or time_str == '':
+        return None
+    
+    time_parts = str(time_str).strip().split(':')
+    if len(time_parts) != 3:
+        return None
+    
+    try:
+        hours = int(time_parts[0])
+        minutes = int(time_parts[1])
+        seconds = int(time_parts[2])
+        
+        # Handle 24+ hour format by converting to next day
+        if hours >= 24:
+            base_date = datetime(2000, 1, 1)
+            extra_days = hours // 24
+            remaining_hours = hours % 24
+            result = base_date + timedelta(days=extra_days, hours=remaining_hours, minutes=minutes, seconds=seconds)
+        else:
+            result = datetime(2000, 1, 1, hours, minutes, seconds)
+        
+        return result
+    except (ValueError, IndexError):
+        return None
+
+
+def parse_travel_time(trav_time_str):
+    """
+    Parse travel time string (HH:MM:SS) and return as timedelta.
+    """
+    if pd.isna(trav_time_str) or trav_time_str == '':
+        return timedelta(0)
+    
+    time_parts = str(trav_time_str).strip().split(':')
+    if len(time_parts) != 3:
+        return timedelta(0)
+    
+    try:
+        hours = int(time_parts[0])
+        minutes = int(time_parts[1])
+        seconds = int(time_parts[2])
+        return timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    except (ValueError, IndexError):
+        return timedelta(0)
+
+def extract_line_type(line_id):
+    """Extract the line type from transit line ID."""
+    if pd.isna(line_id) or line_id == '':
+        return "unknown"
+    
+    line_str = str(line_id)
+    # Extract the part after the first dash and before the second dash
+    parts = line_str.split('-')
+    if len(parts) >= 2:
+        return parts[1]  # e.g., "91-55-j24-1" -> "55"
+    return "unknown"
+
+
+def get_pt_transfers_statistics(csv_file):
+    """
+    Analyze PT transfers with walking segments between them.
+    
+    Identifies and counts transfers following the pattern: pt -> walk -> pt
+    where walking segments separate consecutive PT legs.
+    
+    Returns:
+        dict: Transfer analysis results and details
+    """
+    print("Analyzing PT transfers...")
+    
+    df = pd.read_csv(csv_file, sep=';')
+    print(f"Loaded {len(df)} trip legs")
+    
+    # Sort by person, trip_id, and departure time
+    df_sorted = df.sort_values(['person', 'trip_id', 'dep_time']).reset_index(drop=True)
+    
+    # counters for verification
+    same_stop_transfers = 0
+    different_stop_transfers = 0
+    total_pt_legs = 0
+
+    # Store all relevant transfer data
+    transfer_details = []
+    
+    # analyze each trip per person
+    for (person, trip_id), trip_group in df_sorted.groupby(['person', 'trip_id']):
+        trip_legs = trip_group.reset_index(drop=True)
+        pt_legs_indices = trip_legs[trip_legs['mode'] == 'pt'].index.tolist()
+        total_pt_legs += len(pt_legs_indices)
+        
+        # check consecutive PT legs for transfers (legs = stages of a single trip)
+        for i in range(len(pt_legs_indices) - 1):
+            current_pt_idx = pt_legs_indices[i]
+            next_pt_idx = pt_legs_indices[i + 1]
+            current_pt_leg = trip_legs.iloc[current_pt_idx]
+            next_pt_leg = trip_legs.iloc[next_pt_idx]
+            
+            # check for pt usage
+            if (pd.notna(current_pt_leg['egress_stop_id']) and 
+                current_pt_leg['egress_stop_id'] != '' and
+                pd.notna(next_pt_leg['access_stop_id']) and 
+                next_pt_leg['access_stop_id'] != ''):
+
+                # Extract base stop IDs for comparison
+                current_egress_base = extract_base_stop_id(current_pt_leg['egress_stop_id'])
+                next_access_base = extract_base_stop_id(next_pt_leg['access_stop_id'])
+                
+                # Determine transfer type based on base stop IDs
+                if current_egress_base == next_access_base:
+                    transfer_type = 'same_stop'
+                    same_stop_transfers += 1
+                else:
+                    transfer_type = 'different_stop'
+                    different_stop_transfers += 1
+                
+                # Calculate walking segments between PT legs
+                walking_legs = trip_legs.iloc[current_pt_idx + 1:next_pt_idx]
+                walking_distance = walking_legs[walking_legs['mode'] == 'walk']['distance'].sum()
+                walking_time = sum(parse_travel_time(t) for t in walking_legs[walking_legs['mode'] == 'walk']['trav_time'])
+                
+                # Parse times
+                current_departure = parse_time_24plus(current_pt_leg['dep_time'])
+                current_arrival = parse_time_24plus(current_pt_leg['dep_time']) + parse_travel_time(current_pt_leg['trav_time']) if current_departure else None
+                next_departure = parse_time_24plus(next_pt_leg['dep_time'])
+
+                # Get line information
+                current_line = current_pt_leg['transit_line']
+                next_line = next_pt_leg['transit_line']
+                line_change = current_line != next_line
+
+                # Extract line types for analysis
+                current_line_type = extract_line_type(current_line)
+                next_line_type = extract_line_type(next_line)
+                line_type_change = current_line_type != next_line_type
+
+                # Store detailed transfer information
+                transfer_detail = {
+                    'person': person,
+                    'trip_id': trip_id,
+                    'transfer_type': transfer_type,
+                    'current_egress_stop': current_pt_leg['egress_stop_id'],
+                    'next_access_stop': next_pt_leg['access_stop_id'],
+                    'current_egress_stop_base': current_egress_base,
+                    'next_access_stop_base': next_access_base,
+                    'current_line': current_line,
+                    'next_line': next_line,
+                    'current_line_type': current_line_type,
+                    'next_line_type': next_line_type,
+                    'line_change': line_change,
+                    'line_type_change': line_type_change,
+                    'walking_legs_between': len(walking_legs),
+                    'walking_distance': walking_distance,
+                    'walking_time': str(walking_time),
+                    'current_pt_departure': str(current_departure.time()) if current_departure else '',
+                    'current_pt_arrival': str(current_arrival.time()) if current_arrival else '',
+                    'next_pt_departure': str(next_departure.time()) if next_departure else '',
+                }
+
+                transfer_details.append(transfer_detail)
+
+    print("\n=== TRANSFER ANALYSIS RESULTS ===")
+    print(f"Total PT legs: {total_pt_legs}")
+    print(f"Same stop transfers: {same_stop_transfers}")
+    print(f"Different stop transfers: {different_stop_transfers}")
+    print(f"Total transfers: {same_stop_transfers + different_stop_transfers}")
+    
+    total_transfers = same_stop_transfers + different_stop_transfers
+    if total_transfers > 0:
+        print(f"PT transfer rate: {total_transfers/total_pt_legs*100:.1f}% of all PT legs")
+        
+        if transfer_details:
+            transfer_df = pd.DataFrame(transfer_details) 
+
+            line_changes = sum(1 for details in transfer_details if details['line_change'])
+            print(f"Line changes: {line_changes:,} ({100*line_changes/total_transfers:.1f}% of transfers)")
+    else:
+        print("No PT transfers found")
+    
+    return transfer_df
 
 def extract_base_stop_id(stop_string):
     """
@@ -46,14 +230,14 @@ def extract_base_stop_id(stop_string):
 # STEP 1: LOAD AND PROCESS TRANSFER DATA
 # =============================================================================
 
-def load_transfer_data():
+def load_transfer_data(path):
     """Load the transfer analysis data"""
     try:
-        df = pd.read_csv('pt_transfer_analysis.csv')
-        print(f"✅ Loaded {len(df)} transfer records from pt_transfer_analysis.csv")
+        df = pd.read_csv(path)
+        print(f"Loaded {len(df)} transfer records")
         return df
     except FileNotFoundError:
-        print("❌ Error: pt_transfer_analysis.csv not found. Please run analyze_transfers.py first.")
+        print(f"Error: {path} not found. Please run analyze_transfers.py first.")
         return None
 
 
@@ -112,7 +296,7 @@ def build_stop_id_mapping(df, legs_df=None):
                 representative_stop = max(full_stops.items(), key=lambda x: x[1])[0]
             final_mapping[base_stop] = representative_stop
     
-    print(f"✅ Built mapping for {len(final_mapping)} base stops to representative full stop IDs")
+    print(f"Built mapping for {len(final_mapping)} base stops to representative full stop IDs")
     return final_mapping
 
 
@@ -137,7 +321,7 @@ def aggregate_stop_transfers(df):
         'stop_transfers': defaultdict(int)
     })
     
-    print("🔄 Processing transfer records with base stop ID aggregation...")
+    print("Processing transfer records...")
     
     for _, row in df.iterrows():
         # Extract base stop IDs (this is the key fix)
@@ -160,7 +344,7 @@ def aggregate_stop_transfers(df):
             stop_data[access_stop_base]['total_transfers_in'] += 1
             stop_data[egress_stop_base]['total_transfers_out'] += 1
             stop_data[access_stop_base]['line_transfers'][from_line][to_line] += 1
-            
+
         else:  # different_stop
             # Different stop transfer: walk between stops
             stop_data[egress_stop_base]['total_transfers_out'] += 1
@@ -182,7 +366,7 @@ def aggregate_stop_transfers(df):
             'stop_transfers': dict(data['stop_transfers'])
         }
     
-    print(f"✅ Aggregated data for {len(result)} base stops with transfers")
+    print(f"Aggregated data for {len(result)} base stops with transfers")
     return result
 
 
@@ -193,12 +377,12 @@ def add_all_pt_boardings(stop_data):
     """
     legs_df = None
     try:
-        print("🔄 Loading output_legs.csv to count ALL PT boardings...")
+        print("Loading output_legs.csv to count PT boardings...")
         legs_df = pd.read_csv('output_legs.csv', sep=';')
         
         # Filter for PT legs only
         pt_legs = legs_df[legs_df['mode'] == 'pt'].copy()
-        print(f"✅ Found {len(pt_legs)} PT legs total")
+        print(f"Found {len(pt_legs)} PT legs total")
         
         # Extract base stop IDs from access_stop_id
         pt_legs['access_stop_base'] = pt_legs['access_stop_id'].apply(extract_base_stop_id)
@@ -206,8 +390,8 @@ def add_all_pt_boardings(stop_data):
         # Count ALL boardings per base stop ID (including standalone trips)
         stop_boardings = pt_legs['access_stop_base'].value_counts()
         
-        print(f"🔄 Adding ALL PT boardings for {len(stop_boardings)} base stops...")
-        
+        print(f"Adding PT boardings for {len(stop_boardings)} base stops...")
+
         for base_stop_id, boarding_count in stop_boardings.items():
             if pd.notna(base_stop_id):
                 base_stop_str = str(base_stop_id)
@@ -222,12 +406,12 @@ def add_all_pt_boardings(stop_data):
                         'line_transfers': {},
                         'stop_transfers': {}
                     }
-                
+
     except FileNotFoundError:
-        print("⚠️ Warning: output_legs.csv not found. Only showing transfer boardings.")
+        print("Warning: output_legs.csv not found. Only showing transfer boardings.")
     except Exception as e:
-        print(f"⚠️ Warning: Error processing boardings: {e}")
-    
+        print(f"Warning: Error processing boardings: {e}")
+
     return stop_data, legs_df
 
 
@@ -241,7 +425,7 @@ def convert_to_representative_stop_ids(stop_data, base_to_full_mapping):
     """
     full_stop_data = {}
     
-    print("🔄 Converting base stop IDs to representative full stop IDs for output...")
+    print("Converting base stop IDs to representative full stop IDs...")
     
     major_stops_examples = []
     
@@ -252,7 +436,7 @@ def convert_to_representative_stop_ids(stop_data, base_to_full_mapping):
         # Track examples of major stops for logging
         if data['total_boardings'] > 50 or data['total_transfers_in'] > 20:
             major_stops_examples.append(
-                f"  📍 {base_stop_id} → {representative_stop_id} "
+                f"  {base_stop_id} → {representative_stop_id} "
                 f"(boardings: {data['total_boardings']}, transfers: {data['total_transfers_in']})"
             )
         
@@ -271,11 +455,11 @@ def convert_to_representative_stop_ids(stop_data, base_to_full_mapping):
             'stop_transfers': converted_stop_transfers
         }
     
-    print(f"✅ Converted {len(stop_data)} base stops to {len(full_stop_data)} representative stop IDs")
+    print(f"Converted {len(stop_data)} base stops to {len(full_stop_data)} representative stop IDs")
     
     # Show examples of major stop consolidations
     if major_stops_examples:
-        print("🔍 Major stop consolidations (base → representative):")
+        print("Major stop consolidations (base → representative):")
         for example in major_stops_examples[:8]:  # Show top 8
             print(example)
         if len(major_stops_examples) > 8:
@@ -288,22 +472,21 @@ def convert_to_representative_stop_ids(stop_data, base_to_full_mapping):
 # STEP 3: GROUP BY CANTON
 # =============================================================================
 
-def load_canton_stop_mapping():
+def load_canton_stop_mapping(stops_dir):
     """
     Load all canton GeoJSON files and create a mapping from base stop_id to canton name.
     """
     canton_stops = {}
     base_to_canton = {}
-    stops_dir = Path("stops_by_canton")
     
-    print(f"🔄 Loading canton stop data from {stops_dir}...")
+    print(f"Loading canton stop data from {stops_dir}...")
     
     if not stops_dir.exists():
-        print(f"❌ Error: {stops_dir} directory not found!")
+        print(f"Error: {stops_dir} directory not found!")
         return {}
     
     geojson_files = list(stops_dir.glob("*_stops.geojson"))
-    print(f"✅ Found {len(geojson_files)} canton files")
+    print(f"Found {len(geojson_files)} canton files")
     
     for geojson_file in geojson_files:
         canton_name = geojson_file.stem.replace("_stops", "")
@@ -324,12 +507,12 @@ def load_canton_stop_mapping():
                         base_to_canton[base_id] = canton_name
                     stop_count += 1
             
-            print(f"  ✅ {canton_name}: {stop_count} stop IDs")
+            print(f"  {canton_name}: {stop_count} stop IDs")
             
         except Exception as e:
-            print(f"❌ Error reading {geojson_file}: {e}")
+            print(f"Error reading {geojson_file}: {e}")
     
-    print(f"✅ Total base stop IDs mapped: {len(base_to_canton)}")
+    print(f"Total base stop IDs mapped: {len(base_to_canton)}")
     return base_to_canton
 
 
@@ -340,7 +523,7 @@ def group_transfers_by_canton(transfer_data, canton_base_mapping):
     canton_data = defaultdict(dict)
     unmapped_stops = set()
 
-    print("🔄 Grouping transfer data by canton...")
+    print("Grouping transfer data by canton...")
 
     mapped_count = 0
     total_count = 0
@@ -356,13 +539,13 @@ def group_transfers_by_canton(transfer_data, canton_base_mapping):
         else:
             unmapped_stops.add(stop_id)
 
-    print(f"✅ Grouping results:")
-    print(f"   📊 Total stops processed: {total_count}")
-    print(f"   ✅ Successfully mapped: {mapped_count}")
-    print(f"   ❌ Unmapped: {len(unmapped_stops)}")
+    print(f"Grouping results:")
+    print(f"   Total stops processed: {total_count}")
+    print(f"   Successfully mapped: {mapped_count}")
+    print(f"   Unmapped: {len(unmapped_stops)}")
     
     if unmapped_stops and len(unmapped_stops) < 50:  # Only show if manageable number
-        print(f"   ⚠️ Sample unmapped stops: {list(unmapped_stops)[:10]}")
+        print(f"   Sample unmapped stops: {list(unmapped_stops)[:10]}")
 
     return dict(canton_data), unmapped_stops
 
@@ -371,7 +554,7 @@ def calculate_canton_statistics(canton_data):
     """
     Calculate summary statistics for each canton.
     """
-    print("🔄 Calculating canton-level statistics...")
+    print("Calculating canton-level statistics...")
     
     for canton_name, stops_data in canton_data.items():
         total_boardings = sum(data.get('total_boardings', 0) for data in stops_data.values())
@@ -397,7 +580,7 @@ def calculate_canton_statistics(canton_data):
                     max_boardings = boardings
                     busiest_stop = stop_id
         
-        # Add canton summary
+        # Add canton summary (for sanity checks)
         canton_data[canton_name]['_canton_summary'] = {
             'total_stops': len(stops_data),
             'total_boardings': total_boardings,
@@ -412,33 +595,32 @@ def calculate_canton_statistics(canton_data):
     
     return canton_data
 
-
 # =============================================================================
 # STEP 4: MAIN PROCESSING PIPELINE
 # =============================================================================
 
-def process_transfer_data():
+def get_transfer_matrix_data(data_path, output_dir, stops_dir):
     """
-    Main function to process transfer data and generate both output files.
+    Main function to process transfer data and generate canton-grouped output file.
     """
+    stops_dir = None
+    output_dir = None
+    data_path = None
+
     print("=" * 60)
-    print("🚀 SWISS PT TRANSFER DATA PROCESSING PIPELINE")
+    print("SWISS PT TRANSFER DATA PROCESSING PIPELINE")
     print("=" * 60)
-    
-    # Step 1: Load transfer data
-    df = load_transfer_data()
-    if df is None:
-        return
-    
-    print(f"📊 Transfer data columns: {list(df.columns)}")
-    print(f"📊 Transfer types: {df['transfer_type'].value_counts().to_dict()}")
-    
+
+    # Step 1: Get relevant transfer statistics dataframe
+    df = get_pt_transfers_statistics(data_path)
+    print(f"Transfer data columns: {list(df.columns)}")
+
     # Step 2: Aggregate transfer data by stop (using base stop IDs)
     stop_data = aggregate_stop_transfers(df)
-    
-    # Step 3: Add all PT boardings from output_legs.csv
+
+    # Step 3: Add all PT boardings from output_legs.csv (otherwise only transfer data present in stats)
     stop_data, legs_df = add_all_pt_boardings(stop_data)
-    print(f"✅ Final data includes {len(stop_data)} base stops total")
+    print(f"Final data includes {len(stop_data)} base stops total")
     
     # Step 4: Build mapping from base stop IDs to full stop IDs
     base_to_full_mapping = build_stop_id_mapping(df, legs_df)
@@ -452,64 +634,38 @@ def process_transfer_data():
     standalone_trips = total_boardings - total_transfers_in
     
     print("\n" + "=" * 40)
-    print("📊 BOARDING STATISTICS")
+    print("BOARDING STATISTICS")
     print("=" * 40)
-    print(f"  🚌 Total PT boardings: {total_boardings:,}")
-    print(f"  🔄 Transfer boardings: {total_transfers_in:,}")
-    print(f"  🎯 Standalone trips: {standalone_trips:,}")
+    print(f"  Total PT boardings: {total_boardings:,}")
+    print(f"  Transfer boardings: {total_transfers_in:,}")
+    print(f"  Standalone trips: {standalone_trips:,}")
     if total_boardings > 0:
-        print(f"  📈 Transfer rate: {total_transfers_in/total_boardings*100:.1f}%")
+        print(f"  Transfer rate: {total_transfers_in/total_boardings*100:.1f}%")
     
-    # Step 7: Save stop-level JSON
-    output_file = 'stop_transfer_data.json'
-    with open(output_file, 'w') as f:
-        json.dump(full_stop_data, f, indent=2)
-    print(f"\n✅ Stop-level JSON saved to {output_file}")
-    
-    # Step 8: Load canton mapping and group by canton
-    canton_base_mapping = load_canton_stop_mapping()
+    # Step 7: Load canton mapping and group by canton
+    canton_base_mapping = load_canton_stop_mapping(stops_dir)
     if not canton_base_mapping:
-        print("❌ Error: No canton-stop mapping loaded.")
+        print("Error: No canton-stop mapping loaded.")
         return
     
-    canton_data, unmapped_stops = group_transfers_by_canton(full_stop_data, canton_base_mapping)
+    canton_data, _ = group_transfers_by_canton(full_stop_data, canton_base_mapping)
     
-    # Step 9: Calculate canton statistics
+    # Step 8: Calculate canton statistics
     canton_data = calculate_canton_statistics(canton_data)
     
-    # Step 10: Create final canton output structure
-    output_data = {
-        'metadata': {
-            'description': 'Public transport transfer data grouped by Swiss cantons',
-            'total_cantons': len(canton_data),
-            'total_stops_mapped': sum(len(stops) - 1 for stops in canton_data.values()),  # -1 for summary
-            'unmapped_stops': len(unmapped_stops),
-            'data_structure': {
-                'canton_name': {
-                    'stop_id': {
-                        'total_boardings': 'Total boardings at this stop',
-                        'total_transfers_in': 'Total people transferring into this stop',
-                        'total_transfers_out': 'Total people leaving this stop via transfer',
-                        'line_transfers': 'origin_line -> destination_line transfer counts',
-                        'stop_transfers': 'transfers from this stop to other stops'
-                    },
-                    '_canton_summary': 'Aggregated statistics for the canton'
-                }
-            }
-        },
-        'cantons': canton_data
-    }
-    
-    # Step 11: Save canton-grouped JSON
+    output_data = canton_data
+
+    # Step 10: Save canton-grouped JSON
     canton_output_file = "stop_transfer_data_by_canton.json"
-    with open(canton_output_file, 'w', encoding='utf-8') as f:
+    output_directory = os.join(output_dir, "public", "data", canton_output_file)
+    with open(output_directory, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, indent=2, ensure_ascii=False)
     
-    print(f"✅ Canton-grouped JSON saved to {canton_output_file}")
+    print(f"\nSaved canton-grouped JSON to {canton_output_file}")
     
-    # Step 12: Print final summary
+    # Step 11: Print final summary
     print("\n" + "=" * 60)
-    print("🎉 PROCESSING COMPLETE - CANTON SUMMARY")
+    print("PROCESSING COMPLETE - CANTON SUMMARY")
     print("=" * 60)
     for canton_name in sorted(canton_data.keys()):
         summary = canton_data[canton_name]['_canton_summary']
@@ -517,12 +673,6 @@ def process_transfer_data():
               f"{summary['total_boardings']:5d} boardings, "
               f"{summary['total_transfers_in']:4d} transfers")
     
-    print(f"\n🎯 Final outputs:")
-    print(f"   📄 {output_file}")
-    print(f"   📄 {canton_output_file}")
-    print(f"   📊 {len(canton_data)} cantons processed")
+    print(f"\nFinal output: {canton_output_file}")
+    print(f"Processed {len(canton_data)} cantons")
     print("=" * 60)
-
-
-if __name__ == "__main__":
-    process_transfer_data()

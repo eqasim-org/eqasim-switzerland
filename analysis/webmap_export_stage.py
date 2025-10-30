@@ -8,6 +8,7 @@ from analysis.network_reader import read_network
 from analysis.matsim_pt_analysis import generate_source_destination_data
 from analysis.matsim_pt_analysis import add_canton_to_pt_passenger, create_boarding_json
 from analysis.synth_micro_comparison import *
+from analysis.process_transfer_data import get_transfer_matrix_data
 
 def configure(context):
     context.stage("matsim.simulation.run")  # get working directory
@@ -60,6 +61,7 @@ def execute(context):
     matsim_network_path = os.path.join(simulation_output, "output_network.xml.gz")
     transit_schedule_path = os.path.join(simulation_output, "output_transitSchedule.xml.gz")
     volumes_path = os.path.join(simulation_output, "pt_passenger_counts.csv.gz")
+    pt_legs_path = os.path.join(simulation_output, "output_legs.csv.gz")
 
     # Microcensus files (fixed path)
     microcensus_trips_df = context.stage("data.microcensus.trips")[0]  # first element of tuple
@@ -142,6 +144,9 @@ def execute(context):
     stops_dir = os.path.join(output_dir, "public", "data", "matsim", "transit", "stops_by_canton")
     df_with_cantons = add_canton_to_pt_passenger(volumes_path, stops_dir)
     create_boarding_json(df_with_cantons, output_dir)
+
+    # === Additional plots for looking at transfers between PT stops ===
+    get_transfer_matrix_data(data_path=pt_legs_path, output_dir=output_dir, stops_dir=stops_dir)
 
     # === Generate plots for comparing activities from microcensus and synthetic datasets
     microcensus_directory = context.config('working_directory')
