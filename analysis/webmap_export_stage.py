@@ -137,6 +137,14 @@ def execute(context):
     print("Exporting inter-cantonal stops with volume...")
     webmap_export.export_inter_cantonal_stops(joined, volumes_df)
 
+
+    # === Generate plots for comparing activities from microcensus and synthetic datasets
+    microcensus_directory = context.config('working_directory')
+    synthetic_directory = context.config("output_path")
+    save_directory = os.path.join(output_dir, "public", "data")
+    os.makedirs(save_directory, exist_ok=True)
+    generate_microcensus_synthetic_comparison(microcensus_directory, synthetic_directory, canton_boundaries, save_directory)
+   
     # === Additional functionality from matsim_destination_zones.py ===
     generate_source_destination_data(synthetic_gz_path, work_dir=output_dir, canton_boundaries=canton_boundaries)
 
@@ -147,12 +155,5 @@ def execute(context):
 
     # === Additional plots for looking at transfers between PT stops ===
     get_transfer_matrix_data(data_path=pt_legs_path, output_dir=output_dir, stops_dir=stops_dir)
-
-    # === Generate plots for comparing activities from microcensus and synthetic datasets
-    microcensus_directory = context.config('working_directory')
-    synthetic_directory = context.config("output_path")
-    save_directory = os.path.join(output_dir, "public", "data")
-    os.makedirs(save_directory, exist_ok=True)
-    generate_microcensus_synthetic_comparison(microcensus_directory, synthetic_directory, canton_boundaries, save_directory)
     
     print("Webmap export complete. Output saved to:", output_dir)

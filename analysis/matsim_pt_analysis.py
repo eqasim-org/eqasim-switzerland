@@ -22,7 +22,7 @@ def preprocess_trips(input_path, canton_boundaries):
     df_with_end = assign_cantons(df, canton_boundaries, x_col='end_x', y_col='end_y')
     df_with_end = df_with_end.rename(columns={'canton_name': 'end_canton'})
     # Remove accents
-    df_with_start['end_canton'] = df_with_start['end_canton'].transform(clean_geo_name)
+    df_with_end['end_canton'] = df_with_end['end_canton'].transform(clean_geo_name)
   
     # combine start and end canton
     df_final = pd.merge(df_with_start, df_with_end[['trip_id', 'end_canton']], on='trip_id', how='left')

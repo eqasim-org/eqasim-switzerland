@@ -94,7 +94,7 @@ def get_pt_transfers_statistics(csv_file):
     """
     print("Analyzing PT transfers...")
     
-    df = pd.read_csv(csv_file, sep=';')
+    df = pd.read_csv(csv_file, sep=';', compression='gzip')
     print(f"Loaded {len(df)} trip legs")
     
     # Sort by person, trip_id, and departure time
@@ -142,7 +142,6 @@ def get_pt_transfers_statistics(csv_file):
                 # Calculate walking segments between PT legs
                 walking_legs = trip_legs.iloc[current_pt_idx + 1:next_pt_idx]
                 walking_distance = walking_legs[walking_legs['mode'] == 'walk']['distance'].sum()
-                walking_time = sum(parse_travel_time(t) for t in walking_legs[walking_legs['mode'] == 'walk']['trav_time'])
                 
                 # Parse times
                 current_departure = parse_time_24plus(current_pt_leg['dep_time'])
@@ -176,7 +175,6 @@ def get_pt_transfers_statistics(csv_file):
                     'line_type_change': line_type_change,
                     'walking_legs_between': len(walking_legs),
                     'walking_distance': walking_distance,
-                    'walking_time': str(walking_time),
                     'current_pt_departure': str(current_departure.time()) if current_departure else '',
                     'current_pt_arrival': str(current_arrival.time()) if current_arrival else '',
                     'next_pt_departure': str(next_departure.time()) if next_departure else '',
@@ -481,7 +479,7 @@ def load_canton_stop_mapping(stops_dir):
     
     print(f"Loading canton stop data from {stops_dir}...")
     
-    if not stops_dir.exists():
+    if not os.path.exists(stops_dir):
         print(f"Error: {stops_dir} directory not found!")
         return {}
     
@@ -603,10 +601,6 @@ def get_transfer_matrix_data(data_path, output_dir, stops_dir):
     """
     Main function to process transfer data and generate canton-grouped output file.
     """
-    stops_dir = None
-    output_dir = None
-    data_path = None
-
     print("=" * 60)
     print("SWISS PT TRANSFER DATA PROCESSING PIPELINE")
     print("=" * 60)
