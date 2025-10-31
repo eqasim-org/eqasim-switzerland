@@ -368,7 +368,7 @@ def aggregate_stop_transfers(df):
     return result
 
 
-def add_all_pt_boardings(stop_data):
+def add_all_pt_boardings(stop_data, csv_file):
     """
     Add ALL PT boardings to the total_boardings count from output_legs.csv.
     This includes both transfer boardings and standalone PT trips.
@@ -376,7 +376,7 @@ def add_all_pt_boardings(stop_data):
     legs_df = None
     try:
         print("Loading output_legs.csv to count PT boardings...")
-        legs_df = pd.read_csv('output_legs.csv', sep=';')
+        legs_df = pd.read_csv(csv_file, sep=';', compression='gzip')
         
         # Filter for PT legs only
         pt_legs = legs_df[legs_df['mode'] == 'pt'].copy()
@@ -478,8 +478,9 @@ def load_canton_stop_mapping(stops_dir):
     base_to_canton = {}
     
     print(f"Loading canton stop data from {stops_dir}...")
+    stops_dir = Path(stops_dir)  # Convert string to Path object
     
-    if not os.path.exists(stops_dir):
+    if not stops_dir.exists():
         print(f"Error: {stops_dir} directory not found!")
         return {}
     
@@ -613,7 +614,7 @@ def get_transfer_matrix_data(data_path, output_dir, stops_dir):
     stop_data = aggregate_stop_transfers(df)
 
     # Step 3: Add all PT boardings from output_legs.csv (otherwise only transfer data present in stats)
-    stop_data, legs_df = add_all_pt_boardings(stop_data)
+    stop_data, legs_df = add_all_pt_boardings(stop_data, data_path)
     print(f"Final data includes {len(stop_data)} base stops total")
     
     # Step 4: Build mapping from base stop IDs to full stop IDs
@@ -651,7 +652,7 @@ def get_transfer_matrix_data(data_path, output_dir, stops_dir):
 
     # Step 10: Save canton-grouped JSON
     canton_output_file = "stop_transfer_data_by_canton.json"
-    output_directory = os.join(output_dir, "public", "data", canton_output_file)
+    output_directory = os.path.join(output_dir, "public", "data", canton_output_file)
     with open(output_directory, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, indent=2, ensure_ascii=False)
     
