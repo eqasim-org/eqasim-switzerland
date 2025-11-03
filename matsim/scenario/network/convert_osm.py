@@ -21,14 +21,20 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     
     context.config("data_path")        
-    context.config("export_detailed_network", False)
-    context.config("simplify_network_in_eqasim", False)
+    context.config("export_detailed_network", False)    
     context.config("correct_links_capacity", False)
     context.config("minimum_speed", 3) #in km/h
     context.config("input_downsampling")
     context.config("add_trafic_lights", False)
     context.config("assign_elevations", False)
     context.config("parseTurnRestrictions", True)
+    context.config("simplify_network_in_eqasim", False)
+    # only if simplify network is true
+    context.config("remove_network_loops", True)
+    context.config("remove_replicate_links", True)
+    context.config("remove_nodes_with_no_intersection", True)
+    context.config("correct_speeds", True)
+    context.config("ensure_network_connectivity", True)
 
 def execute(context):
     network_file = context.stage("data.osm.clean")
@@ -164,7 +170,13 @@ def execute(context):
 
         # Simplify the network if requested, merge short links and remove loops and unconnected links
         if context.config("simplify_network_in_eqasim") :
-            net, stats = networkCleaner(net).run()
+            net, stats = networkCleaner(net).run(
+                remove_network_loops=context.config("remove_network_loops"),
+                remove_replicate_links=context.config("remove_replicate_links"),
+                remove_nodes_with_no_intersection=context.config("remove_nodes_with_no_intersection"),
+                correct_speeds=context.config("correct_speeds"),
+                ensure_network_connectivity=context.config("ensure_network_connectivity")
+            )
             # Save stats
             with open("%s/statistics_of_cleaning_network.json" % context.path(), "w") as f:
                 json.dump(stats, f, indent=4) 

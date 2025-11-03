@@ -15,54 +15,65 @@ class networkCleaner():
         self.nodes = network.nodes.copy()        
         self.network = network
 
-    def run(self):
-        stats = self.clean_network()
+    def run(self, remove_network_loops= True, remove_replicate_links= True,
+                  remove_nodes_with_no_intersection= True, correct_speeds= True,
+                  ensure_network_connectivity= True):
+        stats = self.clean_network(remove_network_loops, remove_replicate_links, remove_nodes_with_no_intersection, 
+                                   correct_speeds, ensure_network_connectivity)
         self.network.nodes = self.nodes
         self.network.links = self.links
         return self.network, stats
 
-    def clean_network(self):
+    def clean_network(self, remove_network_loops= True, remove_replicate_links= True,
+                            remove_nodes_with_no_intersection= True, correct_speeds= True,
+                            ensure_network_connectivity= True):
         stats = dict()
 
         """All network should be considered, because intersections could be with (pt) and (pt,car)"""
         df = self.links
 
         # Removing loops
-        sel = (df['from_node'] == df['to_node'])
-        stats["removed_loops"] = int(sel.sum())
-        logger.info("There are %d loops in the network that are removed." % stats["removed_loops"] )
-        df = df[~sel].reset_index(drop=True)
+        if remove_network_loops:
+            sel = (df['from_node'] == df['to_node'])
+            stats["removed_loops"] = int(sel.sum())
+            logger.info("There are %d loops in the network that are removed." % stats["removed_loops"] )
+            df = df[~sel].reset_index(drop=True)
 
         # Remove replicated links
-        len_df = len(df)
-        df = df.drop_duplicates(subset=['length','modes','from_node', 'to_node', 'capacity'],
-                                ignore_index=True)
-        stats["removed_link_duplicates"] = len_df-len(df)
-        logger.info("There are %d link duplicates in the network that are removed." % stats["removed_link_duplicates"] )                
-        
+        if remove_replicate_links:            
+            len_df = len(df)
+            df = df.drop_duplicates(subset=['length','modes','from_node', 'to_node', 'capacity'],
+                                    ignore_index=True)
+            stats["removed_link_duplicates"] = len_df-len(df)
+            logger.info("There are %d link duplicates in the network that are removed." % stats["removed_link_duplicates"] )                
+            
         # Removing nodes with no intersection
-        logger.info("Removing nodes that do not represent an intersection.")
-        df, stats2 = self.merge_link_chains(df)
+        if remove_nodes_with_no_intersection:
+            logger.info("Removing nodes that do not represent an intersection.")
+            df, stats2 = self.merge_link_chains(df)
+            stats.update(stats2)
         
         # Removed links that are not connected to the whole graph
-        logger.info("Remove unconnected links")
-        cond = "disallowedNextLinks" in self.network.link_attrs["name"].unique()
-        func = self.remove_unconnected_links_with_turns_restrictions if cond else self.remove_unconnected_links
-        df, num_removed = func(df)        
-        stats["removed_unconnected_links"] = num_removed
+        if ensure_network_connectivity:
+            logger.info("Remove unconnected links")
+            cond = "disallowedNextLinks" in self.network.link_attrs["name"].unique()
+            func = self.remove_unconnected_links_with_turns_restrictions if cond else self.remove_unconnected_links
+            df, num_removed = func(df)        
+            stats["removed_unconnected_links"] = num_removed            
 
-        self.links = df
-        stats.update(stats2)
+        self.links = df        
         
-        # Limit the speed limit in the network
-        logger.info("Change the infinit freespeed to 85.")
-        # This is also done in : https://github.com/eqasim-org/eqasim-java/blob/develop/core/src/main/java/org/eqasim/core/scenario/preparation/AdjustLinkLength.java#L9
-        self.links.loc[self.links.freespeed.apply(np.isinf),"freespeed"] = 85
-        self.links.loc[self.links.freespeed<20/3.6,"freespeed"] = 20/3.6
+        if correct_speeds:
+            # Limit the speed limit in the network
+            logger.info("Change the infinit freespeed to 85.")
+            # This is also done in : https://github.com/eqasim-org/eqasim-java/blob/develop/core/src/main/java/org/eqasim/core/scenario/preparation/AdjustLinkLength.java#L9
+            self.links.loc[self.links.freespeed.apply(np.isinf),"freespeed"] = 85
+            self.links.loc[self.links.freespeed<20/3.6,"freespeed"] = 20/3.6
 
+        # Update nodes dataframe to keep only the nodes present in the links
         unique_nodes = set(df.from_node.tolist() + df.to_node.tolist())
         self.nodes = self.nodes[self.nodes.node_id.isin(unique_nodes)].reset_index(drop=True)
-        
+            
         if "attributes" not in self.links:
             warnings.warn("Attributes are not present in the links dataframe.", category=UserWarning)
         

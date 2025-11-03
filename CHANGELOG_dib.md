@@ -25,6 +25,14 @@ This process will:
 - Remove nodes that have one incoming link and one outgoing link with no changes in link attributes (speed, capacity, lanes)
 - Remove unconnected links (some links are not connected to the whole network)
 
+If you want to have more control over what it does, you have five new parameters for more targeted corrections on the network:
+
+- `remove_network_loops`: Remove links that are simple loops (where `from_node == to_node`)
+- `remove_replicate_links`: Remove links that are replicated in the network
+- `remove_nodes_with_no_intersection`: Remove nodes where there is no intersection
+- `correct_speeds`: Correct speeds at some links where they are infinite or 0
+- `ensure_network_connectivity`: Remove nodes that are not connected to the whole network
+
 ## Elevations
 If you want to have an elevation attribute for each node (z-coordinate), set `assign_elevations: true`.
 

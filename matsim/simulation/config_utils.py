@@ -54,7 +54,7 @@ def adjust_pt_routing_parameters(context, parameters):
     config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
     assert os.path.exists(config_path)
 
-    pt_modes = ["rail", "subway", "ferry", "tram", "funicular", "cable-car", "gondola", "other"]
+    pt_modes = ["bus", "rail", "subway", "ferry", "tram", "funicular", "cable-car", "gondola", "other"]
     penalty_intermodal = parameters["raptorPenalties:transfer_intermodal"]
     penalty_rail       = parameters["raptorPenalties:transfer_rail"]
     penalty_other      = parameters["raptorPenalties:transfer_other"]
