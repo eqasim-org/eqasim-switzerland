@@ -135,14 +135,14 @@ def create_anonymization_plots():
     
     # Load original data for comparison
     spatial_files = [
-        'anonymized_10k_donut_geomask.csv',
-        'anonymized_10k_k_anonymity.csv', 
-        'anonymized_10k_differential_privacy.csv',
-        'anonymized_10k_voronoi_mask.csv'
+        'full_donut_geomask.csv',
+        'full_k_anonymity.csv', 
+        'full_differential_privacy.csv',
+        'full_voronoi.csv'
     ]
     
     # Get original coordinates from first file
-    df_orig = pd.read_csv('statpop_sample_10k.csv')
+    df_orig = pd.read_csv('statpop_original_zurich.csv')
     orig_x = df_orig['home_x'].values
     orig_y = df_orig['home_y'].values
     
