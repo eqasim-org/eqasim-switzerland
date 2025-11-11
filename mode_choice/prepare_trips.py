@@ -49,5 +49,9 @@ def execute(context):
     df_spatial["preceding_purpose"] = df_spatial["preceding_purpose"].astype(str)
     df_spatial["mode"] = df_spatial["mode"].astype(str)
     df_spatial["crowfly_distance"] = df_spatial.following_geometry.distance(df_spatial.preceding_geometry)
-
+    
+    df_spatial['origin_x'] = df_spatial.preceding_geometry.x
+    df_spatial['origin_y'] = df_spatial.preceding_geometry.y
+    df_spatial['destination_x'] = df_spatial.following_geometry.x
+    df_spatial['destination_y'] = df_spatial.following_geometry.y
     return df_spatial

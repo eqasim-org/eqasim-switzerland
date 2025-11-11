@@ -9,6 +9,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from typing import Dict, List, Tuple, Optional, Union
 import logging
+import time
 from ..network.network_processor import NetworkProcessor
 
 logger = logging.getLogger(__name__)
@@ -221,7 +222,62 @@ class CarTripRouter:
         }, index=trips.index)
         return df
 
+    def router_trips_dataframe(self, df, congestion: bool=True, batch_size: int=512, departure_hour: int=None) -> pd.DataFrame:
+        """
+        Route all trips in the provided DataFrame.
 
+        Args:
+            df: DataFrame with trip data, including origin and destination coordinates.
+            congestion: Whether to consider congestion data (default: True).
+            batch_size: Number of trips to route in one batch (default: 512).
+            departure_hour: Departure hour as integer (0-23). If None, departure time should be in the DataFrame in seconds after midnight.
+
+        Returns:
+            DataFrame with routing results, including access distances and total travel times.
+        """
+        df = df[['person_id', 'trip_index', 
+                 'origin_x', 'origin_y', 
+                 'destination_x', 'destination_y', 
+                 'departure_time']].reset_index(drop=True).copy()
+        # Extract departure hours
+        if departure_hour is None:
+            departure_hours = (df['departure_time'] // 3600).astype(int) % 24
+        else:
+            departure_hours = pd.Series(departure_hour, index=df.index)
+
+        logger.info("Starting car routing process ...")
+        logger.info(f"\tBatch size: {batch_size}")
+        logger.info(f"\tConsidering congestion: {congestion}")
+        logger.info(f"\tThe graph type used: {self.graph_type}")        
+        
+        # Start routing
+        self.results = []
+        total_trips = len(df)
+        routed_count = 0    
+        iteration = 0    
+        start_time = time.time()
+        for hour in range(24):
+            hour_trips = df[departure_hours == hour]
+            if not hour_trips.empty:
+                for start_idx in range(0, len(hour_trips), batch_size):
+                    end_idx = start_idx + batch_size
+                    batch_trips = hour_trips.iloc[start_idx:end_idx]
+                    batch_results = self.route_batch_trips(batch_trips, departure_hour=hour, congestion=congestion)
+                    batch_results["person_id"] = batch_trips["person_id"].values
+                    batch_results["trip_index"] = batch_trips["trip_index"].values
+                    batch_results["departure_time"] = batch_trips["departure_time"].values
+                    self.results.append(batch_results)
+                    routed_count += len(batch_trips) 
+                    iteration += 1
+                    if iteration % 10 == 0:                   
+                        logger.info(f"  Routed batch of {len(batch_trips)} trips (total routed: {routed_count}/{total_trips})")
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"Completed routing of {routed_count} trips in {elapsed_time:.2f} seconds.")
+        # Append results to trips DataFrame
+        results_df = pd.concat(self.results, ignore_index=True)   
+        del self.results
+        return results_df
 
 def config(context):
     pass
