@@ -54,4 +54,20 @@ def execute(context):
     df_spatial['origin_y'] = df_spatial.preceding_geometry.y
     df_spatial['destination_x'] = df_spatial.following_geometry.x
     df_spatial['destination_y'] = df_spatial.following_geometry.y
-    return df_spatial
+    
+    df_spatial["trip_id"] = df_spatial["person_id"].astype(str) + "_" + df_spatial["trip_index"].astype(str)
+    
+    return df_spatial[[
+        "person_id",
+        "trip_index",
+        "trip_id",
+        "preceding_purpose",
+        "following_purpose",
+        "departure_time",
+        "mode",
+        "crowfly_distance",
+        "origin_x",
+        "origin_y",
+        "destination_x",
+        "destination_y"
+    ]]

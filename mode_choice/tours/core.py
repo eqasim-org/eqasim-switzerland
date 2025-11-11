@@ -2,6 +2,10 @@ from typing import List, Dict, Any, Tuple
 import pandas as pd
 from itertools import product
 from joblib import Parallel, delayed
+import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Modes we consider
 POSSIBLE_MODES = set(['car', 'public_transport', 'bike', 'walk', 'car_passenger'])
@@ -21,11 +25,16 @@ def get_possible_mode_combinations_parallel(distances: List[List[float]],
                                             preceding_activities: List[List[str]] = None,
                                             following_activities: List[List[str]] = None
                                             ) -> List[Tuple[str, ...]]:
+    
+    logger.info("Starting parallel computation of possible mode combinations for each tour")
+    start_time = time.time()
     results = Parallel(n_jobs=-1)(
         delayed(get_possible_mode_combinations)(d, p, pa, fa)
         for d, p, pa, fa in 
         zip(distances, persons, preceding_activities, following_activities)
     )
+    end_time = time.time()
+    logger.info(f"\t Parallel computation for {len(results)} tours completed in {end_time - start_time:.2f} seconds")
     return results
 
 def get_possible_mode_combinations(distances: List[float],

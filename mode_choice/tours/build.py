@@ -7,26 +7,26 @@ import geopandas as gpd
 import numpy as np
 
 def configure(context):
-    context.stage("mode_choice.prepare_trips")
+    context.stage("mode_choice.trips.prepare_trips")
     context.stage("data.constants")
     context.stage("synthesis.population.enriched")
     context.stage("mode_choice.tours.core")
 
 def execute(context):
-    df_trips = context.stage("mode_choice.prepare_trips")[
-        ["person_id","trip_index","preceding_purpose","following_purpose","crowfly_distance"]]
+    df_trips = context.stage("mode_choice.trips.prepare_trips")[
+        ["person_id","trip_index","trip_id","preceding_purpose","following_purpose","crowfly_distance"]]
 
-    # 1. a tour is and home home activity, thus each home activity defines a tour end point
+    # 1. a tour is a sequence of trips that starts and ends at home, thus each home activity defines a tour start point
     ### make sure dataframe is sorted
     df_trips = df_trips.sort_values(['person_id', 'trip_index'])
-    ### Detect trip ends a tour (destination == Home)
-    df_trips['tour_end'] = (df_trips["following_purpose"].eq("home")).astype(int)
-    ### Compute tour index as cumulative sum of tour ends per person
-    df_trips['tour_index'] = df_trips.groupby('person_id')['tour_end'].cumsum()
+    ### Detect trip starts a tour (origin == Home)
+    df_trips['tour_start'] = (df_trips["preceding_purpose"].eq("home")).astype(int)
+    ### Compute tour index as cumulative sum of tour starts per person
+    df_trips['tour_index'] = df_trips.groupby('person_id')['tour_start'].cumsum()
 
     # 2. aggregate trips into tours
     df_tours = df_trips.groupby(['person_id', 'tour_index']).agg({
-        'trip_index': list,
+        'trip_id': list,
         'preceding_purpose': list,
         'following_purpose': list,
         'crowfly_distance': list
@@ -36,7 +36,10 @@ def execute(context):
     # 3. get person attributes
     c = context.stage("data.constants")
     df_persons = context.stage("synthesis.population.enriched")[
-        ["person_id","age","car_availability","driving_license","number_of_bikes_class","is_car_passenger"]]
+        ["person_id","age","car_availability","driving_license","number_of_bikes_class","is_car_passenger"]
+        ].copy()
+    
+    # process availability columns to boolean
     df_persons['car_availability'] = (df_persons['car_availability']!=c.CAR_AVAILABILITY_NEVER).astype(bool)
     df_persons['bike_availability'] = (df_persons['number_of_bikes_class']!=c.BIKE_AVAILABILITY_FOR_NONE).astype(bool)
     df_persons['is_car_passenger'] = df_persons['is_car_passenger'].fillna(False).astype(bool)
@@ -57,6 +60,6 @@ def execute(context):
     df_tours["mode_candidates"] = res
 
     # 5. finalize tours dataframe
-    df_tours = df_tours[["person_id","trip_index","mode_candidates"]]
-    df_tours = df_tours.explode("mode_candidates")
+    df_tours["Euclidean_distance_km"] = df_tours["crowfly_distance"].apply(lambda x: np.array(x)/1000)
+    df_tours = df_tours[["person_id","trip_id","tour_id","Euclidean_distance_km","mode_candidates"]]    
     return df_tours

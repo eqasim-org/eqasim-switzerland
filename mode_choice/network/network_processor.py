@@ -44,7 +44,7 @@ class NetworkProcessor:
         Returns:
             Dictionary containing links and nodes data
         """
-        logger.info(f"Loading network from {self.network_file}")
+        logger.info(f"\t Reading network from {self.network_file}")
         net = read_network(self.network_file)
         
         # make sure id is str
@@ -66,7 +66,7 @@ class NetworkProcessor:
         
         # save
         self.network = net
-        logger.info(f"Loaded {len(self.network.links)} links and {len(self.network.nodes)} nodes")
+        logger.info(f"\t Loaded {len(self.network.links)} links and {len(self.network.nodes)} nodes")
 
     def load_congestion_data(self):
         """
@@ -83,7 +83,7 @@ class NetworkProcessor:
             logger.warning("Congestion file does not exist")
             return None
         
-        logger.info(f"Loading congestion data from {self.congestion_file}")
+        logger.info(f"\t Reading congestion data from {self.congestion_file}")
         
         # Create renaming and dtypes map for congestion columns
         renaming_map = {"LINK": "link_id"}
@@ -119,7 +119,7 @@ class NetworkProcessor:
         # store congestion data
         self.congestion_data = congestion_data
         self.congestion_aware = True
-        logger.info(f"Loaded congestion data for {len(congestion_data)} links")        
+        logger.info(f"\t Loaded congestion data for {len(congestion_data)} links")        
     
     def created_congestion_aware_network(self):
         """
@@ -185,7 +185,7 @@ class NetworkProcessor:
         if self.network is None:
             self.load_network()
             
-        logger.info("Creating igraph graph from MATSim network")
+        logger.info("\t Creating igraph graph from MATSim network")
 
         graph = Graph(directed=True)
         
@@ -216,7 +216,7 @@ class NetworkProcessor:
         if self.network is None:
             self.load_network()
             
-        logger.info("Creating NetworkX graph from MATSim network")
+        logger.info("\t Creating NetworkX graph from MATSim network")
 
         graph = nx.DiGraph()
         
@@ -246,15 +246,15 @@ class NetworkProcessor:
         if self.network is None:
             self.load_network()
             
-        logger.info("Creating Pandana graph from MATSim network")
+        logger.info("\t Creating Pandana graph from MATSim network")
 
         nodes = self.network.nodes                
         links = self.created_congestion_aware_network()
         
         # get indices        
         node_id_map = dict(zip(nodes["node_id"], nodes.index))
-        from_nodes = links[["from_node"]].map(lambda x: node_id_map.get(x)).astype('int32')["from_node"]
-        to_nodes = links[["to_node"]].map(lambda x: node_id_map.get(x)).astype('int32')["to_node"]
+        from_nodes = links["from_node"].map(lambda x: node_id_map.get(x)).astype('int32')
+        to_nodes = links["to_node"].map(lambda x: node_id_map.get(x)).astype('int32')
 
         # columns
         travel_time_cols = ["length"] + [col for col in links.columns if "travel_time" in col]
@@ -269,15 +269,15 @@ class NetworkProcessor:
         )
         
         self.graph = graph
-        logger.info(f"Created Pandana graph with {len(nodes)} nodes and {len(links)} edges")
+        logger.info(f"\t Created Pandana graph with {len(nodes)} nodes and {len(links)} edges")
 
 
 
 
-def config(context):
+def configure(context):
     pass
 
-def excute(context):
+def execute(context):
     return NetworkProcessor
 
 

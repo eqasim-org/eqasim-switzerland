@@ -1,7 +1,7 @@
 
 
-def config(context):
+def configure(context):
     pass
 
-def excute(context):
+def execute(context):
     pass

@@ -38,11 +38,13 @@ class CarTripRouter:
         """
         Build the routing graph and prepare for routing.
         """
+        logger.info("Building routing graph ...")
         if self.network_processor.graph is None:
             self.network_processor.build()
         self.graph = self.network_processor.graph
 
         # build spatial index for nodes
+        logger.info("Building spatial index for nodes ...")
         net = self.network_processor.network
         node_coords = np.column_stack((net.nodes['x'], net.nodes['y']))
         self._node_kdtree = cKDTree(node_coords)
@@ -63,6 +65,8 @@ class CarTripRouter:
             self.route_batch_trips = self.route_batch_trips_pandana 
         else:
             raise ValueError(f"Unsupported graph type: {self.graph_type}")
+        
+        logger.info("CarTripRouter is ready for routing.")
 
     def nearest_node(self, x: Union[List[float],float], y: Union[List[float],float]) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -235,6 +239,10 @@ class CarTripRouter:
         Returns:
             DataFrame with routing results, including access distances and total travel times.
         """
+        if self.graph is None:
+            logger.warning("Router graph is not built yet. Building now...")
+            self.build()
+        
         df = df[['person_id', 'trip_index', 
                  'origin_x', 'origin_y', 
                  'destination_x', 'destination_y', 
@@ -270,19 +278,19 @@ class CarTripRouter:
                     routed_count += len(batch_trips) 
                     iteration += 1
                     if iteration % 10 == 0:                   
-                        logger.info(f"  Routed batch of {len(batch_trips)} trips (total routed: {routed_count}/{total_trips})")
+                        logger.info(f"\t Routing progress: {routed_count}/{total_trips} trips routed")
         
         elapsed_time = time.time() - start_time
-        logger.info(f"Completed routing of {routed_count} trips in {elapsed_time:.2f} seconds.")
+        logger.info(f"\t Completed routing of {routed_count} trips in {elapsed_time:.2f} seconds.")
         # Append results to trips DataFrame
         results_df = pd.concat(self.results, ignore_index=True)   
         del self.results
         return results_df
 
-def config(context):
+def configure(context):
     pass
 
-def excute(context):
+def execute(context):
     return CarTripRouter
 
 
