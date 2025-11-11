@@ -1,10 +1,8 @@
-import pandas as pd
-import numpy as np
 import os
 
 def config(context):
     context.stage("mode_choice.prepare_trips")
-    context.stage("mode_choice.car.router")
+    context.stage("mode_choice.network.car_router")
     context.stage("mode_choice.network.network_processor")
     
     context.config("data_path")

@@ -10,7 +10,7 @@ from scipy.spatial import cKDTree
 from typing import Dict, List, Tuple, Optional, Union
 import logging
 import time
-from ..network.network_processor import NetworkProcessor
+from .network_processor import NetworkProcessor
 
 logger = logging.getLogger(__name__)
 
