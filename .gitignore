@@ -10,3 +10,5 @@ slurm*
 *.out
 *.sh
 !docker_run.sh
+*.ipynb_checkpoints
+*.ipynb

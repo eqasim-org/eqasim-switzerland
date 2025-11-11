@@ -5,7 +5,6 @@ We define the tour as a sequence of trips that starts and ends at home.
 import pandas as pd
 import geopandas as gpd
 import numpy as np
-import mode_choice.tours.core as tours_core
 
 def configure(context):
     context.stage("mode_choice.prepare_trips")
@@ -48,12 +47,13 @@ def execute(context):
                           on="person_id", how="left")
     
     # 4. get all possible mode combinations for each tour
-    context.stage("mode_choice.tours.core")# make sure the stage is executed so that any function changes are taken into account
+    tours_finder = context.stage("mode_choice.tours.core")# make sure the stage is executed so that any function changes are taken into account
     persons_attributes = ["age","car_availability","driving_license","bike_availability","is_car_passenger"]
-    res = tours_core.get_possible_mode_combinations_parallel(df_tours.crowfly_distance,
-                                              df_tours[persons_attributes].to_dict(orient="records"),
-                                              df_tours.preceding_purpose,
-                                              df_tours.following_purpose)
+    res = tours_finder( df_tours.crowfly_distance,
+                        df_tours[persons_attributes].to_dict(orient="records"),
+                        df_tours.preceding_purpose,
+                        df_tours.following_purpose)
+    
     df_tours["mode_candidates"] = res
 
     # 5. finalize tours dataframe

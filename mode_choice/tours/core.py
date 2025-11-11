@@ -129,4 +129,4 @@ def spatial_continuity_filter(all_combinations: List[Tuple[str, ...]],
 def configure(context):
     pass    
 def execute(context):
-    pass
+    return get_possible_mode_combinations_parallel
