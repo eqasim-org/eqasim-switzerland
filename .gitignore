@@ -12,3 +12,4 @@ slurm*
 !docker_run.sh
 *.ipynb_checkpoints
 *.ipynb
+output
