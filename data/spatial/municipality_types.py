@@ -15,22 +15,20 @@ def execute(context):
 
     df_types = pd.read_excel("%s/spatial/Raumgliederungen.xlsx" % data_path,
                              names=["municipality_id", "TYP"],
-                             usecols=[0, 7],
+                             usecols=[0, 6],
                              skiprows=2,
                              nrows=2132,
                              )
     df_municipalities = context.stage("data.spatial.municipalities")[0]
 
     # Rewrite classification based on the official division
-    df_types.loc[df_types["TYP"] == 11, "municipality_type"] = "urban"
-    df_types.loc[df_types["TYP"] == 12, "municipality_type"] = "urban"
-    df_types.loc[df_types["TYP"] == 13, "municipality_type"] = "urban"
-    df_types.loc[df_types["TYP"] == 21, "municipality_type"] = "suburban"
-    df_types.loc[df_types["TYP"] == 22, "municipality_type"] = "suburban"
-    df_types.loc[df_types["TYP"] == 23, "municipality_type"] = "suburban"
-    df_types.loc[df_types["TYP"] == 31, "municipality_type"] = "rural"
-    df_types.loc[df_types["TYP"] == 32, "municipality_type"] = "rural"
-    df_types.loc[df_types["TYP"] == 33, "municipality_type"] = "rural"
+    df_types.loc[df_types["TYP"] == 0, "municipality_type"] = "rural"
+    df_types.loc[df_types["TYP"] == 1, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 2, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 3, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 4, "municipality_type"] = "suburban"
+    df_types.loc[df_types["TYP"] == 5, "municipality_type"] = "suburban"
+    df_types.loc[df_types["TYP"] == 6, "municipality_type"] = "rural"
 
     df_types["municipality_type"] = df_types["municipality_type"].astype("category")
     df_types = df_types[["municipality_id", "municipality_type"]]

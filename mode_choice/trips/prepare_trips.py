@@ -15,7 +15,9 @@ import numpy as np
 def configure(context):
     context.stage("synthesis.population.trips")
     context.stage("synthesis.population.spatial.locations")
-
+    context.stage("data.spatial.municipality_types")
+    context.stage("data.spatial.municipalities")
+    
 def execute(context):
     # read trips
     df_trips = context.stage("synthesis.population.trips")
@@ -43,6 +45,9 @@ def execute(context):
         "geometry": "following_geometry"
     }), how = "left", on = ["person_id", "following_activity_index"])
     
+    # transform it into geopandas dataframe
+    df_spatial = gpd.GeoDataFrame(df_spatial, crs = "EPSG:2056", geometry = "preceding_geometry")
+
     # get coordinates
     df_spatial['origin_x'] = df_spatial.preceding_geometry.x
     df_spatial['origin_y'] = df_spatial.preceding_geometry.y
@@ -57,17 +62,18 @@ def execute(context):
 
     # determine destination type    
     df_municipality_type = context.stage("data.spatial.municipality_types")
-    df_municipalities,_ = context.stage("data.spatial.municipalities")
-    df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_type","geometry"]]
+    df_municipalities, _ = context.stage("data.spatial.municipalities")
+    df_municipalities = df_municipalities.merge(df_municipality_type, on="municipality_id")
+    df_municipalities = gpd.GeoDataFrame(df_municipalities[["municipality_type", "geometry"]], crs="EPSG:2056")
 
     # Spatial join for origin municipality
     df_origin = gpd.GeoDataFrame(df_spatial, geometry="preceding_geometry", crs="EPSG:2056")
-    df_origin = df_origin.sjoin(df_municipalities, how="left", predicate="intersects")
+    df_origin = df_origin.sjoin_nearest(df_municipalities, how="left")
     df_spatial["origin_municipality"] = df_origin["municipality_type"]
 
     # Spatial join for destination municipality
     df_dest = gpd.GeoDataFrame(df_spatial, geometry="following_geometry", crs="EPSG:2056")
-    df_dest = df_dest.sjoin(df_municipalities, how="left", predicate="intersects")
+    df_dest = df_dest.sjoin_nearest(df_municipalities, how="left")
     df_spatial["destination_municipality"] = df_dest["municipality_type"]
 
     # home municipality
@@ -75,9 +81,6 @@ def execute(context):
             columns={"origin_municipality":"home_municipality"}).drop_duplicates("person_id").reset_index(drop=True)    
     df_spatial = df_spatial.merge(homes, on="person_id", how="left")
     assert not df_spatial[["home_municipality","origin_municipality","destination_municipality"]].isna().any().any(), "Some trips have no municipality type!"
-
-    # transform it into geopandas dataframe
-    df_spatial = gpd.GeoDataFrame(df_spatial, crs = "EPSG:2056", geometry = "following_geometry")
     
     # compute crowfly distance
     df_spatial["crowfly_distance"] = df_spatial.following_geometry.distance(df_spatial.preceding_geometry)  
