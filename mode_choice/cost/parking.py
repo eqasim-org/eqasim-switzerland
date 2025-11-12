@@ -10,31 +10,28 @@ def configure(context):
 
 
 def execute(context):
-    # read the travel times
+    # read the travel times and trips
     travel_times = context.stage("mode_choice.travel_times.car").copy()
-    
+    trips = context.stage("mode_choice.trips.prepare_trips")[["person_id", "trip_index", "destination_municipality", "following_purpose","departure_time"]]
+    df = travel_times.merge(trips, on=["person_id", "trip_index"], how="left")
+
     # determine arrival time
-    travel_times["arrival_time"] = travel_times["departure_time"] + travel_times["total_travel_time"]
+    total_travel_time_sec = (df["travel_time_min"] + df["access_egress_time_min"]) * 60
+    df["arrival_time"] = df["departure_time"] + total_travel_time_sec
 
     # idensity last activity    
-    travel_times["is_last"] = travel_times["person_id"].shift(-1) != travel_times["person_id"]
+    df["is_last"] = df["person_id"].shift(-1) != df["person_id"]
 
     # compute activity duration
-    travel_times = travel_times.sort_values(
-        by=["person_id", "trip_index"]
-    ).reset_index(drop=True)
-    
-    travel_times["parking_duration_min"] = (np.clip(travel_times["departure_time"].shift(-1), 8*3600, 19*3600) - 
-                                            np.clip(travel_times["arrival_time"], 8*3600, 19*3600)) / 60.0
+    df = df.sort_values(by=["person_id", "trip_index"]).reset_index(drop=True)
 
-    travel_times.loc[travel_times["parking_duration_min"]<=0, "parking_duration_min"] = 0.0  # do not pay parking (duration out of bounds)
-    travel_times.loc[travel_times["is_last"].values, "parking_duration_min"] = 0.0 # do not pay parking (home parking at night)
+    df["parking_duration_min"] = (np.clip(df["departure_time"].shift(-1), 8*3600, 19*3600) - 
+                                  np.clip(df["arrival_time"], 8*3600, 19*3600)) / 60.0
 
-    travel_times["parking_duration_min"] = travel_times["parking_duration_min"].clip(0.0, 11 * 60.0)  # ensure max 11 hours (from 8am to 7pm)
+    df.loc[df["parking_duration_min"]<=0, "parking_duration_min"] = 0.0  # do not pay parking (duration out of bounds)
+    df.loc[df["is_last"].values, "parking_duration_min"] = 0.0 # do not pay parking (home parking at night)
 
-    # determine destination type
-    trips = context.stage("mode_choice.trips.prepare_trips")[["person_id", "trip_index", "destination_municipality", "following_purpose"]]
-    df = travel_times.merge(trips, on=["person_id", "trip_index"], how="left")
+    df["parking_duration_min"] = df["parking_duration_min"].clip(0.0, 11 * 60.0)  # ensure max 11 hours (from 8am to 7pm)
 
     # situations
     destination_urban = df.destination_municipality=="urban"

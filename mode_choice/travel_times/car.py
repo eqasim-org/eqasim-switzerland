@@ -59,10 +59,13 @@ def execute(context):
 
     ######################
     # finalize the output
-    df = trips[["person_id","trip_index","crowfly_distance"]]
+    df = trips[["person_id","trip_index","crowfly_distance"]].copy()
     
     # Euclidean distance in km
     df["Euclidean_distance_km"] = df["crowfly_distance"] * 1e-3
+
+    # router distance in km (this should be corrected once we make sure pandana is corrected)
+    df["distance_km"] = df["Euclidean_distance_km"] * context.config("car_distance_factor")
 
     # merge with travel times
     df = df.merge(
@@ -71,14 +74,7 @@ def execute(context):
         how="left"
     )
 
-    # router distance in km (this should be corrected once we make sure pandana is corrected)
-    df["distance_km"] = routed_trips["Euclidean_distance_km"] * context.config("car_distance_factor")
-
-    return routed_trips[["person_id","trip_index",
-                         "travel_time_min","access_egress_time_min",
-                         "distance_km","Euclidean_distance_km"]]
-    
-    
-    
-
+    return df[["person_id","trip_index",
+                "travel_time_min","access_egress_time_min",
+                "distance_km"]]
     

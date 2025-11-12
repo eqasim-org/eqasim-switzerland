@@ -1,6 +1,3 @@
-import pandas as pd
-import numpy as np
-import os
 
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
@@ -10,7 +7,7 @@ def configure(context):
 
 def execute(context):
     # read prepared trips
-    trips = context.stage("mode_choice.prepare_trips")[
+    trips = context.stage("mode_choice.trips.prepare_trips")[
         ["person_id","trip_index","crowfly_distance"]
     ].copy()
 
@@ -25,7 +22,7 @@ def execute(context):
     bike_speed = context.config("bike_speed_m_per_s")
     trips["travel_time_min"] = (trips["distance_km"]*1e3 / bike_speed) / 60
 
-    return trips[["person_id","trip_index","travel_time_min","distance_km","Euclidean_distance_km"]]
+    return trips[["person_id","trip_index","travel_time_min","distance_km"]]
 
     
     
