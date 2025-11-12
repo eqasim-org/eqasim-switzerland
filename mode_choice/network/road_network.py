@@ -1,18 +1,13 @@
-# -*- coding: utf-8 -*-
-
+"""
+I made this as a stage because it takes time to read the network from xml, but it is faster to read the pickle file,
+in case it was already created.
+"""
 import xopen
 import xml.etree.ElementTree as ET
 import pandas as pd
-
+import os
 import logging
 logger = logging.getLogger(__name__)
-
-"""
-It is partially based on the implementation from:
-https://github.com/matsim-vsp/matsim-python-tools/blob/master/matsim/Network.py
-
-Additional network readers may be integrated in the future to improve reading efficiency.
-"""
 
 class Network:
 
@@ -81,7 +76,6 @@ class Network:
             )
     
         return geo_net    
-
 
 def read_network(filename, skip_attributes=False):
     """Read a MATSim network.xml.gz file. Returns a Network object with dataframes
@@ -170,3 +164,35 @@ def read_network(filename, skip_attributes=False):
     link_attrs["link_id"] = link_attrs["link_id"].astype(str)
     
     return Network(nodes, links, node_attrs, link_attrs, network_attrs)
+
+def configure(context):
+    context.config("data_path")
+    context.config("dmc_network_file", 
+                   default=os.path.join(context.config("data_path"), "dmc", "switzerland_network.xml.gz"))
+
+def execute(context):
+    network_file = context.config("dmc_network_file")
+    
+    logger.info(f"\t Reading network from {network_file}")
+    net = read_network(network_file)
+    
+    # make sure id is str
+    net.links['link_id'] = net.links['link_id'].astype(str)
+    net.links['from_node'] = net.links['from_node'].astype(str)
+    net.links['to_node'] = net.links['to_node'].astype(str)
+    net.nodes['node_id'] = net.nodes['node_id'].astype(str)
+
+    # filter out non-car links
+    car_links = net.links["modes"].str.split(',').map(lambda x: "car" in x)
+    net.links = net.links[car_links].reset_index(drop=True)
+    net.nodes = net.nodes[net.nodes['node_id'].isin(
+        pd.unique(net.links['from_node'].tolist() + net.links['to_node'].tolist())
+    )].reset_index(drop=True)        
+
+    # del unecessary data
+    del net.link_attrs
+    del net.node_attrs
+    net.links = net.links[['link_id', 'from_node', 'to_node', 'length', 'freespeed', 'modes']]
+
+    logger.info(f"\t Loaded {len(net.links)} links and {len(net.nodes)} nodes")
+    return net

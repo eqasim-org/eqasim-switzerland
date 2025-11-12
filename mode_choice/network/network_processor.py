@@ -7,7 +7,7 @@ import os
 import pandas as pd
 
 import numpy as np
-from .network_reader import read_network
+from .road_network import read_network, Network
 from typing import Dict, Tuple, Optional
 import logging
 
@@ -19,20 +19,24 @@ class NetworkProcessor:
     Processes MATSim network data and creates a routing-ready graph with congestion information.
     """
     
-    def __init__(self, network_file: str, congestion_file: Optional[str] = None, graph_type: str = "igraph"):
+    def __init__(self, network_file: str = None, network: Network = None, 
+                 congestion_file: Optional[str] = None, graph_type: str = "igraph"):
         """
         Initialize the network processor.
         
         Args:
             network_file: Path to the MATSim network XML file
+            network: Network object (optional)
             congestion_file: Path to the congestion data file (optional)
+            graph_type: Type of graph to create ("igraph", "networkx", "pandana")
         """
         assert graph_type in ["igraph", "networkx", "pandana"], "Unsupported graph type"
-
+        assert (network_file is not None) or (network is not None), "Either network_file or network must be provided"
+        
         self.network_file = network_file
         self.congestion_file = congestion_file
         self.graph_type = graph_type        
-        self.network = None
+        self.network = network
         self.graph = None
         self.congestion_data = None
         self.congestion_aware = False
@@ -44,6 +48,9 @@ class NetworkProcessor:
         Returns:
             Dictionary containing links and nodes data
         """
+        if self.network is not None:
+            return 
+
         logger.info(f"\t Reading network from {self.network_file}")
         net = read_network(self.network_file)
         

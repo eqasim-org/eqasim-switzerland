@@ -254,9 +254,9 @@ class CarTripRouter:
             departure_hours = pd.Series(departure_hour, index=df.index)
 
         logger.info("Starting car routing process ...")
-        logger.info(f"\tBatch size: {batch_size}")
-        logger.info(f"\tConsidering congestion: {congestion}")
-        logger.info(f"\tThe graph type used: {self.graph_type}")        
+        logger.info(f"\t Batch size: {batch_size}")
+        logger.info(f"\t Considering congestion: {congestion}")
+        logger.info(f"\t The graph type used: {self.graph_type}")        
         
         # Start routing
         self.results = []

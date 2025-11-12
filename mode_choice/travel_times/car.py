@@ -4,6 +4,7 @@ def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
     context.stage("mode_choice.network.car_router")
     context.stage("mode_choice.network.network_processor")
+    context.stage("mode_choice.network.road_network")
     
     context.config("data_path")
 
@@ -20,14 +21,20 @@ def execute(context):
     network_file = context.config("dmc_network_file")
     congestion_file = context.config("dmc_congestion_file")
     
-    # prepare the router
-    router_class = context.stage("mode_choice.network.car_router")
-    network_processor_class = context.stage("mode_choice.network.network_processor")    
+    # get the road network
+    road_network = context.stage("mode_choice.network.road_network")
+
+    # prepare the network processor
+    network_processor_class = context.stage("mode_choice.network.network_processor")
     network_processor = network_processor_class(
             network_file=network_file,
+            network=road_network,
             congestion_file=congestion_file,
             graph_type=context.config("dmc_graph_type")
         )
+    
+    # get and build the router
+    router_class = context.stage("mode_choice.network.car_router")
     router = router_class(network_processor = network_processor)
     router.build()
 
