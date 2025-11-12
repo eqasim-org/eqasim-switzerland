@@ -15,6 +15,9 @@ def configure(context):
     context.config("dmc_graph_type", default="pandana")
     context.config("routing_batch_size", default=4096)
 
+    context.config("walk_speed_m_per_s", default=1.3) 
+    context.config("walk_distance_factor", default=1.3) # factor to account for indirect walk paths
+    context.config("car_distance_factor", 1.4) # factor to account for indirect car paths
 
 def execute(context):
     # get network and congestion file paths
@@ -45,7 +48,35 @@ def execute(context):
     routed_trips = router.router_trips_dataframe(trips, 
                                                  congestion=True, 
                                                  batch_size=context.config("routing_batch_size"))
-    return routed_trips
+
+    routed_trips["travel_time_min"] = routed_trips["total_travel_time"] / 60
+
+    # access_egress time in min
+    access_egress_distance = routed_trips["access_euc_distance"] + routed_trips["egress_euc_distance"]
+    walk_speed = context.config("walk_speed_m_per_s")
+    walk_factor = context.config("walk_distance_factor")
+    routed_trips["access_egress_time_min"] = (access_egress_distance * walk_factor) / (walk_speed * 60)
+
+    ######################
+    # finalize the output
+    df = trips[["person_id","trip_index","crowfly_distance"]]
+    
+    # Euclidean distance in km
+    df["Euclidean_distance_km"] = df["crowfly_distance"] * 1e-3
+
+    # merge with travel times
+    df = df.merge(
+        routed_trips[["person_id","trip_index","travel_time_min","access_egress_time_min"]],
+        on=["person_id","trip_index"],
+        how="left"
+    )
+
+    # router distance in km (this should be corrected once we make sure pandana is corrected)
+    df["distance_km"] = routed_trips["Euclidean_distance_km"] * context.config("car_distance_factor")
+
+    return routed_trips[["person_id","trip_index",
+                         "travel_time_min","access_egress_time_min",
+                         "distance_km","Euclidean_distance_km"]]
     
     
     

@@ -45,7 +45,7 @@ def execute(context):
                              "hasRegionalSubscription", "hasJuniorSubscription",
                              "hasGleis7Subscription", 'age']]
 
-    df = df.merge(df_persons, on="person_id", how="left")
+    df = trips.merge(df_persons, on="person_id", how="left")
     assert not df["age"].isna().any(), "Some persons have no age!"
 
     # compute the cost

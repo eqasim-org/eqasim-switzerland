@@ -33,7 +33,7 @@ def execute(context):
     travel_times["parking_duration_min"] = travel_times["parking_duration_min"].clip(0.0, 11 * 60.0)  # ensure max 11 hours (from 8am to 7pm)
 
     # determine destination type
-    trips = context.stage("mode_choice.trips.prepare_trips")[["person_id", "trip_index", "origin_municipality", "destination_municipality", "home_municipality"]]
+    trips = context.stage("mode_choice.trips.prepare_trips")[["person_id", "trip_index", "destination_municipality", "following_purpose"]]
     df = travel_times.merge(trips, on=["person_id", "trip_index"], how="left")
 
     # situations
@@ -48,7 +48,6 @@ def execute(context):
 
     parking_cost[pay_parking_urban]    = (df["parking_duration_min"][pay_parking_urban]/60.0) * context.config("parking_cost_per_hour_CHF_urban")
     parking_cost[pay_parking_suburban] = (df["parking_duration_min"][pay_parking_suburban]/60.0) * context.config("parking_cost_per_hour_CHF_suburban")    
-    
     
     df["parking_cost"] = np.clip(parking_cost, 0, 40)
     

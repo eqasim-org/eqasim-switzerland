@@ -4,7 +4,7 @@ import pyproj
 
 import data.spatial.cantons
 import data.spatial.municipalities
-import data.spatial.municipality_types
+from data.spatial.municipality_types import impute as impute_municipality_types
 import data.spatial.ovgk
 import data.spatial.utils
 import data.spatial.zones
@@ -85,7 +85,7 @@ def execute(context):
         "person_id", "municipality_id", 
         zone_type="municipality", point_type="home")
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
-    df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
+    df_spatial = impute_municipality_types(df_spatial, df_municipality_types)
 
     df_mz_households = pd.merge(
         df_mz_households, df_spatial[["person_id", "zone_id", "municipality_type"]],

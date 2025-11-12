@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 import data.spatial.cantons
-import data.spatial.municipality_types
+from data.spatial.municipality_types import impute as impute_municipality_types
 import data.spatial.ovgk
 import data.spatial.utils
 import data.spatial.zones
@@ -117,7 +117,7 @@ def execute(context):
         ["person_id", "municipality_id", "quarter_id", "canton_id", "geometry"]])
 
     # Impute municipality types
-    df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
+    df_spatial = impute_municipality_types(df_spatial, df_municipality_types)
 
     # Impute zones
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)

@@ -14,15 +14,18 @@ def execute(context):
         ["person_id","trip_index","crowfly_distance"]
     ].copy()
 
+    # Euclidean distance in km
+    trips["Euclidean_distance_km"] = trips["crowfly_distance"] * 1e-3
+
     # calculate biking distance
     bike_distance_factor = context.config("bike_distance_factor")
-    trips["distance_km"] = trips["crowfly_distance"] * bike_distance_factor * 1e-3
+    trips["distance_km"] = trips["Euclidean_distance_km"] * bike_distance_factor
     
     # calculate biking travel time in seconds
     bike_speed = context.config("bike_speed_m_per_s")
-    trips["travel_time_min"] = (trips["bike_distance_km"]*1e3 / bike_speed) / 60
-    
-    return trips
+    trips["travel_time_min"] = (trips["distance_km"]*1e3 / bike_speed) / 60
+
+    return trips[["person_id","trip_index","travel_time_min","distance_km","Euclidean_distance_km"]]
 
     
     
