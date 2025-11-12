@@ -9,7 +9,7 @@ def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
 
 def execute(context):
-    df = context.stage("mode_choice.trips.prepare_trips")[["person_id","trip_index"]].copy()
+    df = context.stage("mode_choice.trips.prepare_trips")[["person_id","trip_id"]].copy()
     df["travel_time_min"] = 0
     df["access_egress_time_min"] = 0
     df["waiting_time_min"] = 0

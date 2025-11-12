@@ -40,23 +40,19 @@ class TourUtility(BaseUtility):
     num_persons = 0
     
     @staticmethod
-    def init(tours=None, persons=None, travel_times=None):
+    def init(tours=None, persons=None, variables=None):
         # add row_id to tours (like index in pandas)
         tours = tours.with_row_index(name="tour_row_id")
 
         # Unpack travel times
         TourUtility.variables_by_mode = {
-            "car": travel_times['car'].lazy(),
-            "pt": travel_times['pt'].lazy(),
-            "bike": travel_times['bike'].lazy(),
-            "walk": travel_times['walk'].lazy(),
-            "car_passenger":travel_times['car_passenger'].lazy()
+            "car": variables['car'].lazy(),
+            "pt": variables['pt'].lazy(),
+            "bike": variables['bike'].lazy(),
+            "walk": variables['walk'].lazy(),
+            "car_passenger": variables['car_passenger'].lazy()
         }
         
-        # add person attributes to tours
-        if persons is not None:
-            tours = tours.join(persons, on="person_id", how="left")
-
         # make tours lazy
         TourUtility.tours = tours.lazy()
                   
@@ -67,28 +63,38 @@ class TourUtility(BaseUtility):
         # store persons info
         TourUtility.persons = tours["person_id"].unique()
         TourUtility.num_persons = len(TourUtility.persons)
-            
+
+        # if persons are provided, meaning their attributes are not in the variables
+        if persons is not None:
+            TourUtility.add_persons_attributes_to_variables(persons.lazy())
 
     @staticmethod
     def get_exploded_tours_for_utilities():
         if TourUtility.tours is None:
             raise RuntimeError("Tours are not initialized.")
     
-        cols = ["tour_row_id", "trip_key", "candidate_mode"]
+        cols = ["tour_row_id", "trip_id", "mode_candidates"]
 
         # Explode trips and candidate modes
         exploded_lazy = (
             TourUtility.tours.select(cols)
-            .explode(["trip_key", "candidate_mode"])
+            .explode(["trip_id", "mode_candidates"])
             .with_columns([
-            pl.col("candidate_mode").cast(pl.Categorical)
+            pl.col("mode_candidates").cast(pl.Categorical)
             ])
         ).collect()
-        
-        exploded_lazy = {mode: exploded_lazy.filter(pl.col("candidate_mode") == mode)
+
+        exploded_lazy = {mode: exploded_lazy.filter(pl.col("mode_candidates") == mode)
                          for mode in TourUtility.utility_estimators}
         return exploded_lazy
-    
+
+    @staticmethod
+    def add_persons_attributes_to_variables(persons: pl.LazyFrame):
+        for mode, variables_lazy in TourUtility.variables_by_mode.items():
+            # Join persons attributes with the variables
+            variables_lazy = variables_lazy.join(persons, on="person_id", how="left").collect() #do this now, I don't want a do it each time we compute utilities
+            TourUtility.variables_by_mode[mode] = variables_lazy.lazy()
+
     @staticmethod
     def compute_mode_utilities(mode: str) -> pl.LazyFrame:
         estimator = TourUtility.utility_estimators.get(mode)

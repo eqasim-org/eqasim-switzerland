@@ -11,12 +11,14 @@ class DMC:
                  parameters_file: str,
                  tours: pl.DataFrame,
                  persons: pl.DataFrame,
-                 travel_times: Dict[str, pl.DataFrame]
+                 variables: Dict[str, pl.DataFrame]
                  ):
         # Load parameters
         Parameters.from_yaml(parameters_file)
         # Init tour utility calculator
-        TourUtility.init(tours, persons, travel_times)
+        TourUtility.init(tours = tours, 
+                         persons = persons, 
+                         variables = variables)
 
     def run(self):
         tours = TourUtility.get_all_utilities().collect()
@@ -24,7 +26,7 @@ class DMC:
         return tours
     
 
-def config(context):
+def configure(context):
     pass
 
 def execute(context):

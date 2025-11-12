@@ -17,22 +17,16 @@ def configure(context):
     context.stage("synthesis.population.spatial.locations")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
-    context.stage("synthesis.population.enriched")
+    context.stage("mode_choice.trips.prepare_persons")
     
-
-MS_REGIONS = {'canton_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26], 
-              'cluster': [2, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 2, 0]}
-MS_REGIONS = pd.DataFrame(MS_REGIONS)
 
 def execute(context):
     # read trips
     df_trips = context.stage("synthesis.population.trips")
 
-    # add canton_id and region
-    persons = context.stage("synthesis.population.enriched")[["person_id","canton_id"]]
+    # add region
+    persons = context.stage("mode_choice.trips.prepare_persons")[["person_id","region"]]
     df_trips = df_trips.merge(persons, on="person_id", how="left")
-    df_trips = df_trips.merge(MS_REGIONS, on="canton_id", how="left")
-    df_trips = df_trips.rename(columns={"cluster":"region"})
 
     # read spatial data set
     df_trips["preceding_activity_index"] = df_trips["trip_index"]

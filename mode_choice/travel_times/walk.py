@@ -11,7 +11,7 @@ def configure(context):
 def execute(context):
     # read prepared trips
     trips = context.stage("mode_choice.trips.prepare_trips")[
-        ["person_id","trip_index","crowfly_distance"]
+        ["person_id","trip_id","crowfly_distance"]
     ].copy()
 
     # Euclidean distance in km
@@ -25,7 +25,7 @@ def execute(context):
     walk_speed = context.config("walk_speed_m_per_s")
     trips["travel_time_min"] = (trips["distance_km"]*1e3 / walk_speed) / 60
 
-    return trips[["person_id","trip_index","travel_time_min","distance_km"]]
+    return trips[["person_id","trip_id","travel_time_min","distance_km"]]
 
     
     

@@ -9,7 +9,7 @@ import numpy as np
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
     context.stage("data.constants")
-    context.stage("synthesis.population.enriched")
+    context.stage("mode_choice.trips.prepare_persons")
     context.stage("mode_choice.tours.core")
 
 def execute(context):
@@ -34,20 +34,10 @@ def execute(context):
     df_tours["tour_id"] = range(len(df_tours))
 
     # 3. get person attributes
-    c = context.stage("data.constants")
-    df_persons = context.stage("synthesis.population.enriched")[
-        ["person_id","age","car_availability","driving_license","number_of_bikes_class","is_car_passenger"]
+    df_persons = context.stage("mode_choice.trips.prepare_persons")[
+        ["person_id","age","car_availability","driving_license","bike_availability","is_car_passenger"]
         ].copy()
-    
-    # process availability columns to boolean
-    df_persons['car_availability'] = (df_persons['car_availability']!=c.CAR_AVAILABILITY_NEVER).astype(bool)
-    df_persons['bike_availability'] = (df_persons['number_of_bikes_class']!=c.BIKE_AVAILABILITY_FOR_NONE).astype(bool)
-    df_persons['is_car_passenger'] = df_persons['is_car_passenger'].fillna(False).astype(bool)
-    df_persons['driving_license'] = df_persons['driving_license'].fillna(False).astype(bool)
-    
-    df_tours = df_tours.merge(df_persons[
-                          ["person_id","age","car_availability","driving_license","bike_availability","is_car_passenger"]], 
-                          on="person_id", how="left")
+    df_tours = df_tours.merge(df_persons, on="person_id", how="left")
     
     # 4. get all possible mode combinations for each tour
     tours_finder = context.stage("mode_choice.tours.core")# make sure the stage is executed so that any function changes are taken into account
@@ -62,4 +52,6 @@ def execute(context):
     # 5. finalize tours dataframe
     df_tours["Euclidean_distance_km"] = df_tours["crowfly_distance"].apply(lambda x: np.array(x)/1000)
     df_tours = df_tours[["person_id","trip_id","tour_id","Euclidean_distance_km","mode_candidates"]]    
+    df_tours = df_tours.explode("mode_candidates")
+
     return df_tours

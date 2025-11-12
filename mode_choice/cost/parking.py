@@ -3,7 +3,6 @@ import numpy as np
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
     context.stage("mode_choice.travel_times.car")
-    context.stage("mode_choice.trips.prepare_trips")
 
     context.config("parking_cost_per_hour_CHF_urban", 1.0) #CHF per hour
     context.config("parking_cost_per_hour_CHF_suburban", 0.5) #CHF per hour
@@ -12,8 +11,9 @@ def configure(context):
 def execute(context):
     # read the travel times and trips
     travel_times = context.stage("mode_choice.travel_times.car").copy()
-    trips = context.stage("mode_choice.trips.prepare_trips")[["person_id", "trip_index", "destination_municipality", "following_purpose","departure_time"]]
-    df = travel_times.merge(trips, on=["person_id", "trip_index"], how="left")
+    trips = context.stage("mode_choice.trips.prepare_trips")[
+        ["person_id", "trip_index", "trip_id", "destination_municipality", "following_purpose","departure_time"]]
+    df = travel_times.merge(trips, on=["person_id", "trip_id"], how="left")
 
     # determine arrival time
     total_travel_time_sec = (df["travel_time_min"] + df["access_egress_time_min"]) * 60
@@ -46,6 +46,6 @@ def execute(context):
     parking_cost[pay_parking_urban]    = (df["parking_duration_min"][pay_parking_urban]/60.0) * context.config("parking_cost_per_hour_CHF_urban")
     parking_cost[pay_parking_suburban] = (df["parking_duration_min"][pay_parking_suburban]/60.0) * context.config("parking_cost_per_hour_CHF_suburban")    
     
-    df["parking_cost"] = np.clip(parking_cost, 0, 40)
-    
-    return df[["person_id", "trip_index", "parking_cost"]]
+    df["parking_cost_CHF"] = np.clip(parking_cost, 0, 40)
+
+    return df[["person_id", "trip_id", "parking_cost_CHF"]]

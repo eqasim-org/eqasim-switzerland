@@ -242,8 +242,8 @@ class CarTripRouter:
         if self.graph is None:
             logger.warning("Router graph is not built yet. Building now...")
             self.build()
-        
-        df = df[['person_id', 'trip_index', 
+
+        df = df[['person_id', 'trip_id', 
                  'origin_x', 'origin_y', 
                  'destination_x', 'destination_y', 
                  'departure_time']].reset_index(drop=True).copy()
@@ -272,7 +272,7 @@ class CarTripRouter:
                     batch_trips = hour_trips.iloc[start_idx:end_idx]
                     batch_results = self.route_batch_trips(batch_trips, departure_hour=hour, congestion=congestion)
                     batch_results["person_id"] = batch_trips["person_id"].values
-                    batch_results["trip_index"] = batch_trips["trip_index"].values
+                    batch_results["trip_id"] = batch_trips["trip_id"].values
                     batch_results["departure_time"] = batch_trips["departure_time"].values
                     self.results.append(batch_results)
                     routed_count += len(batch_trips) 

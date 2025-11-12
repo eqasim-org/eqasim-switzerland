@@ -42,7 +42,10 @@ def execute(context):
     router.build()
 
     # read prepared trips
-    trips = context.stage("mode_choice.trips.prepare_trips")
+    trips = context.stage("mode_choice.trips.prepare_trips")[
+             ['person_id', 'trip_id', 'origin_x', 'origin_y',  'destination_x', 'destination_y',  
+              'departure_time', 'crowfly_distance']
+        ]
 
     # route the trips
     routed_trips = router.router_trips_dataframe(trips, 
@@ -59,7 +62,7 @@ def execute(context):
 
     ######################
     # finalize the output
-    df = trips[["person_id","trip_index","crowfly_distance"]].copy()
+    df = trips[["person_id","trip_id","crowfly_distance"]].copy()
     
     # Euclidean distance in km
     df["Euclidean_distance_km"] = df["crowfly_distance"] * 1e-3
@@ -69,12 +72,12 @@ def execute(context):
 
     # merge with travel times
     df = df.merge(
-        routed_trips[["person_id","trip_index","travel_time_min","access_egress_time_min"]],
-        on=["person_id","trip_index"],
+        routed_trips[["person_id","trip_id","travel_time_min","access_egress_time_min"]],
+        on=["person_id","trip_id"],
         how="left"
     )
 
-    return df[["person_id","trip_index",
-                "travel_time_min","access_egress_time_min",
-                "distance_km"]]
+    return df[["person_id","trip_id",
+               "travel_time_min","access_egress_time_min",
+               "distance_km"]]
     

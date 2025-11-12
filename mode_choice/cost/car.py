@@ -13,10 +13,10 @@ def configure(context):
 def execute(context):
     # read prepared trips
     df = context.stage("mode_choice.travel_times.car")[
-        ["person_id", "trip_index","distance_km"]]
+        ["person_id", "trip_id","distance_km"]]
     
     # compute the cost
     car_cost_per_km = context.config("car_cost_per_km") 
-    df["car_cost"] = df["distance_km"] * car_cost_per_km
+    df["cost_CHF"] = df["distance_km"] * car_cost_per_km
 
-    return df[["person_id", "trip_index","car_cost"]]
+    return df[["person_id", "trip_id", "cost_CHF"]]

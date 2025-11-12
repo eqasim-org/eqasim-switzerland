@@ -7,7 +7,7 @@ def configure(context):
 
 def execute(context):
     df = context.stage("mode_choice.trips.prepare_trips")[
-        ["person_id","trip_index","destination_municipality","following_purpose"]
+        ["person_id","trip_id","destination_municipality","following_purpose"]
     ]
 
     urban_search_min = context.config("urban_parking_search_min")
@@ -22,4 +22,4 @@ def execute(context):
     parking_searching_duration_min[df["following_purpose"].isin(["home", "work"])] = 0.0
 
     df["parking_searching_duration_min"] = parking_searching_duration_min
-    return df[["person_id","trip_index","parking_searching_duration_min"]]
+    return df[["person_id","trip_id","parking_searching_duration_min"]]

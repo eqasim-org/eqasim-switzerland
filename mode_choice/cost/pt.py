@@ -8,7 +8,7 @@ import pandas as pd
 
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")    
-    context.stage("synthesis.population.enriched")
+    context.stage("mode_choice.trips.prepare_persons")
     context.config("pt_distance_factor", 1.4) #CHF per hour
 
 
@@ -30,20 +30,14 @@ DISTANCE_THRESHOLD_KM = 10.0
 def execute(context):
     # read prepared trips
     trips = context.stage("mode_choice.trips.prepare_trips")[
-        ["person_id", "trip_index","trip_id","crowfly_distance","departure_time",
+        ["person_id", "trip_id","crowfly_distance","departure_time",
          "origin_x","origin_y", "destination_x", "destination_y", "home_x","home_y",]]
     
     # get subscriptions and age
-    df_persons = context.stage("synthesis.population.enriched")
-    df_persons["hasGeneralSubscription"] = df_persons.subscriptions_ga
-    df_persons["hasHalbtaxSubscription"] = df_persons.subscriptions_halbtax
-    df_persons["hasRegionalSubscription"] = df_persons.subscriptions_verbund | df_persons.subscriptions_strecke
-    df_persons["hasJuniorSubscription"] = df_persons.subscriptions_junior
-    df_persons["hasGleis7Subscription"] = df_persons.subscriptions_gleis7
-    
-    df_persons = df_persons[["person_id", "hasGeneralSubscription","hasHalbtaxSubscription",
-                             "hasRegionalSubscription", "hasJuniorSubscription",
-                             "hasGleis7Subscription", 'age']]
+    df_persons = context.stage("mode_choice.trips.prepare_persons")[
+        ["person_id", "hasGeneralSubscription","hasHalbtaxSubscription",
+         "hasRegionalSubscription", "hasJuniorSubscription",
+         "hasGleis7Subscription", 'age']]
 
     df = trips.merge(df_persons, on="person_id", how="left")
     assert not df["age"].isna().any(), "Some persons have no age!"
@@ -67,4 +61,6 @@ def execute(context):
     cost[(df["age"]<25)&df["hasGleis7Subscription"]&between7and5] = 0.0
 
     ### Limit pt cost per person per day to 50 CHF, split among their trips (daily pass)
-    return np.clip(cost,0,50)
+    df["cost_CHF"] = np.clip(cost,0,50)
+    
+    return df[["person_id","trip_id","cost_CHF"]]
