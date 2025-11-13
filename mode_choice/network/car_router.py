@@ -177,11 +177,21 @@ class CarTripRouter:
         travel_time_attr = (f"travel_time_{departure_hour}_{departure_hour+1}_avg" 
                             if (self.congestion_aware and congestion) else "travel_time")
 
-        # Batch compute shortest paths                  
-        results = [
+        # Batch compute shortest paths   
+        ### in travel times               
+        tt = [
             self.route_node_to_node(origin_node_id, destination_node_id, 
                                     origin_node_idx, destination_node_idx,
                                     travel_time_attr)
+            for (origin_node_id, destination_node_id, origin_node_idx, destination_node_idx)
+            in zip(origin_nodes, dest_nodes, origin_idx, dest_idx)
+        ]
+        ### in distance
+        # TODO: see comments in route_batch_trips_pandana
+        ds = [
+            self.route_node_to_node(origin_node_id, destination_node_id, 
+                                    origin_node_idx, destination_node_idx,
+                                    "length")
             for (origin_node_id, destination_node_id, origin_node_idx, destination_node_idx)
             in zip(origin_nodes, dest_nodes, origin_idx, dest_idx)
         ]
@@ -190,7 +200,8 @@ class CarTripRouter:
         df = pd.DataFrame({
             'access_euc_distance': np.atleast_1d(access_euc_distances),
             'egress_euc_distance': np.atleast_1d(egress_euc_distances),
-            'total_travel_time': pd.Series(results, index=trips.index)
+            'total_travel_time': pd.Series(tt, index=trips.index),
+            'total_distance': pd.Series(ds, index=trips.index)
         }, index=trips.index)
         return df
 
@@ -211,18 +222,28 @@ class CarTripRouter:
 
         travel_time_attr = (f"travel_time_{departure_hour}_{departure_hour+1}_avg" 
                             if (self.congestion_aware and congestion) else "travel_time")        
-        # Batch compute shortest paths                  
+        # Batch compute shortest paths 
+        ### in travel times                 
         tt = self.graph.shortest_path_lengths(
             origin_idx,
             dest_idx,
             imp_name=travel_time_attr
         )
-                    
+        ### in distance
+        # TODO: this is not the right way, but for now it is the best approximation
+        # pandana does not support multiple impedance attributes in shortest_path_lengths
+        # and when we try to get the paths, it doesn't return the correct path
+        ds = self.graph.shortest_path_lengths(
+            origin_idx,
+            dest_idx,
+            imp_name="length"
+        )            
         # Compile results into DataFrame
         df = pd.DataFrame({
             'access_euc_distance': np.atleast_1d(access_euc_distances),
             'egress_euc_distance': np.atleast_1d(egress_euc_distances),
-            'total_travel_time': pd.Series(tt, index=trips.index)
+            'total_travel_time': pd.Series(tt, index=trips.index),
+            'total_distance': pd.Series(ds, index=trips.index)
         }, index=trips.index)
         return df
 

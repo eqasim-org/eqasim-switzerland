@@ -17,7 +17,9 @@ def configure(context):
 
     context.config("walk_speed_m_per_s", default=1.3) 
     context.config("walk_distance_factor", default=1.3) # factor to account for indirect walk paths
-    context.config("car_distance_factor", 1.4) # factor to account for indirect car paths
+
+# TODO: save the router object to avoid rebuilding it every time, because it takes time.
+# this is not straightforward, because pandana graphs are not serializable using pickle.
 
 def execute(context):
     # get network and congestion file paths
@@ -53,7 +55,8 @@ def execute(context):
                                                  batch_size=context.config("routing_batch_size"))
 
     routed_trips["travel_time_min"] = routed_trips["total_travel_time"] / 60
-
+    routed_trips["distance_km"] = routed_trips["total_distance"] / 1000
+    
     # access_egress time in min
     access_egress_distance = routed_trips["access_euc_distance"] + routed_trips["egress_euc_distance"]
     walk_speed = context.config("walk_speed_m_per_s")
@@ -62,17 +65,17 @@ def execute(context):
 
     ######################
     # finalize the output
-    df = trips[["person_id","trip_id","euclidean_distance_km"]].copy()
+    # df = trips[["person_id","trip_id","euclidean_distance_km"]].copy()
 
     # router distance in km (this should be corrected once we make sure pandana is corrected)
-    df["distance_km"] = df["euclidean_distance_km"] * context.config("car_distance_factor")
+    # df["distance_km"] = df["euclidean_distance_km"] * context.config("car_distance_factor")
 
     # merge with travel times
-    df = df.merge(
-        routed_trips[["person_id","trip_id","travel_time_min","access_egress_time_min"]],
-        on=["person_id","trip_id"],
-        how="left"
-    )
+    # df = df.merge(
+    #     routed_trips[["person_id","trip_id","travel_time_min","access_egress_time_min","distance_km"]],
+    #     on=["person_id","trip_id"],
+    #     how="left"
+    # )
 
     return df[["person_id","trip_id",
                "travel_time_min","access_egress_time_min",
