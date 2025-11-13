@@ -54,7 +54,7 @@ class Selector():
         df.with_columns(
             pl.col("noisy_utility")
                 .rank(method="ordinal", descending=True)
-                .over("selection_id")
+                .over("tour_id")
                 .alias("rn")
         )
         .filter(pl.col("rn") == 1)
@@ -67,7 +67,7 @@ class Selector():
             df.with_columns(
                 pl.col("utility")
                     .rank(method="ordinal", descending=True)
-                    .over("selection_id")
+                    .over("tour_id")
                     .alias("rn")
             )
             .filter(pl.col("rn") == 1)
