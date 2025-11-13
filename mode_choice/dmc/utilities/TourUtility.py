@@ -11,13 +11,8 @@ from .BikeUtility import BikeUtility
 from .CarUtility import CarUtility
 from .PtUtility import PtUtility
 from .WalkUtility import WalkUtility
-from .ZeroUtility import ZeroUtility
 from .CpUtility import CpUtility
-import pandas as pd
-import numpy as np
 import polars as pl
-import glob
-import os
 
 import logging
 logger = logging.getLogger(__name__)
@@ -57,8 +52,7 @@ class TourUtility(BaseUtility):
         TourUtility.tours = tours.lazy()
                   
         # for better efficiency, we explode tours here
-        exploded_tours = TourUtility.get_exploded_tours_for_utilities()
-        TourUtility.exploded_tours = {k:v.lazy() for k,v in exploded_tours.items()}
+        TourUtility.exploded_tours = TourUtility.get_exploded_tours_for_utilities()
         
         # store persons info
         TourUtility.persons = tours["person_id"].unique()
@@ -86,7 +80,7 @@ class TourUtility(BaseUtility):
             .with_columns([
             pl.col("mode_candidates").cast(pl.Categorical)
             ])
-        ).collect()
+        )
 
         exploded_lazy = {mode: exploded_lazy.filter(pl.col("mode_candidates") == mode)
                          for mode in TourUtility.utility_estimators}
@@ -133,7 +127,7 @@ class TourUtility(BaseUtility):
         
         ### join with tours and return results
         #select data      
-        cols = ["tour_row_id", "person_id", "trip_id", "tour_id"]                 
+        cols = ["tour_row_id", "person_id", "trip_id", "tour_id", "mode_candidates"]                 
         results = (TourUtility.tours.select(cols)
                     .join(results, on="tour_row_id", how="left")
                     .select(cols + ["utility"]))        

@@ -6,7 +6,6 @@ Created on Thu May 22 14:19:01 2025
 @author: dabdelkader
 """
 
-from utilities.TourUtility import TourUtility
 import numpy as np
 import pandas as pd
 import polars as pl

@@ -20,12 +20,12 @@ def configure(context):
     context.stage("mode_choice.cost.pt")
     context.stage("mode_choice.penalties.parking_search")
 
-    # context.stage("mode_choice.dmc.run_dmc")
+    context.stage("mode_choice.dmc.run_dmc")
 
     context.config("data_path")
     context.config("random_seed")
-    context.config("mode_choice_parameters_file", 
-                   default=os.path.join(context.config("data_path"), "dmc", "parameters.yaml"))
+    context.config("dmc_parameters_file", 
+                   default=os.path.join(context.config("data_path"), "dmc", "mode_parameters.yml"))
 
 def execute(context):
     logger.info("="*40)
@@ -103,8 +103,9 @@ def execute(context):
     # Init DMC
     logger.info("\t Initializing DMC model...")
     DMC = context.stage("mode_choice.dmc.run_dmc")
+    parameters_file = context.config("dmc_parameters_file")
     dmc = DMC(
-        parameters_file=context.config("mode_choice_parameters_file"),
+        parameters_file=parameters_file,
         tours=tours,
         persons=persons,
         trips = trips,
@@ -115,4 +116,14 @@ def execute(context):
     # Run DMC
     logger.info("\t Running DMC model...")
     choices = dmc.run()
-    return choices[["person_id","trip_id","selected_mode"]].to_pandas()
+
+    # turn them back into trips
+    choice = (choices
+              .select(["person_id","trip_id","mode_candidates"])
+              .explode(["trip_id","mode_candidates"])
+              .rename({"mode_candidates":"mode"})
+              .with_columns([
+                  pl.col("trip_id").str.split('_').list.get(1).cast(pl.Int32).alias("trip_index"),
+              ]))
+
+    return choice[["person_id","trip_index","trip_id","mode"]].to_pandas()
