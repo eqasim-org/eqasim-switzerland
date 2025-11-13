@@ -11,13 +11,18 @@ class DMC:
                  parameters_file: str,
                  tours: pl.DataFrame,
                  persons: pl.DataFrame,
-                 variables: Dict[str, pl.DataFrame]
+                 trips: pl.DataFrame,
+                 variables: Dict[str, pl.DataFrame],
+                 seed: int = 1102
                  ):
+        # Set random seed for selector
+        Selector.set_seed(seed)
         # Load parameters
         Parameters.from_yaml(parameters_file)
         # Init tour utility calculator
         TourUtility.init(tours = tours, 
                          persons = persons, 
+                         trips = trips,
                          variables = variables)
 
     def run(self):

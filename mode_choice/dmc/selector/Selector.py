@@ -34,52 +34,6 @@ class Selector():
         else:
             raise ValueError(f"Unknown selector: {Selector.selector}")
 
-    @staticmethod
-    def _maximum_utility_selection(df):        
-
-        if Selector.considerMinimumUtility:
-            df = df[df['utility'] > Selector.minimum_utility]
-
-        # Group by person_id and selection_id
-        grouped = df.groupby(['person_id', 'selection_id'], sort=False)
-
-        # Find the row with max utility per group
-        max_rows = df.loc[grouped['utility'].idxmax()].index
-
-        # Create selected column
-        df['selected'] = False
-        df.loc[max_rows, 'selected'] = True
-
-        return df
-
-    @staticmethod
-    def _multinomial_logit_selection(df):        
-        if Selector.considerMinimumUtility:
-            df = df[df['utility'] > Selector.minimum_utility]
-        
-        df.loc[:,'utility'] = np.minimum(df['utility'], Selector.maximum_utility)
-        
-        # Compute the probability
-        df.loc[:,"exp_util"] = np.exp(df['utility'])        
-        group_sum = df.groupby(['person_id', 'selection_id'])['exp_util'].transform('sum')
-        df.loc[:,'probability'] = df["exp_util"] / group_sum
-               
-        # Generate a random number per row
-        df.loc[:,'rand'] = np.random.rand(len(df))
-        df.loc[:,'rand'] = df.groupby(['person_id', 'selection_id'])['rand'].transform('first')
-        
-        # Compute cumulative probability within each group
-        df.loc[:,'cum_prob'] = df.groupby(['person_id', 'selection_id'])['probability'].cumsum()
-        
-        # Mark selected where rand < cum_prob and previous cum_prob <= rand
-        df.loc[:,'prev_cum_prob'] = df.groupby(['person_id', 'selection_id'])['cum_prob'].shift(fill_value=0)
-        df.loc[:,'selected'] = (df['rand'] >= df['prev_cum_prob']) & (df['rand'] < df['cum_prob'])
-        
-        # Clean up unnecessary columns
-        df.drop(columns=['exp_util', 'probability', 'rand', 'cum_prob', 'prev_cum_prob'], inplace=True)
-
-        return df
-    
 
     @staticmethod
     def _multinomial_logit_selection_polars(df: pl.DataFrame) -> pl.DataFrame:
@@ -130,3 +84,8 @@ class Selector():
     def get_selector()->str:
         return Selector.selector
 
+    @staticmethod
+    def set_seed(seed:int):
+        random.seed(seed)
+        np.random.seed(seed)
+        Selector.gumble = None  # reset gumble to regenerate with new seed

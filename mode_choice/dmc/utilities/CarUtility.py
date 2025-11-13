@@ -22,7 +22,7 @@ class CarUtility(BaseUtility):
     @staticmethod
     def estimateCostUtility():
         interaction_distance = BaseUtility.interaction(
-            pl.col("euclideanDistance_km"), 
+            pl.col("euclidean_distance_km"), 
             reference=BaseUtility.cost.referenceEuclideanDistance_km, 
             lambda_val=BaseUtility.cost.lambdaCostEuclideanDistance            
         )
@@ -39,16 +39,18 @@ class CarUtility(BaseUtility):
 
     @staticmethod
     def parkingSearchDuration():
-        return ( pl.when(pl.col("urbanDestination") == 1)
+        return ( pl.when((pl.col("destination_home") == 1) | (pl.col("destination_work") == 1))
+                   .then(0.0) 
+                   .when(pl.col("urban_destination") == 1)
                    .then(BaseUtility.parking.urbanParkingSearchDuration_min)
-                   .when(pl.col("subUrbanDestination") == 1)
+                   .when(pl.col("suburban_destination") == 1)
                    .then(BaseUtility.parking.suburbanParkingSearchDuration_min)
                    .otherwise(0.0)  )
     
     @staticmethod
     def estimateTraveltimeUtility():
         # Combine travel time and parking search duration before exponentiation for efficiency
-        total_time = pl.col("travelTime_min") + CarUtility.parkingSearchDuration()
+        total_time = pl.col("travel_time_min") + CarUtility.parkingSearchDuration()
         return BaseUtility.car.betaTravelTime_u_min * total_time.pow(BaseUtility.car.travelTimeExponent)
 
     @staticmethod
@@ -61,10 +63,10 @@ class CarUtility(BaseUtility):
             BaseUtility.car.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18) +
             BaseUtility.car.betaSex_u * pl.col("sex") +
             CarUtility.estimateRegionalUtility() +
-            BaseUtility.car.betaOriginHome_u * pl.col("originHome") +
-            BaseUtility.car.betaShortDistance_u * pl.col("shortDistance") +
-            BaseUtility.car.betaUrbanDestination_u * pl.col("urbanDestination") +
-            BaseUtility.car.betaDestinationWork_u * pl.col("destinationWork")         
+            BaseUtility.car.betaOriginHome_u * pl.col("origin_home") +
+            BaseUtility.car.betaShortDistance_u * pl.col("short_distance") +
+            BaseUtility.car.betaUrbanDestination_u * pl.col("urban_destination") +
+            BaseUtility.car.betaDestinationWork_u * pl.col("destination_work")         
         )
 
         return utility

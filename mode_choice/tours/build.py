@@ -14,7 +14,7 @@ def configure(context):
 
 def execute(context):
     df_trips = context.stage("mode_choice.trips.prepare_trips")[
-        ["person_id","trip_index","trip_id","preceding_purpose","following_purpose","crowfly_distance"]]
+        ["person_id","trip_index","trip_id","preceding_purpose","following_purpose","euclidean_distance_km"]]
 
     # 1. a tour is a sequence of trips that starts and ends at home, thus each home activity defines a tour start point
     ### make sure dataframe is sorted
@@ -29,7 +29,7 @@ def execute(context):
         'trip_id': list,
         'preceding_purpose': list,
         'following_purpose': list,
-        'crowfly_distance': list
+        'euclidean_distance_km': list
     }).reset_index()
     df_tours["tour_id"] = range(len(df_tours))
 
@@ -42,7 +42,7 @@ def execute(context):
     # 4. get all possible mode combinations for each tour
     tours_finder = context.stage("mode_choice.tours.core")# make sure the stage is executed so that any function changes are taken into account
     persons_attributes = ["age","car_availability","driving_license","bike_availability","is_car_passenger"]
-    res = tours_finder( df_tours.crowfly_distance,
+    res = tours_finder( df_tours.euclidean_distance_km,
                         df_tours[persons_attributes].to_dict(orient="records"),
                         df_tours.preceding_purpose,
                         df_tours.following_purpose)
@@ -50,8 +50,7 @@ def execute(context):
     df_tours["mode_candidates"] = res
 
     # 5. finalize tours dataframe
-    df_tours["Euclidean_distance_km"] = df_tours["crowfly_distance"].apply(lambda x: np.array(x)/1000)
-    df_tours = df_tours[["person_id","trip_id","tour_id","Euclidean_distance_km","mode_candidates"]]    
+    df_tours = df_tours[["person_id","trip_id","tour_id","euclidean_distance_km","mode_candidates"]]    
     df_tours = df_tours.explode("mode_candidates")
 
     return df_tours

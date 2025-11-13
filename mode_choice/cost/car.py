@@ -17,6 +17,6 @@ def execute(context):
     
     # compute the cost
     car_cost_per_km = context.config("car_cost_per_km") 
-    df["cost_CHF"] = df["distance_km"] * car_cost_per_km
+    df["cost_MU"] = df["distance_km"] * car_cost_per_km
 
-    return df[["person_id", "trip_id", "cost_CHF"]]
+    return df[["person_id", "trip_id", "cost_MU"]]

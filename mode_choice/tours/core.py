@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 # Modes we consider
 POSSIBLE_MODES = set(['car', 'public_transport', 'bike', 'walk', 'car_passenger'])
 
-# default thresholds (Euclidean distance) (meters)
-DEFAULT_WALK_THRESHOLD = 4000.0
-DEFAULT_BIKE_THRESHOLD = 8000.0
-DEFAULT_CAR_MIN_THRESHOLD = 100.0
-DEFAULT_PT_MIN_THRESHOLD = 100.0
-DEFAULT_PASSENGER_MIN_THRESHOLD = 100.0
+# default thresholds (Euclidean distance) (km)
+DEFAULT_WALK_THRESHOLD = 4.0
+DEFAULT_BIKE_THRESHOLD = 8.0
+DEFAULT_CAR_MIN_THRESHOLD = 0.15
+DEFAULT_PT_MIN_THRESHOLD = 0.15
+DEFAULT_PASSENGER_MIN_THRESHOLD = 0.15
 # spatial continuity constraints
 MODE_CONTINUITY = set(["car", "bike"] )
 

@@ -30,7 +30,7 @@ DISTANCE_THRESHOLD_KM = 10.0
 def execute(context):
     # read prepared trips
     trips = context.stage("mode_choice.trips.prepare_trips")[
-        ["person_id", "trip_id","crowfly_distance","departure_time",
+        ["person_id", "trip_id","euclidean_distance_km","departure_time",
          "origin_x","origin_y", "destination_x", "destination_y", "home_x","home_y",]]
     
     # get subscriptions and age
@@ -44,7 +44,7 @@ def execute(context):
 
     # compute the cost
     homeDistance_km = df.apply(homdistance, axis=1)
-    in_vehicle_distance_km = df["crowfly_distance"] / 1000 * context.config("pt_distance_factor")    
+    in_vehicle_distance_km = df["euclidean_distance_km"]* context.config("pt_distance_factor")    
     
     cost = np.maximum(2.8, 2*(0.21 * in_vehicle_distance_km - 0.00015 * in_vehicle_distance_km**2))
     
@@ -61,6 +61,6 @@ def execute(context):
     cost[(df["age"]<25)&df["hasGleis7Subscription"]&between7and5] = 0.0
 
     ### Limit pt cost per person per day to 50 CHF, split among their trips (daily pass)
-    df["cost_CHF"] = np.clip(cost,0,50)
+    df["cost_MU"] = np.clip(cost,0,50)
     
-    return df[["person_id","trip_id","cost_CHF"]]
+    return df[["person_id","trip_id","cost_MU"]]

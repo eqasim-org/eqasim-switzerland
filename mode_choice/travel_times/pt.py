@@ -10,10 +10,9 @@ def configure(context):
 
 def execute(context):
     df = context.stage("mode_choice.trips.prepare_trips")[["person_id","trip_id"]].copy()
-    df["travel_time_min"] = 0
     df["access_egress_time_min"] = 0
     df["waiting_time_min"] = 0
-    df["number_of_transfers"] = 0
+    df["number_of_line_switches"] = 0
     df["in_vehicle_time_min"] = 0
-    df["distance_km"] = 0
+    df["distance_km"] = 0 # this is the network distance traveled by pt
     return df

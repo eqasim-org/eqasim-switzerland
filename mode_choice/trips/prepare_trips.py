@@ -89,7 +89,8 @@ def execute(context):
     
     # compute crowfly distance
     df_spatial["crowfly_distance"] = df_spatial.following_geometry.distance(df_spatial.preceding_geometry)  
-
+    df_spatial["euclidean_distance_km"] = df_spatial["crowfly_distance"] / 1000.0  # convert to km
+    
     # finalize dataframe
     df_spatial["following_purpose"] = df_spatial["following_purpose"].astype(str)
     df_spatial["preceding_purpose"] = df_spatial["preceding_purpose"].astype(str)
@@ -98,7 +99,7 @@ def execute(context):
     
     return df_spatial[[
         "person_id", "trip_index", "trip_id", "preceding_purpose", "following_purpose",
-        "departure_time", "mode", "crowfly_distance",
+        "departure_time", "mode", "euclidean_distance_km",
         "origin_x", "origin_y", "destination_x", "destination_y", "home_x", "home_y",
         "origin_municipality", "destination_municipality", "home_municipality", "region"
     ]]

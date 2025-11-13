@@ -8,15 +8,12 @@ def configure(context):
 def execute(context):
     # read prepared trips
     trips = context.stage("mode_choice.trips.prepare_trips")[
-        ["person_id","trip_id","crowfly_distance"]
+        ["person_id","trip_id","euclidean_distance_km"]
     ].copy()
-
-    # Euclidean distance in km
-    trips["Euclidean_distance_km"] = trips["crowfly_distance"] * 1e-3
-
+    
     # calculate biking distance
     bike_distance_factor = context.config("bike_distance_factor")
-    trips["distance_km"] = trips["Euclidean_distance_km"] * bike_distance_factor
+    trips["distance_km"] = trips["euclidean_distance_km"] * bike_distance_factor
     
     # calculate biking travel time in seconds
     bike_speed = context.config("bike_speed_m_per_s")
