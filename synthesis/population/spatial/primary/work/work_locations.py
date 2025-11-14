@@ -79,9 +79,10 @@ def execute(context):
     # Microcensus commute (work)
     commute = context.stage("data.microcensus.commute")["work"][["person_id", "commute_mode", "commute_home_distance"]]
     commute = commute.rename(columns={"person_id": "mz_person_id"})
+    
     # Merge commute info
     df = pd.merge(persons, commute, on="mz_person_id", how="inner")
-    df = df.groupby('home_zone_id', group_keys=False).apply(zigzag_sort).reset_index(drop=True)
+    df = df.groupby('home_zone_id', group_keys=False).apply(sort_group).reset_index(drop=True)
 
     # Zones and index mapping
     df_zones = context.stage("data.spatial.zones").copy()
