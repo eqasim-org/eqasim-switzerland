@@ -11,7 +11,7 @@ def configure(context):
     context.stage("data.microcensus.commute")
     context.stage("data.od.matrix")
     context.stage("data.od.distances")
-    context.config("random_seed", 42)
+    context.config("random_seed")
     context.config("input_downsampling")
 
 # In this algorithm, the statent is loaded into kdtree, then for each agent do the following:
