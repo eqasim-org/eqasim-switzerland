@@ -134,7 +134,7 @@ def get_calibration_args(context):
                                 "--config:eqasim:calibration.bounds", bounds,
                                 "--config:eqasim:calibration.distanceBins", "0,451,995,1513,2400,3853,5026,6674,9261,13788,22976,1000000",
                                 "--config:eqasim:calibration.maxEval", "4000",
-                                "--config:eqasim:calibration.repoCommit", "b72fae6c3860169f5a837d4648dbf4b2dc7ac3a0",
+                                "--config:eqasim:calibration.repoCommit", "7b1bf4d4c8c1fddc9d3479a96513d5c5d3268294",
                                 "--config:eqasim:calibration.optimizerPath", "optimizer",
                                 "--config:eqasim:termination.threshold", "0.0000001"
                                 ])
