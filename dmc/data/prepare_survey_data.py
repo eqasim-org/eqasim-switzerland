@@ -6,6 +6,7 @@ import shapely.geometry as geo
 from shapely import vectorized
 from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
 import logging
+from matsim.scenario.households import INCOME_CLASS_MAP
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,10 +46,12 @@ def execute(context):
     df_persons["hasGleis7Subscription"] = df_persons.subscriptions_gleis7
     df_persons["statedPreferenceRegion"] = df_persons.sp_region
     
-
-    INCOME_CLASS_MAP = {0: 2000, 1: 3000, 2: 4500, 3: 7000, 4: 9000, 5: 11000,  6: 13000, 7: 15000, 8: 17000}
+    
     df_persons["income"] = df_persons.income_class.map(INCOME_CLASS_MAP)
-    df_persons["income"] = df_persons["income"] / df_persons["household_size"].fillna(1).clip(lower=1, upper=7)
+    num_children = df_persons["N_children_under_12"]
+    num_adults = np.maximum(1, df_persons['household_size'] - num_children)
+    equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children    
+    df_persons["income"] = df_persons["income"] / equvalent_size
 
     df_persons["ms_region"] = df_persons.canton_id.map(lambda x: MS_REGIONS.loc[x,"cluster"])
 
