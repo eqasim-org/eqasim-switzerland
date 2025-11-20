@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 
 import xopen
-import xml.etree.ElementTree as ET
+try:
+    from lxml import etree as ET
+except ImportError:
+    import xml.etree.ElementTree as ET
 import pandas as pd
 import geopandas as gpd
 from .writers import NetworkWriter
@@ -14,6 +17,9 @@ from shapely import wkt
 from shapely.errors import WKTReadingError
 from shapely.geometry import Point
 import networkx as nx 
+import concurrent.futures
+import multiprocessing
+import io
 
 import logging
 logger = logging.getLogger(__name__)
@@ -157,90 +163,125 @@ class Network:
     
 
 
+def parse_nodes(content, skip_attributes):
+    # Parse nodes from XML bytes
+    tree = ET.iterparse(io.BytesIO(content), events=['start', 'end'])
+    node_ids = []
+    node_xs = []
+    node_ys = []
+    node_zs = []
+    node_attrs = []
+    network_attrs = {}
+    current_id = None
+    for xml_event, elem in tree:
+        if elem.tag == 'node' and xml_event == 'start':
+            atts = elem.attrib
+            current_id = str(atts['id'])
+            node_ids.append(current_id)
+            node_xs.append(float(atts['x']))
+            node_ys.append(float(atts['y']))
+            node_zs.append(float(atts.get('z', 0.0)) if 'z' in atts else None)
+        elif elem.tag == 'attribute' and xml_event == 'end':
+            if elem.attrib['name'] == Network._crsTag:
+                network_attrs[Network._crsTag] = elem.text
+            elif not skip_attributes:
+                atts = {}
+                atts['node_id'] = current_id
+                atts['name'] = elem.attrib['name']
+                atts['value'] = elem.text
+                if 'class' in elem.attrib:
+                    if elem.attrib['class'] == 'java.lang.Long':
+                        atts['value'] = int(elem.text)
+                    elif elem.attrib['class'] == 'java.lang.Double':
+                        atts['value'] = float(elem.text)
+                    elif elem.attrib['class'] == 'java.lang.Integer':
+                        atts['value'] = int(elem.text)
+                node_attrs.append(atts)
+        if elem.tag == 'node' and xml_event == 'end':
+            elem.clear()
+    nodes = pd.DataFrame({'node_id': node_ids, 'x': node_xs, 'y': node_ys, 'z': node_zs})
+    if nodes.z.isna().all():
+        nodes = nodes.drop(columns=['z'])
+
+    node_attrs = pd.DataFrame.from_records(node_attrs)
+    return nodes, node_attrs, network_attrs
+
+def parse_links(content, skip_attributes):
+    # Parse links from XML bytes
+    tree = ET.iterparse(io.BytesIO(content), events=['start', 'end'])
+    link_ids = []
+    link_froms = []
+    link_tos = []
+    link_lengths = []
+    link_freespeeds = []
+    link_capacities = []
+    link_permlanes = []
+    link_modes = []
+    link_oneways = []
+    link_attrs = []
+    current_id = None
+    for xml_event, elem in tree:
+        if elem.tag == 'link' and xml_event == 'start':
+            atts = elem.attrib
+            current_id = str(atts['id'])
+            link_ids.append(current_id)
+            link_froms.append(str(atts['from']))
+            link_tos.append(str(atts['to']))
+            link_lengths.append(float(atts['length']))
+            link_freespeeds.append(float(atts['freespeed']))
+            link_capacities.append(float(atts['capacity']))
+            link_permlanes.append(float(atts['permlanes']))
+            link_modes.append(str(atts.get('modes', '')))
+            link_oneways.append(int(atts.get('oneway', 1)))
+        elif elem.tag == 'attribute' and xml_event == 'end' and not skip_attributes:
+            atts = {}
+            atts['link_id'] = current_id
+            atts['name'] = elem.attrib['name']
+            atts['value'] = elem.text
+            if 'class' in elem.attrib:
+                if elem.attrib['class'] == 'java.lang.Long':
+                    atts['value'] = int(elem.text)
+                elif elem.attrib['class'] == 'java.lang.Double':
+                    atts['value'] = float(elem.text)
+                elif elem.attrib['class'] == 'java.lang.Integer':
+                    atts['value'] = int(elem.text)
+            link_attrs.append(atts)
+        if elem.tag == 'link' and xml_event == 'end':
+            elem.clear()
+    links = pd.DataFrame({
+        'link_id': link_ids, 'from_node': link_froms, 'to_node': link_tos,
+        'length': link_lengths, 'freespeed': link_freespeeds, 'capacity': link_capacities,
+        'permlanes': link_permlanes, 'modes': link_modes, 'oneway': link_oneways
+    })
+
+    link_attrs = pd.DataFrame.from_records(link_attrs)
+    return links, link_attrs
+
 def read_network(filename, skip_attributes=False):
     """Read a MATSim network.xml.gz file. Returns a Network object with dataframes
     for nodes, links, node_attributes, and link_attributes. If the network has a CRS
     projection set, it will be available in network_attrs."""
-    tree = ET.iterparse(xopen.xopen(filename, 'r'), events=['start', 'end'])
-    nodes = []
-    links = []
-    node_attrs = []
-    link_attrs = []
-
-    network_attrs = {}
-
-    attributes = node_attrs
-    attr_label = 'node_id'
-    current_id = None
-
-    for xml_event, elem in tree:
-        # the nodes element CLOSES at the end of the nodes, followed by links:
-        if elem.tag == 'links' and xml_event == 'start':
-            attributes = link_attrs
-            attr_label = 'link_id'
-
-        elif elem.tag == 'node' and xml_event == 'start':
-            atts = elem.attrib
-            current_id = atts['id']
-
-            atts['node_id'] = atts.pop('id')
-            atts['x'] = float(atts['x'])
-            atts['y'] = float(atts['y'])
-            if 'z' in atts: atts['z'] = float(atts['z'])
-
-            nodes.append(atts)
-
-        elif elem.tag == 'link' and xml_event == 'start':
-            atts = elem.attrib
-            current_id = atts['id']
-
-            atts['link_id'] = atts.pop('id')
-            atts['from_node'] = atts.pop('from')
-            atts['to_node'] = atts.pop('to')
-
-            atts['length'] = float(atts['length'])
-            atts['freespeed'] = float(atts['freespeed'])
-            atts['capacity'] = float(atts['capacity'])
-            atts['permlanes'] = float(atts['permlanes'])
-
-            if 'volume' in atts: atts['volume'] = float(atts['volume'])
-
-            links.append(atts)
-
-
-        elif elem.tag == 'attribute' and xml_event == 'end':
-            if elem.attrib['name'] == Network._crsTag:
-                network_attrs[Network._crsTag] = elem.text
-
-            elif not skip_attributes:
-                atts = {}
-                atts[attr_label] = current_id
-                atts['name'] = elem.attrib['name']
-                atts['value'] = elem.text
-
-                # TODO: pandas will make the value column "object" since we're mixing types
-                if 'class' in elem.attrib:
-                    if elem.attrib['class'] == 'java.lang.Long':
-                        atts['value'] = int(elem.text)
-                    if elem.attrib['class'] == 'java.lang.Double':
-                        atts['value'] = float(elem.text)
-                    if elem.attrib['class'] == 'java.lang.Integer':
-                        atts['value'] = int(elem.text)
-
-                attributes.append(atts)
-
-        # clear the element when we're done, to keep memory usage low
-        if elem.tag in ['node', 'link'] and xml_event == 'end':
-            elem.clear()
-
-    nodes = pd.DataFrame.from_records(nodes)
-    links = pd.DataFrame.from_records(links)
-    node_attrs = pd.DataFrame.from_records(node_attrs)
-    link_attrs = pd.DataFrame.from_records(link_attrs)
+    with xopen.xopen(filename, 'rb') as f:
+        content = f.read()
     
-    # make sure all ids are str
+    # Find the start of <links>
+    links_start = content.find(b'<links')
+    if links_start == -1:
+        raise ValueError("Could not find <links> tag in file.")
+    
+    nodes_content = content[:links_start] + b'</network>'  # Close the nodes part
+    links_content = b'<network>' + content[links_start:]  # Start the links part
+    
+    with multiprocessing.Pool(2) as pool:
+        nodes_result = pool.apply_async(parse_nodes, (nodes_content, skip_attributes))
+        links_result = pool.apply_async(parse_links, (links_content, skip_attributes))
+        nodes, node_attrs, network_attrs = nodes_result.get()
+        links, link_attrs = links_result.get()
+    
+    # Ensure types
     nodes["node_id"] = nodes["node_id"].astype(str)
     links["link_id"] = links["link_id"].astype(str)
-    link_attrs["link_id"] = link_attrs["link_id"].astype(str)
+    if not link_attrs.empty:
+        link_attrs["link_id"] = link_attrs["link_id"].astype(str)
     
     return Network(nodes, links, node_attrs, link_attrs, network_attrs)

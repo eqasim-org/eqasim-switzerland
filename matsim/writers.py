@@ -444,7 +444,7 @@ class NetworkWriter(XmlWriter):
    
 
     def write_node(self, _id: str, x: float, y:float, z:float=None):
-        if z is None:
+        if z is None or np.isnan(z):
             self._write_line(f'<node  id="{_id}"  x="{x}"  y="{y}"/>')        
         else:
             self._write_line(f'<node  id="{_id}"  x="{x}"  y="{y}"  z="{z}"/>')        
@@ -488,16 +488,30 @@ class NetworkWriter(XmlWriter):
     def add_nodes(self,_id, x, y, z=None):
         self.start_nodes()
         if z is None:
-            list(map(self.write_node,_id,x,y))
+            node_lines = list(map(lambda i: f'<node  id="{_id[i]}"  x="{x[i]}"  y="{y[i]}"/>', range(len(_id))))
         else:
-            list(map(self.write_node,_id,x,y,z))
+            node_lines = list(map(lambda i: f'<node  id="{_id[i]}"  x="{x[i]}"  y="{y[i]}"  z="{z[i]}"/>', range(len(_id))))
+        self._write('\n'.join(node_lines) + '\n')
         self.end_nodes()
     
     def add_links(self, _id, _from, to, length, freespeed, capacity, permlanes,
                    oneway, modes, attributes, write_attrbs=True):
-        self.write_attrbs = write_attrbs
+        self.write_attrbs = write_attrbs & isinstance(attributes, list)         
         self.start_links()
-        list(map(self.write_link, _id, _from, to, length, freespeed, capacity, 
-                 permlanes, oneway, modes, attributes))
-        self.end_links()      
-                            
+        def make_link(i):
+            link_xml = f'<link id="{_id[i]}" from="{_from[i]}" to="{to[i]}" length="{length[i]}" freespeed="{freespeed[i]}" capacity="{capacity[i]}" permlanes="{permlanes[i]}" oneway="{oneway[i]}" modes="{modes[i]}">'
+            if self.write_attrbs and isinstance(attributes[i], dict):
+                attr_xml = ['  <attributes>']  # Indent for attributes
+                for k, v in attributes[i].items():
+                    if k == "disallowedNextLinks":
+                        typ = "org.matsim.core.network.turnRestrictions.DisallowedNextLinks"
+                    else:
+                        typ = self.get_java_type(type(v))
+                    attr_xml.append(f'    <attribute name="{k}" class="{typ}">{v}</attribute>')  # Further indent
+                attr_xml.append('  </attributes>')
+                link_xml += '\n'.join(attr_xml)
+            link_xml += '</link>'
+            return link_xml
+        link_lines = list(map(make_link, range(len(_id))))
+        self._write('\n'.join(link_lines) + '\n')
+        self.end_links()
