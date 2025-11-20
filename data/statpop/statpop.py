@@ -44,17 +44,19 @@ def execute(context):
     final_count = len(df_persons)
     print(f"{initial_count - final_count} persons without permanent residence filtered out.")
 
-
     # Merge STATPOP persons and households into a list of persons with household attributes
     df = pd.merge(df_persons, df_link, on=("person_id", "municipality_id"))
-    df = pd.merge(df, df_households, on="household_id")
+    df = pd.merge(df, df_households, on="household_id") # This removes the great majority of collective housing residents, there are only ~700 left at this point.
 
     # Impute the houeshold size for each STATPOP person
     df_size = df.groupby("household_id").size().reset_index(name="household_size")
     df = pd.merge(df, df_size, on="household_id")
 
     # Only allow houesholds under a certain size
+    initial_count = len(df)
     df = df[df["household_size"] <= c.MAXIMUM_HOUSEHOLD_SIZE]
+    final_count = len(df)
+    print(f"{initial_count - final_count} persons were filtered out based on the the household size max constraint.")
 
     # Remove all households where ALL persons are under a certain age
     df_filter = df[["household_id", "age"]].groupby("household_id").max().reset_index()
@@ -139,9 +141,9 @@ def execute(context):
         context.stage("data.statpop.density"), df, 
         "home_x", "home_y", 
         radius = c.POPULATION_DENSITY_RADIUS,
-        chunk_size=10000, # it looks that 10k is better than 1k, did not test more
-        point_type="home",
-        n_jobs=context.config("threads"))
+        chunk_size = 10000, # it looks that 10k is better than 1k, did not test more
+        point_type = "home",
+        n_jobs = context.config("threads"))
 
     # Impute OV Guteklasse
     df_ovgk = context.stage("data.spatial.ovgk")
@@ -149,14 +151,14 @@ def execute(context):
     df = pd.merge(df, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
 
     # Save original statpop person and household ids
-    df["statpop_person_id"] = df["person_id"].astype(int)
+    df["statpop_person_id"]    = df["person_id"].astype(int)
     df["statpop_household_id"] = df["household_id"].astype(int)
 
     # Identify households with children
     children_columns = []
     for upper_age in [3, 6, 12, 18]:
-        col_name          = "N_children_under_"+str(upper_age)
-        children          = df[df["age"]<upper_age]
+        col_name          = "N_children_under_" + str(upper_age)
+        children          = df[df["age"] < upper_age]
         hhl_with_children = np.unique(children["household_id"].values.tolist())
         df.loc[:, col_name] = df["household_id"].isin(hhl_with_children)
 
@@ -171,7 +173,7 @@ def execute(context):
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
         "home_municipality_id", "home_quarter_id", "canton_id", "population_density", "sp_region", "ovgk",
-        "statpop_person_id", "statpop_household_id"]+children_columns]
+        "statpop_person_id", "statpop_household_id", "collective_housing_resident"] + children_columns]
 
     df = data.statpop.head_of_household.impute(df, c)
 

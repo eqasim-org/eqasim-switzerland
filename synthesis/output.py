@@ -184,7 +184,7 @@ def execute(context):
 
     df_spatial = df_spatial.drop(columns = ["preceding_geometry", "following_geometry"])
 
-    df_spatial = gpd.GeoDataFrame(df_spatial, crs = "EPSG:2154")
+    df_spatial = gpd.GeoDataFrame(df_spatial, crs = "EPSG:2056")
     df_spatial["following_purpose"] = df_spatial["following_purpose"].astype(str)
     df_spatial["preceding_purpose"] = df_spatial["preceding_purpose"].astype(str)
     df_spatial["mode"] = df_spatial["mode"].astype(str)

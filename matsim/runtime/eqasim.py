@@ -21,10 +21,12 @@ def configure(context):
     context.config("eqasim_repository", "https://github.com/eqasim-org/eqasim-java.git")
     context.config("eqasim_path", "")
 
+
 def run(context, command, arguments):
     jar_path = context.stage("matsim.runtime.eqasim")
     jar_path = "{}/{}".format(context.path("matsim.runtime.eqasim"), jar_path)
     java.run(context, command, arguments, jar_path)
+
 
 def execute(context):
     version = context.config("eqasim_version")
@@ -59,6 +61,7 @@ def execute(context):
             "%s/eqasim-java/switzerland/target/switzerland-%s.jar" % (context.path(), version))
 
     return "eqasim-java/switzerland/target/switzerland-%s.jar" % version
+
 
 def validate(context):
     path = context.config("eqasim_path")

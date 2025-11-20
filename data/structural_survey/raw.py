@@ -4,6 +4,10 @@ import pandas as pd
 def configure(context):
     context.config("data_path")
 
+# Structural survey interviews all (e.g., unemployed or those going to school are also present) individuals age 15 and over
+# The weights of all interviewed individuals sumup to the STATPOP values of the same year for those individuals
+# Last 3 or 5 instances of this survey can be combined in order to ahve more detailed representation of flows
+# we currently only use transport mode, but age is also available along with other variables
 
 def execute(context):
     data_path = context.config("data_path")
