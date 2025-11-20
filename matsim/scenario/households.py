@@ -74,10 +74,17 @@ def execute(context):
     # Attach real average income per person per household
     INCOME_CLASS_MAP = {0: 2000, 1: 3000, 2: 5000, 3: 7000, 4: 9000, 5: 11000,  6: 13000, 7: 15000, 8: 17000}
     df_persons["income"] = df_persons["income_class"].astype(int).map(INCOME_CLASS_MAP)
-    df_persons["income_per_capita"] = df_persons["income"] / df_persons["household_size"].fillna(1).clip(lower=1, upper=7)
+    
+    # Calculate income per capita using the OECD equivalence scale: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Glossary:Equivalised_income
+    df_persons['is_child'] = df_persons['age'] < 14
+    num_children = df_persons.groupby('household_id')['is_child'].transform('sum')
+    num_adults = df_persons['household_size'] - num_children
+    assert (num_adults >= 1).all(), "All households should have at least one adult."
+    equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children
+    df_persons["income_per_capita"] = df_persons["income"] / equvalent_size
 
+    
     df_persons = df_persons[FIELDS]
-
     if context.config("include_cross_border"):
         cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
 
