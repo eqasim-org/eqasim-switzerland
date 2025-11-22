@@ -14,15 +14,18 @@ def configure(context):
     context.config("random_seed")
     context.config("input_downsampling")
 
-# In this algorithm, the statent is loaded into kdtree, then for each agent do the following:
+# Algorithm:
 # 1. get the home location
 # 2. from the od matrices, get the probability that the agent work in each zone, based on his residence zone and mode.
+# 3. sample destintion zones
 # 3. give to each company a weight, based on the number of employees.
-# 4. estimate a probability based on the companies' distance to agent's home
-# 5. get the joint probability by multipling the 3 probabilities
-# 6. sample one company based on that probabilities for each agent
+# 4. estimate a probability based on the companies' distance to agent's home and the agent's commute distance
+# 5. get the joint probability by multipling the weight and the estimated probability
+# 6. sample one company based on that probability for each agent (sampling is done without replacement, each time a company
+# is selected, its weight decreases)
+# 7. special case (heuristics) for very short commute distances
 
-STANDARD_DEVIATION_DISTANCE = 150  # meters (radius of 500 m for 99.7% of distribution)
+STANDARD_DEVIATION_DISTANCE = 150  # meters (radius of 450 m for 99.7% of distribution)
 
 def get_distance_weight(dx):
     # Gaussian around 0 with adaptive std for numerical stability
@@ -30,7 +33,7 @@ def get_distance_weight(dx):
     coef = 1.0 / (std * np.sqrt(2.0 * np.pi))
     return coef * np.exp(-0.5 * (dx / std) ** 2)
 
-def deterministic_multinomial(n, probs):
+def multinomial_sample(n, probs):
     """
     Deterministic version of multinomial sampling.
 
@@ -137,7 +140,7 @@ def execute(context):
         # We use this to respect the mode split in determining possible destination zones
         zone_probs = np.sum([mode_count * pdf_matrices[normalize_mode(mode)][origin_idx, :]  for mode, mode_count in modes_counts.items()],
                         axis=0)
-        destination_zones = deterministic_multinomial(n_commuters, zone_probs / zone_probs.sum())
+        destination_zones = multinomial_sample(n_commuters, zone_probs / zone_probs.sum())
         num_destination_zones_per_zone[origin_zone] = {zone_ids[i]: count for i, count in enumerate(destination_zones) if count > 0}
             
     # now we prepare array in order to use numPy for work assignment, it is faster than pandas dataframe manipulation
