@@ -6,18 +6,8 @@ try:
 except ImportError:
     import xml.etree.ElementTree as ET
 import pandas as pd
-import geopandas as gpd
 from .writers import NetworkWriter
 import gzip
-from tqdm import tqdm
-import os
-import numpy as np
-import warnings
-from shapely import wkt
-from shapely.errors import WKTReadingError
-from shapely.geometry import Point
-import networkx as nx 
-import concurrent.futures
 import multiprocessing
 import io
 
@@ -100,6 +90,7 @@ class Network:
         return geo_net
     
     def as_nx(self):
+        import networkx as nx 
         G = nx.Graph()  
         links = self.links
         nodes = self.nodes  

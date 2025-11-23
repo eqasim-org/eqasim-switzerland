@@ -6,6 +6,7 @@ import dmc.cost.parking as parking_cost
 import dmc.penalties.parking as parking_penalty
 
 from dmc.data.utils import merge_same_trips
+from dmc.constants import constants
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -22,15 +23,12 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
 
-    context.config("car_cost_per_km", 0.26) #CHF per km
-    context.config("parking_cost_per_hour_CHF_urban", 1.0) #CHF per hour
-    context.config("parking_cost_per_hour_CHF_suburban", 0.5) #CHF per hour
-    context.config("parking_price_reduction_for_work", 1.0) 
-    context.config("urban_parking_search_min", 2.0) #minutes (source1: https://www.sciencedirect.com/science/article/pii/S0965856424000934)
-    #                                                        (source2(zurich, see validation data): https://link.springer.com/article/10.1007/s11116-017-9832-9)
-    #                                                        (source3(page 114): https://www.research-collection.ethz.ch/entities/publication/19cf9faa-55b4-4f01-96ab-fdfb9587032a)
-    # ref for VoT: https://www.sciencedirect.com/science/article/pii/S0965856421001658#:~:text=We%20obtain%20median%20VTTS%20for,amounts%20to%2025.2%20CHF%2Fh.
-    context.config("suburban_parking_search_min", 1.0) #minutes
+    context.config("car_cost_per_km", constants.CAR_COST_PER_KM) #CHF per km
+    context.config("parking_cost_per_hour_CHF_urban", constants.PARKING_COST_PER_HOUR_CHF_URBAN)
+    context.config("parking_cost_per_hour_CHF_suburban", constants.PARKING_COST_PER_HOUR_CHF_SUBURBAN)
+    context.config("parking_price_reduction_for_work", constants.PARKING_PRICE_REDUCTION_FOR_WORK) 
+    context.config("urban_parking_search_min", constants.URBAN_PARKING_SEARCH_MIN) 
+    context.config("suburban_parking_search_min", constants.SUBURBAN_PARKING_SEARCH_MIN) 
     context.config("only_from_home_trips", False)
 
 def execute(context):
@@ -51,12 +49,13 @@ def execute(context):
     persons = persons[["person_id","car_availability","number_of_cars","number_of_bikes_class",
                        "driving_license","is_car_passenger"]].reset_index(drop=True)
 
-    persons["car_availability"] = persons["number_of_cars"]>0 # I noticed that this is better than using the car availability stated in the survey
-
+    persons["car_availability"] = persons["car_availability"]!= c.CAR_AVAILABILITY_NEVER 
+    
+    persons["car_passenger_availability"] = persons["car_availability"] | persons["is_car_passenger"]    
     persons["car_availability"] = ((persons["car_availability"])&
                                    (persons["driving_license"]==True))
     persons["bike_availability"] = persons["number_of_bikes_class"] != c.BIKE_AVAILABILITY_FOR_NONE
-    persons["car_passenger_availability"] = persons["car_availability"] | persons["is_car_passenger"]
+    
     persons["walk_availability"] = True
     persons["pt_availability"] = True
 

@@ -24,8 +24,8 @@ def configure(context):
     context.config("ignore_car_passenger", False)
     context.config("distance_cost_interaction", True)
     context.config("income_cost_interaction", True)
-    context.config("urban_parking_search_min", 2.0) #used in the writer
-    context.config("suburban_parking_search_min", 1.0) #used in the writer
+    context.config("urban_parking_search_min", constants.URBAN_PARKING_SEARCH_MIN) #used in the writer
+    context.config("suburban_parking_search_min", constants.SUBURBAN_PARKING_SEARCH_MIN) #used in the writer
     context.config("use_exponents", True)
 
 def preprocess_data(df, ignore_car_passenger):

@@ -7,15 +7,13 @@ from shapely import vectorized
 from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
 import logging
 from matsim.scenario.households import INCOME_CLASS_MAP
+from dmc.constants import constants
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-MS_REGIONS = {'canton_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26], 
-              'cluster': [2, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 2, 0]}
-MS_REGIONS = pd.DataFrame(MS_REGIONS)
-MS_REGIONS = MS_REGIONS.set_index("canton_id")
+MS_REGIONS = constants.MS_REGIONS
 
 def configure(context):
     context.config("data_path")
