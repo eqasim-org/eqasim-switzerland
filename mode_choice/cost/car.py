@@ -4,10 +4,24 @@ In future, this could be extended to use the routed distance instead.
 We do not use it currently because of pandana current limitations.
 """
 
+import numpy as np
+from mode_choice.dmc_defaults import Defaults
+# for the record:
+# this function can be used as car cost, fit from this paper:
+# Weis, C., Kowald, M., Danalet, A., Schmid, B., Vrtic, M., Axhausen, K.W. and Mathys, N., 2021. Surveying and analysing mode and route choices in Switzerland 2010–2015. Travel behaviour and society, 22, pp.10-21.
+# function:
+# func = lambda x: np.minimum(0.3, 0.104 + 0.6 * np.exp(-1.2*(x**0.33)))
+
+def car_cost_weiss(distance_km, *args, **kwargs):
+    return np.minimum(0.3, 0.104 + 0.6 * np.exp(-1.2*(distance_km**0.33)))
+
+def car_cost(distance_km, cost_per_km):
+    return distance_km * cost_per_km
+
 
 def configure(context):
     context.stage("mode_choice.travel_times.car")
-    context.config("car_cost_per_km", 0.26) #CHF per km
+    context.config("car_cost_per_km", Defaults.CAR_COST_PER_KM)
 
 
 def execute(context):
@@ -17,6 +31,6 @@ def execute(context):
     
     # compute the cost
     car_cost_per_km = context.config("car_cost_per_km") 
-    df["cost_MU"] = df["distance_km"] * car_cost_per_km
+    df["cost_MU"] = car_cost(df["distance_km"], car_cost_per_km)
 
     return df[["person_id", "trip_id", "cost_MU"]]

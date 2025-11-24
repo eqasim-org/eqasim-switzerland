@@ -1,11 +1,34 @@
 import numpy as np
+from mode_choice.dmc_defaults import Defaults
 
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
     context.stage("mode_choice.travel_times.car")
 
-    context.config("parking_cost_per_hour_CHF_urban", 1.0) #CHF per hour
-    context.config("parking_cost_per_hour_CHF_suburban", 0.5) #CHF per hour
+    context.config("parking_cost_per_hour_CHF_urban", Defaults.PARKING_COST_PER_HOUR_URBAN) #CHF per hour
+    context.config("parking_cost_per_hour_CHF_suburban", Defaults.PARKING_COST_PER_HOUR_SUBURBAN) #CHF per hour
+
+
+def parking_cost(df,context):
+    parking_cost_per_hour_CHF_urban = context.config("parking_cost_per_hour_CHF_urban")
+    parking_cost_per_hour_CHF_suburban = context.config("parking_cost_per_hour_CHF_suburban")
+    # situations
+    destination_urban = df.destination_municipality=="urban"
+    destination_suburban = df.destination_municipality=="suburban"
+    if "following_purpose" in df.columns:
+        destination_home = df.following_purpose=="home"
+    else:
+        destination_home = df.purpose=="home"    
+
+    # compute parking cost
+    parking_cost = np.zeros(len(df))
+    pay_parking_urban    = destination_urban & (~destination_home) & (df["parking_duration_min"]>60)
+    pay_parking_suburban = destination_suburban & (~destination_home) & (df["parking_duration_min"]>60)
+
+    parking_cost[pay_parking_urban]    = (df["parking_duration_min"][pay_parking_urban]/60.0) * parking_cost_per_hour_CHF_urban
+    parking_cost[pay_parking_suburban] = (df["parking_duration_min"][pay_parking_suburban]/60.0) * parking_cost_per_hour_CHF_suburban    
+    
+    return np.clip(parking_cost, 0, 40)
 
 
 def execute(context):
@@ -33,19 +56,7 @@ def execute(context):
 
     df["parking_duration_min"] = df["parking_duration_min"].clip(0.0, 11 * 60.0)  # ensure max 11 hours (from 8am to 7pm)
 
-    # situations
-    destination_urban = df.destination_municipality=="urban"
-    destination_suburban = df.destination_municipality=="suburban"
-    destination_home = df.following_purpose=="home"    
-
     # compute parking cost
-    parking_cost = np.zeros(len(df))
-    pay_parking_urban    = destination_urban & (~destination_home) & (df["parking_duration_min"]>60)
-    pay_parking_suburban = destination_suburban & (~destination_home) & (df["parking_duration_min"]>60)
-
-    parking_cost[pay_parking_urban]    = (df["parking_duration_min"][pay_parking_urban]/60.0) * context.config("parking_cost_per_hour_CHF_urban")
-    parking_cost[pay_parking_suburban] = (df["parking_duration_min"][pay_parking_suburban]/60.0) * context.config("parking_cost_per_hour_CHF_suburban")    
-    
-    df["parking_cost_CHF"] = np.clip(parking_cost, 0, 40)
+    df["parking_cost_CHF"] = parking_cost(df, context)
 
     return df[["person_id", "trip_id", "parking_cost_CHF"]]

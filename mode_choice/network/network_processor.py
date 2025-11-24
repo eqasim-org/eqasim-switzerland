@@ -5,11 +5,11 @@ Handles network loading, graph construction, and congestion integration.
 
 import os
 import pandas as pd
-
 import numpy as np
 from .road_network import read_network, Network
 from typing import Dict, Tuple, Optional
 import logging
+import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -172,14 +172,15 @@ class NetworkProcessor:
         if self.congestion_data is None and self.congestion_file is not None:
             self.load_congestion_data()
 
-        if self.graph_type == "igraph":
-            self.create_igraph()
-        elif self.graph_type == "networkx":
-            self.create_nx_graph()
-        elif self.graph_type == "pandana":
-            self.create_pandana_graph()
-        else:
-            raise ValueError(f"Unsupported graph type: {self.graph_type}")
+        if self.graph is None:
+            if self.graph_type == "igraph":
+                self.create_igraph()
+            elif self.graph_type == "networkx":
+                self.create_nx_graph()
+            elif self.graph_type == "pandana":
+                self.create_pandana_graph()
+            else:
+                raise ValueError(f"Unsupported graph type: {self.graph_type}")
     
     def create_igraph(self):
         """
@@ -278,16 +279,123 @@ class NetworkProcessor:
         self.graph = graph
         logger.info(f"\t Created Pandana graph with {len(nodes)} nodes and {len(links)} edges")
 
+    def save(self, path: str):
+        """
+        Save the NetworkProcessor object to a file.
+        
+        Args:
+        path (str): The file path where the NetworkProcessor object will be saved
+        """
+        logger.info(f"\t Saving NetworkProcessor to {path}")
 
+        data_path = os.path.join(path, "network_processor.pkl")
+        data = dict(
+            network_file = self.network_file,
+            congestion_file = self.congestion_file,
+            graph_type = self.graph_type,
+            network = self.network,
+            congestion_data = self.congestion_data,
+            congestion_aware = self.congestion_aware
+        )
+        with open(data_path, 'wb') as f:
+            pickle.dump(data, f)
+
+        logger.info(f"\t Saved NetworkProcessor data to {data_path}")
+        # if graph type is pandana
+        if self.graph_type == "pandana" and self.graph is not None:
+            graph_path = os.path.join(path, "pandana_graph.h5")
+            self.graph.save_hdf5(graph_path)
+        # if it is igraph
+        elif self.graph_type == "igraph" and self.graph is not None:
+            graph_path = os.path.join(path, "igraph_graph.graphml")
+            self.graph.write_graphml(graph_path)
+        # if it is networkx
+        elif self.graph_type == "networkx" and self.graph is not None:
+            import networkx as nx
+            graph_path = os.path.join(path, "networkx_graph.gpickle")
+            nx.write_gpickle(self.graph, graph_path)
+
+        logger.info(f"\t Saved {self.graph_type} graph to {graph_path}")
+    
+    @staticmethod
+    def load(path: str):
+        """
+        Load the NetworkProcessor object from a file.
+        
+        Args:
+        path (str): The file path from where the NetworkProcessor object will be loaded
+        """
+        logger.info(f"\t Loading NetworkProcessor from {path}")
+
+        data_path = os.path.join(path, "network_processor.pkl")
+        with open(data_path, 'rb') as f:
+            data = pickle.load(f)
+        
+        net_processor = NetworkProcessor(
+            network_file = data['network_file'],
+            congestion_file = data['congestion_file'],
+            graph_type = data['graph_type'],
+            network = data['network']
+        )
+        
+        net_processor.congestion_data = data['congestion_data']
+        net_processor.congestion_aware = data['congestion_aware']
+
+        logger.info(f"\t Loaded NetworkProcessor data from {data_path}")
+        # if graph type is pandana, load the graph too
+        if net_processor.graph_type == "pandana":
+            graph_path = os.path.join(path, "pandana_graph.h5")
+            if os.path.exists(graph_path):
+                import pandana as pdna
+                net_processor.graph = pdna.Network.from_hdf5(graph_path)
+        # if it is igraph
+        elif net_processor.graph_type == "igraph":
+            graph_path = os.path.join(path, "igraph_graph.graphml")
+            if os.path.exists(graph_path):
+                import igraph as ig
+                net_processor.graph = ig.read(graph_path)
+        # if it is networkx
+        elif net_processor.graph_type == "networkx":
+            graph_path = os.path.join(path, "networkx_graph.gpickle")
+            if os.path.exists(graph_path):
+                import networkx as nx
+                net_processor.graph = nx.read_gpickle(graph_path)
+        logger.info(f"\t Loaded {net_processor.graph_type} graph from {graph_path}")
+        return net_processor
+            
 
 
 def configure(context):
-    pass
+    context.config("dmc_graph_type", default="pandana")
+    context.config("dmc_network_file", 
+                default=os.path.join(context.config("data_path"), "dmc", "switzerland_network.xml.gz"))
+    context.config("dmc_congestion_file", 
+                   default=os.path.join(context.config("data_path"), "dmc", "linkstats.txt.gz"))  
+    context.stage("mode_choice.network.road_network")
 
 def execute(context):
-    return NetworkProcessor
+    # get network and congestion file paths
+    network_file = context.config("dmc_network_file")
+    congestion_file = context.config("dmc_congestion_file")
+    
+    # get the road network
+    road_network = context.stage("mode_choice.network.road_network")
 
+    # prepare the network processor
+    network_processor = NetworkProcessor(
+            network_file=network_file,
+            network=road_network,
+            congestion_file=congestion_file,
+            graph_type=context.config("dmc_graph_type")
+        )
 
+    network_processor.build()
+
+    # path to save the processor object
+    path_to_save = context.path()
+    network_processor.save(path_to_save)
+    
+    return NetworkProcessor, path_to_save
 
 
 

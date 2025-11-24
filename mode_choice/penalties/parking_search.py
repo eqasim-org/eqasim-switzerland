@@ -1,15 +1,12 @@
 import numpy as np
+from mode_choice.dmc_defaults import Defaults
 
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
-    context.config("urban_parking_search_min", 2.0)   
-    context.config("suburban_parking_search_min", 1.0) 
+    context.config("urban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_URBAN)   
+    context.config("suburban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_SUBURBAN) 
 
-def execute(context):
-    df = context.stage("mode_choice.trips.prepare_trips")[
-        ["person_id","trip_id","destination_municipality","following_purpose"]
-    ]
-
+def parking_search_time(df, context):
     urban_search_min = context.config("urban_parking_search_min")
     suburban_search_min = context.config("suburban_parking_search_min")
 
@@ -19,7 +16,16 @@ def execute(context):
     parking_searching_duration_min[df["destination_municipality"] == "suburban"] += suburban_search_min
 
     ### don't search for parking when going home or work
-    parking_searching_duration_min[df["following_purpose"].isin(["home", "work"])] = 0.0
+    if "following_purpose" in df.columns:
+        parking_searching_duration_min[df["following_purpose"].isin(["home", "work"])] = 0.0
+    else:
+        parking_searching_duration_min[df["purpose"].isin(["home", "work"])] = 0.0
+        
+    return parking_searching_duration_min
 
-    df["parking_searching_duration_min"] = parking_searching_duration_min
+def execute(context):
+    df = context.stage("mode_choice.trips.prepare_trips")[
+        ["person_id","trip_id","destination_municipality","following_purpose"]
+    ].copy()
+    df["parking_searching_duration_min"] = parking_search_time(df, context)
     return df[["person_id","trip_id","parking_searching_duration_min"]]

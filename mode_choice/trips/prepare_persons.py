@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
+from mode_choice.dmc_defaults import Defaults
 
 
-MS_REGIONS = {'canton_id': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26], 
-              'cluster': [2, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 2, 0]}
-MS_REGIONS = pd.DataFrame(MS_REGIONS)
+MS_REGIONS = Defaults.MS_REGIONS.reset_index().copy()
+INCOME_CLASS_MAP = Defaults.INCOME_CLASS_MAP
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -25,10 +25,16 @@ def execute(context):
     df_persons = df_persons.rename(columns={"cluster":"region"})
     assert not df_persons["region"].isna().any(), "Some persons have no region assigned!"
 
-    # add income (income per capita)
-    INCOME_CLASS_MAP = {0: 2000, 1: 3000, 2: 4500, 3: 7000, 4: 9000, 5: 11000,  6: 13000, 7: 15000, 8: 17000} # same as cmdp/dmc/data/prepare_survey_data.py
+    # add income (income per capita)    
     df_persons["income"] = df_persons.income_class.map(INCOME_CLASS_MAP)
-    df_persons["income"] = df_persons["income"] / df_persons["household_size"].fillna(1).clip(lower=1, upper=7)
+    
+    # Calculate income per capita using the OECD equivalence scale: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Glossary:Equivalised_income
+    df_persons['is_child'] = df_persons['age'] < 14
+    num_children = df_persons.groupby('household_id')['is_child'].transform('sum')
+    num_adults = df_persons['household_size'] - num_children
+    assert (num_adults >= 1).all(), "All households should have at least one adult."
+    equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children
+    df_persons["income"] = df_persons["income"] / equvalent_size
 
     # add availabilities
     c = context.stage("data.constants")

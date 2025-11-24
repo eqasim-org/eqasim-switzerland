@@ -13,3 +13,4 @@ slurm*
 *.ipynb_checkpoints
 *.ipynb
 output
+*.log

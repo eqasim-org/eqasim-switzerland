@@ -1,0 +1,3 @@
+class constants:
+    MEAN_EUCLIDEAN_DISTANCE_KM = 8.0
+    MEAN_INCOME_CHF = 3700.0

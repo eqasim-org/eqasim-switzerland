@@ -2,22 +2,24 @@ from typing import List, Dict, Any, Tuple
 import pandas as pd
 from itertools import product
 from joblib import Parallel, delayed
+from mode_choice.dmc_defaults import Defaults
 import time
 import logging
 
 logger = logging.getLogger(__name__)
 
 # Modes we consider
-POSSIBLE_MODES = set(['car', 'public_transport', 'bike', 'walk', 'car_passenger'])
+POSSIBLE_MODES = Defaults.POSSIBLE_MODES
 
 # default thresholds (Euclidean distance) (km)
-DEFAULT_WALK_THRESHOLD = 4.0
-DEFAULT_BIKE_THRESHOLD = 8.0
-DEFAULT_CAR_MIN_THRESHOLD = 0.15
-DEFAULT_PT_MIN_THRESHOLD = 0.15
-DEFAULT_PASSENGER_MIN_THRESHOLD = 0.15
+DEFAULT_WALK_THRESHOLD = Defaults.DEFAULT_WALK_THRESHOLD_KM
+DEFAULT_BIKE_THRESHOLD = Defaults.DEFAULT_BIKE_THRESHOLD_KM
+DEFAULT_CAR_MIN_THRESHOLD = Defaults.DEFAULT_CAR_MIN_THRESHOLD_KM
+DEFAULT_PT_MIN_THRESHOLD = Defaults.DEFAULT_PT_MIN_THRESHOLD_KM
+DEFAULT_PASSENGER_MIN_THRESHOLD = Defaults.DEFAULT_PASSENGER_MIN_THRESHOLD_KM
+
 # spatial continuity constraints
-MODE_CONTINUITY = set(["car", "bike"] )
+MODE_CONTINUITY = Defaults.MODE_CONTINUITY
 
 
 def get_possible_mode_combinations_parallel(distances: List[List[float]],
@@ -137,5 +139,6 @@ def spatial_continuity_filter(all_combinations: List[Tuple[str, ...]],
 # I include this as a stage so that if we modify some functions, it will be considered in synpp
 def configure(context):
     pass    
+
 def execute(context):
     return get_possible_mode_combinations_parallel

@@ -20,12 +20,11 @@ def configure(context):
     context.stage("mode_choice.cost.pt")
     context.stage("mode_choice.penalties.parking_search")
 
+    context.stage("mode_choice.estimate_mode.run")
     context.stage("mode_choice.dmc.run_dmc")
 
     context.config("data_path")
     context.config("random_seed")
-    context.config("dmc_parameters_file", 
-                   default=os.path.join(context.config("data_path"), "dmc", "mode_parameters.yml"))
 
 def execute(context):
     logger.info("="*40)
@@ -103,7 +102,8 @@ def execute(context):
     # Init DMC
     logger.info("\t Initializing DMC model...")
     DMC = context.stage("mode_choice.dmc.run_dmc")
-    parameters_file = context.config("dmc_parameters_file")
+    _, _, parameters_file = context.stage("mode_choice.estimate_mode.run")
+    
     dmc = DMC(
         parameters_file=parameters_file,
         tours=tours,
