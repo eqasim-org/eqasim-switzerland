@@ -59,6 +59,9 @@ class Defaults:
     USE_EXPONENTS_IN_MODE_CHOICE = True
     INCOME_COST_INTERACTION = True
     DISTANCE_COST_INTERACTION = True
+    SHORT_DISTANCE_LIMIT_KM = 1.0
+    LONG_DISTANCE_LIMIT_KM = 12.0
+    
 
 def configure(context):
     pass

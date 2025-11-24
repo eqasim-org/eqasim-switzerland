@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 MODES = ['car', 'pt', 'bike', 'walk', 'car_passenger']
 MEAN_EUCLIDEAN_DISTANCE_KM = constants.MEAN_EUCLIDEAN_DISTANCE_KM
 MEAN_INCOME_CHF = constants.MEAN_INCOME_CHF
+SHORT_DISTANCE_LIMIT_KM = Defaults.SHORT_DISTANCE_LIMIT_KM
+LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
 
 def configure(context):
     context.stage("mode_choice.estimate_model.data.training_data")
@@ -55,8 +57,8 @@ def preprocess_data(df, ignore_car_passenger):
     df["region_2"] = (df["region"]==1).astype(int)
     df["region_3"] = (df["region"]==2).astype(int)
 
-    df["short_distance"] = (df["euclidean_distance_km"]<1.0).astype(int) # 80% of bike and walk trips are below 1 km
-    df["long_distance"]  = (df["euclidean_distance_km"]>=12.0).astype(int) # 80% of car and pt trips are below 12 km
+    df["short_distance"] = (df["euclidean_distance_km"]<SHORT_DISTANCE_LIMIT_KM).astype(int) # 80% of bike and walk trips are below 1 km
+    df["long_distance"]  = (df["euclidean_distance_km"]>LONG_DISTANCE_LIMIT_KM).astype(int) # 80% of car and pt trips are below 12 km
     return df, modes
 
 def define_variables(database, ignore_car_passenger):
