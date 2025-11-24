@@ -4,8 +4,6 @@ import logging
 from mode_choice.dmc_defaults import Defaults
 
 logger = logging.getLogger(__name__)
-SHORT_DISTANCE_LIMIT_KM = Defaults.SHORT_DISTANCE_LIMIT_KM
-LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
 
 def configure(context):
     context.stage("mode_choice.prepare_data")
@@ -14,15 +12,23 @@ def configure(context):
 
     context.config("data_path")
     context.config("random_seed")
+    context.config("calibrated_parameters", default=False)
+    if context.config("calibrated_parameters"):
+        context.stage("mode_choice.calibration.calibrate")
 
 def execute(context):
     prepared_data = context.stage("mode_choice.prepare_data")
     
+    # get parameters path
+    if context.config("calibrated_parameters"):
+        parameters_file = context.stage("mode_choice.calibration.calibrate")
+    else:
+        _, _, parameters_file = context.stage("mode_choice.estimate_mode.run")
+    
     # Init DMC
     logger.info("\t Initializing DMC model...")
-    DMC = context.stage("mode_choice.dmc.run_dmc")
-    _, _, parameters_file = context.stage("mode_choice.estimate_mode.run")
-    
+    DMC = context.stage("mode_choice.dmc.run_dmc")    
+
     dmc = DMC(
         parameters_file=parameters_file,
         tours=prepared_data['tours'],

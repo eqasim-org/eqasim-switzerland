@@ -32,6 +32,7 @@ class Parameters(ABC):
         betaRegion2_u: float = 0.0
         betaOriginHome_u: float = 0.0
         betaShortDistance_u: float = 0.0
+        betaLongDistance_u: float = 0.0
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
 
@@ -39,7 +40,8 @@ class Parameters(ABC):
         alpha_u: float = 0.0
         betaTravelTime_u_min: float = 0.0
         travelTimeExponent: float = 1.0
-
+        betaAccessEgressTime_u_min: float = 0.0
+        accessEgressTimeExponent: float = 1.0
         betaAge_u: float = 0.0
         betaSex_u: float = 0.0
         betaRegion1_u: float = 0.0
@@ -48,6 +50,7 @@ class Parameters(ABC):
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
         betaShortDistance_u: float = 0.0
+        betaLongDistance_u: float = 0.0
 
         additionalAccessEgressWalkTime_min: float = 0.0
         constantParkingSearchPenalty_min: float = 0.0
@@ -80,6 +83,7 @@ class Parameters(ABC):
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
         betaShortDistance_u: float = 0.0
+        betaLongDistance_u: float = 0.0
 
     class walk:
         alpha_u: float = 0.0
@@ -92,6 +96,7 @@ class Parameters(ABC):
         betaRegion2_u: float = 0.0
         betaOriginHome_u: float = 0.0
         betaShortDistance_u: float = 0.0
+        betaLongDistance_u: float = 0.0
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
 
@@ -112,6 +117,7 @@ class Parameters(ABC):
         betaUrbanDestination_u: float = 0.0
         betaDrivingLicense_u: float = 0.0
         betaShortDistance_u: float = 0.0
+        betaLongDistance_u: float = 0.0
 
     class cost:        
         betaCost_u_MU: float = 0
