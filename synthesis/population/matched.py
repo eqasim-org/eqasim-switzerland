@@ -339,7 +339,7 @@ def execute(context):
         population_selector  = df_population["age"] >= c.MZ_AGE_THRESHOLD
         population_selector &= df_population["is_head"]
 
-        columns_household_matching           = ["ovgk", "N_children_under_12", "age_class", "canton_id", "sex"]
+        columns_household_matching           = ["ovgk", "household_size", "canton_id", "age_class", "sex"]
         mandatory_columns_household_matching = columns_household_matching[:3]
 
         df_target, df_population, removed_ids_list = run_statistical_matching_extended(context, 
@@ -446,7 +446,7 @@ def execute(context):
 
         population_selector = df_population["age_class"] > 0
 
-        columns_individual_matching           = [ "number_of_cars_class", "N_children_under_18", "ovgk", "age_class", "sex", "employment_status"]
+        columns_individual_matching           = [ "ovgk", "age_class", "sex", "employment_status", "number_of_cars_class", "N_children_under_18"]
         mandatory_columns_individual_matching = columns_individual_matching[:4]
 
         df_target, df_population, removed_ids_list  = run_statistical_matching_extended(context, 
