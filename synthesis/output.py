@@ -103,10 +103,10 @@ def execute(context):
     ]]
 
     df_activities.to_csv("%s/%sactivities.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
-
+    print("Finished writing activities!")
     # Prepare trips
     df_trips = context.stage("synthesis.population.trips")
-    df_locat = context.stage("synthesis.population.spatial.locations")
+    #df_locat = context.stage("synthesis.population.spatial.locations")
 
 
     df_trips["preceding_activity_index"] = df_trips["trip_index"]
@@ -120,21 +120,30 @@ def execute(context):
     ]]
 
     #df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
-
+    print("Starting to create activities gpkg data.")
     # Prepare spatial data sets
     df_locations = context.stage("synthesis.population.spatial.locations")[[
         "person_id", "activity_index", "geometry"
     ]]
+    # Set a MultiIndex on both (avoids reshuffling all columns)
+    df_locations = df_locations.set_index(["person_id", "activity_index"])
+    df_activities = df_activities.set_index(["person_id", "activity_index"])
 
-    df_activities = pd.merge(df_activities, df_locations[[
-        "person_id", "activity_index", "geometry"
-    ]], how = "left", on = ["person_id", "activity_index"])
-
+    # Fast alignment of the one column you need
+    df_activities["geometry"] = df_locations["geometry"]
+    df_activities = df_activities.reset_index()
+    df_locations = df_locations.reset_index()
     # Write spatial activities
-    df_spatial = gpd.GeoDataFrame(df_activities, crs = "EPSG:2056")
+    df_spatial = gpd.GeoDataFrame(
+        df_activities,
+        geometry="geometry",
+        crs="EPSG:2056"
+    )
     df_spatial["purpose"] = df_spatial["purpose"].astype(str)
     path = "%s/%sactivities.gpkg" % (output_path, output_prefix)
-    df_spatial.to_file(path, driver = "GPKG")
+    print("Starting to write activities gpkg data.")
+    df_spatial.to_file(path, driver = "GPKG", engine="pyogrio")
+    print("Finished writing activities gpkg data.")
     clean_gpkg(path)
 
     # Write spatial homes
