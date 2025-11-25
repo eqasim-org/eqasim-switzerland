@@ -12,10 +12,11 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.households")
     context.config("output_path")
-    context.config("cutout_path")
+    context.config("analysis_path")
+    context.config("cutout_path", False)
 
 def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, output_path):
-    for modeT in ["subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "car_availability", "employed"]:
+    for modeT in ["subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "car_availability", "employed", "income_class"]:
         s1 = pop_before[pop_before["age"]>=6][modeT].value_counts(dropna = True)
         s2 = pop_after[pop_after["age"]>=6][modeT].value_counts(dropna = True)
         s3 = pop_mz.groupby([modeT])["person_weight"].sum()
@@ -26,17 +27,47 @@ def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, o
 
         d = d1.merge(d2, on = "index", suffixes=["_before", "_after"])
         d =  d.merge(d3, on = "index")
-        d["index"] = d["index"].astype(str)
-        d["index"] = [c.replace("False", "No") for c in d["index"]]
-        d["index"] = [c.replace("True", "Yes") for c in d["index"]]
-        d["index"] = [c.replace("0.0", "Always") for c in d["index"]]
-        d["index"] = [c.replace("1.0", "Sometimes") for c in d["index"]]
-        d["index"] = [c.replace("2.0", "Never") for c in d["index"]]
+        # ---------- LABELING BY VARIABLE TYPE ----------
+        # make a copy to work with
+        idx = d["index"]
 
+        # Boolean subscription/employment variables
+        if modeT in ["subscriptions_ga", "subscriptions_halbtax",
+                     "subscriptions_verbund", "employed"]:
+            # map True/False to Yes/No, keep anything else as string
+            mapped = idx.map({True: "Yes", False: "No"})
+            d["index"] = mapped.fillna(idx.astype(str))
+
+        # Car availability: 0/1/2 -> Always/Sometimes/Never
+        elif modeT == "car_availability":
+            # ensure numeric for mapping
+            idx_num = pd.to_numeric(idx, errors="coerce")
+            mapped = idx_num.map({0: "Always", 1: "Sometimes", 2: "Never"})
+            # if something doesn’t map, just keep original string
+            d["index"] = mapped.fillna(idx.astype(str))
+
+        # Income: keep numeric categories, but as strings (or add your own mapping)
+        elif modeT == "income":
+            # make sure integers show up nicely, e.g. "1", "2", ...
+            # (you can plug your own dict here if you have labels for each code)
+            d["index"] = pd.to_numeric(idx, errors="ignore")
+            d["index"] = d["index"].astype(str)
+
+        # fallback (shouldn't really be used here)
+        else:
+            d["index"] = idx.astype(str)
+        # ---------- END LABELING ----------
+
+        # suffix for HDF key and filenames
         if modeT.split("_")[0] == "subscriptions":
             suffix = modeT.split("_")[1]
         elif modeT == "car_availability":
             suffix = "car"
+        elif modeT == "income":
+            suffix = "income"
+        else:
+            suffix = modeT
+
         
         
         d.to_hdf(output_file_path, key = "mto_"+suffix)
@@ -75,7 +106,8 @@ def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, o
                        "subscriptions_ga": "GA ownership",
                        "subscriptions_halbtax": "Half-fare ownership",
                        "subscriptions_verbund": "Regional PT subscription ownership",
-                       "employed": "Employment"}
+                       "employed": "Employment",
+                       "income_class": "Income class"}
 
         plt.title(modetotitle[modeT] + " before and after applying WFH and MTO models")
         plt.xlabel(modetotitle[modeT])
@@ -89,10 +121,17 @@ def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, o
 
 
 def execute(context):
+    output_path = context.config("analysis_path")
     # Load population before models
     pop_before = context.stage("synthesis.population.enriched")
+    #activate for synpop_are
+    #pop_before["subscriptions_halbtax"] = pop_before["subscriptions"].isin(["HTA", "HTA+VA"])
+
     # Load population after models
     pop_after = context.stage("synthesis.population.enriched")
+    #activate for synpop_are
+    #pop_after["subscriptions_halbtax"] = pop_after["subscriptions"].isin(["HTA", "HTA+VA"])
+
 
     # Select those living within the shapefile
     if context.config("cutout_path"):
@@ -112,14 +151,15 @@ def execute(context):
     # Load microcensus population
     #hhl = context.stage("data.microcensus.households")[["person_id", "home_x", "home_y"]]
     pop_mz = context.stage("data.microcensus.persons")
+    pop_mz = pop_mz[pop_mz["weekend"]== False]
     #pop_mz = pop_mz.merge(hhl, on = "person_id")
     if context.config("cutout_path"):
         homes     = gpd.GeoSeries.from_xy(pop_mz["home_x"], pop_mz["home_y"])
         homes_in_shp = homes.within(zurich5km)
         pop_mz = pop_mz[homes_in_shp]
-        #pop_mz = pop_mz[pop_mz["canton_id"]==22]
+    #pop_mz = pop_mz[pop_mz["canton_id"]==1]
     # Setting up the output folder
-    output_path = context.config("output_path") + "/MTO_zurich5km"
+    
     Path(output_path).mkdir(parents = True, exist_ok= True)
     output_file_path = output_path + "/results_data_agg_onlyMTO.h5"
 
