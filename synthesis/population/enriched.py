@@ -108,13 +108,13 @@ def execute(context):
 
         # Filling those with NA income class with 0
         df_persons.loc[df_persons["income_class"].isna(), "income_class"] = 0
-        df_persons.loc[df_persons["age"].isna(), "age"]                   = 30 # TODO check why/how some agents can have NaN age
+        df_persons.loc[df_persons["age"].isna(), "age"]                   = 5 # TODO check why/how some agents can have NaN age
 
         # Filling missing IDs
         df_persons["statpop_person_id"]    = df_persons["synpop_person_id"]
         df_persons["statpop_household_id"] = df_persons["synpop_person_id"]
         df_persons["mz_head_id"]           = df_persons["mz_person_id"].fillna(0).astype(int)
-        df_persons["age"]                  = df_persons["age"].fillna(30).astype(int)
+        df_persons["age"]                  = df_persons["age"].fillna(5).astype(int)
 
         # Make sure we have now NaNs included (commented out, because home_quater_id MAY be NaN deliberately)
         # assert(len(df_persons.drop(["mz_person_id", "mz_head_id"], axis = 1).dropna()) == len(df_matching))
@@ -132,5 +132,5 @@ def execute(context):
         print("Fixing this to ensure consistency of the results.")
         df_persons.loc[df_persons["age_class"]<=1, "driving_license"] = False
 
-    print(df_persons["collective_housing_resident"].value_counts())
+    #print(df_persons["collective_housing_resident"].value_counts())
     return df_persons
