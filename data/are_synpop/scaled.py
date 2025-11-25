@@ -119,4 +119,6 @@ def execute(context):
         print("Number of persons in population controls :", df_population_controls["weight"].sum())
         print("Number of persons after scaling :", len(df_synpop_new["person_id"].unique()))
 
-    return df_synpop_new
+        return df_synpop_new
+    else:
+        return df_synpop
