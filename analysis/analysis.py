@@ -78,6 +78,11 @@ def import_data_actual(context, population_selector = None):
     # including those filtered in trips (?) Milos feb '24
 
     df_act_trips = context.stage("data.microcensus.trips")[0]
+
+    keep_ids = df_act_persons.loc[~df_act_persons["weekend"], "person_id"].unique()
+
+    df_act_persons = df_act_persons[df_act_persons["person_id"].isin(keep_ids)]
+    df_act_trips  = df_act_trips[df_act_trips["person_id"].isin(keep_ids)]
     # Merging with person information, correcting trips with erroneous purpose
 
     df_act_persons.rename(columns = {"person_weight": "weight_person"}, inplace = True)
@@ -525,7 +530,7 @@ def generate_plots(context, df_aux_act, df_aux_syn, df_act, df_syn, df_syn_no_tr
     
 def execute(context):
     pop_all = None
-    pop_men_1840 = {"age_selector": [18, 40], "gender_selector": "male", "canton_selector":[1,2,5,7]}
+    pop_men_1840 = {"age_selector": [18, 40], "gender_selector": "male", "canton_selector":[1]}
     pop_wom_1840 = {"age_selector": [18, 40], "gender_selector": "female"}#, "senior_homes_selector": "no"}
 
     suff_all = ""
