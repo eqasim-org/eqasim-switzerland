@@ -10,7 +10,9 @@ def configure(context):
     context.stage("mode_choice.network.road_network")
     
     context.config("data_path")
-
+    context.config("dmc_simulation_data_path", 
+                   default = os.path.join(context.config("data_path"), "simulation_data"))
+    
     context.config("routing_batch_size", default=Defaults.DEFAULT_CAR_ROUTING_BATCH_SIZE)
 
     context.config("walk_speed_m_per_s", default=Defaults.DEFAULT_WALK_SPEED_M_PER_S) 

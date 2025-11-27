@@ -167,8 +167,10 @@ def read_network(filename, skip_attributes=False):
 
 def configure(context):
     context.config("data_path")
+    context.config("dmc_simulation_data_path", 
+                   default = os.path.join(context.config("data_path"), "simulation_data"))    
     context.config("dmc_network_file", 
-                   default=os.path.join(context.config("data_path"), "dmc", "switzerland_network.xml.gz"))
+                default=os.path.join(context.config("dmc_simulation_data_path"),"switzerland_network.xml.gz"))
 
 def execute(context):
     network_file = context.config("dmc_network_file")

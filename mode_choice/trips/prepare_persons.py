@@ -17,6 +17,8 @@ def execute(context):
     df_persons["hasGeneralSubscription"] = df_persons.subscriptions_ga
     df_persons["hasHalbtaxSubscription"] = df_persons.subscriptions_halbtax
     df_persons["hasRegionalSubscription"] = df_persons.subscriptions_verbund | df_persons.subscriptions_strecke
+    df_persons["hasVerbundSubscription"] = df_persons.subscriptions_verbund
+    df_persons["hasStreckenSubscription"] = df_persons.subscriptions_strecke
     df_persons["hasJuniorSubscription"] = df_persons.subscriptions_junior
     df_persons["hasGleis7Subscription"] = df_persons.subscriptions_gleis7
 
@@ -50,6 +52,7 @@ def execute(context):
         # pt subscriptions
         "hasGeneralSubscription", "hasHalbtaxSubscription",
         "hasRegionalSubscription", "hasJuniorSubscription", "hasGleis7Subscription",
+        "hasVerbundSubscription", "hasStreckenSubscription",
         
         # availabilities
         "car_availability", "bike_availability", "is_car_passenger"

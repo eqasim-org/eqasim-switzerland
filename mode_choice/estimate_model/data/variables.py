@@ -106,10 +106,10 @@ def execute(context):
     cost_pt = pt_trips[["person_id","trip_id","euclidean_distance_km"]].copy()
     subscriptions =  context.stage("mode_choice.estimate_model.data.survey_data")[
         ["person_id", "trip_id", "hasGeneralSubscription","hasHalbtaxSubscription",  "hasRegionalSubscription", 
-         "hasJuniorSubscription","hasGleis7Subscription", 'age','destination_x', 'destination_y', 'origin_x', 
-         'origin_y', 'home_x', 'home_y','departure_time']]
+         "hasJuniorSubscription","hasGleis7Subscription", "hasStreckenSubscription","hasVerbundSubscription",
+         'age','destination_x', 'destination_y', 'origin_x', 'origin_y', 'home_x', 'home_y','departure_time']]
     cost_pt = cost_pt.merge(subscriptions, on=["person_id", "trip_id"], how="left")
-    cost_pt["cost_CHF"]  = pt_cost(cost_pt, context)
+    cost_pt["cost_CHF"]  = pt_cost(context, cost_pt)
     pt_trips["pt_cost_CHF"] = cost_pt["cost_CHF"]    
     pt_trips.drop(columns=["euclidean_distance_km"], inplace=True)
 

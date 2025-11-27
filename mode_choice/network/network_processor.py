@@ -367,10 +367,15 @@ class NetworkProcessor:
 
 def configure(context):
     context.config("dmc_graph_type", default="pandana")
+    
+    context.config("data_path")
+    context.config("dmc_simulation_data_path", 
+                   default = os.path.join(context.config("data_path"), "simulation_data"))
+    
     context.config("dmc_network_file", 
-                default=os.path.join(context.config("data_path"), "dmc", "switzerland_network.xml.gz"))
+                default=os.path.join(context.config("dmc_simulation_data_path"),"switzerland_network.xml.gz"))
     context.config("dmc_congestion_file", 
-                   default=os.path.join(context.config("data_path"), "dmc", "linkstats.txt.gz"))  
+                   default=os.path.join(context.config("dmc_simulation_data_path"), "linkstats.csv.gz"))  
     context.stage("mode_choice.network.road_network")
 
 def execute(context):

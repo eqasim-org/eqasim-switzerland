@@ -40,6 +40,8 @@ def execute(context):
     df_persons["hasJuniorSubscription"] = df_persons.subscriptions_junior
     df_persons["hasGleis7Subscription"] = df_persons.subscriptions_gleis7
     df_persons["statedPreferenceRegion"] = df_persons.sp_region
+    df_persons["hasVerbundSubscription"] = df_persons.subscriptions_verbund
+    df_persons["hasStreckenSubscription"] = df_persons.subscriptions_strecke
     # 2. income
     df_persons["income"] = df_persons.income_class.map(INCOME_CLASS_MAP)
     num_children = df_persons["N_children_under_12"]
@@ -119,11 +121,11 @@ def execute(context):
     df_trips = df_trips.reset_index(drop=True)
 
     cols = ['person_id', 'trip_id', 'departure_time', 'mode', 'purpose','destination_x', 'destination_y', 'origin_x', 'origin_y',
-            'home_x', 'home_y', 'hasGeneralSubscription', 'hasJuniorSubscription', 'hasGleis7Subscription', 'hasHalbtaxSubscription', 
-            'hasRegionalSubscription', 'person_weight', 'age', 'sex', "number_of_cars", "number_of_bikes_class",
-            'driving_license', 'region', 'is_car_passenger', 'income', 'weekend', "car_availability",'destination_home', 'origin_home', 
-            'destination_work', 'euclidean_distance_km', 'is_first', 'is_last', 'parking_duration_wo_travelTime_min', 'home_municipality',
-            'origin_municipality', 'destination_municipality']
+            'home_x', 'home_y', 'hasGeneralSubscription', 'hasJuniorSubscription', 'hasGleis7Subscription', 'hasHalbtaxSubscription',
+            'hasVerbundSubscription', 'hasStreckenSubscription', 'hasRegionalSubscription', 'person_weight', 'age', 'sex',
+            "number_of_cars", "number_of_bikes_class", 'driving_license', 'region', 'is_car_passenger', 'income', 'weekend', 
+            "car_availability",'destination_home', 'origin_home', 'destination_work', 'euclidean_distance_km', 'is_first', 
+            'is_last', 'parking_duration_wo_travelTime_min', 'home_municipality', 'origin_municipality', 'destination_municipality']
     df_trips = df_trips[cols]
 
     logger.info(f"There are {len(df_trips)} trips after cleaning.")
