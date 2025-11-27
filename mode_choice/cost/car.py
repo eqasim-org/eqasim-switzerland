@@ -19,13 +19,13 @@ def car_cost(distance_km, cost_per_km):
 
 
 def configure(context):
-    context.stage("mode_choice.travel_times.car")
+    context.stage("mode_choice.variables.car")
     context.config("car_cost_per_km", Defaults.CAR_COST_PER_KM)
 
 
 def execute(context):
     # read prepared trips
-    df = context.stage("mode_choice.travel_times.car")[
+    df = context.stage("mode_choice.variables.car")[
         ["person_id", "trip_id","distance_km"]]
     
     # compute the cost

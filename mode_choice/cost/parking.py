@@ -3,7 +3,7 @@ from mode_choice.dmc_defaults import Defaults
 
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
-    context.stage("mode_choice.travel_times.car")
+    context.stage("mode_choice.variables.car")
 
     context.config("parking_cost_per_hour_CHF_urban", Defaults.PARKING_COST_PER_HOUR_URBAN) #CHF per hour
     context.config("parking_cost_per_hour_CHF_suburban", Defaults.PARKING_COST_PER_HOUR_SUBURBAN) #CHF per hour
@@ -33,7 +33,7 @@ def parking_cost(df,context):
 
 def execute(context):
     # read the travel times and trips
-    travel_times = context.stage("mode_choice.travel_times.car").copy()
+    travel_times = context.stage("mode_choice.variables.car").copy()
     trips = context.stage("mode_choice.trips.prepare_trips")[
         ["person_id", "trip_index", "trip_id", "destination_municipality", "following_purpose","departure_time"]]
     df = travel_times.merge(trips, on=["person_id", "trip_id"], how="left")

@@ -4,10 +4,10 @@ Routing car passenger is the same as routing cars, so will just return cars trav
 
 
 def configure(context):
-    context.stage("mode_choice.travel_times.car")
+    context.stage("mode_choice.variables.car")
 
 def execute(context):    
-    return context.stage("mode_choice.travel_times.car")
+    return context.stage("mode_choice.variables.car")
     
     
     
