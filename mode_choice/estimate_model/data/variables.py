@@ -42,6 +42,9 @@ def configure(context):
     context.config("urban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_URBAN)   
     context.config("suburban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_SUBURBAN)     
 
+    context.config("pt_cost_model", default=Defaults.PT_COST_MODEL)
+    context.config("car_cost_model", default = Defaults.CAR_COST_MODEL)
+    
 def execute(context):
     survey_data = context.stage("mode_choice.estimate_model.data.survey_data")[
         ['person_id', 'trip_id', 'origin_x', 'origin_y', 'destination_x', 'destination_y',
@@ -101,7 +104,7 @@ def execute(context):
 
     ###################### compute costs for car and pt ###################
     # 1. car cost
-    car_trips["car_cost_CHF"] = car_cost(car_trips["car_distance_km"], context.config("car_cost_per_km"))
+    car_trips["car_cost_CHF"] = car_cost(context, car_trips["car_distance_km"], context.config("car_cost_per_km"))
     # 2. pt cost
     cost_pt = pt_trips[["person_id","trip_id","euclidean_distance_km"]].copy()
     subscriptions =  context.stage("mode_choice.estimate_model.data.survey_data")[

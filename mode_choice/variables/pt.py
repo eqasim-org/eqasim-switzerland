@@ -19,7 +19,7 @@ def configure(context):
     context.config("dmc_matsim_config_file", default=os.path.join(context.config("dmc_simulation_data_path"), "matsim_config.xml"))
     
     context.config("walk_speed_m_per_s", default=Defaults.DEFAULT_WALK_SPEED_M_PER_S)
-    context.config("walk_distance_factor", default=Defaults.DEFAULT_WALK_DISTANCE_FACTOR) 
+    context.config("walk_distance_factor", default=Defaults.DEFAULT_WALK_DISTANCE_FACTOR)     
 
 def run_pt_router(context, input_path, output_path):    
     # cwd = os.getcwd()

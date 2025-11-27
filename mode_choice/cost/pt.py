@@ -8,6 +8,7 @@ import pandas as pd
 import os
 from mode_choice.dmc_defaults import Defaults
 import matsim.runtime.eqasim as eqasim
+import time
 
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")    
@@ -20,6 +21,7 @@ def configure(context):
     context.config("dmc_matsim_config_file", default=os.path.join(context.config("dmc_simulation_data_path"), "matsim_config.xml"))
 
     context.config("pt_distance_factor", default=Defaults.DEFAULT_PT_DISTANCE_FACTOR)
+    context.config("pt_cost_model", default=Defaults.PT_COST_MODEL)
 
 ################# OLD MODEL #######################
 euc_distance = lambda x,y: np.sqrt((x[0]-y[0])**2 + (x[1]-y[1])**2)
@@ -52,7 +54,7 @@ def pt_cost_simple(context, df, distance_threshold_km=DISTANCE_THRESHOLD_KM):
     return np.clip(cost,0,50)
 
 ################# NEW MODEL #######################
-def pt_cost(context, df):    
+def pt_cost_detailed(context, df):    
     df = df.copy()
     df = df.rename(columns = {
             "trip_id": "ID",
@@ -95,6 +97,14 @@ def pt_cost(context, df):
     assert not df["price"].isna().any(), "Some trips have no price computed"
     return df["price"].values
 
+################# PICK THE RIGHT MODEL #######################
+def pt_cost(context, df):
+    if context.config("pt_cost_model") == "simple":
+        return pt_cost_simple(context, df)
+    elif context.config("pt_cost_model") == "detailed":
+        return pt_cost_detailed(context, df)
+    else:
+        raise ValueError(f"Unknown pt_cost_model: {context.config('pt_cost_model')}")
 
 ################# COMPUTE COST FOR SYNTHETIC TRIPS #######################
 def execute(context):
@@ -113,13 +123,15 @@ def execute(context):
     assert not df["age"].isna().any(), "Some persons have no age!"
 
     # compute the cost    
-    df["cost_MU"] = pt_cost(context, df)    
+    starting_time = time.time()
+    df["cost_CHF"] = pt_cost(context, df)    
     
     # fill nans with the simple model
-    f_nan = df["cost_MU"].isna()
+    f_nan = df["cost_CHF"].isna()
     num_nans = f_nan.sum()
     if num_nans>0:
         logger.info(f"{num_nans} trips have no price estimation from the detailed model, using the simple model instead.")
-        df.loc[f_nan, "cost_MU"] = pt_cost_simple(context,df[f_nan])
+        df.loc[f_nan, "cost_CHF"] = pt_cost_simple(context,df[f_nan])
     
-    return df[["person_id","trip_id","cost_MU"]]
+    logger.info(f"PT cost computation took {(time.time()-starting_time)/60:.2f} minutes.")
+    return df[["person_id","trip_id","cost_CHF"]]

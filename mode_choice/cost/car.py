@@ -14,14 +14,23 @@ def car_cost_weiss(distance_km, *args, **kwargs):
     cost_per_km = np.minimum(0.3, 0.104 + 0.6 * np.exp(-1.2*(distance_km**0.33)))
     return distance_km * cost_per_km
 
-def car_cost(distance_km, cost_per_km):
+def car_cost_simple(distance_km, cost_per_km):
     return distance_km * cost_per_km
 
 
+def car_cost(context, *args, **kwargs):
+    car_cost_model = context.config("car_cost_model")
+    if car_cost_model == "simple":
+        return car_cost_simple(*args, **kwargs)
+    elif car_cost_model == "weiss":
+        return car_cost_weiss(*args, **kwargs)
+    else:
+        raise ValueError(f"Unknown car cost model: {car_cost_model}")
+
 def configure(context):
     context.stage("mode_choice.variables.car")
-    context.config("car_cost_per_km", Defaults.CAR_COST_PER_KM)
-
+    context.config("car_cost_per_km", default = Defaults.CAR_COST_PER_KM)
+    context.config("car_cost_model", default = Defaults.CAR_COST_MODEL)
 
 def execute(context):
     # read prepared trips
@@ -30,6 +39,6 @@ def execute(context):
     
     # compute the cost
     car_cost_per_km = context.config("car_cost_per_km") 
-    df["cost_MU"] = car_cost(df["distance_km"], car_cost_per_km)
+    df["cost_CHF"] = car_cost(context, df["distance_km"], car_cost_per_km)
 
-    return df[["person_id", "trip_id", "cost_MU"]]
+    return df[["person_id", "trip_id", "cost_CHF"]]

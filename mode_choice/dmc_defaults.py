@@ -42,9 +42,11 @@ class Defaults:
 
     # Pt cost parameters 
     PT_COST_DISTANCE_THRESHOLD_KM = 10.0    
-
+    PT_COST_MODEL = "detailed"  # "simple" or "detailed"
+    
     # car cost parameters
     CAR_COST_PER_KM = 0.26  # CHF per km
+    CAR_COST_MODEL = "simple"  # "simple" or "weiss"
     
     # parking
     PARKING_COST_PER_HOUR_URBAN = 1.0  # CHF per hour

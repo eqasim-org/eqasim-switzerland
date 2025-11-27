@@ -35,7 +35,7 @@ class PtUtility(BaseUtility):
         )
 
         cost_correction = (10.0-pl.col("euclidean_distance_km")).clip(lower_bound=0.0) ** BaseUtility.pt.distanceExponent
-        corrected_cost = pl.col("cost_MU") + BaseUtility.pt.betaDistance_u_km * cost_correction
+        corrected_cost = pl.col("cost_CHF") + BaseUtility.pt.betaDistance_u_km * cost_correction
         cost = BaseUtility.cost.betaCost_u_MU * interaction_distance * interaction_income * corrected_cost
         return cost
     

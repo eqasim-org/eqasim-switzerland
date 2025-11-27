@@ -33,7 +33,7 @@ class CarUtility(BaseUtility):
             lambda_val=BaseUtility.cost.lambdaCostIncome            
         )
     
-        cost = BaseUtility.cost.betaCost_u_MU * interaction_distance * interaction_income * pl.col("cost_MU")
+        cost = BaseUtility.cost.betaCost_u_MU * interaction_distance * interaction_income * pl.col("cost_CHF")
         return cost
     
 
