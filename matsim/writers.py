@@ -496,7 +496,7 @@ class NetworkWriter(XmlWriter):
     
     def add_links(self, _id, _from, to, length, freespeed, capacity, permlanes,
                    oneway, modes, attributes, write_attrbs=True):
-        self.write_attrbs = write_attrbs & isinstance(attributes, list)         
+        self.write_attrbs = write_attrbs        
         self.start_links()
         def make_link(i):
             link_xml = f'<link id="{_id[i]}" from="{_from[i]}" to="{to[i]}" length="{length[i]}" freespeed="{freespeed[i]}" capacity="{capacity[i]}" permlanes="{permlanes[i]}" oneway="{oneway[i]}" modes="{modes[i]}">'
