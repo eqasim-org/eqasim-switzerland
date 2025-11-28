@@ -18,6 +18,8 @@ def configure(context):
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
     context.stage("mode_choice.trips.prepare_persons")
+
+    context.stage("pt_preparation.pt_pricing.uspat_zones")
     
 
 def execute(context):
@@ -96,10 +98,21 @@ def execute(context):
     df_spatial["preceding_purpose"] = df_spatial["preceding_purpose"].astype(str)
     df_spatial["mode"] = df_spatial["mode"].astype(str)
     df_spatial["trip_id"] = df_spatial["person_id"].astype(str) + "_" + df_spatial["trip_index"].astype(str)
+
+    uspat_zones      = context.stage("pt_preparation.pt_pricing.uspat_zones").copy()[["zone_id", "geometry"]]
+    origins_gdf      = gpd.GeoDataFrame(df_spatial, geometry=gpd.points_from_xy(df_spatial["origin_x"], df_spatial["origin_y"]), crs = "EPSG:2056")
+    destinations_gdf = gpd.GeoDataFrame(df_spatial, geometry=gpd.points_from_xy(df_spatial["destination_x"], df_spatial["destination_y"]), crs = "EPSG:2056")
+
+    origins_with_zone = gpd.sjoin(origins_gdf, uspat_zones, how="left", predicate="within")
+    dest_with_zone    = gpd.sjoin(destinations_gdf, uspat_zones, how="left", predicate="within")
+
+    df_spatial["origin_zone"]      = origins_with_zone["zone_id"]
+    df_spatial["destination_zone"] = dest_with_zone["zone_id"]
     
     return df_spatial[[
         "person_id", "trip_index", "trip_id", "preceding_purpose", "following_purpose",
         "departure_time", "mode", "euclidean_distance_km",
         "origin_x", "origin_y", "destination_x", "destination_y", "home_x", "home_y",
-        "origin_municipality", "destination_municipality", "home_municipality", "region"
+        "origin_municipality", "destination_municipality", "home_municipality", "region",
+        "origin_zone", "destination_zone"
     ]]
