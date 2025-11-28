@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 
 import data.spatial.municipalities
 import data.spatial.quarters
@@ -122,4 +123,5 @@ def execute(context):
     )
     df["zone_id"] = df["zone_id"].astype(np.int)
     df["zone_municipality_id"] = df["zone_municipality_id"].astype(np.int)
+
     return df

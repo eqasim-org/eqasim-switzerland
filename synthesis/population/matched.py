@@ -3,6 +3,8 @@ import itertools
 import numba
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
+mp.set_start_method("spawn", force=True)
 
 """
 This stage attaches observations from the microcensus to the synthetic population sample.
@@ -225,8 +227,9 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     if population_selector is not None:
         df_target = pd.DataFrame(df_target[population_selector])
 
-    df_assignment, levels = parallel_statistical_matching(
-        context,
+    #df_assignment, levels = parallel_statistical_matching(
+    df_assignment, levels = statistical_matching(
+        context.progress,
         df_source, source_identifier, weight,
         df_target, target_identifier,
         columns,
