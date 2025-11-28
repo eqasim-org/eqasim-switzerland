@@ -43,19 +43,20 @@ class PtUtility(BaseUtility):
     def compute_lazy():
         
         utility = (
-            BaseUtility.pt.alpha_u +
-            BaseUtility.pt.betaInVehicleTime_u_min * pl.col("in_vehicle_time_min").pow(BaseUtility.pt.inVehicleTimeExponent) +
-            BaseUtility.pt.betaAccessEgressTime_u_min * pl.col("access_egress_time_min").pow(BaseUtility.pt.accessEgressTimeExponent) +
-            BaseUtility.pt.betaWaitingTime_u_min * pl.col("waiting_time_min").pow(BaseUtility.pt.waitingTimeExponent) +
-            BaseUtility.pt.betaLineSwitch_u * pl.col("number_of_line_switches").pow(BaseUtility.pt.lineSwitchExponent) +
-            PtUtility.estimateCostUtility() +
-            BaseUtility.pt.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18) +
-            BaseUtility.pt.betaSex_u * pl.col("sex") +
-            PtUtility.estimateRegionalUtility() +
-            BaseUtility.pt.betaOriginHome_u * pl.col("origin_home") +
-            BaseUtility.pt.betaShortDistance_u * pl.col("short_distance") +
-            BaseUtility.pt.betaUrbanDestination_u * pl.col("urban_destination") +
-            BaseUtility.pt.betaDestinationWork_u * pl.col("destination_work")         
+            BaseUtility.pt.alpha_u
+            + BaseUtility.pt.betaInVehicleTime_u_min * pl.col("in_vehicle_time_min").pow(BaseUtility.pt.inVehicleTimeExponent)
+            + BaseUtility.pt.betaAccessEgressTime_u_min * pl.col("access_egress_time_min").pow(BaseUtility.pt.accessEgressTimeExponent)
+            + BaseUtility.pt.betaWaitingTime_u_min * pl.col("waiting_time_min").pow(BaseUtility.pt.waitingTimeExponent)
+            + BaseUtility.pt.betaLineSwitch_u * pl.col("number_of_line_switches").pow(BaseUtility.pt.lineSwitchExponent)
+            + PtUtility.estimateCostUtility()
+            + BaseUtility.pt.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18)
+            + BaseUtility.pt.betaSex_u * pl.col("sex")
+            + PtUtility.estimateRegionalUtility()
+            + BaseUtility.pt.betaOriginHome_u * pl.col("origin_home")
+            + BaseUtility.pt.betaShortDistance_u * pl.col("short_distance")
+            + BaseUtility.pt.betaLongDistance_u * pl.col("long_distance")
+            + BaseUtility.pt.betaUrbanDestination_u * pl.col("urban_destination")
+            + BaseUtility.pt.betaDestinationWork_u * pl.col("destination_work")         
         )
 
         return utility

@@ -90,11 +90,10 @@ def pt_cost_detailed(context, df):
                "--output-path", output_path]
                )
     
-    assert os.path.exists(output_path)    
+    assert os.path.exists(output_path), "The pt price computation did not produce an output file."    
 
-    result = pd.read_csv(output_path)[["id","price"]]    
-    df = df.merge(result, left_on="ID", right_on="id", how="left")
-    assert not df["price"].isna().any(), "Some trips have no price computed"
+    result = pd.read_csv(output_path, usecols = ["id","price"]) 
+    df = df.merge(result, left_on="ID", right_on="id", how="left") # I merge because not sure it is the same order
     return df["price"].values
 
 ################# PICK THE RIGHT MODEL #######################

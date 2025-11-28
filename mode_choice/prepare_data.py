@@ -22,8 +22,7 @@ def configure(context):
     context.stage("mode_choice.cost.parking")
     context.stage("mode_choice.cost.pt")
     context.stage("mode_choice.penalties.parking_search")
-
-    context.stage("mode_choice.estimate_mode.run")
+    
     context.stage("mode_choice.dmc.run_dmc")
 
     context.config("data_path")
@@ -31,10 +30,10 @@ def configure(context):
 
 def execute(context):
     logger.info("="*40)
-    logger.info("Running mode choice model...")
+    logger.info("Preparing data...")
     
     # lead persons and convert to polars DataFrame
-    logger.info("\t Loading persons data...")
+    logger.info("\t Loading persons...")
     persons = context.stage("mode_choice.trips.prepare_persons")[
         ["person_id","age","sex","region","driving_license","income"]]
     persons = pl.from_pandas(persons).with_columns([
@@ -46,14 +45,14 @@ def execute(context):
     ])
     
     # load tours and convert to polars DataFrame
-    logger.info("\t Loading tours data...")
+    logger.info("\t Loading tours...")
     tours = context.stage("mode_choice.tours.build")
     tours = pl.from_pandas(tours).with_columns([
         pl.col("euclidean_distance_km").list.eval(pl.element().cast(pl.Float32))
     ])
 
     # load variables and merge necessary dataframes (persons attributes will be merged later in the TourUtility)
-    logger.info("\t Loading variables data...")
+    logger.info("\t Loading modes variables...")
     # 1. bike
     bike = context.stage("mode_choice.variables.bike")
     bike = pl.from_pandas(bike)
@@ -87,7 +86,7 @@ def execute(context):
         ])
     
     # load trips
-    logger.info("\t Loading trips data...")
+    logger.info("\t Loading trips...")
     trips = context.stage("mode_choice.trips.prepare_trips")[
         ["trip_id","preceding_purpose", "following_purpose", "euclidean_distance_km","destination_municipality"]]
     trips = pl.from_pandas(trips)

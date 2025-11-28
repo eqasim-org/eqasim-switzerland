@@ -1,5 +1,6 @@
 import pandas as pd
 
+#TODO: add this class synpp dependency in all the stages where it is used
 
 class Defaults:
     # Mode names
@@ -61,8 +62,8 @@ class Defaults:
     USE_EXPONENTS_IN_MODE_CHOICE = True
     INCOME_COST_INTERACTION = True
     DISTANCE_COST_INTERACTION = True
-    SHORT_DISTANCE_LIMIT_KM = 1.0
-    LONG_DISTANCE_LIMIT_KM = 12.0
+    SHORT_DISTANCE_LIMIT_KM = 1.0 # 80% of bike and walk trips are below 1 km
+    LONG_DISTANCE_LIMIT_KM = 12.0 # 80% of car and pt trips are below 12 km
     
 
 def configure(context):

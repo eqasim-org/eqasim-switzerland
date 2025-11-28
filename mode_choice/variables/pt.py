@@ -70,4 +70,5 @@ def execute(context):
     df = pt_variables(context, path_to_cache, output_path)
     
     df = df.rename(columns={"identifier":"trip_id"})
+    df["person_id"] = df["trip_id"].str.split("_").str[0].astype(int) # to keep consistency between stages (person_id and trip_id always)
     return df

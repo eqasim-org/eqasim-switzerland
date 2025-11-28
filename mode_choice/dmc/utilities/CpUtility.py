@@ -21,23 +21,23 @@ class CpUtility(BaseUtility):
                    .when(pl.col("region") == 2)
                    .then(beta2)
                    .otherwise(0.0)  )
-                
-    
+                    
     @staticmethod
     def compute_lazy():
         
         utility = (
-            BaseUtility.cp.alpha_u +
-            BaseUtility.cp.betaTravelTime_u_min * pl.col("travel_time_min").pow(BaseUtility.cp.travelTimeExponent) +
-            BaseUtility.cp.betaDistance_km * pl.col("euclidean_distance_km").pow(BaseUtility.cp.distanceExponent) +
-            BaseUtility.cp.betaDrivingLicense_u * pl.col("driving_license") +
-            BaseUtility.cp.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18) +
-            BaseUtility.cp.betaSex_u * pl.col("sex") +
-            CpUtility.estimateRegionalUtility() +
-            BaseUtility.cp.betaOriginHome_u * pl.col("origin_home") +
-            BaseUtility.cp.betaShortDistance_u * pl.col("short_distance") +
-            BaseUtility.cp.betaUrbanDestination_u * pl.col("urban_destination") +
-            BaseUtility.cp.betaDestinationWork_u * pl.col("destination_work")         
+            BaseUtility.cp.alpha_u
+            + BaseUtility.cp.betaTravelTime_u_min * pl.col("travel_time_min").pow(BaseUtility.cp.travelTimeExponent)
+            + BaseUtility.cp.betaDistance_km * pl.col("euclidean_distance_km").pow(BaseUtility.cp.distanceExponent)
+            + BaseUtility.cp.betaDrivingLicense_u * pl.col("driving_license")
+            + BaseUtility.cp.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18)
+            + BaseUtility.cp.betaSex_u * pl.col("sex")
+            + CpUtility.estimateRegionalUtility()
+            + BaseUtility.cp.betaOriginHome_u * pl.col("origin_home")
+            + BaseUtility.cp.betaShortDistance_u * pl.col("short_distance")
+            + BaseUtility.cp.betaLongDistance_u * pl.col("long_distance")
+            + BaseUtility.cp.betaUrbanDestination_u * pl.col("urban_destination")
+            + BaseUtility.cp.betaDestinationWork_u * pl.col("destination_work")         
         )
 
         return utility
