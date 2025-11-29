@@ -6,7 +6,7 @@ from mode_choice.dmc_defaults import Defaults
 from .utils import merge_same_trips
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("synpp")
 
 MS_REGIONS = Defaults.MS_REGIONS
 INCOME_CLASS_MAP = Defaults.INCOME_CLASS_MAP
@@ -24,8 +24,8 @@ def execute(context):
     df_persons = context.stage("data.microcensus.persons")    
     df_trips,filterout_person_ids = context.stage("data.microcensus.trips")
     filterout_person_ids = set(filterout_person_ids)
-    logger.info(f"There are {len(df_trips)} trips in total.")
-    logger.info(f"There are {len(df_persons)} persons in total.")
+    logger.info(f"\t There are {len(df_trips)} trips in total.")
+    logger.info(f"\t There are {len(df_persons)} persons in total.")
 
     # sort trips by person and by trip
     df_trips = df_trips.sort_values(["person_id","trip_id"])
@@ -39,7 +39,6 @@ def execute(context):
     df_persons["hasRegionalSubscription"] = df_persons.subscriptions_verbund | df_persons.subscriptions_strecke
     df_persons["hasJuniorSubscription"] = df_persons.subscriptions_junior
     df_persons["hasGleis7Subscription"] = df_persons.subscriptions_gleis7
-    df_persons["statedPreferenceRegion"] = df_persons.sp_region
     df_persons["hasVerbundSubscription"] = df_persons.subscriptions_verbund
     df_persons["hasStreckenSubscription"] = df_persons.subscriptions_strecke
     # 2. income
@@ -52,7 +51,7 @@ def execute(context):
     df_persons["region"] = df_persons.canton_id.map(lambda x: MS_REGIONS.loc[x,"cluster"])
 
     cols = ["person_id","home_x","home_y", "hasGeneralSubscription","hasHalbtaxSubscription","hasRegionalSubscription", "hasJuniorSubscription", 
-            "hasGleis7Subscription", "statedPreferenceRegion", 'person_weight', 'age', 'sex', 'driving_license', 'region',
+            "hasGleis7Subscription", "hasVerbundSubscription", "hasStreckenSubscription", 'person_weight', 'age', 'sex', 'driving_license', 'region',
              'is_car_passenger', "income", "number_of_cars","number_of_bikes_class", "weekend", "car_availability"]
     df_persons = df_persons[cols]  
     # 4. merge  
@@ -60,7 +59,7 @@ def execute(context):
 
     # updates filtered persons to include the weekend trips
     filterout_person_ids.update(df_persons[df_persons["weekend"]==True].person_id.tolist())
-    
+
     # correct trip information
     df_trips["destination_home"] = df_trips.purpose == "home"
     df_trips["origin_home"] = (df_trips.origin_x == df_trips.home_x) & (df_trips.origin_y == df_trips.home_y)    
@@ -91,22 +90,33 @@ def execute(context):
     df_trips["geometry_destination"] = gpd.points_from_xy(df_trips.destination_x, df_trips.destination_y)
 
     # Spatial join for home municipality
-    df_home = gpd.GeoDataFrame(df_trips, geometry="geometry_home", crs="EPSG:2056")
+    logger.info("\t Assigning municipality types to trips based on home, origin, and destination locations.")
+    logger.info("\t\t 1. Home municipality")
+    df_home = gpd.GeoDataFrame(df_trips[["geometry_home"]], 
+                               geometry="geometry_home", 
+                               crs="EPSG:2056")
     assert df_home.crs == df_municipalities.crs
-    df_home = df_home.sjoin(df_municipalities, how="left", predicate="intersects")
+    df_home = df_home.sjoin_nearest(df_municipalities, how="left")
     df_trips["home_municipality"] = df_home["municipality_type"]
 
     # Spatial join for origin municipality
-    df_origin = gpd.GeoDataFrame(df_trips, geometry="geometry_origin", crs="EPSG:2056")
-    df_origin = df_origin.sjoin(df_municipalities, how="left", predicate="intersects")
+    logger.info("\t\t 2. Origin municipality")
+    df_origin = gpd.GeoDataFrame(df_trips[["geometry_origin"]], 
+                                 geometry="geometry_origin", 
+                                 crs="EPSG:2056")
+    df_origin = df_origin.sjoin_nearest(df_municipalities, how="left")
     df_trips["origin_municipality"] = df_origin["municipality_type"]
 
     # Spatial join for destination municipality
-    df_dest = gpd.GeoDataFrame(df_trips, geometry="geometry_destination", crs="EPSG:2056")
-    df_dest = df_dest.sjoin(df_municipalities, how="left", predicate="intersects")
+    logger.info("\t\t 3. Destination municipality")
+    df_dest = gpd.GeoDataFrame(df_trips[["geometry_destination"]], 
+                               geometry="geometry_destination", 
+                               crs="EPSG:2056")
+    df_dest = df_dest.sjoin_nearest(df_municipalities, how="left")
     df_trips["destination_municipality"] = df_dest["municipality_type"]
 
     # within switzerland
+    logger.info("\t Checking if trips are within Switzerland.")
     df_switzerland = context.stage("data.spatial.swiss_border")
     ch_polygon = df_switzerland.buffer(0).iloc[0] 
     inside_origin = vectorized.contains(ch_polygon, df_trips["origin_x"].values, df_trips["origin_y"].values)
@@ -128,13 +138,21 @@ def execute(context):
             'is_last', 'parking_duration_wo_travelTime_min', 'home_municipality', 'origin_municipality', 'destination_municipality']
     df_trips = df_trips[cols]
 
-    logger.info(f"There are {len(df_trips)} trips after cleaning.")
+    logger.info(f"\t There are {len(df_trips)} trips after cleaning.")
 
     ### merge same trips
     # here I merge the trips that are supposed to be part of the same trip
-    # If the arrival time of trip ``i`` is equal to the departure time of trip ``i+1``, and the mode is the same, merge them
+    # If the arrival time of trip `i` is equal to the departure time of trip `i+1`, and the mode is the same, merge them
+    # Why ?
+    # In the survey, I noticed some car trips for short distance, followed by car trip for reasonable distance with no time gap
+    # This is likely due to parking or picking someone up. So I merge them to have a more accurate representation of the actual trip, 
+    # because the choice of the car for the first trip is very linkely due to the second trip.
     df_trips = merge_same_trips(context, df_trips)
+    logger.info(f"\t There are {len(df_trips)} trips after merging same trips.")
 
+    ### correct the trip_id
+    df_trips["trip_id"] = df_trips.person_id.astype(str) + "_" + df_trips.trip_id.astype(str)
+    
     ### Assertions
     assert (df_trips["weekend"]==False).all(), "Weekend trips are not allowed in the final dataset."   
     assert set(df_trips['home_municipality'].unique())==set(df_trips['origin_municipality'].unique())==set(df_trips['destination_municipality'].unique())== {'rural', 'suburban', 'urban'}

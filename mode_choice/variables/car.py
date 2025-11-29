@@ -21,7 +21,7 @@ def configure(context):
 # TODO: save the router object to avoid rebuilding it every time, because it takes time.
 # this is not straightforward, because pandana graphs are not serializable using pickle.
 
-def car_variables(df, context):
+def car_variables(context, df):
     # prepare the network processor
     network_processor_class, path_to_load_network = context.stage("mode_choice.network.network_processor")
     network_processor = network_processor_class.load(path_to_load_network)
@@ -55,7 +55,7 @@ def execute(context):
         ]
 
     # get travel times
-    routed_trips = car_variables(trips, context)
+    routed_trips = car_variables(context, trips)
 
     return routed_trips[["person_id","trip_id",
                          "travel_time_min","access_egress_time_min",

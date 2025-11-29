@@ -28,7 +28,6 @@ class CpUtility(BaseUtility):
         utility = (
             BaseUtility.cp.alpha_u
             + BaseUtility.cp.betaTravelTime_u_min * pl.col("travel_time_min").pow(BaseUtility.cp.travelTimeExponent)
-            + BaseUtility.cp.betaDistance_km * pl.col("euclidean_distance_km").pow(BaseUtility.cp.distanceExponent)
             + BaseUtility.cp.betaDrivingLicense_u * pl.col("driving_license")
             + BaseUtility.cp.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18)
             + BaseUtility.cp.betaSex_u * pl.col("sex")

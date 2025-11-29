@@ -37,11 +37,37 @@ def run_pt_router(context, input_path, output_path):
         )
     # os.chdir(cwd)
 
-def pt_variables(context, input_path, output_path):  
+def pt_variables(context, df):
+    # ensure identifier column 
+    if "identifier" not in df.columns:
+        if "trip_id" in df.columns:
+            df = df.rename(columns={"trip_id":"identifier"}).reset_index(drop=True) 
+        else:
+            raise ValueError("Input dataframe must have either 'identifier' or 'trip_id' column.")
+    df = df[["identifier", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time"]].copy()
+    
+    # save file to be read by the router        
+    input_path = os.path.join(context.path(), "pt_trips_to_be_routerd.csv")
+    initial_length = len(df)
+    logger.info("\t Saving %d trips to be routed to %s.", initial_length, input_path)
+    df.to_csv(input_path, index=False)
+
+    # get the output path
+    output_path= os.path.join(context.path(), "pt_routed_trips.csv")
+
     # run the router
     run_pt_router(context, input_path, output_path)
+
     # read routed trips
     df = pd.read_csv(output_path)
+    logger.info(f"\t There are {len(df)} trips after PT routing.")
+    logger.info(f"\t There are {initial_length - len(df)} trips lost during PT routing.")
+
+    # rename back to trip_id
+    df = df.rename(columns={"identifier":"trip_id"})
+    df["trip_id"] = df["trip_id"].astype(str)
+    df["person_id"] = df["trip_id"].str.split("_").str[0].astype(int) # to keep consistency between stages (person_id and trip_id always)
+ 
     # only keep relevant columns
     df["access_egress_time_min"] = df["access_travel_time_min"] + df["egress_travel_time_min"]
     df["waiting_time_min"] = df["transfer_waiting_time_min"] + df["transfer_travel_time_min"]
@@ -49,7 +75,7 @@ def pt_variables(context, input_path, output_path):
     df["distance_km"] = df["in_vehicle_distance_total_km"]
     
     return df[
-         ["identifier", "access_egress_time_min", "in_vehicle_time_min", "transfers", 
+         ["trip_id", "person_id", "access_egress_time_min", "in_vehicle_time_min", "transfers", 
           "waiting_time_min", "distance_km"]
          ]
 
@@ -57,18 +83,8 @@ def execute(context):
     df = context.stage("mode_choice.trips.prepare_trips")[
         ["trip_id","origin_x", "origin_y", "destination_x", "destination_y", "departure_time"]
         ].copy()
-    df = df.rename(columns={"trip_id":"identifier"}).reset_index(drop=True)
-    
-    # save file to be read by the router        
-    path_to_cache = os.path.join(context.path(), "pt_trips_to_be_routerd.csv")    
-    logger.info("Saving %d trips to be routed to %s.", len(df), path_to_cache)
-    df.to_csv(path_to_cache, index=False)
     
     # run the router    
-    output_path= os.path.join(context.path(), "pt_routed_trips.csv")
-    logger.info("Saved %d trips to be routed to %s.", len(df), output_path)    
-    df = pt_variables(context, path_to_cache, output_path)
-    
-    df = df.rename(columns={"identifier":"trip_id"})
-    df["person_id"] = df["trip_id"].str.split("_").str[0].astype(int) # to keep consistency between stages (person_id and trip_id always)
+    df = pt_variables(context, df)
+
     return df
