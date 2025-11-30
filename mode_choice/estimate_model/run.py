@@ -375,8 +375,9 @@ def execute(context):
     try:
         path_to_params = os.path.join(context.path(),"model_parameters.yaml")
         writer(context, result, path_to_params).write()
-    except:
-        logger.warning("Could not write the model parameters to a yaml file.")
+    except Exception as e:
+        logger.warning("Could not write the model parameters to a yaml file: %s", e)
+        logger.warning("You need to get the output of this stage and check why it failed.")
         path_to_params = None
     
     return (result, df, path_to_params)

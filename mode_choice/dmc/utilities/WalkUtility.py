@@ -35,7 +35,6 @@ class WalkUtility(BaseUtility):
             + BaseUtility.walk.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.walk.betaUrbanDestination_u * pl.col("urban_destination")
             + BaseUtility.walk.betaDestinationWork_u * pl.col("destination_work")
-            + WalkUtility.estimateLongDistanceUtility()
         )
 
         return utility

@@ -64,6 +64,10 @@ class Defaults:
     DISTANCE_COST_INTERACTION = True
     SHORT_DISTANCE_LIMIT_KM = 1.0 # 80% of bike and walk trips are below 1 km
     LONG_DISTANCE_LIMIT_KM = 12.0 # 80% of car and pt trips are below 12 km
+
+    # calibration defaults
+    ESTIMATE_DMC_PARAMETERS = True
+    CALIBRATE_DMC_PARAMETERS = True
     
 
 def configure(context):
