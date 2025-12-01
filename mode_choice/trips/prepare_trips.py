@@ -121,6 +121,7 @@ def execute(context):
         "origin_x", "origin_y", "destination_x", "destination_y", "home_x", "home_y",
         "origin_municipality", "destination_municipality", "home_municipality", "region"
     ]
+    
     if context.config("use_skim_matrices"):
         cols.extend(["origin_zone", "destination_zone"])
 
