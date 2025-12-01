@@ -54,7 +54,7 @@ def execute(context):
     survey_data = context.stage("mode_choice.estimate_model.data.survey_data")[
         ['person_id', 'trip_id', 'origin_x', 'origin_y', 'destination_x', 'destination_y', "home_x", "home_y",
          'departure_time', 'euclidean_distance_km', 'number_of_cars', 'driving_license',
-         'number_of_bikes_class','is_car_passenger', 'car_availability']
+         'number_of_bikes_class','is_car_passenger', 'car_availability', 'age']
     ].copy()
     c = context.stage("data.constants")
 
