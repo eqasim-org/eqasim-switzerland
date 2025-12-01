@@ -16,6 +16,5 @@ def execute(context):
         path = context.config("skim_matrices_path")
         matrices = pd.read_csv(path)
 
-    print(matrices.head())
     return matrices
 

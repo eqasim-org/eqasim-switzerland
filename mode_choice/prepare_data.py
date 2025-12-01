@@ -53,26 +53,31 @@ def execute(context):
 
     # load variables and merge necessary dataframes (persons attributes will be merged later in the TourUtility)
     logger.info("\t Loading modes variables...")
+
     # 1. bike
     bike = context.stage("mode_choice.variables.bike")
     bike = pl.from_pandas(bike)
+
     # 2. car
-    car = context.stage("mode_choice.variables.car")
-    car_cost = context.stage("mode_choice.cost.car")
-    parking_cost = context.stage("mode_choice.cost.parking")
+    car            = context.stage("mode_choice.variables.car")
+    car_cost       = context.stage("mode_choice.cost.car")
+    parking_cost   = context.stage("mode_choice.cost.parking")
     parking_search = context.stage("mode_choice.penalties.parking_search")
-    car = (car.merge(car_cost, on=["person_id","trip_id"], how="left")
-           .merge(parking_cost, on=["person_id","trip_id"], how="left")
-           .merge(parking_search, on=["person_id","trip_id"], how="left"))
-    car = pl.from_pandas(car)
+    car            = (car.merge(car_cost, on=["person_id","trip_id"], how="left")
+                     .merge(parking_cost, on=["person_id","trip_id"], how="left")
+                     .merge(parking_search, on=["person_id","trip_id"], how="left"))
+    car            = pl.from_pandas(car)
+
     # 3. pt
-    pt = context.stage("mode_choice.variables.pt")
+    pt      = context.stage("mode_choice.variables.pt")
     pt_cost = context.stage("mode_choice.cost.pt")
-    pt = pt.merge(pt_cost, on=["person_id","trip_id"], how="left")
-    pt = pl.from_pandas(pt)
+    pt      = pt.merge(pt_cost, on=["person_id","trip_id"], how="left")
+    pt      = pl.from_pandas(pt)
+
     # 4. car passenger
     car_passenger = context.stage("mode_choice.variables.car_passenger")
     car_passenger = pl.from_pandas(car_passenger)
+
     # 5. walk
     walk = context.stage("mode_choice.variables.walk")
     walk = pl.from_pandas(walk)
