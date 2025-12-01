@@ -15,6 +15,35 @@ def configure(context):
     context.config("pt_distance_factor")
 
 
+def pt_cost(context, df):
+    pt_distance_factor = context.config("pt_distance_factor")
+
+    persons  = context.stage("mode_choice.trips.prepare_persons").copy()[
+        ["person_id", 
+         "hasGeneralSubscription", "hasHalbtaxSubscription",
+         "hasVerbundSubscription", "hasStreckenSubscription", 
+         "hasJuniorSubscription",  "hasGleis7Subscription", 
+         "age"]
+        ]
+    
+    trips    = df.merge(persons, on = "person_id", how = "left")
+    
+    matrices = context.stage("mode_choice.trips.get_skim_matrices").copy()[["origin_zone", "destination_zone", "price_halbtax", "price_no_halbtax"]]
+
+    trips = trips.merge(matrices, on = ["origin_zone", "destination_zone"], how = "left")
+    
+    mask_in_study_area = trips["origin_zone"].notna() & trips["destination_zone"].notna()
+    
+    trips.loc[mask_in_study_area & trips["hasHalbtaxSubscription"], "cost_CHF"]  = trips[mask_in_study_area & trips["hasHalbtaxSubscription"]]["price_halbtax"].values
+    trips.loc[mask_in_study_area & ~trips["hasHalbtaxSubscription"], "cost_CHF"] = trips[mask_in_study_area & ~trips["hasHalbtaxSubscription"]]["price_no_halbtax"].values
+    
+    trips.loc[~mask_in_study_area, "cost_CHF"] = cost_no_zone_model(trips[~mask_in_study_area].copy(), pt_distance_factor)
+
+    trips = trips[["person_id", "trip_id", "cost_CHF"]]
+
+    return trips
+
+
 def cost_no_zone_model(trips_no_zone, pt_distance_factor):
     euclidean_distance  = lambda x,y: np.sqrt((x[0] - y[0])**2 + (x[1] - y[1])**2)
     distance_home       = lambda x: max(euclidean_distance((x["home_x"], x["home_y"]), (x["origin_x"], x["origin_y"])),
@@ -43,7 +72,6 @@ def cost_no_zone_model(trips_no_zone, pt_distance_factor):
 
 def execute(context):
     pt_distance_factor = context.config("pt_distance_factor")
-    starting_time      = time.time()
 
     trips    = context.stage("mode_choice.trips.prepare_trips").copy()[
         ["person_id", "trip_id", "departure_time",
@@ -73,14 +101,10 @@ def execute(context):
     
     trips.loc[mask_in_study_area & trips["hasHalbtaxSubscription"], "cost_CHF"]  = trips[mask_in_study_area & trips["hasHalbtaxSubscription"]]["price_halbtax"].values
     trips.loc[mask_in_study_area & ~trips["hasHalbtaxSubscription"], "cost_CHF"] = trips[mask_in_study_area & ~trips["hasHalbtaxSubscription"]]["price_no_halbtax"].values
-
-    logger.info(f"PT cost computation took {(time.time() - starting_time) / 60:.2f} minutes.")
     
     trips.loc[~mask_in_study_area, "cost_CHF"] = cost_no_zone_model(trips[~mask_in_study_area].copy(), pt_distance_factor)
 
     trips = trips[["person_id", "trip_id", "cost_CHF"]]
-
-    logger.info(f"PT cost computation took {(time.time() - starting_time) / 60:.2f} minutes.")
 
     return trips
 
