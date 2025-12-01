@@ -36,6 +36,9 @@ class BikeUtility(BaseUtility):
             + BaseUtility.bike.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.bike.betaUrbanDestination_u * pl.col("urban_destination")
             + BaseUtility.bike.betaDestinationWork_u * pl.col("destination_work")
+            + BaseUtility.bike.betaDestinationOther_u * pl.col("destination_other")
+            + BaseUtility.bike.betaDestinationLeisure_u * pl.col("destination_leisure")
+            
         )
 
         return utility

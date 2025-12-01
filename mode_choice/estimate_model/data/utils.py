@@ -10,7 +10,8 @@ def merge_same_trips(context, df):
     df_trips = context.stage("data.microcensus.trips")[0][["person_id","trip_id","departure_time","arrival_time","mode"]]
     df_trips = df_trips.sort_values(by=["person_id","trip_id"]).reset_index(drop=True)
 
-    columns_to_keep_last = ['purpose', 'destination_x', 'destination_y', 'destination_home', 'destination_work','is_last',
+    columns_to_keep_last = ['purpose', 'destination_x', 'destination_y', 'destination_home', 'destination_work',
+                            'destination_other', 'destination_leisure', 'is_last',
                             'parking_duration_wo_travelTime_min','destination_municipality']
 
     columns_to_sum = ['euclidean_distance_km']

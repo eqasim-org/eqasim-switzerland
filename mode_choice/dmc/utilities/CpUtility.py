@@ -36,7 +36,10 @@ class CpUtility(BaseUtility):
             + BaseUtility.cp.betaShortDistance_u * pl.col("short_distance")
             + BaseUtility.cp.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.cp.betaUrbanDestination_u * pl.col("urban_destination")
-            + BaseUtility.cp.betaDestinationWork_u * pl.col("destination_work")         
+            + BaseUtility.cp.betaDestinationWork_u * pl.col("destination_work")
+            + BaseUtility.cp.betaDestinationOther_u * pl.col("destination_other")
+            + BaseUtility.cp.betaDestinationLeisure_u * pl.col("destination_leisure")
+                 
         )
 
         return utility

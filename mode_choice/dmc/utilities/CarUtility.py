@@ -62,7 +62,10 @@ class CarUtility(BaseUtility):
             + BaseUtility.car.betaShortDistance_u * pl.col("short_distance")
             + BaseUtility.car.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.car.betaUrbanDestination_u * pl.col("urban_destination")
-            + BaseUtility.car.betaDestinationWork_u * pl.col("destination_work")         
+            + BaseUtility.car.betaDestinationWork_u * pl.col("destination_work")
+            + BaseUtility.car.betaDestinationOther_u * pl.col("destination_other")
+            + BaseUtility.car.betaDestinationLeisure_u * pl.col("destination_leisure")
+                  
         )
 
         return utility

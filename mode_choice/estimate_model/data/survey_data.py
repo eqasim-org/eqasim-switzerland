@@ -64,6 +64,8 @@ def execute(context):
     df_trips["destination_home"] = df_trips.purpose == "home"
     df_trips["origin_home"] = (df_trips.origin_x == df_trips.home_x) & (df_trips.origin_y == df_trips.home_y)    
     df_trips["destination_work"] = df_trips.purpose == "work"    
+    df_trips["destination_other"] = df_trips.purpose == "other"
+    df_trips["destination_leisure"] = df_trips.purpose == "leisure"
     df_trips["euclidean_distance_km"] = df_trips.crowfly_distance*1e-3
     df_trips["is_first"] = df_trips["person_id"].shift(1) != df_trips["person_id"]
     df_trips["is_last"]  = df_trips["person_id"].shift(-1) != df_trips["person_id"]
@@ -134,8 +136,9 @@ def execute(context):
             'home_x', 'home_y', 'hasGeneralSubscription', 'hasJuniorSubscription', 'hasGleis7Subscription', 'hasHalbtaxSubscription',
             'hasVerbundSubscription', 'hasStreckenSubscription', 'hasRegionalSubscription', 'person_weight', 'age', 'sex',
             "number_of_cars", "number_of_bikes_class", 'driving_license', 'region', 'is_car_passenger', 'income', 'weekend', 
-            "car_availability",'destination_home', 'origin_home', 'destination_work', 'euclidean_distance_km', 'is_first', 
-            'is_last', 'parking_duration_wo_travelTime_min', 'home_municipality', 'origin_municipality', 'destination_municipality']
+            "car_availability",'destination_home', 'origin_home', 'destination_work','destination_other', 'destination_leisure', 
+            'euclidean_distance_km', 'is_first', 'is_last', 'parking_duration_wo_travelTime_min', 'home_municipality',
+            'origin_municipality', 'destination_municipality']
     df_trips = df_trips[cols]
 
     logger.info(f"\t There are {len(df_trips)} trips after cleaning.")
@@ -147,8 +150,8 @@ def execute(context):
     # In the survey, I noticed some car trips for short distance, followed by car trip for reasonable distance with no time gap
     # This is likely due to parking or picking someone up. So I merge them to have a more accurate representation of the actual trip, 
     # because the choice of the car for the first trip is very linkely due to the second trip.
-    df_trips = merge_same_trips(context, df_trips)
-    logger.info(f"\t There are {len(df_trips)} trips after merging same trips.")
+    # df_trips = merge_same_trips(context, df_trips)
+    # logger.info(f"\t There are {len(df_trips)} trips after merging same trips.")
 
     ### correct the trip_id
     df_trips["trip_id"] = df_trips.person_id.astype(str) + "_" + df_trips.trip_id.astype(str)

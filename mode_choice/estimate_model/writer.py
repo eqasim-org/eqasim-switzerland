@@ -84,6 +84,8 @@ NAMES_CONVERSION = {
     'beta_bike_long_distance': 'bike.betaLongDistance_u',
     'beta_bike_work_destination': 'bike.betaDestinationWork_u',
     'beta_bike_urban_destination': 'bike.betaUrbanDestination_u',
+    'beta_bike_destination_other': 'bike.betaDestinationOther_u',
+    'beta_bike_destination_leisure': 'bike.betaDestinationLeisure_u',
     
     # Car
     'beta_car_asc': 'car.alpha_u',
@@ -100,6 +102,8 @@ NAMES_CONVERSION = {
     'beta_car_work_destination': 'car.betaDestinationWork_u',
     'beta_car_short_distance': 'car.betaShortDistance_u',
     'beta_car_long_distance': 'car.betaLongDistance_u',
+    'beta_car_destination_other': 'car.betaDestinationOther_u',
+    'beta_car_destination_leisure': 'car.betaDestinationLeisure_u',
 
     # Car Passenger
     'beta_car_passenger_asc': 'cp.alpha_u',
@@ -115,6 +119,8 @@ NAMES_CONVERSION = {
     'beta_car_passenger_driving_permit': 'cp.betaDrivingLicense_u',
     'beta_car_passenger_short_distance': 'cp.betaShortDistance_u',
     'beta_car_passenger_long_distance': 'cp.betaLongDistance_u',
+    'beta_car_passenger_destination_other': 'cp.betaDestinationOther_u',
+    'beta_car_passenger_destination_leisure': 'cp.betaDestinationLeisure_u',
     
     # PT
     'beta_pt_asc': 'pt.alpha_u',
@@ -139,6 +145,8 @@ NAMES_CONVERSION = {
     'beta_pt_urban_destination': 'pt.betaUrbanDestination_u',
     'beta_pt_short_distance': 'pt.betaShortDistance_u',
     'beta_pt_long_distance': 'pt.betaLongDistance_u',
+    'beta_pt_destination_other': 'pt.betaDestinationOther_u',
+    'beta_pt_destination_leisure': 'pt.betaDestinationLeisure_u',
 
     # Walk
     'beta_walk_asc': 'walk.alpha_u',
@@ -153,7 +161,8 @@ NAMES_CONVERSION = {
     'beta_walk_urban_destination': 'walk.betaUrbanDestination_u',
     'beta_walk_short_distance': 'walk.betaShortDistance_u',
     'beta_walk_long_distance': 'walk.betaLongDistance_u',
-
+    'beta_walk_destination_other': 'walk.betaDestinationOther_u',
+    'beta_walk_destination_leisure': 'walk.betaDestinationLeisure_u',
 
     # Cost
     'beta_cost_CHF': 'betaCost_u_MU',

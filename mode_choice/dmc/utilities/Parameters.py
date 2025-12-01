@@ -35,6 +35,8 @@ class Parameters(ABC):
         betaLongDistance_u: float = 0.0
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
+        betaDestinationOther_u: float = 0.0
+        betaDestinationLeisure_u: float = 0.0
 
     class car:
         alpha_u: float = 0.0
@@ -51,9 +53,12 @@ class Parameters(ABC):
         betaUrbanDestination_u: float = 0.0
         betaShortDistance_u: float = 0.0
         betaLongDistance_u: float = 0.0
+        betaDestinationOther_u: float = 0.0
+        betaDestinationLeisure_u: float = 0.0        
 
         additionalAccessEgressWalkTime_min: float = 0.0
         constantParkingSearchPenalty_min: float = 0.0
+
 
     class parking:
         urbanParkingSearchDuration_min: float = 0.0
@@ -84,6 +89,8 @@ class Parameters(ABC):
         betaUrbanDestination_u: float = 0.0
         betaShortDistance_u: float = 0.0
         betaLongDistance_u: float = 0.0
+        betaDestinationOther_u: float = 0.0
+        betaDestinationLeisure_u: float = 0.0
 
     class walk:
         alpha_u: float = 0.0
@@ -99,6 +106,8 @@ class Parameters(ABC):
         betaLongDistance_u: float = 0.0
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
+        betaDestinationOther_u: float = 0.0
+        betaDestinationLeisure_u: float = 0.0
 
     class cp:
         alpha_u: float = 0.0
@@ -118,7 +127,9 @@ class Parameters(ABC):
         betaDrivingLicense_u: float = 0.0
         betaShortDistance_u: float = 0.0
         betaLongDistance_u: float = 0.0
-
+        betaDestinationOther_u: float = 0.0
+        betaDestinationLeisure_u: float = 0.0
+        
     class cost:        
         betaCost_u_MU: float = 0
         lambdaCostEuclideanDistance: float = 0

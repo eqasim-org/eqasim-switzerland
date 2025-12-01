@@ -19,7 +19,7 @@ def execute(context):
     df_variables = context.stage("mode_choice.estimate_model.data.variables")
     df_survey = context.stage("mode_choice.estimate_model.data.survey_data") [[
         "person_id", "trip_id", "person_weight", "mode", "income", "region", "age", "sex", "driving_license",
-        "origin_home", "destination_work", "departure_time", 
+        "origin_home", "destination_work", "destination_other", "destination_leisure", "departure_time", 
         'home_municipality', 'origin_municipality', 'destination_municipality',
         'is_car_passenger'
     ]]      
@@ -76,7 +76,7 @@ def execute(context):
     logger.info(f"There are {len(df)} trips after removing trips with selected but not available modes.")
 
     ### remove very short and very long trips
-    out_of_range_distance = ((df.euclidean_distance_km < 0.1) | (df.euclidean_distance_km > 200))
+    out_of_range_distance = ((df.euclidean_distance_km < 0.01) | (df.euclidean_distance_km > 500))
     df = df[~out_of_range_distance]
     logger.info(f"There are {len(df)} trips after removing very short and very long trips.")
 
@@ -88,7 +88,7 @@ def execute(context):
     columns = [
         "person_id", "trip_id", "person_weight", "mode", "euclidean_distance_km",
         "home_municipality", "origin_municipality", "destination_municipality", 
-        "destination_work", "origin_home",
+        "destination_work", "destination_other", "destination_leisure", "origin_home",
 
         # person
         "age", "sex", "income", "region", "is_car_passenger", "driving_license",

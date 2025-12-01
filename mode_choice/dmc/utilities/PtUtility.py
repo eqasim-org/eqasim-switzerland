@@ -56,7 +56,9 @@ class PtUtility(BaseUtility):
             + BaseUtility.pt.betaShortDistance_u * pl.col("short_distance")
             + BaseUtility.pt.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.pt.betaUrbanDestination_u * pl.col("urban_destination")
-            + BaseUtility.pt.betaDestinationWork_u * pl.col("destination_work")         
+            + BaseUtility.pt.betaDestinationWork_u * pl.col("destination_work")
+            + BaseUtility.pt.betaDestinationOther_u * pl.col("destination_other")
+            + BaseUtility.pt.betaDestinationLeisure_u * pl.col("destination_leisure")
         )
 
         return utility

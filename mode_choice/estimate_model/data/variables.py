@@ -177,13 +177,19 @@ def execute(context):
                          (df["pt_in_vehicle_time_min"]>300) |
                          (df["pt_transfers"]>5) |
                          (df["pt_access_egress_time_min"]>60)|
-                         (df["pt_distance_km"]>300))
+                         (df["pt_distance_km"]>500))
     df.loc[pt_unavailability, "pt_availability"] = False
     # 2. car 
-    car_unavailability = (df["car_travel_time_min"]<1) | (df["car_distance_km"]>300) | (df["car_access_egress_time_min"]>60)
+    car_unavailability = ((df["car_travel_time_min"]<1) | 
+                          (df["car_travel_time_min"]>300) |
+                          (df["car_distance_km"]>500) | 
+                          (df["car_access_egress_time_min"]>60))
     df.loc[car_unavailability, "car_availability"] = False        
     # 3. car passenger
-    cp_unavailability = (df["car_passenger_travel_time_min"]<1) | (df["car_passenger_distance_km"]>300) | (df["car_passenger_access_egress_time_min"]>60)
+    cp_unavailability = ((df["car_passenger_travel_time_min"]<1) | 
+                         (df["car_passenger_travel_time_min"]>300) | 
+                         (df["car_passenger_distance_km"]>500) | 
+                         (df["car_passenger_access_egress_time_min"]>60))
     df.loc[cp_unavailability, "car_passenger_availability"] = False    
 
     ###################### return the dataframe ######################

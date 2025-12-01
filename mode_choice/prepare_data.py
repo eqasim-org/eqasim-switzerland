@@ -97,11 +97,13 @@ def execute(context):
         pl.when(pl.col("destination_municipality") == "urban").then(1).otherwise(0.).cast(pl.Int8).alias("urban_destination"),
         pl.when(pl.col("destination_municipality") == "suburban").then(1).otherwise(0.).cast(pl.Int8).alias("suburban_destination"),
         pl.when(pl.col("following_purpose") == "work").then(1).otherwise(0.).cast(pl.Int8).alias("destination_work"),
+        pl.when(pl.col("following_purpose") == "other").then(1).otherwise(0.).cast(pl.Int8).alias("destination_other"),
+        pl.when(pl.col("following_purpose") == "leisure").then(1).otherwise(0.).cast(pl.Int8).alias("destination_leisure"),
         pl.when(pl.col("following_purpose") == "home").then(1).otherwise(0.).cast(pl.Int8).alias("destination_home"),
         pl.col("euclidean_distance_km").cast(pl.Float32)
     ]).select([
         "trip_id", "origin_home", "short_distance", "long_distance", "urban_destination", "suburban_destination", 
-        "destination_work", "destination_home", "euclidean_distance_km"
+        "destination_work", "destination_other", "destination_leisure", "destination_home", "euclidean_distance_km"
     ])
     
     return dict(      
