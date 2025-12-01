@@ -7,6 +7,7 @@ This module processes synthetic population trips by:
 - Computing crowfly distances between activity locations
 """
 
+from asyncio.log import logger
 import pandas as pd
 import geopandas as gpd
 from shapely import linestrings
@@ -96,6 +97,11 @@ def execute(context):
     # compute crowfly distance
     df_spatial["crowfly_distance"] = df_spatial.following_geometry.distance(df_spatial.preceding_geometry)  
     df_spatial["euclidean_distance_km"] = df_spatial["crowfly_distance"] / 1000.0  # convert to km
+    
+    ### filter out loop trips and unconsidered modes
+    df_spatial = df_spatial[df_spatial["euclidean_distance_km"] > 1e-3]
+    df_spatial = df_spatial[df_spatial["mode"].isin(Defaults.POSSIBLE_MODES)].reset_index(drop=True)
+    logger.warning(f"Dropping {len(df_trips) - len(df_spatial)} trips with distance < 1 meter or unconsidered modes.")
     
     # finalize dataframe
     df_spatial["following_purpose"] = df_spatial["following_purpose"].astype(str)
