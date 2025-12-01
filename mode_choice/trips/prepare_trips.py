@@ -11,6 +11,7 @@ import pandas as pd
 import geopandas as gpd
 from shapely import linestrings
 import numpy as np
+from mode_choice.dmc_defaults import Defaults
 
 def configure(context):
     context.stage("synthesis.population.trips")
@@ -19,7 +20,7 @@ def configure(context):
     context.stage("data.spatial.municipalities")
     context.stage("mode_choice.trips.prepare_persons")
 
-    context.config("use_skim_matrices", default = False)
+    context.config("use_skim_matrices", default = Defaults.USE_SKIM_MATRICES)
 
     if context.config("use_skim_matrices"):
         context.stage("pt_preparation.pt_pricing.uspat_zones")

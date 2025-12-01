@@ -24,9 +24,9 @@ class Defaults:
     DEFAULT_PASSENGER_MIN_THRESHOLD_KM = 0.15
 
     # speeds and distance factors
-    DEFAULT_WALK_SPEED_M_PER_S = 1.3  # ~5 km/h
+    DEFAULT_WALK_SPEED_M_PER_S = 1.3  
     DEFAULT_WALK_DISTANCE_FACTOR = 1.3  # factor to account for indirect walking paths
-    DEFAULT_BIKE_SPEED_M_PER_S = 4.0  # ~14.4 km/h
+    DEFAULT_BIKE_SPEED_M_PER_S = 4.0 
     DEFAULT_BIKE_DISTANCE_FACTOR = 1.4  # factor to account for indirect biking paths
     DEFAULT_PT_DISTANCE_FACTOR = 1.4
 
@@ -68,6 +68,9 @@ class Defaults:
     # calibration defaults
     ESTIMATE_DMC_PARAMETERS = True
     CALIBRATE_DMC_PARAMETERS = True
+
+    # PT router and cost
+    USE_SKIM_MATRICES = False
     
 
 def configure(context):

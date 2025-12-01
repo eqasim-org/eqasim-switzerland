@@ -5,12 +5,12 @@ from mode_choice.dmc_defaults import Defaults
 # for routing
 from mode_choice.variables.walk import walk_travel_time, walk_distance
 from mode_choice.variables.bike import bike_travel_time, bike_distance
-from mode_choice.variables.pt import pt_variables
+from mode_choice.variables.pt_java import pt_variables
 from mode_choice.variables.car import car_variables
 
 # costs
 from mode_choice.cost.car import car_cost
-from mode_choice.cost.pt import pt_cost
+from mode_choice.cost.pt_java import pt_cost
 from mode_choice.cost.parking import parking_cost
 
 # penalties
