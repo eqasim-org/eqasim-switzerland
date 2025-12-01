@@ -32,14 +32,15 @@ class CarUtility(BaseUtility):
             reference=BaseUtility.cost.referenceIncome, 
             lambda_val=BaseUtility.cost.lambdaCostIncome            
         )
-    
-        cost = BaseUtility.cost.betaCost_u_MU * interaction_distance * interaction_income * pl.col("cost_CHF")
-        return cost
+        cost_CHF = pl.col("cost_CHF") + pl.col("parking_cost_CHF")
+        interaction = interaction_distance * interaction_income
+        cost_utility = BaseUtility.cost.betaCost_u_MU * interaction * cost_CHF
+        return cost_utility
     
     @staticmethod
     def estimateTraveltimeUtility():
         # Combine travel time and parking search duration before exponentiation for efficiency
-        total_time = pl.col("travel_time_min") + pl.col("parking_search_time_min")
+        total_time = pl.col("travel_time_min") + pl.col("parking_searching_duration_min")
         return BaseUtility.car.betaTravelTime_u_min * total_time.pow(BaseUtility.car.travelTimeExponent)
 
     @staticmethod

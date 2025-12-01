@@ -70,7 +70,6 @@ class writer:
         
         logger.info(f"All DMC parameters saved to: {file_path}")
 
-
 NAMES_CONVERSION = {
     # Bike
     'beta_bike_asc': 'bike.alpha_u',
@@ -136,8 +135,8 @@ NAMES_CONVERSION = {
     'beta_pt_region_2': 'pt.betaRegion1_u',
     'beta_pt_region_3': 'pt.betaRegion2_u', 
     'beta_pt_origin_home': 'pt.betaOriginHome_u',
-    'beta_pt_work': 'pt.betaDestinationWork_u',
-    'beta_pt_destination': 'pt.betaUrbanDestination_u',
+    'beta_pt_work_destination': 'pt.betaDestinationWork_u',
+    'beta_pt_urban_destination': 'pt.betaUrbanDestination_u',
     'beta_pt_short_distance': 'pt.betaShortDistance_u',
     'beta_pt_long_distance': 'pt.betaLongDistance_u',
 
@@ -150,9 +149,8 @@ NAMES_CONVERSION = {
     'beta_walk_region_2': 'walk.betaRegion1_u',
     'beta_walk_region_3': 'walk.betaRegion2_u', 
     'beta_walk_origin_home': 'walk.betaOriginHome_u',    
-    'beta_walk_work': 'walk.betaDestinationWork_u',
-    'beta_walk_destination': 'walk.betaUrbanDestination_u',
-    'beta_walk_origin_home': 'walk.betaOriginHome_u',
+    'beta_walk_work_destination': 'walk.betaDestinationWork_u',
+    'beta_walk_urban_destination': 'walk.betaUrbanDestination_u',
     'beta_walk_short_distance': 'walk.betaShortDistance_u',
     'beta_walk_long_distance': 'walk.betaLongDistance_u',
 
@@ -160,5 +158,5 @@ NAMES_CONVERSION = {
     # Cost
     'beta_cost_CHF': 'betaCost_u_MU',
     'lambda_cost_income': 'lambdaCostIncome',
-    'lambda_cost_distance': 'lambdaCostEuclideanDistance',
+    'lambda_cost_distance': 'lambdaCostEuclideanDistance'
 }

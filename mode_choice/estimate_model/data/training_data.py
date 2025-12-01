@@ -37,8 +37,10 @@ def execute(context):
     ### fill nans when modes are not available, because anyway it won't be considered
     for mode in ['car', 'car_passenger', 'pt', 'walk', 'bike']:    
         not_available_mode = ~ df[f"{mode}_availability"]
+        mode_columns = [col for col in df.columns if mode in col] + (["parking_searching_duration_min", "parking_cost_CHF"] if mode == "car" else [])
+        if mode=="car":
+            mode_columns = [c for c in mode_columns if "car_passenger" not in c]  # remove car passenger columns from car mode_columns
 
-        mode_columns = [col for col in df.columns if mode in col]
         is_nan = df[mode_columns].isna().sum(axis=1) > 0
         rows_to_fill = is_nan & not_available_mode
         df.loc[rows_to_fill, mode_columns] = df.loc[rows_to_fill, mode_columns].fillna(0)
@@ -46,7 +48,10 @@ def execute(context):
     ### fill nans and deactivate availability when modes are not selected 
     for mode in ['car', 'car_passenger', 'pt', 'walk', 'bike']:    
         not_selected = df["mode"]!=mode
-        mode_columns = [col for col in df.columns if mode in col]
+        mode_columns = [col for col in df.columns if mode in col] + (["parking_searching_duration_min", "parking_cost_CHF"] if mode == "car" else [])
+        if mode=="car":
+            mode_columns = [c for c in mode_columns if "car_passenger" not in c]  # remove car passenger columns from car mode_columns
+        
         is_nan = df[mode_columns].isna().sum(axis=1) > 0
 
         df.loc[is_nan & not_selected, mode_columns] = df.loc[is_nan & not_selected, mode_columns].fillna(0)

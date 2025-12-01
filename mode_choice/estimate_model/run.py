@@ -131,12 +131,12 @@ def define_betas(ignore_car_passenger, use_exponents):
         "lambda_walk": Beta("lambda_walk", 1.0, 0.01, None, trainable),
 
         # cost
-        "beta_cost_CHF": Beta("beta_cost_CHF", -0.1, None, None, 0),        
+        "beta_cost_CHF": Beta("beta_cost_CHF", -0.1, None, -1e-3, 0),        
 
         # car
         "beta_car_asc": Beta("beta_car_asc", 0, None, None, 0),
-        "beta_car_travel_time_min": Beta("beta_car_travel_time_min", -0.01, None, -0.001, 0),                        
-        "beta_car_access_egress_time_min": Beta("beta_car_access_egress_time_min", -0.01, None, -0.001, 0),
+        "beta_car_travel_time_min": Beta("beta_car_travel_time_min", -0.01, None, -1e-3, 0),                        
+        "beta_car_access_egress_time_min": Beta("beta_car_access_egress_time_min", -0.01, None, -1e-3, 0),
         "beta_car_work_destination": Beta("beta_car_work_destination", 0, None, None, 0),        
         "beta_car_urban_destination": Beta("beta_car_urban_destination", 0, None, None, 0),
         "beta_car_sex": Beta("beta_car_sex", 0, None, None, 0),
@@ -188,7 +188,7 @@ def define_betas(ignore_car_passenger, use_exponents):
     if not ignore_car_passenger:
         betas.update({
             "beta_car_passenger_asc": Beta("beta_car_passenger_asc", 0, None, None, 0),
-            "beta_car_passenger_travel_time_min": Beta("beta_car_passenger_travel_time_min", 0, None, None, 0),
+            "beta_car_passenger_travel_time_min": Beta("beta_car_passenger_travel_time_min", 0, None, -1e-3, 0),
             "beta_car_passenger_driving_permit": Beta("beta_car_passenger_driving_permit", 0, None, None, 0),            
             "beta_car_passenger_work_destination": Beta("beta_car_passenger_work_destination", 0, None, None, 0),
             "beta_car_passenger_age": Beta("beta_car_passenger_age", 0, None, None, 0),
@@ -343,21 +343,26 @@ def execute(context):
     df, modes = preprocess_data(df, ignore_car_passenger)
     log_trip_stats(df, modes)
 
+    if 'trip_id' in df.columns and df['trip_id'].dtype != int:
+        # replace the trip_id with the trip_index
+        df['trip_id'] = df['trip_id'].astype(str).str.split('_').str[1].astype(int)
+
     database = db.Database("data", df)
     vars = define_variables(database, ignore_car_passenger)
     betas = define_betas(ignore_car_passenger, use_exponents)
     utilities, availability = build_utilities(context, vars, betas, modes, ignore_car_passenger)
 
-    # Training the model
-    logprob = models.loglogit(utilities, availability, vars["mode"])
+    # Training the model (do it in the cache because biogeme stores some files in the current working directory)
     cwd = os.getcwd()
     os.chdir(context.working_directory)
+
+    logprob = models.loglogit(utilities, availability, vars["mode"])
     biogeme = bio.BIOGEME(database, {"loglike": logprob, "weight": vars["weight"]})
     biogeme.modelName = "DMC_model"
-    biogeme.generate_html = False
-    biogeme.generate_pickle = False
-    biogeme.loadSavedIterations = False
-    biogeme.saveIterations = False
+    # biogeme.generate_html = False
+    # biogeme.generate_pickle = False
+    # biogeme.loadSavedIterations = False
+    # biogeme.saveIterations = False
     
     null_loglikelihood = biogeme.calculateNullLoglikelihood(availability)
     result = biogeme.estimate()
@@ -370,8 +375,9 @@ def execute(context):
     try:
         path_to_params = os.path.join(context.path(),"model_parameters.yaml")
         writer(context, result, path_to_params).write()
-    except:
-        logger.warning("Could not write the model parameters to a yaml file.")
+    except Exception as e:
+        logger.warning("Could not write the model parameters to a yaml file: %s", e)
+        logger.warning("You need to get the output of this stage and check why it failed.")
         path_to_params = None
     
     return (result, df, path_to_params)

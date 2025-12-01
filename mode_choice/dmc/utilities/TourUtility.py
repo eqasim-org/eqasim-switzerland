@@ -30,7 +30,7 @@ class TourUtility(BaseUtility):
     # Shared class-level variables for dataframes
     variables_by_mode = {}
     tours = None
-    exploded_tours = None
+    exploded_tours = None # this is added for efficiency when the utilities are estimated hundreds of times
     persons = []
     num_persons = 0
     
@@ -127,7 +127,7 @@ class TourUtility(BaseUtility):
         
         ### join with tours and return results
         #select data      
-        cols = ["tour_row_id", "person_id", "trip_id", "tour_id", "mode_candidates"]                 
+        cols = ["tour_row_id", "person_id", "trip_id", "tour_id", "euclidean_distance_km", "mode_candidates"]                 
         results = (TourUtility.tours.select(cols)
                     .join(results, on="tour_row_id", how="left")
                     .select(cols + ["utility"]))        
