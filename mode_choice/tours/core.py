@@ -92,9 +92,9 @@ def get_available_modes_per_agent(person:dict):
         possible_modes.discard("bike")
     
     # check car_passenger availability
-    cp_availability = person["car_availability"] or person["is_car_passenger"]
-    if not cp_availability:
-        possible_modes.discard("car_passenger")
+    # cp_availability = person["car_availability"] or person["is_car_passenger"]
+    # if not cp_availability:
+    #     possible_modes.discard("car_passenger")
     
     return possible_modes
 

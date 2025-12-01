@@ -67,6 +67,7 @@ def execute(context):
     # 3. car
     survey_data["car_availability"]  = ((survey_data['car_availability']!=c.CAR_AVAILABILITY_NEVER) & 
                                         (survey_data['driving_license']) &
+                                        (survey_data['age']>=18) &
                                         (survey_data['euclidean_distance_km'] >= Defaults.DEFAULT_CAR_MIN_THRESHOLD_KM))
     # 4. public transport
     survey_data["pt_availability"]   = (survey_data['euclidean_distance_km'] >= Defaults.DEFAULT_PT_MIN_THRESHOLD_KM)    
