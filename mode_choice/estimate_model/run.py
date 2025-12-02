@@ -400,8 +400,15 @@ def execute(context):
 
     # write the optimal parameters to a yaml file in MATSim input format
     try:
+        # write parameters to yml format
         path_to_params = os.path.join(context.path(),"model_parameters.yaml")
         writer(context, result, path_to_params).write()
+        logger.info("The estimated model parameters have been written to: %s", path_to_params)
+        # write parameters statistics to a csv file
+        path_to_params_stats = os.path.join(context.path(),"model_parameters_stats.csv")
+        result.getEstimatedParameters().to_csv(path_to_params_stats, index=False)        
+        logger.info("The estimated model parameters statistics have been written to: %s", path_to_params_stats)
+
     except Exception as e:
         logger.warning("Could not write the model parameters to a yaml file: %s", e)
         logger.warning("You need to get the output of this stage and check why it failed.")
