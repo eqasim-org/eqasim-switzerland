@@ -11,7 +11,7 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
 
     context.stage("data.pt_pricing.pt_pricing")
-    context.stage("calibration.pt_routing.pt_routing_parameters")
+    context.stage("pt_preparation.pt_routing.pt_routing_parameters")
     
     context.config("input_downsampling")
     context.config("output_prefix", "switzerland_")
@@ -128,7 +128,7 @@ def execute(context):
     if not context.config("useScheduleBasedTransport"):
         config_utils.add_SBBPT_module(context)
 
-    pt_parameters = context.stage("calibration.pt_routing.pt_routing_parameters")
+    pt_parameters = context.stage("pt_preparation.pt_routing.pt_routing_parameters")
     config_utils.adjust_pt_routing_parameters(context, pt_parameters)
 
     config_utils.change_param(context, "facilities", "inputFacilitiesFile", "null")
