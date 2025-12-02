@@ -8,6 +8,9 @@ Created on Wed May 21 17:55:47 2025
 from .BaseUtility import BaseUtility
 import pandas as pd
 import polars as pl
+from mode_choice.dmc_defaults import Defaults
+LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
+
 
 class WalkUtility(BaseUtility):
     
@@ -32,7 +35,7 @@ class WalkUtility(BaseUtility):
             + WalkUtility.estimateRegionalUtility()
             + BaseUtility.walk.betaOriginHome_u * pl.col("origin_home")
             + BaseUtility.walk.betaShortDistance_u * pl.col("short_distance")
-            + BaseUtility.walk.betaLongDistance_u * pl.col("long_distance")
+            + BaseUtility.walk.betaLongDistance_u * pl.max_horizontal(0.0, pl.col("distance_km") - LONG_DISTANCE_LIMIT_KM)
             + BaseUtility.walk.betaUrbanDestination_u * pl.col("urban_destination")
             + BaseUtility.walk.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.walk.betaDestinationOther_u * pl.col("destination_other")

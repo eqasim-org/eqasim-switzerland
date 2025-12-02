@@ -249,7 +249,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_car_region_3"] * vars["region_3"]
         + betas["beta_car_origin_home"] * vars["origin_home"]    
         + betas["beta_car_short_distance"] * vars["short_distance"]
-        + betas["beta_car_long_distance"] * vars["long_distance"]
+        + betas["beta_car_long_distance"] * bioMax(0, vars["car_distance_km"] - LONG_DISTANCE_LIMIT_KM)
         + betas["beta_car_destination_other"] * vars["destination_other"]
         + betas["beta_car_destination_leisure"] * vars["destination_leisure"]
     )
@@ -278,7 +278,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_pt_region_3"] * vars["region_3"]
         + betas["beta_pt_origin_home"] * vars["origin_home"]
         + betas["beta_pt_short_distance"] * vars["short_distance"]
-        + betas["beta_pt_long_distance"] * vars["long_distance"]
+        + betas["beta_pt_long_distance"] * bioMax(0, vars["pt_distance_km"] - LONG_DISTANCE_LIMIT_KM)
         + betas["beta_pt_destination_other"] * vars["destination_other"]
         + betas["beta_pt_destination_leisure"] * vars["destination_leisure"]
     )
@@ -295,7 +295,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_bike_origin_home"] * vars["origin_home"]        
         + betas["beta_bike_short_distance"] * vars["short_distance"]
         + betas["beta_bike_work_destination"] * vars["destination_work"]
-        + betas["beta_bike_long_distance"] * vars["long_distance"]
+        + betas["beta_bike_long_distance"] * bioMax(0, vars["bike_distance_km"] - LONG_DISTANCE_LIMIT_KM)
         + betas["beta_bike_destination_other"] * vars["destination_other"]
         + betas["beta_bike_destination_leisure"] * vars["destination_leisure"]
     )
@@ -330,7 +330,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
             + betas["beta_car_passenger_region_3"] * vars["region_3"]
             + betas["beta_car_passenger_origin_home"] * vars["origin_home"]
             + betas["beta_car_passenger_short_distance"] * vars["short_distance"]            
-            + betas["beta_car_passenger_long_distance"] * vars["long_distance"]
+            + betas["beta_car_passenger_long_distance"] * bioMax(0, vars["car_passenger_distance_km"] - LONG_DISTANCE_LIMIT_KM)
             + betas["beta_car_passenger_destination_other"] * vars["destination_other"]
             + betas["beta_car_passenger_destination_leisure"] * vars["destination_leisure"]
         )

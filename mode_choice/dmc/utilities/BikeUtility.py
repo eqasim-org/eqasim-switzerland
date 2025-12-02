@@ -9,6 +9,8 @@ from .BaseUtility import BaseUtility
 import pandas as pd
 import numpy as np
 import polars as pl
+from mode_choice.dmc_defaults import Defaults
+LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
 
 class BikeUtility(BaseUtility):
     
@@ -33,7 +35,7 @@ class BikeUtility(BaseUtility):
             + BikeUtility.estimateRegionalUtility()
             + BaseUtility.bike.betaOriginHome_u * pl.col("origin_home")
             + BaseUtility.bike.betaShortDistance_u * pl.col("short_distance")
-            + BaseUtility.bike.betaLongDistance_u * pl.col("long_distance")
+            + BaseUtility.bike.betaLongDistance_u * pl.max_horizontal(0.0, pl.col("distance_km") - LONG_DISTANCE_LIMIT_KM)
             + BaseUtility.bike.betaUrbanDestination_u * pl.col("urban_destination")
             + BaseUtility.bike.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.bike.betaDestinationOther_u * pl.col("destination_other")

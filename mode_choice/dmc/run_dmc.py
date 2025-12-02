@@ -31,6 +31,7 @@ class DMC:
         
 def configure(context):
     context.config("random_seed")
+    context.stage("mode_choice.dmc_defaults")
 
 def execute(context):
     random_seed = context.config("random_seed")

@@ -7,6 +7,9 @@ Created on Wed May 21 17:48:11 2025
 """
 from .BaseUtility import BaseUtility
 import polars as pl
+from mode_choice.dmc_defaults import Defaults
+LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
+
 
 class CarUtility(BaseUtility):    
     
@@ -60,7 +63,7 @@ class CarUtility(BaseUtility):
             + CarUtility.estimateRegionalUtility()
             + BaseUtility.car.betaOriginHome_u * pl.col("origin_home")
             + BaseUtility.car.betaShortDistance_u * pl.col("short_distance")
-            + BaseUtility.car.betaLongDistance_u * pl.col("long_distance")
+            + BaseUtility.car.betaLongDistance_u * pl.max_horizontal(0.0, pl.col("distance_km") - LONG_DISTANCE_LIMIT_KM)
             + BaseUtility.car.betaUrbanDestination_u * pl.col("urban_destination")
             + BaseUtility.car.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.car.betaDestinationOther_u * pl.col("destination_other")
