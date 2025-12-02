@@ -20,6 +20,8 @@ def configure(context):
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
     context.stage("mode_choice.dmc_defaults")
+    
+    context.config("merge_trips_that_might_be_same_trip", Defaults.MERGE_TRIPS_THAT_MIGHT_BE_SAME_TRIP)
 
 def execute(context):
     df_persons = context.stage("data.microcensus.persons")    
@@ -151,8 +153,10 @@ def execute(context):
     # In the survey, I noticed some car trips for short distance, followed by car trip for reasonable distance with no time gap
     # This is likely due to parking or picking someone up. So I merge them to have a more accurate representation of the actual trip, 
     # because the choice of the car for the first trip is very linkely due to the second trip.
-    # df_trips = merge_same_trips(context, df_trips)
-    # logger.info(f"\t There are {len(df_trips)} trips after merging same trips.")
+    if context.config("merge_trips_that_might_be_same_trip"):
+        logger.info("\t Merging trips that might be part of the same trip.")
+        df_trips = merge_same_trips(context, df_trips)
+        logger.info(f"\t There are {len(df_trips)} trips after merging same trips.")
 
     ### correct the trip_id
     df_trips["trip_id"] = df_trips.person_id.astype(str) + "_" + df_trips.trip_id.astype(str)
