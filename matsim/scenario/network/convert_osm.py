@@ -148,8 +148,8 @@ def execute(context):
     # Here we correct the capacity, simplify the network or include the traffic lights if required
     # The network is read once because reading it multiple times is slow
     reduce_capacity_outside_border  = (isinstance(context.config("osm_file"),list) & 
-                                       context.config("border_offset") >0 &
-                                       context.config("factor_reduce_capacity_outside_border")<1)
+                                       (context.config("border_offset")>0) &
+                                       (context.config("factor_reduce_capacity_outside_border")<1))
     
     if (context.config("simplify_network_in_eqasim") or 
         context.config("correct_links_capacity") or

@@ -19,8 +19,8 @@ VEHICLE_FIELDS = ["vehicle_id", "type_id", "age", "euro"]
 def execute(context):
     output_path = "%s/vehicles.xml.gz" % context.path()
 
-    df_vehicle_types, df_vehicles, df_trucks = context.stage("synthesis.vehicles.vehicles")
-    df_vehicles = pd.concat([df_vehicles, df_trucks])
+    df_vehicle_types, df_vehicles, df_trucks, df_lcv = context.stage("synthesis.vehicles.vehicles")
+    df_vehicles = pd.concat([df_vehicles, df_trucks, df_lcv])
 
     if context.config("include_cross_border"):
         cross_border_vehicles = context.stage("data.cross_border.generate_cross_border_traffic")[2].copy()
