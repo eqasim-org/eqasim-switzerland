@@ -19,8 +19,8 @@ def execute(context):
     df_variables = context.stage("mode_choice.estimate_model.data.variables")
     df_survey = context.stage("mode_choice.estimate_model.data.survey_data") [[
         "person_id", "trip_id", "person_weight", "mode", "income", "region", "age", "sex", "driving_license",
-        "origin_home", "destination_work", "destination_other", "destination_leisure", "departure_time", 
-        'home_municipality', 'origin_municipality', 'destination_municipality',
+        "origin_home", "destination_work", "destination_other", "destination_leisure", "destination_education",
+        "departure_time", 'home_municipality', 'origin_municipality', 'destination_municipality', 'destination_home',
         'is_car_passenger'
     ]]      
 
@@ -87,8 +87,8 @@ def execute(context):
     ########################### RETURN ################################
     columns = [
         "person_id", "trip_id", "person_weight", "mode", "euclidean_distance_km",
-        "home_municipality", "origin_municipality", "destination_municipality", 
-        "destination_work", "destination_other", "destination_leisure", "origin_home",
+        "home_municipality", "origin_municipality", "destination_municipality", "destination_education",
+        "destination_work", "destination_other", "destination_leisure", "origin_home","destination_home",
 
         # person
         "age", "sex", "income", "region", "is_car_passenger", "driving_license",

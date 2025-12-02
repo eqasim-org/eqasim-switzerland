@@ -86,7 +86,9 @@ NAMES_CONVERSION = {
     'beta_bike_urban_destination': 'bike.betaUrbanDestination_u',
     'beta_bike_destination_other': 'bike.betaDestinationOther_u',
     'beta_bike_destination_leisure': 'bike.betaDestinationLeisure_u',
-    
+    'beta_bike_destination_education': 'bike.betaDestinationEducation_u',
+    'beta_bike_destination_home': 'bike.betaDestinationHome_u',
+
     # Car
     'beta_car_asc': 'car.alpha_u',
     'beta_car_travel_time_min': 'car.betaTravelTime_u_min',
@@ -104,6 +106,8 @@ NAMES_CONVERSION = {
     'beta_car_long_distance': 'car.betaLongDistance_u',
     'beta_car_destination_other': 'car.betaDestinationOther_u',
     'beta_car_destination_leisure': 'car.betaDestinationLeisure_u',
+    'beta_car_destination_education': 'car.betaDestinationEducation_u',
+    'beta_car_destination_home': 'car.betaDestinationHome_u',
 
     # Car Passenger
     'beta_car_passenger_asc': 'cp.alpha_u',
@@ -121,7 +125,9 @@ NAMES_CONVERSION = {
     'beta_car_passenger_long_distance': 'cp.betaLongDistance_u',
     'beta_car_passenger_destination_other': 'cp.betaDestinationOther_u',
     'beta_car_passenger_destination_leisure': 'cp.betaDestinationLeisure_u',
-    
+    'beta_car_passenger_destination_education': 'cp.betaDestinationEducation_u',
+    'beta_car_passenger_destination_home': 'cp.betaDestinationHome_u',
+
     # PT
     'beta_pt_asc': 'pt.alpha_u',
     'beta_pt_in_vehicle_time_min': 'pt.betaInVehicleTime_u_min',
@@ -147,6 +153,8 @@ NAMES_CONVERSION = {
     'beta_pt_long_distance': 'pt.betaLongDistance_u',
     'beta_pt_destination_other': 'pt.betaDestinationOther_u',
     'beta_pt_destination_leisure': 'pt.betaDestinationLeisure_u',
+    'beta_pt_destination_education': 'pt.betaDestinationEducation_u',
+    'beta_pt_destination_home': 'pt.betaDestinationHome_u',
 
     # Walk
     'beta_walk_asc': 'walk.alpha_u',
@@ -163,6 +171,8 @@ NAMES_CONVERSION = {
     'beta_walk_long_distance': 'walk.betaLongDistance_u',
     'beta_walk_destination_other': 'walk.betaDestinationOther_u',
     'beta_walk_destination_leisure': 'walk.betaDestinationLeisure_u',
+    'beta_walk_destination_education': 'walk.betaDestinationEducation_u',
+    'beta_walk_destination_home': 'walk.betaDestinationHome_u',
 
     # Cost
     'beta_cost_CHF': 'betaCost_u_MU',

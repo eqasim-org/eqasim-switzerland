@@ -7,8 +7,6 @@ Created on Wed May 21 18:16:46 2025
 """
 from .BaseUtility import BaseUtility
 import polars as pl
-from mode_choice.dmc_defaults import Defaults
-LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
 
 class PtUtility(BaseUtility):
     
@@ -61,6 +59,8 @@ class PtUtility(BaseUtility):
             + BaseUtility.pt.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.pt.betaDestinationOther_u * pl.col("destination_other")
             + BaseUtility.pt.betaDestinationLeisure_u * pl.col("destination_leisure")
+            + BaseUtility.pt.betaDestinationEducation_u * pl.col("destination_education")
+            + BaseUtility.pt.betaDestinationHome_u * pl.col("destination_home")
         )
 
         return utility

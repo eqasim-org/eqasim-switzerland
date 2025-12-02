@@ -40,11 +40,11 @@ class Defaults:
 
     # Pt cost parameters 
     PT_COST_DISTANCE_THRESHOLD_KM = 10.0    
-    PT_COST_MODEL = "simple"  # "simple" or "detailed"
+    PT_COST_MODEL = "detailed"  # "simple" or "detailed"
     
     # car cost parameters
     CAR_COST_PER_KM = 0.26  # CHF per km
-    CAR_COST_MODEL = "weiss"  # "simple" or "weiss"
+    CAR_COST_MODEL = "simple"  # "simple" or "weiss"
     
     # parking
     PARKING_COST_PER_HOUR_URBAN = 1.0  # CHF per hour
@@ -59,8 +59,8 @@ class Defaults:
     USE_EXPONENTS_IN_MODE_CHOICE = True
     INCOME_COST_INTERACTION = True
     DISTANCE_COST_INTERACTION = True
-    SHORT_DISTANCE_LIMIT_KM = 0.8 
-    LONG_DISTANCE_LIMIT_KM = 15.0 
+    SHORT_DISTANCE_LIMIT_KM = 1.0 
+    LONG_DISTANCE_LIMIT_KM = 12.0 
 
     # calibration defaults
     ESTIMATE_DMC_PARAMETERS = True
@@ -70,7 +70,7 @@ class Defaults:
     USE_SKIM_MATRICES = False
     
     # model estimation data
-    MERGE_TRIPS_THAT_MIGHT_BE_SAME_TRIP = True
+    MERGE_TRIPS_THAT_MIGHT_BE_SAME_TRIP = False
 
 def configure(context):
     pass

@@ -9,8 +9,6 @@ from .BaseUtility import BaseUtility
 import pandas as pd
 import numpy as np
 import polars as pl
-from mode_choice.dmc_defaults import Defaults
-LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
 
 class CpUtility(BaseUtility):    
     
@@ -41,6 +39,8 @@ class CpUtility(BaseUtility):
             + BaseUtility.cp.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.cp.betaDestinationOther_u * pl.col("destination_other")
             + BaseUtility.cp.betaDestinationLeisure_u * pl.col("destination_leisure")
+            + BaseUtility.cp.betaDestinationEducation_u * pl.col("destination_education")
+            + BaseUtility.cp.betaDestinationHome_u * pl.col("destination_home")
                  
         )
 

@@ -9,8 +9,6 @@ from .BaseUtility import BaseUtility
 import pandas as pd
 import numpy as np
 import polars as pl
-from mode_choice.dmc_defaults import Defaults
-LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
 
 class BikeUtility(BaseUtility):
     
@@ -40,6 +38,8 @@ class BikeUtility(BaseUtility):
             + BaseUtility.bike.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.bike.betaDestinationOther_u * pl.col("destination_other")
             + BaseUtility.bike.betaDestinationLeisure_u * pl.col("destination_leisure")
+            + BaseUtility.bike.betaDestinationEducation_u * pl.col("destination_education")
+            + BaseUtility.bike.betaDestinationHome_u * pl.col("destination_home")
             
         )
 
