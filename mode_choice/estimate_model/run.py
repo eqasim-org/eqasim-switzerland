@@ -12,9 +12,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MODES = constants.POSSIBLE_MODES
 MEAN_EUCLIDEAN_DISTANCE_KM = constants.MEAN_EUCLIDEAN_DISTANCE_KM
 MEAN_INCOME_CHF = constants.MEAN_INCOME_CHF
+MODES = list(Defaults.POSSIBLE_MODES).copy()
 SHORT_DISTANCE_LIMIT_KM = Defaults.SHORT_DISTANCE_LIMIT_KM
 LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
 

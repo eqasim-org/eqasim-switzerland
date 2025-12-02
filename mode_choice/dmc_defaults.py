@@ -59,8 +59,8 @@ class Defaults:
     USE_EXPONENTS_IN_MODE_CHOICE = True
     INCOME_COST_INTERACTION = True
     DISTANCE_COST_INTERACTION = True
-    SHORT_DISTANCE_LIMIT_KM = 1.0 # 80% of bike and walk trips are below 1 km
-    LONG_DISTANCE_LIMIT_KM = 12.0 # 80% of car and pt trips are below 12 km
+    SHORT_DISTANCE_LIMIT_KM = 0.8 
+    LONG_DISTANCE_LIMIT_KM = 15.0 
 
     # calibration defaults
     ESTIMATE_DMC_PARAMETERS = True
