@@ -7,12 +7,12 @@ def configure(context):
     context.config("bike_distance_factor", default=Defaults.DEFAULT_BIKE_DISTANCE_FACTOR)  # factor to account for indirect biking paths
 
 
-def bike_travel_time(distance_km, context):
+def bike_travel_time(context, distance_km):
     bike_speed_m_per_s = context.config("bike_speed_m_per_s")
     travel_time_min = (distance_km * 1e3 / bike_speed_m_per_s) / 60
     return travel_time_min
 
-def bike_distance(euclidean_distance_km, context):
+def bike_distance(context, euclidean_distance_km):
     bike_distance_factor = context.config("bike_distance_factor")
     adjusted_distance_km = euclidean_distance_km * bike_distance_factor
     return adjusted_distance_km
@@ -24,10 +24,10 @@ def execute(context):
     ].copy()
     
     # calculate biking distance    
-    trips["distance_km"] = bike_distance(trips["euclidean_distance_km"], context)
+    trips["distance_km"] = bike_distance(context, trips["euclidean_distance_km"])
     
     # calculate biking travel time in seconds    
-    trips["travel_time_min"] = bike_travel_time(trips["distance_km"], context)
+    trips["travel_time_min"] = bike_travel_time(context, trips["distance_km"])
 
     return trips[["person_id","trip_id","travel_time_min","distance_km"]]
 

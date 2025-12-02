@@ -80,8 +80,8 @@ def execute(context):
     # 1. walk trips
     walk_trips = survey_data.loc[survey_data["walk_availability"],
                                  ['person_id', 'trip_id', 'euclidean_distance_km']].reset_index(drop=True).copy()
-    walk_trips["walk_distance_km"] = walk_distance(walk_trips["euclidean_distance_km"], context)  
-    walk_trips["walk_travel_time_min"] = walk_travel_time(walk_trips["walk_distance_km"], context)
+    walk_trips["walk_distance_km"] = walk_distance(context, walk_trips["euclidean_distance_km"])  
+    walk_trips["walk_travel_time_min"] = walk_travel_time(context, walk_trips["walk_distance_km"])
     walk_trips.drop(columns=["euclidean_distance_km"], inplace=True)
     num_nans = walk_trips.isna().sum().sum()
     logger.info(f"\t \t There are {num_nans} nans in walk trips after computing walk variables.")
@@ -89,8 +89,8 @@ def execute(context):
     # 2. bike trips
     bike_trips = survey_data.loc[survey_data["bike_availability"],
                                  ['person_id', 'trip_id', 'euclidean_distance_km']].reset_index(drop=True).copy()
-    bike_trips["bike_distance_km"] = bike_distance(bike_trips["euclidean_distance_km"], context)
-    bike_trips["bike_travel_time_min"] = bike_travel_time(bike_trips["bike_distance_km"], context)
+    bike_trips["bike_distance_km"] = bike_distance(context, bike_trips["euclidean_distance_km"])
+    bike_trips["bike_travel_time_min"] = bike_travel_time(context, bike_trips["bike_distance_km"])
     bike_trips.drop(columns=["euclidean_distance_km"], inplace=True)
     num_nans = bike_trips.isna().sum().sum()
     logger.info(f"\t \t There are {num_nans} nans in bike trips after computing bike variables.")

@@ -42,8 +42,8 @@ def car_variables(context, df):
     
     # access_egress time in min
     euclidean_access_egress_distance = routed_trips["access_euc_distance"] + routed_trips["egress_euc_distance"]
-    acess_egress_distance_km = walk_distance(euclidean_access_egress_distance / 1000, context)
-    routed_trips["access_egress_time_min"] = walk_travel_time(acess_egress_distance_km, context)
+    acess_egress_distance_km = walk_distance(context, euclidean_access_egress_distance / 1000)
+    routed_trips["access_egress_time_min"] = walk_travel_time(context, acess_egress_distance_km)
     
     return routed_trips
 
