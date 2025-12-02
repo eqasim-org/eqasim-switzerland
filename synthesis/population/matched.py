@@ -410,36 +410,41 @@ def execute(context):
         
         df_matching_normal = df_matching_normal.rename(columns = {"mz_id": "mz_id_normal"})
         
-        ## SECOND MATCHING - STATPOP PEOPLE WITH WEIRD RESIDENCE
+        ## SECOND MATCHING - STATPOP PEOPLE WITH RESIDENCE AT MUNICPALITY CENTER
 
-        population_selector_weird = (df_population["age"] >= c.MZ_AGE_THRESHOLD) & (df_population["collective_housing_resident"])
+        population_selector = (df_population["age"] >= c.MZ_AGE_THRESHOLD) & (df_population["collective_housing_resident"])
+        # with low population samples it can happen that we do not have these individuals
+        if (population_selector.any()):
+            df_source_center = df_source.merge(context.stage("data.microcensus.activity_chains")[["person_id", "activity_chain"]], how = "left", right_on = "person_id", left_on = "mz_id")
+            df_source_center = df_source_center[df_source_center["activity_chain"]=="home"]
 
-        df_source_weird = df_source.merge(context.stage("data.microcensus.activity_chains")[["person_id", "activity_chain"]], how = "left", right_on = "person_id", left_on = "mz_id")
-        df_source_weird = df_source_weird[df_source_weird["activity_chain"]=="home"]
+            print("Second statistical matching starting - people with weird residence")
 
-        print("Second statistical matching starting - people with weird residence")
+            df_target_center, df_population_center, removed_ids_list_center  = run_statistical_matching_extended(context, 
+                                                                df_source_center, "mz_id", "household_weight",
+                                                                df_population.copy(), "person_id",
+                                                                columns_individual_matching, mandatory_columns_individual_matching,
+                                                                minimum_observations = context.config("matching_minimum_observations"), 
+                                                                population_selector = population_selector,
+                                                                option = "household")
+            
+            df_matching_center = pd.merge(
+                df_population_center[["person_id", "household_id", "mz_head_id"]],
+                df_target_center[["person_id", "mz_id"]],
+                on="person_id", how="left")     
 
-        df_target_weird, df_population_weird, removed_ids_list_weird  = run_statistical_matching_extended(context, 
-                                                              df_source_weird, "mz_id", "household_weight",
-                                                              df_population.copy(), "person_id",
-                                                              columns_individual_matching, mandatory_columns_individual_matching,
-                                                              minimum_observations = context.config("matching_minimum_observations"), 
-                                                              population_selector = population_selector_weird,
-                                                              option = "household")
-        
-        df_matching_weird = pd.merge(
-            df_population_weird[["person_id", "household_id", "mz_head_id"]],
-            df_target_weird[["person_id", "mz_id"]],
-            on="person_id", how="left")     
+            df_matching_center = df_matching_center.rename(columns = {"mz_id": "mz_id_center"})  
 
-        df_matching_weird = df_matching_weird.rename(columns = {"mz_id": "mz_id_weird"})  
-
-        removed_ids_list = removed_ids_list + removed_ids_list_weird + removed_ids_list_normal
-        df_matching      = pd.merge(df_matching_normal, df_matching_weird, on = ["person_id", "household_id", "mz_head_id"])
-        df_matching["mz_id"] = df_matching["mz_id_normal"].combine_first(df_matching["mz_id_weird"])
+            removed_ids_list = removed_ids_list + removed_ids_list_center + removed_ids_list_normal
+            df_matching      = pd.merge(df_matching_normal, df_matching_center, on = ["person_id", "household_id", "mz_head_id"])
+            df_matching["mz_id"] = df_matching["mz_id_normal"].combine_first(df_matching["mz_id_center"])
+            del df_matching["mz_id_center"]
+        else:
+            df_matching = df_matching_normal.copy()
+            df_matching["mz_id"] = df_matching["mz_id_normal"]
 
         del df_matching["mz_id_normal"]
-        del df_matching["mz_id_weird"]
+       
     
     elif c.census == "are_synpop":
         number_of_population_persons    = len(np.unique(df_population["person_id"]))

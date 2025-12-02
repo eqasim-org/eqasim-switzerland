@@ -10,13 +10,15 @@ def configure(context):
     
     context.stage("synthesis.vehicles.passengers.default")
     context.stage("synthesis.vehicles.trucks.default")
+    context.stage("synthesis.vehicles.lcv.default")
 
 def execute(context):
     df_car_types, df_cars = context.stage("cars")
     df_passenger_types, df_passengers = context.stage("synthesis.vehicles.passengers.default")
     df_truck_types, df_trucks = context.stage("synthesis.vehicles.trucks.default")
+    df_lcv_types, df_lcv = context.stage("synthesis.vehicles.lcv.default")
 
     df_vehicles_person = pd.concat([df_cars, df_passengers])
-    df_types = pd.concat([df_car_types, df_passenger_types, df_truck_types])
+    df_types = pd.concat([df_car_types, df_passenger_types, df_truck_types, df_lcv_types])
 
-    return df_types, df_vehicles_person, df_trucks
+    return df_types, df_vehicles_person, df_trucks, df_lcv

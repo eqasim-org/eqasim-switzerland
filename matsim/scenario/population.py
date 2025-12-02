@@ -16,7 +16,9 @@ def configure(context):
     context.stage("synthesis.population.spatial.locations")
     context.stage("data.spatial.cantons")
     context.config("use_freight", default=False)
+    context.config("use_lcv", default=False)
     context.stage("synthesis.freight.trips")
+    context.stage("synthesis.lcv.trips")
 
     context.stage("synthesis.vehicles.vehicles")
     context.stage("data.spatial.municipality_types")
@@ -113,7 +115,7 @@ class FreightWriter:
     def add_vehicles(self, vehicles):
         self.vehicles = vehicles
 
-    def write(self, writer):
+    def write(self, writer, truck=True):
         writer.start_person("freight_" + str(self.freight_agent[1]))
         # Attributes
         writer.start_attributes()
@@ -130,10 +132,14 @@ class FreightWriter:
 
         # Plan
         writer.start_plan(selected=True)
-
-        start_location = writer.location(self.freight_agent[2], self.freight_agent[3], None)
-        end_location = writer.location(self.freight_agent[4], self.freight_agent[5], None)
-        departure_time = self.freight_agent[6]
+        if (truck):
+            start_location = writer.location(self.freight_agent[2], self.freight_agent[3], None)
+            end_location = writer.location(self.freight_agent[4], self.freight_agent[5], None)
+            departure_time = self.freight_agent[6]
+        else:
+            start_location = writer.location(self.freight_agent[4], self.freight_agent[5], None)
+            end_location = writer.location(self.freight_agent[6], self.freight_agent[7], None)
+            departure_time = self.freight_agent[8]
         arrival_time = departure_time + 3600
 
         # loading activity
@@ -143,7 +149,10 @@ class FreightWriter:
         writer.end_activity()
 
         # transport leg
-        writer.add_leg(str(self.freight_agent[7]), departure_time, arrival_time - departure_time)
+        if (truck):
+            writer.add_leg(str(self.freight_agent[7]), departure_time, arrival_time - departure_time)
+        else:
+            writer.add_leg("truck", departure_time, arrival_time - departure_time)
 
         # unloading activity
         writer.start_activity("freight_unloading", end_location, arrival_time, 30 * 3600)
@@ -367,6 +376,40 @@ def execute(context):
                         pass
 
                 assert (number_of_written_freight == len(df_freight))
+            
+            if context.config("use_lcv"):
+                df_lcv= context.stage("synthesis.lcv.trips")
+                df_vehicles = context.stage("synthesis.vehicles.vehicles")[3] ## here we obtain lcv vehicles data
+                df_vehicles = df_vehicles.sort_values(by=["owner_id"])
+                
+                df_vehicles = df_vehicles[VEHICLE_FIELDS]
+                vehicle_iterator = backlog_iterator(iter(df_vehicles[VEHICLE_FIELDS].itertuples(index = False)))
+
+                lcv_iterator = iter(df_lcv.itertuples())
+                number_of_written_lcv = 0
+
+                with context.progress(total=len(df_lcv), label="Writing lcv agents ...") as progress:
+                    try:
+                        while True:
+                            vehicles = []
+                            lcv = next(lcv_iterator)
+                            lcv_writer = FreightWriter(lcv)
+                            owner_id = lcv[1]
+                            while vehicle_iterator.has_next():
+                                vehicle = vehicle_iterator.next()
+                                if not vehicle[VEHICLE_FIELDS.index("owner_id")] == owner_id:
+                                    vehicle_iterator.previous()
+                                    break
+                                else:
+                                    vehicles.append(vehicle)
+                            lcv_writer.add_vehicles(vehicles)
+                            lcv_writer.write(writer, False)
+                            number_of_written_lcv += 1
+                            progress.update()
+                    except StopIteration:
+                        pass
+
+                assert (number_of_written_lcv == len(df_lcv))
 
             writer.end_population()
 
