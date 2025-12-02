@@ -35,7 +35,7 @@ class WalkUtility(BaseUtility):
             + WalkUtility.estimateRegionalUtility()
             + BaseUtility.walk.betaOriginHome_u * pl.col("origin_home")
             + BaseUtility.walk.betaShortDistance_u * pl.col("short_distance")
-            + BaseUtility.walk.betaLongDistance_u * pl.max_horizontal(0.0, pl.col("distance_km") - LONG_DISTANCE_LIMIT_KM)
+            + BaseUtility.walk.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.walk.betaUrbanDestination_u * pl.col("urban_destination")
             + BaseUtility.walk.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.walk.betaDestinationOther_u * pl.col("destination_other")

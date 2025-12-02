@@ -63,7 +63,7 @@ class CarUtility(BaseUtility):
             + CarUtility.estimateRegionalUtility()
             + BaseUtility.car.betaOriginHome_u * pl.col("origin_home")
             + BaseUtility.car.betaShortDistance_u * pl.col("short_distance")
-            + BaseUtility.car.betaLongDistance_u * pl.max_horizontal(0.0, pl.col("distance_km") - LONG_DISTANCE_LIMIT_KM)
+            + BaseUtility.car.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.car.betaUrbanDestination_u * pl.col("urban_destination")
             + BaseUtility.car.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.car.betaDestinationOther_u * pl.col("destination_other")
