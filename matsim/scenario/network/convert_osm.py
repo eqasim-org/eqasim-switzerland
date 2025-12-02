@@ -20,10 +20,13 @@ def configure(context):
     context.stage("data.osm.traffic_lights")
     context.stage("data.spatial.swiss_border")
     
-    context.config("data_path")        
+    context.config("data_path")
+    context.config("osm_file", "switzerland-latest.osm.gz")
+    context.config("border_offset", 20000)
+    context.config("factor_reduce_capacity_outside_border", 1)
     context.config("export_detailed_network", False)    
     context.config("correct_links_capacity", False)
-    context.config("minimum_speed", 3) #in km/h
+    context.config("minimum_speed", 2) #in km/h
     context.config("input_downsampling")
     context.config("add_trafic_lights", False)
     context.config("assign_elevations", False)
@@ -144,11 +147,15 @@ def execute(context):
 
     # Here we correct the capacity, simplify the network or include the traffic lights if required
     # The network is read once because reading it multiple times is slow
-
+    reduce_capacity_outside_border  = (isinstance(context.config("osm_file"),list) & 
+                                       context.config("border_offset") >0 &
+                                       context.config("factor_reduce_capacity_outside_border")<1)
+    
     if (context.config("simplify_network_in_eqasim") or 
         context.config("correct_links_capacity") or
         context.config("add_trafic_lights") or
-        context.config("assign_elevations")):
+        context.config("assign_elevations") or 
+        reduce_capacity_outside_border):
        
         # Read the network
         network_path =  "%s/converted_network.xml.gz" % context.path()
@@ -187,7 +194,12 @@ def execute(context):
             net.links = CapacityCorrector(net).run(  sampling_rate=sampling_rate,
                                                      minimum_speed=context.config("minimum_speed")/3.6)
             
-
+        if reduce_capacity_outside_border:
+            border = context.stage("data.spatial.swiss_border")
+            border_geo = border.geometry.iloc[0]
+            factor = context.config("factor_reduce_capacity_outside_border")
+            net.links = CapacityCorrector(net).reduce_capacity(border=border_geo,
+                                                               factor=factor)
             
         # Do not remove the last version of the network, just rename it.
         shutil.move(network_path, network_path.replace("converted_network","converted_network_uncleaned"))

@@ -1,6 +1,6 @@
 import numpy as np
 from matsim.readers import Network
-
+import shapely.vectorized
 
 class CapacityCorrector:
     """
@@ -12,6 +12,7 @@ class CapacityCorrector:
     
     def __init__(self, network:Network):
         self.links = network.links
+        self.nodes = network.nodes
 
     def _correct_capacity(self, row, sampling_rate, minimum_speed):
         current_capacity = row["capacity"]
@@ -33,6 +34,22 @@ class CapacityCorrector:
         return self.links
 
 
+    def reduce_capacity(self, border, factor):
+        # nodes within switzerland
+        within_ch = shapely.vectorized.contains(border, self.nodes.x.tolist(), self.nodes.y.tolist())        
+        nodes_within_ch = set(self.nodes[within_ch].node_id)
+        
+        # links withing switzerland
+        links_within_ch = (self.links.from_node.isin(nodes_within_ch) &
+                           self.links.to_node.isin(nodes_within_ch))
+        
+        car_links = self.links["modes"].str.contains(r'\bcar\b')
 
+        #is_in = links_within_ch&car_links
+        is_out = (~links_within_ch)&car_links
+
+        self.links.loc[is_out, "capacity"] *= factor
+        
+        return self.links
 
 
