@@ -10,7 +10,7 @@ def configure(context):
     context.config("parking_cost_per_hour_CHF_suburban", Defaults.PARKING_COST_PER_HOUR_SUBURBAN) #CHF per hour
 
 
-def parking_cost(df,context):
+def parking_cost(context, df):
     parking_cost_per_hour_CHF_urban = context.config("parking_cost_per_hour_CHF_urban")
     parking_cost_per_hour_CHF_suburban = context.config("parking_cost_per_hour_CHF_suburban")
     # situations
@@ -51,13 +51,11 @@ def execute(context):
 
     df["parking_duration_min"] = (np.clip(df["departure_time"].shift(-1), 8*3600, 19*3600) - 
                                   np.clip(df["arrival_time"], 8*3600, 19*3600)) / 60.0
-
-    df.loc[df["parking_duration_min"]<=0, "parking_duration_min"] = 0.0  # do not pay parking (duration out of bounds)
+    
     df.loc[df["is_last"].values, "parking_duration_min"] = 0.0 # do not pay parking (home parking at night)
-
     df["parking_duration_min"] = df["parking_duration_min"].clip(0.0, 11 * 60.0)  # ensure max 11 hours (from 8am to 7pm)
 
     # compute parking cost
-    df["parking_cost_CHF"] = parking_cost(df, context)
+    df["parking_cost_CHF"] = parking_cost(context, df)
 
     return df[["person_id", "trip_id", "parking_cost_CHF"]]

@@ -154,7 +154,7 @@ def execute(context):
     parking_duration.loc[~is_last, "parking_duration_min"] -= (parking_duration.loc[~is_last, "car_travel_time_min"] + 
                                                                parking_duration.loc[~is_last, "car_access_egress_time_min"])
     parking_duration["parking_duration_min"] = parking_duration["parking_duration_min"].fillna(0.0).clip(0.0, 11 * 60.0)  # max 11 hours (from 8am to 7pm) and nans are last activities
-    cost_parking = parking_cost(parking_duration, context)
+    cost_parking = parking_cost(context, parking_duration)
     car_trips["parking_cost_CHF"] = cost_parking
 
     # parking search time
