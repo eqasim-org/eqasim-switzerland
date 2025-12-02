@@ -7,6 +7,7 @@ MS_REGIONS = Defaults.MS_REGIONS.reset_index().copy()
 INCOME_CLASS_MAP = Defaults.INCOME_CLASS_MAP
 
 def configure(context):
+    context.stage("mode_choice.dmc_defaults")
     context.stage("synthesis.population.enriched")
     context.stage("data.constants")
 

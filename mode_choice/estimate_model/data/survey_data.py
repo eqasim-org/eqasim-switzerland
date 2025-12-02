@@ -19,6 +19,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
+    context.stage("mode_choice.dmc_defaults")
 
 def execute(context):
     df_persons = context.stage("data.microcensus.persons")    

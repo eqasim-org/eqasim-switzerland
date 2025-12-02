@@ -14,4 +14,4 @@ slurm*
 *.ipynb
 output
 *.log
-simulation_data
+simulation_data*

@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 def configure(context):
     context.stage("mode_choice.prepare_data")
     context.stage("mode_choice.dmc.run_dmc")
-
+    context.stage("mode_choice.dmc_defaults")
+    
     context.config("data_path")
     context.config("random_seed")
     context.config("estimate_dmc_parameters", default = Defaults.ESTIMATE_DMC_PARAMETERS)

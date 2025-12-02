@@ -1,6 +1,7 @@
 from mode_choice.dmc_defaults import Defaults
 
 def configure(context):
+    context.stage("mode_choice.dmc_defaults")
     context.stage("mode_choice.trips.prepare_trips")
     context.config("bike_speed_m_per_s", default=Defaults.DEFAULT_BIKE_SPEED_M_PER_S)  # average biking speed ~14.4 km/h
     context.config("bike_distance_factor", default=Defaults.DEFAULT_BIKE_DISTANCE_FACTOR)  # factor to account for indirect biking paths

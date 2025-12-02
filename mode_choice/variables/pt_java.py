@@ -12,6 +12,7 @@ def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
+    context.stage("mode_choice.dmc_defaults")
     
     context.config("data_path")
     context.config("dmc_simulation_data_path", default = os.path.join(context.config("data_path"), "simulation_data"))

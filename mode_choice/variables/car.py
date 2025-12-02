@@ -8,6 +8,7 @@ def configure(context):
     context.stage("mode_choice.network.car_router")
     context.stage("mode_choice.network.network_processor")
     context.stage("mode_choice.network.road_network")
+    context.stage("mode_choice.dmc_defaults")
     
     context.config("data_path")
     context.config("dmc_simulation_data_path", 

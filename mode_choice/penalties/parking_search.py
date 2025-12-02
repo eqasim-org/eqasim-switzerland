@@ -3,6 +3,7 @@ from mode_choice.dmc_defaults import Defaults
 
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
+    context.stage("mode_choice.dmc_defaults")
     context.config("urban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_URBAN)   
     context.config("suburban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_SUBURBAN) 
 

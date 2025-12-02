@@ -4,7 +4,8 @@ from mode_choice.dmc_defaults import Defaults
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
     context.stage("mode_choice.variables.car")
-
+    context.stage("mode_choice.dmc_defaults")
+    
     context.config("parking_cost_per_hour_CHF_urban", Defaults.PARKING_COST_PER_HOUR_URBAN) #CHF per hour
     context.config("parking_cost_per_hour_CHF_suburban", Defaults.PARKING_COST_PER_HOUR_SUBURBAN) #CHF per hour
 

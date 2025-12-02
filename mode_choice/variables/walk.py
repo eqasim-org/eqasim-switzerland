@@ -4,6 +4,7 @@ import os
 from mode_choice.dmc_defaults import Defaults
 
 def configure(context):
+    context.stage("mode_choice.dmc_defaults")
     context.stage("mode_choice.trips.prepare_trips")
     context.config("walk_speed_m_per_s", default=Defaults.DEFAULT_WALK_SPEED_M_PER_S)  # average walking speed ~5 km/h
     context.config("walk_distance_factor", default=Defaults.DEFAULT_WALK_DISTANCE_FACTOR)  # factor to account for indirect walking paths

@@ -15,6 +15,7 @@ import numpy as np
 from mode_choice.dmc_defaults import Defaults
 
 def configure(context):
+    context.stage("mode_choice.dmc_defaults")
     context.stage("synthesis.population.trips")
     context.stage("synthesis.population.spatial.locations")
     context.stage("data.spatial.municipality_types")

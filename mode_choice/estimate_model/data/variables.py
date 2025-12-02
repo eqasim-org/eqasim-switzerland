@@ -22,6 +22,7 @@ logger = logging.getLogger("synpp")
 In this stage I compute all the variables needed for the mode choice model.
 """
 def configure(context):
+    context.stage("mode_choice.dmc_defaults")
     context.stage("mode_choice.estimate_model.data.survey_data")
     context.stage("data.constants")
     context.stage("matsim.runtime.eqasim")

@@ -16,7 +16,8 @@ def configure(context):
 
     context.stage("mode_choice.dmc.run_dmc")
     context.stage("mode_choice.calibration.optimizer")
-
+    context.stage("mode_choice.dmc_defaults")
+    
     context.config("data_path")
     context.config("random_seed")
 

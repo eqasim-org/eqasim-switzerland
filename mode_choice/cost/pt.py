@@ -1,6 +1,7 @@
 from mode_choice.dmc_defaults import Defaults
 
 def configure(context):
+    context.stage("mode_choice.dmc_defaults")
     context.config("use_skim_matrices", default = Defaults.USE_SKIM_MATRICES)
     if context.config("use_skim_matrices"):
         context.stage("mode_choice.cost.pt_skim_matrices")

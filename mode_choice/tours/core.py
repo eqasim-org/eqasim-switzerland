@@ -138,7 +138,7 @@ def spatial_continuity_filter(all_combinations: List[Tuple[str, ...]],
 
 # I include this as a stage so that if we modify some functions, it will be considered in synpp
 def configure(context):
-    pass    
+    context.stage("mode_choice.dmc_defaults")    
 
 def execute(context):
     return get_possible_mode_combinations_parallel

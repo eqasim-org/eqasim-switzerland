@@ -26,6 +26,7 @@ def configure(context):
     context.config("urban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_URBAN) #used in the writer
     context.config("suburban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_SUBURBAN) #used in the writer
     context.config("use_exponents", default = Defaults.USE_EXPONENTS_IN_MODE_CHOICE)
+    context.stage("mode_choice.dmc_defaults")
 
 def preprocess_data(df, ignore_car_passenger):
     modes = MODES.copy()

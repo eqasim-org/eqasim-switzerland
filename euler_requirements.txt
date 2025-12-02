@@ -24,3 +24,5 @@ synpp==1.6.1
 osmium==4.0.2
 lxml==6.0.0
 pandana==0.7
+polars==1.32.3
+biogeme==3.2.11

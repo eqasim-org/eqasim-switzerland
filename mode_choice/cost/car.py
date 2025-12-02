@@ -29,6 +29,7 @@ def car_cost(context, *args, **kwargs):
 
 def configure(context):
     context.stage("mode_choice.variables.car")
+    context.stage("mode_choice.dmc_defaults")
     context.config("car_cost_per_km", default = Defaults.CAR_COST_PER_KM)
     context.config("car_cost_model", default = Defaults.CAR_COST_MODEL)
 
