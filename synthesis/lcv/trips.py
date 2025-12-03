@@ -20,11 +20,13 @@ import geopandas as gpd
 
 def configure(context):
     context.stage("data.statent.statent")
-    
+    context.stage("synthesis.freight.trips")
+
     context.config("input_downsampling")
     context.config("random_seed")
     context.config("data_path")
     context.config("lcv_poisson_sampling", default=False)
+    context.config("use_freight")    
 
 # -----------------------------------------------------------------------------
 # HELPER FUNCTIONS
@@ -452,4 +454,10 @@ def execute(context):
         bins_df,
         seed=seed,
     )
+
+    # if the freight module is used, make sure that the trip ids do not overlap
+    if context.config("use_freight"):
+        id_offset = context.stage("synthesis.freight.trips")["agent_id"].max() + 1
+        trips_df["trip_id"] += id_offset
+
     return trips_df

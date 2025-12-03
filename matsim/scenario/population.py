@@ -108,15 +108,19 @@ class PersonWriter:
 
 
 class FreightWriter:
-    def __init__(self, freight_agent):
+    def __init__(self, freight_agent, is_lcv = False):
         self.freight_agent = freight_agent
         self.vehicles = []
+        if is_lcv:
+            self.prefix = "lcv_"
+        else:
+            self.prefix = "freight_"
 
     def add_vehicles(self, vehicles):
         self.vehicles = vehicles
 
     def write(self, writer, truck=True):
-        writer.start_person("freight_" + str(self.freight_agent[1]))
+        writer.start_person(self.prefix + str(self.freight_agent[1]))
         # Attributes
         writer.start_attributes()
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
@@ -380,13 +384,7 @@ def execute(context):
             if context.config("use_lcv"):
                 df_lcv= context.stage("synthesis.lcv.trips")
                 df_vehicles = context.stage("synthesis.vehicles.vehicles")[3] ## here we obtain lcv vehicles data
-                df_vehicles = df_vehicles.sort_values(by=["owner_id"])
-                
-                if context.config("use_freight"):
-                    id_offset = context.stage("synthesis.freight.trips")["agent_id"].max() + 1
-                    df_lcv["trip_id"] += id_offset
-                    df_vehicles["owner_id"] += id_offset
-                    df_vehicles["vehicle_id"] = df_vehicles["owner_id"].astype(str) + ":lcv"
+                df_vehicles = df_vehicles.sort_values(by=["owner_id"])                
 
                 df_vehicles = df_vehicles[VEHICLE_FIELDS]
                 vehicle_iterator = backlog_iterator(iter(df_vehicles[VEHICLE_FIELDS].itertuples(index = False)))
@@ -399,7 +397,7 @@ def execute(context):
                         while True:
                             vehicles = []
                             lcv = next(lcv_iterator)
-                            lcv_writer = FreightWriter(lcv)
+                            lcv_writer = FreightWriter(lcv, is_lcv = True)
                             owner_id = lcv[1]
                             while vehicle_iterator.has_next():
                                 vehicle = vehicle_iterator.next()
