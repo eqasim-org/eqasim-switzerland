@@ -46,7 +46,8 @@ def pt_variables(context, df):
         else:
             raise ValueError("Input dataframe must have either 'identifier' or 'trip_id' column.")
     df = df[["identifier", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time"]].copy()
-    
+    initial_ids = df[["identifier"]].astype(str).copy()
+
     # save file to be read by the router        
     input_path = os.path.join(context.path(), "pt_trips_to_be_routerd.csv")
     initial_length = len(df)
@@ -64,16 +65,22 @@ def pt_variables(context, df):
     logger.info(f"\t There are {len(df)} trips after PT routing.")
     logger.info(f"\t There are {initial_length - len(df)} trips lost during PT routing.")
 
-    # rename back to trip_id
-    df = df.rename(columns={"identifier":"trip_id"})
-    df["trip_id"] = df["trip_id"].astype(str)
-    df["person_id"] = df["trip_id"].str.split("_").str[0].astype(int) # to keep consistency between stages (person_id and trip_id always)
- 
-    # only keep relevant columns
+    # relevant variables
     df["access_egress_time_min"] = df["access_travel_time_min"] + df["egress_travel_time_min"]
     df["waiting_time_min"] = df["transfer_waiting_time_min"] + df["transfer_travel_time_min"]
     df["in_vehicle_time_min"] = df["in_vehicle_time_total_min"]
     df["distance_km"] = df["in_vehicle_distance_total_km"]
+    
+    # Trips that could not be routed (no public transport route found) are assigned high values
+    # for travel times and distances to discourage their selection in mode choice,
+    # since we cannot mark them as unavailable here as the tours are already built.
+    df = initial_ids.merge(df, on="identifier", how="left")
+    df.loc[df["access_egress_time_min"].isna(), ["access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "distance_km"]] = 1e4
+    
+    # rename back to trip_id
+    df = df.rename(columns={"identifier":"trip_id"})
+    df["trip_id"] = df["trip_id"].astype(str)   
+    df["person_id"] = df["trip_id"].str.split("_").str[0].astype(int) # to keep consistency between stages (person_id and trip_id always)
     
     return df[
          ["trip_id", "person_id", "access_egress_time_min", "in_vehicle_time_min", "transfers", 

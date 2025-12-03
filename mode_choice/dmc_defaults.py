@@ -19,9 +19,9 @@ class Defaults:
     # default thresholds (Euclidean distance) (km)
     DEFAULT_WALK_THRESHOLD_KM = 4.0 # quantile 99% of all walk trips in microcensus (euclidean distance)
     DEFAULT_BIKE_THRESHOLD_KM = 11 # quantile 99% of all bike trips in microcensus (euclidean distance)
-    DEFAULT_CAR_MIN_THRESHOLD_KM = 0.1
-    DEFAULT_PT_MIN_THRESHOLD_KM = 0.1
-    DEFAULT_PASSENGER_MIN_THRESHOLD_KM = 0.1
+    DEFAULT_CAR_MIN_THRESHOLD_KM = 0.2
+    DEFAULT_PT_MIN_THRESHOLD_KM = 0.2
+    DEFAULT_PASSENGER_MIN_THRESHOLD_KM = 0.2
 
     # speeds and distance factors
     DEFAULT_WALK_SPEED_M_PER_S = 1.3  
@@ -40,7 +40,7 @@ class Defaults:
 
     # Pt cost parameters 
     PT_COST_DISTANCE_THRESHOLD_KM = 10.0    
-    PT_COST_MODEL = "detailed"  # "simple" or "detailed"
+    PT_COST_MODEL = "simple"  # "simple" or "detailed"
     
     # car cost parameters
     CAR_COST_PER_KM = 0.26  # CHF per km
@@ -60,7 +60,7 @@ class Defaults:
     INCOME_COST_INTERACTION = True
     DISTANCE_COST_INTERACTION = True
     SHORT_DISTANCE_LIMIT_KM = 1.0 
-    LONG_DISTANCE_LIMIT_KM = 12.0 
+    LONG_DISTANCE_LIMIT_KM = 13.0 
 
     # calibration defaults
     ESTIMATE_DMC_PARAMETERS = True

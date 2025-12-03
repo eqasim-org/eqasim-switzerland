@@ -38,6 +38,7 @@ def execute(context):
     persons = context.stage("mode_choice.trips.prepare_persons")[
         ["person_id","age","sex","region","driving_license","income"]]
     persons = pl.from_pandas(persons).with_columns([
+        pl.col("person_id").cast(pl.Int64),
         pl.col("age").cast(pl.Int8),
         pl.col("sex").cast(pl.Int8),
         pl.col("region").cast(pl.Int8),
@@ -107,7 +108,7 @@ def execute(context):
         pl.when(pl.col("following_purpose") == "leisure").then(1).otherwise(0.).cast(pl.Int8).alias("destination_leisure"),
         pl.when(pl.col("following_purpose") == "home").then(1).otherwise(0.).cast(pl.Int8).alias("destination_home"),
         pl.when(pl.col("following_purpose") == "education").then(1).otherwise(0.).cast(pl.Int8).alias("destination_education"),
-        pl.col("euclidean_distance_km").cast(pl.Float32)
+        pl.col("euclidean_distance_km").cast(pl.Float32)        
     ]).select([
         "trip_id", "origin_home", "short_distance", "long_distance", "urban_destination", "suburban_destination", 
         "destination_work", "destination_other", "destination_leisure", "destination_home", "destination_education", "euclidean_distance_km"

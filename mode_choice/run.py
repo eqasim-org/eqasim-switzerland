@@ -12,10 +12,12 @@ def configure(context):
     context.stage("mode_choice.dmc_defaults")
     
     context.config("data_path")
+    context.config("dmc_simulation_data_path", default = os.path.join(context.config("data_path"), "simulation_data"))    
+
     context.config("random_seed")
     context.config("estimate_dmc_parameters", default = Defaults.ESTIMATE_DMC_PARAMETERS)
     context.config("calibrate_dmc_parameters", default = Defaults.CALIBRATE_DMC_PARAMETERS)
-    context.config("mode_parameters_path", default = "")
+    context.config("mode_parameters_path", default = os.path.join(context.config("dmc_simulation_data_path"), "dmc_parameters.yml"))
 
     if context.config("estimate_dmc_parameters"):
         context.stage("mode_choice.estimate_model.run")

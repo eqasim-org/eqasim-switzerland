@@ -8,8 +8,11 @@ from mode_choice.dmc.run_dmc import DMC
 logger = logging.getLogger(__name__)
 def configure(context):
     context.stage("mode_choice.prepare_data")
-    context.config("estimate_dmc_parameters", default = Defaults.ESTIMATE_DMC_PARAMETERS)      
-    context.config("mode_parameters_path", default = "") 
+    
+    context.config("estimate_dmc_parameters", default = Defaults.ESTIMATE_DMC_PARAMETERS)  
+    context.config("data_path")
+    context.config("dmc_simulation_data_path", default = os.path.join(context.config("data_path"), "simulation_data"))        
+    context.config("mode_parameters_path", default = os.path.join(context.config("dmc_simulation_data_path"), "dmc_parameters.yml"))
 
     if context.config("estimate_dmc_parameters"):
         context.stage("mode_choice.estimate_model.run")
@@ -17,8 +20,7 @@ def configure(context):
     context.stage("mode_choice.dmc.run_dmc")
     context.stage("mode_choice.calibration.optimizer")
     context.stage("mode_choice.dmc_defaults")
-    
-    context.config("data_path")
+        
     context.config("random_seed")
 
 def execute(context):

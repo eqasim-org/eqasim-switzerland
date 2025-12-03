@@ -7,7 +7,8 @@ import biogeme.biogeme as bio
 from biogeme import models
 from biogeme.expressions import Beta, Variable, bioMax, bioMin, log
 import logging
-
+import pandas as pd
+import threading
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ def configure(context):
     context.config("suburban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_SUBURBAN) #used in the writer
     context.config("use_exponents", default = Defaults.USE_EXPONENTS_IN_MODE_CHOICE)
     context.stage("mode_choice.dmc_defaults")
+    context.stage("data.microcensus.shares")
 
 def preprocess_data(df, ignore_car_passenger):
     modes = MODES.copy()
@@ -72,9 +74,9 @@ def define_variables(database, ignore_car_passenger):
     variables = {
         "mode": db.Variable("mode"),
         "weight": db.Variable("person_weight"),
-        "euclidean_distance_km": db.Variable("euclidean_distance_km"),
+        "euclidean_distance_km": bioMax(db.Variable("euclidean_distance_km"), 0.001),
         "age": db.Variable("age"),
-        "income": db.Variable("income"),
+        "income": bioMax(db.Variable("income"), 0.001),
         "sex": db.Variable("sex"),
         "driving_license": db.Variable("driving_license"),
         "parking_cost_CHF": db.Variable("parking_cost_CHF"),
@@ -127,11 +129,11 @@ def define_betas(ignore_car_passenger, use_exponents):
     trainable = 0 if use_exponents else 1
     betas = {
         # lambdas
-        "lambda_cost_distance": Beta("lambda_cost_distance", -0.1, None, -0.001, 0),
-        "lambda_cost_income": Beta("lambda_cost_income", -0.05, None, -0.001, 0),
+        "lambda_cost_distance": Beta("lambda_cost_distance", -0.1, None, 0, 0),
+        "lambda_cost_income": Beta("lambda_cost_income", -0.05, None, 0, 0),
 
         "lambda_car_travel_time": Beta("lambda_car_travel_time", 1.0, 0.01, None, trainable),
-        "lambda_car_access_egress_time": Beta("lambda_car_access_egress_time", 1.0, 0.01, None, trainable),
+        "lambda_car_access_egress_time": Beta("lambda_car_access_egress_time", 1.0, 0.0, None, trainable),
         "lambda_pt_in_vehicle_time": Beta("lambda_pt_in_vehicle_time", 1.0, 0.01, None, trainable),
         "lambda_pt_access_egress_time": Beta("lambda_pt_access_egress_time", 1.0, 0.01, None, trainable),
         "lambda_pt_transfers": Beta("lambda_pt_transfers", 1.0, 0.01, None, trainable),
@@ -160,13 +162,13 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_car_destination_other": Beta("beta_car_destination_other", 0, None, None, 0),
         "beta_car_destination_leisure": Beta("beta_car_destination_leisure", 0, None, None, 0),
         "beta_car_destination_education": Beta("beta_car_destination_education", 0, None, None, 0),
-        "beta_car_destination_home": Beta("beta_car_destination_home", 0, None, None, 0),
+        "beta_car_destination_home": Beta("beta_car_destination_home", 0, None, None, 1),
         # pt
         "beta_pt_asc": Beta("beta_pt_asc", 0, None, None, 1),
-        "beta_pt_access_egress_time_min": Beta("beta_pt_access_egress_time_min", 0, None, -1e-3, 0),
+        "beta_pt_access_egress_time_min": Beta("beta_pt_access_egress_time_min", -0.01, None, -1e-3, 0),
         "beta_pt_in_vehicle_time_min": Beta("beta_pt_in_vehicle_time_min", -0.05, None, -1e-3, 0),                
-        "beta_pt_transfers": Beta("beta_pt_transfers", 0, None, -1e-3, 0),
-        "beta_pt_waiting_time_min": Beta("beta_pt_waiting_time_min", 0, None, -1e-3, 0),
+        "beta_pt_transfers": Beta("beta_pt_transfers", -0.01, None, -1e-3, 0),
+        "beta_pt_waiting_time_min": Beta("beta_pt_waiting_time_min", -0.01, None, -1e-3, 0),
         "beta_pt_distance_km": Beta("beta_pt_distance_km", 0, None, None, 0),
         "beta_pt_sex": Beta("beta_pt_sex", 0, None, None, 1),        
         "beta_pt_urban_destination": Beta("beta_pt_urban_destination", 0, None, None, 1),
@@ -192,7 +194,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_bike_origin_home": Beta("beta_bike_origin_home", 0, None, None, 0),        
         "beta_bike_short_distance": Beta("beta_bike_short_distance", 0, None, None, 0),        
         "beta_bike_work_destination": Beta("beta_bike_work_destination", 0, None, None, 0),
-        "beta_bike_long_distance": Beta("beta_bike_long_distance", 0, None, None, 0),
+        "beta_bike_long_distance": Beta("beta_bike_long_distance", 0, None, None, 1),
         "beta_bike_destination_other": Beta("beta_bike_destination_other", 0, None, None, 0),
         "beta_bike_destination_leisure": Beta("beta_bike_destination_leisure", 0, None, None, 0),
         "beta_bike_destination_education": Beta("beta_bike_destination_education", 0, None, None, 0),
@@ -211,7 +213,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_walk_destination_other": Beta("beta_walk_destination_other", 0, None, None, 0),
         "beta_walk_destination_leisure": Beta("beta_walk_destination_leisure", 0, None, None, 0),
         "beta_walk_destination_education": Beta("beta_walk_destination_education", 0, None, None, 0),
-        "beta_walk_destination_home": Beta("beta_walk_destination_home", 0, None, None, 0),
+        "beta_walk_destination_home": Beta("beta_walk_destination_home", 0, None, None, 1),
     }
     if not ignore_car_passenger:
         betas.update({
@@ -229,8 +231,8 @@ def define_betas(ignore_car_passenger, use_exponents):
             "beta_car_passenger_origin_home": Beta("beta_car_passenger_origin_home", 0, None, None, 0),
             "beta_car_passenger_destination_other": Beta("beta_car_passenger_destination_other", 0, None, None, 0),
             "beta_car_passenger_destination_leisure": Beta("beta_car_passenger_destination_leisure", 0, None, None, 0),
-            "beta_car_passenger_destination_education": Beta("beta_car_passenger_destination_education", 0, None, None, 0),
-            "beta_car_passenger_destination_home": Beta("beta_car_passenger_destination_home", 0, None, None, 0),
+            "beta_car_passenger_destination_education": Beta("beta_car_passenger_destination_education", 0, None, None, 1),
+            "beta_car_passenger_destination_home": Beta("beta_car_passenger_destination_home", 0, None, None, 1),
         })
     return betas
 
@@ -389,11 +391,27 @@ def log_trip_stats(df, modes):
     logger.info("The average euclidean distance is: %.2f km, for pt and car is %.2f km", df.euclidean_distance_km.mean(), df[pt_or_car].euclidean_distance_km.mean())
     logger.info("The average income is: %.2f CHF", df.income.mean())
 
+def correct_weights(context, df, modes):
+    mode_shares_path,_ = context.stage("data.microcensus.shares")
+    mode_shares = pd.read_csv(mode_shares_path).set_index("mode")
+    mode_shares_in_df = (df.groupby("mode").person_weight.sum()/df.person_weight.sum()).to_dict()
+    
+    for m in modes:
+        idx = modes.index(m)
+        mode_share = mode_shares.loc[m, "mode_share"]
+        mode_share_in_df = mode_shares_in_df[idx]        
+        factor = mode_share / mode_share_in_df
+        df.loc[df["mode"]==idx, "person_weight"] *= factor
+    
+    df["person_weight"] = len(df) * df["person_weight"] / df["person_weight"].sum()
+    return df
+
 def execute(context):
     df = context.stage("mode_choice.estimate_model.data.training_data")
     ignore_car_passenger = context.config("ignore_car_passenger")
     use_exponents = context.config("use_exponents")
     df, modes = preprocess_data(df, ignore_car_passenger)
+    # df = correct_weights(context, df, modes)
     log_trip_stats(df, modes)
 
     if 'trip_id' in df.columns and df['trip_id'].dtype != int:
@@ -410,8 +428,8 @@ def execute(context):
     os.chdir(context.working_directory)
 
     logprob = models.loglogit(utilities, availability, vars["mode"])
-    biogeme = bio.BIOGEME(database, {"loglike": logprob, "weight": vars["weight"]},
-                          parameters={'number_of_threads': 4})
+    biogeme = bio.BIOGEME(database, {"loglike": logprob, "weight": vars["weight"]})
+                        #   parameters={'number_of_threads': threading.active_count()})
     
     biogeme.modelName = "DMC_model"
     # biogeme.generate_html = False
