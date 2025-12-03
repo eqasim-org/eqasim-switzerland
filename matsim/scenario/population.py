@@ -382,6 +382,12 @@ def execute(context):
                 df_vehicles = context.stage("synthesis.vehicles.vehicles")[3] ## here we obtain lcv vehicles data
                 df_vehicles = df_vehicles.sort_values(by=["owner_id"])
                 
+                if context.config("use_freight"):
+                    id_offset = context.stage("synthesis.freight.trips")["agent_id"].max() + 1
+                    df_lcv["trip_id"] += id_offset
+                    df_vehicles["owner_id"] += id_offset
+                    df_vehicles["vehicle_id"] = df_vehicles["owner_id"].astype(str) + ":lcv"
+
                 df_vehicles = df_vehicles[VEHICLE_FIELDS]
                 vehicle_iterator = backlog_iterator(iter(df_vehicles[VEHICLE_FIELDS].itertuples(index = False)))
 
