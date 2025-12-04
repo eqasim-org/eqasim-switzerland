@@ -11,14 +11,14 @@ def configure(context):
 def execute(context):
     df_lcv = context.stage("synthesis.lcv.trips")
     df_vehicle_types = pd.DataFrame.from_records([{
-        "type_id": "default_lcv", "nb_seats": 1, "length": 9.0, "width": 1.0, "pce": 2.0, "mode": "lcv",
+        "type_id": "default_lcv", "nb_seats": 1, "length": 9.0, "width": 1.0, "pce": 2.0, "mode": "truck",
         "hbefa_cat": "HEAVY_GOODS_VEHICLE", "hbefa_tech": "average", "hbefa_size": "average", "hbefa_emission": "average", ##TODO: check hbefa_category
     }])
 
     df_vehicles = df_lcv[["trip_id"]].copy()
     df_vehicles = df_vehicles.rename(columns = { "trip_id": "owner_id" })
     
-    df_vehicles["mode"] = "lcv"
+    df_vehicles["mode"] = "truck"
 
     df_vehicles["vehicle_id"] = df_vehicles["owner_id"].astype(str) + ":lcv"
     df_vehicles["type_id"] = "default_lcv"

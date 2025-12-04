@@ -124,7 +124,12 @@ class FreightWriter:
         # Attributes
         writer.start_attributes()
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
-        writer.add_attribute("type", "java.lang.String", str(self.freight_agent[7]))
+        
+        if (truck):
+            writer.add_attribute("type", "java.lang.String", str(self.freight_agent[7]))
+        else:
+            writer.add_attribute("type", "java.lang.String", "truck")
+
         writer.add_attribute("subpopulation", "java.lang.String", "freight")
 
         writer.add_attribute("vehicles", "org.matsim.vehicles.PersonVehicles", "{{{content}}}".format(content = ",".join([
