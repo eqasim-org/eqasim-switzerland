@@ -24,7 +24,7 @@ def configure(context):
 
 
 def run(context, command, arguments):
-    jar_path = context.stage("calibration.pt_routing.eqasim")
+    jar_path = context.stage("pt_preparation.pt_routing.eqasim")
     java.run(context, command, arguments, jar_path)
 
 

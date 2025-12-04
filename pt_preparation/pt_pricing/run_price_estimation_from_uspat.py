@@ -13,7 +13,7 @@ def configure(context):
 
 def execute(context):
 
-    uspat_points = context.stage("pt_preparation.pt_pricing.uspat")
+    uspat_points = context.stage("pt_preparation.pt_pricing.uspat_points")
     N            = len(uspat_points)
 
     coord_x = uspat_points.geometry.x.to_numpy() 
