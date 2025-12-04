@@ -12,7 +12,7 @@ def execute(context):
     df_persons = context.stage("synthesis.freight.trips")
 
     df_vehicle_types = pd.DataFrame.from_records([{
-        "type_id": "default_truck", "nb_seats": 1, "length": 12.0, "width": 1.0, "pce": 3.0, "mode": "car_passenger",
+        "type_id": "default_truck", "nb_seats": 1, "length": 12.0, "width": 1.0, "pce": 3.0, "mode": "truck",
         "hbefa_cat": "HEAVY_GOODS_VEHICLE", "hbefa_tech": "average", "hbefa_size": "average", "hbefa_emission": "average",
     }])
 
