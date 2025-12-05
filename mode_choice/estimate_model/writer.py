@@ -18,8 +18,8 @@ class writer:
     def write(self):
         params_dict = {self.rename(k): float(v) for k, v in self.params.items()}
         # interactions reference values
-        params_dict["referenceIncome"] = constants.MEAN_INCOME_CHF
-        params_dict["referenceEuclideanDistance_km"] = constants.MEAN_EUCLIDEAN_DISTANCE_KM
+        params_dict["referenceIncome"] = constants.REF_INCOME_CHF
+        params_dict["referenceEuclideanDistance_km"] = constants.REF_EUCLIDEAN_DISTANCE_KM
         # parking informations
         params_dict["parking.urbanParkingSearchDuration_min"] = self.context.config("urban_parking_search_min")
         params_dict["parking.suburbanParkingSearchDuration_min"] = self.context.config("suburban_parking_search_min")
@@ -88,6 +88,7 @@ NAMES_CONVERSION = {
     'beta_bike_destination_leisure': 'bike.betaDestinationLeisure_u',
     'beta_bike_destination_education': 'bike.betaDestinationEducation_u',
     'beta_bike_destination_home': 'bike.betaDestinationHome_u',
+    'beta_bike_working_hour': 'bike.betaWorkingHour_u',
 
     # Car
     'beta_car_asc': 'car.alpha_u',
@@ -108,6 +109,7 @@ NAMES_CONVERSION = {
     'beta_car_destination_leisure': 'car.betaDestinationLeisure_u',
     'beta_car_destination_education': 'car.betaDestinationEducation_u',
     'beta_car_destination_home': 'car.betaDestinationHome_u',
+    'beta_car_working_hour': 'car.betaWorkingHour_u',
 
     # Car Passenger
     'beta_car_passenger_asc': 'cp.alpha_u',
@@ -127,6 +129,7 @@ NAMES_CONVERSION = {
     'beta_car_passenger_destination_leisure': 'cp.betaDestinationLeisure_u',
     'beta_car_passenger_destination_education': 'cp.betaDestinationEducation_u',
     'beta_car_passenger_destination_home': 'cp.betaDestinationHome_u',
+    'beta_car_passenger_working_hour': 'cp.betaWorkingHour_u',
 
     # PT
     'beta_pt_asc': 'pt.alpha_u',
@@ -155,6 +158,7 @@ NAMES_CONVERSION = {
     'beta_pt_destination_leisure': 'pt.betaDestinationLeisure_u',
     'beta_pt_destination_education': 'pt.betaDestinationEducation_u',
     'beta_pt_destination_home': 'pt.betaDestinationHome_u',
+    'beta_pt_working_hour': 'pt.betaWorkingHour_u',
 
     # Walk
     'beta_walk_asc': 'walk.alpha_u',
@@ -173,6 +177,7 @@ NAMES_CONVERSION = {
     'beta_walk_destination_leisure': 'walk.betaDestinationLeisure_u',
     'beta_walk_destination_education': 'walk.betaDestinationEducation_u',
     'beta_walk_destination_home': 'walk.betaDestinationHome_u',
+    'beta_walk_working_hour': 'walk.betaWorkingHour_u',
 
     # Cost
     'beta_cost_CHF': 'betaCost_u_MU',

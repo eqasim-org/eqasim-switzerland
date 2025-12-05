@@ -28,7 +28,7 @@ class BikeUtility(BaseUtility):
         utility = (
             BaseUtility.bike.alpha_u
             + BaseUtility.bike.betaTravelTime_u_min * pl.col("travel_time_min").pow(BaseUtility.bike.travelTimeExponent) 
-            + BaseUtility.bike.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18)
+            + BaseUtility.bike.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 17)
             + BaseUtility.bike.betaSex_u * pl.col("sex")
             + BikeUtility.estimateRegionalUtility()
             + BaseUtility.bike.betaOriginHome_u * pl.col("origin_home")
@@ -40,6 +40,7 @@ class BikeUtility(BaseUtility):
             + BaseUtility.bike.betaDestinationLeisure_u * pl.col("destination_leisure")
             + BaseUtility.bike.betaDestinationEducation_u * pl.col("destination_education")
             + BaseUtility.bike.betaDestinationHome_u * pl.col("destination_home")
+            + BaseUtility.bike.betaWorkingHour_u * pl.col("working_hour")
             
         )
 

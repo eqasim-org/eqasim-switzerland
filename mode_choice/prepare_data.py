@@ -6,6 +6,7 @@ from mode_choice.dmc_defaults import Defaults
 logger = logging.getLogger(__name__)
 SHORT_DISTANCE_LIMIT_KM = Defaults.SHORT_DISTANCE_LIMIT_KM
 LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
+WORKING_HOURS = Defaults.WORKING_HOURS
 
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
@@ -95,7 +96,7 @@ def execute(context):
     # load trips
     logger.info("\t Loading trips...")
     trips = context.stage("mode_choice.trips.prepare_trips")[
-        ["trip_id","preceding_purpose", "following_purpose", "euclidean_distance_km","destination_municipality"]]
+        ["trip_id","preceding_purpose", "following_purpose", "euclidean_distance_km","destination_municipality", "departure_time"]]
     trips = pl.from_pandas(trips)
     trips = trips.with_columns([
         pl.when(pl.col("preceding_purpose") == "home").then(1).otherwise(0.).cast(pl.Int8).alias("origin_home"),
@@ -108,9 +109,10 @@ def execute(context):
         pl.when(pl.col("following_purpose") == "leisure").then(1).otherwise(0.).cast(pl.Int8).alias("destination_leisure"),
         pl.when(pl.col("following_purpose") == "home").then(1).otherwise(0.).cast(pl.Int8).alias("destination_home"),
         pl.when(pl.col("following_purpose") == "education").then(1).otherwise(0.).cast(pl.Int8).alias("destination_education"),
+        pl.when(pl.col("departure_time").is_between(WORKING_HOURS[0]*3600, WORKING_HOURS[1]*3600)).then(1).otherwise(0.).cast(pl.Int8).alias("working_hour"),
         pl.col("euclidean_distance_km").cast(pl.Float32)        
     ]).select([
-        "trip_id", "origin_home", "short_distance", "long_distance", "urban_destination", "suburban_destination", 
+        "trip_id", "origin_home", "short_distance", "long_distance", "urban_destination", "suburban_destination", "working_hour",
         "destination_work", "destination_other", "destination_leisure", "destination_home", "destination_education", "euclidean_distance_km"
     ])
     

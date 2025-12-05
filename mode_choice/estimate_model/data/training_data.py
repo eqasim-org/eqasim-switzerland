@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-
+from mode_choice.dmc_defaults import Defaults
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -13,6 +13,7 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
+    context.stage("mode_choice.dmc_defaults")
     context.config("only_from_home_trips", default=False)
 
 def execute(context):
@@ -21,7 +22,7 @@ def execute(context):
         "person_id", "trip_id", "person_weight", "mode", "income", "region", "age", "sex", "driving_license",
         "origin_home", "destination_work", "destination_other", "destination_leisure", "destination_education",
         "departure_time", 'home_municipality', 'origin_municipality', 'destination_municipality', 'destination_home',
-        'is_car_passenger'
+        'is_car_passenger', 'working_hour'
     ]]      
 
     # merge the two dataframes on person_id and trip_id
@@ -86,7 +87,7 @@ def execute(context):
 
     ########################### RETURN ################################
     columns = [
-        "person_id", "trip_id", "person_weight", "mode", "euclidean_distance_km",
+        "person_id", "trip_id", "person_weight", "mode", "euclidean_distance_km","working_hour",
         "home_municipality", "origin_municipality", "destination_municipality", "destination_education",
         "destination_work", "destination_other", "destination_leisure", "origin_home","destination_home",
 

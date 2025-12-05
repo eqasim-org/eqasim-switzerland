@@ -49,7 +49,7 @@ class PtUtility(BaseUtility):
             + BaseUtility.pt.betaWaitingTime_u_min * pl.col("waiting_time_min").pow(BaseUtility.pt.waitingTimeExponent)
             + BaseUtility.pt.betaLineSwitch_u * pl.col("transfers").pow(BaseUtility.pt.lineSwitchExponent)
             + PtUtility.estimateCostUtility()
-            + BaseUtility.pt.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18)
+            + BaseUtility.pt.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 17)
             + BaseUtility.pt.betaSex_u * pl.col("sex")
             + PtUtility.estimateRegionalUtility()
             + BaseUtility.pt.betaOriginHome_u * pl.col("origin_home")
@@ -61,6 +61,7 @@ class PtUtility(BaseUtility):
             + BaseUtility.pt.betaDestinationLeisure_u * pl.col("destination_leisure")
             + BaseUtility.pt.betaDestinationEducation_u * pl.col("destination_education")
             + BaseUtility.pt.betaDestinationHome_u * pl.col("destination_home")
+            + BaseUtility.pt.betaWorkingHour_u * pl.col("working_hour")
         )
 
         return utility

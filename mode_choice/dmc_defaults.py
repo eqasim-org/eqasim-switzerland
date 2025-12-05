@@ -17,11 +17,11 @@ class Defaults:
     MODE_CONTINUITY = set([MODE_CAR, MODE_BIKE])
 
     # default thresholds (Euclidean distance) (km)
-    DEFAULT_WALK_THRESHOLD_KM = 4.0 # quantile 99% of all walk trips in microcensus (euclidean distance)
+    DEFAULT_WALK_THRESHOLD_KM = 4.5 # quantile 99% of all walk trips in microcensus (euclidean distance)
     DEFAULT_BIKE_THRESHOLD_KM = 11 # quantile 99% of all bike trips in microcensus (euclidean distance)
-    DEFAULT_CAR_MIN_THRESHOLD_KM = 0.2
-    DEFAULT_PT_MIN_THRESHOLD_KM = 0.2
-    DEFAULT_PASSENGER_MIN_THRESHOLD_KM = 0.2
+    DEFAULT_CAR_MIN_THRESHOLD_KM = 0.15
+    DEFAULT_PT_MIN_THRESHOLD_KM = 0.15
+    DEFAULT_PASSENGER_MIN_THRESHOLD_KM = 0.15
 
     # speeds and distance factors
     DEFAULT_WALK_SPEED_M_PER_S = 1.3  
@@ -38,6 +38,7 @@ class Defaults:
     
     INCOME_CLASS_MAP = {0: 2000, 1: 3000, 2: 5000, 3: 7000, 4: 9000, 5: 11000,  6: 13000, 7: 15000, 8: 17000}
 
+    WORKING_HOURS = [8 , 17] # start and end of working hours
     # Pt cost parameters 
     PT_COST_DISTANCE_THRESHOLD_KM = 10.0    
     PT_COST_MODEL = "simple"  # "simple" or "detailed"

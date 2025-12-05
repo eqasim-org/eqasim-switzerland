@@ -28,7 +28,7 @@ class WalkUtility(BaseUtility):
         utility = (
             BaseUtility.walk.alpha_u
             + BaseUtility.walk.betaTravelTime_u_min * pl.col("travel_time_min").pow(BaseUtility.walk.travelTimeExponent)
-            + BaseUtility.walk.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18)
+            + BaseUtility.walk.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 17)
             + BaseUtility.walk.betaSex_u * pl.col("sex")
             + WalkUtility.estimateRegionalUtility()
             + BaseUtility.walk.betaOriginHome_u * pl.col("origin_home")
@@ -40,6 +40,7 @@ class WalkUtility(BaseUtility):
             + BaseUtility.walk.betaDestinationLeisure_u * pl.col("destination_leisure")
             + BaseUtility.walk.betaDestinationEducation_u * pl.col("destination_education")
             + BaseUtility.walk.betaDestinationHome_u * pl.col("destination_home")
+            + BaseUtility.walk.betaWorkingHour_u * pl.col("working_hour")
         )
 
         return utility

@@ -29,7 +29,7 @@ class CpUtility(BaseUtility):
             BaseUtility.cp.alpha_u
             + BaseUtility.cp.betaTravelTime_u_min * pl.col("travel_time_min").pow(BaseUtility.cp.travelTimeExponent)
             + BaseUtility.cp.betaDrivingLicense_u * pl.col("driving_license")
-            + BaseUtility.cp.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18)
+            + BaseUtility.cp.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 17)
             + BaseUtility.cp.betaSex_u * pl.col("sex")
             + CpUtility.estimateRegionalUtility()
             + BaseUtility.cp.betaOriginHome_u * pl.col("origin_home")
@@ -41,6 +41,7 @@ class CpUtility(BaseUtility):
             + BaseUtility.cp.betaDestinationLeisure_u * pl.col("destination_leisure")
             + BaseUtility.cp.betaDestinationEducation_u * pl.col("destination_education")
             + BaseUtility.cp.betaDestinationHome_u * pl.col("destination_home")
+            + BaseUtility.cp.betaWorkingHour_u * pl.col("working_hour")
                  
         )
 

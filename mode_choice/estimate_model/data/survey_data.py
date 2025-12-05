@@ -10,6 +10,7 @@ logger = logging.getLogger("synpp")
 
 MS_REGIONS = Defaults.MS_REGIONS
 INCOME_CLASS_MAP = Defaults.INCOME_CLASS_MAP
+WORKING_HOURS = Defaults.WORKING_HOURS
 
 def configure(context):
     context.config("data_path")
@@ -71,6 +72,7 @@ def execute(context):
     df_trips["destination_leisure"] = df_trips.purpose == "leisure"
     df_trips["destination_education"] = df_trips.purpose == "education"
     df_trips["euclidean_distance_km"] = df_trips.crowfly_distance*1e-3
+    df_trips["working_hour"] = df_trips.departure_time.between(WORKING_HOURS[0]*3600, WORKING_HOURS[1]*3600)
     df_trips["is_first"] = df_trips["person_id"].shift(1) != df_trips["person_id"]
     df_trips["is_last"]  = df_trips["person_id"].shift(-1) != df_trips["person_id"]
 
@@ -142,7 +144,7 @@ def execute(context):
             "number_of_cars", "number_of_bikes_class", 'driving_license', 'region', 'is_car_passenger', 'income', 'weekend', 
             "car_availability",'destination_home', 'origin_home', 'destination_work','destination_other', 'destination_leisure', 
             'destination_education', 'euclidean_distance_km', 'is_first', 'is_last', 'parking_duration_wo_travelTime_min', 'home_municipality',
-            'origin_municipality', 'destination_municipality']
+            'origin_municipality', 'destination_municipality','working_hour']
     df_trips = df_trips[cols]
 
     logger.info(f"\t There are {len(df_trips)} trips after cleaning.")

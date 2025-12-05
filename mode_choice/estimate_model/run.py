@@ -13,8 +13,8 @@ import threading
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MEAN_EUCLIDEAN_DISTANCE_KM = constants.MEAN_EUCLIDEAN_DISTANCE_KM
-MEAN_INCOME_CHF = constants.MEAN_INCOME_CHF
+REF_EUCLIDEAN_DISTANCE_KM = constants.REF_EUCLIDEAN_DISTANCE_KM
+REF_INCOME_CHF = constants.REF_INCOME_CHF
 MODES = ['car', 'pt', 'bike', 'walk', 'car_passenger']
 SHORT_DISTANCE_LIMIT_KM = Defaults.SHORT_DISTANCE_LIMIT_KM
 LONG_DISTANCE_LIMIT_KM = Defaults.LONG_DISTANCE_LIMIT_KM
@@ -48,6 +48,7 @@ def preprocess_data(df, ignore_car_passenger):
     df["destination_leisure"] = df["destination_leisure"].astype(int)
     df["destination_education"] = df["destination_education"].astype(int)
     df["destination_home"] = df["destination_home"].astype(int)
+    df["working_hour"] = df["working_hour"].astype(int)
 
     df["origin_home"] = df["origin_home"].astype(int)
     df["sex"] = df["sex"].astype(int)
@@ -92,6 +93,7 @@ def define_variables(database, ignore_car_passenger):
         "origin_home": db.Variable("origin_home"),        
         "short_distance": db.Variable("short_distance"),
         "long_distance": db.Variable("long_distance"),
+        "working_hour": db.Variable("working_hour"),
         # car
         "car_availability": db.Variable("car_availability"),
         "car_travel_time_min": db.Variable("car_travel_time_min"),
@@ -138,7 +140,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "lambda_pt_access_egress_time": Beta("lambda_pt_access_egress_time", 0.44, 0.01, None, trainable),
         "lambda_pt_transfers": Beta("lambda_pt_transfers", 0.99, 0.01, None, trainable),
         "lambda_pt_waiting_time": Beta("lambda_pt_waiting_time", 1.00, 0.01, None, 1), #doesn't converge
-        "lambda_pt_distance": Beta("lambda_pt_distance", 0.01, 0.01, None, 0),
+        "lambda_pt_distance": Beta("lambda_pt_distance", 0.01, 0.01, None, trainable),
         "lambda_car_passenger_travel_time": Beta("lambda_car_passenger_travel_time", 1.04, 0.01, None, trainable),            
         "lambda_bike": Beta("lambda_bike", 0.59, 0.01, None, trainable),
         "lambda_walk": Beta("lambda_walk", 0.31, 0.01, None, trainable),
@@ -163,6 +165,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_car_destination_leisure": Beta("beta_car_destination_leisure", -0.00, None, None, 0),
         "beta_car_destination_education": Beta("beta_car_destination_education", -0.55, None, None, 0),
         "beta_car_destination_home": Beta("beta_car_destination_home", 0.00, None, None, 1),
+        "beta_car_working_hour": Beta("beta_car_working_hour", 0.00, None, None, 0),
         # pt
         "beta_pt_asc": Beta("beta_pt_asc", 0.00, None, None, 1),
         "beta_pt_access_egress_time_min": Beta("beta_pt_access_egress_time_min", -0.46, None, -1e-3, 0),
@@ -183,6 +186,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_pt_destination_leisure": Beta("beta_pt_destination_leisure", 0.00, None, None, 1),
         "beta_pt_destination_education": Beta("beta_pt_destination_education", 0.00, None, None, 1),
         "beta_pt_destination_home": Beta("beta_pt_destination_home", 0.00, None, None, 1),
+        "beta_pt_working_hour": Beta("beta_pt_working_hour", 0.00, None, None, 0),
         #bike
         "beta_bike_asc": Beta("beta_bike_asc", -0.04, None, None, 0),
         "beta_bike_travel_time_min": Beta("beta_bike_travel_time_min", -0.53, None, -1e-3, 0),
@@ -199,6 +203,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_bike_destination_leisure": Beta("beta_bike_destination_leisure", 0.35, None, None, 0),
         "beta_bike_destination_education": Beta("beta_bike_destination_education", 0.11, None, None, 0),
         "beta_bike_destination_home": Beta("beta_bike_destination_home", 1.01, None, None, 0),
+        "beta_bike_working_hour": Beta("beta_bike_working_hour", 0.00, None, None, 0),
         # walk
         "beta_walk_asc": Beta("beta_walk_asc", 6.67, None, None, 0),
         "beta_walk_travel_time_min": Beta("beta_walk_travel_time_min", -3.27, None, -1e-3, 0),
@@ -214,6 +219,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_walk_destination_leisure": Beta("beta_walk_destination_leisure", 0.28, None, None, 0),
         "beta_walk_destination_education": Beta("beta_walk_destination_education", 0.07, None, None, 0),
         "beta_walk_destination_home": Beta("beta_walk_destination_home", 0.00, None, None, 1),
+        "beta_walk_working_hour": Beta("beta_walk_working_hour", 0.00, None, None, 1),
     }
     if not ignore_car_passenger:
         betas.update({
@@ -233,17 +239,18 @@ def define_betas(ignore_car_passenger, use_exponents):
             "beta_car_passenger_destination_leisure": Beta("beta_car_passenger_destination_leisure", 0.91, None, None, 0),
             "beta_car_passenger_destination_education": Beta("beta_car_passenger_destination_education", 0.00, None, None, 0),
             "beta_car_passenger_destination_home": Beta("beta_car_passenger_destination_home", 0.00, None, None, 1),
+            "beta_car_passenger_working_hour": Beta("beta_car_passenger_working_hour", 0.00, None, None, 0),
         })
     return betas
 
 def build_utilities(context, vars, betas, modes, ignore_car_passenger):
     if context.config("distance_cost_interaction"):
-        euclidean_interaction_cost = (vars["euclidean_distance_km"] / MEAN_EUCLIDEAN_DISTANCE_KM) ** betas["lambda_cost_distance"]
+        euclidean_interaction_cost = (vars["euclidean_distance_km"] / REF_EUCLIDEAN_DISTANCE_KM) ** betas["lambda_cost_distance"]
     else:
         euclidean_interaction_cost = 1
 
     if context.config("income_cost_interaction"):
-        income_interaction_cost = (vars["income"] / MEAN_INCOME_CHF) ** betas["lambda_cost_income"]
+        income_interaction_cost = (vars["income"] / REF_INCOME_CHF) ** betas["lambda_cost_income"]
     else:
         income_interaction_cost = 1
 
@@ -262,7 +269,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_car_work_destination"] * vars["destination_work"]
         + betas["beta_car_urban_destination"] * vars["urban_destination"]
         + betas["beta_car_sex"] * vars["sex"]
-        + betas["beta_car_age"] * bioMax(0, vars["age"] - 18)
+        + betas["beta_car_age"] * bioMax(0, vars["age"] - 17)
         + betas["beta_car_region_2"] * vars["region_2"]
         + betas["beta_car_region_3"] * vars["region_3"]
         + betas["beta_car_origin_home"] * vars["origin_home"]    
@@ -272,6 +279,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_car_destination_leisure"] * vars["destination_leisure"]
         + betas["beta_car_destination_education"] * vars["destination_education"]
         + betas["beta_car_destination_home"] * vars["destination_home"]
+        + betas["beta_car_working_hour"] * vars["working_hour"]
     )
 
     transformed_pt_in_vehicle_time = vars["pt_in_vehicle_time_min"]** betas["lambda_pt_in_vehicle_time"]
@@ -291,7 +299,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_cost_CHF"] * pt_cost * cost_interaction
 
         + betas["beta_pt_sex"] * vars["sex"]
-        + betas["beta_pt_age"] * bioMax(0, vars["age"] - 18)
+        + betas["beta_pt_age"] * bioMax(0, vars["age"] - 17)
         + betas["beta_pt_work_destination"] * vars["destination_work"]
         + betas["beta_pt_urban_destination"] * vars["urban_destination"]        
         + betas["beta_pt_region_2"] * vars["region_2"]
@@ -303,13 +311,14 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_pt_destination_leisure"] * vars["destination_leisure"]
         + betas["beta_pt_destination_education"] * vars["destination_education"]
         + betas["beta_pt_destination_home"] * vars["destination_home"]
+        + betas["beta_pt_working_hour"] * vars["working_hour"]
     )
 
     bike_utility = (
         betas["beta_bike_asc"]
         + betas["beta_bike_travel_time_min"] * (vars["bike_travel_time_min"]**betas["lambda_bike"])
 
-        + betas["beta_bike_age"] * bioMax(0, vars["age"] - 18)
+        + betas["beta_bike_age"] * bioMax(0, vars["age"] - 17)
         + betas["beta_bike_sex"] * vars["sex"]
         + betas["beta_bike_urban_destination"] * vars["urban_destination"] 
         + betas["beta_bike_region_2"] * vars["region_2"]
@@ -322,13 +331,14 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_bike_destination_leisure"] * vars["destination_leisure"]
         + betas["beta_bike_destination_education"] * vars["destination_education"]
         + betas["beta_bike_destination_home"] * vars["destination_home"]
+        + betas["beta_bike_working_hour"] * vars["working_hour"]
     )
 
     walk_utility = (
         betas["beta_walk_asc"]
         + betas["beta_walk_travel_time_min"] * (vars["walk_travel_time_min"]**betas["lambda_walk"])
 
-        + betas["beta_walk_age"] * bioMax(0, vars["age"] - 18)
+        + betas["beta_walk_age"] * bioMax(0, vars["age"] - 17)
         + betas["beta_walk_sex"] * vars["sex"]
         + betas["beta_walk_region_2"] * vars["region_2"]
         + betas["beta_walk_region_3"] * vars["region_3"]        
@@ -340,6 +350,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_walk_destination_leisure"] * vars["destination_leisure"]
         + betas["beta_walk_destination_education"] * vars["destination_education"]
         + betas["beta_walk_destination_home"] * vars["destination_home"]
+        + betas["beta_walk_working_hour"] * vars["working_hour"]
     )
 
     if not ignore_car_passenger:
@@ -349,7 +360,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
             + betas["beta_car_passenger_travel_time_min"] * cp_tt            
             + betas["beta_car_passenger_driving_permit"] * vars["driving_license"]
             + betas["beta_car_passenger_work_destination"] * vars["destination_work"]
-            + betas["beta_car_passenger_age"] * bioMax(0, vars["age"] - 18)
+            + betas["beta_car_passenger_age"] * bioMax(0, vars["age"] - 17)
             + betas["beta_car_passenger_sex"] * vars["sex"]
             + betas["beta_car_passenger_urban_destination"] * vars["urban_destination"]
             + betas["beta_car_passenger_region_2"] * vars["region_2"]
@@ -361,6 +372,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
             + betas["beta_car_passenger_destination_leisure"] * vars["destination_leisure"]
             + betas["beta_car_passenger_destination_education"] * vars["destination_education"]
             + betas["beta_car_passenger_destination_home"] * vars["destination_home"]
+            + betas["beta_car_passenger_working_hour"] * vars["working_hour"]
         )
 
     utilities = {
@@ -392,6 +404,7 @@ def log_trip_stats(df, modes):
     logger.info("The average income is: %.2f CHF", df.income.mean())
 
 def correct_weights(context, df, modes):
+    # this corrects the weights in order to align with the mode shares from stage data.microcensus.shares
     mode_shares_path,_ = context.stage("data.microcensus.shares")
     mode_shares = pd.read_csv(mode_shares_path).set_index("mode")
     mode_shares_in_df = (df.groupby("mode").person_weight.sum()/df.person_weight.sum()).to_dict()

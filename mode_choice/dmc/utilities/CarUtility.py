@@ -56,7 +56,7 @@ class CarUtility(BaseUtility):
             + CarUtility.estimateTraveltimeUtility()
             + CarUtility.estimateAcessEgressTimeUtility()
             + CarUtility.estimateCostUtility()
-            + BaseUtility.car.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 18)
+            + BaseUtility.car.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 17)
             + BaseUtility.car.betaSex_u * pl.col("sex")
             + CarUtility.estimateRegionalUtility()
             + BaseUtility.car.betaOriginHome_u * pl.col("origin_home")
@@ -68,6 +68,7 @@ class CarUtility(BaseUtility):
             + BaseUtility.car.betaDestinationLeisure_u * pl.col("destination_leisure")
             + BaseUtility.car.betaDestinationEducation_u * pl.col("destination_education")
             + BaseUtility.car.betaDestinationHome_u * pl.col("destination_home")
+            + BaseUtility.car.betaWorkingHour_u * pl.col("working_hour")
                   
         )
 
