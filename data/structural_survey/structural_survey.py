@@ -29,7 +29,7 @@ def execute(context):
     rng = np.random.RandomState(random_seed)
 
     # Find the correct modes
-    df_se.loc[:, "mode_numeric"] = df_se.loc[:, "mode"].astype(np.int)
+    df_se.loc[:, "mode_numeric"] = df_se.loc[:, "mode"].astype(int)
     df_se.loc[df_se["mode_numeric"] == -10, "mode"] = "unknown"
     df_se.loc[df_se["mode_numeric"] == -9, "mode"] = "unknown"
     df_se.loc[df_se["mode_numeric"] == -8, "mode"] = "unknown"
@@ -67,14 +67,26 @@ def execute(context):
                           "quarter_id": "work_quarter_id",
                           "country_id": "work_country_id"}, axis=1)
 
+    # Impute the education zone
+    df_se = df_se.reset_index(drop=True)
+    df_se = df_se.rename({"education_municipality": "municipality_id",
+                          "education_quarter": "quarter_id"}, axis=1)
+    df_se = quarters.update_quarter_ids(df_se, df_quarters)
+    df_se = municipalities.update_municipality_ids(df_se, df_municipality_mapping)
+    df_se = df_se.rename({"municipality_id": "education_municipality_id",
+                          "quarter_id": "education_quarter_id"}, axis=1)
+
+
     f_no_home = ((np.isnan(df_se["home_municipality_id"])) & 
                  (np.isnan(df_se["home_quarter_id"])))
     f_no_work = ((np.isnan(df_se["work_country_id"])) & 
                  (np.isnan(df_se["work_municipality_id"])) & 
                  (np.isnan(df_se["work_quarter_id"])))
-
+    f_no_education = ((np.isnan(df_se["education_municipality_id"])) & 
+                      (np.isnan(df_se["education_quarter_id"])))
     print("Found %d observations without home location information" % np.count_nonzero(f_no_home))
     print("Found %d observations without work location information" % np.count_nonzero(f_no_work))
+    print("Found %d observations without education location information" % np.count_nonzero(f_no_education))
 
     # in certain cases it can happen that quarter is not reported for the work municipality
     # even though this municipality is divided into quarters.
@@ -268,9 +280,17 @@ def execute(context):
                                                     "country": "work_country_id",
                                                     "nuts": "nuts_id",
                                                     "postal_code": "postal_code"})
-
+    print("Imputing education zones ...")
+    df_se = zones.impute(df_se, df_zones, zone_id_prefix="education_", 
+                                      zone_fields={"quarter": "education_quarter_id",
+                                                    "municipality": "education_municipality_id",
+                                                    "country": "country_id",
+                                                    "nuts": "nuts_id",
+                                                    "postal_code": "postal_code"})
+    
     return df_se[[
         "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
         "work_country_id", "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
+        "education_municipality_id", "education_quarter_id", "education_zone_id", "education_zone_level",
         "mode", "weight"
     ]]

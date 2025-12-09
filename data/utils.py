@@ -44,7 +44,7 @@ def prepare_education_locations(df_persons, df_statent, c):
     if census == "statpop":
         age_bounds      = [(-np.inf, 6), (6, 12), (12, 16), (16, np.inf)]
         education_types = ["kindergarten", "primary", "secondary", "tertiary"]
-        query_sizes     = (1, 1, 5, 10)
+        query_sizes     = (1, 2, 7, 20)
 
         for (lower_bound, upper_bound), type in zip(age_bounds, education_types):
             filter_persons  = (df_persons["age"] > lower_bound) & (df_persons["age"] <= upper_bound)
@@ -54,7 +54,7 @@ def prepare_education_locations(df_persons, df_statent, c):
             filters_locations.append(filter_location)
 
     elif census == "are_synpop":
-        query_sizes     = (1, 3, 10)
+        query_sizes     = (1, 5, 20)
         education_types = ["kindergarten", "primary and secondary", "tertiary"]
 
         f_under_6  = df_persons["age_class"] == 0
