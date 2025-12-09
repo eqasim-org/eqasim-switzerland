@@ -10,8 +10,8 @@ from shapely import vectorized
 import time
 from typing import List, Tuple
 
-os.chdir(os.path.join("..","..","..",".."))
-from matsim.readers import Network, read_network
+# os.chdir(os.path.join("..","..","..",".."))
+# from matsim.readers import Network, read_network
 
 # Assuming 'Network' is a custom class with a 'nodes' attribute (pandas.DataFrame)
 # from your_project import Network 

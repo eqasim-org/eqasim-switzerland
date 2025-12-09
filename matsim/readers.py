@@ -6,7 +6,7 @@ try:
 except ImportError:
     import xml.etree.ElementTree as ET
 import pandas as pd
-from .writers import NetworkWriter
+from matsim.writers import NetworkWriter
 import gzip
 import multiprocessing
 import io

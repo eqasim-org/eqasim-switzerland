@@ -13,7 +13,7 @@ def configure(context):
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 20000) 
-    context.config("add_trafic_lights", False) 
+    context.config("add_traffic_lights", False) 
 
 
 # This handler processes nodes in the OSM data to find traffic lights
@@ -61,7 +61,7 @@ def get_region(context):
 
 def execute(context):
     # If not requested, do not proces traffic lights
-    if not context.config("add_trafic_lights"):
+    if not context.config("add_traffic_lights"):
         logger.info("Traffic lights not added, skipping.")
         return
     
