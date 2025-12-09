@@ -21,6 +21,6 @@ rasterstats==0.19.0
 osmnx==1.4.0
 Rtree==1.2.0
 synpp==1.6.1
-osmium=4.0.2
+osmium==4.0.2
 lxml==6.0.0
 xopen==2.0.2

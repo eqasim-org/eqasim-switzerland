@@ -7,7 +7,7 @@ import math
 
 def configure(context):
     context.stage("synthesis.population.enriched")
-
+    #  can add output paths to make the data available
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.trips")
 
@@ -18,6 +18,7 @@ def configure(context):
 
 def validate(context):
     output_path = context.config("output_path")
+    # 4-5 csv, geo files
 
     if not os.path.isdir(output_path):
         raise RuntimeError("Output directory must exist: %s" % output_path)
@@ -117,7 +118,7 @@ def execute(context):
         "preceding_purpose", "following_purpose"
     ]]
 
-    #df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
+    df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
 
     # Prepare spatial data sets
     df_locations = context.stage("synthesis.population.spatial.locations")[[
