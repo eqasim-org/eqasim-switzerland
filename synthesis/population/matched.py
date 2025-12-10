@@ -327,7 +327,12 @@ def execute(context):
     
     df_source     = df_source.rename(columns={"person_id": "mz_id"})
     df_population = context.stage("synthesis.population.sampled")
+    df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
+    df_population["household_size_class"] = df_population["household_size_class"].clip(upper=2)
+    df_source["N_children_under_12"] = df_source["N_children_under_12"].clip(upper=1)
+    df_population["N_children_under_12"] = df_population["N_children_under_12"].clip(upper=1)
 
+    
     if c.census == "statpop":
 
         ## We first want to match by household to be able
@@ -338,8 +343,8 @@ def execute(context):
 
         population_selector  = df_population["age"] >= c.MZ_AGE_THRESHOLD
         population_selector &= df_population["is_head"]
-
-        columns_household_matching           = ["ovgk", "household_size", "canton_id", "age_class", "sex"]
+        print(df_source["household_size_class"].unique())
+        columns_household_matching           = ["municipality_type", "ovgk", "household_size_class", "sp_region", "canton_id"]#, "age_class"]
         mandatory_columns_household_matching = columns_household_matching[:3]
 
         df_target, df_population, removed_ids_list = run_statistical_matching_extended(context, 
@@ -385,10 +390,11 @@ def execute(context):
 
         ## Now that we have added attributes
         ## SECOND MATCHING - NORMAL PEOPLE
-
+        df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=1)
+        df_source["number_of_cars_class"] = df_source["number_of_cars_class"].clip(upper=1)
         population_selector_normal = (df_population["age"] >= c.MZ_AGE_THRESHOLD) & ~(df_population["collective_housing_resident"])
 
-        columns_individual_matching           = ["number_of_cars_class", "N_children_under_12", "ovgk", "age_class", "sex", "marital_status"]
+        columns_individual_matching           = ["age_class", "sex", "number_of_cars_class", "N_children_under_12", "canton_id", "sp_region", "ovgk"]
         mandatory_columns_individual_matching = columns_individual_matching[:4]
 
         print("Second statistical matching starting")
