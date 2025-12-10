@@ -16,9 +16,11 @@ def configure(context):
     context.config("cutout_path", False)
 
 def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, output_path):
-    for modeT in ["subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "car_availability", "employed", "income_class"]:
+    for modeT in ["subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "car_availability", "employed", "income_class", "number_of_cars_class"]:
         s1 = pop_before[pop_before["age"]>=6][modeT].value_counts(dropna = True)
         s2 = pop_after[pop_after["age"]>=6][modeT].value_counts(dropna = True)
+        if modeT == "income_class":
+            pop_mz = pop_mz[pop_mz["income_imputed"]==False]
         s3 = pop_mz.groupby([modeT])["person_weight"].sum()
         d1 = pd.DataFrame(s1).reset_index()
         d2 = pd.DataFrame(s2).reset_index()
@@ -47,12 +49,14 @@ def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, o
             d["index"] = mapped.fillna(idx.astype(str))
 
         # Income: keep numeric categories, but as strings (or add your own mapping)
-        elif modeT == "income":
+        elif modeT == "income_class":
             # make sure integers show up nicely, e.g. "1", "2", ...
             # (you can plug your own dict here if you have labels for each code)
             d["index"] = pd.to_numeric(idx, errors="ignore")
             d["index"] = d["index"].astype(str)
-
+        elif modeT == "number_of_cars_class":
+            d["index"] = pd.to_numeric(idx, errors="ignore")
+            d["index"] = d["index"].astype(str)
         # fallback (shouldn't really be used here)
         else:
             d["index"] = idx.astype(str)
@@ -65,6 +69,8 @@ def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, o
             suffix = "car"
         elif modeT == "income":
             suffix = "income"
+        elif modeT == "number_of_cars_class":
+            suffix = "number_cars"
         else:
             suffix = modeT
 
@@ -107,7 +113,8 @@ def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, o
                        "subscriptions_halbtax": "Half-fare ownership",
                        "subscriptions_verbund": "Regional PT subscription ownership",
                        "employed": "Employment",
-                       "income_class": "Income class"}
+                       "income_class": "Income class",
+                       "number_of_cars_class": "number_of_cars_class"}
 
         plt.title(modetotitle[modeT] + " before and after applying WFH and MTO models")
         plt.xlabel(modetotitle[modeT])
@@ -146,18 +153,19 @@ def execute(context):
         pop_after  = pop_after[homes_in_shp]
 
     #pop_before = pop_before[pop_before["canton_id"]==22]
-    #pop_after = pop_after[pop_after["canton_id"]==22]
+    pop_after = pop_after[pop_after["canton_id"]==1]
     
     # Load microcensus population
     #hhl = context.stage("data.microcensus.households")[["person_id", "home_x", "home_y"]]
     pop_mz = context.stage("data.microcensus.persons")
+    print(pop_mz.columns)
     pop_mz = pop_mz[pop_mz["weekend"]== False]
     #pop_mz = pop_mz.merge(hhl, on = "person_id")
     if context.config("cutout_path"):
         homes     = gpd.GeoSeries.from_xy(pop_mz["home_x"], pop_mz["home_y"])
         homes_in_shp = homes.within(zurich5km)
         pop_mz = pop_mz[homes_in_shp]
-    #pop_mz = pop_mz[pop_mz["canton_id"]==1]
+    pop_mz = pop_mz[pop_mz["canton_id"]==1]
     # Setting up the output folder
     
     Path(output_path).mkdir(parents = True, exist_ok= True)
