@@ -23,7 +23,7 @@ def execute(context):
 
     # Rewrite classification based on the official division
     df_types.loc[df_types["TYP"] == 0, "municipality_type"] = "rural"
-    df_types.loc[df_types["TYP"] == 1, "municipality_type"] = "urban"
+    df_types.loc[df_types["TYP"] == 1, "municipality_type"] = "urbancore"
     df_types.loc[df_types["TYP"] == 2, "municipality_type"] = "urban"
     df_types.loc[df_types["TYP"] == 3, "municipality_type"] = "urban"
     df_types.loc[df_types["TYP"] == 4, "municipality_type"] = "suburban"
@@ -31,6 +31,7 @@ def execute(context):
     df_types.loc[df_types["TYP"] == 6, "municipality_type"] = "rural"
 
     df_types["municipality_type"] = df_types["municipality_type"].astype("category")
+    
     df_types = df_types[["municipality_id", "municipality_type"]]
 
     # Match by municipality_id
