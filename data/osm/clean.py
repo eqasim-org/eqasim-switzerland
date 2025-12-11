@@ -10,6 +10,17 @@ def configure(context):
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 20000)
 
+def get_region(context):
+    # Bounding Area
+    border = context.stage("data.spatial.swiss_border")
+    border = border.reset_index()[["geometry"]].to_crs(epsg=2056) 
+    
+    buffer = context.config("border_offset") 
+    if buffer>0:
+        border["geometry"] = border.geometry.buffer(buffer)
+        border["geometry"] = border.geometry.simplify(min(buffer, 3000), preserve_topology=True) #Simplify: Faster
+           
+    return border
 
 def execute(context):
     # if the path is not a list, treat it as a single file, else treat it as a list of files, merge them, and keep only
@@ -25,14 +36,7 @@ def execute(context):
         osm_files = ['%s/osm/%s' % (context.config("data_path"), f) for f in osm_file]
 
         # Bounding Area
-        border = context.stage("data.spatial.swiss_border")
-        border = border.reset_index()[["geometry"]].to_crs(epsg=2056) 
-        
-        buffer = context.config("border_offset") 
-        if buffer>0:
-            border["geometry"] = border.geometry.buffer(buffer)
-            border["geometry"] = border.geometry.simplify(min(buffer, 3000), preserve_topology=True) #Simplify: Faster
-        
+        border = get_region(context)
         border = border.to_crs("EPSG:4326") # because osm in in wgs84       
         # Merge and cut to the area
         return mf.merge_files(context, osm_files, border, output_file)

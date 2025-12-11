@@ -4,6 +4,10 @@ from shapely.geometry import Point, LineString
 import pandas as pd
 import geopandas as gpd
 import logging
+from data.osm.clean import get_region
+import os
+from multiprocessing import Pool
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,18 +50,26 @@ class WaysHandler(osmium.SimpleHandler):
             self.belong_to_car_road.extend(matching_node_ids)
 
 
-def get_region(context):
-    # Bounding Area
-    border = context.stage("data.spatial.swiss_border")
-    border = border.reset_index()[["geometry"]].to_crs(epsg=2056) 
+def read_file(osm_file):
+    handler = NodesHandler()
+    handler.apply_file(osm_file)
     
-    buffer = context.config("border_offset") 
-    if buffer>0:
-        border["geometry"] = border.geometry.buffer(buffer)
-        border["geometry"] = border.geometry.simplify(min(buffer, 3000), preserve_topology=True) #Simplify: Faster
-           
-    return border["geometry"].iloc[0]
-
+    ways_handler = WaysHandler([n['node_id'] for n in handler.traffic_lights])
+    ways_handler.apply_file(osm_file)
+    belong_to_car_road = ways_handler.belong_to_car_road
+    
+    # Filter traffic lights that belong to car roads
+    logger.info(f"    Found {len(handler.traffic_lights)} traffic lights in {osm_file}.")
+    handler.traffic_lights = [tl for tl in handler.traffic_lights if tl['node_id'] in belong_to_car_road]
+    logger.info(f"    Found {len(handler.traffic_lights)} traffic lights that belong to car roads in {osm_file}.")
+    
+    # If traffic lights are found, append them to df
+    if handler.traffic_lights:
+        dfi = pd.DataFrame(handler.traffic_lights)
+    else:
+        dfi = pd.DataFrame(columns=['node_id','x','y','direction','geometry'])
+    
+    return dfi
 
 def execute(context):
     # If not requested, do not proces traffic lights
@@ -75,24 +87,15 @@ def execute(context):
     osm_files = ['%s/osm/%s' % (context.config("data_path"), i) for i in osm_files]
     
     # Process each osm file to add traffic lights
-    df = []
-    for file in osm_files:
-        handler = NodesHandler()
-        handler.apply_file(file)
-        
-        ways_handler = WaysHandler([n['node_id'] for n in handler.traffic_lights])
-        ways_handler.apply_file(file)
-        belong_to_car_road = ways_handler.belong_to_car_road
-        
-        # Filter traffic lights that belong to car roads
-        logger.info(f"    Found {len(handler.traffic_lights)} traffic lights in {file}.")
-        handler.traffic_lights = [tl for tl in handler.traffic_lights if tl['node_id'] in belong_to_car_road]
-        logger.info(f"    Found {len(handler.traffic_lights)} traffic lights that belong to car roads in {file}.")
-        
-        # If traffic lights are found, append them to df
-        if handler.traffic_lights:
-            dfi = pd.DataFrame(handler.traffic_lights)
-            df.append(dfi)
+    processes = min(len(osm_files), 4)    
+    with Pool(processes=processes) as pool:
+        df = list(context.progress(
+            pool.imap_unordered(
+                read_file,
+                osm_files
+            ),
+            label=f"Processing OSM files for traffic lights ({processes} parallel processes) ..."
+        ))
     
     logger.info(f"  -> Total number of traffic lights is: {sum(len(dfi) for dfi in df)}")
 
@@ -103,10 +106,12 @@ def execute(context):
         df = df.drop_duplicates(subset=["node_id", "x", "y"])
         df = gpd.GeoDataFrame(df, geometry='geometry', crs='EPSG:4326')
         df = df.to_crs(epsg=2056)
-        
+        logger.info(f"  -> Number of unique traffic lights after merging is: {len(df)}.")
+
         if len(osm_files)>1:
-            # only keep the traffic light located i the interest area
+            # only keep the traffic lights located in the interest area
             region = get_region(context)
+            region = region["geometry"].iloc[0]
             df = df[df.geometry.within(region)].reset_index(drop=True)
             logger.info(f"  -> Number of traffic lights within the region of interest is: {len(df)}.")
 
