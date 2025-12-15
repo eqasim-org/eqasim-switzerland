@@ -41,13 +41,13 @@ The module is organized into several sub-components within the `mode_choice/` di
 The execution flow is managed by `mode_choice/run.py` and proceeds through the following stages:
 
 ### Step 1: Configuration
-The module reads its settings from `config_dmc.yml`. This file contains default configuration values (e.g., data paths, DMC parameters, flags for estimation/calibration) that control the module's behavior. these configurations can be modified from this file or in the config file.
+The module reads its settings from `config.yml`. This file contains default configuration values (e.g., data paths, DMC parameters, flags for estimation/calibration) that control the module's behavior. These configurations can be modified from this file or `mode_choice.dmc_defaults` which contains the default values of all the parameters related to mode choice.
 
 ### Step 2: Data Preparation
 The `prepare_data` stage loads and formats the necessary inputs:
 -   **Persons**: Socio-demographic attributes (age, sex, income, driving license).
--   **Tours/Trips**: Travel demand information (origin, destination, purpose).
--   **Variables**: variables for each mode (travel times, distances, costs).
+-   **Tours/Trips**: Travel demand information (origin, destination, purpose) and the difference possible tours that can be realized (i.e. car-car-car, pt-walk-pt, pt-pt-pt, ...).
+-   **Variables**: variables for each trips and each mode (travel times, distances, costs).
 
 ### Step 3: Parameter Handling
 The module determines which parameters to use based on the configuration flags:
@@ -59,7 +59,7 @@ The module determines which parameters to use based on the configuration flags:
 The `DMC` class is initialized with the chosen parameters and prepared data. It then calculates utilities for each mode and selects the final mode for each tour.
 
 ### Step 5: Output
-The module returns the predicted mode for each trip, ready for integration into the synthetic population.
+The module returns the predicted mode for each trip (trips with 0 distance are filtered out in an earlier stage), ready for integration into the synthetic population.
 
 ---
 
@@ -79,7 +79,7 @@ This sub-module calculates the utility of each transportation mode:
 -   **`Parameters`**: Manages loading and accessing model coefficients from the YAML file.
 
 ### Selector (`selector/`)
--   **`Selector`**: Implements the probabilistic mode selection based on a Multinomial Logit model. It converts utilities into choice probabilities and draws a mode for each tour.
+-   **`Selector`**: Implements the probabilistic mode selection based on a Multinomial Logit model. It converts utilities into choice probabilities and draws a mode for each tour. A seed parameter is used for reproducibility. For efficient selection (fast), the selection is done this way: first, a random error is sampled from a Gumbel distribution, this error is added to the deterministic utility, and then maximum utility selection is done, meaning the choice with the highest global utility is selected.
 
 ---
 
@@ -91,27 +91,29 @@ This sub-module calculates the utility of each transportation mode:
 -   **Data**: Swiss Microcensus (observed travel behavior).
 -   **Process**: Estimates utility function coefficients (betas) using maximum likelihood estimation.
 -   **Output**: A YAML file containing the estimated parameters.
+-   **Consistency**: For consistency with MATSim data format, when writing the parameters, a renaming is done.
 
 ### Calibration (`calibration/`)
 
--   **Goal**: Adjust the Alternative-Specific Constants (ASCs) so that the simulated mode shares match a set of target shares.
+-   **Goal**: Adjust the Alternative-Specific Constants (ASCs) so that the simulated mode shares match a set of target shares that are estimated in `data.microcensus.shares`.
 -   **Process**:
     1.  Run the DMC model with initial parameters.
     2.  Compare simulated mode shares against target shares.
     3.  Use an optimizer to iteratively adjust the ASCs until convergence.
 -   **Output**: A `calibrated_parameters.yml` file with the final, calibrated parameters.
+-  **Why ?**: The utility function parameters are estimated using Microcensus data, which represent only a sample of the population and require, and further filtered to ensure data quality for model estimation. As a result, the estimation sample may not be fully representative of the entire population. Moreover, the explanatory variables included in the utility specifications cannot capture all relevant determinants of mode choice, such as comfort, perceived safety, environmental awareness, physical ability, or other latent preferences. The Alternative-Specific Constants (ASCs) absorb the average effect of these unobserved or omitted factors. When estimated from a restricted sample, ASCs may therefore be biased. The calibration procedure corrects for this bias by adjusting the ASCs so that the model reproduces observed aggregate mode shares, ensuring that the simulated choices are consistent with population-level behavior rather than solely reflecting the estimation sample.
 
 ---
 
 ## 6. Configuration Options
 
-The module is controlled via `config_dmc.yml`. Key settings include:
+The module is controlled via `config.yml`. The extra key settings include:
 
 | Option | Description |
 |---|---|
 | `estimate_dmc_parameters` | Set to `true` to run the estimation stage. |
 | `calibrate_dmc_parameters` | Set to `true` to run the calibration stage. |
-| `mode_parameters_path` | Path to a pre-existing parameter file (used if not estimating or calibrating). |
+| `mode_parameters_path` | Path to a pre-existing parameter file (used if not estimating). |
 | `random_seed` | Ensures reproducibility of results. |
 
 ---
@@ -125,3 +127,6 @@ The **Mode Choice Module** is a robust, modular, and configurable system that:
 3.  **Calibrates** the model to match target mode shares.
 4.  **Predicts** transportation mode choices using a state-of-the-art Discrete Mode Choice framework.
 5.  **Integrates** seamlessly into the broader synthetic population pipeline.
+
+## 8. Possible issues
+1. If you encounter an OOM (Out of Memory) error, it means the tours DataFrame is too large. You might want to perform mode choice in batches. To do this, specify `num_tour_batches` in the config file as a high number based on your memory size (10, 50, ...). This will divide the tours into that number of chunks and process mode choice batch by batch in series. It is already efficient, but do not attempt to parallelize this part, because it cannot be made parallel due to the code's organization. Polars already handles parallelism internally when performing its operations.

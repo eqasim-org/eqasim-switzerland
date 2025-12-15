@@ -49,10 +49,7 @@ def execute(context):
     
     # load tours and convert to polars DataFrame
     logger.info("\t Loading tours...")
-    tours = context.stage("mode_choice.tours.build")
-    tours = pl.from_pandas(tours).with_columns([
-        pl.col("euclidean_distance_km").list.eval(pl.element().cast(pl.Float32))
-    ])
+    paths_to_tours = context.stage("mode_choice.tours.build")
 
     # load variables and merge necessary dataframes (persons attributes will be merged later in the TourUtility)
     logger.info("\t Loading modes variables...")
@@ -117,7 +114,7 @@ def execute(context):
     ])
     
     return dict(      
-        tours=tours,
+        tours=paths_to_tours,
         persons=persons,
         trips = trips,
         variables=variables        

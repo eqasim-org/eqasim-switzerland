@@ -5,12 +5,19 @@ We define the tour as a sequence of trips that starts and ends at home.
 import pandas as pd
 import geopandas as gpd
 import numpy as np
+import polars as pl
+import os
+import logging 
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("mode_choice.trips.prepare_trips")
     context.stage("data.constants")
     context.stage("mode_choice.trips.prepare_persons")
     context.stage("mode_choice.tours.core")
+
+    context.config("num_tour_batches", default=0)
 
 def execute(context):
     df_trips = context.stage("mode_choice.trips.prepare_trips")[
@@ -53,4 +60,28 @@ def execute(context):
     df_tours = df_tours[["person_id","trip_id","tour_id","euclidean_distance_km","mode_candidates"]]    
     df_tours = df_tours.explode("mode_candidates")
 
-    return df_tours
+    # save the tours dataframe in batches for memory issues
+    num_batches = context.config("num_tour_batches")
+    if num_batches <=1:
+        return df_tours
+    
+    else:
+        logger.info("\t Saving tours in batches...")        
+        persons_in_each_batch = np.array_split(df_tours['person_id'].unique(), int(num_batches))
+        
+        path_to_data = context.path()
+        list_paths = []    
+        for i,p in enumerate(persons_in_each_batch):
+            # get the batch
+            batch = df_tours[df_tours['person_id'].isin(p)]
+            # convert the batch to polars
+            batch = pl.from_pandas(batch).with_columns([
+                    pl.col("euclidean_distance_km").list.eval(pl.element().cast(pl.Float32))
+                ])
+            # save the batch
+            path = os.path.join(path_to_data,f"tours_batch_{i}.parquet")
+            list_paths.append(path)     
+            batch.write_parquet(path)
+            logger.info(f"\t\t Saved batch {i+1}/{num_batches} with {len(p)} persons to {path}")
+
+        return list_paths

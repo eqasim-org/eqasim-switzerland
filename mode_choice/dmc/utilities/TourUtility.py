@@ -6,6 +6,7 @@ Created on Thu May 22 09:22:46 2025
 @author: dabdelkader
 """
 
+from typing import Union
 from .BaseUtility import BaseUtility
 from .BikeUtility import BikeUtility
 from .CarUtility import CarUtility
@@ -35,6 +36,14 @@ class TourUtility(BaseUtility):
     num_persons = 0
     
     @staticmethod
+    def clear():
+        TourUtility.variables_by_mode = {}
+        TourUtility.tours = None
+        TourUtility.exploded_tours = None
+        TourUtility.persons = []
+        TourUtility.num_persons = 0
+        
+    @staticmethod
     def init(tours=None, persons=None, trips = None, variables=None):
         # add row_id to tours (like index in pandas)
         tours = tours.with_row_index(name="tour_row_id")
@@ -60,11 +69,11 @@ class TourUtility(BaseUtility):
 
         # if persons are provided, meaning their attributes are not in the variables
         if persons is not None:
-            TourUtility.add_persons_attributes_to_variables(persons.lazy())
+            TourUtility.add_persons_attributes_to_variables(persons)
         
         # if trips are provided, meaning their attributes are not in the variables
         if trips is not None:
-            TourUtility.add_trips_attributes_to_variables(trips.lazy())
+            TourUtility.add_trips_attributes_to_variables(trips)
 
     @staticmethod
     def get_exploded_tours_for_utilities():
@@ -87,17 +96,17 @@ class TourUtility(BaseUtility):
         return exploded_lazy
 
     @staticmethod
-    def add_persons_attributes_to_variables(persons: pl.LazyFrame):
+    def add_persons_attributes_to_variables(persons: Union[pl.LazyFrame, pl.DataFrame]):
         for mode, variables_lazy in TourUtility.variables_by_mode.items():
             # Join persons attributes with the variables
-            variables_lazy = variables_lazy.join(persons, on="person_id", how="left").collect() #do this now, I don't want a do it each time we compute utilities
+            variables_lazy = variables_lazy.join(persons, on="person_id", how="left")
             TourUtility.variables_by_mode[mode] = variables_lazy.lazy()
 
     @staticmethod
-    def add_trips_attributes_to_variables(trips: pl.LazyFrame):
+    def add_trips_attributes_to_variables(trips: Union[pl.LazyFrame, pl.DataFrame]):
         for mode, variables_lazy in TourUtility.variables_by_mode.items():
             # Join trips attributes with the variables
-            variables_lazy = variables_lazy.join(trips, on="trip_id", how="left").collect() #do this now, I don't want a do it each time we compute utilities
+            variables_lazy = variables_lazy.join(trips, on="trip_id", how="left")
             TourUtility.variables_by_mode[mode] = variables_lazy.lazy()
 
     @staticmethod

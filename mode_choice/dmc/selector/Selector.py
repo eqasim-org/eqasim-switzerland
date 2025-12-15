@@ -11,7 +11,7 @@ import pandas as pd
 import polars as pl
 import random
 
-# fix the seed for reproducibility
+# fix the seed for reproducibility (can be changed later)
 random.seed(1102)
 np.random.seed(1102)
 

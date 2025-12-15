@@ -18,7 +18,7 @@ class ModeShares():
         self.dmc = dmc
 
     def set_dmc(self, dmc: DMC):
-        if dmc is None:
+        if not isinstance(dmc, DMC):
             raise ValueError("DMC model must be provided to compute mode shares.")
         self.dmc = dmc
 
@@ -34,7 +34,7 @@ class ModeShares():
         return {mode: self.get_mode_share(mode, level) for mode in modes}
 
     def compute_mode_shares(self, modes: List[str]):
-        tours = self.dmc.run() # this line can be remove and replaced by the two lines in dmc.run, but it is kept for clearness
+        tours = self.dmc.run(verbose=False)
         tours = (tours.select(["person_id","trip_id","mode_candidates", "euclidean_distance_km"])
                   .explode(["mode_candidates","euclidean_distance_km"])
                   .filter(pl.col("euclidean_distance_km") > 1e-3))
