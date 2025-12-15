@@ -59,9 +59,9 @@ class DMC:
                             
         else:
             TourUtility.init(tours = tours, 
-                            persons = persons, 
-                            trips = trips,
-                            variables = variables)
+                            persons = persons.lazy(), 
+                            trips = trips.lazy(),
+                            variables = {k: v.lazy() for k, v in variables.items()})
 
     def run(self, verbose: bool = True) -> pl.DataFrame:
         if self.run_by_batch:
