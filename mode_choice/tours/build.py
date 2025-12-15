@@ -63,6 +63,9 @@ def execute(context):
     # save the tours dataframe in batches for memory issues
     num_batches = context.config("num_tour_batches")
     if num_batches <=1:
+        df_tours = pl.from_pandas(df_tours).with_columns([
+                    pl.col("euclidean_distance_km").list.eval(pl.element().cast(pl.Float32))
+                ])
         return df_tours
     
     else:
