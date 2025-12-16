@@ -185,7 +185,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_pt_work_destination": Beta("beta_pt_work_destination", 0.000, None, None, 1),
         "beta_pt_destination_other": Beta("beta_pt_destination_other", 0.000, None, None, 1),
         "beta_pt_destination_leisure": Beta("beta_pt_destination_leisure", 0.000, None, None, 1),
-        "beta_pt_destination_education": Beta("beta_pt_destination_education", 0.000, None, None, 0),
+        "beta_pt_destination_education": Beta("beta_pt_destination_education", 0.000, None, None, 1),
         "beta_pt_destination_home": Beta("beta_pt_destination_home", 0.000, None, None, 1),
         "beta_pt_working_hour": Beta("beta_pt_working_hour", -0.488, None, None, 0),
         #bike
@@ -219,7 +219,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_walk_destination_other": Beta("beta_walk_destination_other", -0.087, None, None, 0),
         "beta_walk_destination_leisure": Beta("beta_walk_destination_leisure", 0.199, None, None, 0),
         "beta_walk_destination_education": Beta("beta_walk_destination_education", -0.150, None, None, 0),
-        "beta_walk_destination_home": Beta("beta_walk_destination_home", 0.000, None, None, 1),
+        "beta_walk_destination_home": Beta("beta_walk_destination_home", 0.000, None, None, 0),
         "beta_walk_working_hour": Beta("beta_walk_working_hour", 0.000, None, None, 1),
     }
     if not ignore_car_passenger:
@@ -238,7 +238,7 @@ def define_betas(ignore_car_passenger, use_exponents):
             "beta_car_passenger_origin_home": Beta("beta_car_passenger_origin_home", 0.064, None, None, 0),
             "beta_car_passenger_destination_other": Beta("beta_car_passenger_destination_other", 0.391, None, None, 0),
             "beta_car_passenger_destination_leisure": Beta("beta_car_passenger_destination_leisure", 0.655, None, None, 0),
-            "beta_car_passenger_destination_education": Beta("beta_car_passenger_destination_education", -0.922, None, None, 1),
+            "beta_car_passenger_destination_education": Beta("beta_car_passenger_destination_education", -0.922, None, None, 0),
             "beta_car_passenger_destination_home": Beta("beta_car_passenger_destination_home", 0.000, None, None, 0),
             "beta_car_passenger_working_hour": Beta("beta_car_passenger_working_hour", -0.363, None, None, 0),
         })
