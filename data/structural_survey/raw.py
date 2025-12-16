@@ -32,7 +32,14 @@ def execute(context):
                 "MAINMODETRANSPWORK": int,
                 weight_column: float,
                 "SCHOOL_MUN": int,
-                "SCHOOL_QUARTER": int
+                "SCHOOL_QUARTER": int,
+                "AGE": int,
+                "SEX": int,
+                "CURRACTIVITYSTATUSI": int,
+                "STATUSINEMPL_DETAIL": int,
+                "RES_CANTON": int,
+                "RES_DISTRICT": int,
+                "CURRACTIVITY_STUDENT": int
             }
 
             renames = {
@@ -44,7 +51,8 @@ def execute(context):
                 "MAINMODETRANSPWORK": "mode",
                 weight_column: "weight",
                 "SCHOOL_MUN": "education_municipality",
-                "SCHOOL_QUARTER": "education_quarter"
+                "SCHOOL_QUARTER": "education_quarter",
+                "CURRACTIVITY_STUDENT": "IS_STUDENT"
             }
 
             data_frames.append(data.utils.read_csv(context, f, fields, renames, total=total, sep=sep))

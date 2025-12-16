@@ -272,5 +272,5 @@ def execute(context):
     return df_se[[
         "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
         "work_country_id", "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
-        "mode", "weight"
+        "mode", "weight",  "AGE", "SEX", "CURRACTIVITYSTATUSI", "STATUSINEMPL_DETAIL", "RES_CANTON", "RES_DISTRICT", "IS_STUDENT"
     ]]
