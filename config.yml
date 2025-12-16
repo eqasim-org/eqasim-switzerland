@@ -72,7 +72,7 @@ config:
     parseTurnRestrictions: true
 
     # whether to add traffic lights to the network, default is false
-    add_trafic_lights: false
+    add_traffic_lights: false
 
     # whether to assign elevations to the nodes, default is false
     assign_elevations: false
