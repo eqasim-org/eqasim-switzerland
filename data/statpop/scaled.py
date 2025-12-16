@@ -6,7 +6,7 @@ from data.statpop.multilevelipf.multilevelipf import FittingProblem, IPUSolver
 
 
 def configure(context):
-    context.stage("data.statpop.statpop")
+    context.stage("data.statpop.students_v2")
     context.stage("data.statpop.projections.households")
     context.stage("data.statpop.projections.population")
     context.stage("data.constants")
@@ -19,7 +19,7 @@ def configure(context):
     
 
 def execute(context):
-    df_statpop = context.stage("data.statpop.statpop")
+    df_statpop = context.stage("data.statpop.students_v2")
     if context.config("enable_scaling"):
 
         scaling_year = context.config("scaling_year")

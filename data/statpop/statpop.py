@@ -21,6 +21,7 @@ def configure(context):
     context.stage("data.spatial.municipality_types")
     context.stage("data.statpop.density")
     context.stage("data.spatial.cantons")
+    context.stage("data.spatial.districts")
     context.stage("data.spatial.ovgk")
     context.stage("data.constants")
     context.config("threads")
@@ -94,6 +95,7 @@ def execute(context):
     df_municipality_types = context.stage("data.spatial.municipality_types")
     df_quarters = context.stage("data.spatial.quarters")
     df_cantons = context.stage("data.spatial.cantons")
+    df_districts = context.stage("data.spatial.districts")
 
     df_spatial = pd.DataFrame(df[["person_id", "home_x", "home_y"]])
     df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y", coord_type="home")
@@ -113,6 +115,11 @@ def execute(context):
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_cantons, "person_id", "canton_id",
                                             zone_type="canton", point_type="home")[
         ["person_id", "municipality_id", "quarter_id", "canton_id", "geometry"]])
+    
+    # Impute districts
+    df_spatial = (data.spatial.utils.impute(context, df_spatial, df_districts, "person_id", "district_id",
+                                            zone_type="district", point_type="home")[
+        ["person_id", "municipality_id", "quarter_id", "district_id", "canton_id", "geometry"]])
 
     # Impute municipality types
     df_spatial = impute_municipality_types(df_spatial, df_municipality_types)
@@ -124,7 +131,7 @@ def execute(context):
 
     del df["municipality_id"]
     df = pd.merge(
-        df, df_spatial[["person_id", "zone_id", "municipality_type", "municipality_id", "quarter_id", "canton_id"]],
+        df, df_spatial[["person_id", "zone_id", "municipality_type", "municipality_id", "quarter_id", "canton_id", "district_id"]],
         on="person_id"
     )
 
@@ -172,7 +179,7 @@ def execute(context):
         "marital_status", "nationality",
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
-        "home_municipality_id", "home_quarter_id", "canton_id", "population_density", "sp_region", "ovgk",
+        "home_municipality_id", "home_quarter_id", "canton_id", "district_id", "population_density", "sp_region", "ovgk",
         "statpop_person_id", "statpop_household_id", "collective_housing_resident"] + children_columns]
 
     df = data.statpop.head_of_household.impute(df, c)
