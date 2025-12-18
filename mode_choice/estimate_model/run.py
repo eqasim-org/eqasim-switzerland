@@ -69,6 +69,8 @@ def preprocess_data(df, ignore_car_passenger):
 
     df["short_distance"] = (df["euclidean_distance_km"]<SHORT_DISTANCE_LIMIT_KM).astype(int) # 80% of bike and walk trips are below 1 km
     df["long_distance"]  = (df["euclidean_distance_km"]>LONG_DISTANCE_LIMIT_KM).astype(int) # 80% of car and pt trips are below 12 km
+
+    df["pt_total_travel_time"] = df["pt_access_egress_time_min"] + df["pt_in_vehicle_time_min"] + df["pt_waiting_time_min"]
     return df, modes
 
 def define_variables(database, ignore_car_passenger):
@@ -109,6 +111,7 @@ def define_variables(database, ignore_car_passenger):
         "pt_waiting_time_min": db.Variable("pt_waiting_time_min"),
         "pt_distance_km": db.Variable("pt_distance_km"),
         "pt_cost_CHF": db.Variable("pt_cost_CHF"),
+        "pt_total_travel_time": db.Variable("pt_total_travel_time"),
         # bike
         "bike_availability": db.Variable("bike_availability"),
         "bike_travel_time_min": db.Variable("bike_travel_time_min"),

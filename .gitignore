@@ -15,3 +15,7 @@ slurm*
 output
 *.log
 simulation_data*
+*.html
+*.pickle
+*.iter
+*.toml

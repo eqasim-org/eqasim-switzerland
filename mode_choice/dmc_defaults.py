@@ -71,7 +71,7 @@ class Defaults:
     USE_SKIM_MATRICES = False
     
     # model estimation data
-    MERGE_TRIPS_THAT_MIGHT_BE_SAME_TRIP = False
+    MERGE_TRIPS_THAT_MIGHT_BE_SAME_TRIP = True
 
 def configure(context):
     pass

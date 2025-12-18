@@ -77,7 +77,7 @@ def execute(context):
     logger.info(f"There are {len(df)} trips after removing trips with selected but not available modes.")
 
     ### remove very short and very long trips
-    out_of_range_distance = ((df.euclidean_distance_km < 0.01) | (df.euclidean_distance_km > 120))
+    out_of_range_distance = ((df.euclidean_distance_km < 0.01) | (df.euclidean_distance_km > 200))
     df = df[~out_of_range_distance]
     logger.info(f"There are {len(df)} trips after removing very short and very long trips.")
 
