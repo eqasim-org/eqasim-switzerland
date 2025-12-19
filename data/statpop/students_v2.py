@@ -5,7 +5,7 @@ from joblib import Parallel, delayed  # kept in case you need later, but not use
 
 def configure(context):
     context.config("data_path")
-    context.stage("data.statpop.employment")
+    context.stage("data.statpop.employment_v2")
     context.stage("data.structural_survey.structural_survey")
 
 def execute(context):
@@ -14,25 +14,23 @@ def execute(context):
     # 0. PREP: CLEAN + ALIGN EMPLOYMENT INFO
     # =========================================================
     survey_df = context.stage("data.structural_survey.structural_survey")
-    survey_df = survey_df.rename(columns={"RES_DISTRICT": "district_id"})
-    survey_df = survey_df.rename(columns={"RES_CANTON": "canton_id"})
 
-    pop_df = context.stage("data.statpop.employment")
+    pop_df = context.stage("data.statpop.employment_v2")
 
     # Ensure survey targets are ints
-    survey_df['CURRACTIVITYSTATUSI'] = survey_df['CURRACTIVITYSTATUSI'].astype('int64')
-    survey_df['STATUSINEMPL_DETAIL'] = survey_df['STATUSINEMPL_DETAIL'].astype('int64')
-    survey_df['IS_STUDENT'] = survey_df['IS_STUDENT'].astype('int64')
+    survey_df['employed'] = survey_df['employed'].astype('int64')
+    survey_df['job_position'] = survey_df['job_position'].astype('int64')
+    survey_df['is_student'] = survey_df['is_student'].astype('int64')
 
     # Drop rows with missing key vars in survey (safety)
     survey_df = survey_df.dropna(subset=[
-        'AGE', 'SEX', 'home_municipality_id', 'district_id', 'canton_id',
-        'CURRACTIVITYSTATUSI', 'STATUSINEMPL_DETAIL', 'IS_STUDENT'
+        'age', 'sex', 'home_municipality_id', 'district_id', 'canton_id',
+        'employed', 'job_position', 'is_student'
     ])
 
     # In the population, use the *drawn* employment as features
-    pop_df['CURRACTIVITYSTATUSI'] = pop_df['CURRACTIVITYSTATUSI'].astype('int64')
-    pop_df['STATUSINEMPL_DETAIL'] = pop_df['STATUSINEMPL_DETAIL'].astype('int64')
+    pop_df['employed'] = pop_df['employed'].astype('int64')
+    pop_df['job_position'] = pop_df['job_position'].astype('int64')
 
     # =========================================================
     # 1. AGE BINS + CATEGORICAL CLEANING
@@ -45,15 +43,15 @@ def execute(context):
     ]
 
     for df in (survey_df, pop_df):
-        df['AGE_BIN'] = pd.cut(
-            df['AGE'],
+        df['age_bin'] = pd.cut(
+            df['age'],
             bins=age_bins,
             labels=age_labels,
             right=False
         )
 
     # Harmonize categoricals as strings
-    cat_cols = ['AGE_BIN', 'SEX', 'home_municipality_id', 'district_id', 'canton_id']
+    cat_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id']
     for df in (survey_df, pop_df):
         for col in cat_cols:
             df[col] = df[col].astype(str).fillna('Missing')
@@ -64,10 +62,10 @@ def execute(context):
 
     # Features: age, sex, activity, job, and spatial IDs
     student_feat_cols = [
-        'AGE_BIN',
-        'SEX',
-        'CURRACTIVITYSTATUSI',
-        'STATUSINEMPL_DETAIL',
+        'age_bin',
+        'sex',
+        'employed',
+        'job_position',
         'home_municipality_id',
         'district_id',
         'canton_id'
@@ -79,7 +77,7 @@ def execute(context):
     student_feature_cols = X_student_survey.columns
     X_student_pop = X_student_pop.reindex(columns=student_feature_cols, fill_value=0)
 
-    y_student = survey_df['IS_STUDENT'].astype('int64')
+    y_student = survey_df['is_student'].astype('int64')
     w_student = survey_df['weight']
 
     # =========================================================
@@ -146,8 +144,9 @@ def execute(context):
 
     # Final cast
     pop_df['STUDENT_draw'] = pop_df['STUDENT_draw'].astype('int64')
-
+    pop_df = pop_df.rename(columns={"STUDENT_draw": "is_student"})
+    pop_df.loc[pop_df['age'] < 15, 'is_student'] = 1
     print("Final STUDENT_draw distribution:")
-    print(pop_df['STUDENT_draw'].value_counts(normalize=True))
-
+    print(pop_df['is_student'].value_counts(normalize=True))
+    print(pop_df.columns)
     return pop_df

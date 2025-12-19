@@ -23,30 +23,23 @@ def execute(context):
     # -------------------------------------------------------------------
 
     survey_df = context.stage("data.structural_survey.structural_survey")
-    survey_df['CURRACTIVITYSTATUSI'] = survey_df['CURRACTIVITYSTATUSI'].astype(int)
-    survey_df['STATUSINEMPL_DETAIL'] = survey_df['STATUSINEMPL_DETAIL'].astype(int)
-    survey_df = survey_df.rename(columns={"RES_DISTRICT": "district_id"})
-    survey_df = survey_df.rename(columns={"RES_CANTON": "canton_id"})
+    survey_df['employed'] = survey_df['employed'].astype('int64')
+    survey_df['job_position'] = survey_df['job_position'].astype('int64')
 
     pop_df = context.stage("data.statpop.statpop")
-    pop_df = pop_df.rename(columns={"age": "AGE"})
-    pop_df = pop_df[pop_df["AGE"] >= 15]
-    pop_df = pop_df.rename(columns={"sex": "SEX"})
+    #pop_df = pop_df[pop_df["age"] >= 15]
 
-    sum_by_status = survey_df.groupby("CURRACTIVITYSTATUSI")["weight"].sum()
-    print("Survey CURRACTIVITYSTATUSI weighted totals:")
+    sum_by_status = survey_df.groupby("employed")["weight"].sum()
+    print("Survey employed weighted totals:")
     print(sum_by_status)
 
     # =========================================================
     # 1. BASIC CLEANING + AGE BINS
     # =========================================================
 
-    survey_df['CURRACTIVITYSTATUSI'] = survey_df['CURRACTIVITYSTATUSI'].astype('int64')
-    survey_df['STATUSINEMPL_DETAIL'] = survey_df['STATUSINEMPL_DETAIL'].astype('int64')
-
     survey_df = survey_df.dropna(subset=[
-        'AGE', 'SEX', 'home_municipality_id', 'district_id', 'canton_id',
-        'CURRACTIVITYSTATUSI', 'STATUSINEMPL_DETAIL'
+        'age', 'sex', 'home_municipality_id', 'district_id', 'canton_id',
+        'employed', 'job_position'
     ])
 
     # Age bins
@@ -57,15 +50,15 @@ def execute(context):
     ]
 
     for df in (survey_df, pop_df):
-        df['AGE_BIN'] = pd.cut(
-            df['AGE'],
+        df['age_bin'] = pd.cut(
+            df['age'],
             bins=age_bins,
             labels=age_labels,
             right=False
         )
 
     # Harmonize categoricals as strings
-    cat_cols = ['AGE_BIN', 'SEX', 'home_municipality_id', 'district_id', 'canton_id']
+    cat_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id']
     for df in (survey_df, pop_df):
         for col in cat_cols:
             df[col] = df[col].astype(str).fillna('Missing')
@@ -75,7 +68,7 @@ def execute(context):
     # =========================================================
 
     # Features we will use for both activity and job models
-    feature_cols = ['AGE_BIN', 'SEX', 'home_municipality_id', 'district_id', 'canton_id']
+    feature_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id']
 
     X_survey = pd.get_dummies(survey_df[feature_cols], drop_first=False)
     X_pop    = pd.get_dummies(pop_df[feature_cols], drop_first=False)
@@ -87,13 +80,13 @@ def execute(context):
     w = survey_df['weight']
 
     # =========================================================
-    # 3. FIT GLOBAL ACTIVITY MODEL (CURRACTIVITYSTATUSI)
+    # 3. FIT GLOBAL ACTIVITY MODEL (employed)
     # =========================================================
 
     # Choose model type here: "gbm" or "rf"
     ACTIVITY_MODEL = "gbm"   # or "rf"
 
-    y_act = survey_df['CURRACTIVITYSTATUSI'].astype('int64')
+    y_act = survey_df['employed'].astype('int64')
 
     if ACTIVITY_MODEL == "gbm":
         act_model = HistGradientBoostingClassifier(
@@ -121,15 +114,15 @@ def execute(context):
     print("Fitted global activity model using:", ACTIVITY_MODEL)
 
     # =========================================================
-    # 4. FIT GLOBAL JOB MODEL (STATUSINEMPL_DETAIL, ONLY EMPLOYED)
+    # 4. FIT GLOBAL JOB MODEL (job_position, ONLY EMPLOYED)
     # =========================================================
 
     # Choose job model: "gbm" or "rf"
     JOB_MODEL = "gbm"   # or "rf"
 
-    df_emp = survey_df[survey_df['CURRACTIVITYSTATUSI'] == 1]
+    df_emp = survey_df[survey_df['employed'] == 1]
     X_job_survey = X_survey.loc[df_emp.index]
-    y_job = df_emp['STATUSINEMPL_DETAIL'].astype('int64')
+    y_job = df_emp['job_position'].astype('int64')
     w_job = df_emp['weight']
 
     if JOB_MODEL == "gbm":
@@ -161,8 +154,8 @@ def execute(context):
     # 5. STOCHASTIC PREDICTION FOR POPULATION
     # =========================================================
 
-    pop_df['CURRACTIVITYSTATUSI_draw'] = np.nan
-    pop_df['STATUSINEMPL_DETAIL_draw'] = np.nan
+    pop_df['employed_draw'] = np.nan
+    pop_df['job_position_draw'] = np.nan
 
     SEED_ACTIVITY = 123
     SEED_JOB      = 456
@@ -177,7 +170,7 @@ def execute(context):
         seed=SEED_ACTIVITY
     ).astype('int64')
 
-    pop_df['CURRACTIVITYSTATUSI_draw'] = act_draw
+    pop_df['employed_draw'] = act_draw
 
     # ----- Job type -----
     job_draw = np.full(len(pop_df), np.nan)
@@ -202,34 +195,35 @@ def execute(context):
 
         job_draw[emp_mask] = job_draw_emp
 
-    pop_df['STATUSINEMPL_DETAIL_draw'] = job_draw
+    pop_df['job_position_draw'] = job_draw
 
     # =========================================================
     # 6. FILL ANY REMAINING NANS + CAST
     # =========================================================
 
-    na_job = pop_df['STATUSINEMPL_DETAIL_draw'].isna().sum()
-    print(f"NaNs in STATUSINEMPL_DETAIL_draw before fallback: {na_job}")
+    na_job = pop_df['job_position_draw'].isna().sum()
+    print(f"NaNs in job_position_draw before fallback: {na_job}")
 
     if na_job > 0:
-        curr = pop_df['CURRACTIVITYSTATUSI_draw'].astype('int64')
-        mask_na = pop_df['STATUSINEMPL_DETAIL_draw'].isna()
+        curr = pop_df['employed_draw'].astype('int64')
+        mask_na = pop_df['job_position_draw'].isna()
 
-        pop_df.loc[mask_na & (curr == 2), 'STATUSINEMPL_DETAIL_draw'] = 60
-        pop_df.loc[mask_na & (curr == 3), 'STATUSINEMPL_DETAIL_draw'] = 70
-        pop_df.loc[mask_na & (curr == 1), 'STATUSINEMPL_DETAIL_draw'] = 43  # generic employee
+        pop_df.loc[mask_na & (curr == 2), 'job_position_draw'] = 60
+        pop_df.loc[mask_na & (curr == 3), 'job_position_draw'] = 70
+        pop_df.loc[mask_na & (curr == 1), 'job_position_draw'] = 43  # generic employee
 
-    pop_df['CURRACTIVITYSTATUSI_draw'] = pop_df['CURRACTIVITYSTATUSI_draw'].astype('int64')
-    pop_df['STATUSINEMPL_DETAIL_draw'] = pop_df['STATUSINEMPL_DETAIL_draw'].astype('int64')
+    pop_df['employed_draw'] = pop_df['employed_draw'].astype('int64')
+    pop_df['job_position_draw'] = pop_df['job_position_draw'].astype('int64')
 
-    print("Final CURRACTIVITYSTATUSI_draw distribution:")
-    print(pop_df['CURRACTIVITYSTATUSI_draw'].value_counts(normalize=True))
+    print("Final employed_draw distribution:")
+    print(pop_df['employed_draw'].value_counts(normalize=True))
 
-    print("\nFinal STATUSINEMPL_DETAIL_draw distribution:")
-    print(pop_df['STATUSINEMPL_DETAIL_draw'].value_counts(normalize=True))
+    print("\nFinal job_position_draw distribution:")
+    print(pop_df['job_position_draw'].value_counts(normalize=True))
 
     # Overwrite original columns with draws
-    pop_df = pop_df.rename(columns={"CURRACTIVITYSTATUSI_draw": "CURRACTIVITYSTATUSI"})
-    pop_df = pop_df.rename(columns={"STATUSINEMPL_DETAIL_draw": "STATUSINEMPL_DETAIL"})
-
+    pop_df = pop_df.rename(columns={"employed_draw": "employed"})
+    pop_df = pop_df.rename(columns={"job_position_draw": "job_position"})
+    pop_df.loc[pop_df['age']<15, 'employed'] = 3
+    pop_df.loc[pop_df['age']<15, 'job_position'] = 70
     return pop_df
