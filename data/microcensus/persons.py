@@ -125,12 +125,12 @@ def execute(context):
     columns.append("highest_education")
 
     # Employment status
-    df_mz_persons.loc[:, "employment_status"]                                                                   = "inactive"
-    df_mz_persons.loc[df_mz_persons["f40800_01"] == 5, "employment_status"]                                     = "working student"
-    df_mz_persons.loc[(df_mz_persons["f40800_01"] < 5) & (df_mz_persons["f40800_01"] > 0), "employment_status"] = "active"
-    df_mz_persons.loc[df_mz_persons["age"]<15, "employment_status"]                                             = "student"
-    df_mz_persons.loc[(df_mz_persons["f41001a"]==32) | (df_mz_persons["f41001b"]==32), "employment_status"]     = "student"
-    df_mz_persons.loc[(df_mz_persons["f41000a"]==32) | (df_mz_persons["f41000b"]==32), "employment_status"]     = "working student"
+    df_mz_persons.loc[:, "employment_status"]                                                                   = 0
+    df_mz_persons.loc[df_mz_persons["f40800_01"] == 5, "employment_status"]                                     = 3
+    df_mz_persons.loc[(df_mz_persons["f40800_01"] < 5) & (df_mz_persons["f40800_01"] > 0), "employment_status"] = 1
+    df_mz_persons.loc[df_mz_persons["age"]<15, "employment_status"]                                             = 2
+    df_mz_persons.loc[(df_mz_persons["f41001a"]==32) | (df_mz_persons["f41001b"]==32), "employment_status"]     = 2
+    df_mz_persons.loc[(df_mz_persons["f41000a"]==32) | (df_mz_persons["f41000b"]==32), "employment_status"]     = 3
 
     columns.append("employment_status")
 
@@ -149,8 +149,23 @@ def execute(context):
 
     df_mz_persons["parking_cost_work"] = np.maximum(0, df_mz_persons["f41400"].astype(np.float))
     df_mz_persons["parking_cost_education"] = np.maximum(0, df_mz_persons["f41401"].astype(np.float))
+    df_mz_persons["occupation"] = df_mz_persons["ISCO_08"]
+    # BSTELL codes
+    # -99	-99.Alter der Zielperson < 15 Jahre
+    # -98	-98.keine Antwort
+    # -97	-97.weiss nicht
+    # 11	11.Selbständige/Selbständiger mit Arbeitnehmer(n)
+    # 12	12.Selbständige/Selbständiger ohne Arbeitnehmer
+    # 20	20.Mitarbeitendes Familienmitglied
+    # 31	31.Arbeitnehmerin / Arbeitnehmer in Unternehmensleitung
+    # 32	32.Arbeitnehmerin / Arbeitnehmer mit Vorgesetztenfunktion
+    # 33	33.Arbeitnehmerin / Arbeitnehmer ohne Vorgesetztenfunktion
+    # 40	40.Lehrtochter / Lehrling
+    # 50	50.Erwerbslose / Erwerbsloser
+    # 60	60.Nichterwerbspersonen (falls >= 15 Jahre alt)
 
-    columns.extend(["parking_work", "parking_education", "parking_cost_work", "parking_cost_education"])
+    df_mz_persons["job_position"] = df_mz_persons["BSTELL"]
+    columns.extend(["parking_work", "parking_education", "parking_cost_work", "parking_cost_education", "occupation", "job_position"])
 
     # Wrap up
     df_mz_persons = df_mz_persons[columns]
