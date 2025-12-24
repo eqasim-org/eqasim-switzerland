@@ -24,7 +24,8 @@ class Constants:
         self.census = census
 
         if self.census == "statpop":
-            self.AGE_CLASS_UPPER_BOUNDS      = [6, 15, 18, 24, 30, 45, 65, 80]
+            #self.AGE_CLASS_UPPER_BOUNDS      = [6, 15, 18, 24, 30, 45, 65, 80]
+            self.AGE_CLASS_UPPER_BOUNDS      = [6, 15, 18, 24, 45, 65, 80]
 
         elif self.census == "are_synpop":
             self.AGE_CLASS_UPPER_BOUNDS      = [6, 18, 25, 45, 65, 75]
