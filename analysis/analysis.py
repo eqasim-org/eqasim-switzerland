@@ -20,9 +20,9 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("synthesis.output")
 
-    context.config("weekend_scenario", False)
-    context.config("specific_weekend_scenario", "all") # options are "all", "saturday", "sunday"
-    context.config("specific_day_scenario", "avgworkday") #options can be any of the days of the week or "avgworkday"
+    #context.config("weekend_scenario", False)
+    #context.config("specific_weekend_scenario", "all") # options are "all", "saturday", "sunday"
+    #context.config("specific_day_scenario", "avgworkday") #options can be any of the days of the week or "avgworkday"
     
     
 def import_data_synthetic(context, population_selector = None):
@@ -87,7 +87,7 @@ def import_data_actual(context, population_selector = None):
 
     df_act_persons.rename(columns = {"person_weight": "weight_person"}, inplace = True)
     df_px = df_act_persons[["person_id", "weight_person", "employed",
-                                                "age", "sex", "car_availability"]]
+                                                "age", "sex", "car_availability", "canton_id"]]
     df_act = df_act_trips.merge(df_px, on=["person_id"], how='left')
 
     # TODO: do we need this and why? Milos Feb '24
@@ -125,6 +125,11 @@ def import_data_actual(context, population_selector = None):
             df_act = df_act[df_act["sex"] == g]
             df_persons_no_trip = df_persons_no_trip[df_persons_no_trip["sex"] == g]
             print("INFO only considering ", gender, " agents.")
+        if "canton_selector" in population_selector.keys():
+            cantons = population_selector["canton_selector"]
+            df_act = df_act[df_act["canton_id"].isin(cantons)]
+            df_persons_no_trip = df_persons_no_trip[df_persons_no_trip["canton_id"].isin(cantons)]
+            print("INFO only considering MZ individuals living in cantons n° ", cantons)
 
     # df_act contains only those that have trips
     return df_act, df_persons_no_trip
@@ -132,18 +137,6 @@ def import_data_actual(context, population_selector = None):
 
 
 def aux_data_frame(df_act, df_syn, population_selector = None):
-    if population_selector:
-        if "age_selector" in population_selector.keys():
-            age_min = population_selector["age_selector"][0]
-            age_max = population_selector["age_selector"][1]
-            df_act = df_act[(df_act["age"] <= age_max) & (df_act["age"] >= age_min)]
-            df_syn = df_syn[(df_syn["age"] <= age_max) & (df_syn["age"] >= age_min)]
-            print("INFO excluding agents NOT between the age of ", age_min, " and ", age_max)
-        if "gender_selector" in population_selector.keys():
-            gender = population_selector["gender_selector"]
-            df_act = df_act[df_act["sex"] == gender]
-            df_syn = df_syn[df_syn["sex"] == gender]
-            print("INFO only considering ", gender, " agents.")
 
     df_act["person_id"] = df_act.index
     pers_ids = df_act["person_id"].unique()
@@ -517,21 +510,21 @@ def generate_plots(context, df_aux_act, df_aux_syn, df_act, df_syn, df_syn_no_tr
 
     syn = syn.groupby(["following_purpose"]).mean()["crowfly_distance"] 
 
-    # 2.3 Ready to plot!
-    myplottools.plot_comparison_bar(context, imtitle = "distancepurpose.png", plottitle = "Crowfly distance " + suffix, ylabel = "Mean crowfly distance [km]", xlabel = "", lab = syn.index, actual = act, synthetic = syn, t = None, xticksrot = True )
-    all_the_plot_distances(context, df_act_dist, df_syn_dist, suffix)
+    # # 2.3 Ready to plot!
+    # myplottools.plot_comparison_bar(context, imtitle = "distancepurpose.png", plottitle = "Crowfly distance " + suffix, ylabel = "Mean crowfly distance [km]", xlabel = "", lab = syn.index, actual = act, synthetic = syn, t = None, xticksrot = True )
+    # all_the_plot_distances(context, df_act_dist, df_syn_dist, suffix)
 
-    # 2.4 Distance from home to education
-    for primary_purpose in ["work", "education"]:
-        print("INFO computing distances between home and", primary_purpose)
-        syn_0, act_0, act_w0 = compare_dist_from_home(context, df_syn, df_act,primary_purpose, suffix = suffix)
+    # # 2.4 Distance from home to education
+    # for primary_purpose in ["work", "education"]:
+    #     print("INFO computing distances between home and", primary_purpose)
+    #     syn_0, act_0, act_w0 = compare_dist_from_home(context, df_syn, df_act,primary_purpose, suffix = suffix)
 
 
     
 def execute(context):
     pop_all = None
-    pop_men_1840 = {"age_selector": [18, 40], "gender_selector": "male", "canton_selector":[1]}
-    pop_wom_1840 = {"age_selector": [18, 40], "gender_selector": "female"}#, "senior_homes_selector": "no"}
+    pop_men_1840 = {"age_selector": [30, 44], "gender_selector": "female", "canton_selector":[1]}
+    pop_wom_1840 = {"age_selector": [30, 44]}#, "gender_selector": "male"}#, "senior_homes_selector": "no"}
 
     suff_all = ""
     suff_men_1840 = "men aged 18 to 40 living in cantons 1, 2, 5, and 7"
