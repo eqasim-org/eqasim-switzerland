@@ -16,9 +16,10 @@ def configure(context):
     context.config("cutout_path", False)
 
 def mto_comparison_wfh_models(pop_before, pop_after, pop_mz, output_file_path, output_path):
-    for modeT in ["subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "car_availability", "employed", "income_class", "number_of_cars_class"]:
-        s1 = pop_before[pop_before["age"]>=6][modeT].value_counts(dropna = True)
-        s2 = pop_after[pop_after["age"]>=6][modeT].value_counts(dropna = True)
+    for modeT in ["subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "employed", "income_class", "number_of_cars_class",  "car_availability"]:
+        s1 = pop_before[pop_before["age"]>=15][modeT].value_counts(dropna = True)
+        s2 = pop_after[pop_after["age"]>=15][modeT].value_counts(dropna = True)
+        pop_mz = pop_mz[pop_mz["age"]>=15]
         if modeT == "income_class":
             pop_mz = pop_mz[pop_mz["income_imputed"]==False]
         s3 = pop_mz.groupby([modeT])["person_weight"].sum()
@@ -131,11 +132,14 @@ def execute(context):
     output_path = context.config("analysis_path")
     # Load population before models
     pop_before = context.stage("synthesis.population.enriched")
+    pop_before.loc[pop_before["employed"].isin([3]), "employed"] = 0
     #activate for synpop_are
     #pop_before["subscriptions_halbtax"] = pop_before["subscriptions"].isin(["HTA", "HTA+VA"])
 
     # Load population after models
     pop_after = context.stage("synthesis.population.enriched")
+    
+    pop_after.loc[pop_after["employed"].isin([3]), "employed"] = 0
     #activate for synpop_are
     #pop_after["subscriptions_halbtax"] = pop_after["subscriptions"].isin(["HTA", "HTA+VA"])
 
@@ -153,8 +157,10 @@ def execute(context):
         pop_after  = pop_after[homes_in_shp]
 
     #pop_before = pop_before[pop_before["canton_id"]==22]
-    pop_after = pop_after[pop_after["canton_id"]==1]
-    
+    pop_before["canton_id"] = pop_before["canton_id"].astype(str)
+    pop_after["canton_id"] = pop_after["canton_id"].astype(str)
+    pop_after = pop_after[pop_after["canton_id"]=='1']
+    print(pop_after)
     # Load microcensus population
     #hhl = context.stage("data.microcensus.households")[["person_id", "home_x", "home_y"]]
     pop_mz = context.stage("data.microcensus.persons")
@@ -166,6 +172,7 @@ def execute(context):
         homes_in_shp = homes.within(zurich5km)
         pop_mz = pop_mz[homes_in_shp]
     pop_mz = pop_mz[pop_mz["canton_id"]==1]
+    print(pop_mz)
     # Setting up the output folder
     
     Path(output_path).mkdir(parents = True, exist_ok= True)
