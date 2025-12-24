@@ -28,7 +28,7 @@ def execute(context):
         # Attach household attributes through head of household
         df_mz["mz_head_id"] = df_mz[["person_id"]]
         df_persons = pd.merge(df_persons,
-                            df_mz[["mz_head_id", "income_class", "number_of_cars_class", "number_of_bikes_class"]],
+                            df_mz[["mz_head_id", "number_of_cars_class", "number_of_bikes_class"]],
                             on="mz_head_id")
 
         # Attach person attributes
@@ -51,7 +51,7 @@ def execute(context):
                             )
 
         # Reset children
-        children_selector = df_persons["AGE"] < c.MZ_AGE_THRESHOLD
+        children_selector = df_persons["age"] < c.MZ_AGE_THRESHOLD
         df_persons.loc[children_selector, "driving_license"]  = False
         #df_persons.loc[children_selector, "employed"]         = False
         df_persons.loc[children_selector, "marital_status"]   = c.MARITAL_STATUS_SINGLE
@@ -61,18 +61,18 @@ def execute(context):
         # assert(len(df_persons.drop(["mz_person_id", "mz_head_id"], axis = 1).dropna()) == len(df_matching))
 
         # Make sure all mz_id == NaN are agents under threshold age
-        assert (np.sum(df_persons[df_persons["mz_person_id"].isna()]["AGE"] >= c.MZ_AGE_THRESHOLD) == 0)
+        assert (np.sum(df_persons[df_persons["mz_person_id"].isna()]["age"] >= c.MZ_AGE_THRESHOLD) == 0)
 
         # Set mz_person_id == NaN to -1 and format ids to int
         df_persons["mz_person_id"] = df_persons["mz_person_id"].fillna(-1).astype(int)
         df_persons["mz_head_id"] = df_persons["mz_head_id"].fillna(-1).astype(int)
 
         # Clean driving license attribute
-        N_underage_driving = len(df_persons[(df_persons["AGE"]<18) & (df_persons["driving_license"])])
+        N_underage_driving = len(df_persons[(df_persons["age"]<18) & (df_persons["driving_license"])])
         print(f"Identified {N_underage_driving} agents under 18 years but having a driving license.")
         print("This is due to statistical matching - those agents were not matched using the age variable.")
         print("Fixing this to ensure consistency of the results.")
-        df_persons.loc[df_persons["AGE"]<18, "driving_license"] = False
+        df_persons.loc[df_persons["age"]<18, "driving_license"] = False
 
     elif c.census == "are_synpop":
 
