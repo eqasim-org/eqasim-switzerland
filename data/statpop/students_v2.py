@@ -5,22 +5,31 @@ from joblib import Parallel, delayed  # kept in case you need later, but not use
 
 def configure(context):
     context.config("data_path")
-    context.stage("data.statpop.employment_v2")
+    context.stage("data.microcensus.income_predictor")
     context.stage("data.structural_survey.structural_survey")
 
 def execute(context):
 
     # =========================================================
+    # CONFIG FOR ANALYSIS
+    # =========================================================
+    # Set to e.g. "1" or "ZH" depending on your canton_id coding AFTER string cast
+    # Set to None to use ALL cantons (global comparison)
+    CANTON_FOR_ANALYSIS = None   # e.g. "1" or None
+
+    # choose model type: "gbm" or "rf"
+    STUDENT_MODEL = "gbm"   # or "rf"
+
+    # =========================================================
     # 0. PREP: CLEAN + ALIGN EMPLOYMENT INFO
     # =========================================================
     survey_df = context.stage("data.structural_survey.structural_survey")
-
-    pop_df = context.stage("data.statpop.employment_v2")
+    pop_df    = context.stage("data.microcensus.income_predictor")
 
     # Ensure survey targets are ints
-    survey_df['employed'] = survey_df['employed'].astype('int64')
+    survey_df['employed']    = survey_df['employed'].astype('int64')
     survey_df['job_position'] = survey_df['job_position'].astype('int64')
-    survey_df['is_student'] = survey_df['is_student'].astype('int64')
+    survey_df['is_student']  = survey_df['is_student'].astype('int64')
 
     # Drop rows with missing key vars in survey (safety)
     survey_df = survey_df.dropna(subset=[
@@ -29,7 +38,7 @@ def execute(context):
     ])
 
     # In the population, use the *drawn* employment as features
-    pop_df['employed'] = pop_df['employed'].astype('int64')
+    pop_df['employed']     = pop_df['employed'].astype('int64')
     pop_df['job_position'] = pop_df['job_position'].astype('int64')
 
     # =========================================================
@@ -65,8 +74,8 @@ def execute(context):
         'age_bin',
         'sex',
         'employed',
-        'job_position',
-        'home_municipality_id',
+       # 'job_position',
+       # 'home_municipality_id',
         'district_id',
         'canton_id'
     ]
@@ -83,9 +92,6 @@ def execute(context):
     # =========================================================
     # 3. FIT ONE GLOBAL STUDENT MODEL (GBM OR RF)
     # =========================================================
-
-    # choose model type: "gbm" or "rf"
-    STUDENT_MODEL = "gbm"   # or "rf"
 
     if STUDENT_MODEL == "gbm":
         student_model = HistGradientBoostingClassifier(
@@ -142,11 +148,84 @@ def execute(context):
 
     pop_df['STUDENT_draw'] = stu_draw
 
-    # Final cast
+    # Final cast + overwrite name
     pop_df['STUDENT_draw'] = pop_df['STUDENT_draw'].astype('int64')
     pop_df = pop_df.rename(columns={"STUDENT_draw": "is_student"})
+    # force <15 to be student
     pop_df.loc[pop_df['age'] < 15, 'is_student'] = 1
-    print("Final STUDENT_draw distribution:")
+
+    print("Final STUDENT distribution in population:")
     print(pop_df['is_student'].value_counts(normalize=True))
-    print(pop_df.columns)
+
+    # =========================================================
+    # 6. DIAGNOSTIC: COMPARE STUDENT RATES BY AGE_BIN (SURVEY vs POP)
+    # =========================================================
+
+    # Optionally filter by canton
+    if CANTON_FOR_ANALYSIS is not None:
+        canton_key = str(CANTON_FOR_ANALYSIS)
+        survey_diag = survey_df[survey_df['canton_id'] == canton_key].copy()
+        pop_diag    = pop_df[pop_df['canton_id'].astype(str) == canton_key].copy()
+        print(f"\n[DIAGNOSTIC] Analysis restricted to canton_id = {canton_key}")
+    else:
+        survey_diag = survey_df.copy()
+        pop_diag    = pop_df.copy()
+        print("\n[DIAGNOSTIC] Analysis for ALL cantons (global)")
+
+    # helper for weighted mean
+    def weighted_mean(x, w):
+        return np.average(x, weights=w) if len(x) > 0 else np.nan
+
+    # --- Survey: weighted share of students by age_bin ---
+    survey_age = (
+        survey_diag
+        .groupby('age_bin')
+        .apply(lambda g: weighted_mean(g['is_student'], g['weight']))
+        .reset_index(name='share_student_survey')
+    )
+
+    # --- Population: share of students by age_bin (unweighted or weighted if available) ---
+    # detect optional weight in pop
+    pop_weight_col = None
+    for cand in ['weight', 'person_weight', 'household_weight']:
+        if cand in pop_diag.columns:
+            pop_weight_col = cand
+            break
+
+    if pop_weight_col is not None:
+        pop_age = (
+            pop_diag
+            .groupby('age_bin')
+            .apply(lambda g: weighted_mean(g['is_student'], g[pop_weight_col]))
+            .reset_index(name='share_student_pop')
+        )
+    else:
+        pop_age = (
+            pop_diag
+            .groupby('age_bin')['is_student']
+            .mean()
+            .reset_index(name='share_student_pop')
+        )
+
+    # --- Merge and compute differences ---
+    age_compare = pd.merge(
+        survey_age,
+        pop_age,
+        on='age_bin',
+        how='outer'
+    )
+
+    age_compare['share_student_survey'] = age_compare['share_student_survey'].fillna(0.0)
+    age_compare['share_student_pop']    = age_compare['share_student_pop'].fillna(0.0)
+    age_compare['diff_pop_minus_survey'] = (
+        age_compare['share_student_pop'] - age_compare['share_student_survey']
+    )
+
+    print("\nShare of students by age_bin (survey vs population):")
+    print(
+        age_compare
+        .sort_values('age_bin')
+        .to_string(index=False)
+    )
+
     return pop_df
