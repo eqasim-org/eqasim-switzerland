@@ -447,5 +447,5 @@ def execute(context):
         [['income_class', 'share_true', 'share_pred', 'share_diff']]
         .to_string(index=False)
     )
-
+    pop_df = pop_df.rename(columns={"HH_INCOME_CLASS_draw": "income_class"})
     return pop_df
