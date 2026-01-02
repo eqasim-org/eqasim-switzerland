@@ -95,3 +95,13 @@ def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_d
         df_points.loc[invalid_mask, zone_id_field] = df_zones.iloc[indices][zone_id_field].values
 
     return pd.merge(df_original, df_points[[point_id_field, zone_id_field]], on=point_id_field, how="left")
+
+
+
+def convert_crs(x, y, original_crs="EPSG:2056", target_crs="EPSG:4326"):
+    """Convert coordinates from EPSG:2056 to EPSG:4326"""
+    gdf = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x, y, crs=original_crs))
+    gdf = gdf.to_crs(target_crs)
+    x4326 = gdf.geometry.x.values
+    y4326 = gdf.geometry.y.values
+    return x4326, y4326

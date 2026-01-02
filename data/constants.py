@@ -53,6 +53,9 @@ class Constants:
 
         self.BASE_SCALING_YEAR = 2023
         self.BASE_PROJECTED_YEAR = 2040
+
+        # This dictionnary is used to convert income class to income per capita
+        self.INCOME_CLASS_MAP = {0: 2000, 1: 3000, 2: 5000, 3: 7000, 4: 9000, 5: 11000,  6: 13000, 7: 15000, 8: 17000}
         
 
 def configure(context):

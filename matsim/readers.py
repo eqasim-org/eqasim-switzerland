@@ -14,12 +14,8 @@ import io
 import logging
 logger = logging.getLogger(__name__)
 
-"""
-It is partially based on the implementation from:
-https://github.com/matsim-vsp/matsim-python-tools/blob/master/matsim/Network.py
-
-Additional network readers may be integrated in the future to improve reading efficiency.
-"""
+#TODO: optimize reading with multiprocessing
+#TODO: optimize saving with multiprocessing, buffered batch writing
 
 class Network:
 

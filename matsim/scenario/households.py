@@ -58,7 +58,6 @@ def add_household(writer, household, member_ids, c):
 
     writer.end_household()
 
-INCOME_CLASS_MAP = {0: 2000, 1: 3000, 2: 5000, 3: 7000, 4: 9000, 5: 11000,  6: 13000, 7: 15000, 8: 17000}
 def execute(context):
     cache_path = context.path()
     c          = context.stage("data.constants")
@@ -72,7 +71,7 @@ def execute(context):
     assert df_persons.canton_name.notnull().all(), "Not all persons have a canton name assigned. Check the canton data."
 
     # Attach real average income per person per household    
-    df_persons["income"] = df_persons["income_class"].astype(int).map(INCOME_CLASS_MAP)
+    df_persons["income"] = df_persons["income_class"].astype(int).map(c.INCOME_CLASS_MAP)
     
     # Calculate income per capita using the OECD equivalence scale: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Glossary:Equivalised_income
     df_persons['is_child'] = df_persons['age'] < 14

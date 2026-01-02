@@ -6,7 +6,6 @@ import shapely.geometry as geo
 from shapely import vectorized
 from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
 import logging
-from matsim.scenario.households import INCOME_CLASS_MAP
 from dmc.constants import constants
 
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +22,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
+    context.stage("data.constants")
 
 def execute(context):
     df_persons = context.stage("data.microcensus.persons")    
@@ -44,8 +44,8 @@ def execute(context):
     df_persons["hasGleis7Subscription"] = df_persons.subscriptions_gleis7
     df_persons["statedPreferenceRegion"] = df_persons.sp_region
     
-    
-    df_persons["income"] = df_persons.income_class.map(INCOME_CLASS_MAP)
+    c = context.stage("data.constants")
+    df_persons["income"] = df_persons.income_class.map(c.INCOME_CLASS_MAP)
     num_children = df_persons["N_children_under_12"]
     num_adults = np.maximum(1, df_persons['household_size'] - num_children)
     equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children    
