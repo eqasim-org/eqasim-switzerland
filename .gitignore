@@ -15,7 +15,7 @@ slurm*
 !docker_run.sh
 logs
 run*.sh
-analysis
+# analysis
 server
 cutterZone
 .ipynb_checkpoints
