@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import gc
 
 from data.spatial.cantons import impute_sp_region
 from data.spatial.municipality_types import impute as impute_municipality_types
@@ -176,11 +177,11 @@ def execute(context):
         "person_id", "household_id",
         "sex", "age",
         "home_x", "home_y",
-        "marital_status", "nationality",
+        "marital_status",
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
         "home_municipality_id", "home_quarter_id", "canton_id", "district_id", "population_density", "sp_region", "ovgk",
-        "statpop_person_id", "statpop_household_id", "collective_housing_resident"] + children_columns]
+        "collective_housing_resident"] + children_columns]
 
     df = data.statpop.head_of_household.impute(df, c)
 
