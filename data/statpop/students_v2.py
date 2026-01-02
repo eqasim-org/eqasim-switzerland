@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import gc
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from joblib import Parallel, delayed  # kept in case you need later, but not used here
 
@@ -20,6 +21,9 @@ def execute(context):
     # choose model type: "gbm" or "rf"
     STUDENT_MODEL = "gbm"   # or "rf"
 
+    # HPC: chunk size for population predictions (memory control)
+    CHUNK_SIZE = 50_000  # try 25k–100k depending on cluster memory
+
     # =========================================================
     # 0. PREP: CLEAN + ALIGN EMPLOYMENT INFO
     # =========================================================
@@ -27,9 +31,9 @@ def execute(context):
     pop_df    = context.stage("data.microcensus.income_predictor")
 
     # Ensure survey targets are ints
-    survey_df['employed']    = survey_df['employed'].astype('int64')
+    survey_df['employed']     = survey_df['employed'].astype('int64')
     survey_df['job_position'] = survey_df['job_position'].astype('int64')
-    survey_df['is_student']  = survey_df['is_student'].astype('int64')
+    survey_df['is_student']   = survey_df['is_student'].astype('int64')
 
     # Drop rows with missing key vars in survey (safety)
     survey_df = survey_df.dropna(subset=[
@@ -80,11 +84,12 @@ def execute(context):
         'canton_id'
     ]
 
+    # --- survey design matrix  ---
     X_student_survey = pd.get_dummies(survey_df[student_feat_cols], drop_first=False)
-    X_student_pop    = pd.get_dummies(pop_df[student_feat_cols], drop_first=False)
-
     student_feature_cols = X_student_survey.columns
-    X_student_pop = X_student_pop.reindex(columns=student_feature_cols, fill_value=0)
+
+    # DO NOT build X_student_pop for 8M rows on HPC (OOM risk)
+    # We'll do it chunk-wise below.
 
     y_student = survey_df['is_student'].astype('int64')
     w_student = survey_df['weight']
@@ -109,7 +114,7 @@ def execute(context):
             max_depth=15,
             min_samples_leaf=5,
             random_state=42,
-            n_jobs=-1
+            n_jobs=1   # HPC safer than -1 (prevents oversubscription / memory spikes)
         )
         student_model.fit(X_student_survey, y_student, sample_weight=w_student)
 
@@ -130,23 +135,44 @@ def execute(context):
         return classes[chosen_idx]
 
     # =========================================================
-    # 5. STOCHASTIC ASSIGNMENT OF STUDENT_draw TO POPULATION
+    # 5. STOCHASTIC ASSIGNMENT OF STUDENT_draw TO POPULATION (CHUNKED)
     # =========================================================
 
     pop_df['STUDENT_draw'] = np.nan
-
     SEED_STUDENT = 789
 
-    proba_stu   = student_model.predict_proba(X_student_pop)
     classes_stu = student_model.classes_.astype('int64')  # should be [0,1] or [1,0]
 
-    stu_draw = draw_multinomial_from_proba(
-        proba_stu,
-        classes_stu,
-        seed=SEED_STUDENT
-    ).astype('int64')
+    n = len(pop_df)
+    stu_out = np.empty(n, dtype=np.int64)
 
-    pop_df['STUDENT_draw'] = stu_draw
+    print(f"Predicting students in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
+
+    for start in range(0, n, CHUNK_SIZE):
+        end = min(start + CHUNK_SIZE, n)
+        chunk = pop_df.iloc[start:end]
+
+        X_chunk = pd.get_dummies(chunk[student_feat_cols], drop_first=False)
+        X_chunk = X_chunk.reindex(columns=student_feature_cols, fill_value=0)
+
+        proba_stu = student_model.predict_proba(X_chunk)
+
+        stu_draw = draw_multinomial_from_proba(
+            proba_stu,
+            classes_stu,
+            seed=SEED_STUDENT + start
+        ).astype('int64')
+
+        stu_out[start:end] = stu_draw
+
+        # free chunk memory
+        del X_chunk, proba_stu, stu_draw
+        gc.collect()
+
+        if (start // CHUNK_SIZE) % 20 == 0:
+            print(f"  ... processed {end:,}/{n:,}")
+
+    pop_df['STUDENT_draw'] = stu_out
 
     # Final cast + overwrite name
     pop_df['STUDENT_draw'] = pop_df['STUDENT_draw'].astype('int64')
@@ -161,15 +187,15 @@ def execute(context):
     # 6. DIAGNOSTIC: COMPARE STUDENT RATES BY AGE_BIN (SURVEY vs POP)
     # =========================================================
 
-    # Optionally filter by canton
+    # Optionally filter by canton (avoid .copy() on huge frames)
     if CANTON_FOR_ANALYSIS is not None:
         canton_key = str(CANTON_FOR_ANALYSIS)
-        survey_diag = survey_df[survey_df['canton_id'] == canton_key].copy()
-        pop_diag    = pop_df[pop_df['canton_id'].astype(str) == canton_key].copy()
+        survey_diag = survey_df[survey_df['canton_id'] == canton_key]
+        pop_diag    = pop_df[pop_df['canton_id'].astype(str) == canton_key]
         print(f"\n[DIAGNOSTIC] Analysis restricted to canton_id = {canton_key}")
     else:
-        survey_diag = survey_df.copy()
-        pop_diag    = pop_df.copy()
+        survey_diag = survey_df
+        pop_diag    = pop_df
         print("\n[DIAGNOSTIC] Analysis for ALL cantons (global)")
 
     # helper for weighted mean
@@ -185,7 +211,6 @@ def execute(context):
     )
 
     # --- Population: share of students by age_bin (unweighted or weighted if available) ---
-    # detect optional weight in pop
     pop_weight_col = None
     for cand in ['weight', 'person_weight', 'household_weight']:
         if cand in pop_diag.columns:
