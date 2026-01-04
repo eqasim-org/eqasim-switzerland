@@ -85,7 +85,9 @@ def plot_boxplot_by(df, by, value1, value2, title, out_path, xlabel="", figsize=
     df["diff"] = (df["y"] - df["x"])/df["x"] * 100  # percentage difference   
 
     fig, ax = plt.subplots(figsize=figsize)
-    df.boxplot(column="diff", by="by", ax=ax, grid=False, patch_artist=True)
+    df.boxplot(column="diff", by="by", ax=ax, grid=False, patch_artist=True, showfliers=False, 
+               boxprops=dict(facecolor='mediumturquoise', color='navy'), medianprops=dict(color='navy'), 
+               whiskerprops=dict(color='navy'), capprops=dict(color='navy'))
     ax.set_ylabel("Difference [%]")
     ax.set_xlabel(xlabel)  # optional
     ax.set_title(title)
@@ -121,7 +123,7 @@ def plot_boxplot(x, y, title, out_path, xlabel="", figsize=(6,6), fig_ax = None,
         fig, ax = plt.subplots(figsize=figsize)
 
     # --- boxplot ---
-    ax.boxplot(diff, vert=True, patch_artist=True)
+    ax.boxplot(diff, vert=True, patch_artist=True, showfliers=False)
     ax.set_ylabel("Difference [%]")
     ax.set_xlabel(xlabel)  # optional
     ax.set_title(title)

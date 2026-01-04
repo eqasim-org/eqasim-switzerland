@@ -19,9 +19,18 @@ def configure(context):
 
 
 def execute(context):
-    logger.info("Routing car car trips using MATSim")
+    logger.info("Routing car trips using MATSim")
+    
     # Load trips
-    df = context.stage("analysis.travel_times.APIs.get")
+    dfs = context.stage("analysis.travel_times.APIs.get")
+    keys = dfs.keys()
+    df = []    
+    for k, v in dfs.items():
+        v["identifier"] = k + "___" + v["identifier"]
+        df.append(v)
+    df = pd.concat(df, ignore_index=True)
+    del dfs
+
     df = df[['identifier', 'origin_x', 'origin_y', 'destination_x', 'destination_y', 'departure_time']]
 
     # save trips to temporary csv
@@ -64,4 +73,15 @@ def execute(context):
     )
     os.chdir(cwd)
 
-    return (path_to_trips, output_path)
+    # reconstruct the dictionary keys
+    logger.info("\t - Reconstructing trip identifiers")
+    df_routed = pd.read_csv(output_path)
+    output_paths = {}
+    for k in keys:
+        df_k_routed = df_routed[df_routed["identifier"].str.startswith(k + "___")]
+        df_k_routed["identifier"] = df_k_routed["identifier"].str.split("___").str[1]
+        df_k_routed = df_k_routed.reset_index(drop=True)
+        output_paths[k] = os.path.join(context.path(), f"routed_car_trips_{k}.csv")         
+        df_k_routed.to_csv(output_paths[k], index=False)
+    
+    return (path_to_trips, output_paths)
