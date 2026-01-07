@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from lxml import etree
 import matsim.runtime.eqasim as eqasim
 import gzip
+from dmc.constants import constants as dmc_constants
 
 import matsim.simulation.config_utils as config_utils
 
@@ -29,6 +30,7 @@ def configure(context):
     
     context.config("output_prefix", "switzerland_")
     context.config("useScheduleBasedTransport", default = True)
+    context.config("car_cost_model", dmc_constants.CAR_COST_MODEL)
 
 
 def execute(context):
@@ -148,7 +150,9 @@ def execute(context):
         "--downsamplingRate", context.config("input_downsampling"),
         "--replanningRate", "0.05",
         "--hasFreight", context.config("use_freight"),
-        "--prefix", context.config("output_prefix")    ])
+        "--prefix", context.config("output_prefix"),
+        "--carCostModel", context.config("car_cost_model").lower()
+        ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
 

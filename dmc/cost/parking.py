@@ -18,16 +18,19 @@ def get_cost(df, context):
     # situations
     destination_urban = df.destination_municipality=="urban"
     destination_suburban = df.destination_municipality=="suburban"
+    destination_urbancore = df.destination_municipality=="urbancore"
     destination_home = df.destination_home
     destination_work = df.destination_work
 
     # compute cost
     parking_cost = np.zeros(len(df))
+    pay_parking_urbancore = destination_urbancore & (~destination_home) & (parking_duration_min>60)
     pay_parking_urban    = destination_urban & (~destination_home) & (parking_duration_min>60)
     pay_parking_suburban = destination_suburban & (~destination_home) & (parking_duration_min>60)
 
-    parking_cost[pay_parking_urban]    = (parking_duration_min[pay_parking_urban]/60.0) * context.config("parking_cost_per_hour_CHF_urban")
-    parking_cost[pay_parking_suburban] = (parking_duration_min[pay_parking_suburban]/60.0) * context.config("parking_cost_per_hour_CHF_suburban")
+    parking_cost[pay_parking_urban]    = (parking_duration_min[pay_parking_urban]/60.0 - 1.0) * context.config("parking_cost_per_hour_CHF_urban")
+    parking_cost[pay_parking_urbancore] = (parking_duration_min[pay_parking_urbancore]/60.0 - 1.0) * context.config("parking_cost_per_hour_CHF_urbancore")
+    parking_cost[pay_parking_suburban] = (parking_duration_min[pay_parking_suburban]/60.0 - 1.0) * context.config("parking_cost_per_hour_CHF_suburban")
     parking_cost[destination_work] *= context.config("parking_price_reduction_for_work")
 
     parking_cost = np.clip(parking_cost, 0, 40)

@@ -67,7 +67,9 @@ class Counts:
         if context:
             self.ch_border = context.stage("data.spatial.swiss_border")
         else:
-            self.ch_border = Osm().get_border("switzerland")   
+            # I can use the Osm class here to load the swiss border
+            raise ValueError("Context must be provided to load Swiss border data.")
+  
             
     def from_file(self, file_path, id_column="OBJECTID", columns_to_keep=['TJM', 'TJOM'], projection="EPSG:2056"):
         # Load the file

@@ -1,6 +1,6 @@
 import os.path
 import shutil
-
+import glob
 
 def configure(context):
     context.stage("matsim.simulation.run")
@@ -15,7 +15,7 @@ def configure(context):
     context.config("export_detailed_network", False)
     context.config("write_jar", True)
     context.config("estimate_dmc", default=False)
-
+    context.config("calibrate_alphas_in_matsim", default=False)
 
 def execute(context):
     source_path = context.path("matsim.simulation.prepare")
@@ -52,6 +52,7 @@ def execute(context):
     ]
     if context.config("estimate_dmc"):
         file_names.append("estimated_dmc_parameters.yml")
+        file_names.append("dmc_cost_parameters.yml")
     
     for file in file_names:
         shutil.copyfile("%s/%s" % (source_path, file), 
@@ -73,10 +74,18 @@ def execute(context):
     
     # move the results to the output
     path_to_results =  "%s/simulation_output" % context.path("matsim.simulation.run")
-    shutil.move(path_to_results, 
-                "%s/simulation_output" % target_path)
-    # TODO: if calibration is activated, copy the calibrated parameters
+    new_path_to_results = "%s/simulation_output" % target_path
+    shutil.move(path_to_results, new_path_to_results)
     
+    # if calibration is activated, copy the calibrated parameters
+    if context.config("calibrate_alphas_in_matsim"):
+        calibrated_parameters_path = glob.glob("%s/*_parameters.yml" % new_path_to_results)
+        if len(calibrated_parameters_path) > 0:            
+            calibrated_parameters_path = max(calibrated_parameters_path, key=os.path.getctime)
+
+        shutil.copyfile(calibrated_parameters_path, 
+                        "%s/calibrated_mode_parameters.yml" % target_path)
+        
     # copy contract information
     contracts_path = context.stage("contracts.contracts")
     shutil.copyfile(contracts_path, "%s/CONTRACTS.html" % target_path)

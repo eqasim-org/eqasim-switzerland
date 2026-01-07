@@ -25,10 +25,16 @@ def configure(context):
 
     context.config("car_cost_per_km", constants.CAR_COST_PER_KM) #CHF per km
     context.config("parking_cost_per_hour_CHF_urban", constants.PARKING_COST_PER_HOUR_CHF_URBAN)
+    context.config("parking_cost_per_hour_CHF_urbancore", constants.PARKING_COST_PER_HOUR_CHF_URBANCORE)
     context.config("parking_cost_per_hour_CHF_suburban", constants.PARKING_COST_PER_HOUR_CHF_SUBURBAN)
     context.config("parking_price_reduction_for_work", constants.PARKING_PRICE_REDUCTION_FOR_WORK) 
+    
+    context.config("urbancore_parking_search_min", constants.URBANCORE_PARKING_SEARCH_MIN)
     context.config("urban_parking_search_min", constants.URBAN_PARKING_SEARCH_MIN) 
-    context.config("suburban_parking_search_min", constants.SUBURBAN_PARKING_SEARCH_MIN) 
+    context.config("suburban_parking_search_min", constants.SUBURBAN_PARKING_SEARCH_MIN)
+
+    context.config("car_cost_model", constants.CAR_COST_MODEL)
+    context.config("pt_regional_radius_km", constants.PT_REGIONAL_RADIUS_KM)
     context.config("only_from_home_trips", False)
 
 def execute(context):
@@ -47,21 +53,21 @@ def execute(context):
     # Availabilities
     persons = context.stage("data.microcensus.persons")
     persons = persons[["person_id","car_availability","number_of_cars","number_of_bikes_class",
-                       "driving_license","is_car_passenger"]].reset_index(drop=True)
+                       "driving_license","is_car_passenger", "age"]].reset_index(drop=True)
 
-    persons["car_availability"] = persons["car_availability"]!= c.CAR_AVAILABILITY_NEVER 
-    
-    persons["car_passenger_availability"] = persons["car_availability"] | persons["is_car_passenger"]    
+    persons["car_passenger_availability"] = True # car passenger available for all persons
+    persons["walk_availability"] = True # walk available for all persons
+    persons["pt_availability"] = True # pt available for all persons
+    persons["car_availability"] = persons["car_availability"]!= c.CAR_AVAILABILITY_NEVER         
     persons["car_availability"] = ((persons["car_availability"])&
-                                   (persons["driving_license"]==True))
-    persons["bike_availability"] = persons["number_of_bikes_class"] != c.BIKE_AVAILABILITY_FOR_NONE
-    
-    persons["walk_availability"] = True
-    persons["pt_availability"] = True
+                                   (persons["driving_license"]==True)&
+                                   (persons["age"]>=18))
+    persons["bike_availability"] = persons["number_of_bikes_class"] != c.BIKE_AVAILABILITY_FOR_NONE    
 
     persons = persons[["person_id","car_availability","car_passenger_availability","bike_availability","walk_availability","pt_availability"]]
     df = df.merge(persons, on="person_id", how="left")
 
+    # Manage availabilities based on routing results
     """
     availabilities are removed if :
         - no route is generated (in routed data)
@@ -86,11 +92,11 @@ def execute(context):
                          )
     df.loc[pt_unavailability, "pt_availability"] = False
 
-    car_unavailability = (df["car_travel_time_min"]<1) | (df["car_distance_km"]>300)
+    car_unavailability = (df["car_travel_time_min"]<1) | (df["car_travel_time_min"]>300)
     df.loc[car_unavailability, "car_availability"] = False        
     df.loc[car_unavailability, "car_passenger_availability"] = False    
 
-    small_distance = df.euclidean_distance_km<0.1 #less than 100m
+    small_distance = df.euclidean_distance_km<0.05 #less than 50m
     df.loc[small_distance,["pt_availability","car_availability","car_passenger_availability"]] = False
 
     bike_unavailability = df.bike_distance_km>20
@@ -98,7 +104,6 @@ def execute(context):
 
     walk_unavailability = df.walk_distance_km>5
     df.loc[walk_unavailability, "walk_availability"] = False    
-
 
     # compute costs
     ## car cost      
@@ -110,7 +115,7 @@ def execute(context):
     df["actual_parking_duration_min"] = parking_duration_min
 
     ##public transport cost
-    df["pt_cost_CHF"] = pt_cost.get_cost(df, context, distance_threshold_km = 10.0)
+    df["pt_cost_CHF"] = pt_cost.get_cost(df, context, pt_regional_radius_km = context.config("pt_regional_radius_km"))
 
     # Set parking searching time
     df['parking_searching_duration_min'] = parking_penalty.get_parking_search_min(df, context)
@@ -160,17 +165,20 @@ def execute(context):
     df = df[~f_remove]
 
     ### remove very short and very long trips
-    out_of_range_distance = ((df.euclidean_distance_km < 0.1) | (df.euclidean_distance_km > 100))
+    out_of_range_distance = ((df.euclidean_distance_km < 0.05) | (df.euclidean_distance_km > 100))
     df = df[~out_of_range_distance]
 
     ########################### RETURN ################################
     columns = [
         "person_id", "trip_id", "person_weight", "mode", "euclidean_distance_km",
         "home_municipality", "origin_municipality", "destination_municipality", 
-        "destination_work", "origin_home", "elevation_difference",
+        "destination_work", "origin_home", "destination_home", "destination_education",
+        "destination_shopping", "destination_leisure", "destination_other",        
+        "elevation_difference",
 
         # person
-        "age", "sex", "income", "sp_region", "ms_region", "is_car_passenger",
+        "age", "sex", "income", "sp_region", "ms_region", "is_car_passenger", "ovgk", 
+        "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired","low_income",
 
         # car
         'car_availability' ,'car_travel_time_min', 'car_cost_CHF', 'driving_license', "car_distance_km",

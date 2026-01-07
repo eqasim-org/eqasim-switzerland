@@ -21,7 +21,7 @@ def configure(context):
     context.stage("data.microcensus.persons")    
     context.stage("data.spatial.swiss_border")
     context.stage("data.spatial.municipality_types")
-    context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.municipalities")    
     context.stage("data.constants")
 
 def execute(context):
@@ -37,41 +37,54 @@ def execute(context):
                          'destination_y', 'origin_x', 'origin_y', 'crowfly_distance']].reset_index(drop=True)
     
     # include personal information
+    # 1. subscriptions
     df_persons["hasGeneralSubscription"] = df_persons.subscriptions_ga
     df_persons["hasHalbtaxSubscription"] = df_persons.subscriptions_halbtax
     df_persons["hasRegionalSubscription"] = df_persons.subscriptions_verbund | df_persons.subscriptions_strecke
     df_persons["hasJuniorSubscription"] = df_persons.subscriptions_junior
     df_persons["hasGleis7Subscription"] = df_persons.subscriptions_gleis7
     df_persons["statedPreferenceRegion"] = df_persons.sp_region
-    
+    # 2. income equivalence scale
     c = context.stage("data.constants")
     df_persons["income"] = df_persons.income_class.map(c.INCOME_CLASS_MAP)
     num_children = df_persons["N_children_under_12"]
     num_adults = np.maximum(1, df_persons['household_size'] - num_children)
     equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children    
     df_persons["income"] = df_persons["income"] / equvalent_size
+    df_persons["low_income"] = df_persons["income"] < c.LOW_INCOME_THRESHOLD
 
+    # 3. sp_region and ms_region
     df_persons["ms_region"] = df_persons.canton_id.map(lambda x: MS_REGIONS.loc[x,"cluster"])
-
+    # 4. car ration
+    df_persons["car_ownership_ratio"] = np.clip(1 - df_persons["number_of_cars_class"]/df_persons["N_adults"],0,1)
+    # 5. pt quality
+    df_persons["good_pt_service"] = (df_persons["ovgk"].isin(["A", "B"])).astype(int)
+    df_persons["medium_pt_service"] = (df_persons["ovgk"].isin(["C","D"])).astype(int)
+    # 6. retired ot not
+    df_persons["is_retired"] = (df_persons["age"]>=65).astype(int) 
+    # 7. merge
     cols = ["person_id","home_x","home_y", "hasGeneralSubscription","hasHalbtaxSubscription","hasRegionalSubscription", "hasJuniorSubscription", 
-            "hasGleis7Subscription", "statedPreferenceRegion", 'person_weight', 'age', 'sex', 'driving_license', 'sp_region', 'ms_region',
-             'is_car_passenger', "income", "weekend"]
+            "hasGleis7Subscription", "statedPreferenceRegion", 'person_weight', 'age', 'sex', 'driving_license', 'sp_region', 'ms_region', "ovgk",
+            'is_car_passenger', "income", "weekend", "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired", "low_income"]
     df_persons = df_persons[cols]    
     df_trips = df_trips.merge(df_persons, on="person_id", how="left")
 
     # updates filtered persons to include the weekend trips
     filterout_person_ids.update(df_persons[df_persons["weekend"]==True].person_id.tolist())
     
-    # correct trip information
-    df_trips["destination_home"] = df_trips.purpose == "home"
+    # enrich trips with additional information
+    df_trips["destination_home"] = df_trips.purpose.isin(["home", "home_secondary"])
     df_trips["origin_home"] = (df_trips.origin_x == df_trips.home_x) & (df_trips.origin_y == df_trips.home_y)    
-    df_trips["destination_work"] = df_trips.purpose == "work"
-    
+    df_trips["destination_work"] = df_trips.purpose.isin(["work","work_secondary"])
+    df_trips["destination_education"] = df_trips.purpose.isin(["education","education_secondary"])
+    df_trips["destination_shopping"] = df_trips.purpose.isin(["shop"])
+    df_trips["destination_leisure"] = df_trips.purpose.isin(["leisure"])
+    df_trips["destination_other"] = df_trips.purpose.isin(["other"])    
     df_trips["euclidean_distance_km"] = df_trips.crowfly_distance*1e-3
-
     df_trips["is_first"] = df_trips["person_id"].shift(1) != df_trips["person_id"]
     df_trips["is_last"]  = df_trips["person_id"].shift(-1) != df_trips["person_id"]
 
+    # estimate parking duration without travel time
     parking_duration_min = (np.clip(df_trips["departure_time"].shift(-1), 8*3600, 19*3600) - 
                             np.clip(df_trips["departure_time"], 8*3600, 19*3600)) / 60.0
 
@@ -117,7 +130,7 @@ def execute(context):
     df_trips["inside_ch"] = inside_origin&inside_destination    
     
     ### filter
-    df_trips = df_trips[df_trips["euclidean_distance_km"]>0.01] # remove trips with less than 10m
+    df_trips = df_trips[df_trips["euclidean_distance_km"]>1e-2] # remove trips with less than 10m
     df_trips = df_trips[~df_trips.person_id.isin(filterout_person_ids)] # persons that need to be removed
     df_trips = df_trips[df_trips["inside_ch"]==True] # only trips within Switzerland
     df_trips = df_trips[df_trips.isna().sum(axis=1)==0] # remove trips with incomplete data
@@ -142,17 +155,20 @@ def execute(context):
 
     ### Assertions
     assert all(df_trips["weekend"]==False)     
-    assert set(df_trips['home_municipality'].unique())==set(df_trips['origin_municipality'].unique())==set(df_trips['destination_municipality'].unique())== {'rural', 'suburban', 'urban'}
+    assert (set(df_trips['home_municipality'].unique()) ==
+            set(df_trips['origin_municipality'].unique()) ==
+            set(df_trips['destination_municipality'].unique())== {'rural', 'suburban', 'urban', 'urbancore'})
     assert df_trips["elevation_difference"].notna().all()
 
     ### return
     cols = ['person_id', 'trip_id', 'departure_time', 'mode', 'purpose',
             'destination_x', 'destination_y', 'origin_x', 'origin_y',
             'home_x', 'home_y', 'hasGeneralSubscription', 'hasJuniorSubscription', 'hasGleis7Subscription',
-            'hasHalbtaxSubscription', 'hasRegionalSubscription',
-            'statedPreferenceRegion', 'person_weight', 'age', 'sex',
-            'driving_license', 'sp_region', 'ms_region', 'is_car_passenger', 'income', 'weekend',
-            'destination_home', 'origin_home', 'destination_work',
+            'hasHalbtaxSubscription', 'hasRegionalSubscription', 'ovgk', 'car_ownership_ratio', "good_pt_service", "medium_pt_service",
+            'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','low_income',
+            'driving_license', 'sp_region', 'ms_region', 'is_car_passenger', 'income',
+            'destination_home', 'origin_home', 'destination_work', 'destination_education',
+            'destination_shopping', 'destination_leisure', 'destination_other',
             'euclidean_distance_km', 'is_first', 'is_last',
             'parking_duration_wo_travelTime_min', 'home_municipality',
             'origin_municipality', 'destination_municipality', 'inside_ch',

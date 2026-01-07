@@ -4,77 +4,129 @@ import seaborn as sns
 import biogeme.database as db
 import biogeme.biogeme as bio
 import matplotlib.pyplot as plt
+from dmc.constants import constants
 
 
 class vot_utils:
-    @staticmethod
-    def compute_vot(df, res, utilities, time_col="car_travel_time_min", cost_col="car_cost_CHF", eps=1e-2, time_unit_per_hour=60.0):
-        """
-        Return a DataFrame with utilities and VOT (CHF per time_unit, default CHF/minute).
-        If you want CHF/hour, multiply by time_unit_per_hour afterwards.
-        """
-
-        # 1) Retrieve estimated betas
-        beta_values = res.getBetaValues()
-
-        # 2) Prepare perturbed dataframes (vectorized)          
-        df_t_plus  = df.copy(); df_t_plus[time_col]  = df_t_plus[time_col]  + eps
-        df_t_minus = df.copy(); df_t_minus[time_col] = df_t_minus[time_col] - eps
-        df_c_plus  = df.copy(); df_c_plus[cost_col]  = df_c_plus[cost_col]  + eps
-        df_c_minus = df.copy(); df_c_minus[cost_col] = df_c_minus[cost_col] - eps
-
-        # 3) Utility simulation helper (recreate Database + BIOGEME per full dataset)    
-        def simulate_for_dataframe(df_input):
-            database = db.Database("data", df_input)
-            simulate = bio.BIOGEME(database, utilities)
-            sim_df = simulate.simulate(beta_values) 
-            sim_df.index = df_input.index
-            return sim_df
-
-        U_t_plus  = simulate_for_dataframe(df_t_plus)
-        U_t_minus = simulate_for_dataframe(df_t_minus)
-        U_c_plus  = simulate_for_dataframe(df_c_plus)
-        U_c_minus = simulate_for_dataframe(df_c_minus)
-
-        # 4) central differences per alternative (columns of sim_df)
-        dudt = (U_t_plus - U_t_minus) / (2.0 * eps)
-        dudc = (U_c_plus - U_c_minus) / (2.0 * eps)
-
-        # 5) VOT per alternative: (∂U/∂T) / (∂U/∂C)    
-        vot = dudt / dudc
-        vot = vot * time_unit_per_hour  # optional conversion to CHF/hour if eps in minutes
-        return vot
 
     @staticmethod
-    def get_car_vot(df, res, utilities, modes, eps=1e-2):
+    def get_car_vot(df, res):
         """
         Return the average VOT for car users (CHF per hour).
+        
+        VOT is calculated as the marginal rate of substitution between time and cost:
+        VOT = -(∂U/∂time) / (∂U/∂cost) * 60 (to convert from minutes to hours)
+        
+        For car:
+        - ∂U/∂car_time = beta_car_travel_time_min * lambda_car_travel_time * car_time^(lambda-1)
+        - ∂U/∂cost = beta_cost_CHF * cost_interaction
         """
-        vot_car = vot_utils.compute_vot(df, res, utilities, time_col="car_travel_time_min", cost_col="car_cost_CHF", eps=eps)
-        vot_car.columns = [modes[i] for i in vot_car.columns]
-
-        car_data = vot_car.loc[df["car_availability"].astype(bool), "car"]
-        return car_data[car_data.notna()].reset_index(drop=True)
+        # Extract estimated parameters
+        params = res.getEstimatedParameters()["Value"].to_dict()
+        
+        beta_car_time = params.get("beta_car_travel_time_min")
+        lambda_car_time = params.get("lambda_car_travel_time", 1.0)
+        beta_cost = params.get("beta_cost_CHF")
+        lambda_cost_distance = params.get("lambda_cost_distance", 0.0)
+        lambda_cost_income = params.get("lambda_cost_income", 0.0)
+        
+        # Calculate cost interaction terms
+        ref_euclidean_distance_km = constants.REF_EUCLIDEAN_DISTANCE_KM
+        ref_income_chf = constants.REF_INCOME_CHF
+        TIME_SCALE_MIN = constants.TIME_SCALE_MIN
+        
+        euclidean_interaction_cost = (df["euclidean_distance_km"] / ref_euclidean_distance_km) ** lambda_cost_distance
+        income_interaction_cost = (df["income"] / ref_income_chf) ** lambda_cost_income
+        cost_interaction = euclidean_interaction_cost * income_interaction_cost
+        
+        # Calculate car time (same as in model)
+        car_time = (df["car_travel_time_min"] + df["parking_searching_duration_min"]) / TIME_SCALE_MIN
+        
+        # Calculate marginal utilities
+        # ∂U/∂car_time = beta_car_time * lambda * car_time^(lambda-1)
+        marginal_utility_time = beta_car_time * lambda_car_time * (car_time ** (lambda_car_time - 1))
+        marginal_utility_cost = beta_cost * cost_interaction
+        
+        # VOT in CHF per minute, then convert to CHF per hour
+        vot_car = -(marginal_utility_time / marginal_utility_cost) * 60
+        
+        return vot_car
 
     @staticmethod
-    def get_pt_vot(df, res, utilities, modes, eps=1e-2):
+    def get_pt_vot(df, res):
         """
         Return the average VOT for public transport users (CHF per hour).
+        
+        For PT, we calculate VOT for multiple time components:
+        - In-vehicle time: main component of travel
+        - Access/egress time: time to reach/leave PT
+        - Transfer time: waiting time between connections
+        - Travel time: linear term (if present)
+        
+        We return the weighted average VOT based on the time composition.
         """
-        pt_vots = {}
-        for col in ['pt_in_vehicle_time_min', 'pt_access_egress_time_min', 'pt_transfer_time_min']:
-            pt_vots[col] = vot_utils.compute_vot(df, res, utilities, time_col=col, cost_col="pt_cost_CHF", eps=eps)
-            pt_vots[col].columns = [modes[i] for i in pt_vots[col].columns]
-
-        # we remove those who have subscriptions (zero cost), and we estimate the average VoT by considering access/egress/transfer times
-        sel = df['pt_availability'].astype(bool) & (df.pt_cost_CHF>0)
-        overall_time = df.loc[sel, ['pt_in_vehicle_time_min', 'pt_access_egress_time_min', 'pt_transfer_time_min']].sum(axis=1)
-        pt_data = (df.loc[sel, "pt_in_vehicle_time_min"] * pt_vots["pt_in_vehicle_time_min"].loc[sel, "pt"] + 
-                   df.loc[sel, "pt_access_egress_time_min"] * pt_vots["pt_access_egress_time_min"].loc[sel, "pt"] + 
-                   df.loc[sel, "pt_transfer_time_min"] * pt_vots["pt_transfer_time_min"].loc[sel, "pt"]
-                   )/ overall_time
-
-        return pt_data[pt_data.notna()].reset_index(drop=True)
+        # Extract estimated parameters
+        params = res.getEstimatedParameters()["Value"].to_dict()
+        
+        beta_pt_in_vehicle = params.get("beta_pt_in_vehicle_time_min")
+        lambda_pt_in_vehicle = params.get("lambda_pt_in_vehicle_time", 1.0)
+        
+        beta_pt_access_egress = params.get("beta_pt_access_egress_time_min")
+        lambda_pt_access_egress = params.get("lambda_pt_access_egress_time", 1.0)
+        
+        beta_pt_transfer_time = params.get("beta_pt_transfer_time_min")
+        lambda_pt_transfer_time = params.get("lambda_pt_transfer_time", 1.0)
+        
+        beta_pt_travel_time = params.get("beta_pt_travel_time_min")
+        
+        beta_cost = params.get("beta_cost_CHF")
+        lambda_cost_distance = params.get("lambda_cost_distance", 0.0)
+        lambda_cost_income = params.get("lambda_cost_income", 0.0)
+        
+        # Calculate cost interaction terms
+        ref_euclidean_distance_km = constants.REF_EUCLIDEAN_DISTANCE_KM
+        ref_income_chf = constants.REF_INCOME_CHF
+        TIME_SCALE_MIN = constants.TIME_SCALE_MIN
+        
+        euclidean_interaction_cost = (df["euclidean_distance_km"] / ref_euclidean_distance_km) ** lambda_cost_distance
+        income_interaction_cost = (df["income"] / ref_income_chf) ** lambda_cost_income
+        cost_interaction = euclidean_interaction_cost * income_interaction_cost
+        
+        # Marginal utility of cost
+        marginal_utility_cost = beta_cost * cost_interaction
+        
+        # Calculate VOT for each time component
+        # In-vehicle time VOT
+        pt_in_vehicle_time = df["pt_in_vehicle_time_min"] / TIME_SCALE_MIN
+        marginal_utility_in_vehicle = beta_pt_in_vehicle * lambda_pt_in_vehicle * (pt_in_vehicle_time ** (lambda_pt_in_vehicle - 1))
+        vot_in_vehicle = -(marginal_utility_in_vehicle / marginal_utility_cost) * 60
+        
+        # Access/egress time VOT
+        pt_access_egress_time = df["pt_access_egress_time_min"] / TIME_SCALE_MIN
+        marginal_utility_access_egress = beta_pt_access_egress * lambda_pt_access_egress * (pt_access_egress_time ** (lambda_pt_access_egress - 1))
+        vot_access_egress = -(marginal_utility_access_egress / marginal_utility_cost) * 60
+        
+        # Transfer time VOT
+        pt_transfer_time = df["pt_transfer_time_min"] / TIME_SCALE_MIN
+        marginal_utility_transfer = beta_pt_transfer_time * lambda_pt_transfer_time * (pt_transfer_time ** (lambda_pt_transfer_time - 1))
+        vot_transfer = -(marginal_utility_transfer / marginal_utility_cost) * 60
+        
+        # Calculate weighted average VOT based on time composition
+        total_time = df["pt_in_vehicle_time_min"] + df["pt_access_egress_time_min"] + df["pt_transfer_time_min"]
+        
+        # Avoid division by zero
+        total_time = total_time.replace(0, np.nan)
+        
+        weight_in_vehicle = df["pt_in_vehicle_time_min"] / total_time
+        weight_access_egress = df["pt_access_egress_time_min"] / total_time
+        weight_transfer = df["pt_transfer_time_min"] / total_time
+        
+        # Weighted average VOT
+        vot_pt = (weight_in_vehicle * vot_in_vehicle + 
+                  weight_access_egress * vot_access_egress + 
+                  weight_transfer * vot_transfer)        
+        
+        return (vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer)
 
     @staticmethod
     def plot_vot(car_data, pt_data, figure_path, return_figure=False):

@@ -55,9 +55,12 @@ def execute(context):
     # dmc estimation and calibration
     additional_args = []
     if context.config("estimate_dmc"):
-        _, _, estimated_parameters_path, _ = context.stage("dmc.model")
+        _, _, (mode_params_path, cost_params_path), _ , _ = context.stage("dmc.model")
         mode_parameters_path = "%s/estimated_dmc_parameters.yml" % context.path("matsim.simulation.prepare")
-        shutil.copy(estimated_parameters_path, mode_parameters_path)
+        cost_parameters_path = "%s/dmc_cost_parameters.yml" % context.path("matsim.simulation.prepare")
+        shutil.copy(mode_params_path, mode_parameters_path)
+        shutil.copy(cost_params_path, cost_parameters_path)
+        additional_args.extend(["--config:eqasim.costParametersPath", cost_parameters_path])
         additional_args.extend(["--config:eqasim.modeParametersPath", mode_parameters_path])
 
     additional_args.extend(get_calibration_args(context))

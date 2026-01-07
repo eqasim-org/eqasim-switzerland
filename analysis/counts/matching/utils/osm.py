@@ -1,11 +1,7 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-Created on Wed Apr 30 13:45:15 2025
-
-@author: dabdelkader
+Osm is a class to handle OpenStreetMap data retrieval and caching.
+It uses osmnx to fetch place geometries and caches results for efficiency.
 """
-
 import geopandas as gpd
 import osmnx as ox
 from shapely.geometry import Point
@@ -18,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize memory with default cache directory
-memory = Memory(os.path.join("cache", "osm_class_cache"), verbose=0)
+memory = Memory(os.path.join(".cache", "osm_class_cache"), verbose=0)
 
 class Osm:
 
@@ -100,21 +96,3 @@ class Osm:
     def get_border(place: str):
         return ox.geocode_to_gdf(place)
         
-
-
-# def __init__(self, osm_file: Union[str, Path]):
-#     # Convert string to Path for processing
-#     self.osm_file = Path(osm_file)
-# # Ensure it's a .pbf file
-# assert self.osm_file.suffix == ".pbf", "You need to provide a .pbf file"
-# # Pass the string representation to OSM if it expects a string
-# self.osm = OSM(str(self.osm_file))
-# # Extract places
-# self.places = self.osm.get_place_polygons()
-# Filter for Zurich and Bern
-# cities = self.places[self.places["name"].isin(places)]        
-# We use osmnx rather tha pyrosm
-
-
-
-

@@ -3,6 +3,9 @@ from matsim.readers import Network
 import shapely.vectorized
 import geopandas as gpd
 import shapely.geometry as shp
+import logging
+
+logger = logging.getLogger("synpp")
 
 class SpeedCorrector:
     """
@@ -71,24 +74,37 @@ class SpeedCorrector:
 
         return links_centers[["link_id", "municipality_type"]]
     
+    def assign_municipality_types_to_network(self):
+        logger.info("Assigning municipality types to network links...")
+        regions = self.get_regions()            
+        links_types = self.assign_municipality_types(regions)
+        links = self.network.links.copy()
+        links = links.merge(links_types, on="link_id", how="left")
+        links.apply(lambda row: row['attributes'].update({'municipalityType': row['municipality_type']}), axis=1)
+        links = links.drop(columns=["municipality_type"])
+        return links
+
     def run_municipality_type_based_correction(self):
         """        
         This method corrects the free speed of links in the network based on the municipality type they are located in.
         The correction is applied only to car links and only if their free speed is below a specified speed limit.
         The municipality types considered are 'urban', 'suburban', 'rural', and 'outside'.
-        """        
-        regions = self.get_regions()            
-        links_types = self.assign_municipality_types(regions)
-
+        """ 
+        municipality_type_is_assigned = self.network.links['attributes'].apply(lambda attrs: 'municipalityType' in attrs).any()
+        if not municipality_type_is_assigned:
+            logger.info("Municipality types not assigned to links. Assigning now...")
+            self.network.links = self.assign_municipality_types_to_network()
+            
         # Merge the municipality types with the network links
         links = self.network.links.copy()
-        links = links.merge(links_types, on="link_id", how="left")
+        links["municipality_type"] = links['attributes'].apply(lambda attrs: attrs.get('municipalityType', 'outside'))
         car_links = self.network.links.modes.str.contains(r"\bcar\b")
         
         # Apply speed correction if enabled
         if self.context.config("correct_speed"):
             speed_limit_for_correction = self.context.config("speed_limit_for_correction")
             speed_factors = {
+                    "urbancore": self.context.config("speed_factor_urbancore"),
                     "urban": self.context.config("speed_factor_urban"),
                     "suburban": self.context.config("speed_factor_suburban"),
                     "rural": self.context.config("speed_factor_rural"),
@@ -105,9 +121,7 @@ class SpeedCorrector:
                     return row['freespeed']
 
             links.loc[car_links, 'freespeed'] = links[car_links].apply(correct_speed, axis=1)
-
-        # put the municipality_type in the network attributes to be saved (maybe usefull in MATSim)
-        links.apply(lambda row: row['attributes'].update({'municipalityType': row['municipality_type']}), axis=1)
+                
         links = links.drop(columns=["municipality_type"])
         return links
 

@@ -4,10 +4,10 @@ import numpy as np
 import pandas as pd
 
 
-def get_cost(df, context, distance_threshold_km = 10.0):
+def get_cost(df, context, pt_regional_radius_km = 10.0):
     df = df.copy()
     # get the prices dataframe
-    prices = estimate_cost_from_eqasim_java(df, context, distance_threshold_km)
+    prices = estimate_cost_from_eqasim_java(df, context, pt_regional_radius_km)
     prices = prices[["id","price"]]
     prices[["person_id", "trip_id"]] = prices["id"].str.extract(r'([^_]+)_(.+)')
     prices["person_id"] = prices["person_id"].astype(df["person_id"].dtype)
@@ -22,14 +22,14 @@ def get_cost(df, context, distance_threshold_km = 10.0):
     num_nans = f_nan.sum()
     if num_nans>0:
         print(f"{num_nans} trips have no price estimation from the detailed model, using the simple model instead.")
-        df.loc[f_nan, "pt_cost_CHF"] = estimate_simple_cost(df[f_nan], context, distance_threshold_km)
+        df.loc[f_nan, "pt_cost_CHF"] = estimate_simple_cost(df[f_nan], context, pt_regional_radius_km)
     
     return df["pt_cost_CHF"]
 
 
 
 
-def estimate_cost_from_eqasim_java(df, context, distance_threshold_km = 10.0):
+def estimate_cost_from_eqasim_java(df, context, pt_regional_radius_km = 10.0):
     df = df.copy()
     df_persons = context.stage("data.microcensus.persons")
 
@@ -99,7 +99,7 @@ euc_distance = lambda x,y: np.sqrt((x[0]-y[0])**2 + (x[1]-y[1])**2)
 homdistance = lambda x: max(euc_distance((x['home_x'],x['home_y']),(x['origin_x'],x['origin_y'])),
                             euc_distance((x['home_x'],x['home_y']),(x['destination_x'],x['destination_y'])))*1e-3
 
-def estimate_simple_cost(df, context, distance_threshold_km = 10.0):
+def estimate_simple_cost(df, context, pt_regional_radius_km = 10.0):
 
     homeDistance_km = df.apply(homdistance, axis=1)
     in_vehicle_distance_km = df.pt_in_vehicle_distance_km    
@@ -109,7 +109,7 @@ def estimate_simple_cost(df, context, distance_threshold_km = 10.0):
     #### cases with subscriptions, and age
     cost[df["hasHalbtaxSubscription"].fillna(False)] *= 0.5
     cost[df["hasGeneralSubscription"].fillna(False)] = 0.0
-    cost[df["hasRegionalSubscription"].fillna(False) & (homeDistance_km < distance_threshold_km)] = 0.0
+    cost[df["hasRegionalSubscription"].fillna(False) & (homeDistance_km < pt_regional_radius_km)] = 0.0
 
     cost[df["age"]<=6] = 0.0 # (source: https://www.sbb.ch/en/travel-information/individual-needs/travelling-with-children/tickets-travelcards.html#:~:text=The%20Junior%20Travelcard%20enables%20children,a%20valid%20ticket%20or%20travelcard.)
     cost[df["age"]<16] *= 0.5

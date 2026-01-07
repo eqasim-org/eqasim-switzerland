@@ -51,15 +51,16 @@ class WaysHandler(osmium.SimpleHandler):
 
 
 def read_file(osm_file):
+    logger.info(f"  Finding traffic lights is in progress for {osm_file}...")
     handler = NodesHandler()
     handler.apply_file(osm_file)
     
+    logger.info(f"    Found {len(handler.traffic_lights)} traffic lights before filtering in {osm_file}.")
     ways_handler = WaysHandler([n['node_id'] for n in handler.traffic_lights])
     ways_handler.apply_file(osm_file)
-    belong_to_car_road = ways_handler.belong_to_car_road
+    belong_to_car_road = set(ways_handler.belong_to_car_road)
     
-    # Filter traffic lights that belong to car roads
-    logger.info(f"    Found {len(handler.traffic_lights)} traffic lights in {osm_file}.")
+    # Filter traffic lights that belong to car roads    
     handler.traffic_lights = [tl for tl in handler.traffic_lights if tl['node_id'] in belong_to_car_road]
     logger.info(f"    Found {len(handler.traffic_lights)} traffic lights that belong to car roads in {osm_file}.")
     
@@ -87,7 +88,7 @@ def execute(context):
     osm_files = ['%s/osm/%s' % (context.config("data_path"), i) for i in osm_files]
     
     # Process each osm file to add traffic lights
-    processes = min(len(osm_files), 4)    
+    processes = min(len(osm_files), 2)  # Limit to 2 processes to avoid overloading the system
     with Pool(processes=processes) as pool:
         df = list(context.progress(
             pool.imap_unordered(

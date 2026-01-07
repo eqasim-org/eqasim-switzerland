@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 import os
 from shapely import vectorized
+import logging 
 
+logger = logging.getLogger("synpp")
 """
 This stage reads trip data from microcensus and computes modal shares.
 It estimates global shares first, then shares by canton.
@@ -13,6 +15,53 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.swiss_border")
+
+
+def merge_same_trips(context, df):
+    """Merge consecutive legs that represent the same trip for a person.
+
+    Two legs are merged when they belong to the same person, use the same mode
+    and the first leg's ``arrival_time`` equals the next leg's ``departure_time``.
+    Chains of such legs are collapsed together.
+    """
+
+    if df.empty:
+        return df
+
+    # Columns we aggregate differently when merging a chain of legs
+    columns_to_keep_last = ['destination_x', 'destination_y', 'arrival_time', 'purpose', 'activity_duration', 'parking_cost']
+    columns_to_sum = ['crowfly_distance', 'network_distance']
+
+    columns_to_keep_last = [c for c in columns_to_keep_last if c in df.columns]
+    columns_to_sum = [c for c in columns_to_sum if c in df.columns]
+
+    # Ensure deterministic ordering (trip_id is chronological within the person/day)
+    df = df.sort_values(["person_id", "trip_id"]).reset_index(drop=True)
+
+    # Identify whether the current leg should be merged with the previous one.
+    # Using shift(1) correctly handles chains A->B->C: both B and C stay in the same group
+    # because each continues the previous leg.
+    merge_with_prev = (
+        (df["person_id"] == df["person_id"].shift(1)) &
+        (df["mode"] == df["mode"].shift(1)) &
+        (df["mode"] == "car") & 
+        (df["departure_time"] == df["arrival_time"].shift(1))
+    )
+
+    # Start a new group when the current row does NOT merge with the previous one
+    group_id = (~merge_with_prev).cumsum()
+    
+    # Build aggregation map: default to first row, override sums/lasts
+    agg_map = {c: 'first' for c in df.columns}
+    for c in columns_to_sum:
+        agg_map[c] = 'sum'
+    for c in columns_to_keep_last:
+        agg_map[c] = 'last'
+
+    merged = df.groupby(group_id, sort=False, as_index=False).agg(agg_map)
+    logger.info(f"Merged trips: {len(df) - len(merged)}")
+    return merged.reset_index(drop=True)
+
 
 def load_clean_trips(context):
     """
@@ -69,6 +118,8 @@ def load_clean_trips(context):
     within_ch = inside_origin&inside_destination 
     trips = trips[within_ch].reset_index(drop=True)
 
+    # merge same trips
+    # trips = merge_same_trips(context, trips)
     return trips
 
 
