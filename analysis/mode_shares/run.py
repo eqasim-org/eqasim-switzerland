@@ -224,4 +224,30 @@ def execute(context):
     plt.savefig(os.path.join(figures_dir, "mode_shares_by_sex.png"), bbox_inches="tight")
     plt.close()
 
+
+    # plot by purpose
+    fig, ax = plt.subplots(figsize=(11, 5))
+    purpose_ids = sorted(target_mode_shares["purpose"].index.unique())
+    for i, mode in enumerate(MODE_ORDER):
+        color = MODE_COLORS[i]
+        actual = target_mode_shares["purpose"].loc[purpose_ids, mode]
+        simulated = simulated_mode_shares["purpose"].loc[purpose_ids, mode]
+                
+        ax.plot(purpose_ids, actual, color=color, linestyle=DATASET_STYLES["Target"]["linestyle"], 
+                marker=DATASET_STYLES["Target"]["marker"], linewidth=DATASET_STYLES["Target"]["linewidth"], 
+                markersize=DATASET_STYLES["Target"]["markersize"], label=f"{mode} (Microcensus)")
+        ax.plot(purpose_ids, simulated, color=color, linestyle=DATASET_STYLES["Simulated"]["linestyle"], 
+                marker=DATASET_STYLES["Simulated"]["marker"], linewidth=DATASET_STYLES["Simulated"]["linewidth"], 
+                markersize=DATASET_STYLES["Simulated"]["markersize"], label=f"{mode} (MATSim)")
+    ax.set_ylabel("Mode Share", fontsize=13)
+    ax.set_xlabel("Purpose", fontsize=13)
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.2), ncol=5, fontsize=10)
+    plt.tight_layout()
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    _ = plt.xticks(rotation=0, fontsize=12)
+    _ = plt.yticks(rotation=0, fontsize=12)
+    plt.savefig(os.path.join(figures_dir, "mode_shares_by_purpose.png"), bbox_inches="tight")
+    plt.close()
+
+
     return dict(done=True, path=figures_dir)

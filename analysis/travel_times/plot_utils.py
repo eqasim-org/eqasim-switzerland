@@ -73,25 +73,24 @@ def plot_boxplot_by(df, by, value1, value2, title, out_path, xlabel="", figsize=
     df = pd.DataFrame({
         "x": df[value1],
         "y": df[value2],
-        "by": df[by]
+        by: df[by]
     }).copy()
     # valid paired values
     df = df[df["x"].notna() & df["y"].notna()].reset_index(drop=True)
 
     if between is not None:
-        df = df[df["by"].between(between[0], between[1])].reset_index(drop=True)
+        df = df[df[by].between(between[0], between[1])].reset_index(drop=True)
 
     # compute differences
     df["diff"] = (df["y"] - df["x"])/df["x"] * 100  # percentage difference   
 
     fig, ax = plt.subplots(figsize=figsize)
-    df.boxplot(column="diff", by="by", ax=ax, grid=False, patch_artist=True, showfliers=False, 
+    df.boxplot(column="diff", by=by, ax=ax, grid=False, patch_artist=True, showfliers=False, 
                boxprops=dict(facecolor='mediumturquoise', color='navy'), medianprops=dict(color='navy'), 
                whiskerprops=dict(color='navy'), capprops=dict(color='navy'))
     ax.set_ylabel("Difference [%]")
-    ax.set_xlabel(xlabel)  # optional
-    ax.set_title(title)
-    ax.set_title("")  # remove automatic 'Boxplot grouped by ...' title
+    ax.set_xlabel(xlabel)    
+    ax.set_title(title)    
     ax.grid(True, axis='y', linestyle='--', alpha=0.5)        
     ax.yaxis.set_major_locator(ticker.MultipleLocator(10))
 

@@ -25,6 +25,7 @@ def execute(context):
     mode_shares["income"] = mode_shares_analyzer.compute_mode_shares_by("income_class")
     mode_shares["age"]    = mode_shares_analyzer.compute_mode_shares_by("age_class")    
     mode_shares["sex"]    = mode_shares_analyzer.compute_mode_shares_by("sex")    
+    mode_shares["purpose"]    = mode_shares_analyzer.compute_mode_shares_by("purpose")
     
     mode_shares["mode_distance"] = mode_shares_analyzer.compute_mode_distribution_by("distance_bin")
     mode_shares["mode_canton"] = mode_shares_analyzer.compute_mode_distribution_by("canton_id")

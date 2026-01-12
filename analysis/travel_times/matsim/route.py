@@ -16,6 +16,7 @@ def configure(context):
     context.config("simulation_directory", default = "simulation_output")
     context.config("output_prefix", "switzerland_")
     context.config("threads")
+    context.config("router_return_links", default = True)
 
 
 def execute(context):
@@ -68,7 +69,8 @@ def execute(context):
             "--trips-path", path_to_trips,
             "--events-path", path_to_events,
             "--output-path", output_path,
-            "--threads", str(context.config("threads"))
+            "--threads", str(context.config("threads")),
+            "--return-links", str(context.config("router_return_links")).lower()
         ]
     )
     os.chdir(cwd)

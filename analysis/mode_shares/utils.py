@@ -9,6 +9,10 @@ logger = logging.getLogger("synpp")
 class ModeShareAnalyzer:
     distance_bins = [0,451,995,1513,2400,3853,5026,6674,9261,13788,22976,1000000] # in meters  
     age_bins = [0, 17, 25, 35, 50, 65, 100]
+    
+    @staticmethod
+    def set_distance_bins(bins):
+        ModeShareAnalyzer.distance_bins = bins
 
     def __init__(self, context, from_matsim = False):
         self.from_matsim = from_matsim
@@ -29,7 +33,10 @@ class ModeShareAnalyzer:
         trips['distance_bin'] = self.get_distance_bins(trips)
 
         # Define age bins for mode shares distributions
-        trips['age_class'] = self.get_age_bins(trips)                
+        trips['age_class'] = self.get_age_bins(trips)  
+
+        # correct purposes
+        trips["purpose"] = trips["purpose"].str.replace("_secondary", "", regex=False)        
         self.trips = trips
 
     def get_paths_matsim(self, context):
@@ -117,7 +124,7 @@ class ModeShareAnalyzer:
         logger.info("Excluding %d external persons over %d persons from MATSIM data.", external_persons.sum(), len(persons))
         persons = persons[~external_persons]
 
-        trips = pd.read_csv(trips_file, sep=";", dtype={0: str, 1: str}, usecols=["trip_id", "person", "main_mode", "euclidean_distance"])
+        trips = pd.read_csv(trips_file, sep=";", dtype={0: str, 1: str}, usecols=["trip_id", "person", "main_mode", "euclidean_distance","end_activity_type"])
         trips = trips.astype({"person":str})
         trips = trips[trips.person.isin(persons.person)]
         trips = trips[trips.main_mode.isin(["car","car_passenger","pt","bike","walk"])]
@@ -137,6 +144,9 @@ class ModeShareAnalyzer:
         persons['age_class'] = self.get_age_bins(persons)                
         trips = trips.merge(persons[['person','age_class','sex','cantonId','cantonName']], on='person', how='left')
         
+        # purposes
+        trips = trips.rename(columns={"end_activity_type":"purpose"})
+        trips["purpose"] = trips["purpose"].str.replace("_secondary", "", regex=False)
         # nans filter
         #trips = trips[(trips.cantonId.notna()) & (trips.income_class.notna()) & (trips.sex.notna())].reset_index(drop=True)
 
@@ -150,7 +160,7 @@ class ModeShareAnalyzer:
         sex_dict = {"m":0,"f":1}
         trips["sex"] = trips["sex"].str.lower().apply(lambda x: sex_dict.get(x, x))
         trips = trips[["trip_id","person","mode","euclidean_distance_km",
-                       "distance_bin","canton_id","canton_name",
+                       "distance_bin","canton_id","canton_name", "purpose",
                        "income_class","age_class","sex","person_weight"]]
 
         self.trips = trips

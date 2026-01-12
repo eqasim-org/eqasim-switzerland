@@ -23,6 +23,31 @@ def configure(context):
     context.config("distance_bin_km", default=8.0)
     context.config("travel_times_from", default="tomtom")
 
+
+def merge_and_filter_large_differences(df_api, df_matsim):
+    # merge dataframes on identifiers
+    df = pd.merge(df_api, df_matsim, on="identifier", suffixes=('_api', '_matsim'))
+    assert (df["departure_time_matsim"]==df["departure_time_api"]).all(), "Departure times do not match between API and MATSim data"
+    assert (np.abs(df["euclidean_distance_km_api"]-df["euclidean_distance_km_matsim"]) < 1e-3).all(), "Euclidean distances do not match between API and MATSim data"
+
+    # Filter out rows with large distance difference (this might be due to network differences, maybe missing links)
+    distance_diff = np.abs((df["distance_km_api"] - df["distance_km_matsim"])/df["distance_km_api"]) * 100.0
+    distance_diff_threshold = 25.0  # percent
+    n_before = len(df)
+    df = df[distance_diff <= distance_diff_threshold].reset_index(drop=True).copy()
+    n_after = len(df)
+    logger.info(f"Filtered out {n_before - n_after} rows with distance difference > {distance_diff_threshold} %")
+
+    # Filter out rows with high access or egress distances
+    access_egress_threshold_km = 0.2  # km
+    n_before = len(df)
+    df = df[(df["access_distance_km"] <= access_egress_threshold_km) & 
+            (df["egress_distance_km"] <= access_egress_threshold_km)].reset_index(drop=True).copy()
+    n_after = len(df)
+    logger.info(f"Filtered out {n_before - n_after} rows with access/egress distance > {access_egress_threshold_km} km")
+
+    return df
+
 def execute(context):
     # Load data from APIs and MATSim
     dfs_api = context.stage("analysis.travel_times.APIs.get")
@@ -42,26 +67,8 @@ def execute(context):
         os.makedirs(out, exist_ok=True)
         out_folders.append(out)
 
-        # merge dataframes on identifiers
-        df = pd.merge(df_api, df_matsim, on="identifier", suffixes=('_api', '_matsim'))
-        assert (df["departure_time_matsim"]==df["departure_time_api"]).all(), "Departure times do not match between API and MATSim data"
-        assert (np.abs(df["euclidean_distance_km_api"]-df["euclidean_distance_km_matsim"]) < 1e-3).all(), "Euclidean distances do not match between API and MATSim data"
-        
-        # Filter out rows with large distance difference (this might be due to network differences, maybe missing links)
-        distance_diff = np.abs((df["distance_km_api"] - df["distance_km_matsim"])/df["distance_km_api"]) * 100.0
-        distance_diff_threshold = 25.0  # percent
-        n_before = len(df)
-        df = df[distance_diff <= distance_diff_threshold].reset_index(drop=True).copy()
-        n_after = len(df)
-        logger.info(f"Filtered out {n_before - n_after} rows with distance difference > {distance_diff_threshold} %")
-
-        # Filter out rows with high access or egress distances
-        access_egress_threshold_km = 0.2  # km
-        n_before = len(df)
-        df = df[(df["access_distance_km"] <= access_egress_threshold_km) & 
-                (df["egress_distance_km"] <= access_egress_threshold_km)].reset_index(drop=True).copy()
-        n_after = len(df)
-        logger.info(f"Filtered out {n_before - n_after} rows with access/egress distance > {access_egress_threshold_km} m")
+        # Merge and filter large differences
+        df = merge_and_filter_large_differences(df_api, df_matsim)
 
         # Plots
         bin_km = float(context.config("distance_bin_km"))

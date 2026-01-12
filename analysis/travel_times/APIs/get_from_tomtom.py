@@ -125,48 +125,53 @@ def execute(context):
     os.makedirs(output_path, exist_ok=True)
     output_path = os.path.join(output_path, "microcensus_routed_trips.json")
 
-    # read trips
-    df_trips = context.stage("analysis.travel_times.trips.car_trips")    
-    logger.info(f"Loaded {len(df_trips)} car trips to be routed using TomTom API.")
-
-    # Convert coordinates to fro EPSG:2056 to EPSG:4326
-    df_trips["origin_x"], df_trips["origin_y"] = convert_crs( df_trips["origin_x"].values, 
-                                                              df_trips["origin_y"].values, 
-                                                              original_crs="EPSG:2056", 
-                                                              target_crs="EPSG:4326")
-    df_trips["destination_x"], df_trips["destination_y"] = convert_crs( df_trips["destination_x"].values, 
-                                                                        df_trips["destination_y"].values, 
-                                                                        original_crs="EPSG:2056", 
-                                                                        target_crs="EPSG:4326")
-    logger.info("Converted coordinates from EPSG:2056 to EPSG:4326.")
-
-    # check for existing routed data
-    if os.path.exists(output_path):
-        with open(output_path, 'r') as f:
-            existing_routed_data = json.load(f)
-
-        routed_ids = set(existing_routed_data.keys())
-        logger.info(f"Found {len(routed_ids)} already routed trips.")
-    else:
-        existing_routed_data = {}
-        routed_ids = set()
-        logger.info("No existing routed trips found.")
-
-    # filter to remaining trips
-    df_remaining = df_trips[~df_trips['identifier'].isin(routed_ids)]
-    logger.info(f"Remaining trips to route: {len(df_remaining)}")
-
     max_requests = context.config("num_tomtom_requests")
     tomtom_api_key = context.config("tomtom_api_key")
-    if (not df_remaining.empty) and (tomtom_api_key != "") and (max_requests > 0):
-        # route remaining trips using tomtom
-        new_routed_data = route_with_tomtom(df_remaining, tomtom_api_key, max_requests)
-        
-        # update existing data with new data
-        existing_routed_data.update(new_routed_data)
+    if (tomtom_api_key != "") and (max_requests > 0):
+        # read trips
+        df_trips = context.stage("analysis.travel_times.trips.car_trips")    
+        logger.info(f"Loaded {len(df_trips)} car trips to be routed using TomTom API.")
 
-        # save results as json
-        with open(output_path, 'w') as f:
-            json.dump(existing_routed_data, f, indent=4)
+        # Convert coordinates to fro EPSG:2056 to EPSG:4326
+        df_trips["origin_x"], df_trips["origin_y"] = convert_crs( df_trips["origin_x"].values, 
+                                                                df_trips["origin_y"].values, 
+                                                                original_crs="EPSG:2056", 
+                                                                target_crs="EPSG:4326")
+        df_trips["destination_x"], df_trips["destination_y"] = convert_crs( df_trips["destination_x"].values, 
+                                                                            df_trips["destination_y"].values, 
+                                                                            original_crs="EPSG:2056", 
+                                                                            target_crs="EPSG:4326")
+        logger.info("Converted coordinates from EPSG:2056 to EPSG:4326.")
+
+        # check for existing routed data
+        if os.path.exists(output_path):
+            with open(output_path, 'r') as f:
+                existing_routed_data = json.load(f)
+
+            routed_ids = set(existing_routed_data.keys())
+            logger.info(f"Found {len(routed_ids)} already routed trips.")
+        else:
+            existing_routed_data = {}
+            routed_ids = set()
+            logger.info("No existing routed trips found.")
+
+        # filter to remaining trips
+        df_remaining = df_trips[~df_trips['identifier'].isin(routed_ids)]
+        logger.info(f"Remaining trips to route: {len(df_remaining)}")
+
+        if (not df_remaining.empty):
+            # route remaining trips using tomtom
+            new_routed_data = route_with_tomtom(df_remaining, tomtom_api_key, max_requests)
+            
+            # update existing data with new data
+            existing_routed_data.update(new_routed_data)
+
+            # save results as json
+            with open(output_path.replace(".json", "_updated.json"), 'w') as f:
+                json.dump(existing_routed_data, f, indent=4)
+
+            # onces it is successful, replace old file
+            os.replace(output_path.replace(".json", "_updated.json"), output_path)
+            logger.info(f"Saved routed trips to {output_path}. Total routed trips: {len(existing_routed_data)}")
 
     return output_path

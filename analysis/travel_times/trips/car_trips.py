@@ -24,14 +24,14 @@ def execute(context):
     # df_trips = df_trips[~df_trips['person_id'].isin(filterout_ids)]
 
     # remove loop trips
-    df_trips = df_trips[df_trips['crowfly_distance'] > 1000]  # keep trips longer than 1000m
+    df_trips = df_trips[df_trips['crowfly_distance'] > 2000]  # keep trips longer than 2000m
 
     # keep only car trips
     car_trips = df_trips[df_trips['mode'] == 'car']
 
     # keep only within switzerland
-    df_switzerland = context.stage("data.spatial.swiss_border")
-    ch_polygon = df_switzerland.buffer(0).iloc[0] 
+    df_switzerland = context.stage("data.spatial.swiss_border").geometry.simplify(2000).iloc[0]
+    ch_polygon = df_switzerland.buffer(-10_000)  # inward buffer of 10km
     inside_origin = vectorized.contains(ch_polygon, df_trips["origin_x"].values, df_trips["origin_y"].values)
     inside_destination = vectorized.contains(ch_polygon, df_trips["destination_x"].values, df_trips["destination_y"].values)
     df_trips = df_trips[inside_origin&inside_destination]

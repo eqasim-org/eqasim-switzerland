@@ -11,6 +11,7 @@ import geopandas as gpd
 import os
 import contextily as ctx
 from shapely import wkb
+import pyarrow.parquet as pq
 
 def configure(context):
     context.config("data_path")
@@ -25,7 +26,9 @@ def execute(context):
     
     # read data
     df1 = gpd.read_file(counts_data1)
-    df2 = pd.read_parquet(counts_data2)
+
+    # Use pyarrow directly to avoid nanosecond overflow on very large timestamps
+    df2 = pq.read_table(counts_data2).to_pandas(timestamp_as_object=True)
 
     # identify the flow
     df2["flow"] = df2["dtv"]
