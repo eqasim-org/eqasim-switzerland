@@ -5,7 +5,7 @@ import dmc.cost.pt as pt_cost
 import dmc.cost.parking as parking_cost
 import dmc.penalties.parking as parking_penalty
 
-from dmc.data.utils import merge_same_trips
+from dmc.data.utils import merge_same_trips, adjust_weights
 from dmc.constants import constants
 
 import logging
@@ -22,6 +22,7 @@ def configure(context):
     context.stage("calibration.pt_pricing.generate_config")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
+    context.stage("data.spatial.swiss_border")
 
     context.config("car_cost_per_km", constants.CAR_COST_PER_KM) #CHF per km
     context.config("parking_cost_per_hour_CHF_urban", constants.PARKING_COST_PER_HOUR_CHF_URBAN)
@@ -85,24 +86,24 @@ def execute(context):
         df.loc[not_routed, f"{mode}_availability"] = False        
         logger.info(f"{mode} : removing {not_routed.sum()} availabilities")
 
-    pt_unavailability = ((df["pt_in_vehicle_time_min"]<1) | 
+    pt_unavailability = ((df["pt_in_vehicle_time_min"]<0.5) | 
                          (df["pt_in_vehicle_time_min"]>300) |
                          (df["pt_transfers"]>5) |
                          (df["pt_transfer_time_min"]>50) 
                          )
     df.loc[pt_unavailability, "pt_availability"] = False
 
-    car_unavailability = (df["car_travel_time_min"]<1) | (df["car_travel_time_min"]>300)
+    car_unavailability = (df["car_travel_time_min"]<0.5) | (df["car_travel_time_min"]>300)
     df.loc[car_unavailability, "car_availability"] = False        
     df.loc[car_unavailability, "car_passenger_availability"] = False    
 
     small_distance = df.euclidean_distance_km<0.05 #less than 50m
     df.loc[small_distance,["pt_availability","car_availability","car_passenger_availability"]] = False
 
-    bike_unavailability = df.bike_distance_km>20
+    bike_unavailability = df.euclidean_distance_km>=10
     df.loc[bike_unavailability, "bike_availability"] = False    
 
-    walk_unavailability = df.walk_distance_km>5
+    walk_unavailability = df.euclidean_distance_km>=6
     df.loc[walk_unavailability, "walk_availability"] = False    
 
     # compute costs
@@ -165,8 +166,11 @@ def execute(context):
     df = df[~f_remove]
 
     ### remove very short and very long trips
-    out_of_range_distance = ((df.euclidean_distance_km < 0.05) | (df.euclidean_distance_km > 100))
-    df = df[~out_of_range_distance]
+    out_of_range_distance = ((df.euclidean_distance_km < 0.01) | (df.euclidean_distance_km > 100))
+    df = df[~out_of_range_distance].reset_index(drop=True)
+
+    ### adjust weights to match target mode shares
+    df["person_weight"] = adjust_weights(context, df)
 
     ########################### RETURN ################################
     columns = [
@@ -174,7 +178,7 @@ def execute(context):
         "home_municipality", "origin_municipality", "destination_municipality", 
         "destination_work", "origin_home", "destination_home", "destination_education",
         "destination_shopping", "destination_leisure", "destination_other",        
-        "elevation_difference",
+        "elevation_difference", "purpose",
 
         # person
         "age", "sex", "income", "sp_region", "ms_region", "is_car_passenger", "ovgk", 

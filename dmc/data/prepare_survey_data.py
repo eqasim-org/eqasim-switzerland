@@ -65,7 +65,7 @@ def execute(context):
     # 7. merge
     cols = ["person_id","home_x","home_y", "hasGeneralSubscription","hasHalbtaxSubscription","hasRegionalSubscription", "hasJuniorSubscription", 
             "hasGleis7Subscription", "statedPreferenceRegion", 'person_weight', 'age', 'sex', 'driving_license', 'sp_region', 'ms_region', "ovgk",
-            'is_car_passenger', "income", "weekend", "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired", "low_income"]
+            'is_car_passenger', "income", "weekend", "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired", "low_income", "income_class"]
     df_persons = df_persons[cols]    
     df_trips = df_trips.merge(df_persons, on="person_id", how="left")
 
@@ -166,7 +166,7 @@ def execute(context):
             'home_x', 'home_y', 'hasGeneralSubscription', 'hasJuniorSubscription', 'hasGleis7Subscription',
             'hasHalbtaxSubscription', 'hasRegionalSubscription', 'ovgk', 'car_ownership_ratio', "good_pt_service", "medium_pt_service",
             'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','low_income',
-            'driving_license', 'sp_region', 'ms_region', 'is_car_passenger', 'income',
+            'driving_license', 'sp_region', 'ms_region', 'is_car_passenger', 'income', 'income_class',
             'destination_home', 'origin_home', 'destination_work', 'destination_education',
             'destination_shopping', 'destination_leisure', 'destination_other',
             'euclidean_distance_km', 'is_first', 'is_last',

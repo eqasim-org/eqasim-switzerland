@@ -43,11 +43,26 @@ def execute(context):
     filtered_df = filtered_df.rename(columns={"HHNR":"person_id","WEGNR":"trip_id","w_verkehrsmittel":"mode"})
 
     ### Set the right mode (pt, car, walk, bike, car_passenger)
-    MOD_DICT = {**{k: 'pt' for k in [2,3,5,6,7]},
-                **{k: 'car' for k in [9,10]},
-                **{k: 'walk' for k in [15]},
-                **{k: 'bike' for k in [14]},
-                **{k: 'unknown' for k in [-99,17,1,4,8,11,12,13,16]}}
+    MOD_DICT = { # this is taken from Microcensus trips stage
+        -99: "unknown",  # Pseudo stage
+        1: "pt",         # Plane
+        2: "pt",         # Train
+        3: "pt",         # Postauto
+        4: "pt",         # Ship
+        5: "pt",         # Tram
+        6: "pt",         # Bus
+        7: "pt",         # Other PT
+        8: "pt",         # Reisecar (coach)
+        9: "car",        # Car
+        10: "car",       # Truck
+        11: "pt",        # Taxi
+        12: "car",       # Motorbike
+        13: "car",       # Mofa
+        14: "bike",      # Bicycle / E-bike
+        15: "walk",      # Walking
+        16: "bike",      # Machines similar to a vehicle
+        17: "unknown"    # Other / don't know
+    }
     filtered_df["mode"] = filtered_df["mode"].map(MOD_DICT)
 
     for mode, cols in modes_cols.items():    

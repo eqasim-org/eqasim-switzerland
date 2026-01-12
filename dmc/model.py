@@ -91,7 +91,7 @@ def preprocess_data(df, ignore_car_passenger):
     unused_columns = [
         "person_id", "trip_id", "home_municipality", "origin_municipality", 
         "sp_region", "ms_region", "ovgk", "pt_egress_time_min", 
-        "pt_access_time_min", "actual_parking_duration_min", "region_0"
+        "pt_access_time_min", "actual_parking_duration_min", "region_0", "purpose"
     ]
     df = df.drop(columns=unused_columns)
     return df, modes
@@ -164,12 +164,12 @@ def define_variables(database, ignore_car_passenger):
 
 def define_betas(ignore_car_passenger, use_exponents):
     """
-    Note for model developers:
-    To ensure model identifiability and convergence in discrete choice estimation, certain parameters must be fixed and non-estimable. 
-    Failure to do so may result in non-convergence or indeterminate solutions due to parameter redundancy. Specifically, two exponents 
-    are constrained to 1.0 (implying linear utility functions). Additionally, alternative-specific constants (ASCs) are normalized 
-    relative to public transport (PT) as the reference mode. Furthermore, one trip purpose category is fixed as the baseline to 
-    establish relative effects for other purposes.
+        Note for model developers:
+        To ensure model identifiability and convergence in discrete choice estimation, certain parameters must be fixed and non-estimable. 
+        Failure to do so may result in non-convergence or indeterminate solutions due to parameter redundancy. Specifically, two exponents 
+        are constrained to 1.0 (implying linear utility functions). Additionally, alternative-specific constants (ASCs) are normalized 
+        relative to public transport (PT) as the reference mode. Furthermore, one trip purpose category is fixed as the baseline to 
+        establish relative effects for other purposes.
     """
     trainable = 0 if use_exponents else 1
     max_disutility = -2e-3
@@ -177,61 +177,61 @@ def define_betas(ignore_car_passenger, use_exponents):
     max_lambda = 2.0
     betas = {
         # lambdas
-        "lambda_cost_distance": Beta("lambda_cost_distance", -0.1, None, max_disutility, 0),
-        "lambda_cost_income": Beta("lambda_cost_income", -0.05, None, max_disutility, 0),
+        "lambda_cost_distance": Beta("lambda_cost_distance", -0.08, None, max_disutility, 0),
+        "lambda_cost_income": Beta("lambda_cost_income", -0.002, None, max_disutility, 0),
 
-        "lambda_car_travel_time": Beta("lambda_car_travel_time", 1.0, min_lambda, max_lambda, trainable),
-        "lambda_pt_in_vehicle_time": Beta("lambda_pt_in_vehicle_time", 1.0, min_lambda, max_lambda, trainable),
-        "lambda_pt_access_egress_time": Beta("lambda_pt_access_egress_time", 1.0, min_lambda, max_lambda, 1),
-        "lambda_pt_transfers": Beta("lambda_pt_transfers", 1.0, min_lambda, max_lambda, trainable),
-        "lambda_pt_transfer_time": Beta("lambda_pt_transfer_time", 1.0, min_lambda, max_lambda, 1), #doesn't converge
-        "lambda_pt_distance": Beta("lambda_pt_distance", 1.0, min_lambda, max_lambda, 0),
-        "lambda_car_passenger_travel_time": Beta("lambda_car_passenger_travel_time", 1.0, min_lambda, max_lambda, trainable),        
-        "lambda_bike": Beta("lambda_bike", 1.0, min_lambda, max_lambda, trainable),
-        "lambda_walk": Beta("lambda_walk", 1.0, min_lambda, max_lambda, trainable),
+        "lambda_car_travel_time": Beta("lambda_car_travel_time", 0.72 if trainable else 1.0, min_lambda, max_lambda, trainable),
+        "lambda_pt_in_vehicle_time": Beta("lambda_pt_in_vehicle_time", 1.5 if trainable else 1.0, min_lambda, max_lambda, trainable),
+        "lambda_pt_access_egress_time": Beta("lambda_pt_access_egress_time", 0.593 if trainable else 1.0, min_lambda, max_lambda, trainable),
+        "lambda_pt_transfers": Beta("lambda_pt_transfers", 1.187 if trainable else 1.0, min_lambda, max_lambda, trainable),
+        "lambda_pt_transfer_time": Beta("lambda_pt_transfer_time", 1.0 if trainable else 1.0, min_lambda, max_lambda, 1), # doesn't converge
+        "lambda_pt_distance": Beta("lambda_pt_distance", 0.521, min_lambda, max_lambda, 0),
+        "lambda_car_passenger_travel_time": Beta("lambda_car_passenger_travel_time", 0.832 if trainable else 1.0, min_lambda, max_lambda, trainable),        
+        "lambda_bike": Beta("lambda_bike", 0.561 if trainable else 1.0, min_lambda, max_lambda, trainable),
+        "lambda_walk": Beta("lambda_walk", 0.28 if trainable else 1.0, min_lambda, max_lambda, trainable),
 
         # cost
         "beta_cost_CHF": Beta("beta_cost_CHF", -0.12, None, max_disutility, 0),        
 
         # car
-        "beta_car_asc": Beta("beta_car_asc", 0, None, None, 0),
-        "beta_car_travel_time_min": Beta("beta_car_travel_time_min", -0.1, None, max_disutility, 0),        
+        "beta_car_asc": Beta("beta_car_asc", 3.48, None, None, 0),
+        "beta_car_travel_time_min": Beta("beta_car_travel_time_min", -0.964, None, max_disutility, 0),        
 
-        "beta_car_destination_work": Beta("beta_car_destination_work", 0, None, None, 0),
+        "beta_car_destination_work": Beta("beta_car_destination_work", 0.447, None, None, 0),
         "beta_car_destination_home": Beta("beta_car_destination_home", 0, None, None, 1),
-        "beta_car_destination_education": Beta("beta_car_destination_education", 0, None, None, 0),
-        "beta_car_destination_shopping": Beta("beta_car_destination_shopping", 0, None, None, 0),
-        "beta_car_destination_leisure": Beta("beta_car_destination_leisure", 0, None, None, 0),
-        "beta_car_destination_other": Beta("beta_car_destination_other", 0, None, None, 0),
-        "beta_car_origin_home": Beta("beta_car_origin_home", 0, None, None, 0),
+        "beta_car_destination_education": Beta("beta_car_destination_education", -0.596, None, None, 0),
+        "beta_car_destination_shopping": Beta("beta_car_destination_shopping", 0.608, None, None, 0),
+        "beta_car_destination_leisure": Beta("beta_car_destination_leisure", 0.251, None, None, 0),
+        "beta_car_destination_other": Beta("beta_car_destination_other", 0.9, None, None, 0),
+        "beta_car_origin_home": Beta("beta_car_origin_home", 0, None, None, 1), # not significant
 
-        "beta_car_destination_urban": Beta("beta_car_destination_urban", 0, None, None, 0),
-        "beta_car_destination_urbancore": Beta("beta_car_destination_urbancore", 0, None, None, 0),
+        "beta_car_destination_urban": Beta("beta_car_destination_urban", -0.072, None, None, 0),
+        "beta_car_destination_urbancore": Beta("beta_car_destination_urbancore", -1.039, None, None, 0),
         
-        "beta_car_sex": Beta("beta_car_sex", 0, None, None, 0),
-        "beta_car_age": Beta("beta_car_age", 0, None, None, 0),
-        "beta_car_retired": Beta("beta_car_retired", 0, None, None, 0),
-        "beta_car_ownership_ratio": Beta("beta_car_ownership_ratio", 0, None, None, 0),
-        "beta_car_low_income": Beta("beta_car_low_income", 0, None, None, 0),
+        "beta_car_sex": Beta("beta_car_sex", -0.574, None, None, 0),
+        "beta_car_age": Beta("beta_car_age", 0.015, None, None, 0),
+        "beta_car_retired": Beta("beta_car_retired", -0.521, None, None, 0),
+        "beta_car_ownership_ratio": Beta("beta_car_ownership_ratio", -2.25, None, None, 0),
+        "beta_car_low_income": Beta("beta_car_low_income", 0.249, None, None, 0),
 
-        "beta_car_region_1": Beta("beta_car_region_1", 0, None, None, 0),
-        "beta_car_region_2": Beta("beta_car_region_2", 0, None, None, 0),        
+        "beta_car_region_1": Beta("beta_car_region_1", 0.223, None, None, 0),
+        "beta_car_region_2": Beta("beta_car_region_2", -0.467, None, None, 0),        
                 
-        "beta_car_short_distance": Beta("beta_car_short_distance", 0, None, None, 0),
-        "beta_car_long_distance": Beta("beta_car_long_distance", 0, None, None, 0),
+        "beta_car_short_distance": Beta("beta_car_short_distance", 0.321, None, None, 0),
+        "beta_car_long_distance": Beta("beta_car_long_distance", 0.086, None, None, 0),
                 
         # pt
         "beta_pt_asc": Beta("beta_pt_asc", 0, None, None, 1),
-        "beta_pt_access_egress_time_min": Beta("beta_pt_access_egress_time_min", -0.05, None, max_disutility, 0),
-        "beta_pt_in_vehicle_time_min": Beta("beta_pt_in_vehicle_time_min", -0.1, None, max_disutility, 0),        
-        "beta_pt_transfers": Beta("beta_pt_transfers", -0.01, None, max_disutility, 0),
-        "beta_pt_transfer_time_min": Beta("beta_pt_transfer_time_min", -0.01, None, max_disutility, 0),
-        "beta_pt_distance_km": Beta("beta_pt_distance_km", 0, None, None, 0),
+        "beta_pt_access_egress_time_min": Beta("beta_pt_access_egress_time_min", -0.716, None, max_disutility, 0),
+        "beta_pt_in_vehicle_time_min": Beta("beta_pt_in_vehicle_time_min", -0.044, None, max_disutility, 0),        
+        "beta_pt_transfers": Beta("beta_pt_transfers", -0.477, None, max_disutility, 0),
+        "beta_pt_transfer_time_min": Beta("beta_pt_transfer_time_min", -0.0234, None, -0.02, 0),
+        "beta_pt_distance_km": Beta("beta_pt_distance_km", -0.4, -0.5, 0.5, 0), #The aim is just to correct the price
         
         "beta_pt_sex": Beta("beta_pt_sex", 0, None, None, 1),
         "beta_pt_age": Beta("beta_pt_age", 0, None, None, 1),
         "beta_pt_retired": Beta("beta_pt_retired", 0, None, None, 1),
-        "beta_pt_low_income": Beta("beta_pt_low_income", 0, None, None, 1),
+        "beta_pt_low_income": Beta("beta_pt_low_income", 0.026, None, None, 0),
 
         "beta_pt_destination_work": Beta("beta_pt_destination_work", 0, None, None, 1),
         "beta_pt_destination_home": Beta("beta_pt_destination_home", 0, None, None, 1),
@@ -250,88 +250,88 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_pt_short_distance": Beta("beta_pt_short_distance", 0, None, None, 1),
         "beta_pt_long_distance": Beta("beta_pt_long_distance", 0, None, None, 1),
         
-        "beta_pt_good_service": Beta("beta_pt_good_service", 0, None, None, 0),
-        "beta_pt_medium_service": Beta("beta_pt_medium_service", 0, None, None, 0),
+        "beta_pt_good_service": Beta("beta_pt_good_service", 0.685, None, None, 0),
+        "beta_pt_medium_service": Beta("beta_pt_medium_service", 0.196, None, None, 0),
         
         #bike        
-        "beta_bike_asc": Beta("beta_bike_asc", 0, None, None, 0),
-        "beta_bike_travel_time_min": Beta("beta_bike_travel_time_min", -0.05, None, max_disutility, 0),        
+        "beta_bike_asc": Beta("beta_bike_asc", 3.667, None, None, 0),
+        "beta_bike_travel_time_min": Beta("beta_bike_travel_time_min", -2.873, None, max_disutility, 0),        
 
-        "beta_bike_age": Beta("beta_bike_age", 0, None, None, 0),
-        "beta_bike_sex": Beta("beta_bike_sex", 0, None, None, 0),
-        "beta_bike_retired": Beta("beta_bike_retired", 0, None, None, 0),
-        "beta_bike_low_income": Beta("beta_bike_low_income", 0, None, None, 0),
+        "beta_bike_age": Beta("beta_bike_age", 0.02, None, None, 0),
+        "beta_bike_sex": Beta("beta_bike_sex", -0.441, None, None, 0),
+        "beta_bike_retired": Beta("beta_bike_retired", -0.848, None, None, 0),
+        "beta_bike_low_income": Beta("beta_bike_low_income", -0.24, None, None, 0),
 
-        "beta_bike_destination_work": Beta("beta_bike_destination_work", 0, None, None, 0),
-        "beta_bike_destination_home": Beta("beta_bike_destination_home", 0, None, None, 1),
-        "beta_bike_destination_education": Beta("beta_bike_destination_education", 0, None, None, 0),
-        "beta_bike_destination_shopping": Beta("beta_bike_destination_shopping", 0, None, None, 0),
-        "beta_bike_destination_leisure": Beta("beta_bike_destination_leisure", 0, None, None, 0),
-        "beta_bike_destination_other": Beta("beta_bike_destination_other", 0, None, None, 0),
-        "beta_bike_origin_home": Beta("beta_bike_origin_home", 0, None, None, 0),
+        "beta_bike_destination_work": Beta("beta_bike_destination_work", 0, None, None, 1), # not significant
+        "beta_bike_destination_home": Beta("beta_bike_destination_home", 0, None, None, 1), # not significant
+        "beta_bike_destination_education": Beta("beta_bike_destination_education", -0.45, None, None, 0),
+        "beta_bike_destination_shopping": Beta("beta_bike_destination_shopping", -0.353, None, None, 0),
+        "beta_bike_destination_leisure": Beta("beta_bike_destination_leisure", -0.093, None, None, 0),
+        "beta_bike_destination_other": Beta("beta_bike_destination_other", -0.515, None, None, 0),
+        "beta_bike_origin_home": Beta("beta_bike_origin_home", 0.228, None, None, 0),
 
-        "beta_bike_destination_urban": Beta("beta_bike_destination_urban", 0, None, None, 0),
-        "beta_bike_destination_urbancore": Beta("beta_bike_destination_urbancore", 0, None, None, 0),
+        "beta_bike_destination_urban": Beta("beta_bike_destination_urban", -0.32, None, None, 0),
+        "beta_bike_destination_urbancore": Beta("beta_bike_destination_urbancore", -0.655, None, None, 0),
 
-        "beta_bike_region_1": Beta("beta_bike_region_1", 0, None, None, 0),
-        "beta_bike_region_2": Beta("beta_bike_region_2", 0, None, None, 0),
+        "beta_bike_region_1": Beta("beta_bike_region_1", -0.929, None, None, 0),
+        "beta_bike_region_2": Beta("beta_bike_region_2", -0.413, None, None, 0),
 
-        "beta_bike_short_distance": Beta("beta_bike_short_distance", 0, None, None, 0),
-        "beta_bike_long_distance": Beta("beta_bike_long_distance", 0, None, None, 0),
+        "beta_bike_short_distance": Beta("beta_bike_short_distance", 0.429, None, None, 0),
+        "beta_bike_long_distance": Beta("beta_bike_long_distance", -0.743, None, None, 0),
         
         # walk
-        "beta_walk_asc": Beta("beta_walk_asc", 0, None, None, 0),
-        "beta_walk_travel_time_min": Beta("beta_walk_travel_time_min", -0.05, None, max_disutility, 0),
+        "beta_walk_asc": Beta("beta_walk_asc", 10.58, None, None, 0),
+        "beta_walk_travel_time_min": Beta("beta_walk_travel_time_min", -8.164, None, max_disutility, 0),
 
-        "beta_walk_age": Beta("beta_walk_age", 0, None, None, 0),
-        "beta_walk_sex": Beta("beta_walk_sex", 0, None, None, 0),
-        "beta_walk_retired": Beta("beta_walk_retired", 0, None, None, 0),
-        "beta_walk_low_income": Beta("beta_walk_low_income", 0, None, None, 0),
+        "beta_walk_age": Beta("beta_walk_age", 0.007, None, None, 0),
+        "beta_walk_sex": Beta("beta_walk_sex", -0.211, None, None, 0),
+        "beta_walk_retired": Beta("beta_walk_retired", -0.285, None, None, 0),
+        "beta_walk_low_income": Beta("beta_walk_low_income", 0, None, None, 1),
 
-        "beta_walk_destination_work": Beta("beta_walk_destination_work", 0, None, None, 0),
-        "beta_walk_destination_home": Beta("beta_walk_destination_home", 0, None, None, 1),
-        "beta_walk_destination_education": Beta("beta_walk_destination_education", 0, None, None, 0),
-        "beta_walk_destination_shopping": Beta("beta_walk_destination_shopping", 0, None, None, 0),
-        "beta_walk_destination_leisure": Beta("beta_walk_destination_leisure", 0, None, None, 0),
-        "beta_walk_destination_other": Beta("beta_walk_destination_other", 0, None, None, 0),
-        "beta_walk_origin_home": Beta("beta_walk_origin_home", 0, None, None, 0),
+        "beta_walk_destination_work": Beta("beta_walk_destination_work", 0, None, None, 1), # not significant
+        "beta_walk_destination_home": Beta("beta_walk_destination_home", 0, None, None, 1), # not significant
+        "beta_walk_destination_education": Beta("beta_walk_destination_education", -0.181, None, None, 0),
+        "beta_walk_destination_shopping": Beta("beta_walk_destination_shopping", 0.022, None, None, 1), # not significant
+        "beta_walk_destination_leisure": Beta("beta_walk_destination_leisure", 0.354, None, None, 0),
+        "beta_walk_destination_other": Beta("beta_walk_destination_other", 0.111, None, None, 0),
+        "beta_walk_origin_home": Beta("beta_walk_origin_home", 0.198, None, None, 0),
 
-        "beta_walk_destination_urban": Beta("beta_walk_destination_urban", 0, None, None, 0),
-        "beta_walk_destination_urbancore": Beta("beta_walk_destination_urbancore", 0, None, None, 0),
+        "beta_walk_destination_urban": Beta("beta_walk_destination_urban", -0.18, None, None, 0),
+        "beta_walk_destination_urbancore": Beta("beta_walk_destination_urbancore", -0.469, None, None, 0),
 
-        "beta_walk_region_1": Beta("beta_walk_region_1", 0, None, None, 0),
-        "beta_walk_region_2": Beta("beta_walk_region_2", 0, None, None, 0),
+        "beta_walk_region_1": Beta("beta_walk_region_1", 0.241, None, None, 0),
+        "beta_walk_region_2": Beta("beta_walk_region_2", -0.155, None, None, 0),
         
-        "beta_walk_short_distance": Beta("beta_walk_short_distance", 0, None, None, 0),
-        "beta_walk_long_distance": Beta("beta_walk_long_distance", 0, None, None, 1),     
+        "beta_walk_short_distance": Beta("beta_walk_short_distance", 0.606, None, None, 0),
+        "beta_walk_long_distance": Beta("beta_walk_long_distance", 0, None, None, 1),   # not significant  
     }
     if not ignore_car_passenger:
         betas.update({
-            "beta_car_passenger_asc": Beta("beta_car_passenger_asc", 0, None, None, 0),
-            "beta_car_passenger_travel_time_min": Beta("beta_car_passenger_travel_time_min", -0.07, None, max_disutility, 0),
+            "beta_car_passenger_asc": Beta("beta_car_passenger_asc", 0.46, None, None, 0),
+            "beta_car_passenger_travel_time_min": Beta("beta_car_passenger_travel_time_min", -1.27, None, max_disutility, 0),
 
-            "beta_car_passenger_driving_permit": Beta("beta_car_passenger_driving_permit", 0, None, None, 0),
-            "beta_car_passenger_age": Beta("beta_car_passenger_age", 0, None, None, 0),
-            "beta_car_passenger_sex": Beta("beta_car_passenger_sex", 0, None, None, 0),
-            "beta_car_passenger_retired": Beta("beta_car_passenger_retired", 0, None, None, 0),
-            "beta_car_passenger_low_income": Beta("beta_car_passenger_low_income", 0, None, None, 0),
+            "beta_car_passenger_driving_permit": Beta("beta_car_passenger_driving_permit", -0.339, None, None, 0),
+            "beta_car_passenger_age": Beta("beta_car_passenger_age", -0.003, None, None, 0),
+            "beta_car_passenger_sex": Beta("beta_car_passenger_sex", 0.141, None, None, 0),
+            "beta_car_passenger_retired": Beta("beta_car_passenger_retired", 0.249, None, None, 0),
+            "beta_car_passenger_low_income": Beta("beta_car_passenger_low_income", 0, None, None, 1), # not significant
 
-            "beta_car_passenger_destination_work": Beta("beta_car_passenger_destination_work", 0, None, None, 0),
-            "beta_car_passenger_destination_home": Beta("beta_car_passenger_destination_home", 0, None, None, 1),
-            "beta_car_passenger_destination_education": Beta("beta_car_passenger_destination_education", 0, None, None, 0),
-            "beta_car_passenger_destination_shopping": Beta("beta_car_passenger_destination_shopping", 0, None, None, 0),
-            "beta_car_passenger_destination_leisure": Beta("beta_car_passenger_destination_leisure", 0, None, None, 0),
-            "beta_car_passenger_destination_other": Beta("beta_car_passenger_destination_other", 0, None, None, 0),
-            "beta_car_passenger_origin_home": Beta("beta_car_passenger_origin_home", 0, None, None, 0),
+            "beta_car_passenger_destination_work": Beta("beta_car_passenger_destination_work", 0.135, None, None, 0),
+            "beta_car_passenger_destination_home": Beta("beta_car_passenger_destination_home", 0, None, None, 1), # not significant
+            "beta_car_passenger_destination_education": Beta("beta_car_passenger_destination_education", -0.558, None, None, 0),
+            "beta_car_passenger_destination_shopping": Beta("beta_car_passenger_destination_shopping", 0.999, None, None, 0),
+            "beta_car_passenger_destination_leisure": Beta("beta_car_passenger_destination_leisure", 1.276, None, None, 0),
+            "beta_car_passenger_destination_other": Beta("beta_car_passenger_destination_other", 1.01, None, None, 0),
+            "beta_car_passenger_origin_home": Beta("beta_car_passenger_origin_home", 0.0, None, None, 1), # not significant
 
-            "beta_car_passenger_destination_urban": Beta("beta_car_passenger_destination_urban", 0, None, None, 0),
-            "beta_car_passenger_destination_urbancore": Beta("beta_car_passenger_destination_urbancore", 0, None, None, 0),
+            "beta_car_passenger_destination_urban": Beta("beta_car_passenger_destination_urban", -0.146, None, None, 0),
+            "beta_car_passenger_destination_urbancore": Beta("beta_car_passenger_destination_urbancore", -1.097, None, None, 0),
 
-            "beta_car_passenger_region_1": Beta("beta_car_passenger_region_1", 0, None, None, 0),
-            "beta_car_passenger_region_2": Beta("beta_car_passenger_region_2", 0, None, None, 0),
+            "beta_car_passenger_region_1": Beta("beta_car_passenger_region_1", 0.291, None, None, 0),
+            "beta_car_passenger_region_2": Beta("beta_car_passenger_region_2", -0.515, None, None, 0),
 
-            "beta_car_passenger_short_distance": Beta("beta_car_passenger_short_distance", 0, None, None, 0),
-            "beta_car_passenger_long_distance": Beta("beta_car_passenger_long_distance", 0, None, None, 0),            
+            "beta_car_passenger_short_distance": Beta("beta_car_passenger_short_distance", 0.284, None, None, 0),
+            "beta_car_passenger_long_distance": Beta("beta_car_passenger_long_distance", 0.148, None, None, 0),            
         })
     return betas
 
@@ -539,10 +539,8 @@ def execute(context):
                           numberOfThreads= 8,
                           number_of_jobs = 8)
     biogeme.modelName = "DMC_model"
-    biogeme.generate_html = False
-    biogeme.generate_pickle = False
-    biogeme.loadSavedIterations = False
-    biogeme.saveIterations = False
+    biogeme.generate_html = True
+    biogeme.generate_pickle = True
     
     null_loglikelihood = biogeme.calculateNullLoglikelihood(availability)
     result = biogeme.estimate()
@@ -554,13 +552,17 @@ def execute(context):
     # write the optimal parameters to a yaml file in MATSim input format    
     mode_params_path, cost_params_path = writer(context, result).write()
 
-    # Compute the VOT for car users
-    vot_car = vot_utils.get_car_vot(df, result)
-    vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer = vot_utils.get_pt_vot(df, result)
-    weights = df["person_weight"]
+    # write the optimal parameters to a csv file
+    csv_params_path = os.path.join(context.path(), "dmc_model_parameters.csv")
+    result.getEstimatedParameters().to_csv(csv_params_path)
+    logger.info("The estimated parameters are saved to %s", csv_params_path)
 
-    logger.info("The average VOT for car users is %.2f CHF/hour", np.average(vot_car, weights=weights))
-    logger.info("The average VOT for pt users is %.2f CHF/hour", np.average(vot_pt, weights=weights))
+    # Compute the VOT for car users
+    vot_car, mean_vot_car = vot_utils.get_car_vot(context, df, result, MODES)
+    vot_pt, mean_vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer = vot_utils.get_pt_vot(context, df, result, MODES)    
+
+    logger.info("The average VOT for car users is %.2f CHF/hour", mean_vot_car)
+    logger.info("The average VOT for pt users is %.2f CHF/hour", mean_vot_pt)
 
     path_to_figure = os.path.join(context.path(),"vot_distribution.png")
     vot_utils.plot_vot(vot_car, vot_pt, figure_path = path_to_figure)
