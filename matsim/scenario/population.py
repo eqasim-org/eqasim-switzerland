@@ -185,6 +185,35 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
                    "geometry", "destination_id", "following_mode", "municipality_type","municipality_id"]
 
+PERSONS_DTYPES = {
+        "person_id": int,
+        "age": int,
+        "car_availability": int,
+        "employed": bool,
+        "driving_license": bool,
+        "sex": int,
+        "home_x": float,
+        "home_y": float,
+        "subscriptions_ga": bool,
+        "subscriptions_halbtax": bool,
+        "subscriptions_verbund": bool,
+        "subscriptions_strecke": bool,
+        "household_id": int,
+        "is_car_passenger": bool,
+        "statpop_person_id": int,
+        "statpop_household_id": int,
+        "mz_person_id": int,
+        "mz_head_id": int,
+        "has_walk_loop_trip": bool,
+        "has_car_loop_trip": bool,
+        "has_car_passenger_loop_trip": bool,
+        "has_pt_loop_trip": bool,
+        "has_bike_loop_trip": bool,
+        "income_class": int,
+        "person_type": str,
+        "subscriptions_gleis7": bool,
+        "subscriptions_junior": bool,
+    }
 
 def execute(context):
     cache_path    = context.path()
@@ -298,8 +327,10 @@ def execute(context):
         
     df_persons    = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
-    df_vehicles   = df_vehicles[VEHICLE_FIELDS]
-    
+    df_vehicles   = df_vehicles[VEHICLE_FIELDS]    
+    # correct types before saving the data
+    df_persons = df_persons.astype(PERSONS_DTYPES)
+
     person_iterator   = iter(df_persons.itertuples(index = False))
     activity_iterator = iter(df_activities.itertuples(index = False))
     vehicle_iterator  = backlog_iterator(iter(df_vehicles.itertuples(index = False)))

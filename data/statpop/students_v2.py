@@ -253,4 +253,5 @@ def execute(context):
         .to_string(index=False)
     )
 
+    pop_df['canton_id'] = pop_df['canton_id'].astype("int64")
     return pop_df

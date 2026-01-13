@@ -326,7 +326,7 @@ def execute(context):
 
     
     df_source     = df_source.rename(columns={"person_id": "mz_id"})
-    df_source["canton_id"] = df_source["canton_id"].astype(str)
+    df_source["canton_id"] = df_source["canton_id"].astype("int64")
     df_population = context.stage("synthesis.population.sampled")
     print(df_population)
 
