@@ -326,11 +326,23 @@ def execute(context):
 
     
     df_source     = df_source.rename(columns={"person_id": "mz_id"})
+    df_source["canton_id"] = df_source["canton_id"].astype("int64")
     df_population = context.stage("synthesis.population.sampled")
+    print(df_population)
+
+    df_population.loc[:, "employment_status"]                                                                   = 0
+    df_population.loc[df_population["employed"] == 1, "employment_status"]                           = 1
+    df_population.loc[(df_population["employed"] == 3) & (df_population["is_student"] == 1), "employment_status"]                           = 2
+    df_population.loc[(df_population["employed"] == 2) & (df_population["is_student"] == 1), "employment_status"]                           = 2
+    df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"]                           = 3
+    df_population["sex"] = df_population["sex"].astype(np.int64)
+
     df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
     df_population["household_size_class"] = df_population["household_size_class"].clip(upper=2)
-    df_source["N_children_under_12"] = df_source["N_children_under_12"].clip(upper=1)
-    df_population["N_children_under_12"] = df_population["N_children_under_12"].clip(upper=1)
+    df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0) 
+    df_source["sex"] = df_source["sex"].astype(np.int64)
+    #df_source["N_children_under_12"] = df_source["N_children_under_12"].clip(upper=1)
+    #df_population["N_children_under_12"] = df_population["N_children_under_12"].clip(upper=1)
 
     
     if c.census == "statpop":
@@ -344,7 +356,9 @@ def execute(context):
         population_selector  = df_population["age"] >= c.MZ_AGE_THRESHOLD
         population_selector &= df_population["is_head"]
         print(df_source["household_size_class"].unique())
-        columns_household_matching           = ["municipality_type", "ovgk", "household_size_class", "sp_region", "canton_id"]#, "age_class"]
+        ##TODO: add here employment job type
+        #columns_household_matching           = ["municipality_type", "ovgk", "household_size_class", "sp_region", "canton_id"]#, "age_class"]
+        columns_household_matching           = ["municipality_type", "income_class", "household_size_class", "sp_region", "N_children_under_12"]#, "age_class"]
         mandatory_columns_household_matching = columns_household_matching[:3]
 
         df_target, df_population, removed_ids_list = run_statistical_matching_extended(context, 
@@ -367,7 +381,7 @@ def execute(context):
                 "household_id", "mz_id"
             ]],
             df_source[[
-                "mz_id", "income_class", "number_of_cars_class", "number_of_bikes_class"
+                "mz_id", "number_of_cars_class", "number_of_bikes_class"
             ]],
             on = "mz_id"
         )
@@ -392,20 +406,28 @@ def execute(context):
         ## SECOND MATCHING - NORMAL PEOPLE
         df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=1)
         df_source["number_of_cars_class"] = df_source["number_of_cars_class"].clip(upper=1)
+        # for col in df_population.columns:
+        #     print(f"\n=== {col} ===")
+        #     print(df_population[col].dropna().unique())
+        # for col in df_source.columns:
+        #     print(f"\n=== {col} ===")
+        #     print(df_source[col].dropna().unique())
+        # exit()
         population_selector_normal = (df_population["age"] >= c.MZ_AGE_THRESHOLD) & ~(df_population["collective_housing_resident"])
-
-        columns_individual_matching           = ["age_class", "sex", "number_of_cars_class", "N_children_under_12", "canton_id", "sp_region", "ovgk"]
+        # HT and activity-chains are better with canton_id instead of muncipality_type
+        #columns_individual_matching           = ["age_class", "sex", "employment_status", "marital_status", "number_of_cars_class", "canton_id", "sp_region"]
+        columns_individual_matching           = ["age_class", "sex", "employment_status", "marital_status", "number_of_cars_class", "canton_id", "ovgk"]
         mandatory_columns_individual_matching = columns_individual_matching[:4]
 
         print("Second statistical matching starting")
 
         df_target_normal, df_population_normal, removed_ids_list_normal  = run_statistical_matching_extended(context, 
-                                                              df_source, "mz_id", "household_weight",
+                                                              df_source, "mz_id", "person_weight",
                                                               df_population.copy(), "person_id",
                                                               columns_individual_matching, mandatory_columns_individual_matching,
                                                               minimum_observations = context.config("matching_minimum_observations"), 
                                                               population_selector = population_selector_normal,
-                                                              option = "household")
+                                                              option = "person")
         
         # Extract only the matching information
 

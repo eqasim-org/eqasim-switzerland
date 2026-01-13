@@ -7,13 +7,13 @@ This stage fuses sampled census data with microcensus data.
 
 
 def configure(context):
-    context.stage("synthesis.population.matched")
+    context.stage("synthesis.population.matched_v2")
     context.stage("synthesis.population.sampled")
     context.stage("data.microcensus.persons")
     context.stage("data.constants")
 
 def execute(context):
-    df_matched, unmatched_ids = context.stage("synthesis.population.matched")
+    df_matched, unmatched_ids = context.stage("synthesis.population.matched_v2")
     df_sampled                = context.stage("synthesis.population.sampled")
     df_mz                     = context.stage("data.microcensus.persons")
     c                         = context.stage("data.constants")
@@ -28,14 +28,14 @@ def execute(context):
         # Attach household attributes through head of household
         df_mz["mz_head_id"] = df_mz[["person_id"]]
         df_persons = pd.merge(df_persons,
-                            df_mz[["mz_head_id", "income_class", "number_of_cars_class", "number_of_bikes_class"]],
+                            df_mz[["mz_head_id", "number_of_cars_class", "number_of_bikes_class"]],
                             on="mz_head_id")
 
         # Attach person attributes
         df_mz["mz_person_id"] = df_mz[["person_id"]]
         df_persons = pd.merge(df_persons,
                             df_mz[["mz_person_id", "driving_license",
-                                    "car_availability", "employed",
+                                    "car_availability",# "employed",
                                     "subscriptions_ga",
                                     "subscriptions_halbtax",
                                     "subscriptions_verbund",
@@ -53,7 +53,7 @@ def execute(context):
         # Reset children
         children_selector = df_persons["age"] < c.MZ_AGE_THRESHOLD
         df_persons.loc[children_selector, "driving_license"]  = False
-        df_persons.loc[children_selector, "employed"]         = False
+        #df_persons.loc[children_selector, "employed"]         = False
         df_persons.loc[children_selector, "marital_status"]   = c.MARITAL_STATUS_SINGLE
         df_persons.loc[children_selector, "car_availability"] = c.CAR_AVAILABILITY_NEVER
 

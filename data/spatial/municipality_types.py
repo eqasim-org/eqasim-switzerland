@@ -31,6 +31,7 @@ def execute(context):
     df_types.loc[df_types["TYP"] == 0, "municipality_type"] = "rural"
 
     df_types["municipality_type"] = df_types["municipality_type"].astype("category")
+    
     df_types = df_types[["municipality_id", "municipality_type"]]
 
     # Match by municipality_id
