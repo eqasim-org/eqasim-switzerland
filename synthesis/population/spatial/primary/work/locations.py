@@ -10,6 +10,9 @@ def configure(context):
     context.stage("data.spatial.zones")
     context.stage("data.spatial.zone_shapes")
     context.stage("synthesis.population.spatial.primary.work.zones")
+
+    if context.config("include_cross_border"):
+        context.stage("data.cross_border.destinations")
     
     context.config("random_seed")
 
@@ -17,6 +20,21 @@ def configure(context):
 def execute(context):
     df = context.stage("synthesis.population.spatial.primary.work.zones")
     df_statent = context.stage("data.statent.statent")
+
+    if context.config("include_cross_border"):
+        destinations_cb         = context.stage("data.cross_border.destinations")
+        destinations_cb_commute = destinations_cb[destinations_cb["trip_purpose"]=="work"]
+
+        nb_empl_cb = destinations_cb_commute.groupby("destination_id")["cross_border_person_id"].count().reset_index()
+        nb_empl_cb.columns = ["enterprise_id", "nb_employees_crossborder"]
+        nb_empl_cb["enterprise_id"] = nb_empl_cb["enterprise_id"].astype(int)
+
+        df_statent = df_statent.merge(nb_empl_cb, on = "enterprise_id", how="left")
+        df_statent["nb_employees_crossborder"] = df_statent["nb_employees_crossborder"].fillna(0).astype(int)
+
+        df_statent["number_employees"] = (df_statent["number_employees"] - df_statent["nb_employees_crossborder"]).clip(lower = 0)
+
+        del df_statent["nb_employees_crossborder"]
 
     df_zones = context.stage("data.spatial.zones")
     df_zones["work_zone_id"] = df_zones["zone_id"]
@@ -46,6 +64,7 @@ def execute(context):
             df.loc[f, "work_x"] = df_statent.iloc[indices]["x"].values
             df.loc[f, "work_y"] = df_statent.iloc[indices]["y"].values
             df.loc[f, "work_location_id"] = df_statent.iloc[indices]["enterprise_id"].values
+            
         else:
             empty_zones.append(zone_id)
     
@@ -71,6 +90,7 @@ def execute(context):
                 pass
         else:
             empty_zones.append(zone_id)
+
     print("Found %d zones which do not have any samples in STATENT" % len(empty_zones))
     # In case there are empty zones we sample randomly from that zone
 
