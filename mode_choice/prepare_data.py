@@ -37,14 +37,19 @@ def execute(context):
     # lead persons and convert to polars DataFrame
     logger.info("\t Loading persons...")
     persons = context.stage("mode_choice.trips.prepare_persons")[
-        ["person_id","age","sex","region","driving_license","income"]]
+        ["person_id","age","sex","region","driving_license","income",
+         "car_ownership_ratio", "good_pt_service", "medium_pt_service", "is_retired",]]
     persons = pl.from_pandas(persons).with_columns([
         pl.col("person_id").cast(pl.Int64),
         pl.col("age").cast(pl.Int8),
         pl.col("sex").cast(pl.Int8),
         pl.col("region").cast(pl.Int8),
         pl.col("driving_license").cast(pl.Int8),
-        pl.col("income").cast(pl.Float32)
+        pl.col("income").cast(pl.Float32),
+        pl.col("car_ownership_ratio").cast(pl.Float32),
+        pl.col("good_pt_service").cast(pl.Int8),
+        pl.col("medium_pt_service").cast(pl.Int8),
+        pl.col("is_retired").cast(pl.Int8)
     ])
     
     # load tours and convert to polars DataFrame
@@ -100,7 +105,9 @@ def execute(context):
         pl.when(pl.col("euclidean_distance_km") < SHORT_DISTANCE_LIMIT_KM).then(1).otherwise(0.).cast(pl.Int8).alias("short_distance"),
         pl.when(pl.col("euclidean_distance_km") > LONG_DISTANCE_LIMIT_KM).then(1).otherwise(0.).cast(pl.Int8).alias("long_distance"),
         pl.when(pl.col("destination_municipality") == "urban").then(1).otherwise(0.).cast(pl.Int8).alias("urban_destination"),
+        pl.when(pl.col("destination_municipality") == "urbancore").then(1).otherwise(0.).cast(pl.Int8).alias("urbancore_destination"),
         pl.when(pl.col("destination_municipality") == "suburban").then(1).otherwise(0.).cast(pl.Int8).alias("suburban_destination"),
+        pl.when(pl.col("destination_municipality") == "rural").then(1).otherwise(0.).cast(pl.Int8).alias("rural_destination"),
         pl.when(pl.col("following_purpose") == "work").then(1).otherwise(0.).cast(pl.Int8).alias("destination_work"),
         pl.when(pl.col("following_purpose") == "other").then(1).otherwise(0.).cast(pl.Int8).alias("destination_other"),
         pl.when(pl.col("following_purpose") == "leisure").then(1).otherwise(0.).cast(pl.Int8).alias("destination_leisure"),
@@ -109,8 +116,9 @@ def execute(context):
         pl.when(pl.col("departure_time").is_between(WORKING_HOURS[0]*3600, WORKING_HOURS[1]*3600)).then(1).otherwise(0.).cast(pl.Int8).alias("working_hour"),
         pl.col("euclidean_distance_km").cast(pl.Float32)        
     ]).select([
-        "trip_id", "origin_home", "short_distance", "long_distance", "urban_destination", "suburban_destination", "working_hour",
-        "destination_work", "destination_other", "destination_leisure", "destination_home", "destination_education", "euclidean_distance_km"
+        "trip_id", "origin_home", "short_distance", "long_distance", "urban_destination", "urbancore_destination", "suburban_destination",
+        "rural_destination", "working_hour", "destination_work", "destination_other", "destination_leisure", "destination_home", 
+        "destination_education", "euclidean_distance_km"
     ])
     
     return dict(      

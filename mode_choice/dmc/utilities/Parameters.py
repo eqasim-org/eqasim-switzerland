@@ -35,11 +35,14 @@ class Parameters(ABC):
         betaLongDistance_u: float = 0.0
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
+        betaUrbancoreDestination_u: float = 0.0
+        betaRuralDestination_u: float = 0.0
         betaDestinationOther_u: float = 0.0
         betaDestinationLeisure_u: float = 0.0
         betaDestinationEducation_u: float = 0.0
         betaDestinationHome_u: float = 0.0
         betaWorkingHour_u: float = 0.0
+        betaIsRetired_u: float = 0.0
 
     class car:
         alpha_u: float = 0.0
@@ -54,6 +57,8 @@ class Parameters(ABC):
         betaOriginHome_u: float = 0.0
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
+        betaUrbancoreDestination_u: float = 0.0
+        betaRuralDestination_u: float = 0.0
         betaShortDistance_u: float = 0.0
         betaLongDistance_u: float = 0.0
         betaDestinationOther_u: float = 0.0
@@ -62,10 +67,13 @@ class Parameters(ABC):
         betaDestinationHome_u: float = 0.0
         betaDrivingLicense_u: float = 0.0
         betaWorkingHour_u: float = 0.0
+        betaIsRetired_u: float = 0.0
+        betaCarOwnershipRatio_u: float = 0.0
 
 
     class parking:
         urbanParkingSearchDuration_min: float = 0.0
+        urbancoreParkingSearchDuration_min: float = 0.0
         suburbanParkingSearchDuration_min: float = 0.0
 
     class pt:
@@ -91,6 +99,8 @@ class Parameters(ABC):
         betaOriginHome_u: float = 0.0
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
+        betaUrbancoreDestination_u: float = 0.0
+        betaRuralDestination_u: float = 0.0
         betaShortDistance_u: float = 0.0
         betaLongDistance_u: float = 0.0
         betaDestinationOther_u: float = 0.0
@@ -98,6 +108,11 @@ class Parameters(ABC):
         betaDestinationEducation_u: float = 0.0
         betaDestinationHome_u: float = 0.0
         betaWorkingHour_u: float = 0.0
+        betaIsRetired_u: float = 0.0
+        betaGoodService_u: float = 0.0
+        betaMediumService_u: float = 0.0
+        betaContainsRail_u: float = 0.0
+        betaContainsBus_u: float = 0.0
 
     class walk:
         alpha_u: float = 0.0
@@ -113,11 +128,14 @@ class Parameters(ABC):
         betaLongDistance_u: float = 0.0
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
+        betaUrbancoreDestination_u: float = 0.0
+        betaRuralDestination_u: float = 0.0
         betaDestinationOther_u: float = 0.0
         betaDestinationLeisure_u: float = 0.0
         betaDestinationEducation_u: float = 0.0
         betaDestinationHome_u: float = 0.0
         betaWorkingHour_u: float = 0.0
+        betaIsRetired_u: float = 0.0
 
     class cp:
         alpha_u: float = 0.0
@@ -134,6 +152,8 @@ class Parameters(ABC):
         betaOriginHome_u: float = 0.0
         betaDestinationWork_u: float = 0.0
         betaUrbanDestination_u: float = 0.0
+        betaUrbancoreDestination_u: float = 0.0
+        betaRuralDestination_u: float = 0.0
         betaDrivingLicense_u: float = 0.0
         betaShortDistance_u: float = 0.0
         betaLongDistance_u: float = 0.0
@@ -142,6 +162,7 @@ class Parameters(ABC):
         betaDestinationEducation_u: float = 0.0
         betaDestinationHome_u: float = 0.0
         betaWorkingHour_u: float = 0.0
+        betaIsRetired_u: float = 0.0
 
     class cost:        
         betaCost_u_MU: float = 0
@@ -149,6 +170,7 @@ class Parameters(ABC):
         lambdaCostIncome: float = 0
         referenceIncome: float = 0
         referenceEuclideanDistance_km: float = 0
+        travelTimeFactor: float = 1.0
 
     @classmethod
     def to_yaml(cls, file_path: str):        

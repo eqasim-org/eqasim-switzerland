@@ -17,11 +17,11 @@ class Defaults:
     MODE_CONTINUITY = set([MODE_CAR, MODE_BIKE])
 
     # default thresholds (Euclidean distance) (km)
-    DEFAULT_WALK_THRESHOLD_KM = 4.5 # quantile 99% of all walk trips in microcensus (euclidean distance)
+    DEFAULT_WALK_THRESHOLD_KM = 5 # quantile 99% of all walk trips in microcensus (euclidean distance)
     DEFAULT_BIKE_THRESHOLD_KM = 11 # quantile 99% of all bike trips in microcensus (euclidean distance)
-    DEFAULT_CAR_MIN_THRESHOLD_KM = 0.15
-    DEFAULT_PT_MIN_THRESHOLD_KM = 0.15
-    DEFAULT_PASSENGER_MIN_THRESHOLD_KM = 0.15
+    DEFAULT_CAR_MIN_THRESHOLD_KM = 0.1
+    DEFAULT_PT_MIN_THRESHOLD_KM = 0.1
+    DEFAULT_PASSENGER_MIN_THRESHOLD_KM = 0.1
 
     # speeds and distance factors
     DEFAULT_WALK_SPEED_M_PER_S = 1.3  
@@ -45,11 +45,13 @@ class Defaults:
     
     # car cost parameters
     CAR_COST_PER_KM = 0.26  # CHF per km
-    CAR_COST_MODEL = "simple"  # "simple" or "weiss"
+    CAR_COST_MODEL = "weiss"  # "simple" or "weiss"
     
     # parking
+    PARKING_COST_PER_HOUR_URBANCORE = 1.5  # CHF per hour
     PARKING_COST_PER_HOUR_URBAN = 1.0  # CHF per hour
     PARKING_COST_PER_HOUR_SUBURBAN = 0.5  # CHF per hour
+    PARKING_SEARCH_MIN_URBANCORE = 3.0  # minutes
     PARKING_SEARCH_MIN_URBAN = 2.0  # minutes
     PARKING_SEARCH_MIN_SUBURBAN = 1.0  # minutes
 
@@ -71,7 +73,7 @@ class Defaults:
     USE_SKIM_MATRICES = False
     
     # model estimation data
-    MERGE_TRIPS_THAT_MIGHT_BE_SAME_TRIP = True
+    MERGE_TRIPS_THAT_MIGHT_BE_SAME_TRIP = False
 
 def configure(context):
     pass

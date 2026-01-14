@@ -1,3 +1,4 @@
 class constants:
     REF_EUCLIDEAN_DISTANCE_KM = 15.0
     REF_INCOME_CHF = 6000.0
+    TRAVEL_TIME_FACTOR = 10.0    

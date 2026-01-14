@@ -20,9 +20,11 @@ class writer:
         # interactions reference values
         params_dict["referenceIncome"] = constants.REF_INCOME_CHF
         params_dict["referenceEuclideanDistance_km"] = constants.REF_EUCLIDEAN_DISTANCE_KM
+        params_dict["travelTimeFactor"] = constants.TRAVEL_TIME_FACTOR
         # parking informations
         params_dict["parking.urbanParkingSearchDuration_min"] = self.context.config("urban_parking_search_min")
         params_dict["parking.suburbanParkingSearchDuration_min"] = self.context.config("suburban_parking_search_min")
+        params_dict["parking.urbancoreParkingSearchDuration_min"] = self.context.config("urbancore_parking_search_min")
         # set the rest to 0 and 1 for exponents
         params_dict = self.set_the_rest_to_zeros(params_dict)
 
@@ -84,11 +86,14 @@ NAMES_CONVERSION = {
     'beta_bike_long_distance': 'bike.betaLongDistance_u',
     'beta_bike_work_destination': 'bike.betaDestinationWork_u',
     'beta_bike_urban_destination': 'bike.betaUrbanDestination_u',
+    'beta_bike_urbancore_destination': 'bike.betaUrbancoreDestination_u',
+    'beta_bike_rural_destination': 'bike.betaRuralDestination_u',
     'beta_bike_destination_other': 'bike.betaDestinationOther_u',
     'beta_bike_destination_leisure': 'bike.betaDestinationLeisure_u',
     'beta_bike_destination_education': 'bike.betaDestinationEducation_u',
     'beta_bike_destination_home': 'bike.betaDestinationHome_u',
     'beta_bike_working_hour': 'bike.betaWorkingHour_u',
+    'beta_bike_is_retired': 'bike.betaIsRetired_u',
 
     # Car
     'beta_car_asc': 'car.alpha_u',
@@ -102,6 +107,8 @@ NAMES_CONVERSION = {
     'beta_car_region_3': 'car.betaRegion2_u', 
     'beta_car_origin_home': 'car.betaOriginHome_u',
     'beta_car_urban_destination': 'car.betaUrbanDestination_u',
+    'beta_car_urbancore_destination': 'car.betaUrbancoreDestination_u',
+    'beta_car_rural_destination': 'car.betaRuralDestination_u',
     'beta_car_work_destination': 'car.betaDestinationWork_u',
     'beta_car_short_distance': 'car.betaShortDistance_u',
     'beta_car_long_distance': 'car.betaLongDistance_u',
@@ -110,6 +117,8 @@ NAMES_CONVERSION = {
     'beta_car_destination_education': 'car.betaDestinationEducation_u',
     'beta_car_destination_home': 'car.betaDestinationHome_u',
     'beta_car_working_hour': 'car.betaWorkingHour_u',
+    'beta_car_ownership_ratio': 'car.betaCarOwnershipRatio_u',
+    'beta_car_is_retired': 'car.betaIsRetired_u',
 
     # Car Passenger
     'beta_car_passenger_asc': 'cp.alpha_u',
@@ -121,6 +130,8 @@ NAMES_CONVERSION = {
     'beta_car_passenger_region_3': 'cp.betaRegion2_u',
     'beta_car_passenger_origin_home': 'cp.betaOriginHome_u',
     'beta_car_passenger_urban_destination': 'cp.betaUrbanDestination_u',
+    'beta_car_passenger_urbancore_destination': 'cp.betaUrbancoreDestination_u',
+    'beta_car_passenger_rural_destination': 'cp.betaRuralDestination_u',
     'beta_car_passenger_work_destination': 'cp.betaDestinationWork_u',
     'beta_car_passenger_driving_permit': 'cp.betaDrivingLicense_u',
     'beta_car_passenger_short_distance': 'cp.betaShortDistance_u',
@@ -130,6 +141,7 @@ NAMES_CONVERSION = {
     'beta_car_passenger_destination_education': 'cp.betaDestinationEducation_u',
     'beta_car_passenger_destination_home': 'cp.betaDestinationHome_u',
     'beta_car_passenger_working_hour': 'cp.betaWorkingHour_u',
+    'beta_car_passenger_is_retired': 'cp.betaIsRetired_u',
 
     # PT
     'beta_pt_asc': 'pt.alpha_u',
@@ -152,6 +164,8 @@ NAMES_CONVERSION = {
     'beta_pt_origin_home': 'pt.betaOriginHome_u',
     'beta_pt_work_destination': 'pt.betaDestinationWork_u',
     'beta_pt_urban_destination': 'pt.betaUrbanDestination_u',
+    'beta_pt_urbancore_destination': 'pt.betaUrbancoreDestination_u',
+    'beta_pt_rural_destination': 'pt.betaRuralDestination_u',
     'beta_pt_short_distance': 'pt.betaShortDistance_u',
     'beta_pt_long_distance': 'pt.betaLongDistance_u',
     'beta_pt_destination_other': 'pt.betaDestinationOther_u',
@@ -159,6 +173,11 @@ NAMES_CONVERSION = {
     'beta_pt_destination_education': 'pt.betaDestinationEducation_u',
     'beta_pt_destination_home': 'pt.betaDestinationHome_u',
     'beta_pt_working_hour': 'pt.betaWorkingHour_u',
+    'beta_pt_good_service': 'pt.betaGoodService_u',
+    'beta_pt_medium_service': 'pt.betaMediumService_u',
+    'beta_pt_is_retired': 'pt.betaIsRetired_u',
+    'beta_pt_contains_rail': 'pt.betaContainsRail_u',
+    'beta_pt_contains_bus': 'pt.betaContainsBus_u',
 
     # Walk
     'beta_walk_asc': 'walk.alpha_u',
@@ -171,6 +190,8 @@ NAMES_CONVERSION = {
     'beta_walk_origin_home': 'walk.betaOriginHome_u',    
     'beta_walk_work_destination': 'walk.betaDestinationWork_u',
     'beta_walk_urban_destination': 'walk.betaUrbanDestination_u',
+    'beta_walk_urbancore_destination': 'walk.betaUrbancoreDestination_u',
+    'beta_walk_rural_destination': 'walk.betaRuralDestination_u',
     'beta_walk_short_distance': 'walk.betaShortDistance_u',
     'beta_walk_long_distance': 'walk.betaLongDistance_u',
     'beta_walk_destination_other': 'walk.betaDestinationOther_u',
@@ -178,6 +199,7 @@ NAMES_CONVERSION = {
     'beta_walk_destination_education': 'walk.betaDestinationEducation_u',
     'beta_walk_destination_home': 'walk.betaDestinationHome_u',
     'beta_walk_working_hour': 'walk.betaWorkingHour_u',
+    'beta_walk_is_retired': 'walk.betaIsRetired_u',
 
     # Cost
     'beta_cost_CHF': 'betaCost_u_MU',

@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from mode_choice.dmc_defaults import Defaults
-
+from .utils import adjust_weights
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -12,6 +12,9 @@ def configure(context):
     context.stage("mode_choice.estimate_model.data.survey_data")
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
+    context.stage("data.spatial.swiss_border")
+    context.stage("data.spatial.municipality_types")
+    context.stage("data.spatial.municipalities")
     context.stage("data.constants")
     context.stage("mode_choice.dmc_defaults")
     context.config("only_from_home_trips", default=False)
@@ -22,7 +25,8 @@ def execute(context):
         "person_id", "trip_id", "person_weight", "mode", "income", "region", "age", "sex", "driving_license",
         "origin_home", "destination_work", "destination_other", "destination_leisure", "destination_education",
         "departure_time", 'home_municipality', 'origin_municipality', 'destination_municipality', 'destination_home',
-        'is_car_passenger', 'working_hour'
+        'is_car_passenger', 'working_hour', "car_ownership_ratio", "good_pt_service", "medium_pt_service", 
+        "is_retired", "purpose","income_class"
     ]]      
 
     # merge the two dataframes on person_id and trip_id
@@ -77,7 +81,7 @@ def execute(context):
     logger.info(f"There are {len(df)} trips after removing trips with selected but not available modes.")
 
     ### remove very short and very long trips
-    out_of_range_distance = ((df.euclidean_distance_km < 0.01) | (df.euclidean_distance_km > 200))
+    out_of_range_distance = ((df.euclidean_distance_km < 0.01) | (df.euclidean_distance_km > 100))
     df = df[~out_of_range_distance]
     logger.info(f"There are {len(df)} trips after removing very short and very long trips.")
 
@@ -85,12 +89,16 @@ def execute(context):
     df = df[df.isna().sum(axis=1)==0].reset_index(drop=True)
     logger.info(f"There are {len(df)} trips after removing trips with nan values.")
 
+    ### adjust weights to match target mode shares
+    df["person_weight"] = adjust_weights(context, df)
+
     ########################### RETURN ################################
     columns = [
         "person_id", "trip_id", "person_weight", "mode", "euclidean_distance_km","working_hour",
         "home_municipality", "origin_municipality", "destination_municipality", "destination_education",
         "destination_work", "destination_other", "destination_leisure", "origin_home","destination_home",
-
+        "car_ownership_ratio", "good_pt_service", "medium_pt_service", "is_retired",
+        
         # person
         "age", "sex", "income", "region", "is_car_passenger", "driving_license",
         
@@ -104,7 +112,8 @@ def execute(context):
         'bike_distance_km', 'bike_travel_time_min',
         
         # PT variables
-        'pt_access_egress_time_min', 'pt_waiting_time_min', 'pt_transfers', 'pt_in_vehicle_time_min', 'pt_distance_km', 'pt_cost_CHF',
+        'pt_access_egress_time_min', 'pt_waiting_time_min', 'pt_transfers', 'pt_in_vehicle_time_min', 'pt_distance_km', 
+        'pt_cost_CHF', 'pt_contains_rail', 'pt_contains_bus',
         
         # Car variables
         'car_travel_time_min', 'car_access_egress_time_min', 'car_distance_km', 'car_cost_CHF', 'parking_cost_CHF', 'parking_searching_duration_min',

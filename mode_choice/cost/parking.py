@@ -7,15 +7,18 @@ def configure(context):
     context.stage("mode_choice.dmc_defaults")
     
     context.config("parking_cost_per_hour_CHF_urban", Defaults.PARKING_COST_PER_HOUR_URBAN) #CHF per hour
+    context.config("parking_cost_per_hour_CHF_urbancore", Defaults.PARKING_COST_PER_HOUR_URBANCORE) #CHF per hour
     context.config("parking_cost_per_hour_CHF_suburban", Defaults.PARKING_COST_PER_HOUR_SUBURBAN) #CHF per hour
 
 
 def parking_cost(context, df):
     parking_cost_per_hour_CHF_urban = context.config("parking_cost_per_hour_CHF_urban")
     parking_cost_per_hour_CHF_suburban = context.config("parking_cost_per_hour_CHF_suburban")
+    parking_cost_per_hour_CHF_urbancore = context.config("parking_cost_per_hour_CHF_urbancore")
     # situations
     destination_urban = df.destination_municipality=="urban"
     destination_suburban = df.destination_municipality=="suburban"
+    destination_urbancore = df.destination_municipality=="urbancore"
     if "following_purpose" in df.columns:
         destination_home = df.following_purpose=="home"
     else:
@@ -24,10 +27,14 @@ def parking_cost(context, df):
     # compute parking cost
     parking_cost = np.zeros(len(df))
     pay_parking_urban    = destination_urban & (~destination_home) & (df["parking_duration_min"]>60)
+    pay_parking_urbancore= destination_urbancore & (~destination_home) & (df["parking_duration_min"]>60)
     pay_parking_suburban = destination_suburban & (~destination_home) & (df["parking_duration_min"]>60)
 
-    parking_cost[pay_parking_urban]    = (df["parking_duration_min"][pay_parking_urban]/60.0) * parking_cost_per_hour_CHF_urban
-    parking_cost[pay_parking_suburban] = (df["parking_duration_min"][pay_parking_suburban]/60.0) * parking_cost_per_hour_CHF_suburban    
+    parking_duration_to_pay_h = df["parking_duration_min"]/60.0 - 1.0  # first hour free
+    
+    parking_cost[pay_parking_urban]    = (parking_duration_to_pay_h[pay_parking_urban]) * parking_cost_per_hour_CHF_urban
+    parking_cost[pay_parking_urbancore] = (parking_duration_to_pay_h[pay_parking_urbancore]) * parking_cost_per_hour_CHF_urbancore
+    parking_cost[pay_parking_suburban] = (parking_duration_to_pay_h[pay_parking_suburban]) * parking_cost_per_hour_CHF_suburban    
     
     return np.clip(parking_cost, 0, 40)
 

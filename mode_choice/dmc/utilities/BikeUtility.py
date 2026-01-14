@@ -27,7 +27,7 @@ class BikeUtility(BaseUtility):
         
         utility = (
             BaseUtility.bike.alpha_u
-            + BaseUtility.bike.betaTravelTime_u_min * pl.col("travel_time_min").pow(BaseUtility.bike.travelTimeExponent) 
+            + BaseUtility.bike.betaTravelTime_u_min * (pl.col("travel_time_min") / BaseUtility.cost.travelTimeFactor).pow(BaseUtility.bike.travelTimeExponent) 
             + BaseUtility.bike.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 17)
             + BaseUtility.bike.betaSex_u * pl.col("sex")
             + BikeUtility.estimateRegionalUtility()
@@ -35,12 +35,15 @@ class BikeUtility(BaseUtility):
             + BaseUtility.bike.betaShortDistance_u * pl.col("short_distance")
             + BaseUtility.bike.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.bike.betaUrbanDestination_u * pl.col("urban_destination")
+            + BaseUtility.bike.betaUrbancoreDestination_u * pl.col("urbancore_destination")            
+            + BaseUtility.bike.betaRuralDestination_u * pl.col("rural_destination")
             + BaseUtility.bike.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.bike.betaDestinationOther_u * pl.col("destination_other")
             + BaseUtility.bike.betaDestinationLeisure_u * pl.col("destination_leisure")
             + BaseUtility.bike.betaDestinationEducation_u * pl.col("destination_education")
             + BaseUtility.bike.betaDestinationHome_u * pl.col("destination_home")
             + BaseUtility.bike.betaWorkingHour_u * pl.col("working_hour")
+            + BaseUtility.bike.betaIsRetired_u * pl.col("is_retired")            
             
         )
 

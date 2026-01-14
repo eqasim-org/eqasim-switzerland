@@ -41,8 +41,10 @@ def configure(context):
     context.config("car_cost_per_km", default = Defaults.CAR_COST_PER_KM)
     context.config("car_cost_model", default = Defaults.CAR_COST_MODEL)
     context.config("parking_cost_per_hour_CHF_urban", default=Defaults.PARKING_COST_PER_HOUR_URBAN) #CHF per hour
+    context.config("parking_cost_per_hour_CHF_urbancore", default=Defaults.PARKING_COST_PER_HOUR_URBANCORE) #CHF per hour
     context.config("parking_cost_per_hour_CHF_suburban", default=Defaults.PARKING_COST_PER_HOUR_SUBURBAN) #CHF per hour
     context.config("urban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_URBAN)   
+    context.config("urbancore_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_URBANCORE)
     context.config("suburban_parking_search_min", default = Defaults.PARKING_SEARCH_MIN_SUBURBAN)     
     context.config("routing_batch_size", default=Defaults.DEFAULT_CAR_ROUTING_BATCH_SIZE)
     # matsim/eqasim configs
@@ -99,7 +101,7 @@ def execute(context):
     pt_trips = survey_data.loc[survey_data["pt_availability"],
                                ['trip_id', 'origin_x', 'origin_y', 'destination_x', 'destination_y', 
                                 "home_x", "home_y","departure_time"]].reset_index(drop=True).copy()
-    pt_trips = pt_variables(context, pt_trips)
+    pt_trips = pt_variables(context, pt_trips).reset_index(drop=True)
     pt_trips.columns = [c if c in ["person_id", "trip_id"] else "pt_" + c for c in pt_trips.columns]    
     num_nans = pt_trips.isna().sum().sum()
     logger.info(f"\t \t There are {num_nans} nans in pt trips after computing pt variables.")
@@ -175,21 +177,21 @@ def execute(context):
 
     ####################### adjust availabilities ######################
     # 1. pt
-    pt_unavailability = ((df["pt_in_vehicle_time_min"]<1) | 
-                         (df["pt_in_vehicle_time_min"]>60*3) |
+    pt_unavailability = ((df["pt_in_vehicle_time_min"]<0.5) | 
+                         (df["pt_in_vehicle_time_min"]>60*4) |
                          (df["pt_transfers"]>5) |
                          (df["pt_access_egress_time_min"]>60)|
                          (df["pt_distance_km"]>300))
     df.loc[pt_unavailability, "pt_availability"] = False
     # 2. car 
-    car_unavailability = ((df["car_travel_time_min"]<1) | 
-                          (df["car_travel_time_min"]>60*3) |
+    car_unavailability = ((df["car_travel_time_min"]<0.5) | 
+                          (df["car_travel_time_min"]>60*4) |
                           (df["car_distance_km"]>300) | 
                           (df["car_access_egress_time_min"]>40))
     df.loc[car_unavailability, "car_availability"] = False        
     # 3. car passenger
-    cp_unavailability = ((df["car_passenger_travel_time_min"]<1) | 
-                         (df["car_passenger_travel_time_min"]>60*3) | 
+    cp_unavailability = ((df["car_passenger_travel_time_min"]<0.5) | 
+                         (df["car_passenger_travel_time_min"]>60*4) | 
                          (df["car_passenger_distance_km"]>300) | 
                          (df["car_passenger_access_egress_time_min"]>40))
     df.loc[cp_unavailability, "car_passenger_availability"] = False    
@@ -212,7 +214,8 @@ def execute(context):
         'bike_distance_km', 'bike_travel_time_min',
         
         # PT variables
-        'pt_access_egress_time_min', 'pt_waiting_time_min', 'pt_transfers', 'pt_in_vehicle_time_min', 'pt_distance_km', 'pt_cost_CHF',
+        'pt_access_egress_time_min', 'pt_waiting_time_min', 'pt_transfers', 'pt_in_vehicle_time_min', 'pt_distance_km', 
+        'pt_cost_CHF', 'pt_contains_rail', 'pt_contains_bus',
         
         # Car variables
         'car_travel_time_min', 'car_access_egress_time_min', 'car_distance_km', 'car_cost_CHF', 'parking_cost_CHF', 'parking_searching_duration_min',

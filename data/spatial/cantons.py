@@ -1,5 +1,5 @@
 import geopandas as gpd
-
+import unicodedata
 
 def configure(context):
     context.config("data_path")
@@ -10,8 +10,8 @@ def execute(context):
     data_path = context.config("data_path")
 
     df = gpd.read_file(
-        "%s/spatial/canton/swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shp" % data_path#,
-        #encoding="latin1"
+        "%s/spatial/canton/swissBOUNDARIES3D_1_5_TLM_KANTONSGEBIET.shp" % data_path,
+        encoding="latin1"
     ).to_crs("epsg:2056")
 
     df.crs = "epsg:2056"
@@ -19,6 +19,7 @@ def execute(context):
     df = df.rename({"KANTONSNUM": "canton_id", "NAME": "canton_name"}, axis=1)
     df = df[["canton_id", "canton_name", "geometry"]]
 
+    df = process_canton_names(df)
     return df
 
 
@@ -42,4 +43,30 @@ def impute_sp_region(df):
     # more sense to impute the SP region in another way
 
     # assert(not np.any(df["sp_region"] == 0))
+    return df
+
+def process_canton_names(df, col='canton_name', out_col='canton_name_en'):
+    def fix_and_ascii(s):
+        fixed = s.encode('latin1').decode('utf8')
+
+        norm = unicodedata.normalize('NFKD', fixed)
+        ascii_s = norm.encode('ascii', 'ignore').decode('ascii')
+        ascii_s = ascii_s.strip().lower()
+        ascii_s = ascii_s.replace(' ', '_').replace(".", "").replace('-', '_').replace("'", "")
+        return ascii_s
+
+    df = df.copy()
+    df[out_col] = df[col].apply(fix_and_ascii)
+    
+    english_map = {
+        'graubunden': 'grisons',
+        'zuerich': 'zurich',
+        'neuchatel': 'neuchatel',
+        'geneve': 'geneva'
+    }
+
+    # normalize english_map keys to the same form produced by fix_and_ascii
+    normalized_map = {fix_and_ascii(k): v for k, v in english_map.items()}
+    df[out_col] = df[out_col].replace(normalized_map)
+
     return df

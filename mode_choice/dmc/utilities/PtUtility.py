@@ -44,9 +44,9 @@ class PtUtility(BaseUtility):
         
         utility = (
             BaseUtility.pt.alpha_u
-            + BaseUtility.pt.betaInVehicleTime_u_min * pl.col("in_vehicle_time_min").pow(BaseUtility.pt.inVehicleTimeExponent)
-            + BaseUtility.pt.betaAccessEgressTime_u_min * pl.col("access_egress_time_min").pow(BaseUtility.pt.accessEgressTimeExponent)
-            + BaseUtility.pt.betaWaitingTime_u_min * pl.col("waiting_time_min").pow(BaseUtility.pt.waitingTimeExponent)
+            + BaseUtility.pt.betaInVehicleTime_u_min * (pl.col("in_vehicle_time_min") / BaseUtility.cost.travelTimeFactor).pow(BaseUtility.pt.inVehicleTimeExponent)
+            + BaseUtility.pt.betaAccessEgressTime_u_min * (pl.col("access_egress_time_min") / BaseUtility.cost.travelTimeFactor).pow(BaseUtility.pt.accessEgressTimeExponent)
+            + BaseUtility.pt.betaWaitingTime_u_min * (pl.col("waiting_time_min") / BaseUtility.cost.travelTimeFactor).pow(BaseUtility.pt.waitingTimeExponent)
             + BaseUtility.pt.betaLineSwitch_u * pl.col("transfers").pow(BaseUtility.pt.lineSwitchExponent)
             + PtUtility.estimateCostUtility()
             + BaseUtility.pt.betaAge_u * pl.max_horizontal(0.0, pl.col("age") - 17)
@@ -56,12 +56,19 @@ class PtUtility(BaseUtility):
             + BaseUtility.pt.betaShortDistance_u * pl.col("short_distance")
             + BaseUtility.pt.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.pt.betaUrbanDestination_u * pl.col("urban_destination")
+            + BaseUtility.pt.betaUrbancoreDestination_u * pl.col("urbancore_destination")
+            + BaseUtility.pt.betaRuralDestination_u * pl.col("rural_destination")
             + BaseUtility.pt.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.pt.betaDestinationOther_u * pl.col("destination_other")
             + BaseUtility.pt.betaDestinationLeisure_u * pl.col("destination_leisure")
             + BaseUtility.pt.betaDestinationEducation_u * pl.col("destination_education")
             + BaseUtility.pt.betaDestinationHome_u * pl.col("destination_home")
             + BaseUtility.pt.betaWorkingHour_u * pl.col("working_hour")
+            + BaseUtility.pt.betaIsRetired_u * pl.col("is_retired")
+            + BaseUtility.pt.betaGoodService_u * pl.col("good_pt_service")
+            + BaseUtility.pt.betaMediumService_u * pl.col("medium_pt_service")
+            + BaseUtility.pt.betaContainsRail_u * pl.col("contains_rail")
+            + BaseUtility.pt.betaContainsBus_u * pl.col("contains_bus")
         )
 
         return utility

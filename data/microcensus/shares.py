@@ -1,7 +1,10 @@
 import numpy as np
 import pandas as pd
 import os
+from shapely import vectorized
+import logging 
 
+logger = logging.getLogger("synpp")
 """
 This stage reads trip data from microcensus and computes modal shares.
 It estimates global shares first, then shares by canton.
@@ -11,45 +14,121 @@ def configure(context):
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
     context.stage("data.spatial.cantons")
+    context.stage("data.spatial.swiss_border")
+
+
+def merge_same_trips(context, df):
+    """Merge consecutive legs that represent the same trip for a person.
+
+    Two legs are merged when they belong to the same person, use the same mode
+    and the first leg's ``arrival_time`` equals the next leg's ``departure_time``.
+    Chains of such legs are collapsed together.
+    """
+
+    if df.empty:
+        return df
+
+    # Columns we aggregate differently when merging a chain of legs
+    columns_to_keep_last = ['destination_x', 'destination_y', 'arrival_time', 'purpose', 'activity_duration', 'parking_cost']
+    columns_to_sum = ['crowfly_distance', 'network_distance']
+
+    columns_to_keep_last = [c for c in columns_to_keep_last if c in df.columns]
+    columns_to_sum = [c for c in columns_to_sum if c in df.columns]
+
+    # Ensure deterministic ordering (trip_id is chronological within the person/day)
+    df = df.sort_values(["person_id", "trip_id"]).reset_index(drop=True)
+
+    # Identify whether the current leg should be merged with the previous one.
+    # Using shift(1) correctly handles chains A->B->C: both B and C stay in the same group
+    # because each continues the previous leg.
+    merge_with_prev = (
+        (df["person_id"] == df["person_id"].shift(1)) &
+        (df["mode"] == df["mode"].shift(1)) &
+        (df["mode"] == "car") & 
+        (df["departure_time"] == df["arrival_time"].shift(1))
+    )
+
+    # Start a new group when the current row does NOT merge with the previous one
+    group_id = (~merge_with_prev).cumsum()
+    
+    # Build aggregation map: default to first row, override sums/lasts
+    agg_map = {c: 'first' for c in df.columns}
+    for c in columns_to_sum:
+        agg_map[c] = 'sum'
+    for c in columns_to_keep_last:
+        agg_map[c] = 'last'
+
+    merged = df.groupby(group_id, sort=False, as_index=False).agg(agg_map)
+    logger.info(f"Merged trips: {len(df) - len(merged)}")
+    return merged.reset_index(drop=True)
+
+
+def load_clean_trips(context):
+    """
+    Load and filter Microcensus trips, enriching them with person attributes and applying
+    quality and geographic constraints.
+    This function:
+    1) Loads persons and trips from the pipeline.
+    2) Merges selected person attributes into the trips.
+    3) Excludes trips whose ``person_id`` is in the provided ``filterout_ids`` as well as
+        persons flagged as weekend (``persons['weekend'] == True``).
+    4) Applies additional trip-level filters:
+        - non-missing ``household_weight`` and ``person_weight``
+        - ``crowfly_distance`` > 1
+        - mode in ``{"car", "pt", "bike", "walk", "car_passenger"}``
+    5) Keeps only trips whose origin and destination coordinates lie within the Swiss border
+        polygon (loaded from ``data.spatial.swiss_border``).
+    Parameters
+    ----------
+    context : object
+    Returns
+    -------
+    pandas.DataFrame
+         Filtered trips DataFrame including merged person attributes.
+    """
+    persons = context.stage("data.microcensus.persons")
+    trips, filterout_ids = context.stage("data.microcensus.trips")
+
+    # Merge with persons
+    persons = persons[['person_id', 'person_weight', 'age', 'sex', 
+                        'income_class', 'canton_id', 'household_weight', 'weekend']]
+    
+    trips = trips.merge(persons, how="left", on="person_id")
+
+    # Identify weekend persons to filter out
+    week_end_persons = persons[persons['weekend']]["person_id"].unique()
+    filterout_ids = filterout_ids.union(set(week_end_persons))
+
+    # filter trips
+    trips = trips[~trips['person_id'].isin(filterout_ids)]
+
+    # further filter trips
+    modes = ["car","pt","bike","walk","car_passenger"]        
+    sel = ((trips.household_weight.notna()) & 
+            (trips.person_weight.notna()) &
+            (trips.crowfly_distance>1) &
+            (trips["mode"].isin(modes)) )
+    trips = trips[sel].reset_index(drop=True)       
+
+    # keep only trips within switzerland
+    df_switzerland = context.stage("data.spatial.swiss_border")
+    ch_polygon = df_switzerland.buffer(0).iloc[0] 
+    inside_origin = vectorized.contains(ch_polygon, trips["origin_x"].values, trips["origin_y"].values)
+    inside_destination = vectorized.contains(ch_polygon, trips["destination_x"].values, trips["destination_y"].values)
+    within_ch = inside_origin&inside_destination 
+    trips = trips[within_ch].reset_index(drop=True)
+
+    # merge same trips
+    # trips = merge_same_trips(context, trips)
+    return trips
+
 
 def execute(context):
-    trips_data, filtered_out_person_ids = context.stage("data.microcensus.trips")
-    persons_data = context.stage("data.microcensus.persons")
-
-    # Filter out excluded persons from trips
-    valid_trips_mask = ~trips_data["person_id"].isin(filtered_out_person_ids)
-    filtered_trips = trips_data.loc[valid_trips_mask, [
-        'person_id', 'trip_id', 'mode', 'crowfly_distance', 'network_distance'
-    ]]
-
-    # Filter out excluded persons and weekend trips from persons data
-    valid_persons_mask = (
-        (~persons_data["person_id"].isin(filtered_out_person_ids)) & 
-        (persons_data["weekend"] == False)
-    )
-    filtered_persons = persons_data.loc[valid_persons_mask, [
-        'person_id', 'person_weight', 'age', 'age_class', 'sp_region',
-        'sex', 'income_class', 'canton_id', 'household_weight'
-    ]]
-
-    # Merge trips with person attributes and weights
-    trips_with_weights = filtered_trips.merge(filtered_persons, how="left", on="person_id")
-    
-    # Define valid transportation modes
-    valid_modes = ["car", "pt", "bike", "walk", "car_passenger"]
-    
-    # Apply final filtering criteria
-    final_filter_mask = (
-        (trips_with_weights.household_weight.notna()) & 
-        (trips_with_weights.person_weight.notna()) &
-        (trips_with_weights.crowfly_distance > 1) &
-        (trips_with_weights["mode"].isin(valid_modes))
-    )
-    
-    final_trips = trips_with_weights[final_filter_mask].reset_index(drop=True)
+    final_trips = load_clean_trips(context)
 
     # Attach canton name
-    df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name"]].copy()
+    df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name_en"]].copy()
+    df_cantons = df_cantons.rename(columns={"canton_name_en": "canton_name"})
     
     df_cantons["canton_id"] = df_cantons["canton_id"].astype(int)
     final_trips["canton_id"] = final_trips["canton_id"].astype(int)

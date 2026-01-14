@@ -27,3 +27,4 @@ pandana==0.7
 polars==1.32.3
 biogeme==3.2.11
 xopen==2.0.2
+ipfn==1.4.4

@@ -70,7 +70,9 @@ def pt_variables(context, df):
     df["waiting_time_min"] = df["transfer_waiting_time_min"] + df["transfer_travel_time_min"]
     df["in_vehicle_time_min"] = df["in_vehicle_time_total_min"]
     df["distance_km"] = df["in_vehicle_distance_total_km"]
-    
+    df["contains_rail"] = ((df["in_vehicle_time_rail_min"].notna()) & (df["in_vehicle_time_rail_min"] > 0)).astype(int)
+    df["contains_bus"] = ((df["in_vehicle_time_bus_min"].notna()) & (df["in_vehicle_time_bus_min"] > 0)).astype(int)
+
     # Trips that could not be routed (no public transport route found) are assigned high values
     # for travel times and distances to discourage their selection in mode choice,
     # since we cannot mark them as unavailable here as the tours are already built.
@@ -84,7 +86,7 @@ def pt_variables(context, df):
     
     return df[
          ["trip_id", "person_id", "access_egress_time_min", "in_vehicle_time_min", "transfers", 
-          "waiting_time_min", "distance_km"]
+          "waiting_time_min", "distance_km", "contains_rail", "contains_bus"]
          ]
 
 def execute(context):    

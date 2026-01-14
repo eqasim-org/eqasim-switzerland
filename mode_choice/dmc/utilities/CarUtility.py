@@ -41,12 +41,12 @@ class CarUtility(BaseUtility):
     @staticmethod
     def estimateTraveltimeUtility():
         # Combine travel time and parking search duration before exponentiation for efficiency
-        total_time = pl.col("travel_time_min") + pl.col("parking_searching_duration_min")
+        total_time = (pl.col("travel_time_min") + pl.col("parking_searching_duration_min")) / BaseUtility.cost.travelTimeFactor
         return BaseUtility.car.betaTravelTime_u_min * total_time.pow(BaseUtility.car.travelTimeExponent)
 
     @staticmethod
     def estimateAcessEgressTimeUtility():
-        return BaseUtility.car.betaAccessEgressTime_u_min * pl.col("access_egress_time_min").pow(BaseUtility.car.accessEgressTimeExponent)
+        return BaseUtility.car.betaAccessEgressTime_u_min * (pl.col("access_egress_time_min") / BaseUtility.cost.travelTimeFactor).pow(BaseUtility.car.accessEgressTimeExponent)
     
     @staticmethod
     def compute_lazy():
@@ -63,12 +63,16 @@ class CarUtility(BaseUtility):
             + BaseUtility.car.betaShortDistance_u * pl.col("short_distance")
             + BaseUtility.car.betaLongDistance_u * pl.col("long_distance")
             + BaseUtility.car.betaUrbanDestination_u * pl.col("urban_destination")
+            + BaseUtility.car.betaUrbancoreDestination_u * pl.col("urbancore_destination")
+            + BaseUtility.car.betaRuralDestination_u * pl.col("rural_destination")
             + BaseUtility.car.betaDestinationWork_u * pl.col("destination_work")
             + BaseUtility.car.betaDestinationOther_u * pl.col("destination_other")
             + BaseUtility.car.betaDestinationLeisure_u * pl.col("destination_leisure")
             + BaseUtility.car.betaDestinationEducation_u * pl.col("destination_education")
             + BaseUtility.car.betaDestinationHome_u * pl.col("destination_home")
             + BaseUtility.car.betaWorkingHour_u * pl.col("working_hour")
+            + BaseUtility.car.betaIsRetired_u * pl.col("is_retired")            
+            + BaseUtility.car.betaCarOwnershipRatio_u * pl.col("car_ownership_ratio")
                   
         )
 

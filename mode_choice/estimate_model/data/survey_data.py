@@ -53,11 +53,19 @@ def execute(context):
     df_persons["income"] = df_persons["income"] / equvalent_size
     # 3. ms_region
     df_persons["region"] = df_persons.canton_id.map(lambda x: MS_REGIONS.loc[x,"cluster"])
+    # 4. car ration
+    df_persons["car_ownership_ratio"] = np.clip(1 - df_persons["number_of_cars_class"]/df_persons["N_adults"],0,1)
+    # 5. pt quality
+    df_persons["good_pt_service"] = (df_persons["ovgk"].isin(["A", "B"])).astype(int)
+    df_persons["medium_pt_service"] = (df_persons["ovgk"].isin(["C","D"])).astype(int)
+    # 6. retired or not
+    df_persons["is_retired"] = (df_persons["age"]>=65).astype(int) 
 
     cols = ["person_id","home_x","home_y", "hasGeneralSubscription","hasHalbtaxSubscription","hasRegionalSubscription", "hasJuniorSubscription", 
             "hasGleis7Subscription", "hasVerbundSubscription", "hasStreckenSubscription", 'person_weight', 'age', 'sex', 'driving_license', 'region',
-             'is_car_passenger', "income", "number_of_cars","number_of_bikes_class", "weekend", "car_availability"]
-    df_persons = df_persons[cols]  
+             'is_car_passenger', "income", "number_of_cars","number_of_bikes_class", "weekend", "car_availability",
+             "car_ownership_ratio", "good_pt_service", "medium_pt_service", "is_retired", "income_class"]
+    df_persons = df_persons[cols]
     # 4. merge  
     df_trips = df_trips.merge(df_persons, on="person_id", how="left")
 
@@ -144,7 +152,8 @@ def execute(context):
             "number_of_cars", "number_of_bikes_class", 'driving_license', 'region', 'is_car_passenger', 'income', 'weekend', 
             "car_availability",'destination_home', 'origin_home', 'destination_work','destination_other', 'destination_leisure', 
             'destination_education', 'euclidean_distance_km', 'is_first', 'is_last', 'parking_duration_wo_travelTime_min', 'home_municipality',
-            'origin_municipality', 'destination_municipality','working_hour']
+            'origin_municipality', 'destination_municipality','working_hour', "car_ownership_ratio", "good_pt_service", "medium_pt_service", 
+            "is_retired", "income_class"]
     df_trips = df_trips[cols]
 
     logger.info(f"\t There are {len(df_trips)} trips after cleaning.")
@@ -166,7 +175,9 @@ def execute(context):
     
     ### Assertions
     assert (df_trips["weekend"]==False).all(), "Weekend trips are not allowed in the final dataset."   
-    assert set(df_trips['home_municipality'].unique())==set(df_trips['origin_municipality'].unique())==set(df_trips['destination_municipality'].unique())== {'rural', 'suburban', 'urban'}
+    assert (set(df_trips['home_municipality'].unique()) ==
+        set(df_trips['origin_municipality'].unique()) ==
+        set(df_trips['destination_municipality'].unique())== {'rural', 'suburban', 'urban', 'urbancore'})
     assert df_trips.isna().sum().sum() == 0, "There should be no missing values in the final dataset." 
 
     ### return

@@ -46,9 +46,19 @@ def execute(context):
     df_persons['is_car_passenger'] = df_persons['is_car_passenger'].fillna(False).astype(bool)
     df_persons['driving_license'] = df_persons['driving_license'].fillna(False).astype(bool)
 
+    # add the rest of attributes 
+    num_adults = df_persons['household_size'] - df_persons['N_children_under_18']        
+    df_persons["car_ownership_ratio"] = np.clip(1 - df_persons["number_of_cars_class"]/num_adults,0,1)
+    # 5. pt quality
+    df_persons["good_pt_service"] = (df_persons["ovgk"].isin(["A", "B"])).astype(int)
+    df_persons["medium_pt_service"] = (df_persons["ovgk"].isin(["C","D"])).astype(int)
+    # 6. retired or not
+    df_persons["is_retired"] = (df_persons["age"]>=65).astype(int) 
+
     return df_persons[[
         # basic attributes
         "person_id", "sex", "age", "region", "driving_license", "income",
+        "car_ownership_ratio", "good_pt_service", "medium_pt_service", "is_retired",
 
         # pt subscriptions
         "hasGeneralSubscription", "hasHalbtaxSubscription",
