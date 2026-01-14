@@ -30,8 +30,8 @@ def execute(context):
     df["destination_municipality_id"]   = merged["municipality_id"].values
     df["destination_municipality_name"] = merged["municipality_name"].values
     
-    statent         = context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga", "municipality_id"]].copy()
-    statent.columns = ["destination_id", "destination_x", "destination_y", "noga", "municipality_id"]
+    statent         = context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga", "municipality_id", "number_employees"]].copy()
+    statent.columns = ["destination_id", "destination_x", "destination_y", "noga", "municipality_id", "number_employees"]
 
     statent["offers_work"]           = True
     statent["offers_other"]          = True
@@ -59,10 +59,13 @@ def execute(context):
             if len(candidates) == 0:
                 candidates = statent[mask_statent_mun]
 
+            weights = candidates["number_employees"]
+
             sampled = candidates.sample(
                 n = N_sample,
                 random_state = context.config("random_seed"),
-                replace = True
+                replace = True,
+                weights = weights
             )
 
             df.loc[mask, "destination_id"] = sampled["destination_id"].values
