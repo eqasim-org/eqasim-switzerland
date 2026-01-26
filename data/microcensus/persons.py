@@ -28,7 +28,9 @@ def execute(context):
     df_mz_persons["person_weight"] = df_mz_persons["WP"]
     df_mz_persons["date"] = df_mz_persons["USTag"]
 
-    columns = ["person_id", "person_weight", "age", "sex", "date"]
+    df_mz_persons["is_swiss"] = df_mz_persons["f43500"]
+
+    columns = ["person_id", "person_weight", "age", "sex", "date", "is_swiss"]
 
     # Marital status
     df_mz_persons.loc[df_mz_persons["zivil"] == 1, "marital_status"] = c.MARITAL_STATUS_SINGLE
@@ -45,6 +47,11 @@ def execute(context):
     df_mz_persons["driving_license"] = df_mz_persons["f20400a"] == 1
 
     columns.append("driving_license")
+
+    # Learning driving license
+    df_mz_persons["learning_driving_license"] = df_mz_persons["f20400c"] == 1
+
+    columns.append("learning_driving_license")
 
     # Car availability
     df_mz_persons["car_availability"] = c.CAR_AVAILABILITY_NEVER
