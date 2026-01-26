@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
-
+from catboost import CatBoostClassifier
 # ---------------------------------------------------------
 # helper: stochastic draw from class probabilities
 # ---------------------------------------------------------
@@ -14,7 +14,7 @@ def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
 
 
 def configure(context):
-    context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.21.persons")
     context.stage("data.statpop.employment_v2")
 
 
@@ -22,14 +22,15 @@ def execute(context):
     # -------------------------------------------------------------------
     # CONFIG: model type + calibration switch
     # -------------------------------------------------------------------
-    INCOME_MODEL = "rf"          # "rf" or "gbm"
-    USE_CALIBRATION = True       # <--- set to False to turn calibration OFF
+    INCOME_MODEL = "catboost"          # "rf" or "gbm" r "catboost"
+    USE_CALIBRATION = False       # <--- set to False to turn calibration OFF
 
     # -------------------------------------------------------------------
     # 0. LOAD DATA
     # -------------------------------------------------------------------
-    survey_df = context.stage("data.microcensus.persons")
+    survey_df = context.stage("data.microcensus.21.persons")
     pop_df = context.stage("data.statpop.employment_v2")
+    survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income
 
     # Map population job_position to survey coding
     mapping_pop_to_survey = {
@@ -79,7 +80,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 2. PREP POP: PICK ONE RANDOM REPRESENTATIVE PER HOUSEHOLD (age >= 6)
     # -------------------------------------------------------------------
-    REP_MIN_AGE = 6  # you can try 15 or 18 as well
+    REP_MIN_AGE = 18  # you can try 15 or 18 as well
 
     pop_eligible = pop_df[pop_df['age'] >= REP_MIN_AGE].copy()
     rng = np.random.default_rng(12345)
@@ -161,11 +162,28 @@ def execute(context):
                 random_state=42,
                 n_jobs=-1
             )
+        elif model_type in ("catboost", "cat"):
+            
+            return CatBoostClassifier(
+                loss_function="MultiClass",
+                iterations=1200,
+                learning_rate=0.05,
+                depth=8,
+                l2_leaf_reg=6.0,
+                random_seed=42,
+                verbose=False,
+                bootstrap_type="Bernoulli",
+                subsample=0.8
+            )
         else:
-            raise ValueError(f"Unknown model_type={model_type}, use 'gbm' or 'rf'.")
+            raise ValueError(f"Unknown model_type={model_type}, use 'gbm', 'rf' or 'catboost'.")
 
     income_model = build_income_model(INCOME_MODEL)
-    income_model.fit(X_survey, y, sample_weight=sample_weight)
+        
+    # CatBoost / sklearn models all handle numpy arrays; standardize dtype
+    Xs = X_survey.to_numpy(dtype=float, copy=False)
+    Xp = X_reps.to_numpy(dtype=float, copy=False)
+    income_model.fit(Xs, y, sample_weight=sample_weight)
     print("Fitted global household income-class model on full survey using:", INCOME_MODEL)
 
     classes_cls = income_model.classes_.astype('int64')
@@ -174,7 +192,7 @@ def execute(context):
     # 5b. CALIBRATION SETUP (OPTIONAL)
     # -------------------------------------------------------------------
     # Base probabilities for reps (uncalibrated)
-    proba_reps_raw = income_model.predict_proba(X_reps)
+    proba_reps_raw = income_model.predict_proba(Xp)
     reps_job = reps['job_position'].values
 
     if USE_CALIBRATION:
@@ -298,6 +316,11 @@ def execute(context):
     hh_income_df = reps[hh_cols].copy()
 
     pop_df = pop_df.merge(hh_income_df, on='household_id', how='left')
+
+    #there is a tiny group of hosuehold that do not have a single adult
+    #assign income_class to 0 to these households.
+    pop_df.loc[pop_df["N_adults"].eq(0), "HH_INCOME_CLASS_hat"] = 0
+    pop_df.loc[pop_df["N_adults"].eq(0), "HH_INCOME_CLASS_draw"] = 0
 
     print("Household income class distribution (drawn), overall (persons):")
     print(pop_df['HH_INCOME_CLASS_draw'].value_counts(normalize=True))
