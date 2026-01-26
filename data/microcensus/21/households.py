@@ -1,0 +1,116 @@
+import numpy as np
+import pandas as pd
+import pyproj
+
+from data.spatial.cantons import impute_sp_region
+import data.spatial.municipalities
+from data.spatial.municipality_types import impute as impute_municipality_type
+import data.spatial.ovgk
+import data.spatial.utils
+import data.spatial.zones
+import data.statpop.density
+import data.utils
+
+def configure(context):
+    context.config("data_path")
+    context.config("output_path")
+
+    context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.zones")
+    context.stage("data.spatial.municipality_types")
+    context.stage("data.statpop.density")
+    context.stage("data.spatial.ovgk")
+    context.stage("data.microcensus.21.household_persons")
+    context.stage("data.constants")
+
+def execute(context):
+    data_path = context.config("data_path")
+    c         = context.stage("data.constants")
+
+    df_mz_households = pd.read_csv(
+        "%s/microcensus/21/haushalte.csv" % data_path, sep=";", encoding="latin1")
+
+    # Simple attributes
+    df_mz_households["household_size"]   = df_mz_households["hhgr"]
+    df_mz_households["number_of_cars"]   = np.maximum(0, df_mz_households["f30100"])
+    df_mz_households["number_of_bikes"]  = df_mz_households["f32200a"]
+    df_mz_households["person_id"]        = df_mz_households["HHNR"]
+    df_mz_households["household_weight"] = df_mz_households["WM"]
+
+    # Income
+    df_mz_households["income_class"] = df_mz_households["f20601"] - 1  # Turn into zero-based class
+    df_mz_households["income_class"] = np.maximum(-1, df_mz_households["income_class"])  # Make all "invalid" entries -1
+
+    # Convert coordinates to CH1903_PLUS
+    coords = df_mz_households[["W_Y", "W_X"]].values
+    transformer = pyproj.Transformer.from_crs(c.WGS84, c.CH1903_PLUS)
+    x, y = transformer.transform(coords[:, 0], coords[:, 1])
+    df_mz_households.loc[:, "home_x"] = x
+    df_mz_households.loc[:, "home_y"] = y
+
+    # Class variable for number of cars
+    df_mz_households["number_of_cars_class"] = 0
+    df_mz_households.loc[df_mz_households["number_of_cars"] > 0, "number_of_cars_class"] = np.minimum(
+        c.MAX_NUMBER_OF_CARS_CLASS, df_mz_households["number_of_cars"])
+
+    # Bike availability depends on household size. (TODO: Would it make sense to use the same concept for cars?)
+    df_mz_households["number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_NONE
+    df_mz_households.loc[
+        df_mz_households["number_of_bikes"] > 0, "number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_SOME
+    df_mz_households.loc[
+        df_mz_households["number_of_bikes"] >= df_mz_households["household_size"],
+        "number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_ALL
+
+    # Household size class
+    data.utils.assign_household_class(df_mz_households, c)
+
+    # Region information
+    # (acc. to Analyse der SP-Befragung 2015 zur Verkehrsmodus- und Routenwahl)
+    df_mz_households["canton_id"] = df_mz_households["W_KANTON"]
+    df_mz_households = impute_sp_region(df_mz_households)
+
+    # Impute spatial information
+    df_municipalities = context.stage("data.spatial.municipalities")[0]
+    df_zones = context.stage("data.spatial.zones")
+    df_municipality_types = context.stage("data.spatial.municipality_types")
+
+    df_spatial = pd.DataFrame(df_mz_households[["person_id", "home_x", "home_y"]])
+    df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y", coord_type="home")
+    df_spatial = data.spatial.utils.impute(
+        context, 
+        df_spatial, df_municipalities, 
+        "person_id", "municipality_id", 
+        zone_type="municipality", point_type="home")
+    df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
+    df_spatial = impute_municipality_type(df_spatial, df_municipality_types)
+
+    df_mz_households = pd.merge(
+        df_mz_households, df_spatial[["person_id", "zone_id", "municipality_type"]],
+        on="person_id"
+    )
+
+    df_mz_households["home_zone_id"] = df_mz_households["zone_id"]
+
+    # Impute population density
+    data.statpop.density.impute(
+        context, 
+        context.stage("data.statpop.density"), df_mz_households, 
+        "home_x", "home_y",
+        point_type="home")
+
+    # Impute OV Guteklasse
+    df_ovgk = context.stage("data.spatial.ovgk")
+    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
+    df_mz_households = pd.merge(df_mz_households, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
+
+    # Impute household person information, such as number of children
+    df_household_info = context.stage("data.microcensus.21.household_persons")[1].copy()
+    household_columns = context.stage("data.microcensus.21.household_persons")[2].copy()
+    df_mz_households  = pd.merge(df_mz_households, df_household_info, left_on="person_id", right_on="household_id", how="left")
+
+    # Wrap it up
+    return df_mz_households[[
+        "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
+        "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
+        "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id", "ovgk",
+    ] + household_columns]
