@@ -85,7 +85,7 @@ def execute(context):
 
     # Turn sex and nationality into an actual 0-based class
     df["sex"] -= 1
-    df["nationality"] -= 1
+    df["nationality"] -= 1 # 0:swiss 1:rest
 
     # Get the age class
     df["age_class"] = np.digitize(df["age"], c.AGE_CLASS_UPPER_BOUNDS)
@@ -181,7 +181,7 @@ def execute(context):
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
         "home_municipality_id", "home_quarter_id", "canton_id", "district_id", "population_density", "sp_region", "ovgk",
-        "collective_housing_resident"] + children_columns]
+        "collective_housing_resident", "nationality"] + children_columns]
 
     df = data.statpop.head_of_household.impute(df, c)
 
