@@ -20,7 +20,7 @@ def execute(context):
     data_path = context.config("data_path")
 
     npvm = pd.read_csv(f"{data_path}/pt_reference_data/106_release.mobi-zones.csv", 
-                       sep = ";", nrows = 7979) # Excluding the rows below this one as the later zones are outside Switzerland
+                       sep = ";", nrows = 7966) # Excluding the rows below this one as the later zones are outside Switzerland
 
     npvm = npvm[["zone_id", "zone_index", "pop_ga", "pop_ht", "pop_va", "pop_va_ht"]]
     npvm = npvm.rename(columns = {"pop_ga": "N_ga_npvm", "pop_ht": "N_ht_npvm",
@@ -58,6 +58,6 @@ def execute(context):
     zones_with_canton = zones_with_canton[["zone_id", "canton_id", "canton_name"]]
 
     npvm = zones_with_canton.merge(npvm, on = "zone_id", how = "right")
-    #npvm["canton_id"] = npvm["canton_id"].astype(int)
+    npvm["canton_id"] = npvm["canton_id"].astype(int)
 
     return npvm
