@@ -11,10 +11,14 @@ def execute(context):
     household_persons = pd.read_csv(
         "%s/microcensus/21/haushaltspersonen.csv" % data_path, sep=";", encoding="latin1")
     
-    household_persons = household_persons[["HHNR", "HPNR", "alter", "gesl"]]
+    household_persons = household_persons[["HHNR", "HPNR", "alter", "gesl", "f20400a", "f20400b"]]
 
-    household_persons.columns = ["household_id", "hhpers_id", "age", "sex"]
-
+    household_persons.columns = ["household_id", "hhpers_id", "age", "sex", "driving_license", "motorcycle_license"]
+    household_persons["driving_license"] = (
+    pd.to_numeric(household_persons["driving_license"], errors="coerce")
+    .eq(1)
+    .astype(int)
+)
     household_persons.loc[:, "children_under_3"]  = (household_persons["age"] <  3)  & (household_persons["age"] >= 0)
     household_persons.loc[:, "children_under_6"]  = (household_persons["age"] <  6)  & (household_persons["age"] >= 0)
     household_persons.loc[:, "children_under_12"] = (household_persons["age"] <  12) & (household_persons["age"] >= 0)
