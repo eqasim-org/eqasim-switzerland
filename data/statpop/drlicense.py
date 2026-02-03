@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from catboost import CatBoostClassifier
-    
 
 # ---------------------------------------------------------
 # helper: stochastic draw from class probabilities (binary ok)
@@ -33,7 +32,7 @@ def execute(context):
     # -------------------------------------------------------------------
     DL_MODEL = "catboost"         # "rf" or "gbm" or "catboost"
     SEED_DL  = 2026
-    DIAG_CANTON_ID = "5"    # default canton selection for diagnostics (string after preprocessing)
+    DIAG_CANTON_ID = "25"    # default canton selection for diagnostics (string after preprocessing)
 
     # -------------------------------------------------------------------
     # 0. LOAD DATA
@@ -41,7 +40,7 @@ def execute(context):
     survey_df = context.stage("data.microcensus.21.persons")
     pop_df    = context.stage("data.statpop.students_v2")
 
-    survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income
+    #survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income
 
     survey_df["N_children_under_18"] = survey_df["N_children_under_18"] > 0
     
@@ -120,7 +119,7 @@ def execute(context):
 
     cat_cols = [
         "age_bin", "sex", "job_position", "canton_id", "income_class", "is_swiss",
-        "municipality_type", "sp_region", "marital_status"
+        "municipality_type", "sp_region", "marital_status", "employment_status"
     ]
     num_cols = ["age", "age_sq", "household_size", "N_adults", "N_children_under_18"]
 
@@ -145,9 +144,12 @@ def execute(context):
         "municipality_type",
         "N_children_under_18",
         "marital_status",
-        "household_size",
-        "income_class",
-        #"is_swiss"
+        "N_adults",
+        #"household_size",
+        #"employment_status",
+        #"income_class",
+        #"is_swiss" #does not fit well to MZ 21 with this variable, there are some differences in distribution and overal number (73.35 in pop and 74.95 in MZ 21)
+        # however it fits better to the expected number of driver's licenses in the population
     ]
 
     X_survey = pd.get_dummies(survey_df[feature_cols], drop_first=False)
