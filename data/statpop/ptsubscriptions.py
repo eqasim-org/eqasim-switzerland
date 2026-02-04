@@ -45,12 +45,12 @@ def execute(context):
     PT_MODEL = "catboost"      # "rf" or "gbm" or "catboost"
     SEED_PT  = 2026
     DIAG_CANTON_ID = "1"
-    MIN_AGE = 18              
+    MIN_AGE = 6              
     USE_DRAW_DIAG = True
 
     # Survey columns (per your assumption)
     SURVEY_TARGET_COL = "subscription"        # values 0..4
-    SURVEY_WEIGHT_COL = "person_weight"       # change if your weight column differs
+    SURVEY_WEIGHT_COL = "person_weight"       
 
     # Survey car ownership proxy (so survey and pop align on a "car ownership class" feature)
     SURVEY_CARCOUNT_COL = "number_of_cars_class"   # if present; used only to derive HH_CAR_OWN_class in survey
@@ -262,24 +262,8 @@ def execute(context):
     else:
         survey_df["presence_of_children_under_18"] = 0
 
-    # Suggested additional useful vars (if present):
-    # - income_class (strong)
-    # - employment_status / is_student
-    # - is_swiss
-    # - sp_region / urbanity (municipality_type, ovgk)
-    # - car ownership (HH_CAR_OWN_class) + possibly car_avail_draw
-    # survey_df = survey_df[survey_df["age"]>17]
-    # pop_df = pop_df[pop_df["age"]>17]
-    # print(survey_df)
-    # print(survey_df[survey_df["driving_license"]==0])
-    # print(pop_df)
-    # print(pop_df[pop_df["driving_license"]==0])
-    # print(survey_df)
-    # print(survey_df[survey_df["car_availability"]==0])
-    # print(pop_df)
-    # print(pop_df[pop_df["car_availability"]==0])
-    # exit()
-    # feature lists: keep robust (only use columns that exist in BOTH after we create them)
+   
+    # feature lists
     candidate_cat = [
         "age_bin",
         "sex",
@@ -292,7 +276,7 @@ def execute(context):
         # "income_class",
         # "is_swiss",
         # "presence_of_children_under_18",
-        # "HH_CAR_OWN_class",
+        "HH_CAR_OWN_class",
         # "driving_license",  #TODO: this variable is not coded properly it seems
         "car_availability",
     ]
@@ -538,5 +522,6 @@ def execute(context):
             print(compare_multiclass(g, canton_id=DIAG_CANTON_ID, order=order).to_string(index=False))
 
     print("\n==========================================================================================")
-
+    #TODO: rename subsciptions column; clean variables and keep only the necessary ones
+    keep_columns = []
     return pop_df
