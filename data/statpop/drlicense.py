@@ -464,5 +464,5 @@ def execute(context):
 
     print("\n==========================================================================")
 
-
+    pop_df = pop_df.rename(columns={"DL_has_or_learning_draw": "driving_license"})
     return pop_df
