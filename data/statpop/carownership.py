@@ -13,6 +13,14 @@ def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
     chosen_idx = (r < cum_proba).argmax(axis=1)
     return classes[chosen_idx]
 
+def freq_table(df, col, top=None):
+    vc = df[col].value_counts(dropna=False)
+    pct = df[col].value_counts(dropna=False, normalize=True).mul(100)
+    out = pd.DataFrame({"count": vc, "pct": pct.round(2)})
+    if top:
+        out = out.head(top)
+    return out
+
 def _weighted_mean(x, w):
     x = np.asarray(x, dtype=float)
     w = np.asarray(w, dtype=float)
@@ -77,11 +85,6 @@ def execute(context):
     survey_df = survey_df.drop(columns=["household_id"])
     pop_df    = context.stage("data.statpop.drlicense").copy()
 
-    # Only use those that do not have income imputed
-    print("TODO: as we remove households with children report behaviour we loose some households with children, skewing the data")
-    # if "income_imputed" in survey_df.columns:
-    #     survey_df = survey_df[survey_df["income_imputed"] == False]
-
     # Make sure essentials exist
     for df in (survey_df, pop_df):
         df["age"] = pd.to_numeric(df.get("age"), errors="coerce")
@@ -102,17 +105,8 @@ def execute(context):
         .transform("sum")
     )
 
-    # If your pop already has the DL model output, use it to build household license intensity
-    # Prefer draw, otherwise hat, otherwise fall back (if available) to boolean driving_license
-    if "DL_has_or_learning_draw" in pop_df.columns:
-        dl_pop_col = "DL_has_or_learning_draw"
-    elif "DL_has_or_learning_hat" in pop_df.columns:
-        dl_pop_col = "DL_has_or_learning_hat"
-    elif "driving_license" in pop_df.columns:
-        dl_pop_col = "driving_license"
-    else:
-        dl_pop_col = None
-
+    dl_pop_col = "driving_license"
+  
     # -------------------------------------------------------------------
     # 1. PREP SURVEY: build household-level table with target 0/1/2/3+
     # -------------------------------------------------------------------
@@ -182,20 +176,16 @@ def execute(context):
     # Children already built above in pop_df["N_children_under_18"]
     pop_df["presence_of_children_under_18"] = (pop_df["N_children_under_18"] > 0).astype(int)
 
-    # Build household DL intensity in pop
-    if dl_pop_col is not None:
-        dl_vals = pd.to_numeric(pop_df[dl_pop_col], errors="coerce")
-        # treat booleans
-        if dl_vals.isna().all() and pop_df[dl_pop_col].dtype == bool:
-            dl_vals = pop_df[dl_pop_col].astype(int)
-        dl_adult = dl_vals.where(pop_df["age"] >= 18, 0.0).fillna(0.0)
-        pop_df["_dl_adult"] = dl_adult
-        dl_sum = pop_df.groupby("household_id")["_dl_adult"].transform("sum")
-        denom = pop_df["N_adults"].replace(0, np.nan)
-        pop_df["N_drivers_license_per_adult"] = (dl_sum / denom).fillna(0.0).clip(0.0, 1.0)
-    else:
-        pop_df["N_drivers_license_per_adult"] = 0.0  # fallback
+    adult = pop_df["age"].ge(18)
+    # if driving_license is already 0/1; otherwise do: (pop_df["driving_license"] == 1).astype(int)
+    dl = pd.to_numeric(pop_df["driving_license"], errors="coerce").fillna(0).astype("int8")
 
+    # group-wise totals aligned to pop_df rows
+    n_adults = adult.groupby(pop_df["household_id"]).transform("sum").astype("float32")
+    n_dl = (dl.where(adult, 0)).groupby(pop_df["household_id"]).transform("sum").astype("float32")
+
+    pop_df["N_drivers_license_per_adult"] = n_dl / n_adults
+    pop_df.loc[n_adults == 0, "N_drivers_license_per_adult"] = np.nan  
     # Build HH table in pop
     def mode_or_first(x):
         x = x.dropna()
@@ -229,13 +219,11 @@ def execute(context):
     w_counts = tmp.groupby(gcol)[wcol].sum().sort_values(ascending=False)
     w_freq = w_counts.to_frame("weighted_count")
     w_freq["weighted_pct"] = (w_freq["weighted_count"] / w_freq["weighted_count"].sum() * 100).round(2)
-    print(w_freq)
 
     # --- hh_p: unweighted frequency (and %), by presence_of_children_under_18 ---
     p_counts = hh_p[gcol].astype("string").fillna("<NA>").value_counts(dropna=False)
     p_freq = p_counts.to_frame("count")
     p_freq["pct"] = (p_freq["count"] / p_freq["count"].sum() * 100).round(2)
-    print(p_freq)
 
     # -------------------------------------------------------------------
     # 3. FEATURE ENGINEERING / CLEANING
@@ -259,7 +247,10 @@ def execute(context):
 
         # clip ratio
         df["N_drivers_license_per_adult"] = df["N_drivers_license_per_adult"].clip(0.0, 1.0)
-
+   
+    col = "N_drivers_license_per_adult"
+    print(freq_table(hh_s, col))
+    print(freq_table(hh_p, col))
     # -------------------------------------------------------------------
     # 4. DESIGN MATRICES
     # -------------------------------------------------------------------

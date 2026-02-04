@@ -68,11 +68,7 @@ def execute(context):
     persons_df["car_availability"] = np.where(var_raw == 2, 0, 1).astype("int64")
     hh_persons_df = context.stage("data.microcensus.21.household_persons")[0].copy()
     pop_df = context.stage("data.statpop.carownership").copy()
-    print(pop_df)
-    print(pop_df[pop_df["age"]>15])
-    exit()
     
-
     # -------------------------------------------------------------------
     # 1. KEY COLUMNS & REQUIRED FIELDS
     # -------------------------------------------------------------------
@@ -86,26 +82,16 @@ def execute(context):
     # Survey outcome name
     CAR_AV_COL = _resolve_col(persons_df, ["car_availability"], "car_availability outcome (persons_df)")
 
-    # Cars variable names per your note:
     # - survey persons: number_of_cars_class
     # - pop: HH_CAR_OWN_draw
     CARS_COL_PERS = _resolve_col(persons_df, ["number_of_cars_class"], "number_of_cars_class (persons_df)")
     CARS_COL_POP  = _resolve_col(pop_df, ["HH_CAR_OWN_draw"], "HH_CAR_OWN_draw (pop_df)")
 
-    # Survey weights
-    if "person_weight" not in persons_df.columns:
-        raise KeyError("persons_df must contain 'person_weight' for weighted training/diagnostics.")
-
     # Household-persons must contain driving_license
-    DL_COL_HHP = _resolve_col(hh_persons_df, ["driving_license"], "driving_license (household_persons_df)")
+    DL_COL_HHP = "driving_license"
 
-    # Population DL indicator (prefer your modeled draw if present; else fall back)
-    DL_POP_COL = (
-        "DL_has_or_learning_draw" if "DL_has_or_learning_draw" in pop_df.columns else
-        "DL_has_or_learning_hat"  if "DL_has_or_learning_hat"  in pop_df.columns else
-        ("driving_license" if "driving_license" in pop_df.columns else
-         _resolve_col(pop_df, ["dl_has", "DL_has_or_learning"], "DL indicator (pop_df)"))
-    )
+    # Population DL indicator
+    DL_POP_COL = "driving_license"
 
     # -------------------------------------------------------------------
     # 2. BASIC CLEANING
@@ -196,11 +182,8 @@ def execute(context):
     #     - if persons_df already has driving_license -> use it
     #     - else: assume focal has DL if hh_n_dl>0 (weak fallback; but avoids crash)
     # -------------------------------------------------------------------
-    if "driving_license" in persons_df.columns:
-        persons_df["dl_has_focal"] = _to_dl_has(persons_df["driving_license"])
-    else:
-        # fallback (NOT ideal, but consistent with your schema description where persons lacks member rows)
-        persons_df["dl_has_focal"] = (persons_df["hh_n_dl"] > 0).astype("int64")
+    persons_df["dl_has_focal"] = _to_dl_has(persons_df["driving_license"])
+
 
     # -------------------------------------------------------------------
     # 6. ENFORCE DETERMINISTIC RULES IN SURVEY OUTCOME
@@ -267,10 +250,10 @@ def execute(context):
         "marital_status",
         "N_adults",
         # shortage features
-        "hh_n_cars",
-        "hh_n_dl",
-        "cars_per_dl",
-        "cars_shortage",
+        # "hh_n_cars",
+        # "hh_n_dl",
+        #"cars_per_dl",
+         "cars_shortage",
     ]
 
     num_cols = [
@@ -558,5 +541,5 @@ def execute(context):
 
     print("\n==========================================================================")
 
-
+    pop_df = pop_df.rename(columns={"car_avail_draw": "car_availability"})
     return pop_df
