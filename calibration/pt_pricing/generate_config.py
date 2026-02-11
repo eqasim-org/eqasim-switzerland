@@ -53,13 +53,16 @@ def execute(context):
         shutil.copyfile(transit_vehicles_input_path, transit_vehicles_output_path)
 
     # PT pricing
-    sbb_path, zones_path = context.stage("data.pt_pricing.pt_pricing")
+    sbb_path, zones_path, pricing_path = context.stage("data.pt_pricing.pt_pricing")
 
     sbb_output_path =  f"{context.path()}/SBB_all_distances.csv" 
     shutil.copy(sbb_path, sbb_output_path)
 
     zones_output_path =  f"{context.path()}/gtfs_zones.csv" 
     shutil.copy(zones_path, zones_output_path)
+
+    pricing_output_path =  f"{context.path()}/pricingDescription.xml" 
+    shutil.copy(pricing_path, pricing_output_path)
 
     network_input_path = context.stage("matsim.scenario.network.mapped")["network"]
     network_output_path = "%s/%snetwork.xml.gz" % (context.path(), context.config("output_prefix"))
