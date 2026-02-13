@@ -61,6 +61,14 @@ def execute(context):
 
     columns.append("car_availability")
 
+    # bike availability
+    df_mz_persons["bike_availability"] = c.BIKE_AVAILABILITY_NEVER
+    df_mz_persons.loc[df_mz_persons["f42100e"] == 1, "bike_availability"] = c.BIKE_AVAILABILITY_ALWAYS
+    df_mz_persons.loc[df_mz_persons["f42100e"] == 2, "bike_availability"] = c.BIKE_AVAILABILITY_SOMETIMES
+    df_mz_persons.loc[df_mz_persons["f42100e"] == 3, "bike_availability"] = c.BIKE_AVAILABILITY_NEVER
+
+    columns.append("bike_availability")
+
     # Employment (TODO: I know that LIMA uses a more fine-grained category here)
     df_mz_persons["employed"] = df_mz_persons["f40800_01"] != -99
 
