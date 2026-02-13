@@ -40,16 +40,16 @@ class Constants:
         self.SEX_MALE   = 0
         self.SEX_FEMALE = 1
 
-        self.BIKE_AVAILABILITY_FOR_ALL  = 2
-        self.BIKE_AVAILABILITY_FOR_SOME = 1
-        self.BIKE_AVAILABILITY_FOR_NONE = 0
+        self.BIKE_AVAILABILITY_ALWAYS  = 0
+        self.BIKE_AVAILABILITY_SOMETIMES = 1
+        self.BIKE_AVAILABILITY_NEVER = 2
 
         self.MZ_AGE_THRESHOLD = 6
 
         self.INCOME_CLASSES = 9
 
         self.MAX_NUMBER_OF_CARS_CLASS = 3
-
+        self.MAX_NUMBER_OF_BIKES_CLASS = 3
         self.POPULATION_DENSITY_RADIUS = 2.5 * 1e3
 
         self.BASE_SCALING_YEAR = 2023

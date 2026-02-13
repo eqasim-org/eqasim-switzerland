@@ -9,8 +9,7 @@ def configure(context):
     context.config("data_path")
     #context.config("weekend", default = False)
 
-    context.stage("data.microcensus.households")
-    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.21.households")
     context.stage("data.constants")
 
 def execute(context):
@@ -18,8 +17,8 @@ def execute(context):
     c         = context.stage("data.constants")
 
     df_mz_persons = pd.read_csv(
-        "%s/microcensus/zielpersonen.csv" % data_path,
-        sep = ",", encoding = "latin1", parse_dates = ["USTag"]
+        "%s/microcensus/21/zielpersonen.csv" % data_path,
+        sep = ";", encoding = "latin1", parse_dates = ["USTag"]
     )
 
     df_mz_persons["age"] = df_mz_persons["alter"]
@@ -28,8 +27,8 @@ def execute(context):
     df_mz_persons["person_weight"] = df_mz_persons["WP"]
     df_mz_persons["date"] = df_mz_persons["USTag"]
 
-    df_mz_persons["is_swiss"] = df_mz_persons["f43500"]
-
+    df_mz_persons["is_swiss"] = df_mz_persons["nation"]
+    df_mz_persons["is_swiss"] = np.where(df_mz_persons["is_swiss"] == 8100, 0, 1) # 8100 is coded as swiss
     columns = ["person_id", "person_weight", "age", "sex", "date", "is_swiss"]
 
     # Marital status
@@ -61,14 +60,6 @@ def execute(context):
 
     columns.append("car_availability")
 
-    # bike availability
-    df_mz_persons["bike_availability"] = c.BIKE_AVAILABILITY_NEVER
-    df_mz_persons.loc[df_mz_persons["f42100e"] == 1, "bike_availability"] = c.BIKE_AVAILABILITY_ALWAYS
-    df_mz_persons.loc[df_mz_persons["f42100e"] == 2, "bike_availability"] = c.BIKE_AVAILABILITY_SOMETIMES
-    df_mz_persons.loc[df_mz_persons["f42100e"] == 3, "bike_availability"] = c.BIKE_AVAILABILITY_NEVER
-
-    columns.append("bike_availability")
-
     # Employment (TODO: I know that LIMA uses a more fine-grained category here)
     df_mz_persons["employed"] = df_mz_persons["f40800_01"] != -99
 
@@ -84,18 +75,18 @@ def execute(context):
 
     # Day of the observation
     df_mz_persons["weekend"] = False
-    df_mz_persons.loc[df_mz_persons["tag"] >= 6, "weekend"] = True
+    df_mz_persons.loc[df_mz_persons["Tag"] >= 6, "weekend"] = True
 
     df_mz_persons["workday"] = False
-    df_mz_persons.loc[df_mz_persons["tag"] <= 5, "workday"] = True
+    df_mz_persons.loc[df_mz_persons["Tag"] <= 5, "workday"] = True
 
     df_mz_persons["day"] = "Monday"
-    df_mz_persons.loc[df_mz_persons["tag"] == 2, "day"] = "Tuesday"
-    df_mz_persons.loc[df_mz_persons["tag"] == 3, "day"] = "Wednesday"
-    df_mz_persons.loc[df_mz_persons["tag"] == 4, "day"] = "Thursday"
-    df_mz_persons.loc[df_mz_persons["tag"] == 5, "day"] = "Friday"
-    df_mz_persons.loc[df_mz_persons["tag"] == 6, "day"] = "Saturday"
-    df_mz_persons.loc[df_mz_persons["tag"] == 7, "day"] = "Sunday"
+    df_mz_persons.loc[df_mz_persons["Tag"] == 2, "day"] = "Tuesday"
+    df_mz_persons.loc[df_mz_persons["Tag"] == 3, "day"] = "Wednesday"
+    df_mz_persons.loc[df_mz_persons["Tag"] == 4, "day"] = "Thursday"
+    df_mz_persons.loc[df_mz_persons["Tag"] == 5, "day"] = "Friday"
+    df_mz_persons.loc[df_mz_persons["Tag"] == 6, "day"] = "Saturday"
+    df_mz_persons.loc[df_mz_persons["Tag"] == 7, "day"] = "Sunday"
 
     columns.append("weekend")
     columns.append("workday")
@@ -103,13 +94,13 @@ def execute(context):
 
     # Here we extract a bit more than Kirill, but most likely it will be useful later
 
-    df_mz_persons["subscriptions_ga"]      = df_mz_persons["f41610a"] == 1
-    df_mz_persons["subscriptions_halbtax"] = df_mz_persons["f41610b"] == 1
-    df_mz_persons["subscriptions_verbund"] = df_mz_persons["f41610c"] == 1
-    df_mz_persons["subscriptions_strecke"] = df_mz_persons["f41610d"] == 1
-    df_mz_persons["subscriptions_gleis7"]  = df_mz_persons["f41610e"] == 1
-    df_mz_persons["subscriptions_junior"]  = df_mz_persons["f41610f"] == 1
-    df_mz_persons["subscriptions_other"]   = df_mz_persons["f41610g"] == 1
+    df_mz_persons["subscriptions_ga"]      = df_mz_persons["f41600_01a"] == 1
+    df_mz_persons["subscriptions_halbtax"] = df_mz_persons["f41600_01b"] == 1
+    df_mz_persons["subscriptions_verbund"] = df_mz_persons["f41600_01c"] == 1
+    df_mz_persons["subscriptions_strecke"] = df_mz_persons["f41600_01d"] == 1
+    df_mz_persons["subscriptions_gleis7"]  = df_mz_persons["f41600_01e"] == 1
+    df_mz_persons["subscriptions_junior"]  = df_mz_persons["f41600_01f"] == 1
+    df_mz_persons["subscriptions_other"]   = df_mz_persons["f41600_01g"] == 1
 
     df_mz_persons["subscriptions_ga_class"]      = df_mz_persons["f41651"] == 1
     df_mz_persons["subscriptions_verbund_class"] = df_mz_persons["f41653"] == 1
@@ -130,11 +121,10 @@ def execute(context):
     columns.append("subscriptions")
 
     # Education
-    df_mz_persons["highest_education"]                                                               = "secondary"
-    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([1, 2, 3, 4]), "highest_education"]                = "primary"
-    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([5, 6, 7, 8, 9, 10, 11, 12]), "highest_education"] = "secondary"
-    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([13, 14, 15, 16]), "highest_education"]            = "tertiary_professional"
-    df_mz_persons.loc[df_mz_persons["HAUSB"].isin([17, 18, 19]), "highest_education"]                = "tertiary_academic"
+    df_mz_persons["highest_education"]                                                               = "secondary" # those that did not report
+    df_mz_persons.loc[df_mz_persons["HAUSB3"].isin([1]), "highest_education"]                = "primary"
+    df_mz_persons.loc[df_mz_persons["HAUSB3"].isin([2]), "highest_education"] = "secondary"
+    df_mz_persons.loc[df_mz_persons["HAUSB3"].isin([3]), "highest_education"]            = "tertiary"
     df_mz_persons["highest_education"] = df_mz_persons["highest_education"].astype("category")
 
     columns.append("highest_education")
@@ -164,7 +154,6 @@ def execute(context):
 
     df_mz_persons["parking_cost_work"] = np.maximum(0, df_mz_persons["f41400"].astype(np.float))
     df_mz_persons["parking_cost_education"] = np.maximum(0, df_mz_persons["f41401"].astype(np.float))
-    df_mz_persons["occupation"] = df_mz_persons["ISCO_08"]
     # BSTELL codes
     # -99	-99.Alter der Zielperson < 15 Jahre
     # -98	-98.keine Antwort
@@ -180,44 +169,17 @@ def execute(context):
     # 60	60.Nichterwerbspersonen (falls >= 15 Jahre alt)
 
     df_mz_persons["job_position"] = df_mz_persons["BSTELL"]
-    columns.extend(["parking_work", "parking_education", "parking_cost_work", "parking_cost_education", "occupation", "job_position"])
+    columns.extend(["parking_work", "parking_education", "parking_cost_work", "parking_cost_education", "job_position"])
 
     # Wrap up
     df_mz_persons = df_mz_persons[columns]
 
     # Merge in the other data sets
-    df_mz_households = context.stage("data.microcensus.households")
-    df_mz_trips, filterout_person_ids = context.stage("data.microcensus.trips")
+    df_mz_households = context.stage("data.microcensus.21.households")
 
     df_mz_persons = pd.merge(df_mz_persons, df_mz_households)
     df_mz_persons = data.microcensus.income.impute(df_mz_persons)
 
     initial_size = len(df_mz_persons)
-
-    # This will only filter out persons that do not have enough information in the trips file
-    # it will still keep persons that did not report any trips
-    df_mz_persons = df_mz_persons[~df_mz_persons["person_id"].isin(filterout_person_ids)]
-
-    #if context.config("weekend"):
-    #    df_mz_persons = df_mz_persons[df_mz_persons["weekend"]]
-    #else:
-    #    df_mz_persons = df_mz_persons[~df_mz_persons["weekend"]]
-
-    then_size = len(df_mz_persons)
-    home_ids = set(df_mz_persons["person_id"]) - set(df_mz_trips["person_id"])
-
-    # Note: Around 7000 of them are those, which do not even have an activity chain in the first place
-    # because they have not been asked.
-    print("  Removed %d (%.2f%%) persons from MZ because of insufficient trip data" % (
-        len(filterout_person_ids), 100.0 * len(filterout_person_ids) / initial_size
-    ))
-    
-    print("  Percentage of agents staying home (not weighted): %d (%.2f%%)" % (
-        len(home_ids), 100.0 * len(home_ids) / then_size
-    ))
-
-    # Add car passenger flag
-    car_passenger_ids = df_mz_trips.loc[df_mz_trips["mode"] == "car_passenger", "person_id"].unique()
-    df_mz_persons["is_car_passenger"] = df_mz_persons["person_id"].isin(car_passenger_ids)
 
     return df_mz_persons

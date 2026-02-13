@@ -20,7 +20,7 @@ def configure(context):
     context.stage("data.spatial.municipality_types")
     context.stage("data.statpop.density")
     context.stage("data.spatial.ovgk")
-    context.stage("data.microcensus.household_persons")
+    context.stage("data.microcensus.21.household_persons")
     context.stage("data.constants")
 
 def execute(context):
@@ -28,10 +28,9 @@ def execute(context):
     c         = context.stage("data.constants")
 
     df_mz_households = pd.read_csv(
-        "%s/microcensus/haushalte.csv" % data_path, sep=",", encoding="latin1")
+        "%s/microcensus/21/haushalte.csv" % data_path, sep=";", encoding="latin1")
 
     # Simple attributes
-    df_mz_households["home_structure"]   = df_mz_households["W_STRUKTUR_AGG_2000"]
     df_mz_households["household_size"]   = df_mz_households["hhgr"]
     df_mz_households["number_of_cars"]   = np.maximum(0, df_mz_households["f30100"])
     df_mz_households["number_of_bikes"]  = df_mz_households["f32200a"]
@@ -39,12 +38,12 @@ def execute(context):
     df_mz_households["household_weight"] = df_mz_households["WM"]
 
     # Income
-    df_mz_households["income_class"] = df_mz_households["F20601"] - 1  # Turn into zero-based class
+    df_mz_households["income_class"] = df_mz_households["f20601"] - 1  # Turn into zero-based class
     df_mz_households["income_class"] = np.maximum(-1, df_mz_households["income_class"])  # Make all "invalid" entries -1
 
-    # Convert coordinates to LV95
-    coords = df_mz_households[["W_X_CH1903", "W_Y_CH1903"]].values
-    transformer = pyproj.Transformer.from_crs(c.CH1903, c.CH1903_PLUS)
+    # Convert coordinates to CH1903_PLUS
+    coords = df_mz_households[["W_Y", "W_X"]].values
+    transformer = pyproj.Transformer.from_crs(c.WGS84, c.CH1903_PLUS)
     x, y = transformer.transform(coords[:, 0], coords[:, 1])
     df_mz_households.loc[:, "home_x"] = x
     df_mz_households.loc[:, "home_y"] = y
@@ -103,8 +102,8 @@ def execute(context):
     df_mz_households = pd.merge(df_mz_households, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
 
     # Impute household person information, such as number of children
-    df_household_info = context.stage("data.microcensus.household_persons")[1].copy()
-    household_columns = context.stage("data.microcensus.household_persons")[2].copy()
+    df_household_info = context.stage("data.microcensus.21.household_persons")[1].copy()
+    household_columns = context.stage("data.microcensus.21.household_persons")[2].copy()
     df_mz_households  = pd.merge(df_mz_households, df_household_info, left_on="person_id", right_on="household_id", how="left")
 
     # Wrap it up

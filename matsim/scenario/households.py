@@ -6,6 +6,13 @@ import pandas as pd
 
 import matsim.writers
 
+def _require_cols(df, cols, df_name):
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise KeyError(f"{df_name} is missing required columns: {missing}")
+
+def _na_to_default(x, default):
+    return default if pd.isna(x) else x
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -14,7 +21,7 @@ def configure(context):
     context.config("include_cross_border")
     context.stage("data.cross_border.generate_cross_border_traffic")
 
-FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class", "number_of_bikes_class",
+FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class",
           "municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"]
 
 INCOME_VALUES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]
@@ -26,37 +33,27 @@ def write_number_of_cars_class(value, c):
     else:
         return str(value)
 
-
-def write_bike_availability(value, c):
-    if value == c.BIKE_AVAILABILITY_FOR_ALL:
-        return "FOR_ALL"
-    elif value == c.BIKE_AVAILABILITY_FOR_SOME:
-        return "FOR_SOME"
-    else:
-        return "FOR_NONE"
-
-
 def add_household(writer, household, member_ids, c):
-    writer.start_household(household[1])
+    # household is a namedtuple row now
+    writer.start_household(household.household_id)
     writer.add_members(member_ids)
-    writer.add_income(INCOME_VALUES[int(household[3])])
+    writer.add_income(INCOME_VALUES[int(household.income_class)])
 
     writer.start_attributes()
-    writer.add_attribute("incomeClass", "java.lang.Integer", str(int(household[3])))
-    writer.add_attribute("numberOfCars", "java.lang.String", write_number_of_cars_class(household[5], c))
-    writer.add_attribute("bikeAvailability", "java.lang.String", write_bike_availability(household[6], c))
-    writer.add_attribute("municipalityType", "java.lang.String", str(household[7]))
-    writer.add_attribute("spRegion", "java.lang.Integer", str(household[8]))
-    writer.add_attribute("ovgk", "java.lang.String", str(household[10]))
-    writer.add_attribute("cantonName", "java.lang.String", str(household[11]))
-    writer.add_attribute("incomePerCapita", "java.lang.Double", str(household[12]))
+    writer.add_attribute("incomeClass", "java.lang.Integer", str(int(household.income_class)))
+    writer.add_attribute("numberOfCars", "java.lang.String", write_number_of_cars_class(household.number_of_cars_class, c))
+    writer.add_attribute("municipalityType", "java.lang.String", str(household.municipality_type))
+    writer.add_attribute("spRegion", "java.lang.Integer", str(household.sp_region))
+    writer.add_attribute("ovgk", "java.lang.String", str(household.ovgk))
+    writer.add_attribute("cantonName", "java.lang.String", str(household.canton_name))
+    writer.add_attribute("incomePerCapita", "java.lang.Double", str(household.income_per_capita))
 
-    canton_id = str(household[9]) if not np.isnan(household[9]) else "-1"
+    canton_id = str(_na_to_default(household.canton_id, -1))
     writer.add_attribute("cantonId", "java.lang.Double", canton_id)
 
     writer.end_attributes()
-
     writer.end_household()
+
 
 def execute(context):
     cache_path = context.path()
@@ -67,6 +64,7 @@ def execute(context):
     
     # Attach canton name to agent (TODO: do it in previous stages, keep track of canton name)
     df_cantons = df_cantons.rename(columns={"canton_name_en": "canton_name"})
+    df_persons["canton_id"] = df_persons["canton_id"].astype("int64")
     df_persons = pd.merge(df_persons, df_cantons, left_on="canton_id", right_on="canton_id", how="left")
     assert df_persons.canton_name.notnull().all(), "Not all persons have a canton name assigned. Check the canton data."
 
@@ -82,7 +80,12 @@ def execute(context):
     df_persons["income_per_capita"] = df_persons["income"] / equvalent_size
 
     
-    df_persons = df_persons[FIELDS]
+    _require_cols(df_persons, ["household_id", "person_id", "income_class", "number_of_cars_class",
+                           "municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"], "df_persons")
+
+    # Keep only the fields you need, but don't crash if you later add extras elsewhere
+    df_persons = df_persons[[c for c in FIELDS if c in df_persons.columns]]
+
     if context.config("include_cross_border"):
         cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
 
@@ -102,7 +105,7 @@ def execute(context):
         cross_border_persons["canton_name"] = "outsideCH"
         cross_border_persons["income_per_capita"] = 0
 
-        cross_border_persons = cross_border_persons[FIELDS]
+        cross_border_persons = cross_border_persons[[c for c in FIELDS if c in cross_border_persons.columns]]
         df_persons = pd.concat([df_persons, cross_border_persons])
 
 
@@ -111,18 +114,22 @@ def execute(context):
             writer = matsim.writers.HouseholdsWriter(raw_writer)
             writer.start_households()
 
-            household = [None, None]
+            household = None
             member_ids = []
 
-            for item in context.progress(df_persons.itertuples(), total=len(df_persons)):
-                # if item[4] >= c.MZ_AGE_THRESHOLD: # Here we filter out young person without actvity chain
-                if not household[1] == item[1]:
-                    if household[0] is not None: add_household(writer, household, member_ids, c)
-                    household, member_ids = item, [item[2]]
+            # name="HH" gives predictable attribute access even if pandas chooses defaults
+            for item in context.progress(df_persons.itertuples(index=False, name="HH"), total=len(df_persons)):
+                if (household is None) or (household.household_id != item.household_id):
+                    if household is not None:
+                        add_household(writer, household, member_ids, c)
+                    household = item
+                    member_ids = [item.person_id]
                 else:
-                    member_ids.append(item[2])
+                    member_ids.append(item.person_id)
 
-            if household[0] is not None: add_household(writer, household, member_ids, c)
+            if household is not None:
+                add_household(writer, household, member_ids, c)
+
 
             writer.end_households()
 
