@@ -143,8 +143,6 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
         # At this point, the goal is to match everyone. So we do not consider the mandatory columns any longer.
         df_matching, assigned_levels = recursive_iteration_statmatch(df_source, source_identifier, weight, df_target, target_identifier, columns, None,
                          rng, minimum_observations)
-        
-        #progress.update(len(df_matching))
 
         share_of_matched_agents = round(len(df_matching) / initial_nb_of_agents * 100,2) + percentage_matched
         
@@ -161,8 +159,6 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
 
         matched_levels               = assigned_levels[assigned_levels >= len(mandatory_columns)]
 
-        #progress.update(len(df_matching_on_mandatory))
-
         next_minimum_observations    =  decrease_minimum_observation(minimum_observations)
 
         share_of_matched_agents = len(df_matching_on_mandatory) / initial_nb_of_agents * 100 + percentage_matched
@@ -172,47 +168,6 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
         matching_the_missing, levels = statistical_matching(progress, df_source, source_identifier, weight, df_not_matching_on_mandatory, target_identifier, columns, mandatory_columns, random_seed, next_minimum_observations, share_of_matched_agents, initial_nb_of_agents)
         
         return pd.concat([df_matching_on_mandatory, matching_the_missing]), np.concatenate((matched_levels, levels))
-
-
-def _run_parallel_statistical_matching(context, args):
-    # Pass arguments
-    df_target, random_seed = args
-
-    # Pass data
-    df_source            = context.data("df_source")
-    source_identifier    = context.data("source_identifier")
-    weight               = context.data("weight")
-    target_identifier    = context.data("target_identifier")
-    columns              = context.data("columns")
-    mandatory_columns    = context.data("mandatory_columns")
-    minimum_observations = context.data("minimum_observations")
-
-    return statistical_matching(context.progress, df_source, source_identifier, weight, df_target, target_identifier,
-                                columns, mandatory_columns, random_seed, minimum_observations)
-
-
-def parallel_statistical_matching(context, df_source, source_identifier, weight, df_target, target_identifier, columns,
-                                  mandatory_columns, minimum_observations=0):
-    
-    random_seed = context.config("random_seed")
-    processes = context.config("hot_deck_matching_runners")
-    
-    rng = np.random.RandomState(random_seed)
-    chunks = np.array_split(df_target, processes)
-
-    with context.progress(label="Statistical matching ...", total=len(df_target)):
-        with context.parallel({
-            "df_source": df_source, "source_identifier": source_identifier, "weight": weight,
-            "target_identifier": target_identifier, "columns": columns, "mandatory_columns": mandatory_columns,
-            "minimum_observations": minimum_observations
-        }) as parallel:
-            random_seeds = rng.randint(10000, size=len(chunks))
-            results = parallel.map(_run_parallel_statistical_matching, zip(chunks, random_seeds))
-
-            levels = np.hstack([r[1] for r in results])
-            df_target = pd.concat([r[0] for r in results])
-
-            return df_target, levels
         
 
 def nonparallel_statistical_matching(context, df_source, source_identifier, weight, df_target, target_identifier, columns,
@@ -327,23 +282,20 @@ def execute(context):
     
     df_source     = df_source.rename(columns={"person_id": "mz_id"})
     df_source["canton_id"] = df_source["canton_id"].astype("int64")
-    df_population = context.stage("synthesis.population.sampled")
-    print(df_population)
 
-    df_population.loc[:, "employment_status"]                                                                   = 0
-    df_population.loc[df_population["employed"] == 1, "employment_status"]                           = 1
-    df_population.loc[(df_population["employed"] == 3) & (df_population["is_student"] == 1), "employment_status"]                           = 2
-    df_population.loc[(df_population["employed"] == 2) & (df_population["is_student"] == 1), "employment_status"]                           = 2
-    df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"]                           = 3
+    df_population = context.stage("synthesis.population.sampled")
+
+    df_population.loc[:, "employment_status"]                                                                     = 0
+    df_population.loc[df_population["employed"] == 1, "employment_status"]                                        = 1
+    df_population.loc[(df_population["employed"] == 3) & (df_population["is_student"] == 1), "employment_status"] = 2
+    df_population.loc[(df_population["employed"] == 2) & (df_population["is_student"] == 1), "employment_status"] = 2
+    df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"] = 3
     df_population["sex"] = df_population["sex"].astype(np.int64)
 
     df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
     df_population["household_size_class"] = df_population["household_size_class"].clip(upper=2)
     df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0) 
     df_source["sex"] = df_source["sex"].astype(np.int64)
-    #df_source["N_children_under_12"] = df_source["N_children_under_12"].clip(upper=1)
-    #df_population["N_children_under_12"] = df_population["N_children_under_12"].clip(upper=1)
-
     
     if c.census == "statpop":
 
@@ -366,8 +318,8 @@ def execute(context):
                                                              df_population.copy(), "person_id",
                                                              columns_household_matching, mandatory_columns_household_matching,
                                                              minimum_observations = context.config("matching_minimum_observations"), 
-                                                             population_selector=population_selector,
-                                                             option="household")
+                                                             population_selector = population_selector,
+                                                             option = "household")
         
         print("First statistical matching done")
 
@@ -406,13 +358,7 @@ def execute(context):
         ## SECOND MATCHING - NORMAL PEOPLE
         df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=1)
         df_source["number_of_cars_class"] = df_source["number_of_cars_class"].clip(upper=1)
-        # for col in df_population.columns:
-        #     print(f"\n=== {col} ===")
-        #     print(df_population[col].dropna().unique())
-        # for col in df_source.columns:
-        #     print(f"\n=== {col} ===")
-        #     print(df_source[col].dropna().unique())
-        # exit()
+
         population_selector_normal = (df_population["age"] >= c.MZ_AGE_THRESHOLD) & ~(df_population["collective_housing_resident"])
         # HT and activity-chains are better with canton_id instead of muncipality_type
         #columns_individual_matching           = ["age_class", "sex", "employment_status", "marital_status", "number_of_cars_class", "canton_id", "sp_region"]
@@ -467,6 +413,7 @@ def execute(context):
             df_matching      = pd.merge(df_matching_normal, df_matching_center, on = ["person_id", "household_id", "mz_head_id"])
             df_matching["mz_id"] = df_matching["mz_id_normal"].combine_first(df_matching["mz_id_center"])
             del df_matching["mz_id_center"]
+            
         else:
             df_matching = df_matching_normal.copy()
             df_matching["mz_id"] = df_matching["mz_id_normal"]

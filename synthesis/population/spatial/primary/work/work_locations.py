@@ -11,12 +11,16 @@ def configure(context):
     context.stage("data.microcensus.commute")
     context.stage("data.od.matrix")
     context.stage("data.od.distances")
+
+    if context.config("include_cross_border"):
+        context.stage("data.cross_border.destinations")
+
     context.config("random_seed")
     context.config("input_downsampling")
 
 # Algorithm:
 # 1. get the home location
-# 2. from the od matrices, get the probability that the agent work in each zone, based on his residence zone and mode.
+# 2. from the od matrices, get the probability that the agent work in each zone, based on their residence zone and mode.
 # 3. sample destintion zones
 # 3. give to each company a weight, based on the number of employees.
 # 4. estimate a probability based on the companies' distance to agent's home and the agent's commute distance
@@ -32,6 +36,7 @@ def get_distance_weight(dx):
     std = max(STANDARD_DEVIATION_DISTANCE, float(np.min(dx)) / 2.0 if dx.size else STANDARD_DEVIATION_DISTANCE)
     coef = 1.0 / (std * np.sqrt(2.0 * np.pi))
     return coef * np.exp(-0.5 * (dx / std) ** 2)
+
 
 def multinomial_sample(n, probs):
     """
@@ -66,10 +71,10 @@ def multinomial_sample(n, probs):
 
     return counts
 
+
 def sort_group(group):
     # Sort distances ascending
     return group.sort_values('commute_home_distance').reset_index(drop=True)
-
 
 
 def execute(context):
@@ -99,12 +104,28 @@ def execute(context):
     df_statent = context.stage("data.statent.statent")[["enterprise_id", "x", "y", "zone_id", "zone_municipality_id", "number_employees"]].copy()
     df_statent = df_statent.dropna(subset=["x", "y", "number_employees", "zone_id"])
 
+    if context.config("include_cross_border"):
+        destinations_cb         = context.stage("data.cross_border.destinations")
+        destinations_cb_commute = destinations_cb[destinations_cb["trip_purpose"]=="work"]
+
+        nb_empl_cb = destinations_cb_commute.groupby("destination_id")["cross_border_person_id"].count().reset_index()
+        nb_empl_cb.columns = ["enterprise_id", "nb_employees_crossborder"]
+        nb_empl_cb["enterprise_id"] = nb_empl_cb["enterprise_id"].astype(int)
+
+        df_statent = df_statent.merge(nb_empl_cb, on = "enterprise_id", how="left")
+        df_statent["nb_employees_crossborder"] = df_statent["nb_employees_crossborder"].fillna(0).astype(int)
+
+        df_statent["number_employees"] = (df_statent["number_employees"] - df_statent["nb_employees_crossborder"]).clip(lower = 0)
+
+        del df_statent["nb_employees_crossborder"]
+
     # Convert to arrays for speed
     comp_x = df_statent["x"].to_numpy(dtype=float)
     comp_y = df_statent["y"].to_numpy(dtype=float)
     comp_emp = df_statent["number_employees"].to_numpy(dtype=float)
     comp_eid = df_statent["enterprise_id"].to_numpy()
     comp_zone_ids = df_statent["zone_id"].to_numpy()
+
     # Map company zone_id -> matrix index; -1 if unknown (filtered out)
     comp_zone_idx = np.array([zone_index.get(z, -1) for z in comp_zone_ids], dtype=int)
     valid_comp_mask = comp_zone_idx >= 0
@@ -221,9 +242,6 @@ def execute(context):
 
             include_origin_zone = False
             prog.update()                
-
-
-
 
     # Build result frame
     out = df[["person_id"]].copy()

@@ -4,13 +4,13 @@ import pandas as pd
 
 
 def add_SBBPT_module(context):
-    config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
+    config_path = f"{context.path()}/{context.config("output_prefix")}config.xml"
     assert os.path.exists(config_path)
 
     # Parse XML and preserve DOCTYPE and comments
     parser = etree.XMLParser(remove_blank_text=True)
-    tree = etree.parse(config_path, parser)
-    root = tree.getroot()
+    tree   = etree.parse(config_path, parser)
+    root   = tree.getroot()
 
     # Create new module
     module = etree.Element("module", name="SBBPt")
@@ -28,19 +28,20 @@ def add_SBBPT_module(context):
 
 
 def add_ptZones_module(context):
-    config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
+    config_path = f"{context.path()}/{context.config("output_prefix")}config.xml"
     assert os.path.exists(config_path)
 
     # Parse XML and preserve DOCTYPE and comments
     parser = etree.XMLParser(remove_blank_text=True)
-    tree = etree.parse(config_path, parser)
-    root = tree.getroot()
+    tree   = etree.parse(config_path, parser)
+    root   = tree.getroot()
 
     # Create new module
     module = etree.Element("module", name="ptZones")
 
     etree.SubElement(module, "param", name="ptZonesFilePath",  value=f"{context.path()}/gtfs_zones.csv")
     etree.SubElement(module, "param", name="sbbDistancesPath", value=f"{context.path()}/SBB_all_distances.csv")
+    etree.SubElement(module, "param", name="pricingDescriptionPath", value=f"{context.path()}/pricingDescription.xml")
 
     # Append to root
     root.append(module)
@@ -51,7 +52,7 @@ def add_ptZones_module(context):
 
 
 def adjust_pt_routing_parameters(context, parameters):
-    config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
+    config_path = f"{context.path()}/{context.config("output_prefix")}config.xml"
     assert os.path.exists(config_path)
 
     pt_modes = ["bus", "rail", "subway", "ferry", "tram", "funicular", "cable-car", "gondola", "other"]
@@ -61,8 +62,8 @@ def adjust_pt_routing_parameters(context, parameters):
 
     # Parse XML and preserve DOCTYPE and comments
     parser = etree.XMLParser(remove_blank_text=True)
-    tree = etree.parse(config_path, parser)
-    root = tree.getroot()
+    tree   = etree.parse(config_path, parser)
+    root   = tree.getroot()
 
     for module in root.findall(".//module"):
         # Update values of time in eqasim:raptor
@@ -87,8 +88,6 @@ def adjust_pt_routing_parameters(context, parameters):
                     etree.SubElement(parameterset, "param", name="toMode", value = mode2)
                     etree.SubElement(parameterset, "param", name="transferPenalty", value = str(round(value, 3)))
 
-
-
     # Write back to file with DOCTYPE
     doctype_str = '<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">'
     tree.write(config_path, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
@@ -99,8 +98,8 @@ def change_param(context, module_name, param_name, new_value):
     assert os.path.exists(config_path)
 
     parser = etree.XMLParser(remove_blank_text=True)
-    tree = etree.parse(config_path, parser)
-    root = tree.getroot()
+    tree   = etree.parse(config_path, parser)
+    root   = tree.getroot()
 
     for module in root.findall(".//module"):
         if module.get("name") == module_name:
@@ -110,7 +109,6 @@ def change_param(context, module_name, param_name, new_value):
 
     doctype_str = '<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">'
     tree.write(config_path, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
-
 
 
 def get_calibration_args(context):
@@ -160,11 +158,6 @@ def get_calibration_args(context):
             ])
 
     return additional_args
-
-
-
-
-
 
 
 def get_delays_args(context):

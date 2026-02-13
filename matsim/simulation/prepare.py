@@ -76,13 +76,16 @@ def execute(context):
     shutil.copyfile(households_input_path, households_output_path)
 
     # PT pricing
-    sbb_path, zones_path = context.stage("data.pt_pricing.pt_pricing")
+    sbb_path, zones_path, pricing_path = context.stage("data.pt_pricing.pt_pricing")
 
     sbb_output_path =  f"{context.path()}/SBB_all_distances.csv" 
     shutil.copy(sbb_path, sbb_output_path)
 
     zones_output_path =  f"{context.path()}/gtfs_zones.csv" 
     shutil.copy(zones_path, zones_output_path)
+
+    pricing_output_path =  f"{context.path()}/pricingDescription.xml" 
+    shutil.copy(pricing_path, pricing_output_path)
 
     # copy the mode shares        
     global_shares_path, cantonal_shares_path = context.stage("data.microcensus.shares")

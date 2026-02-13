@@ -14,7 +14,7 @@ def execute(context):
     df_all = context.stage("data.cross_border.match_activity_chain")
 
     df_through = df_all[df_all["label"]=="Through"]
-    df = df_all[df_all["label"]=="From-To"]
+    df         = df_all[df_all["label"]=="From-To"]
 
     destinations = gpd.GeoSeries.from_xy(df["destination_x"], df["destination_y"])
     destinations = gpd.GeoDataFrame(geometry = destinations, crs = "EPSG:2056")
@@ -30,8 +30,8 @@ def execute(context):
     df["destination_municipality_id"]   = merged["municipality_id"].values
     df["destination_municipality_name"] = merged["municipality_name"].values
     
-    statent         = context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga", "municipality_id"]].copy()
-    statent.columns = ["destination_id", "destination_x", "destination_y", "noga", "municipality_id"]
+    statent         = context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga", "municipality_id", "number_employees"]].copy()
+    statent.columns = ["destination_id", "destination_x", "destination_y", "noga", "municipality_id", "number_employees"]
 
     statent["offers_work"]           = True
     statent["offers_other"]          = True
@@ -59,10 +59,13 @@ def execute(context):
             if len(candidates) == 0:
                 candidates = statent[mask_statent_mun]
 
+            weights = candidates["number_employees"]
+
             sampled = candidates.sample(
                 n = N_sample,
                 random_state = context.config("random_seed"),
-                replace = True
+                replace = True,
+                weights = weights
             )
 
             df.loc[mask, "destination_id"] = sampled["destination_id"].values
@@ -73,9 +76,20 @@ def execute(context):
 
     df["destination_id"] = df["destination_id"].fillna(-1)
 
+    # All entries with no destination assigned have label = Through, which means that the corresponding agents are only crossing Switzerland without stopping
+    # in the country. And as STATENT only covers Switzerland, we cannot assign real destinations to the people crossing the country.
+
+    assert (
+        df.loc[df["destination_id"] == -1, "label"] == "Through"
+    ).all(), "Found rows with destination_id = -1 and label != 'Through'"
+
     df = df[["cross_border_person_id", "mz_person_id", "label",
              "residence_x", "residence_y", 
              "trip_mode", "trip_purpose", "destination_id",
              "origin_x", "origin_y", "destination_x", "destination_y"]]
+    
+    for col in ["mz_person_id", "residence_x", "residence_y", "destination_id",
+             "origin_x", "origin_y", "destination_x", "destination_y"]:
+        df[col] = df[col].astype(int)
 
     return df
