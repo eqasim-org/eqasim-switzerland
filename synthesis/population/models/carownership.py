@@ -32,7 +32,7 @@ def _weighted_mean(x, w):
 def configure(context):
     context.stage("data.microcensus.21.persons")
     context.stage("data.microcensus.21.household_persons")
-    context.stage("data.statpop.drlicense")
+    context.stage("synthesis.population.models.drlicense")
 
 def execute(context):
     # -------------------------------------------------------------------
@@ -83,7 +83,7 @@ def execute(context):
         how="left"
     )
     survey_df = survey_df.drop(columns=["household_id"])
-    pop_df    = context.stage("data.statpop.drlicense").copy()
+    pop_df    = context.stage("synthesis.population.models.drlicense").copy()
 
     # Make sure essentials exist
     for df in (survey_df, pop_df):
@@ -234,7 +234,7 @@ def execute(context):
     # categorical + numeric feature lists
     cat_cols = [ "ovgk","canton_id",  "municipality_type", "presence_of_children_under_18"]#, "ovgk" "municipality_type", "presence_of_children_under_18", "income_class"] #presence_of_children_under_18 reduces the  number of those not owning a car
 
-    num_cols = ["N_adults", "N_drivers_license_per_adult"]#, TODO: this variable seems not to work well, need to figure out why "N_drivers_license_per_adult"]
+    num_cols = ["N_adults", "N_drivers_license_per_adult"]
     
     for df in (hh_s, hh_p):
         # numeric clean
@@ -249,8 +249,6 @@ def execute(context):
         df["N_drivers_license_per_adult"] = df["N_drivers_license_per_adult"].clip(0.0, 1.0)
    
     col = "N_drivers_license_per_adult"
-    print(freq_table(hh_s, col))
-    print(freq_table(hh_p, col))
     # -------------------------------------------------------------------
     # 4. DESIGN MATRICES
     # -------------------------------------------------------------------
@@ -305,8 +303,7 @@ def execute(context):
             raise ValueError(f"Unknown model_type={model_type}, use 'gbm', 'rf', or 'catboost'.")
 
     car_model = build_car_model(CAR_MODEL)
-    print(Xs.columns)
-    #exit()
+
     Xs_np = Xs.to_numpy(dtype=float, copy=False)
     Xp_np = Xp.to_numpy(dtype=float, copy=False)
     
@@ -467,5 +464,5 @@ def execute(context):
         print(compare_multiclass(g, canton_id=DIAG_CANTON_ID, order=order).to_string(index=False))
 
     print("\n==========================================================================================")
-
+    pop_df = pop_df.rename(columns={"HH_CAR_OWN_draw": "number_of_cars_class"}) # 0, 1, 2, 3+ (coded as 3)
     return pop_df

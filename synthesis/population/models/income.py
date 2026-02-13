@@ -15,7 +15,7 @@ def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
 
 def configure(context):
     context.stage("data.microcensus.21.persons")
-    context.stage("data.statpop.employment_v2")
+    context.stage("synthesis.population.models.employment")
 
 
 def execute(context):
@@ -29,7 +29,7 @@ def execute(context):
     # 0. LOAD DATA
     # -------------------------------------------------------------------
     survey_df = context.stage("data.microcensus.21.persons")
-    pop_df = context.stage("data.statpop.employment_v2")
+    pop_df = context.stage("synthesis.population.models.employment")
     survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income
 
     # Map population job_position to survey coding

@@ -48,7 +48,7 @@ def configure(context):
     context.stage("data.microcensus.21.household_persons")   # multiple rows per household, with driving_license per member
 
     # Population:
-    context.stage("data.statpop.carownership")               # person-level population incl. HH_CAR_OWN_draw (cars)
+    context.stage("synthesis.population.models.carownership")               # person-level population incl. HH_CAR_OWN_draw (cars)
 
 
 def execute(context):
@@ -67,7 +67,7 @@ def execute(context):
     var_raw = pd.to_numeric(persons_df["car_availability"], errors="coerce")
     persons_df["car_availability"] = np.where(var_raw == 2, 0, 1).astype("int64")
     hh_persons_df = context.stage("data.microcensus.21.household_persons")[0].copy()
-    pop_df = context.stage("data.statpop.carownership").copy()
+    pop_df = context.stage("synthesis.population.models.carownership").copy()
     
     # -------------------------------------------------------------------
     # 1. KEY COLUMNS & REQUIRED FIELDS
@@ -84,8 +84,8 @@ def execute(context):
 
     # - survey persons: number_of_cars_class
     # - pop: HH_CAR_OWN_draw
-    CARS_COL_PERS = _resolve_col(persons_df, ["number_of_cars_class"], "number_of_cars_class (persons_df)")
-    CARS_COL_POP  = _resolve_col(pop_df, ["HH_CAR_OWN_draw"], "HH_CAR_OWN_draw (pop_df)")
+    CARS_COL_PERS = "number_of_cars_class"
+    CARS_COL_POP  = "number_of_cars_class"
 
     # Household-persons must contain driving_license
     DL_COL_HHP = "driving_license"
@@ -227,7 +227,7 @@ def execute(context):
         df["age_sq"] = df["age"] ** 2
 
     # categoricals as strings
-    cat_cols = ["age_bin", "sex", "canton_id", "municipality_type", "sp_region", "marital_status", "employment_status"]
+    cat_cols = ["age_bin", "sex", "canton_id", "municipality_type", "sp_region", "marital_status", "employment_status", "ovgk"]
     for df in (persons_df, pop_df):
         for col in cat_cols:
             if col in df.columns:
@@ -245,10 +245,11 @@ def execute(context):
         "age_bin",
         "sex",
         "canton_id",
-        "municipality_type",
+        #"municipality_type",
         #"N_children_under_18",
         "marital_status",
-        "N_adults",
+        #"N_adults",
+        "employment_status",
         # shortage features
         # "hh_n_cars",
         # "hh_n_dl",

@@ -24,7 +24,7 @@ def _weighted_mean(x, w):
 
 def configure(context):
     context.stage("data.microcensus.21.persons")
-    context.stage("data.statpop.students_v2")
+    context.stage("synthesis.population.models.students")
 
 def execute(context):
     # -------------------------------------------------------------------
@@ -38,11 +38,13 @@ def execute(context):
     # 0. LOAD DATA
     # -------------------------------------------------------------------
     survey_df = context.stage("data.microcensus.21.persons")
-    pop_df    = context.stage("data.statpop.students_v2")
+    pop_df    = context.stage("synthesis.population.models.students")
 
     #survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income
 
-    survey_df["N_children_under_18"] = survey_df["N_children_under_18"] > 0
+    for df in (survey_df, pop_df):
+        df["N_children_under_18"] = pd.to_numeric(df["N_children_under_18"], errors="coerce")
+        df["N_children_under_18"] = (df["N_children_under_18"].fillna(0) > 0).astype(int)
     
     pop_df["is_swiss"] = pop_df["nationality"] == 0
 
@@ -72,7 +74,7 @@ def execute(context):
         "age", "sex", "household_size", "employment_status", "N_adults",
         "canton_id", "income_class", "person_weight",
         "driving_license", "learning_driving_license", "is_swiss",
-        "N_children_under_18", "municipality_type", "sp_region", "marital_status"
+        "N_children_under_18", "municipality_type", "sp_region", "marital_status", "ovgk",
     ]
     survey_df = survey_df.dropna(subset=[c for c in needed_survey if c in survey_df.columns])
 
@@ -98,6 +100,10 @@ def execute(context):
     survey_df = survey_df.dropna(subset=["income_class"])
     survey_df = survey_df[survey_df["income_class"] >= 0].copy()
 
+    # recode ovgk
+    survey_df["ovgk_grouped"] = survey_df["ovgk"].isin(["A","B","C"]).map({True: "ABC", False: "D_or_None"})
+    pop_df["ovgk_grouped"] = pop_df["ovgk"].isin(["A","B","C"]).map({True: "ABC", False: "D_or_None"})
+
     # -------------------------------------------------------------------
     # 2. PREP POP: ensure income_class exists
     # -------------------------------------------------------------------
@@ -119,7 +125,7 @@ def execute(context):
 
     cat_cols = [
         "age_bin", "sex", "job_position", "canton_id", "income_class", "is_swiss",
-        "municipality_type", "sp_region", "marital_status", "employment_status"
+        "municipality_type", "sp_region", "marital_status", "employment_status", "ovgk_grouped",
     ]
     num_cols = ["age", "age_sq", "household_size", "N_adults", "N_children_under_18"]
 
@@ -137,14 +143,15 @@ def execute(context):
     # -------------------------------------------------------------------
     feature_cols = [
         "age",
-        "age_sq",
+        # "age_sq",
         "age_bin",
         "sex",
         "canton_id",
         "municipality_type",
-        "N_children_under_18",
+        # "N_children_under_18",
         "marital_status",
-        "N_adults",
+        #"N_adults",
+        "ovgk_grouped",
         #"household_size",
         #"employment_status",
         #"income_class",
@@ -190,8 +197,8 @@ def execute(context):
         elif mt in ("catboost", "cat"):
             return CatBoostClassifier(
                 loss_function="Logloss",
-                iterations=1500,
-                learning_rate=0.05,
+                iterations=2500,
+                learning_rate=0.03,
                 depth=10,
                 l2_leaf_reg=6.0,
                 random_seed=42,
@@ -245,25 +252,25 @@ def execute(context):
     pop_ycol = "DL_has_or_learning_draw" if USE_DRAW else "DL_has_or_learning_hat"
 
     # Ensure string typing for merge/group keys
-    survey_df["canton_id"] = survey_df["canton_id"].astype(str).fillna("Missing")
-    pop_df["canton_id"]    = pop_df["canton_id"].astype(str).fillna("Missing")
+    survey_df["canton_id"] = survey_df["canton_id"].astype(str)#.fillna("Missing")
+    pop_df["canton_id"]    = pop_df["canton_id"].astype(str)#.fillna("Missing")
 
-    survey_df["sex"] = survey_df["sex"].astype(str).fillna("Missing")
-    pop_df["sex"]    = pop_df["sex"].astype(str).fillna("Missing")
+    survey_df["sex"] = survey_df["sex"].astype(str)#.fillna("Missing")
+    pop_df["sex"]    = pop_df["sex"].astype(str)#.fillna("Missing")
 
-    survey_df["income_class"] = survey_df["income_class"].astype(str).fillna("Missing")
-    pop_df["income_class"]    = pop_df["income_class"].astype(str).fillna("Missing")
+    survey_df["income_class"] = survey_df["income_class"].astype(str)#.fillna("Missing")
+    pop_df["income_class"]    = pop_df["income_class"].astype(str)#.fillna("Missing")
 
     # municipality_type already cast to str in cat_cols above, but keep safe
-    survey_df["municipality_type"] = survey_df["municipality_type"].astype(str).fillna("Missing")
-    pop_df["municipality_type"]    = pop_df["municipality_type"].astype(str).fillna("Missing")
+    survey_df["municipality_type"] = survey_df["municipality_type"].astype(str)#.fillna("Missing")
+    pop_df["municipality_type"]    = pop_df["municipality_type"].astype(str)#.fillna("Missing")
 
     #  N_children_under_18 as a string key for grouping (0,1,2,3,... + Missing)
     def _children_exact_str(s):
         s = pd.to_numeric(s, errors="coerce").astype("Int64")
         # to string but keep missing as "Missing"
         out = s.astype("string")
-        out = out.fillna("Missing")
+        #out = out.fillna("Missing")
         return out
 
     survey_df["N_children_under_18_exact"] = _children_exact_str(survey_df["N_children_under_18"])
