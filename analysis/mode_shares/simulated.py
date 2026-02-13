@@ -8,13 +8,17 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
     context.stage("data.spatial.swiss_border")
-    context.stage("synthesis.population.enriched")    
-    
+    # context.stage("synthesis.population.enriched")        
+    # context.stage("matsim.output")
+
     context.config("output_path")
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")    
 
 def execute(context):
+    # ensure dependency
+    # _ = context.stage("matsim.output")
+
     mode_shares_analyzer = ModeShareAnalyzer(context, from_matsim = True)
     
     # Compute mode shares

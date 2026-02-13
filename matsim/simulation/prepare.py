@@ -31,6 +31,7 @@ def configure(context):
     context.config("output_prefix", "switzerland_")
     context.config("useScheduleBasedTransport", default = True)
     context.config("car_cost_model", dmc_constants.CAR_COST_MODEL)
+    context.config("route_bike", True)
 
 
 def execute(context):
@@ -151,7 +152,8 @@ def execute(context):
         "--replanningRate", "0.05",
         "--hasFreight", context.config("use_freight"),
         "--prefix", context.config("output_prefix"),
-        "--carCostModel", context.config("car_cost_model").lower()
+        "--carCostModel", context.config("car_cost_model").lower(),
+        "--routeBikeInNetwork", str(context.config("route_bike")).lower()
         ])
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))

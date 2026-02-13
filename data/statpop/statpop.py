@@ -177,11 +177,11 @@ def execute(context):
         "person_id", "household_id",
         "sex", "age",
         "home_x", "home_y",
-        "marital_status",
+        "marital_status","nationality",
         "household_size",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
         "home_municipality_id", "home_quarter_id", "canton_id", "district_id", "population_density", "sp_region", "ovgk",
-        "collective_housing_resident"] + children_columns]
+        "statpop_person_id", "statpop_household_id", "collective_housing_resident"] + children_columns]
 
     df = data.statpop.head_of_household.impute(df, c)
 

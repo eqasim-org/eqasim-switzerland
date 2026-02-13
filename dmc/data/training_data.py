@@ -49,7 +49,7 @@ def execute(context):
 
     # here I merge the trips that are supposed to be the same trip
     # If the arrival time of trip i is equal to the departure time of trip i+1, and the mode is the same, merge them
-    df = merge_same_trips(context, df)
+    # df = merge_same_trips(context, df)
 
     # Availabilities
     persons = context.stage("data.microcensus.persons")
@@ -88,8 +88,8 @@ def execute(context):
 
     pt_unavailability = ((df["pt_in_vehicle_time_min"]<0.5) | 
                          (df["pt_in_vehicle_time_min"]>300) |
-                         (df["pt_transfers"]>5) |
-                         (df["pt_transfer_time_min"]>50) 
+                         (df["pt_transfers"]>6) |
+                         (df["pt_transfer_time_min"]>60) 
                          )
     df.loc[pt_unavailability, "pt_availability"] = False
 
@@ -100,7 +100,7 @@ def execute(context):
     small_distance = df.euclidean_distance_km<0.05 #less than 50m
     df.loc[small_distance,["pt_availability","car_availability","car_passenger_availability"]] = False
 
-    bike_unavailability = df.euclidean_distance_km>=10
+    bike_unavailability = df.euclidean_distance_km>=12
     df.loc[bike_unavailability, "bike_availability"] = False    
 
     walk_unavailability = df.euclidean_distance_km>=6
@@ -181,8 +181,8 @@ def execute(context):
         "elevation_difference", "purpose",
 
         # person
-        "age", "sex", "income", "sp_region", "ms_region", "is_car_passenger", "ovgk", 
-        "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired","low_income",
+        "age", "sex", "income", "income_class", "sp_region", "ms_region", "is_car_passenger", "ovgk", 
+        "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired","is_junior","low_income",
 
         # car
         'car_availability' ,'car_travel_time_min', 'car_cost_CHF', 'driving_license', "car_distance_km",

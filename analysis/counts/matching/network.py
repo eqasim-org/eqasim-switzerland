@@ -14,12 +14,16 @@ logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    # context.stage("matsim.output")
     context.config("output_path")
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")
     context.config("output_prefix", "switzerland_")
 
-def execute(context):        
+def execute(context):  
+    # this part ensure dependency (this stage run after matsim.output)
+    # _ = context.stage("matsim.output")      
+
     output_path = context.config("output_path")
     output_id   = context.config("output_id")
     simulation_directory = context.config("simulation_directory")

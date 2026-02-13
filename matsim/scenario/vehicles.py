@@ -52,13 +52,18 @@ def execute(context):
                         type["type_id"],
                         length=type["length"],
                         width=type["width"],
+                        pce = type["pce"], #this wasn't here before, but it is supported by the writer, so I added it here
+                        nb_seats = type["nb_seats"],
+                        mode = type["mode"], #this wasn't here before, but it is supported by the writer, so I added it here
+                        maximum_velocity = type["maxVelocity"] if ("maxVelocity" in type) and (type["maxVelocity"] is not None) else None,
+                        flow_efficiency_factor = type["flowEfficiencyFactor"] if ("flowEfficiencyFactor" in type) and (type["flowEfficiencyFactor"] is not None) else None,
                         engine_attributes = {
                             "HbefaVehicleCategory": type["hbefa_cat"],
                             "HbefaTechnology": type["hbefa_tech"],
                             "HbefaSizeClass": type["hbefa_size"],
                             "HbefaEmissionsConcept": type["hbefa_emission"]
-                        }
-                    )
+                        } if not pd.isna(type.get("hbefa_cat",np.nan)) else {},
+                    ) 
                     progress.update()
 
             with context.progress(total = len(df_vehicles), label = "Writing vehicles ...") as progress:
@@ -70,7 +75,7 @@ def execute(context):
                         attributes = {
                             "age": vehicle["age"],
                             "euro": vehicle["euro"]
-                        }
+                        } if (("age" in vehicle) and (vehicle["age"] is not None)) else {}
                     )
                     progress.update()
 

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 MODES = ['car', 'pt', 'bike', 'walk', 'car_passenger']
 TIME_SCALE_MIN = constants.TIME_SCALE_MIN
 DISTANCE_SCALE_KM = constants.DISTANCE_SCALE_KM
+PT_REGIONAL_RADIUS_KM = constants.PT_REGIONAL_RADIUS_KM
 
 def configure(context):
     context.stage("dmc.data.training_data")
@@ -88,12 +89,12 @@ def preprocess_data(df, ignore_car_passenger):
     # low income
     df["low_income"] = df["low_income"].astype(int)
     # drop columns not used in the model
-    unused_columns = [
+    columns_to_drop = [
         "person_id", "trip_id", "home_municipality", "origin_municipality", 
-        "sp_region", "ms_region", "ovgk", "pt_egress_time_min", 
+        "sp_region", "ms_region", "ovgk", "pt_egress_time_min", "income_class",
         "pt_access_time_min", "actual_parking_duration_min", "region_0", "purpose"
     ]
-    df = df.drop(columns=unused_columns)
+    df = df.drop(columns=columns_to_drop)
     return df, modes
 
 def define_variables(database, ignore_car_passenger):
@@ -108,7 +109,8 @@ def define_variables(database, ignore_car_passenger):
         "driving_license": db.Variable("driving_license"),
         "parking_cost_CHF": db.Variable("parking_cost_CHF"),        
         "car_ownership_ratio": db.Variable("car_ownership_ratio"),
-        "is_retired": db.Variable("is_retired"),        
+        "is_retired": db.Variable("is_retired"),
+        "is_junior": db.Variable("is_junior"),      
         # regions       
         "region_1": db.Variable("region_1"),
         "region_2": db.Variable("region_2"),
@@ -211,7 +213,8 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_car_sex": Beta("beta_car_sex", -0.574, None, None, 0),
         "beta_car_age": Beta("beta_car_age", 0.015, None, None, 0),
         "beta_car_retired": Beta("beta_car_retired", -0.521, None, None, 0),
-        "beta_car_ownership_ratio": Beta("beta_car_ownership_ratio", -2.25, None, None, 0),
+        "beta_car_junior": Beta("beta_car_junior", 0.0, None, None, 1),
+        "beta_car_ownership_ratio": Beta("beta_car_ownership_ratio", -2.25, None, None, 0),        
         "beta_car_low_income": Beta("beta_car_low_income", 0.249, None, None, 0),
 
         "beta_car_region_1": Beta("beta_car_region_1", 0.223, None, None, 0),
@@ -231,6 +234,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_pt_sex": Beta("beta_pt_sex", 0, None, None, 1),
         "beta_pt_age": Beta("beta_pt_age", 0, None, None, 1),
         "beta_pt_retired": Beta("beta_pt_retired", 0, None, None, 1),
+        "beta_pt_junior": Beta("beta_pt_junior", 0, None, None, 0),
         "beta_pt_low_income": Beta("beta_pt_low_income", 0.026, None, None, 0),
 
         "beta_pt_destination_work": Beta("beta_pt_destination_work", 0, None, None, 1),
@@ -260,6 +264,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_bike_age": Beta("beta_bike_age", 0.02, None, None, 0),
         "beta_bike_sex": Beta("beta_bike_sex", -0.441, None, None, 0),
         "beta_bike_retired": Beta("beta_bike_retired", -0.848, None, None, 0),
+        "beta_bike_junior": Beta("beta_bike_junior", 0, None, None, 1),
         "beta_bike_low_income": Beta("beta_bike_low_income", -0.24, None, None, 0),
 
         "beta_bike_destination_work": Beta("beta_bike_destination_work", 0, None, None, 1), # not significant
@@ -286,6 +291,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_walk_age": Beta("beta_walk_age", 0.007, None, None, 0),
         "beta_walk_sex": Beta("beta_walk_sex", -0.211, None, None, 0),
         "beta_walk_retired": Beta("beta_walk_retired", -0.285, None, None, 0),
+        "beta_walk_junior": Beta("beta_walk_junior", 0, None, None, 0),
         "beta_walk_low_income": Beta("beta_walk_low_income", 0, None, None, 1),
 
         "beta_walk_destination_work": Beta("beta_walk_destination_work", 0, None, None, 1), # not significant
@@ -314,6 +320,7 @@ def define_betas(ignore_car_passenger, use_exponents):
             "beta_car_passenger_age": Beta("beta_car_passenger_age", -0.003, None, None, 0),
             "beta_car_passenger_sex": Beta("beta_car_passenger_sex", 0.141, None, None, 0),
             "beta_car_passenger_retired": Beta("beta_car_passenger_retired", 0.249, None, None, 0),
+            "beta_car_passenger_junior": Beta("beta_car_passenger_junior", 0.0, None, None, 0),
             "beta_car_passenger_low_income": Beta("beta_car_passenger_low_income", 0, None, None, 1), # not significant
 
             "beta_car_passenger_destination_work": Beta("beta_car_passenger_destination_work", 0.135, None, None, 0),
@@ -369,6 +376,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_car_sex"] * vars["sex"]
         + betas["beta_car_age"] * bioMax(0, vars["age"] - 17)
         + betas["beta_car_retired"] * vars["is_retired"]
+        + betas["beta_car_junior"] * vars["is_junior"]
         + betas["beta_car_ownership_ratio"] * vars["car_ownership_ratio"]
         + betas["beta_car_low_income"] * vars["low_income"]
         + betas["beta_car_region_1"] * vars["region_1"]
@@ -384,7 +392,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
     transformed_pt_transfer_time = (vars["pt_transfer_time_min"] / TIME_SCALE_MIN) ** betas["lambda_pt_transfer_time"]
     
     pt_distance = (vars["euclidean_distance_km"] / DISTANCE_SCALE_KM)
-    distance_correction_limit = 10.0 / DISTANCE_SCALE_KM
+    distance_correction_limit = PT_REGIONAL_RADIUS_KM / DISTANCE_SCALE_KM
     cost_correction = betas["beta_pt_distance_km"] * bioMax(distance_correction_limit-pt_distance, 0.0)**betas["lambda_pt_distance"]
     pt_cost = vars["pt_cost_CHF"] + cost_correction
 
@@ -399,6 +407,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_pt_sex"] * vars["sex"]
         + betas["beta_pt_age"] * bioMax(0, vars["age"] - 17)
         + betas["beta_pt_retired"] * vars["is_retired"]
+        + betas["beta_pt_junior"] * vars["is_junior"]
         + betas["beta_pt_low_income"] * vars["low_income"]
 
         + betas["beta_pt_destination_work"] * vars["destination_work"]
@@ -426,6 +435,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_bike_age"] * bioMax(0, vars["age"] - 17)
         + betas["beta_bike_sex"] * vars["sex"]
         + betas["beta_bike_retired"] * vars["is_retired"]
+        + betas["beta_bike_junior"] * vars["is_junior"]
         + betas["beta_bike_low_income"] * vars["low_income"]
         + betas["beta_bike_destination_work"] * vars["destination_work"]
         + betas["beta_bike_destination_home"] * vars["destination_home"]
@@ -450,6 +460,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_walk_age"] * bioMax(0, vars["age"] - 17)
         + betas["beta_walk_sex"] * vars["sex"]
         + betas["beta_walk_retired"] * vars["is_retired"]
+        + betas["beta_walk_junior"] * vars["is_junior"]
         + betas["beta_walk_low_income"] * vars["low_income"]
         + betas["beta_walk_destination_work"] * vars["destination_work"]
         + betas["beta_walk_destination_home"] * vars["destination_home"]
@@ -475,6 +486,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
             + betas["beta_car_passenger_age"] * bioMax(0, vars["age"] - 17)
             + betas["beta_car_passenger_sex"] * vars["sex"]
             + betas["beta_car_passenger_retired"] * vars["is_retired"]
+            + betas["beta_car_passenger_junior"] * vars["is_junior"]
             + betas["beta_car_passenger_low_income"] * vars["low_income"]
             + betas["beta_car_passenger_destination_work"] * vars["destination_work"]
             + betas["beta_car_passenger_destination_home"] * vars["destination_home"]

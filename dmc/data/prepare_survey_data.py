@@ -51,7 +51,7 @@ def execute(context):
     num_adults = np.maximum(1, df_persons['household_size'] - num_children)
     equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children    
     df_persons["income"] = df_persons["income"] / equvalent_size
-    df_persons["low_income"] = df_persons["income"] < c.LOW_INCOME_THRESHOLD
+    df_persons["low_income"] = df_persons["income"] <= c.LOW_INCOME_THRESHOLD
 
     # 3. sp_region and ms_region
     df_persons["ms_region"] = df_persons.canton_id.map(lambda x: MS_REGIONS.loc[x,"cluster"])
@@ -60,12 +60,13 @@ def execute(context):
     # 5. pt quality
     df_persons["good_pt_service"] = (df_persons["ovgk"].isin(["A", "B"])).astype(int)
     df_persons["medium_pt_service"] = (df_persons["ovgk"].isin(["C","D"])).astype(int)
-    # 6. retired ot not
-    df_persons["is_retired"] = (df_persons["age"]>=65).astype(int) 
+    # 6. age related
+    df_persons["is_retired"] = (df_persons["age"]>=65).astype(int)
+    df_persons["is_junior"] = (df_persons["age"]<16).astype(int)
     # 7. merge
     cols = ["person_id","home_x","home_y", "hasGeneralSubscription","hasHalbtaxSubscription","hasRegionalSubscription", "hasJuniorSubscription", 
             "hasGleis7Subscription", "statedPreferenceRegion", 'person_weight', 'age', 'sex', 'driving_license', 'sp_region', 'ms_region', "ovgk",
-            'is_car_passenger', "income", "weekend", "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired", "low_income", "income_class"]
+            'is_car_passenger', "income", "weekend", "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired", "is_junior", "low_income", "income_class"]
     df_persons = df_persons[cols]    
     df_trips = df_trips.merge(df_persons, on="person_id", how="left")
 
@@ -165,7 +166,7 @@ def execute(context):
             'destination_x', 'destination_y', 'origin_x', 'origin_y',
             'home_x', 'home_y', 'hasGeneralSubscription', 'hasJuniorSubscription', 'hasGleis7Subscription',
             'hasHalbtaxSubscription', 'hasRegionalSubscription', 'ovgk', 'car_ownership_ratio', "good_pt_service", "medium_pt_service",
-            'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','low_income',
+            'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','is_junior','low_income',
             'driving_license', 'sp_region', 'ms_region', 'is_car_passenger', 'income', 'income_class',
             'destination_home', 'origin_home', 'destination_work', 'destination_education',
             'destination_shopping', 'destination_leisure', 'destination_other',

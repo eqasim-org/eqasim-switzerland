@@ -12,6 +12,7 @@ from synthesis.population.spatial.secondary.rda import AssignmentSolver, Discret
 def configure(context):
     context.stage("data.constants")
     context.stage("synthesis.population.trips")
+    context.stage("synthesis.population.enriched")
 
     context.stage("synthesis.population.sampled")
     context.stage("synthesis.population.spatial.home.locations")
@@ -50,7 +51,8 @@ def prepare_destinations(context):
 
         data[purpose] = dict(
             identifiers=identifiers[f],
-            locations=locations[f]
+            locations=locations[f],
+            ovgk=df_destinations["ovgk"].values[f]
         )
 
     return data
@@ -76,8 +78,14 @@ def execute(context):
     c    = context.stage("data.constants")
     crs  = c.CH1903_PLUS
 
+    # Load car availability
+    df_car_availability     = context.stage("synthesis.population.enriched")[["person_id","car_availability","driving_license"]]
+    df_car_availability["car_availability"] = ((df_car_availability["car_availability"].astype(int)!=c.CAR_AVAILABILITY_NEVER) &
+                                               (df_car_availability["driving_license"])).astype(bool)        
+
     # Load trips and primary locations
     df_trips                = context.stage("synthesis.population.trips").sort_values(by=["person_id", "trip_index"])
+    df_trips                = pd.merge(df_trips, df_car_availability[["person_id","car_availability"]], how="left", on="person_id")
     df_trips["travel_time"] = df_trips["arrival_time"] - df_trips["departure_time"]
     df_primary              = prepare_locations(context)
 
@@ -90,12 +98,18 @@ def execute(context):
         car=0.8, car_passenger=1.0, pt=1.0, bike=0.0, walk=0.0, walk_loop=0.0, bike_loop=0.0, car_loop=0.8, pt_loop=1.0
     ))
 
-    # Segment into subsamples
+    # Segment into subsamples (pt agents with car availability / without car availability in the same batch)
     processes = context.config("threads")
 
-    unique_person_ids = df_trips["person_id"].unique()
-    number_of_persons = len(unique_person_ids)
-    unique_person_ids = np.array_split(unique_person_ids, processes)
+    unique_person_ids_carAvail = df_trips[df_trips["car_availability"] == True]["person_id"].unique()
+    unique_person_ids_noCar = df_trips[df_trips["car_availability"] == False]["person_id"].unique()
+    
+    number_of_persons = len(unique_person_ids_carAvail) + len(unique_person_ids_noCar)
+    processes_carAvail = int((len(unique_person_ids_carAvail)/number_of_persons) * processes)
+    unique_person_ids_carAvail = np.array_split(unique_person_ids_carAvail, processes_carAvail)
+    unique_person_ids_noCar = np.array_split(unique_person_ids_noCar, processes - processes_carAvail)
+    unique_person_ids = unique_person_ids_carAvail + unique_person_ids_noCar
+    assert len(unique_person_ids) == processes
 
     rng = np.random.RandomState(context.config("random_seed"))
     random_seeds = rng.randint(10000, size=processes)
@@ -104,11 +118,13 @@ def execute(context):
     batches = []
 
     for index in range(processes):
+        batch_trips = df_trips[df_trips["person_id"].isin(unique_person_ids[index])]
         batches.append((
-            df_trips[df_trips["person_id"].isin(unique_person_ids[index])],
+            batch_trips,
             df_primary[df_primary["person_id"].isin(unique_person_ids[index])],
             random_seeds[index],
-            crs
+            crs,
+            batch_trips["car_availability"].iloc[0] # all persons in batch have same car availability
         ))
 
     # Run algorithm in parallel
@@ -134,13 +150,26 @@ def execute(context):
 
 
 def process(context, arguments):
-    df_trips, df_primary, random_seed, crs = arguments
+    df_trips, df_primary, random_seed, crs, car_availability = arguments
 
     # Set up RNG
     rng = np.random.RandomState(random_seed)
 
+    # get destinations candidates
+    destinations = context.data("destinations").copy()
+    if not car_availability:
+        # we add this condition here because people without car availability tend to
+        # choose secondary location where public transport is more accessible (ovgk A, B, C, D)
+        for k,v in destinations.items():
+            mask = (v["ovgk"]=='A') | (v["ovgk"]=='B') | (v["ovgk"]=='C') | (v["ovgk"]=='D')
+            v["identifiers"] = v["identifiers"][mask]
+            v["locations"]   = v["locations"][mask]
+
+    # drop ovgk as it is not needed in the candidate index
+    for v in destinations.values():
+        del v["ovgk"]            
+
     # Set up discretization solver
-    destinations = context.data("destinations")
     candidate_index = CandidateIndex(destinations)
     discretization_solver = CustomDiscretizationSolver(candidate_index)
 

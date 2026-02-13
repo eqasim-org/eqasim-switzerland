@@ -67,8 +67,9 @@ class networkCleaner():
             # Limit the speed limit in the network
             logger.info("Change the infinit freespeed to 85.")
             # This is also done in : https://github.com/eqasim-org/eqasim-java/blob/develop/core/src/main/java/org/eqasim/core/scenario/preparation/AdjustLinkLength.java#L9
-            self.links.loc[self.links.freespeed.apply(np.isinf),"freespeed"] = 85
+            self.links.loc[self.links.freespeed.apply(np.isinf), "freespeed"] = 85
             self.links.loc[self.links.freespeed<20/3.6,"freespeed"] = 20/3.6
+            self.links.loc[self.links.capacity<300,"capacity"] = 300
 
         # Update nodes dataframe to keep only the nodes present in the links
         unique_nodes = set(df.from_node.tolist() + df.to_node.tolist())
@@ -298,4 +299,21 @@ class networkCleaner():
         
         progress_bar.close()
         return final_df, stats
-    
+
+    def add_bike_to_network(self):
+        car_links = self.links.modes.str.split(',').map(lambda x: "car" in x)
+        taxi_links = self.links.modes.str.split(',').map(lambda x: "taxi" in x)
+        bus_links = self.links.modes.str.split(',').map(lambda x: "bus" in x)
+        truck_links = self.links.modes.str.split(',').map(lambda x: "truck" in x)
+        candidate_links = car_links | taxi_links | bus_links | truck_links
+        
+        # find largest connected component of this network and add bike to these links
+        G = nx.DiGraph()
+        G.add_edges_from(zip(self.links.loc[candidate_links,'from_node'], 
+                             self.links.loc[candidate_links,'to_node']))
+        largest_cc = max(nx.strongly_connected_components(G), key=len)
+        bike_links = candidate_links & (self.links.from_node.isin(largest_cc) & self.links.to_node.isin(largest_cc))
+
+        # Add bike to the modes of the selected links
+        self.links.loc[bike_links, "modes"] += ",bike"
+        return self.links

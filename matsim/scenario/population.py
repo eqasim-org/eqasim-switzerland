@@ -219,8 +219,7 @@ def execute(context):
     cache_path    = context.path()
     df_persons    = context.stage("synthesis.population.enriched")
     df_activities = context.stage("synthesis.population.activities")
-    df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]
-    df_vehicles = context.stage("synthesis.vehicles.vehicles")[1]
+    df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]    
     df_municipality_type = context.stage("data.spatial.municipality_types")
     df_municipalities,_ = context.stage("data.spatial.municipalities")
 

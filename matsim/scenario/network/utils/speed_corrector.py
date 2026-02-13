@@ -158,9 +158,12 @@ class SpeedCorrector:
         speed_factor_uphill = self.context.config("speed_factor_uphill")
 
         def correct_speed(row):
-            gradient = row['slope'] / 100 # convert percentage to decimal
+            gradient = abs(row['slope'] / 100) # convert percentage to decimal
             if gradient > max_gradient_threshold:
-                return row['freespeed'] * speed_factor_uphill
+                if row['slope'] > 0:
+                    return row['freespeed'] * speed_factor_uphill
+                else:
+                    return row['freespeed'] * ((1+speed_factor_uphill)/2) # less reduction for downhill
             else:
                 return row['freespeed']
 
@@ -205,7 +208,7 @@ class SpeedCorrector:
         Parameters:
             correction_type (str): The type of correction to apply. Default is 'municipality_type'.
         """
-        assert correction_type in ["municipality_type","uphill","outside_border"], f"Unsupported correction type: {correction_type}"
+        assert correction_type in ["municipality_type","uphill","outside_border","motorway"], f"Unsupported correction type: {correction_type}"
 
         if correction_type == "municipality_type":
             return self.run_municipality_type_based_correction()
@@ -213,6 +216,24 @@ class SpeedCorrector:
             return self.run_uphill_based_correction()
         elif correction_type == "outside_border":           
             return self.run_outside_border_correction()
+        elif correction_type=="motorway":
+            return self.run_motorway_correction()
+    
+    def run_motorway_correction(self):
+        """
+        This method corrects the free speed of motorway links in the network.
+        The correction is applied only to car links classified as motorways.
+        """ 
+        links = self.network.links.copy()
+        car_links = links.modes.str.contains(r"\bcar\b")
+        motorway_links = links['freespeed']>=(80/3.6)
+        
+        # Apply speed correction        
+        speed_factor_motorway = self.context.config("speed_factor_motorway")
+        mask = car_links & motorway_links
+        links.loc[mask, 'freespeed'] = links.loc[mask, 'freespeed'] * speed_factor_motorway
+                
+        return links
         
 
 
