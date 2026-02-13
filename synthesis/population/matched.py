@@ -1,3 +1,5 @@
+import os
+#os.environ["NUMBA_DISABLE_JIT"] = "1"
 import itertools
 
 import numba
@@ -20,6 +22,75 @@ def configure(context):
     context.stage("data.microcensus.activity_chains")
     context.stage("synthesis.population.sampled")
     context.stage("data.constants")
+
+def compare_feature_distribution(df_population_sub, df_source_sub, feature, weight_col="person_weight"):
+    """
+    Compare unweighted population shares vs weighted source shares for one feature.
+    Expects inputs to already be filtered to the segment of interest.
+    """
+    pop = df_population_sub
+    src = df_source_sub
+
+    # Population: unweighted shares
+    pop_dist = (
+        pop[feature]
+        .value_counts(dropna=False, normalize=True)
+        .rename("share_population")
+        .reset_index()
+        .rename(columns={"index": feature})
+    )
+
+    # Source: weighted shares
+    src_w = (
+        src.groupby(feature, dropna=False)[weight_col]
+        .sum()
+        .rename("weight_sum")
+        .reset_index()
+    )
+    total_w = src_w["weight_sum"].sum()
+    src_w["share_source_weighted"] = src_w["weight_sum"] / total_w if total_w != 0 else 0.0
+
+    out = pop_dist.merge(src_w[[feature, "share_source_weighted"]], on=feature, how="outer").fillna(0.0)
+    out["diff_pop_minus_source"] = out["share_population"] - out["share_source_weighted"]
+    out["abs_diff"] = out["diff_pop_minus_source"].abs()
+
+    # Sort by worst mismatch (absolute)
+    out = out.sort_values("abs_diff", ascending=False).reset_index(drop=True)
+    return out
+
+
+def print_matching_diagnostics(df_population_sub, df_source_sub, features, label="", weight_col="person_weight", top_n=8):
+    """
+    Prints per-feature mismatch summaries (TVD + top categories by abs diff).
+    """
+    pop_n = len(df_population_sub)
+    src_n = len(df_source_sub)
+    print(f"\n--- Matching diagnostics: {label} ---")
+    print(f"Population rows: {pop_n} | Source rows: {src_n}\n")
+
+    if pop_n == 0:
+        print("No population rows in this segment.\n")
+        return
+    if src_n == 0:
+        print("No source rows in this segment.\n")
+        return
+
+    for feat in features:
+        if feat not in df_population_sub.columns:
+            print(f"Feature '{feat}' not in population subset -> skipping diagnostics for this feature.\n")
+            continue
+        if feat not in df_source_sub.columns:
+            print(f"Feature '{feat}' not in source subset -> skipping diagnostics for this feature.\n")
+            continue
+
+        out = compare_feature_distribution(df_population_sub, df_source_sub, feat, weight_col=weight_col)
+        tvd = 0.5 * out["abs_diff"].sum()  # Total Variation Distance
+        max_abs = out["abs_diff"].max() if len(out) else 0.0
+
+        print(f"Feature '{feat}': TVD={tvd:.4f} | max_abs_diff={max_abs:.4f}")
+        show = out[[feat, "share_population", "share_source_weighted", "diff_pop_minus_source"]].head(top_n)
+        print(show.to_string(index=False))
+        print("")
 
 
 @numba.jit(nopython=True, parallel=True)
@@ -71,9 +142,9 @@ def recursive_iteration_statmatch(df_source, source_identifier, weight, df_targe
 
     # Perform matching
     weights = df_source[weight].values
-    assigned_indices = np.ones((len(df_target),), dtype=np.int) * -1
-    unassigned_mask = np.ones((len(df_target),), dtype=np.bool)
-    assigned_levels = np.ones((len(df_target),), dtype=np.int) * -1
+    assigned_indices = np.ones((len(df_target),), dtype=np.int64) * -1
+    unassigned_mask = np.ones((len(df_target),), dtype=np.bool_)
+    assigned_levels = np.ones((len(df_target),), dtype=np.int64) * -1
     uniform = rng.random_sample(size=(len(df_target),))
 
     column_indices = [np.arange(len(unique_values[column])) for column in columns]
@@ -168,7 +239,7 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
         matching_the_missing, levels = statistical_matching(progress, df_source, source_identifier, weight, df_not_matching_on_mandatory, target_identifier, columns, mandatory_columns, random_seed, next_minimum_observations, share_of_matched_agents, initial_nb_of_agents)
         
         return pd.concat([df_matching_on_mandatory, matching_the_missing]), np.concatenate((matched_levels, levels))
-
+        
 
 def nonparallel_statistical_matching(context, df_source, source_identifier, weight, df_target, target_identifier, columns,
                                   mandatory_columns, minimum_observations=0):
@@ -176,7 +247,7 @@ def nonparallel_statistical_matching(context, df_source, source_identifier, weig
     random_seed = context.config("random_seed")
     
     return statistical_matching(context.progress, df_source, source_identifier, weight, df_target, target_identifier,
-                                columns, mandatory_columns, random_seed, minimum_observations, 0, 0)
+                                columns, mandatory_columns, random_seed, minimum_observations)
 
 
 def run_statistical_matching_extended(context, df_source, source_identifier, weight,
@@ -261,10 +332,11 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
 
         return df_target, df_population, [unmatchable_person_ids, None]
 
+    
 
 def execute(context):
     df_mz        = context.stage("data.microcensus.persons")
-    c            = context.stage("data.constants")
+    const        = context.stage("data.constants")
     scenario_day = context.config("specific_day_scenario")
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
@@ -278,141 +350,230 @@ def execute(context):
     else:
         raise ValueError(f"Unimplemented day for scenario: {scenario_day}")
 
-    
     df_source     = df_source.rename(columns={"person_id": "mz_id"})
+    df_source["canton_id"] = df_source["canton_id"].astype("int64")
+
     df_population = context.stage("synthesis.population.sampled")
 
-    df_source["household_size_class"]     = df_source["household_size_class"].clip(upper=2)
-    df_population["household_size_class"] = df_population["household_size_class"].clip(upper=2)
-    df_source["N_children_under_12"]      = df_source["N_children_under_12"].clip(upper=1)
-    df_population["N_children_under_12"]  = df_population["N_children_under_12"].clip(upper=1)
+    df_population.loc[:, "employment_status"]                                                                     = 0
+    df_population.loc[df_population["employed"] == 1, "employment_status"]                                        = 1
+    df_population.loc[(df_population["employed"] == 3) & (df_population["is_student"] == 1), "employment_status"] = 2
+    df_population.loc[(df_population["employed"] == 2) & (df_population["is_student"] == 1), "employment_status"] = 2
+    df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"] = 3
 
-    
-    if c.census == "statpop":
+    df_population["sex"] = df_population["sex"].astype(np.int64)
 
-        ## We first want to match by household to be able
-        ## to add extra attributes to the persons
+    AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
+    df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
+    df_source["age_class"] = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
+
+    df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
+    df_population["household_size"] = df_population["household_size"].clip(upper=2)
+
+    df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0)  # presence of children under 12
+
+    df_source["sex"] = df_source["sex"].astype(np.int64)
+    var_raw = pd.to_numeric(df_source["car_availability"], errors="coerce")
+    df_source["car_availability"] = np.where(var_raw == 2, 0, 1).astype("int64")
+
+    if const.census == "statpop":
 
         number_of_population_persons    = len(np.unique(df_population["person_id"]))
         number_of_population_households = len(np.unique(df_population["household_id"]))
 
-        population_selector  = df_population["age"] >= c.MZ_AGE_THRESHOLD
-        population_selector &= df_population["is_head"]
+        population_selector  = df_population["age"] >= const.MZ_AGE_THRESHOLD
+        df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=3)
+        df_source["number_of_cars_class"] = df_source["number_of_cars_class"].clip(upper=3)
 
-        columns_household_matching           = ["municipality_type", "ovgk", "household_size_class", "sp_region", "canton_id"]#, "age_class"]
-        mandatory_columns_household_matching = columns_household_matching[:3]
+        # HT and activity-chains are better with canton_id instead of muncipality_type
+        columns_individual_matching = [
+            "age_class", "sex", "car_availability", "employment_status",
+            "ovgk",  "N_children_under_12", "sp_region", "canton_id",
+        ]
 
-        df_target, df_population, removed_ids_list = run_statistical_matching_extended(context, 
-                                                             df_source, "mz_id", "household_weight",
-                                                             df_population.copy(), "person_id",
-                                                             columns_household_matching, mandatory_columns_household_matching,
-                                                             minimum_observations = context.config("matching_minimum_observations"), 
-                                                             population_selector=population_selector,
-                                                             option="household")
-        
-        print("First statistical matching done")
+        df_population["marital_status"] = df_population["marital_status"].astype("int64")
+        df_population["car_availability"] = df_population["car_availability"].astype("int64")
+        df_population["municipality_type"] = df_population["municipality_type"].astype("object")
+        df_source["municipality_type"] = df_source["municipality_type"].astype("object")
+        df_population["sp_region"] = df_population["sp_region"].astype("int64")
+        df_source["sp_region"] = df_source["sp_region"].astype("int64")
+        df_source["canton_id"] = df_source["canton_id"].astype("int64")
+        df_population["canton_id"] = df_population["canton_id"].astype("int64")
+        df_population["ovgk"] = (df_population["ovgk"] != "None").astype("int64")
+        df_source["ovgk"] = (df_source["ovgk"] != "None").astype("int64")
 
-        # Convert IDs
-        df_target["mz_id"] = df_target["mz_id"].astype(np.int)
-        df_source["mz_id"] = df_source["mz_id"].astype(np.int)
+        mandatory_columns_individual_matching = columns_individual_matching[:7]
 
-        # Get the attributes from the MZ for the head of household (and thus for the household)
-        df_attributes = pd.merge(
-            df_target[[
-                "household_id", "mz_id"
-            ]],
-            df_source[[
-                "mz_id", "income_class", "number_of_cars_class", "number_of_bikes_class"
-            ]],
-            on = "mz_id"
-        )
+        print("Statistical matching starting (normal people split by age band with band-filtered source)")
 
-        df_attributes["mz_head_id"] = df_attributes["mz_id"]
-        del df_attributes["mz_id"]
+        # --- NORMAL PEOPLE: split into age bands + filter source by same band ---
+        df_population_work = df_population.copy()
+        targets_by_band = {}
+        removed_person_ids_normal = set()
 
-        assert (len(df_attributes) == len(df_target))
+        # Define bands (inclusive bounds)
+        age_bands = {
+            "u16":   (None, 15),
+            "16_23": (16, 23),
+            "gt24":  (24, 150),
+        }
 
-        # Attach attrbiutes to STATPOP for the second matching
-        print("Attach attributes to STATPOP for the second matching")
-        initial_population_size = len(df_population)
+        for band_name, (age_min, age_max) in age_bands.items():
+            # Selector for this band, respecting MZ_AGE_THRESHOLD and excluding collective housing
+            sel = (~df_population_work["collective_housing_resident"]) & (df_population_work["age"] >= const.MZ_AGE_THRESHOLD)
+            if age_min is not None:
+                sel &= (df_population_work["age"] >= age_min)
+            if age_max is not None:
+                sel &= (df_population_work["age"] <= age_max)
 
-        df_population = pd.merge(
-            df_population, df_attributes, on="household_id"
-        )
+            if not sel.any():
+                continue
 
-        assert (len(df_population) == initial_population_size)
-        del df_attributes
+            # Filter source to the same age band
+            src_band = df_source.copy()
+            if age_min is not None:
+                src_band = src_band[src_band["age"] >= age_min]
+            if age_max is not None:
+                src_band = src_band[src_band["age"] <= age_max]
 
-        ## Now that we have added attributes
-        ## SECOND MATCHING - NORMAL PEOPLE
-        df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=1)
-        df_source["number_of_cars_class"]     = df_source["number_of_cars_class"].clip(upper=1)
+            # Safety fallback: if band-filtered source is empty, fall back to full source
+            if len(src_band) == 0:
+                print(f"WARNING: Source is empty for band '{band_name}' after age filter; falling back to full df_source.")
+                src_band = df_source
+                
+            # Diagnostics BEFORE matching this band (systematic feature checks)
+            pop_diag = df_population_work.loc[sel, columns_individual_matching + ["person_id", "household_id"]].copy()
+            src_diag = src_band.loc[:, columns_individual_matching + ["mz_id", "person_weight"]].copy()
+            print_matching_diagnostics(
+                pop_diag,
+                src_diag,
+                features=columns_individual_matching,
+                label=f"normal band '{band_name}' (pre-match)",
+                weight_col="person_weight",
+                top_n=8
+            )
 
-        df_population["sex"] = df_population["sex"].astype(int)
+            print(f"  - Matching normal people band: {band_name}")
+            if band_name == "u16":
+                youth = [
+                "age_class", "sex",
+                "ovgk",  "employment_status", "sp_region", "canton_id",
+                ]
+                youth_mandatory = [
+                "age_class", "sex",
+                "ovgk", "employment_status", "sp_region"
+                ]
+                df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
+                    context,
+                    src_band, "mz_id", "person_weight",
+                    df_population_work, "person_id",
+                    youth, youth_mandatory,
+                    minimum_observations=context.config("matching_minimum_observations"),
+                    population_selector=sel,
+                    option="person"
+                )
+            elif band_name == "16_23":
+                youth = [
+                "age_class", "sex",
+                "ovgk",  "employment_status", "car_availability", "sp_region", "canton_id",
+                ]
+                youth_mandatory = [
+                "age_class", "sex",
+                "ovgk", "employment_status", "car_availability", "sp_region"
+                ]
+                df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
+                    context,
+                    src_band, "mz_id", "person_weight",
+                    df_population_work, "person_id",
+                    youth, youth_mandatory,
+                    minimum_observations=context.config("matching_minimum_observations"),
+                    population_selector=sel,
+                    option="person"
+                )
+            else:
+                df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
+                    context,
+                    src_band, "mz_id", "person_weight",
+                    df_population_work, "person_id",
+                    columns_individual_matching, mandatory_columns_individual_matching,
+                    minimum_observations=context.config("matching_minimum_observations"),
+                    population_selector=sel,
+                    option="person"
+                )
 
-        population_selector_normal = (df_population["age"] >= c.MZ_AGE_THRESHOLD) & ~(df_population["collective_housing_resident"])
+            targets_by_band[band_name] = df_target_band
+            removed_person_ids_normal |= set(removed_ids_list_band[0])
 
-        columns_individual_matching           = ["age_class", "sex", "number_of_cars_class", "N_children_under_12", "canton_id", "sp_region", "ovgk"]
-        mandatory_columns_individual_matching = columns_individual_matching[:4]
+        df_population_normal = df_population_work
 
-        print("Second statistical matching starting")
+        # Build one mapping table and fill mz_id from the corresponding band
+        df_matching_normal = df_population_normal[["person_id", "household_id"]].copy()
 
-        df_target_normal, df_population_normal, removed_ids_list_normal  = run_statistical_matching_extended(context, 
-                                                              df_source, "mz_id", "household_weight",
-                                                              df_population.copy(), "person_id",
-                                                              columns_individual_matching, mandatory_columns_individual_matching,
-                                                              minimum_observations = context.config("matching_minimum_observations"), 
-                                                              population_selector = population_selector_normal,
-                                                              option = "household")
-        
-        # Extract only the matching information
+        band_cols = []
+        for band_name, df_target_band in targets_by_band.items():
+            col = f"mz_id_normal_{band_name}"
+            band_cols.append(col)
 
-        df_matching_normal = pd.merge(
-            df_population_normal[["person_id", "household_id", "mz_head_id"]],
-            df_target_normal[["person_id", "mz_id"]],
-            on="person_id", how="left")
-        
-        df_matching_normal = df_matching_normal.rename(columns = {"mz_id": "mz_id_normal"})
-        
-        ## SECOND MATCHING - STATPOP PEOPLE WITH RESIDENCE AT MUNICPALITY CENTER
+            df_matching_normal = pd.merge(
+                df_matching_normal,
+                df_target_band[["person_id", "mz_id"]].rename(columns={"mz_id": col}),
+                on="person_id", how="left"
+            )
 
-        population_selector = (df_population["age"] >= c.MZ_AGE_THRESHOLD) & (df_population["collective_housing_resident"])
-        
+        # Ensure the expected column exists
+        df_matching_normal["mz_id_normal"] = np.nan
+
+        # Combine band assignments (first non-null wins)
+        for col in band_cols:
+            df_matching_normal["mz_id_normal"] = df_matching_normal["mz_id_normal"].combine_first(df_matching_normal[col])
+            del df_matching_normal[col]
+
+        removed_ids_list_normal = [removed_person_ids_normal, None]
+
+        # --- SECOND MATCHING - STATPOP PEOPLE WITH RESIDENCE AT MUNICIPALITY CENTER ---
+        population_selector = (df_population["age"] >= const.MZ_AGE_THRESHOLD) & (df_population["collective_housing_resident"])
+
         # with low population samples it can happen that we do not have these individuals
         if (population_selector.any()):
-            df_source_center = df_source.merge(context.stage("data.microcensus.activity_chains")[["person_id", "activity_chain"]], how = "left", right_on = "person_id", left_on = "mz_id")
-            df_source_center = df_source_center[df_source_center["activity_chain"]=="home"]
+            df_source_center = df_source.merge(
+                context.stage("data.microcensus.activity_chains")[["person_id", "activity_chain"]],
+                how="left", right_on="person_id", left_on="mz_id"
+            )
+            df_source_center = df_source_center[df_source_center["activity_chain"] == "home"]
 
-            print("Second statistical matching starting - people with weird residence")
+            print("Second statistical matching starting - people with strange residence")
 
-            df_target_center, df_population_center, removed_ids_list_center  = run_statistical_matching_extended(context, 
-                                                                df_source_center, "mz_id", "household_weight",
-                                                                df_population.copy(), "person_id",
-                                                                columns_individual_matching, mandatory_columns_individual_matching,
-                                                                minimum_observations = context.config("matching_minimum_observations"), 
-                                                                population_selector = population_selector,
-                                                                option = "household")
-            
+            df_target_center, df_population_center, removed_ids_list_center  = run_statistical_matching_extended(
+                context,
+                df_source_center, "mz_id", "household_weight",
+                df_population.copy(), "person_id",
+                columns_individual_matching, mandatory_columns_individual_matching,
+                minimum_observations=context.config("matching_minimum_observations"),
+                population_selector=population_selector,
+                option="household"
+            )
+
             df_matching_center = pd.merge(
-                df_population_center[["person_id", "household_id", "mz_head_id"]],
+                df_population_center[["person_id", "household_id"]],
                 df_target_center[["person_id", "mz_id"]],
-                on="person_id", how="left")     
+                on="person_id", how="left"
+            )
 
-            df_matching_center = df_matching_center.rename(columns = {"mz_id": "mz_id_center"})  
+            df_matching_center = df_matching_center.rename(columns={"mz_id": "mz_id_center"})
 
-            removed_ids_list = removed_ids_list + removed_ids_list_center + removed_ids_list_normal
-            df_matching      = pd.merge(df_matching_normal, df_matching_center, on = ["person_id", "household_id", "mz_head_id"])
+            removed_ids_list = removed_ids_list_center + removed_ids_list_normal
+            df_matching      = pd.merge(df_matching_normal, df_matching_center, on=["person_id", "household_id"])
             df_matching["mz_id"] = df_matching["mz_id_normal"].combine_first(df_matching["mz_id_center"])
             del df_matching["mz_id_center"]
-            
+
         else:
             df_matching = df_matching_normal.copy()
             df_matching["mz_id"] = df_matching["mz_id_normal"]
+            removed_ids_list = removed_ids_list_normal
 
         del df_matching["mz_id_normal"]
-       
-    
-    elif c.census == "are_synpop":
+
+    elif const.census == "are_synpop":
         number_of_population_persons    = len(np.unique(df_population["person_id"]))
 
         population_selector = df_population["age_class"] > 0
@@ -420,20 +581,25 @@ def execute(context):
         columns_individual_matching           = [ "ovgk", "age_class", "sex", "employment_status", "number_of_cars_class", "N_children_under_18"]
         mandatory_columns_individual_matching = columns_individual_matching[:4]
 
-        df_target, df_population, removed_ids_list  = run_statistical_matching_extended(context, 
-                                                              df_source, "mz_id", "household_weight",
-                                                              df_population.copy(), "person_id",
-                                                              columns_individual_matching, mandatory_columns_individual_matching,
-                                                              minimum_observations = context.config("matching_minimum_observations"), 
-                                                              population_selector=population_selector, 
-                                                              option = "person")
-        
+        df_target, df_population, removed_ids_list  = run_statistical_matching_extended(
+            context,
+            df_source, "mz_id", "household_weight",
+            df_population.copy(), "person_id",
+            columns_individual_matching, mandatory_columns_individual_matching,
+            minimum_observations=context.config("matching_minimum_observations"),
+            population_selector=population_selector,
+            option="person"
+        )
+
         df_matching = pd.merge(
             df_population[["person_id"]],
             df_target[["person_id", "mz_id"]],
-            on="person_id", how="left")
+            on="person_id", how="left"
+        )
 
-    # Wrap up    
+    # Wrap up
+    # Ensure missing mz_id becomes -1 (so your downstream assertions using == -1 work)
+    df_matching["mz_id"] = pd.to_numeric(df_matching["mz_id"], errors="coerce").fillna(-1).astype(np.int64)
 
     df_matching["mz_person_id"] = df_matching["mz_id"]
     del df_matching["mz_id"]
@@ -441,33 +607,24 @@ def execute(context):
     assert (len(df_matching) == len(df_population))
 
     # Check that all person who don't have a MZ id now are under age
-    if c.census == "statpop":
+    if const.census == "statpop":
         assert (np.all(df_population[
-                    df_population["person_id"].isin(
-                        df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
-                    )
-                ]["age"] < c.MZ_AGE_THRESHOLD))
+            df_population["person_id"].isin(
+                df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
+            )
+        ]["age"] < const.MZ_AGE_THRESHOLD))
 
-    
-        assert (not np.any(df_matching["mz_head_id"] == -1))
-
-    elif c.census == "are_synpop":
+    elif const.census == "are_synpop":
         assert (np.all(df_population[
-                    df_population["person_id"].isin(
-                        df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
-                    )
-                ]["age_class"] == 0))
+            df_population["person_id"].isin(
+                df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
+            )
+        ]["age_class"] == 0))
 
     print("Matching is done. In total, the following observations were removed from the census: ")
-
-    if c.census == "statpop":
-        removed_household_ids = removed_ids_list[1]
-        print("  Households: %d (%.2f%%)" % ( len(removed_household_ids), 100.0 * len(removed_household_ids) / number_of_population_households))
 
     removed_person_ids = removed_ids_list[0]
     print("  Persons: %d (%.2f%%)" % (len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_population_persons))
 
     # Return
     return df_matching, removed_person_ids
-
-
