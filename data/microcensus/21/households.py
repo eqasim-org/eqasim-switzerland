@@ -53,13 +53,11 @@ def execute(context):
     df_mz_households.loc[df_mz_households["number_of_cars"] > 0, "number_of_cars_class"] = np.minimum(
         c.MAX_NUMBER_OF_CARS_CLASS, df_mz_households["number_of_cars"])
 
-    # Bike availability depends on household size. (TODO: Would it make sense to use the same concept for cars?)
-    df_mz_households["number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_NONE
-    df_mz_households.loc[
-        df_mz_households["number_of_bikes"] > 0, "number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_SOME
-    df_mz_households.loc[
-        df_mz_households["number_of_bikes"] >= df_mz_households["household_size"],
-        "number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_ALL
+    # Class variable for number of bikes
+    df_mz_households["number_of_bikes_class"] = 0
+
+    df_mz_households.loc[df_mz_households["number_of_bikes"] > 0, "number_of_bikes_class"] = np.minimum(
+        c.MAX_NUMBER_OF_BIKES_CLASS, df_mz_households["number_of_bikes"])
 
     # Household size class
     data.utils.assign_household_class(df_mz_households, c)
