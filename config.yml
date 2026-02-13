@@ -1,20 +1,21 @@
 # General pipeline settings
 # path to the working directory/cache
-working_directory: 
+working_directory: .
 #p path where the pipeline flowchart should be stored
-flowchart_path:
-dryrun: false
-
-# Requested stages
+flowchart_path: ./flowchart.png
+dryrun: true
+output_path: /cache
 run:
     - synthesis.output
     - matsim.simulation.run
 
 # These are configuration options that we use in the pipeline
 config:
-    # path to the input data folder
-    data_path: 
+    output_path: /cache
+    census: statpop    # path to the input data folder
+    data_path: /data
     threads: 4
+    export_detailed_network: false
     random_seed: 0
     # it seems fastest is with 1
     hot_deck_matching_runners: 1

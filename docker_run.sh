@@ -1,4 +1,4 @@
 #!/bin/bash
-source setup/activate.sh
+source /opt/conda/bin/activate venv
 cd /root
-python3 run.py $1
+python run.py "$@"

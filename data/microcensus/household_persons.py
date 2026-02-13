@@ -1,4 +1,5 @@
 import pandas as pd
+import os
 
 def configure(context):
     context.config("data_path")
@@ -10,7 +11,7 @@ def execute(context):
 
     household_persons = pd.read_csv(
         "%s/microcensus/haushaltspersonen.csv" % data_path, sep=",", encoding="latin1")
-    
+
     household_persons = household_persons[["HHNR", "HPNR", "alter", "gesl"]]
 
     household_persons.columns = ["household_id", "hhpers_id", "age", "sex"]
@@ -19,7 +20,7 @@ def execute(context):
     household_persons.loc[:, "children_under_6"]  = (household_persons["age"] <  6)  & (household_persons["age"] >= 0)
     household_persons.loc[:, "children_under_12"] = (household_persons["age"] <  12) & (household_persons["age"] >= 0)
     household_persons.loc[:, "children_under_18"] = (household_persons["age"] <  18) & (household_persons["age"] >= 0)
-    household_persons.loc[:, "adults"]            = (household_persons["age"] >= 18) 
+    household_persons.loc[:, "adults"]            = (household_persons["age"] >= 18)
 
     nb_children_under_3 = household_persons.groupby(["household_id"])["children_under_3"].sum().reset_index()
     nb_children_under_3.columns = ["household_id", "N_children_under_3"]
@@ -42,5 +43,11 @@ def execute(context):
     household_info = pd.merge(household_info, nb_adults, how = "outer", on = "household_id")
 
     household_composition_columns = ["N_children_under_3", "N_children_under_6", "N_children_under_12", "N_children_under_18", "N_adults"]
+
+    root = os.path.join(context.path(), "webmap_data")
+    os.makedirs(root, exist_ok=True)
+
+    household_persons.to_csv(os.path.join(root, "household_persons.csv"), index=False)
+    household_info.to_csv(os.path.join(root, "household_info.csv"), index=False)
 
     return household_persons, household_info, household_composition_columns

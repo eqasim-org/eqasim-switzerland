@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 import pyproj
@@ -157,9 +159,15 @@ def execute(context):
 
     # Network distance
     df_mz_trips["network_distance"] = df_mz_trips["w_rdist"] * 1000.0
-
-    return df_mz_trips[[
+    out = df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "destination_x", "destination_y", "origin_x", "origin_y",
         "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
         "mode_detailed"
     ]], filterout_ids
+
+    root = os.path.join(context.path(), "webmap_data")
+    os.makedirs(root, exist_ok=True)
+    path = os.path.join(root, "income.csv")
+    out.to_csv(path, index=False)
+
+    return out

@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -170,5 +172,10 @@ def execute(context):
     # Add car passenger flag
     car_passenger_ids = df_mz_trips.loc[df_mz_trips["mode"] == "car_passenger", "person_id"].unique()
     df_mz_persons["is_car_passenger"] = df_mz_persons["person_id"].isin(car_passenger_ids)
+
+    root = os.path.join(context.path(), "webmap_data")
+    os.makedirs(root, exist_ok=True)
+    path = os.path.join(root, "persons.csv")
+    df_mz_persons.to_csv(path, index=False)
 
     return df_mz_persons

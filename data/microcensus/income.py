@@ -1,3 +1,6 @@
+import os
+from lib2to3.fixes.fix_input import context
+
 import sklearn.tree
 
 def impute(df_mz):
@@ -26,6 +29,11 @@ def impute(df_mz):
 
     df_mz["income_imputed"] = False
     df_mz.loc[no_income_selector, "income_imputed"] = True
+
+    root = os.path.join(context.path(), "webmap_data")
+    os.makedirs(root, exist_ok=True)
+    path = os.path.join(root, "income.csv")
+    df_mz.to_csv(path, index=False)
 
     return df_mz
 

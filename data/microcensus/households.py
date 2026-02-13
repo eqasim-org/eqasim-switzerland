@@ -10,7 +10,7 @@ import data.spatial.utils
 import data.spatial.zones
 import data.statpop.density
 import data.utils
-import data.utils
+import os
 
 
 def configure(context):
@@ -80,9 +80,9 @@ def execute(context):
     df_spatial = pd.DataFrame(df_mz_households[["person_id", "home_x", "home_y"]])
     df_spatial = data.spatial.utils.to_gpd(context, df_spatial, "home_x", "home_y", coord_type="home")
     df_spatial = data.spatial.utils.impute(
-        context, 
-        df_spatial, df_municipalities, 
-        "person_id", "municipality_id", 
+        context,
+        df_spatial, df_municipalities,
+        "person_id", "municipality_id",
         zone_type="municipality", point_type="home")
     df_spatial = data.spatial.zones.impute(df_spatial, df_zones)
     df_spatial = data.spatial.municipality_types.impute(df_spatial, df_municipality_types)
@@ -96,8 +96,8 @@ def execute(context):
 
     # Impute population density
     data.statpop.density.impute(
-        context, 
-        context.stage("data.statpop.density"), df_mz_households, 
+        context,
+        context.stage("data.statpop.density"), df_mz_households,
         "home_x", "home_y",
         point_type="home")
 
@@ -111,9 +111,15 @@ def execute(context):
     household_columns = context.stage("data.microcensus.household_persons")[2].copy()
     df_mz_households  = pd.merge(df_mz_households, df_household_info, left_on="person_id", right_on="household_id", how="left")
 
-    # Wrap it up
-    return df_mz_households[[
+    out = df_mz_households[[
         "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
         "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id", "ovgk",
     ] + household_columns]
+
+    root = os.path.join(context.path(), "webmap_data")
+    os.makedirs(root, exist_ok=True)
+    path = os.path.join(root, "households.csv")
+    out.to_csv(path, index=False)
+
+    return out

@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -131,5 +133,10 @@ def execute(context):
     df_trips = pd.merge(df_trips, df_first, how = "left", on = ["person_id", "trip_id"])
     df_trips["first_waiting_time"] = df_trips["first_waiting_time"].fillna(0.0)
     df_trips["waiting_time"] -= df_trips["first_waiting_time"]
+
+    root = os.path.join(context.path(), "webmap_data")
+    os.makedirs(root, exist_ok=True)
+    path = os.path.join(root, "transit.csv")
+    df_trips.to_csv(path, index=False)
 
     return df_trips

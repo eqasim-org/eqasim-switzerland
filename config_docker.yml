@@ -6,5 +6,5 @@ hot_deck_matching_runners: 2
 disable_progress_bar: false
 input_downsampling: 0.01
 java_memory: 10G
-stages:
-    - matsim.run
+run:
+  - matsim.simulation.run

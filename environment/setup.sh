@@ -1,30 +1,63 @@
 #!/bin/bash
 set -e
 
+arch=$(uname -m)
+
+if [ "$arch" = "x86_64" ]; then
+    miniconda_url="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+    jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.12%2B7/OpenJDK17U-jdk_x64_linux_hotspot_17.0.12_7.tar.gz"
+elif [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+    miniconda_url="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"
+    jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.12%2B7/OpenJDK17U-jdk_aarch64_linux_hotspot_17.0.12_7.tar.gz"
+else
+    echo "Unsupported architecture: $arch"
+    exit 1
+fi
+
+echo "Verifying Conda and Python installation..."
+
+if [ -f "${environment_directory}/miniconda/bin/conda" ]; then
+    echo "Conda installation found:"
+    "${environment_directory}/miniconda/bin/conda" --version
+else
+    echo "Conda not found!"
+fi
+
+if [ -f "${environment_directory}/miniconda/envs/venv/bin/python" ]; then
+    echo "Python installation found:"
+    "${environment_directory}/miniconda/envs/venv/bin/python" --version
+else
+    echo "Python not found!"
+fi
+
 # Define Miniconda
 miniconda_version="4.6.14"
 # for linux use:
-miniconda_url="https://repo.anaconda.com/miniconda/Miniconda3-${miniconda_version}-Linux-x86_64.sh"
-miniconda_md5="718259965f234088d785cad1fbd7de03"
+#miniconda_url="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"
+#miniconda_md5=""
+
+miniconda_url="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-arm64.sh"
+miniconda_md5=""
 
 # for mac use:
 #miniconda_url="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh"
 #miniconda_md5="2b7f9e46308c28c26dd83abad3e72121ef63916eaf17b63723b5a1f728dc3032"
 
+#
 # on linux
-jdk_version="17.0.12_7"
-jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.12%2B7/OpenJDK17U-jdk_x64_linux_hotspot_17.0.12_7.tar.gz"
-jdk_sha256="9d4dd339bf7e6a9dcba8347661603b74c61ab2a5083ae67bf76da6285da8a778"
+#jdk_version="17.0.12_7"
+#jdk_url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-17.0.12%2B7/OpenJDK17U-jdk_x64_linux_hotspot_17.0.12_7.tar.gz"
+#jdk_sha256="9d4dd339bf7e6a9dcba8347661603b74c61ab2a5083ae67bf76da6285da8a778"
 
 # on Mac M1
-#jdk_version="11.0.22"
-#jdk_url="https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.22%2B7.1/OpenJDK11U-jdk_aarch64_mac_hotspot_11.0.22_7.tar.gz"
-#jdk_sha256="2708f12c6f3b9e18c042d80cd8fd29f3cc3b7896840b26757acfa43aebc4758d"
+jdk_version="11.0.22"
+jdk_url="https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.22%2B7.1/OpenJDK11U-jdk_aarch64_mac_hotspot_11.0.22_7.tar.gz"
+jdk_sha256="2708f12c6f3b9e18c042d80cd8fd29f3cc3b7896840b26757acfa43aebc4758d"
 
 
 
 maven_version="3.9.6"
-maven_url="https://downloads.apache.org/maven/maven-3/${maven_version}/binaries/apache-maven-${maven_version}-bin.tar.gz"
+maven_url="https://archive.apache.org/dist/maven/maven-3/${maven_version}/binaries/apache-maven-${maven_version}-bin.tar.gz"
 maven_sha512="c35a1803a6e70a126e80b2b3ae33eed961f83ed74d18fcd16909b2d44d7dada3203f1ffe726c17ef8dcca2dcaa9fca676987befeadc9b9f759967a8cb77181c0"
 
 # Define Python requirements
@@ -59,7 +92,7 @@ dependencies:
   - pip:
     - synpp==1.5.1
 
-    
+
 EOF
 )
 
@@ -138,6 +171,8 @@ else
 
     source "${environment_directory}/miniconda/etc/profile.d/conda.sh"
     conda config --set always_yes yes --set changeps1 no
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || true
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r || true
     conda update -q conda
 
     touch miniconda_installed
