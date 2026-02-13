@@ -1,10 +1,13 @@
 import numpy as np
+import pandas as pd
 
 from data.spatial import countries, municipalities, quarters, zones, utils
-
+import data.utils
+from data.spatial.municipality_types import impute as impute_municipality_type
 
 def configure(context):
     context.stage("data.structural_survey.raw")
+    context.stage("data.spatial.municipality_types")
     context.stage("data.statpop.statpop")
     context.stage("data.statent.statent")
     
@@ -18,6 +21,8 @@ def configure(context):
 
 def execute(context):
     df_se = context.stage("data.structural_survey.raw")
+
+    df_se["sex"] -= 1
 
     df_zones = context.stage("data.spatial.zones")
     df_countries = context.stage("data.spatial.countries")
@@ -287,10 +292,33 @@ def execute(context):
                                                     "country": "country_id",
                                                     "nuts": "nuts_id",
                                                     "postal_code": "postal_code"})
+    print("Imputing municipality type at home location ...")
+    df_municipality_types = context.stage("data.spatial.municipality_types")
+    df_se = df_se.reset_index(drop=True)
+    df_se.insert(0, "id", np.arange(1, len(df_se) + 1, dtype=np.int64))
+
+    df_spatial = pd.DataFrame(df_se[["id", "home_municipality_id"]])
+    df_spatial = df_spatial.rename(columns={"home_municipality_id" : "municipality_id"})
+    df_spatial = impute_municipality_type(df_spatial, df_municipality_types)
+
+    df_se = pd.merge(
+        df_se, df_spatial[["id", "municipality_type"]],
+        on="id"
+    )
+
+    # for some individuals in Berufschule it is not recreded that they are employed
+    # we correct this here for is_student, employed and job_position variables
+    df_se.loc[df_se["current_education"].eq(6), "employed"] = 1
+    df_se.loc[df_se["current_education"].eq(6), "job_position"] = 50
+    #recode nationality to 0: swiss 1: others
+    col = "nationality"
+    assert df_se[col].isin([1, 2]).all(), f"{col} has values other than 1/2: {df_se.loc[~df_se[col].isin([1,2]), col].unique()}"
     
+    df_se["nationality"]-=1
     return df_se[[
         "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
         "work_country_id", "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
         "mode", "weight",  "age", "sex", "employed", "job_position", "canton_id", "district_id", "is_student",
-        "education_municipality_id", "education_quarter_id", "education_zone_id", "education_zone_level"
+        "education_municipality_id", "education_quarter_id", "education_zone_id", "education_zone_level", "municipality_type",
+        "nationality",
     ]]
