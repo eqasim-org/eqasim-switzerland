@@ -67,8 +67,7 @@ class PersonWriter:
         writer.add_attribute("home_coordinate_y", "java.lang.Double", str(p.home_y))
         writer.add_attribute("carAvail", "java.lang.String", ["never", "always"][int(p.car_availability)])
 
-        #TODO: subscriptions
-
+        writer.add_attribute("subscriptions", "java.lang.String", ["none", "GA", "VA", "HT", "VA+HT"][int(p.pt_subscription)])
 
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(getattr(p, "is_car_passenger", False)))
 
