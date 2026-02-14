@@ -63,7 +63,7 @@ def execute(context):
     output_path = context.path() + "/mzRequests_price.csv"
     config_path = context.stage("calibration.pt_pricing.generate_config")
 
-    eqasim.run(context, "org.eqasim.switzerland.ch.utils.pricing.RunComputeTransitPrices",
+    eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.utils.pricing.RunComputeTransitPrices",
                ["--config-path", config_path,
                "--requests-path", requests_path,
                "--output-path", output_path]

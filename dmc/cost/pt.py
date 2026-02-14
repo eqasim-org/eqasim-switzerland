@@ -80,7 +80,7 @@ def estimate_cost_from_eqasim_java(df, context, pt_regional_radius_km):
             (df_out["departureTime_s"].equals(df["departureTime_s"]))):
             return df_out
 
-    eqasim.run(context, "org.eqasim.switzerland.ch.utils.pricing.RunComputeTransitPrices",
+    eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.utils.pricing.RunComputeTransitPrices",
                ["--config-path", config_path,
                "--requests-path", requests_path,
                "--output-path", output_path,

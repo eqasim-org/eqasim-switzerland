@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def add_SBBPT_module(context):
-    config_path = f"{context.path()}/{context.config("output_prefix")}config.xml"
+    config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
     assert os.path.exists(config_path)
 
     # Parse XML and preserve DOCTYPE and comments
@@ -28,7 +28,7 @@ def add_SBBPT_module(context):
 
 
 def add_ptZones_module(context):
-    config_path = f"{context.path()}/{context.config("output_prefix")}config.xml"
+    config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
     assert os.path.exists(config_path)
 
     # Parse XML and preserve DOCTYPE and comments
@@ -52,7 +52,7 @@ def add_ptZones_module(context):
 
 
 def adjust_pt_routing_parameters(context, parameters):
-    config_path = f"{context.path()}/{context.config("output_prefix")}config.xml"
+    config_path = f"{context.path()}/{context.config('output_prefix')}config.xml"
     assert os.path.exists(config_path)
 
     pt_modes = ["bus", "rail", "subway", "ferry", "tram", "funicular", "cable-car", "gondola", "other"]
