@@ -63,7 +63,7 @@ def execute(context):
         "number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_ALL
 
     # Household size class
-    data.utils.assign_household_class(df_mz_households, c)
+    data.utils.assign_household_class(df_mz_households)
 
     # Region information
     # (acc. to Analyse der SP-Befragung 2015 zur Verkehrsmodus- und Routenwahl)

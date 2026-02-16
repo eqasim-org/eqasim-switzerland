@@ -138,23 +138,68 @@ def import_data_actual(context, population_selector = None):
 
 def aux_data_frame(df_act, df_syn, population_selector = None):
 
+    def build_chain_act(g):
+        # first origin activity
+        first = g.iloc[0]["origin_purpose"]
+
+        # then all destination purposes
+        rest = g["purpose"].tolist()
+
+        chain = [first] + rest
+
+        # map to short codes
+        chain = [purpose_map.get(p, p) for p in chain]
+
+        return "-".join(chain)
+    
+    def build_chain_syn(g):
+        # first origin activity
+        first = g.iloc[0]["preceding_purpose"]
+
+        # then all destination purposes
+        rest = g["following_purpose"].tolist()
+
+        chain = [first] + rest
+
+        # map to short codes
+        chain = [purpose_map.get(p, p) for p in chain]
+
+        return "-".join(chain)
+
     df_act["person_id"] = df_act.index
-    pers_ids = df_act["person_id"].unique()
     df_act = df_act.reset_index(drop=True)
 
-    df_aux_act = pd.DataFrame({
-        "person_id": pers_ids,
-        "weight_person": df_act.groupby("person_id")["weight_person"].mean(),
-        "chain": "home-" + df_act.groupby("person_id")["purpose"].apply(lambda x: "-".join(x))
-    })
+    purpose_map = {
+        "home": "H",
+        "work": "W",
+        "work_secondary": "W",
+        "education": "E",
+        "shop": "S",
+        "leisure": "L",
+        "other": "O",
+    }
 
-    pers_ids = df_syn["person_id"].unique()
+    df_act = df_act.sort_values(["person_id", "trip_id"])
 
-    df_aux_syn = pd.DataFrame({
-        "person_id": pers_ids,
-        "weights": 1,
-        "chain": "home-" + df_syn.groupby("person_id")["following_purpose"].apply(lambda x: "-".join(x))
-    })
+    df_aux_act = (
+        df_act
+        .groupby("person_id")
+        .apply(build_chain_act)
+        .reset_index(name="chain")
+    )
+
+    df_aux_act["weight_person"] = (
+        df_act.groupby("person_id")["weight_person"].mean().values
+    )
+
+    df_syn = df_syn.sort_values(["person_id", "trip_index"])
+    
+    df_aux_syn = (
+        df_syn
+        .groupby("person_id")
+        .apply(build_chain_syn)
+        .reset_index(name="chain")
+    )
 
     return df_aux_act, df_aux_syn
 
@@ -475,40 +520,40 @@ def generate_plots(context, df_aux_act, df_aux_syn, df_act, df_syn, df_syn_no_tr
     
     # Creating the new dataframes with activity chain counts
     #syn_CC = myutils.process_synthetic_activity_chain_counts(df_syn)
-    syn_CC.loc[len(syn_CC) + 1] = pd.Series({"Chain": "home", "synthetic Count": df_syn_no_trip.shape[0] })
+    syn_CC.loc[len(syn_CC) + 1] = pd.Series({"Chain": "H", "synthetic Count": df_syn_no_trip.shape[0] })
    
     #act_CC = myutils.process_actual_activity_chain_counts(df_act, df_aux)
-    act_CC.loc[len(act_CC) + 1] = pd.Series({"Chain": "home", "actual Count": np.sum(df_act_no_trip["weight_person"].values.tolist())})
+    act_CC.loc[len(act_CC) + 1] = pd.Series({"Chain": "H", "actual Count": np.sum(df_act_no_trip["weight_person"].values.tolist())})
 
     # Merging together, comparing
     all_CC = pd.merge(syn_CC, act_CC, on = "Chain", how = "outer")
     activity_chains_comparison(context, all_CC, suffix = suffix)
     
     # Number of activities    
-    activity_counts_comparison(context, all_CC, suffix = suffix)
+    #activity_counts_comparison(context, all_CC, suffix = suffix)
     
     # Number of activities per purposes
-    activity_counts_per_purpose(context, all_CC, suffix = suffix)
+    #activity_counts_per_purpose(context, all_CC, suffix = suffix)
 
     # 2. CROWFLY DISTANCES
     
     # 2.1. Compute the distances
-    df_syn_dist = compute_distances_synthetic(df_syn)
-    df_act_dist = compute_distances_actual(df_act) 
+    #df_syn_dist = compute_distances_synthetic(df_syn)
+    #df_act_dist = compute_distances_actual(df_act) 
     
     # 2.2 Prepare for plotting
-    df_act_dist["x"] = df_act_dist["weight_person"] * df_act_dist["crowfly_distance"]
+    #df_act_dist["x"] = df_act_dist["weight_person"] * df_act_dist["crowfly_distance"]
 
-    act = df_act_dist.groupby(["purpose"]).sum()["x"] / df_act_dist.groupby(["purpose"]).sum()["weight_person"]
-    syn = df_syn_dist.groupby(["following_purpose"]).mean()["crowfly_distance"] 
+    #act = df_act_dist.groupby(["purpose"]).sum()["x"] / df_act_dist.groupby(["purpose"]).sum()["weight_person"]
+    #syn = df_syn_dist.groupby(["following_purpose"]).mean()["crowfly_distance"] 
 
-    act_purposes = list(set(act.reset_index()["purpose"]))
-    syn = syn.reset_index()
-    for p in act_purposes:
-        if p not in list(set(syn["following_purpose"])):
-            syn.loc[len(syn)] = [p, 0]
+    # act_purposes = list(set(act.reset_index()["purpose"]))
+    # syn = syn.reset_index()
+    # for p in act_purposes:
+    #     if p not in list(set(syn["following_purpose"])):
+    #         syn.loc[len(syn)] = [p, 0]
 
-    syn = syn.groupby(["following_purpose"]).mean()["crowfly_distance"] 
+    # syn = syn.groupby(["following_purpose"]).mean()["crowfly_distance"] 
 
     # # 2.3 Ready to plot!
     # myplottools.plot_comparison_bar(context, imtitle = "distancepurpose.png", plottitle = "Crowfly distance " + suffix, ylabel = "Mean crowfly distance [km]", xlabel = "", lab = syn.index, actual = act, synthetic = syn, t = None, xticksrot = True )
@@ -523,15 +568,25 @@ def generate_plots(context, df_aux_act, df_aux_syn, df_act, df_syn, df_syn_no_tr
     
 def execute(context):
     pop_all = None
-    pop_men_1840 = {"age_selector": [30, 44], "gender_selector": "female", "canton_selector":[1]}
-    pop_wom_1840 = {"age_selector": [30, 44]}#, "gender_selector": "male"}#, "senior_homes_selector": "no"}
+    pop_wom = {"gender_selector": "female"}
+    pop_men = {"gender_selector": "male"} 
 
     suff_all = ""
-    suff_men_1840 = "men aged 18 to 40 living in cantons 1, 2, 5, and 7"
-    suff_women_1840 = "women aged 18 to 40 living in Switzerland"
+    suff_wom = "women"
+    suff_men = "men"
 
-    pop_selectors = [pop_all, pop_wom_1840, pop_men_1840]
-    suffixes      = [suff_all, suff_women_1840,  suff_men_1840]
+    pop_selectors = [pop_all, pop_wom, pop_men]
+    suffixes      = [suff_all, suff_wom, suff_men]
+
+    canton_id_to_abb = {1: "ZH", 22: "VD", 18: "GR", 11: "SO"}
+
+    for canton_id in [1, 18, 22, 11]:
+        selector_F = {"gender_selector": "female", "canton_selector": [canton_id]}
+        selector_M = {"gender_selector": "male",   "canton_selector": [canton_id]}
+        suffix_F   = f"women-{canton_id_to_abb[canton_id]}"
+        suffix_M   = f"men-{canton_id_to_abb[canton_id]}"
+        pop_selectors.extend([selector_F, selector_M])
+        suffixes.extend([suffix_F, suffix_M])
 
     for population_selector, suffix in list(zip(pop_selectors, suffixes)):
         df_syn, df_syn_no_trip = import_data_synthetic(context, population_selector)

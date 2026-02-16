@@ -139,7 +139,7 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
     rng = np.random.RandomState(random_seed)
 
     # Termination step
-    if minimum_observations == 1:
+    if minimum_observations == 7:
         # At this point, the goal is to match everyone. So we do not consider the mandatory columns any longer.
         df_matching, assigned_levels = recursive_iteration_statmatch(df_source, source_identifier, weight, df_target, target_identifier, columns, None,
                          rng, minimum_observations)
@@ -279,12 +279,11 @@ def execute(context):
     else:
         raise ValueError(f"Unimplemented day for scenario: {scenario_day}")
 
-    
     df_source     = df_source.rename(columns={"person_id": "mz_id"})
     df_source["canton_id"] = df_source["canton_id"].astype("int64")
 
     df_population = context.stage("synthesis.population.sampled")
-
+    
     df_population.loc[:, "employment_status"]                                                                     = 0
     df_population.loc[df_population["employed"] == 1, "employment_status"]                                        = 1
     df_population.loc[(df_population["employed"] == 3) & (df_population["is_student"] == 1), "employment_status"] = 2
@@ -292,10 +291,10 @@ def execute(context):
     df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"] = 3
     df_population["sex"] = df_population["sex"].astype(np.int64)
 
-    df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
+    df_source["household_size_class"]     = df_source["household_size_class"].clip(upper=2)
     df_population["household_size_class"] = df_population["household_size_class"].clip(upper=2)
-    df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0) 
-    df_source["sex"] = df_source["sex"].astype(np.int64)
+    df_source["N_children_under_12"]      = df_source["N_children_under_12"].ne(0) 
+    df_source["sex"]                      = df_source["sex"].astype(np.int64)
     
     if c.census == "statpop":
 
@@ -363,7 +362,7 @@ def execute(context):
         # HT and activity-chains are better with canton_id instead of muncipality_type
         #columns_individual_matching           = ["age_class", "sex", "employment_status", "marital_status", "number_of_cars_class", "canton_id", "sp_region"]
         columns_individual_matching           = ["age_class", "sex", "employment_status", "marital_status", "number_of_cars_class", "canton_id", "ovgk"]
-        mandatory_columns_individual_matching = columns_individual_matching[:4]
+        mandatory_columns_individual_matching = columns_individual_matching[:5] # Trying with 5 and not 4 to make canton id mandatory and see how it affects PT subscriptions
 
         print("Second statistical matching starting")
 
@@ -426,11 +425,14 @@ def execute(context):
 
         population_selector = df_population["age_class"] > 0
 
-        columns_individual_matching           = [ "ovgk", "age_class", "sex", "employment_status", "number_of_cars_class", "N_children_under_18"]
-        mandatory_columns_individual_matching = columns_individual_matching[:4]
+        #columns_individual_matching           = [ "ovgk", "age_class", "sex", "employment_status", "number_of_cars_class", "N_children_under_18"]
+        columns_individual_matching           = ["sp_region", "sex", "age_class", "driving_license", "canton_id"]
+        mandatory_columns_individual_matching = columns_individual_matching[:5]
+
+        df_population["employment_status"] = df_population["employed"]
 
         df_target, df_population, removed_ids_list  = run_statistical_matching_extended(context, 
-                                                              df_source, "mz_id", "household_weight",
+                                                              df_source, "mz_id", "person_weight",
                                                               df_population.copy(), "person_id",
                                                               columns_individual_matching, mandatory_columns_individual_matching,
                                                               minimum_observations = context.config("matching_minimum_observations"), 
