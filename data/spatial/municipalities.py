@@ -36,7 +36,7 @@ def execute(context):
     for year, shapefile, id_field, name_field in context.progress(SHAPEFILES, label="Reading municipality shape files"):
         df = gpd.read_file(
             "%s/%s" % (data_path, shapefile),
-            encoding="latin1"
+            encoding="utf8"
         ).to_crs("epsg:2056")
 
         df.crs = "epsg:2056"
