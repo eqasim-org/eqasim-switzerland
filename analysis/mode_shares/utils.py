@@ -3,7 +3,7 @@ from data.microcensus.shares import load_clean_trips
 import os
 import numpy as np
 import logging
-
+from .readers import houshold_reader
 logger = logging.getLogger("synpp")
 
 class ModeShareAnalyzer:
@@ -13,6 +13,11 @@ class ModeShareAnalyzer:
     @staticmethod
     def set_distance_bins(bins):
         ModeShareAnalyzer.distance_bins = bins
+
+    @staticmethod
+    def set_age_bins(bins):
+        ModeShareAnalyzer.age_bins = bins
+
 
     def __init__(self, context, from_matsim = False):
         self.from_matsim = from_matsim
@@ -45,9 +50,11 @@ class ModeShareAnalyzer:
         simulation_directory = context.config("simulation_directory")          
         trips_path_matsim = f"{output_path}/{output_id}/{simulation_directory}/output_trips.csv.gz"
         persons_path_matsim = f"{output_path}/{output_id}/{simulation_directory}/output_persons.csv.gz"
+        hourseholds_path_matsim = f"{output_path}/{output_id}/{simulation_directory}/output_households.xml.gz"
         assert os.path.exists(trips_path_matsim), f"MATSIM trips file not found at {trips_path_matsim}"
         assert os.path.exists(persons_path_matsim), f"MATSIM persons file not found at {persons_path_matsim}"
-        return trips_path_matsim, persons_path_matsim
+        assert os.path.exists(hourseholds_path_matsim), f"MATSIM households file not found at {hourseholds_path_matsim}"
+        return trips_path_matsim, persons_path_matsim, hourseholds_path_matsim
     
     def get_distance_labels(self):
         distance_bins = np.array(ModeShareAnalyzer.distance_bins) / 1000
@@ -85,37 +92,19 @@ class ModeShareAnalyzer:
                        include_lowest=True, 
                        ordered=True)
     
-    def get_matsim_canton_id(self, context, df_trips):        
-        df = df_trips[["person"]].copy()
-        # canton level mode shares
-        df_persons = context.stage("synthesis.population.enriched")
-        df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name_en"]]
-        
-        # merge canton names
-        df_cantons = df_cantons.rename(columns={"canton_name_en":"canton_name"})
-        df_persons = pd.merge(df_persons, df_cantons, on="canton_id", how="left")
-        df_persons = df_persons[["person_id", "canton_name","canton_id"]].astype({"person_id":str})    
-
-        df = pd.merge(df, df_persons, right_on = "person_id",
-                            left_on="person", how="left")
-        df = df[df.canton_id.notna()].reset_index(drop=True)
-        
-        if len(df) != len(df_trips):
-            logger.warning(f"{len(df_trips) - len(df)} trips could not be assigned a canton_id.")
-            logger.warning(f"These trips will be ignored for canton level mode share computations.")
-
-        return df[["person", "canton_id","canton_name"]]
     
-    def get_income_class(self, context, df):
+    def get_income_class(self, context, df, households):
         df = df[["person"]].copy()
-        df_persons = context.stage("synthesis.population.enriched")[["person_id","income_class"]].astype({"person_id":str})
-        df = pd.merge(df, df_persons, right_on = "person_id",
-                            left_on="person", how="left")
+        income = households.households[["members","incomeClass"]].explode("members").rename(columns={"members":"person","incomeClass":"income_class"})
+        income = income.astype({"person":str, "income_class":int})
+        # df_persons = context.stage("synthesis.population.enriched")[["person_id","income_class"]].astype({"person_id":str})
+        df = pd.merge(df, income, on="person", how="left")
+        logger.info(f"There are {df.income_class.isna().sum()} persons with no income class assigned over {len(df)} persons.")
         df = df[df.income_class.notna()].reset_index(drop=True)
         return df[["person", "income_class"]]
 
     def load_matsim_data(self, context):
-        trips_file, persons_file = self.get_paths_matsim(context)
+        trips_file, persons_file, households_file = self.get_paths_matsim(context)
         
         # Load trips and persons data
         persons = pd.read_csv(persons_file, dtype={0: str}, sep=";", usecols=["person","subpopulation","age","sex", "cantonId","cantonName"])
@@ -133,8 +122,11 @@ class ModeShareAnalyzer:
         trips["euclidean_distance_km"] = trips["euclidean_distance"] / 1000
         trips = trips[trips.euclidean_distance_km>1e-3].reset_index(drop=True)
 
-        # assign income class
-        income_class_info = self.get_income_class(context, persons)
+        # read households
+        households = houshold_reader(households_file)
+
+        # assign income class from households
+        income_class_info = self.get_income_class(context, persons, households)
         trips = trips.merge(income_class_info, on='person', how='left')
 
         # Define distance bins for mode shares distributions    

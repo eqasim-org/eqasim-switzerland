@@ -130,6 +130,7 @@ NAMES_CONVERSION = {
     'beta_bike_destination_leisure': 'bike.betaDestinationLeisure_u',
     'beta_bike_destination_other': 'bike.betaDestinationOther_u',
     'beta_bike_retired': 'bike.betaRetired_u',
+    'beta_bike_junior': 'bike.betaJunior_u',
     'beta_bike_long_distance': 'bike.betaLongDistance_u',
     
     # Car
@@ -151,6 +152,7 @@ NAMES_CONVERSION = {
     'beta_car_destination_leisure': 'car.betaDestinationLeisure_u',
     'beta_car_destination_other': 'car.betaDestinationOther_u',
     'beta_car_retired': 'car.betaRetired_u',
+    'beta_car_junior': 'car.betaJunior_u',
     'beta_car_ownership_ratio': 'car.betaCarOwnershipRatio_u',
     'beta_car_short_distance': 'car.betaShortDistance_u',
     'beta_car_long_distance': 'car.betaLongDistance_u',
@@ -176,6 +178,7 @@ NAMES_CONVERSION = {
     'beta_car_passenger_driving_permit': 'cp.betaDrivingLicense_u',
     'beta_car_passenger_short_distance': 'cp.betaShortDistance_u',
     'beta_car_passenger_retired': 'cp.betaRetired_u',
+    'beta_car_passenger_junior': 'cp.betaJunior_u',
     'beta_car_passenger_long_distance': 'cp.betaLongDistance_u',
 
     # PT
@@ -208,6 +211,7 @@ NAMES_CONVERSION = {
     'beta_pt_destination_other': 'pt.betaDestinationOther_u',
     'beta_pt_short_distance': 'pt.betaShortDistance_u',
     'beta_pt_retired': 'pt.betaRetired_u',
+    'beta_pt_junior': 'pt.betaJunior_u',
     'beta_pt_long_distance': 'pt.betaLongDistance_u',
     'beta_pt_good_service': 'pt.betaGoodService_u',
     'beta_pt_medium_service': 'pt.betaMediumService_u',
@@ -232,6 +236,7 @@ NAMES_CONVERSION = {
     'beta_walk_destination_leisure': 'walk.betaDestinationLeisure_u',
     'beta_walk_destination_other': 'walk.betaDestinationOther_u',
     'beta_walk_retired': 'walk.betaRetired_u',
+    'beta_walk_junior': 'walk.betaJunior_u',
     'beta_walk_long_distance': 'walk.betaLongDistance_u',
 
     # Cost

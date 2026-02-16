@@ -38,24 +38,29 @@ def configure(context):
     # only if simplify network is true
     context.config("remove_network_loops", True)
     context.config("remove_replicate_links", True)
-    context.config("remove_nodes_with_no_intersection", True)
-    context.config("correct_speeds", True)
+    context.config("remove_nodes_with_no_intersection", False)
+    context.config("correct_speed", True)
     context.config("ensure_network_connectivity", True)
     # this is for speed correction
-    context.config("correct_speed", True)
-    context.config("speed_factor_urbancore", 0.85)
-    context.config("speed_factor_urban", 0.9)
-    context.config("speed_factor_suburban", 0.95)
-    context.config("speed_factor_rural", 1.0)
+    context.config("adjust_speed", True)
+    context.config("speed_factor_urbancore", 0.8)
+    context.config("speed_factor_urban", 0.87)
+    context.config("speed_factor_suburban", 0.92)
+    context.config("speed_factor_rural", 0.97)
+    context.config("speed_factor_motorway", 1.08)
     context.config("speed_limit_for_correction", 70/3.6) # in m/s (speed limit below which we correct the speed)
     # correct speed for uphill links only
-    context.config("correct_speed_uphill", False) # if true, it is triggered only if elevation is assigned
+    context.config("adjust_speed_uphill", False) # if true, it is triggered only if elevation is assigned
     context.config("max_gradient_threshold", 0.1) # in percentage (10% = 0.1)
     context.config("speed_factor_uphill", 0.9) 
     # reduce capacity outside border
     context.config("capacity_factor_outside_border", 1)
     # reduce speed outside border
     context.config("speed_factor_outside_border", 1)
+
+    # whether to route the bike in the network or not
+    context.config("route_bike", True)
+
 
 def execute(context):
     network_file = context.stage("data.osm.clean")
@@ -191,7 +196,7 @@ def execute(context):
             remove_network_loops=context.config("remove_network_loops"),
             remove_replicate_links=context.config("remove_replicate_links"),
             remove_nodes_with_no_intersection=context.config("remove_nodes_with_no_intersection"),
-            correct_speeds=context.config("correct_speeds"),
+            correct_speeds=context.config("correct_speed"),
             ensure_network_connectivity=context.config("ensure_network_connectivity")
         )
         # Save stats
@@ -213,16 +218,23 @@ def execute(context):
         if context.config("speed_factor_outside_border")<1:
             net.links = SpeedCorrector(context, net).run("outside_border")
     
-    if context.config("correct_speed"):
-        # correct link speeds of car links based on municipality types and their speed limit
-        net.links = SpeedCorrector(context, net).run("municipality_type")                    
+    if context.config("adjust_speed"):
+        # adjust link speeds of car links based on municipality types and their speed limit
+        net.links = SpeedCorrector(context, net).run("municipality_type")
+        if abs(context.config("speed_factor_motorway")-1.0)>1e-3:
+            net.links = SpeedCorrector(context, net).run("motorway")
 
-    if context.config("correct_speed_uphill"):
+    if context.config("adjust_speed_uphill"):
         if not context.config("assign_elevations"):
             raise ValueError("To correct speeds of uphill links, elevations must be assigned first.")
         # further correct link speeds of uphill links based on their gradient
         net.links = SpeedCorrector(context, net).run("uphill")
 
+    
+    if context.config("route_bike"):
+        # the bike is added to car, bus, truck and taxi links. however, we check for network connectivity first
+        net.links = networkCleaner(net).add_bike_to_network()
+        
     # Do not remove the last version of the network, just rename it.
     shutil.move(network_path, network_path.replace("converted_network","converted_network_uncleaned"))
     net.save(network_path)

@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 import gc
+from catboost import CatBoostClassifier, Pool
+from sklearn.model_selection import train_test_split  # <-- ADD
 
 # ---------------------------------------------------------
 # helper: stochastic draw
@@ -21,29 +23,28 @@ def execute(context):
     # -------------------------------------------------------------------
     # CONFIG
     # -------------------------------------------------------------------
-    ACTIVITY_MODEL = "gbm"   # "gbm" or "rf"
-    JOB_MODEL      = "gbm"   # "gbm" or "rf"
+    ACTIVITY_MODEL = "catboost"   # "gbm" or "rf" or "catboost"
+    JOB_MODEL      = "gbm"        # "gbm" or "rf"
 
-    # IMPORTANT: chunk size controls memory. Start conservative on HPC.
     CHUNK_SIZE = 25_000
-
     SEED_ACTIVITY = 123
     SEED_JOB      = 456
 
-    # Diagnostics: None = all cantons; or e.g. "1"
-    CANTON_FOR_ANALYSIS = None  # e.g. "1"
+    CANTON_FOR_ANALYSIS = 22  # e.g. "1"
+
+    # Early stopping config (CatBoost only)  <-- ADD
+    VALID_FRAC = 0.10
+    EARLY_STOP_ROUNDS = 200
 
     # -------------------------------------------------------------------
     # 0. LOAD
     # -------------------------------------------------------------------
     survey_df = context.stage("data.structural_survey.structural_survey")
-
     pop_df = context.stage("data.statpop.statpop")
 
     survey_df['employed']     = survey_df['employed'].astype('int32')
     survey_df['job_position'] = survey_df['job_position'].astype('int32')
 
-    # Survey sanity
     print("Survey employed weighted totals:")
     print(survey_df.groupby("employed")["weight"].sum())
 
@@ -52,19 +53,19 @@ def execute(context):
     # -------------------------------------------------------------------
     survey_df = survey_df.dropna(subset=[
         'age', 'sex', 'home_municipality_id', 'district_id', 'canton_id',
-        'employed', 'job_position', 'weight'
+        'employed', 'job_position', 'weight', 'municipality_type',
     ]).copy()
 
-    age_bins = [0, 15, 20, 25, 31, 41, 51, 66, 71, 200]
+    age_bins = [0, 15, 17, 20, 24, 31, 41, 51, 66, 71, 200]
     age_labels = [
-        '0-14', '15-19', '20-24', '25-30',
+        '0-14', '15-16', '17-19', '20-24', '25-30',
         '31-40', '41-50', '51-65', '66-70', '71+'
     ]
 
     for df in (survey_df, pop_df):
         df['age_bin'] = pd.cut(df['age'], bins=age_bins, labels=age_labels, right=False)
 
-    cat_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id']
+    cat_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id', 'municipality_type']
     for df in (survey_df, pop_df):
         for col in cat_cols:
             df[col] = df[col].astype(str).fillna('Missing')
@@ -72,10 +73,10 @@ def execute(context):
     # -------------------------------------------------------------------
     # 2. ONE-HOT DESIGN MATRIX FOR SURVEY
     # -------------------------------------------------------------------
-    feature_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id']
+    feature_cols = ['age', 'age_bin', 'sex', 'nationality', 'municipality_type', 'district_id', 'canton_id']
 
     X_survey = pd.get_dummies(survey_df[feature_cols], drop_first=False)
-    # reduce memory without changing values
+    X_survey['age'] = survey_df['age'].astype(np.float32).to_numpy()
     X_survey = X_survey.astype(np.float32)
 
     global_feature_cols = X_survey.columns
@@ -99,16 +100,74 @@ def execute(context):
                 max_depth=15,
                 min_samples_leaf=5,
                 random_state=42,
-                n_jobs=1  # HPC-safe
+                n_jobs=1
+            )
+        elif model_type in ("catboost", "cat"):
+            return CatBoostClassifier(
+                loss_function="MultiClass",
+                iterations=4000,
+                learning_rate=0.01,
+                depth=10,
+                l2_leaf_reg=6.0,
+                random_seed=42,
+                verbose=200,
+                bootstrap_type="Bernoulli",
+                subsample=0.8
             )
         else:
             raise ValueError(f"Unknown model_type={model_type}, use 'gbm' or 'rf'.")
 
     y_act = survey_df['employed'].astype('int64').to_numpy()
+    # masks for survey split
+    youth_mask_s = (survey_df["age"].to_numpy() >= 15) & (survey_df["age"].to_numpy() <= 23)
+    adult_mask_s = (survey_df["age"].to_numpy() >= 24)
 
-    act_model = build_model(ACTIVITY_MODEL)
-    act_model.fit(X_survey, y_act, sample_weight=w)
-    print("Fitted global activity model using:", ACTIVITY_MODEL)
+    def fit_activity_model(X, y, w, model_name: str):
+        model = build_model(ACTIVITY_MODEL)
+
+        if ACTIVITY_MODEL in ("catboost", "cat"):
+            idx = np.arange(len(y))
+            train_idx, val_idx = train_test_split(
+                idx,
+                test_size=VALID_FRAC,
+                random_state=42,
+                stratify=y
+            )
+
+            X_tr, y_tr, w_tr = X.iloc[train_idx], y[train_idx], w[train_idx]
+            X_va, y_va, w_va = X.iloc[val_idx], y[val_idx], w[val_idx]
+
+            train_pool = Pool(X_tr, y_tr, weight=w_tr)
+            val_pool   = Pool(X_va, y_va, weight=w_va)
+
+            model.fit(
+                train_pool,
+                eval_set=val_pool,
+                use_best_model=True,
+                early_stopping_rounds=EARLY_STOP_ROUNDS
+            )
+            print(f"Fitted {model_name} activity model | best_iter={model.get_best_iteration()} | trees={model.tree_count_}")
+        else:
+            model.fit(X, y, sample_weight=w)
+            print(f"Fitted {model_name} activity model using:", ACTIVITY_MODEL)
+
+        return model
+    # --- fit youth model (15-23)
+
+    y_features = ['age', 'sex', 'canton_id']
+    X_survey_y = pd.get_dummies(survey_df[y_features], drop_first=False)
+    X_survey_y['age'] = X_survey_y['age'].astype(np.float32).to_numpy()
+    X_survey_y = X_survey_y.astype(np.float32)
+    X_y = X_survey_y.loc[youth_mask_s]
+    y_y = y_act[youth_mask_s]
+    w_y = w[youth_mask_s]
+    act_model_y = fit_activity_model(X_y, y_y, w_y, model_name="YOUTH(15-23)")
+
+    # --- fit adult model (24+)
+    X_a = X_survey.loc[adult_mask_s]
+    y_a = y_act[adult_mask_s]
+    w_a = w[adult_mask_s]
+    act_model_a = fit_activity_model(X_a, y_a, w_a, model_name="ADULT(24+)")
 
     # -------------------------------------------------------------------
     # 4. FIT GLOBAL JOB MODEL
@@ -123,13 +182,14 @@ def execute(context):
     print("Fitted global job model using:", JOB_MODEL)
 
     # -------------------------------------------------------------------
-    # 5. POPULATION PREDICTION IN CHUNKS (this is the cluster-safe change)
-    #     - DOES NOT change outcomes vs building full X_pop
+    # 5. POPULATION PREDICTION IN CHUNKS
     # -------------------------------------------------------------------
     n = len(pop_df)
     employed_out = np.empty(n, dtype=np.int16)
     job_out      = np.empty(n, dtype=np.int16)
-    classes_act = act_model.classes_.astype('int64')
+    # activity model classes (assume both models saw same label set; we still handle safely)
+    classes_act_y = act_model_y.classes_.astype('int64')
+    classes_act_a = act_model_a.classes_.astype('int64')
     classes_job = job_model.classes_.astype('int64')
 
     print(f"Predicting population in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
@@ -137,18 +197,40 @@ def execute(context):
         end = min(start + CHUNK_SIZE, n)
         chunk = pop_df.iloc[start:end]
 
-        # one-hot exactly like old code, but only for this chunk
         X_chunk = pd.get_dummies(chunk[feature_cols], drop_first=False)
+        X_chunk['age'] = chunk['age'].astype(np.float32).to_numpy()
         X_chunk = X_chunk.reindex(columns=global_feature_cols, fill_value=0).astype(np.float32)
 
-        # activity draw
-        proba_act = act_model.predict_proba(X_chunk)
-        act_draw = draw_multinomial_from_proba(
-            proba_act, classes_act, seed=SEED_ACTIVITY + start
-        ).astype(np.int16)
+        # route by age
+        age_arr = chunk["age"].to_numpy()
+        youth_mask = (age_arr >= 15) & (age_arr <= 23)
+        adult_mask = (age_arr >= 24)
+
+        act_draw = np.empty(end - start, dtype=np.int16)
+
+        # youth predictions
+        if youth_mask.any():
+            X_yc = X_chunk.loc[youth_mask]
+            proba_y = act_model_y.predict_proba(X_yc)
+            draw_y = draw_multinomial_from_proba(
+                proba_y, classes_act_y, seed=SEED_ACTIVITY + start + 1
+            ).astype(np.int16)
+            act_draw[youth_mask] = draw_y
+            del X_yc, proba_y
+
+        # adult predictions
+        if adult_mask.any():
+            X_ac = X_chunk.loc[adult_mask]
+            proba_a = act_model_a.predict_proba(X_ac)
+            draw_a = draw_multinomial_from_proba(
+                proba_a, classes_act_a, seed=SEED_ACTIVITY + start + 2
+            ).astype(np.int16)
+            act_draw[adult_mask] = draw_a
+            del X_ac, proba_a
+
         employed_out[start:end] = act_draw
 
-        # job draw
+        # job draw (unchanged)
         job_chunk = np.empty(end - start, dtype=np.int16)
         job_chunk[act_draw == 2] = 60
         job_chunk[act_draw == 3] = 70
@@ -161,13 +243,11 @@ def execute(context):
                 proba_job, classes_job, seed=SEED_JOB + start
             ).astype(np.int16)
             job_chunk[emp_mask_local] = job_draw_emp
+            del X_emp, proba_job
 
         job_out[start:end] = job_chunk
 
-        # cleanup chunk memory
-        del X_chunk, proba_act
-        if emp_mask_local.any():
-            del X_emp, proba_job
+        del X_chunk
         gc.collect()
 
         if (start // CHUNK_SIZE) % 20 == 0:
@@ -176,12 +256,11 @@ def execute(context):
     pop_df['employed']     = employed_out
     pop_df['job_position'] = job_out
 
-    # enforce <15 as before
     pop_df.loc[pop_df['age'] < 15, 'employed'] = 3
     pop_df.loc[pop_df['age'] < 15, 'job_position'] = 70
 
     print("Final employed distribution:")
-    print(pop_df['employed'].value_counts(normalize=True))
+    print(pop_df[pop_df['age'] > 14]['employed'].value_counts(normalize=True))
 
     # -------------------------------------------------------------------
     # 6. DIAGNOSTICS

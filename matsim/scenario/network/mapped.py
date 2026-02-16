@@ -12,6 +12,7 @@ def configure(context):
     context.stage("matsim.scenario.network.convert_pt_schedule")
     
     context.config("threads")
+    context.config("route_bike", True)
 
 
 def execute(context):
@@ -60,9 +61,13 @@ def execute(context):
             '<param name="outputStreetNetworkFile" value="%s/road_network.xml.gz" />' % context.path()
         )
 
+        modesToKeep = "car,car_passenger,truck,taxi"
+        if context.config("route_bike"):
+            modesToKeep += ",bike"
+
         content = content.replace(
             '<param name="modesToKeepOnCleanUp" value="car" />',
-            '<param name="modesToKeepOnCleanUp" value="car,car_passenger,truck,taxi" />'
+            '<param name="modesToKeepOnCleanUp" value="%s" />' % modesToKeep
         )
 
         content = content.replace(
@@ -92,31 +97,31 @@ def execute(context):
             """
               <parameterset type="transportModeAssignment" >
 			        <param name="maxLinkCandidateDistance" value="120.0" />
-			        <param name="nLinkThreshold" value="6" />
+			        <param name="nLinkThreshold" value="1" />
 			        <param name="networkModes" value="rail,light_rail,train" />
 			        <param name="scheduleMode" value="rail" />
-			        <param name="strictLinkRule" value="false" />
+			        <param name="strictLinkRule" value="true" />
 		        </parameterset>
             
                <parameterset type="transportModeAssignment" >
 			        <param name="maxLinkCandidateDistance" value="180.0" />
-			        <param name="nLinkThreshold" value="12" />
+			        <param name="nLinkThreshold" value="1" />
 			        <param name="networkModes" value="tram" />
 			        <param name="scheduleMode" value="tram" />
-			        <param name="strictLinkRule" value="false" />
+			        <param name="strictLinkRule" value="true" />
 		        </parameterset>
 
 				<parameterset type="transportModeAssignment" >
 			        <param name="maxLinkCandidateDistance" value="180.0" />
-			        <param name="nLinkThreshold" value="12" />
+			        <param name="nLinkThreshold" value="1" />
 			        <param name="networkModes" value="light_rail,subway" />
 			        <param name="scheduleMode" value="subway" />
-			        <param name="strictLinkRule" value="false" />
+			        <param name="strictLinkRule" value="true" />
 		        </parameterset>
 
 				<parameterset type="transportModeAssignment" >
 			        <param name="maxLinkCandidateDistance" value="120.0" />
-			        <param name="nLinkThreshold" value="6" />
+			        <param name="nLinkThreshold" value="1" />
 			        <param name="networkModes" value="funicular" />
 			        <param name="scheduleMode" value="funicular" />
 			        <param name="strictLinkRule" value="true" />

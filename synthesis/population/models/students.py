@@ -2,11 +2,12 @@ import numpy as np
 import pandas as pd
 import gc
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
-from joblib import Parallel, delayed  # kept in case you need later, but not used here
+from joblib import Parallel, delayed
+from catboost import CatBoostClassifier
 
 def configure(context):
     context.config("data_path")
-    context.stage("data.microcensus.income_predictor")
+    context.stage("synthesis.population.models.income")
     context.stage("data.structural_survey.structural_survey")
 
 def execute(context):
@@ -14,34 +15,28 @@ def execute(context):
     # =========================================================
     # CONFIG FOR ANALYSIS
     # =========================================================
-    # Set to e.g. "1" or "ZH" depending on your canton_id coding AFTER string cast
-    # Set to None to use ALL cantons (global comparison)
-    CANTON_FOR_ANALYSIS = None   # e.g. "1" or None
+    CANTON_FOR_ANALYSIS = 25   # e.g. "1" or None
 
-    # choose model type: "gbm" or "rf"
-    STUDENT_MODEL = "gbm"   # or "rf"
+    # choose model type: "gbm" or "rf" or "catboost"
+    STUDENT_MODEL = "catboost"   # <-- allow "catboost" too
 
-    # HPC: chunk size for population predictions (memory control)
-    CHUNK_SIZE = 50_000  # try 25k–100k depending on cluster memory
+    CHUNK_SIZE = 50_000
 
     # =========================================================
     # 0. PREP: CLEAN + ALIGN EMPLOYMENT INFO
     # =========================================================
     survey_df = context.stage("data.structural_survey.structural_survey")
-    pop_df    = context.stage("data.microcensus.income_predictor")
+    pop_df    = context.stage("synthesis.population.models.income")
 
-    # Ensure survey targets are ints
     survey_df['employed']     = survey_df['employed'].astype('int64')
     survey_df['job_position'] = survey_df['job_position'].astype('int64')
     survey_df['is_student']   = survey_df['is_student'].astype('int64')
 
-    # Drop rows with missing key vars in survey (safety)
     survey_df = survey_df.dropna(subset=[
         'age', 'sex', 'home_municipality_id', 'district_id', 'canton_id',
-        'employed', 'job_position', 'is_student'
+        'employed', 'job_position', 'is_student', 'municipality_type'
     ])
 
-    # In the population, use the *drawn* employment as features
     pop_df['employed']     = pop_df['employed'].astype('int64')
     pop_df['job_position'] = pop_df['job_position'].astype('int64')
 
@@ -49,10 +44,10 @@ def execute(context):
     # 1. AGE BINS + CATEGORICAL CLEANING
     # =========================================================
 
-    age_bins = [0, 15, 20, 25, 31, 41, 51, 66, 71, 200]
+    age_bins = [0, 15, 20, 25, 31, 41, 51, 200]
     age_labels = [
         '0-14', '15-19', '20-24', '25-30',
-        '31-40', '41-50', '51-65', '66-70', '71+'
+        '31-40', '41-50', '51+'
     ]
 
     for df in (survey_df, pop_df):
@@ -63,8 +58,7 @@ def execute(context):
             right=False
         )
 
-    # Harmonize categoricals as strings
-    cat_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id']
+    cat_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id', 'municipality_type']
     for df in (survey_df, pop_df):
         for col in cat_cols:
             df[col] = df[col].astype(str).fillna('Missing')
@@ -73,34 +67,36 @@ def execute(context):
     # 2. DESIGN MATRICES FOR STUDENT MODEL
     # =========================================================
 
-    # Features: age, sex, activity, job, and spatial IDs
     student_feat_cols = [
+        'age',          # <-- ADD
         'age_bin',
         'sex',
         'employed',
-       # 'job_position',
-       # 'home_municipality_id',
-        'district_id',
+        'municipality_type',
+        #'district_id',
         'canton_id'
     ]
 
-    # --- survey design matrix  ---
     X_student_survey = pd.get_dummies(survey_df[student_feat_cols], drop_first=False)
-    student_feature_cols = X_student_survey.columns
 
-    # DO NOT build X_student_pop for 8M rows on HPC (OOM risk)
-    # We'll do it chunk-wise below.
+    # ensure 'age' is numeric after get_dummies (robust)
+    X_student_survey['age'] = survey_df['age'].astype(np.float32).to_numpy()
+
+    # reduce memory
+    X_student_survey = X_student_survey.astype(np.float32)
+
+    student_feature_cols = X_student_survey.columns
 
     y_student = survey_df['is_student'].astype('int64')
     w_student = survey_df['weight']
 
     # =========================================================
-    # 3. FIT ONE GLOBAL STUDENT MODEL (GBM OR RF)
+    # 3. FIT ONE GLOBAL STUDENT MODEL (GBM / RF / CATBOOST)
     # =========================================================
 
     if STUDENT_MODEL == "gbm":
         student_model = HistGradientBoostingClassifier(
-            loss='log_loss',   # binary logistic loss
+            loss='log_loss',
             max_depth=4,
             learning_rate=0.1,
             max_iter=100,
@@ -114,12 +110,26 @@ def execute(context):
             max_depth=15,
             min_samples_leaf=5,
             random_state=42,
-            n_jobs=1   # HPC safer than -1 (prevents oversubscription / memory spikes)
+            n_jobs=1
+        )
+        student_model.fit(X_student_survey, y_student, sample_weight=w_student)
+
+    elif STUDENT_MODEL in ("catboost", "cat"):
+        student_model = CatBoostClassifier(
+            loss_function="Logloss",   # binary
+            iterations=4200,
+            learning_rate=0.03,
+            depth=10,
+            l2_leaf_reg=6.0,
+            random_seed=42,
+            verbose=100,
+            bootstrap_type="Bernoulli",
+            subsample=0.8
         )
         student_model.fit(X_student_survey, y_student, sample_weight=w_student)
 
     else:
-        raise ValueError(f"Unknown STUDENT_MODEL={STUDENT_MODEL}, use 'gbm' or 'rf'.")
+        raise ValueError(f"Unknown STUDENT_MODEL={STUDENT_MODEL}, use 'gbm' or 'rf' or 'catboost'.")
 
     print("Fitted global student model using:", STUDENT_MODEL)
 
@@ -141,7 +151,7 @@ def execute(context):
     pop_df['STUDENT_draw'] = np.nan
     SEED_STUDENT = 789
 
-    classes_stu = student_model.classes_.astype('int64')  # should be [0,1] or [1,0]
+    classes_stu = student_model.classes_.astype('int64')
 
     n = len(pop_df)
     stu_out = np.empty(n, dtype=np.int64)
@@ -153,7 +163,11 @@ def execute(context):
         chunk = pop_df.iloc[start:end]
 
         X_chunk = pd.get_dummies(chunk[student_feat_cols], drop_first=False)
-        X_chunk = X_chunk.reindex(columns=student_feature_cols, fill_value=0)
+
+        # ✅ ensure numeric 'age' exists in chunk too
+        X_chunk['age'] = chunk['age'].astype(np.float32).to_numpy()
+
+        X_chunk = X_chunk.reindex(columns=student_feature_cols, fill_value=0).astype(np.float32)
 
         proba_stu = student_model.predict_proba(X_chunk)
 
@@ -165,7 +179,6 @@ def execute(context):
 
         stu_out[start:end] = stu_draw
 
-        # free chunk memory
         del X_chunk, proba_stu, stu_draw
         gc.collect()
 
@@ -174,10 +187,8 @@ def execute(context):
 
     pop_df['STUDENT_draw'] = stu_out
 
-    # Final cast + overwrite name
     pop_df['STUDENT_draw'] = pop_df['STUDENT_draw'].astype('int64')
     pop_df = pop_df.rename(columns={"STUDENT_draw": "is_student"})
-    # force <15 to be student
     pop_df.loc[pop_df['age'] < 15, 'is_student'] = 1
 
     print("Final STUDENT distribution in population:")
@@ -187,7 +198,6 @@ def execute(context):
     # 6. DIAGNOSTIC: COMPARE STUDENT RATES BY AGE_BIN (SURVEY vs POP)
     # =========================================================
 
-    # Optionally filter by canton (avoid .copy() on huge frames)
     if CANTON_FOR_ANALYSIS is not None:
         canton_key = str(CANTON_FOR_ANALYSIS)
         survey_diag = survey_df[survey_df['canton_id'] == canton_key]
@@ -198,11 +208,9 @@ def execute(context):
         pop_diag    = pop_df
         print("\n[DIAGNOSTIC] Analysis for ALL cantons (global)")
 
-    # helper for weighted mean
     def weighted_mean(x, w):
         return np.average(x, weights=w) if len(x) > 0 else np.nan
 
-    # --- Survey: weighted share of students by age_bin ---
     survey_age = (
         survey_diag
         .groupby('age_bin')
@@ -210,7 +218,6 @@ def execute(context):
         .reset_index(name='share_student_survey')
     )
 
-    # --- Population: share of students by age_bin (unweighted or weighted if available) ---
     pop_weight_col = None
     for cand in ['weight', 'person_weight', 'household_weight']:
         if cand in pop_diag.columns:
@@ -232,7 +239,6 @@ def execute(context):
             .reset_index(name='share_student_pop')
         )
 
-    # --- Merge and compute differences ---
     age_compare = pd.merge(
         survey_age,
         pop_age,

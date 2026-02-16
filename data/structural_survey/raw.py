@@ -39,7 +39,9 @@ def execute(context):
                 "STATUSINEMPL_DETAIL": int,
                 "RES_CANTON": int,
                 "RES_DISTRICT": int,
-                "CURRACTIVITY_STUDENT": int
+                "CURRACTIVITY_STUDENT": int,
+                "NATIONALITYCAT": int,
+                "ONGOINGEDUCATION": int,
             }
 
             renames = {
@@ -59,7 +61,9 @@ def execute(context):
                 "RES_DISTRICT": "district_id",
                 "CURRACTIVITYSTATUSI": "employed", # 1: yes, 2: no, 3: inactive
                 "STATUSINEMPL_DETAIL": "job_position",
-                "CURRACTIVITY_STUDENT": "is_student"
+                "CURRACTIVITY_STUDENT": "is_student",
+                "NATIONALITYCAT" : "nationality",
+                "ONGOINGEDUCATION" : "current_education",
             }
 
             data_frames.append(data.utils.read_csv(context, f, fields, renames, total=total, sep=sep))

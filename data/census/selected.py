@@ -2,7 +2,7 @@ def configure(context):
     census = context.config("census", default="statpop")
 
     if census == "statpop":
-        context.stage("data.statpop.scaled", alias = "census")
+        context.stage("synthesis.population.scaled", alias = "census")
 
     elif census == "are_synpop":
         context.stage("data.are_synpop.scaled", alias = "census")

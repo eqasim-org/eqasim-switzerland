@@ -77,12 +77,12 @@ def execute(context):
             "--config:controler.writeEventsInterval", str(last_iteration),
             "--config:controler.writePlansInterval", str(last_iteration),
             "--config:qsim.numberOfThreads", str(min(context.config("threads"),12)),
-            "--config:linkStats.writeLinkStatsInterval", str(last_iteration),
+            "--config:linkStats.writeLinkStatsInterval", str(int(last_iteration/2)),
             "--config:linkStats.averageLinkStatsOverIterations", str(1),
             # if one wants to visualize outputs, trips file needs to be generated 
             # so one should set this to something other than 0, and preferebly to something 
             # that will output trips file at the end of the simulation
-            "--config:controller.writeTripsInterval", str(last_iteration),
+            "--config:controller.writeTripsInterval", str(int(last_iteration/2)),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
             "--preventwaitingtoentertraffic", preventwaitingtoentertraffic,
             "--config:scoring.writeExperiencedPlans", writeExperiencedPlans

@@ -3,10 +3,12 @@ import numpy as np
 import pandas as pd
 import logging
 from analysis.mode_shares.utils import ModeShareAnalyzer
+from dmc.constants import constants
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("dmc.data.training_data")
 
+MS_REGIONS = constants.MS_REGIONS
 
 def merge_same_trips(context, df):
     df_trips = context.stage("data.microcensus.trips")[0][["person_id","trip_id","departure_time","arrival_time","mode"]]
@@ -75,15 +77,18 @@ def adjust_weights(context, df):
     # 1. Build TARGET data (reference distribution)
     # --------------------------------------------------
     ModeShareAnalyzer.set_distance_bins(
-        [0, 700, 2000, 4000, 6000, 10000, 15000, 20000, 1_000_000]
+        [0, 700, 1500, 3000, 4500, 7000, 10500, 15000, 20000, 1_000_000]
     )
+    ModeShareAnalyzer.set_age_bins([0, 18, 30, 45, 65, 100])
     analyzer = ModeShareAnalyzer(context)
     df_target = analyzer.trips.copy()
+    df_target["ms_region"] = df_target["canton_id"].map(lambda x: MS_REGIONS.loc[x,"cluster"])
 
     # --- apply same behavioral filters as training data
     remove = ((df_target.euclidean_distance_km < 0.01) | (df_target.euclidean_distance_km > 100))
     remove |= ((df_target["mode"] == "walk") & (df_target["euclidean_distance_km"] >= 6))
-    remove |= ((df_target["mode"] == "bike") & (df_target["euclidean_distance_km"] >= 10))
+    remove |= ((df_target["mode"] == "bike") & (df_target["euclidean_distance_km"] >= 12))
+    remove |= ((df_target["mode"] == "car") & (df_target["age"] < 18))
     df_target = df_target.loc[~remove].reset_index(drop=True)
 
     # normalize purpose
@@ -93,40 +98,34 @@ def adjust_weights(context, df):
     # 2. Prepare ACTUAL data
     # --------------------------------------------------
     df_actual = df[
-        ["mode", "euclidean_distance_km", "person_weight",
-         "purpose", "sex", "income_class"]
+        ["mode", "euclidean_distance_km", "person_weight","age",
+         "purpose", "sex", "income_class", "ms_region"]
     ].copy()
 
     df_actual["purpose"] = df_actual["purpose"].str.replace("_secondary", "", regex=False)
 
     # assign distance bins
-    distance_bins = np.array(analyzer.distance_bins) / 1000
-    distance_labels = analyzer.get_distance_labels()
+    df_actual["distance_bin"] = analyzer.get_distance_bins(df_actual)
+    df_target["distance_bin"] = analyzer.get_distance_bins(df_target)
 
-    df_actual["distance_bin"] = pd.cut(
-        df_actual["euclidean_distance_km"],
-        bins=distance_bins,
-        labels=distance_labels,
-        include_lowest=True,
-        ordered=True
-    )
+    # assign age bins
+    df_actual["age_class"] = analyzer.get_age_bins(df_actual)
+    df_target["age_class"] = analyzer.get_age_bins(df_target)
 
-    df_target["distance_bin"] = pd.cut(
-        df_target["euclidean_distance_km"],
-        bins=distance_bins,
-        labels=distance_labels,
-        include_lowest=True,
-        ordered=True
-    )
+    # double the weights of long distances (make the model more sensitive to long distances):
+    # df_actual.loc[df_actual.euclidean_distance_km > 4.5, "person_weight"] *= 1.3
+    # df_target.loc[df_target.euclidean_distance_km > 4.5, "person_weight"] *= 1.3
+    # df_actual.loc[df_actual.euclidean_distance_km > 20, "person_weight"] *= 1.5
+    # df_target.loc[df_target.euclidean_distance_km > 20, "person_weight"] *= 1.5
 
     # --------------------------------------------------
-    # 3. HARD CONSTRAINT: distance × mode and sex x mode
+    # 3. CONSTRAINT
     # --------------------------------------------------
-    df_target["bin_mode"] = df_target["distance_bin"].astype(str) + "|" + df_target["mode"].astype(str)
-    df_actual["bin_mode"] = df_actual["distance_bin"].astype(str) + "|" + df_actual["mode"].astype(str)    
-    target_bin_mode = (
+    df_target["distance_bin_mode"] = df_target["distance_bin"].astype(str) + "|" + df_target["mode"].astype(str)
+    df_actual["distance_bin_mode"] = df_actual["distance_bin"].astype(str) + "|" + df_actual["mode"].astype(str)    
+    target_distance_bin_mode = (
         df_target
-        .groupby("bin_mode")["person_weight"]
+        .groupby("distance_bin_mode")["person_weight"]
         .sum()
     )
     
@@ -137,18 +136,28 @@ def adjust_weights(context, df):
         .groupby("bin_sex")["person_weight"]
         .sum()
     )
-    # --------------------------------------------------
-    # 4. SOFT MARGINAL TARGETS
-    # --------------------------------------------------
-    target_income = (
+
+    df_target["bin_age"] = df_target["age_class"].astype(str) + "|" + df_target["mode"].astype(str)
+    df_actual["bin_age"] = df_actual["age_class"].astype(str) + "|" + df_actual["mode"].astype(str)    
+    target_bin_age = (
         df_target
-        .groupby("income_class")["person_weight"]
+        .groupby("bin_age")["person_weight"]
         .sum()
     )
 
+    df_target["bin_income"] = df_target["income_class"].astype(str) + "|" + df_target["mode"].astype(str)
+    df_actual["bin_income"] = df_actual["income_class"].astype(str) + "|" + df_actual["mode"].astype(str)
+    target_bin_income = (
+        df_target
+        .groupby("bin_income")["person_weight"]
+        .sum()
+    )
+
+    df_target["bin_purpose"] = df_target["purpose"].astype(str) + "|" + df_target["mode"].astype(str)
+    df_actual["bin_purpose"] = df_actual["purpose"].astype(str) + "|" + df_actual["mode"].astype(str)
     target_purpose = (
         df_target
-        .groupby("purpose")["person_weight"]
+        .groupby("bin_purpose")["person_weight"]
         .sum()
     )
 
@@ -158,20 +167,32 @@ def adjust_weights(context, df):
         .sum()
     )
 
+    df_target["bin_ms_region"] = df_target["ms_region"].astype(str) + "|" + df_target["mode"].astype(str)
+    df_actual["bin_ms_region"] = df_actual["ms_region"].astype(str) + "|" + df_actual["mode"].astype(str)
+    target_bin_ms_region = (
+        df_target
+        .groupby("bin_ms_region")["person_weight"]
+        .sum()
+    )
+
     targets = [
-        target_bin_mode,   # HARD
-        target_bin_sex,    # SOFT
-        target_mode,       # SOFT
-        target_purpose,    # SOFT 
-        target_income      # SOFT (weakest)
+        target_distance_bin_mode,   # HARD
+        target_bin_sex,         # SOFT
+        target_bin_age,         # SOFT
+        target_bin_income,      # SOFT        
+        target_purpose,    # SOFT
+        target_bin_ms_region, # SOFT   
+        target_mode,       # SOFT  
     ]
 
     dimensions = [
-        ["bin_mode"],
+        ["distance_bin_mode"],
         ["bin_sex"],
-        ["mode"],        
-        ["purpose"],   
-        ["income_class"],
+        ["bin_age"],
+        ["bin_income"],          
+        ["bin_purpose"]        ,
+        ["bin_ms_region"],
+        ["mode"],
     ]
 
     # --------------------------------------------------
@@ -182,17 +203,16 @@ def adjust_weights(context, df):
         if missing:
             raise ValueError(f"Infeasible raking: missing categories in {col}: {missing}")
 
-    check_missing("bin_mode")
-    check_missing("sex")
-    check_missing("income_class")
-    check_missing("purpose")
+    check_missing("distance_bin_mode")
+    check_missing("bin_sex")
+    check_missing("bin_income")
+    check_missing("bin_purpose")
 
     # --------------------------------------------------
     # 6. RAKING with trim + rerake
     # --------------------------------------------------
     df_actual = df_actual.copy()
-    df_actual["person_weight_orig"] = df_actual["person_weight"]
-
+    df_actual["person_weight_orig"] = df_actual["person_weight"]    
     for j in range(3):
         logger.info(f"\t - Raking iteration {j+1}/3")
         ipf = ipfn(
@@ -211,5 +231,8 @@ def adjust_weights(context, df):
             lower= (0.2 if j < 2 else 0.1) * median_w,
             upper= (7.0 if j < 2 else 10.0) * median_w
         )
+        if j == 0:
+            logger.info(f"\t\t - Original weights stats: min={df_actual['person_weight_orig'].min():.2f}, median={df_actual['person_weight_orig'].median():.2f}, max={df_actual['person_weight_orig'].max():.2f}")
+        logger.info(f"\t\t - weight stats after trimming: min={df_actual['person_weight'].min():.2f}, median={df_actual['person_weight'].median():.2f}, max={df_actual['person_weight'].max():.2f}")
 
     return df_actual["person_weight"]

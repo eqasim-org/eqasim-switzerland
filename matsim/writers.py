@@ -299,7 +299,7 @@ class VehiclesWriter(XmlWriter):
         self._write_line('</vehicleDefinitions>')
         self._pop_scope()
 
-    def add_type(self, vehicle_type_id, nb_seats = 4, length = 5.0, width = 1.0, pce = 1.0, mode = "car", attributes = {}, engine_attributes = {}):
+    def add_type(self, vehicle_type_id, nb_seats = 4, length = 5.0, width = 1.0, pce = 1.0, mode = "car", attributes = {}, engine_attributes = {}, maximum_velocity = None, flow_efficiency_factor=None):
         self._require_scope(self.VEHICLES_SCOPE)
         self._write_line('<vehicleType id="%s">' % str(vehicle_type_id))
 
@@ -318,6 +318,8 @@ class VehiclesWriter(XmlWriter):
 
         self._write_line('<length meter="%f"/>' % length)
         self._write_line('<width meter="%f"/>' % width)
+        if (maximum_velocity is not None) and (not np.isnan(maximum_velocity)):
+            self._write_line('<maximumVelocity meterPerSecond="%f"/>' % maximum_velocity)
 
         if len(engine_attributes) > 0:
             self._write_line('<engineInformation>')
@@ -335,6 +337,8 @@ class VehiclesWriter(XmlWriter):
             self._write_line('<passengerCarEquivalents pce="%f"/>' % pce)
 
         self._write_line('<networkMode networkMode="%s"/>' % mode)
+        if (flow_efficiency_factor is not None) and (not np.isnan(flow_efficiency_factor)):
+            self._write_line('<flowEfficiencyFactor factor="%f"/>' % flow_efficiency_factor)
 
         self.indent -= 1
         self._write_line('</vehicleType>')

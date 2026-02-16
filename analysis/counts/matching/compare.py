@@ -29,7 +29,7 @@ def execute(context):
     # searching for link stats file
     files = glob.glob(os.path.join(iterations_directory, "it.*", f"*.linkstats.txt.gz"))
     if not files:
-        file = None
+        raise FileNotFoundError(f"No link stats files found in {iterations_directory}")
     else:
         # get the latest file (by modification time)
         file = max(files, key=os.path.getmtime)

@@ -10,6 +10,7 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.stage("analysis.travel_times.APIs.get")
+    # context.stage("matsim.output")
 
     context.config("output_path")
     context.config("output_id")
@@ -20,6 +21,8 @@ def configure(context):
 
 
 def execute(context):
+    # ensure dependency
+    # _ = context.stage("matsim.output")
     logger.info("Routing car trips using MATSim")
     
     # Load trips
@@ -69,7 +72,7 @@ def execute(context):
             "--trips-path", path_to_trips,
             "--events-path", path_to_events,
             "--output-path", output_path,
-            "--threads", str(context.config("threads")),
+            "--threads", str(min(context.config("threads"),6)), # more threads produce OOM kills
             "--return-links", str(context.config("router_return_links")).lower()
         ]
     )
