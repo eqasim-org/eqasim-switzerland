@@ -43,6 +43,10 @@ def estimate_cost_from_eqasim_java(df, context, pt_regional_radius_km):
     
     df = df.merge(persons, on="person_id", how="left")
 
+    logger.warning("Gleis 7 subscription is not considered in the pt cost calculation, all persons are considered as not having it.")
+    logger.warning("Thisis because this subscription is not considered by the subscriptions model, and thus are not considered in the simulation.")
+    df["subscriptions_gleis7"] = False
+
     df["ID"] = df["person_id"].astype(str) + "_" + df["trip_id"].astype(str)
     df = df.rename(columns = {
         "origin_x": "originX",

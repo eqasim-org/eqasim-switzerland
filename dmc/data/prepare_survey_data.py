@@ -57,6 +57,8 @@ def execute(context):
     df_persons["ms_region"] = df_persons.canton_id.map(lambda x: MS_REGIONS.loc[x,"cluster"])
     # 4. car ration
     df_persons["car_ownership_ratio"] = np.clip(1 - df_persons["number_of_cars_class"]/df_persons["N_adults"],0,1)
+    df_persons["has_car"] = (df_persons["number_of_cars_class"]>0).astype(int)
+    df_persons["num_adults"] = df_persons["N_adults"].astype(int)
     # 5. pt quality
     df_persons["good_pt_service"] = (df_persons["ovgk"].isin(["A", "B"])).astype(int)
     df_persons["medium_pt_service"] = (df_persons["ovgk"].isin(["C","D"])).astype(int)
@@ -65,7 +67,7 @@ def execute(context):
     df_persons["is_junior"] = (df_persons["age"]<16).astype(int)
     # 7. merge
     cols = ["person_id","home_x","home_y", "hasGeneralSubscription","hasHalbtaxSubscription","hasRegionalSubscription", "hasJuniorSubscription", 
-            "hasGleis7Subscription", "statedPreferenceRegion", 'person_weight', 'age', 'sex', 'driving_license', 'sp_region', 'ms_region', "ovgk",
+            "hasGleis7Subscription", "statedPreferenceRegion", 'person_weight', 'age', 'sex', 'driving_license', 'sp_region', 'ms_region', "ovgk", "has_car", "num_adults",
             'is_car_passenger', "income", "weekend", "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired", "is_junior", "low_income", "income_class"]
     df_persons = df_persons[cols]    
     df_trips = df_trips.merge(df_persons, on="person_id", how="left")
@@ -166,7 +168,7 @@ def execute(context):
             'destination_x', 'destination_y', 'origin_x', 'origin_y',
             'home_x', 'home_y', 'hasGeneralSubscription', 'hasJuniorSubscription', 'hasGleis7Subscription',
             'hasHalbtaxSubscription', 'hasRegionalSubscription', 'ovgk', 'car_ownership_ratio', "good_pt_service", "medium_pt_service",
-            'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','is_junior','low_income',
+            'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','is_junior','low_income','has_car','num_adults',
             'driving_license', 'sp_region', 'ms_region', 'is_car_passenger', 'income', 'income_class',
             'destination_home', 'origin_home', 'destination_work', 'destination_education',
             'destination_shopping', 'destination_leisure', 'destination_other',

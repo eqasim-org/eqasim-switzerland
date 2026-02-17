@@ -83,11 +83,15 @@ def preprocess_data(df, ignore_car_passenger):
     # distance categories
     df["short_distance"] = (df["euclidean_distance_km"]<1.0).astype(int)
     df["long_distance"]  = (df["euclidean_distance_km"]>13.0).astype(int)
+    df["very_long_distance"]  = (df["euclidean_distance_km"]>25.0).astype(int)
     # quality of pt service
     df["good_pt_service"] = df["good_pt_service"].astype(int)
     df["medium_pt_service"] = df["medium_pt_service"].astype(int)
     # low income
-    df["low_income"] = df["low_income"].astype(int)
+    df["low_income"] = df["low_income"].astype(int)    
+    # car ownership
+    df["car_ownership_ratio"] = df["car_ownership_ratio"].astype(float)
+    df["has_car"] = df["has_car"].astype(int)    
     # drop columns not used in the model
     columns_to_drop = [
         "person_id", "trip_id", "home_municipality", "origin_municipality", 
@@ -109,6 +113,8 @@ def define_variables(database, ignore_car_passenger):
         "driving_license": db.Variable("driving_license"),
         "parking_cost_CHF": db.Variable("parking_cost_CHF"),        
         "car_ownership_ratio": db.Variable("car_ownership_ratio"),
+        "has_car": db.Variable("has_car"),
+        "num_adults": db.Variable("num_adults"),
         "is_retired": db.Variable("is_retired"),
         "is_junior": db.Variable("is_junior"),      
         # regions       
@@ -118,6 +124,7 @@ def define_variables(database, ignore_car_passenger):
         "elevation": db.Variable("elevation_difference"),
         "short_distance": db.Variable("short_distance"),
         "long_distance": db.Variable("long_distance"),
+        "very_long_distance": db.Variable("very_long_distance"),
         # destination urbanisation
         "urban_destination": db.Variable("urban_destination"),
         "urbancore_destination": db.Variable("urbancore_destination"),
@@ -229,7 +236,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_pt_in_vehicle_time_min": Beta("beta_pt_in_vehicle_time_min", -0.044, None, max_disutility, 0),        
         "beta_pt_transfers": Beta("beta_pt_transfers", -0.477, None, max_disutility, 0),
         "beta_pt_transfer_time_min": Beta("beta_pt_transfer_time_min", -0.0234, None, -0.02, 0),
-        "beta_pt_distance_km": Beta("beta_pt_distance_km", -0.4, -0.5, 0.5, 0), #The aim is just to correct the price
+        "beta_pt_distance_km": Beta("beta_pt_distance_km", -0.4, -0.5, 0.5, 0),
         
         "beta_pt_sex": Beta("beta_pt_sex", 0, None, None, 1),
         "beta_pt_age": Beta("beta_pt_age", 0, None, None, 1),
@@ -338,7 +345,11 @@ def define_betas(ignore_car_passenger, use_exponents):
             "beta_car_passenger_region_2": Beta("beta_car_passenger_region_2", -0.515, None, None, 0),
 
             "beta_car_passenger_short_distance": Beta("beta_car_passenger_short_distance", 0.284, None, None, 0),
-            "beta_car_passenger_long_distance": Beta("beta_car_passenger_long_distance", 0.148, None, None, 0),            
+            "beta_car_passenger_long_distance": Beta("beta_car_passenger_long_distance", 0.148, None, None, 0),     
+            "beta_car_passenger_very_long_distance": Beta("beta_car_passenger_very_long_distance", 0.0, None, None, 0),
+
+            "beta_car_passenger_ownership_ratio": Beta("beta_car_passenger_ownership_ratio", 0.0, None, None, 0),
+            "beta_car_passenger_has_car": Beta("beta_car_passenger_has_car", 0.0, None, None, 0),            
         })
     return betas
 
@@ -500,7 +511,10 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
             + betas["beta_car_passenger_region_2"] * vars["region_2"]
             + betas["beta_car_passenger_short_distance"] * vars["short_distance"]
             + betas["beta_car_passenger_long_distance"] * vars["long_distance"]
+            + betas["beta_car_passenger_very_long_distance"] * vars["very_long_distance"]
             + betas["beta_car_passenger_origin_home"] * vars["origin_home"]
+            + betas["beta_car_passenger_ownership_ratio"] * vars["car_ownership_ratio"]
+            + betas["beta_car_passenger_has_car"] * vars["has_car"]            
         )
 
     utilities = {

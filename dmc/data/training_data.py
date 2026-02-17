@@ -116,6 +116,10 @@ def execute(context):
     df["actual_parking_duration_min"] = parking_duration_min
 
     ##public transport cost
+    logger.warning("Gleis 7 subscription is not considered in the pt cost calculation, all persons are considered as not having it.")
+    logger.warning("Thisis because this subscription is not considered by the subscriptions model, and thus are not considered in the simulation.")
+    logger.warning("This should be modified here and and dmc.cost.pt if this subscription is considered in the future.")
+    df["hasGleis7Subscription"] = False
     df["pt_cost_CHF"] = pt_cost.get_cost(df, context, pt_regional_radius_km = context.config("pt_regional_radius_km"))
 
     # Set parking searching time
@@ -166,7 +170,7 @@ def execute(context):
     df = df[~f_remove]
 
     ### remove very short and very long trips
-    out_of_range_distance = ((df.euclidean_distance_km < 0.01) | (df.euclidean_distance_km > 100))
+    out_of_range_distance = ((df.euclidean_distance_km < 0.01) | (df.euclidean_distance_km > 150))
     df = df[~out_of_range_distance].reset_index(drop=True)
 
     ### adjust weights to match target mode shares
@@ -183,6 +187,7 @@ def execute(context):
         # person
         "age", "sex", "income", "income_class", "sp_region", "ms_region", "is_car_passenger", "ovgk", 
         "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired","is_junior","low_income",
+        'has_car','num_adults',
 
         # car
         'car_availability' ,'car_travel_time_min', 'car_cost_CHF', 'driving_license', "car_distance_km",

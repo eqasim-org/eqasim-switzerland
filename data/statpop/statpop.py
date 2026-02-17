@@ -178,7 +178,7 @@ def execute(context):
         "sex", "age",
         "home_x", "home_y",
         "marital_status", "nationality",
-        "household_size",
+        "household_size", "statpop_household_id","statpop_person_id",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
         "home_municipality_id", "home_quarter_id", "canton_id", "district_id", "population_density", "sp_region", "ovgk",
         "collective_housing_resident"] + children_columns]

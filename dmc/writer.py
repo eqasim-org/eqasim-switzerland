@@ -180,6 +180,9 @@ NAMES_CONVERSION = {
     'beta_car_passenger_retired': 'cp.betaRetired_u',
     'beta_car_passenger_junior': 'cp.betaJunior_u',
     'beta_car_passenger_long_distance': 'cp.betaLongDistance_u',
+    'beta_car_passenger_ownership_ratio': 'cp.betaCarOwnershipRatio_u',
+    'beta_car_passenger_has_car': 'cp.betaHasCar_u',
+    "beta_car_passenger_very_long_distance": 'cp.betaVeryLongDistance_u',    
 
     # PT
     'beta_pt_asc': 'pt.alpha_u',

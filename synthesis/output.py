@@ -7,6 +7,7 @@ import math
 
 def configure(context):
     context.stage("synthesis.population.enriched")
+    context.stage("synthesis.population.models.subscriptions")
 
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.trips")
@@ -56,7 +57,7 @@ def execute(context):
     ).drop_duplicates("household_id")
     df_households = df_households[[
         "household_id",
-        "number_of_cars_class", "number_of_bikes_class",
+        "number_of_cars_class",
         "ovgk",
         "income",
         "statpop_household_id"
@@ -65,19 +66,16 @@ def execute(context):
     df_households.to_csv("%s/%shouseholds.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
 
     # Prepare persons
-    df_persons = context.stage("synthesis.population.enriched").rename(
+    df_persons = context.stage("synthesis.population.models.subscriptions").rename(
         columns = { "driving_license": "has_driving_license" }
-    )
-
+    )#.merge(context.stage("synthesis.population.enriched")[["person_id","canton_id"]], 
+     #       on="person_id", 
+     #       how="left")
     df_persons = df_persons[[
         "person_id", "household_id",
-        "age", "employed", "sex",
-        "has_driving_license",
-        "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", 
-        "subscriptions_strecke", "subscriptions_gleis7", "subscriptions_junior",
-        "subscriptions_other", "subscriptions_ga_class",
-        "subscriptions_verbund_class", "subscriptions_strecke_class",
-        "statpop_person_id", "mz_person_id", "mz_head_id", "canton_id"
+        "age", "employed", "sex","municipality_type",
+        "has_driving_license","pt_subscription",
+        "mz_person_id", "canton_id"
     ]]
 
     df_persons.to_csv("%s/%spersons.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
