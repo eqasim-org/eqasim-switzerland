@@ -76,7 +76,6 @@ def execute(context):
                             df_mz[["mz_person_id",
                                    "income_class", "age", "number_of_bikes_class",
                                     "car_availability", 
-                                    "employed",
                                     "subscriptions_ga",
                                     "subscriptions_halbtax",
                                     "subscriptions_verbund",

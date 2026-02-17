@@ -22,3 +22,4 @@ cutterZone
 *.ipynb
 routing
 *.jar
+catboost_info

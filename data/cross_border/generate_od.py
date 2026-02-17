@@ -3,6 +3,7 @@ import pandas as pd
 from shapely.geometry import Point
 import geopandas as gpd
 import random
+from pathlib import Path
 
 def configure(context):
     context.config("data_path")
@@ -12,17 +13,18 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
 
     context.config("cross_border_countries", default = "All")
+    context.config("cross_border_exclude_shapefiles", default=None)
 
 
 def sample_rows_by_weight(df2, weight_col="weight"):
     df = df2.copy()
     
     # Separate integer and fractional parts
-    df["int_part"] = df[weight_col].astype(int)
+    df["int_part"]  = df[weight_col].astype(int)
     df["frac_part"] = df[weight_col] - df["int_part"]
     
     # Repeat rows according to integer part
-    repeated = df.iloc[np.repeat(np.arange(len(df)), df["int_part"])].drop(columns=["int_part", "frac_part"])
+    repeated = df.iloc[np.repeat(np.arange(len(df)), df["int_part"])].copy().drop(columns=["int_part", "frac_part"])
     
     # Handle fractional part with Bernoulli sampling
     fractional_mask = np.random.rand(len(df)) < df["frac_part"]
@@ -44,18 +46,19 @@ def sample_points_in_polygon(polygon, n):
 
 
 def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context):
+    df = df.copy()
     points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df[x], df[y]), crs = "EPSG:4326").to_crs("EPSG:2056")
     points["record"] = range(len(points))
 
-    ch_borders        = context.stage("data.spatial.swiss_border")[0]
+    ch_borders        = context.stage("data.spatial.swiss_border").copy()[0]
     ch_borders_simple = ch_borders.simplify(50)
 
     points["dist_to_border"] = points.geometry.apply(lambda g: g.distance(ch_borders_simple)) / 1000
     close_mask               = points["dist_to_border"] < distance_threshold
     far_mask                 = ~close_mask
 
-    far_points   = points[far_mask]
-    close_points = points[close_mask]
+    far_points   = points[far_mask].copy()
+    close_points = points[close_mask].copy()
 
     close_points_registry = close_points.copy().drop_duplicates(subset = ["geometry"], keep = "first")
     merging_aux_df        = close_points_registry.copy().rename(columns = {"geometry": "close_point_geometry"})
@@ -88,8 +91,10 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
 
 
 def expand_and_sample(df, expand_column, weight_column):
+    df = df.copy()
+
     # Expand
-    df_expanded = df.loc[df.index.repeat(df[expand_column])]
+    df_expanded = df.loc[df.index.repeat(df[expand_column])].copy()
     df_expanded["passenger_index"] = df_expanded.groupby(df_expanded.index).cumcount() + 1
     df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]==1), "trip_mode"] = "car"
     df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]>1), "trip_mode"]  = "car_passenger"
@@ -109,15 +114,15 @@ def process_from_to_trips(df_trips, context):
     df_municipalities, _ = context.stage("data.spatial.municipalities")
 
     # 1. Remove "through" trips that were not classified properly
-    trips    = df_trips[(df_trips["origin_country"]=="CH") | (df_trips["destination_country"]=="CH")]
-    trips_od = trips[["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers"]]
+    trips    = df_trips[(df_trips["origin_country"]=="CH") | (df_trips["destination_country"]=="CH")].copy()
+    trips_od = trips[["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers"]].copy()
 
     # 2. Remove trips with missing information on start or end point
     mask_missing_start = (trips_od["start_x"].str.strip() == "") # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
     mask_missing_end   = (trips_od["end_x"].str.strip() == "")   # Same with destinations
     
      # This removes 1.49% of the records
-    df = trips_od[~(mask_missing_start) & ~(mask_missing_end)]
+    df = trips_od[~(mask_missing_start) & ~(mask_missing_end)].copy()
 
     # Reorder start and end so that all trips end in CH
     mask = df["origin_country"] == "CH"
@@ -126,28 +131,26 @@ def process_from_to_trips(df_trips, context):
     df.loc[mask, ["start_y", "end_y"]] = df.loc[mask, ["end_y", "start_y"]].values
 
     # Prepare to sample points from destination municipality
-    destinations = df.apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
-    destinations = gpd.GeoSeries(destinations, crs = "EPSG:4326")
-    destinations = destinations.to_crs("EPSG:2056")
+    destinations = df.copy().apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
+    destinations = gpd.GeoSeries(destinations, crs = "EPSG:4326").to_crs("EPSG:2056")
 
-    joined = gpd.sjoin(gpd.GeoDataFrame(geometry = destinations), df_municipalities, how='left', predicate='within')
+    joined = gpd.sjoin(gpd.GeoDataFrame(geometry = destinations), df_municipalities, how = "left", predicate = "within")
 
-    df.loc[:, "destination_municipality"] = joined["municipality_id"].values
+    df["destination_municipality"] = joined["municipality_id"].values
 
     # In 23 cases, corresponding mostly to people going to Liechtenstein or to points exactly on the border
     # in le Locle or Saint-Gingolph, the municipality cannot be found. 
     # Let's remove these observations.
-    df = df[df["destination_municipality"].notna()]
+    df = df[df["destination_municipality"].notna()].copy()
 
-    df = expand_and_sample(df, "nb_passengers", "weight")
+    df = expand_and_sample(df.copy(), "nb_passengers", "weight")
 
     # Fix the origins
-    df = project_point_series_close_to_border(df, "start_x", "start_y", 20, "home", "other", "origin", context)
+    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", 20, "home", "other", "origin", context)
 
     # Re-create the destinations
-    destinations = df.apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
-    destinations = gpd.GeoSeries(destinations, crs = "EPSG:4326")
-    destinations = destinations.to_crs("EPSG:2056")
+    destinations = df.copy().apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
+    destinations = gpd.GeoSeries(destinations, crs = "EPSG:4326").to_crs("EPSG:2056")
 
     df["destination_x"] = destinations.apply(lambda p : p.x)
     df["destination_y"] = destinations.apply(lambda p : p.y)
@@ -176,9 +179,9 @@ def process_through_trips(through_trips, N, context):
     mask_missing_start = (through_od["start_x"].str.strip() == "") # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
     mask_missing_end   = (through_od["end_x"].str.strip() == "")    
 
-    df = through_od[~(mask_missing_start) & ~(mask_missing_end)] # This removes 9% / 11.3% of the records (unweighted/weighted)
+    df = through_od[~(mask_missing_start) & ~(mask_missing_end)].copy() # This removes 9% / 11.3% of the records (unweighted/weighted)
 
-    df_expanded = df.loc[df.index.repeat(df["nb_passengers"])]
+    df_expanded = df.loc[df.index.repeat(df["nb_passengers"])].copy()
     df_expanded["passenger_index"] = df_expanded.groupby(df_expanded.index).cumcount() + 1
     df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]==1), "trip_mode"] = "car"
     df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]>1), "trip_mode"]  = "car_passenger"
@@ -191,8 +194,8 @@ def process_through_trips(through_trips, N, context):
 
     df = df_sampled.copy().reset_index()
 
-    df = project_point_series_close_to_border(df, "start_x", "start_y", 20, "other", "other", "origin", context)
-    df = project_point_series_close_to_border(df, "end_x", "end_y", 20, "other", "other", "destination", context)
+    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", 20, "other", "other", "origin", context)
+    df = project_point_series_close_to_border(df.copy(), "end_x", "end_y", 20, "other", "other", "destination", context)
 
     df["cross_border_person_id"] = range(N, N + len(df))
     df["cross_border_person_id"] = "CBS_" + df["cross_border_person_id"].astype(str)
@@ -308,21 +311,20 @@ def execute(context):
         day_key = "WE"
 
     day_value = days[day_key]
-    df_days   = df2021[df2021["day_cat"]==day_key]
-    df_days.loc[:, "weight"] = df_days["weight"] / (52 * day_value)
-
+    df_days   = df2021[df2021["day_cat"]==day_key].copy()
+    df_days["weight"] = df_days["weight"] / (52 * day_value)
     df_days["weight"] = df_days["weight"] / 2 # Because the persons entering the country have to leave it too
     del df_days["day_cat"]
 
     # 12. Only select border crossing data - remove Alps crossing data
-    borders = df_days[df_days["crossing_cat"]==1]
+    borders = df_days[df_days["crossing_cat"]==1].copy()
     
     del borders["crossing_cat"]
     del borders["direction_alps"]
 
     # 13. Remove Swiss residents, their mobility should be covered in the Microcensus
     residents_ch_mask = borders["residence_country"] == "CH"
-    borders = borders[~ residents_ch_mask]
+    borders = borders[~ residents_ch_mask].copy()
 
     # 14. Selector by origin country
     allowed_countries  = ["FR", "DE", "AT", "LI", "IT"]
@@ -336,26 +338,62 @@ def execute(context):
                     f"No valid countries in selection. Must be within {allowed_countries}."
                 )
             
-            borders = borders[borders["origin_country"].within(selected_countries)]
+            borders = borders.loc[borders["origin_country"].within(selected_countries)].copy()
 
         elif isinstance(selected_countries, str):
             if selected_countries not in allowed_countries:
                 raise ValueError(
                     f"Invalid country code '{selected_countries}'. Must be one of {allowed_countries}."
                 )
-            borders = borders[borders["origin_country"] == selected_countries]
+            borders = borders.loc[borders["origin_country"] == selected_countries].copy()
 
         else:
             raise TypeError("cross_border_countries must be a list, string, or 'All'.")
 
-    # Now process the trips
+    # 15. Now process the trips
     trips = borders[borders["travel_cat"].isin(["From CH", "To CH"])]   
     from_to_trips = process_from_to_trips(trips, context)
 
-    # TODO process people crossing Switzerland
     through = borders[borders["travel_cat"]=="Through CH"]
     through_trips = process_through_trips(through, len(from_to_trips), context)
 
     df = pd.concat([from_to_trips, through_trips])
+        
+    # 16. Remove trips starting in the spatial file to be excluded
+    exclude_file = context.config("cross_border_exclude_shapefiles")
+
+    if not exclude_file is None:
+        if isinstance(exclude_file, (str, Path)):
+            exclude_file = [exclude_file]
+
+        if not isinstance(exclude_file, (list, tuple)):
+            raise TypeError(
+                "cross_border_exclude_shapefiles must be a path or a list of paths."
+            )
+
+        gdfs = []   
+
+        for f in exclude_file:
+            suffix = Path(f).suffix.lower()
+            if suffix not in {".gpkg", ".shp"}:
+                raise TypeError(
+                    f"{f} is not a .gpkg or .shp file."
+                )
+
+            gdf = gpd.read_file(f).to_crs("EPSG:2056")
+            gdfs.append(gdf)
+
+        exclude_region = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs="EPSG:2056")
+        origins        = gpd.GeoDataFrame(df.copy(), geometry=gpd.points_from_xy(df["origin_x"], df["origin_y"]), crs="EPSG:2056")
+
+        joined           = gpd.sjoin(origins, exclude_region[["geometry"]], how = "left", predicate = "within")
+        is_within_region = joined["index_right"].notna()
+        df["exclude"]    = is_within_region.values
+
+        excluded_ids = df.loc[df["exclude"], "cross_border_person_id"].unique()
+        df = df[~df["cross_border_person_id"].isin(excluded_ids)].copy()
+
+        print(df.head())
+             
 
     return df

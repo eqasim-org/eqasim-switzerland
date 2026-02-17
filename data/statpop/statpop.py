@@ -81,7 +81,7 @@ def execute(context):
 
     # Some adjustments from KM
     data.utils.fix_marital_status(df, c)
-    data.utils.assign_household_class(df, c)
+    data.utils.assign_household_class(df)
 
     # Turn sex and nationality into an actual 0-based class
     df["sex"] -= 1

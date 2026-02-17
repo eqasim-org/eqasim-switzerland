@@ -63,7 +63,7 @@ def execute(context):
     persons["car_availability"] = ((persons["car_availability"])&
                                    (persons["driving_license"]==True)&
                                    (persons["age"]>=18))
-    persons["bike_availability"] = persons["number_of_bikes_class"] != c.BIKE_AVAILABILITY_FOR_NONE    
+    persons["bike_availability"] = persons["number_of_bikes_class"] != c.BIKE_AVAILABILITY_NEVER    
 
     persons = persons[["person_id","car_availability","car_passenger_availability","bike_availability","walk_availability","pt_availability"]]
     df = df.merge(persons, on="person_id", how="left")

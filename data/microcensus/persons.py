@@ -165,6 +165,7 @@ def execute(context):
     df_mz_persons["parking_cost_work"] = np.maximum(0, df_mz_persons["f41400"].astype(np.float))
     df_mz_persons["parking_cost_education"] = np.maximum(0, df_mz_persons["f41401"].astype(np.float))
     df_mz_persons["occupation"] = df_mz_persons["ISCO_08"]
+    
     # BSTELL codes
     # -99	-99.Alter der Zielperson < 15 Jahre
     # -98	-98.keine Antwort

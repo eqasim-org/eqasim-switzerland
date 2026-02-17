@@ -11,7 +11,7 @@ def configure(context):
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.trips")
 
-    context.stage("synthesis.population.spatial.locations")
+    #context.stage("synthesis.population.spatial.locations")
 
     context.config("output_path")
     context.config("output_prefix", "switzerland_")
@@ -119,93 +119,93 @@ def execute(context):
         "preceding_purpose", "following_purpose"
     ]]
 
-    #df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
+    df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
     print("Starting to create activities gpkg data.")
     # Prepare spatial data sets
-    df_locations = context.stage("synthesis.population.spatial.locations")[[
-        "person_id", "activity_index", "geometry"
-    ]]
+    #df_locations = context.stage("synthesis.population.spatial.locations")[[
+    #    "person_id", "activity_index", "geometry"
+    #]]
     # Set a MultiIndex on both (avoids reshuffling all columns)
-    df_locations = df_locations.set_index(["person_id", "activity_index"])
-    df_activities = df_activities.set_index(["person_id", "activity_index"])
+    #df_locations = df_locations.set_index(["person_id", "activity_index"])
+    #df_activities = df_activities.set_index(["person_id", "activity_index"])
 
     # Fast alignment of the one column you need
-    df_activities["geometry"] = df_locations["geometry"]
-    df_activities = df_activities.reset_index()
-    df_locations = df_locations.reset_index()
+    #df_activities["geometry"] = df_locations["geometry"]
+    #df_activities = df_activities.reset_index()
+    #df_locations = df_locations.reset_index()
     # Write spatial activities
-    df_spatial = gpd.GeoDataFrame(
-        df_activities,
-        geometry="geometry",
-        crs="EPSG:2056"
-    )
-    df_spatial["purpose"] = df_spatial["purpose"].astype(str)
-    path = "%s/%sactivities.gpkg" % (output_path, output_prefix)
-    print("Starting to write activities gpkg data.")
-    df_spatial.to_file(path, driver = "GPKG", engine="pyogrio")
-    print("Finished writing activities gpkg data.")
-    clean_gpkg(path)
+    #df_spatial = gpd.GeoDataFrame(
+    #    df_activities,
+    #    geometry="geometry",
+    #    crs="EPSG:2056"
+    #)
+    # df_spatial["purpose"] = df_spatial["purpose"].astype(str)
+    # path = "%s/%sactivities.gpkg" % (output_path, output_prefix)
+    # print("Starting to write activities gpkg data.")
+    # df_spatial.to_file(path, driver = "GPKG", engine="pyogrio")
+    # print("Finished writing activities gpkg data.")
+    # clean_gpkg(path)
 
-    # Write spatial homes
-    path = "%s/%shomes.gpkg" % (output_path, output_prefix)
-    df_spatial[
-        df_spatial["purpose"] == "home"
-    ].drop_duplicates("household_id")[[
-        "household_id", "geometry"
-    ]].to_file(path, driver = "GPKG")
-    clean_gpkg(path)
+    # # Write spatial homes
+    # path = "%s/%shomes.gpkg" % (output_path, output_prefix)
+    # df_spatial[
+    #     df_spatial["purpose"] == "home"
+    # ].drop_duplicates("household_id")[[
+    #     "household_id", "geometry"
+    # ]].to_file(path, driver = "GPKG")
+    # clean_gpkg(path)
 
-    # Write spatial commutes
-    df_spatial = pd.merge(
-        df_spatial[df_spatial["purpose"] == "home"].drop_duplicates("person_id")[["person_id", "geometry"]].rename(columns = { "geometry": "home_geometry" }),
-        df_spatial[df_spatial["purpose"] == "work"].drop_duplicates("person_id")[["person_id", "geometry"]].rename(columns = { "geometry": "work_geometry" })
-    )
+    # # Write spatial commutes
+    # df_spatial = pd.merge(
+    #     df_spatial[df_spatial["purpose"] == "home"].drop_duplicates("person_id")[["person_id", "geometry"]].rename(columns = { "geometry": "home_geometry" }),
+    #     df_spatial[df_spatial["purpose"] == "work"].drop_duplicates("person_id")[["person_id", "geometry"]].rename(columns = { "geometry": "work_geometry" })
+    # )
 
-    df_spatial["geometry"] = [
-        geo.LineString(od)
-        for od in zip(df_spatial["home_geometry"], df_spatial["work_geometry"])
-    ]
+    # df_spatial["geometry"] = [
+    #     geo.LineString(od)
+    #     for od in zip(df_spatial["home_geometry"], df_spatial["work_geometry"])
+    # ]
 
-    df_spatial = df_spatial.drop(columns = ["home_geometry", "work_geometry"])
-    path = "%s/%scommutes.gpkg" % (output_path, output_prefix)
-    df_spatial.to_file(path, driver = "GPKG")
-    clean_gpkg(path)
+    # df_spatial = df_spatial.drop(columns = ["home_geometry", "work_geometry"])
+    # path = "%s/%scommutes.gpkg" % (output_path, output_prefix)
+    # df_spatial.to_file(path, driver = "GPKG")
+    # clean_gpkg(path)
 
-    # Write spatial trips
-    df_spatial = pd.merge(df_trips, df_locations[[
-        "person_id", "activity_index", "geometry"
-    ]].rename(columns = {
-        "activity_index": "preceding_activity_index",
-        "geometry": "preceding_geometry"
-    }), how = "left", on = ["person_id", "preceding_activity_index"])
+    # # Write spatial trips
+    # df_spatial = pd.merge(df_trips, df_locations[[
+    #     "person_id", "activity_index", "geometry"
+    # ]].rename(columns = {
+    #     "activity_index": "preceding_activity_index",
+    #     "geometry": "preceding_geometry"
+    # }), how = "left", on = ["person_id", "preceding_activity_index"])
 
-    df_spatial = pd.merge(df_spatial, df_locations[[
-        "person_id", "activity_index", "geometry"
-    ]].rename(columns = {
-        "activity_index": "following_activity_index",
-        "geometry": "following_geometry"
-    }), how = "left", on = ["person_id", "following_activity_index"])
+    # df_spatial = pd.merge(df_spatial, df_locations[[
+    #     "person_id", "activity_index", "geometry"
+    # ]].rename(columns = {
+    #     "activity_index": "following_activity_index",
+    #     "geometry": "following_geometry"
+    # }), how = "left", on = ["person_id", "following_activity_index"])
 
-    df_spatial["geometry"] = [
-        geo.LineString(od)
-        for od in zip(df_spatial["preceding_geometry"], df_spatial["following_geometry"])
-    ]
+    # df_spatial["geometry"] = [
+    #     geo.LineString(od)
+    #     for od in zip(df_spatial["preceding_geometry"], df_spatial["following_geometry"])
+    # ]
 
-    df_spatial = df_spatial.drop(columns = ["preceding_geometry", "following_geometry"])
+    # df_spatial = df_spatial.drop(columns = ["preceding_geometry", "following_geometry"])
 
-    df_spatial = gpd.GeoDataFrame(df_spatial, crs = "EPSG:2056")
-    df_spatial["following_purpose"] = df_spatial["following_purpose"].astype(str)
-    df_spatial["preceding_purpose"] = df_spatial["preceding_purpose"].astype(str)
-    df_spatial["mode"] = df_spatial["mode"].astype(str)
+    # df_spatial = gpd.GeoDataFrame(df_spatial, crs = "EPSG:2056")
+    # df_spatial["following_purpose"] = df_spatial["following_purpose"].astype(str)
+    # df_spatial["preceding_purpose"] = df_spatial["preceding_purpose"].astype(str)
+    # df_spatial["mode"] = df_spatial["mode"].astype(str)
 
-    df_spatial["crowfly_distance"] = df_spatial.geometry.length
-    df_trips = pd.merge(df_trips, df_spatial[["crowfly_distance", "person_id", "following_activity_index"]], how="left", 
-                        on=["person_id", "following_activity_index"])
-    df_trips = df_trips.drop(columns = ["following_activity_index"])
-    df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
+    # df_spatial["crowfly_distance"] = df_spatial.geometry.length
+    # df_trips = pd.merge(df_trips, df_spatial[["crowfly_distance", "person_id", "following_activity_index"]], how="left", 
+    #                     on=["person_id", "following_activity_index"])
+    # df_trips = df_trips.drop(columns = ["following_activity_index"])
+    # df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
 
-    path = "%s/%strips.gpkg" % (output_path, output_prefix)
-    df_spatial.to_file(path, driver = "GPKG")
-    clean_gpkg(path)
+    # path = "%s/%strips.gpkg" % (output_path, output_prefix)
+    # df_spatial.to_file(path, driver = "GPKG")
+    # clean_gpkg(path)
 
 

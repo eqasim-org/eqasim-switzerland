@@ -38,7 +38,7 @@ def execute(context):
 
     df["child_in_household"]   = df["child_in_household"].astype(int)
     df["driving_license"]      = df["driving_licence"].astype(int)
-    df["household_size_class"] = df["household_size"]
+    #df["household_size_class"] = df["household_size"]
     df["N_children_under_18"]  = df["child_in_household"]
 
     del df["nation"]
@@ -47,7 +47,7 @@ def execute(context):
     del df["age"]
     del df["driving_licence"]
     del df["zone_id"]
-    del df["household_size"]
+    #del df["household_size"]
     del df["child_in_household"]
 
     # Identifying children under the age of 6 from the education variables
@@ -57,19 +57,31 @@ def execute(context):
     # Age class to int
     df["age_class"] = df["age_class"].replace({"0-5":0, "6-17":1, "18-24": 2, "25-44":3, "45-64":4, "65-74":5, "75+":6})
 
+    # Household size class
+    df["household_size_class"] = 2
+    df.loc[df["household_size"] == 1, "household_size_class"] = 0
+    df.loc[df["household_size"] == 2, "household_size_class"] = 1
+
     # Cleaning employment and education status
-    df.loc[(df["position_in_edu"]=="pupil"), "employment_status"]                                     = "student"
-    df.loc[(df["position_in_edu"]=="apprentice"), "employment_status"]                                = "working student"
-    df.loc[(df["position_in_edu"]=="student") & (df["position_in_bus"].isna()), "employment_status"]  = "student"
-    df.loc[(df["position_in_edu"]=="student") & (~df["position_in_bus"].isna()), "employment_status"] = "working student"
-    df.loc[(df["position_in_edu"].isna()) & (~df["position_in_bus"].isna()), "employment_status"]     = "active"
-    df.loc[(df["position_in_edu"].isna()) & (df["position_in_bus"].isna()), "employment_status"]      = "inactive"
+    df.loc[(df["position_in_edu"]=="pupil"), "employed"]                                     = 2 # "student"
+    df.loc[(df["position_in_edu"]=="apprentice"), "employed"]                                = 3 # "working student"
+    df.loc[(df["position_in_edu"]=="student") & (df["position_in_bus"].isna()), "employed"]  = 2 # "student"
+    df.loc[(df["position_in_edu"]=="student") & (~df["position_in_bus"].isna()), "employed"] = 3 # "working student"
+    df.loc[(df["position_in_edu"].isna()) & (~df["position_in_bus"].isna()), "employed"]     = 1 # "active"
+    df.loc[(df["position_in_edu"].isna()) & (df["position_in_bus"].isna()), "employed"]      = 0 # "inactive"
 
-    # Maybe there are too many different employment categories now. Andwe are losing information on socio-professional class, which is used for matching in IdF.
+    df.loc[:, "is_student"] = 0
+    df.loc[(~df["position_in_edu"].isna()), "is_student"] = 1
+
+    df["employed"] = df["employed"].astype(int)
+    df["is_student"] = df["is_student"].astype(int)
+
+    print(df.groupby("employed")["person_id"].count() / len(df) )
+    print(df.groupby("is_student")["person_id"].count() / len(df) )
+
+    # Maybe there are too many different employment categories now. And we are losing information on 
+    # socio-professional class, which is used for matching in IdF.
     # TODO adjust classification if needed.
-
-    #filter = (df["employment_status"]=="active") | (df["employment_status"]=="working student")| (df["employment_status"]=="apprentice")
-    #df.loc[filter, "employment_status"] = df[filter]["employment_status"] + "_" + df[filter]["level_of_employment"]
 
     # Number of cars and bikes
     df["number_of_cars_class"]  = df["cars_in_hh"]
@@ -78,6 +90,9 @@ def execute(context):
     # Make number of cars class compatible with MZ
     df.loc[df["number_of_cars_class"]=="3+", "number_of_cars_class"] = 3
     df["number_of_cars_class"] = df["number_of_cars_class"].astype(int)
+
+    # Car availability
+    df["car_availability"] = df["car_available"]
 
     # Number of bikes class cannot be used for matching as it is given at the household level in MZ
     df.loc[df["number_of_bikes_class"] == "null", "number_of_bikes_class"]                                                            = c.BIKE_AVAILABILITY_FOR_NONE
@@ -153,9 +168,10 @@ def execute(context):
         "household_income",
         "N_children_under_18",
         "number_of_cars_class",
-        "employment_status",
+        "employed", "is_student",
         "driving_license",
         "subscriptions",
+        "car_availability",
         "level_of_employment", "education",
         "position_in_edu", "position_in_bus",
         "age_class", "household_size_class",

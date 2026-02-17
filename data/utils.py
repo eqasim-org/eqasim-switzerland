@@ -10,7 +10,7 @@ def fix_marital_status(df, c):
     df["marital_status"] = df["marital_status"].astype(np.int)
 
 
-def assign_household_class(df, c):
+def assign_household_class(df):
     """
         Combines all houeshold sizes above 5 into one class.
 
@@ -18,18 +18,7 @@ def assign_household_class(df, c):
         have a minimum size of 2. Technically, this doesn't need be true in reality, and
         I'm not sure if it has any implications later on. (TODO)
     """
-
-    census = c.census
-
-    if census == "statpop":
-        df["household_size_class"] = np.minimum(5, df["household_size"]) - 1
-
-    elif census == "are_synpop":
-        df["household_size_class"] = "5+"
-        df.loc[df["household_size"]==1, "household_size_class"] = "1"
-        df.loc[df["household_size"]==2, "household_size_class"] = "2"
-        df.loc[df["household_size"]==3, "household_size_class"] = "3-4"
-        df.loc[df["household_size"]==4, "household_size_class"] = "3-4"
+    df["household_size_class"] = np.minimum(5, df["household_size"]) - 1
 
 
 def prepare_education_locations(df_persons, df_statent, c):
