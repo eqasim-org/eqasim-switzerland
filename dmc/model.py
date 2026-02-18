@@ -83,7 +83,7 @@ def preprocess_data(df, ignore_car_passenger):
     # distance categories
     df["short_distance"] = (df["euclidean_distance_km"]<1.0).astype(int)
     df["long_distance"]  = (df["euclidean_distance_km"]>13.0).astype(int)
-    df["very_long_distance"]  = (df["euclidean_distance_km"]>25.0).astype(int)
+    df["very_long_distance"]  = (df["euclidean_distance_km"]>30.0).astype(int)
     # quality of pt service
     df["good_pt_service"] = df["good_pt_service"].astype(int)
     df["medium_pt_service"] = df["medium_pt_service"].astype(int)

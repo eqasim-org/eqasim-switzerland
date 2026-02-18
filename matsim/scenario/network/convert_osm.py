@@ -43,12 +43,12 @@ def configure(context):
     context.config("ensure_network_connectivity", True)
     # this is for speed correction
     context.config("adjust_speed", True)
-    context.config("speed_factor_urbancore", 0.8)
-    context.config("speed_factor_urban", 0.87)
-    context.config("speed_factor_suburban", 0.92)
-    context.config("speed_factor_rural", 0.97)
-    context.config("speed_factor_motorway", 1.08)
-    context.config("speed_limit_for_correction", 70/3.6) # in m/s (speed limit below which we correct the speed)
+    context.config("speed_factor_urbancore", 0.85)
+    context.config("speed_factor_urban", 0.93)
+    context.config("speed_factor_suburban", 1.0)
+    context.config("speed_factor_rural", 1.05)
+    context.config("speed_factor_motorway", 1.15)
+    context.config("speed_limit_for_correction", 75/3.6) # in m/s (speed limit below which we correct the speed)
     # correct speed for uphill links only
     context.config("adjust_speed_uphill", False) # if true, it is triggered only if elevation is assigned
     context.config("max_gradient_threshold", 0.1) # in percentage (10% = 0.1)
