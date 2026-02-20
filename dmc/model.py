@@ -322,6 +322,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         betas.update({
             "beta_car_passenger_asc": Beta("beta_car_passenger_asc", 0.46, None, None, 0),
             "beta_car_passenger_travel_time_min": Beta("beta_car_passenger_travel_time_min", -1.27, None, max_disutility, 0),
+            "beta_car_passenger_distance_km": Beta("beta_car_passenger_distance_km", -0.1, None, None, 0),
 
             "beta_car_passenger_driving_permit": Beta("beta_car_passenger_driving_permit", -0.339, None, None, 0),
             "beta_car_passenger_age": Beta("beta_car_passenger_age", -0.003, None, None, 0),
@@ -346,7 +347,7 @@ def define_betas(ignore_car_passenger, use_exponents):
 
             "beta_car_passenger_short_distance": Beta("beta_car_passenger_short_distance", 0.284, None, None, 0),
             "beta_car_passenger_long_distance": Beta("beta_car_passenger_long_distance", 0.148, None, None, 0),     
-            "beta_car_passenger_very_long_distance": Beta("beta_car_passenger_very_long_distance", 0.0, None, None, 0),
+            "beta_car_passenger_very_long_distance": Beta("beta_car_passenger_very_long_distance", 0.0, None, None, 1),
 
             "beta_car_passenger_ownership_ratio": Beta("beta_car_passenger_ownership_ratio", 0.0, None, None, 0),
             "beta_car_passenger_has_car": Beta("beta_car_passenger_has_car", 0.0, None, None, 0),            
@@ -493,7 +494,8 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         car_passenger_utility = (
             betas["beta_car_passenger_asc"]            
             + betas["beta_car_passenger_travel_time_min"] * (car_passenger_travel_time**betas["lambda_car_passenger_travel_time"])            
-            + betas["beta_car_passenger_driving_permit"] * vars["driving_license"]            
+            + betas["beta_car_passenger_distance_km"] * bioMax(0,(vars["car_passenger_distance_km"]-50.0)/DISTANCE_SCALE_KM)
+            + betas["beta_car_passenger_driving_permit"] * vars["driving_license"]
             + betas["beta_car_passenger_age"] * bioMax(0, vars["age"] - 17)
             + betas["beta_car_passenger_sex"] * vars["sex"]
             + betas["beta_car_passenger_retired"] * vars["is_retired"]

@@ -161,6 +161,7 @@ NAMES_CONVERSION = {
     'beta_car_passenger_asc': 'cp.alpha_u',
     'beta_car_passenger_travel_time_min': 'cp.betaTravelTime_u_min',
     'lambda_car_passenger_travel_time': 'cp.travelTimeExponent',
+    'beta_car_passenger_distance_km': 'cp.betaDistance_u_km',
     'beta_car_passenger_age': 'cp.betaAge_u',
     'beta_car_passenger_sex': 'cp.betaSex_u',
     'beta_car_passenger_low_income': 'cp.betaLowIncome_u',
