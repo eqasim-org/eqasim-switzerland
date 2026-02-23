@@ -122,13 +122,15 @@ def compute_statistics(df, flow_col='flow', simulated_flow_col='simulated_flow',
     nse = 1 - (np.sum((flow_obs - flow_sim) ** 2) / np.sum((flow_obs - mean_obs) ** 2))
 
     # compute goodness-of-fit: GEH Statistic (Geoffrey E. Havers)
-    geh_values = np.sqrt(2 * (flow_sim - flow_obs) ** 2 / (flow_sim + flow_obs + 1e-6))
+    geh_values = np.sqrt(2 * (flow_sim/24 - flow_obs/24) ** 2 / (flow_sim/24 + flow_obs/24 + 1e-6))
     geh_within_5 = int(np.sum(geh_values <= 5))
     geh_within_10 = int(np.sum(geh_values <= 10))
     geh_within_15 = int(np.sum(geh_values <= 15))
+    geh_within_25 = int(np.sum(geh_values <= 25))
     geh_within_5_pct = (geh_within_5 / n_points) * 100
     geh_within_10_pct = (geh_within_10 / n_points) * 100
     geh_within_15_pct = (geh_within_15 / n_points) * 100
+    geh_within_25_pct = (geh_within_25 / n_points) * 100
     
     stats_dict = {
         'n_points': n_points,
@@ -151,6 +153,8 @@ def compute_statistics(df, flow_col='flow', simulated_flow_col='simulated_flow',
             'within_10_pct': geh_within_10_pct,
             'within_15': geh_within_15,
             'within_15_pct': geh_within_15_pct,
+            'within_25': geh_within_25,
+            'within_25_pct': geh_within_25_pct,
         }
     }
     
@@ -201,6 +205,7 @@ def print_detailed_statistics(stats_dict):
     logger.info(f"   • GEH ≤ 5: {stats_dict['geh']['within_5']:,} points ({stats_dict['geh']['within_5_pct']:.1f}%)")
     logger.info(f"   • GEH ≤ 10: {stats_dict['geh']['within_10']:,} points ({stats_dict['geh']['within_10_pct']:.1f}%)")
     logger.info(f"   • GEH ≤ 15: {stats_dict['geh']['within_15']:,} points ({stats_dict['geh']['within_15_pct']:.1f}%)")
+    logger.info(f"   • GEH ≤ 25: {stats_dict['geh']['within_25']:,} points ({stats_dict['geh']['within_25_pct']:.1f}%)")
     logger.info("=" * 60 + "\n")
 
 def create_comprehensive_plot(df, stats_dict, output_path=None):

@@ -61,10 +61,10 @@ def execute(context):
                                             flow_col = 'flow_w' if context.config("only_weekday") else 'flow')
     
     # Identify the stations that might be mismatched
-    stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>30000)|
-                             (flows.simulated_flow<1000)|
-                             (flows.flow<1000)|
-                             (~flows.pdiff.between(-80,250))]["id"].unique()
+    stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>13000)|
+                             (flows.simulated_flow< 200 * 24)|
+                             (flows.flow< 200 * 24)|
+                             (~flows.pdiff.between(-50,200))]["id"].unique()
 
     # Plot the network and highligh these links in green  
     plotter = Plotter()
@@ -94,7 +94,8 @@ def execute(context):
                     distance_to_border = 2000, 
                     title = f"Observed vs Simulated Traffic Flows ({city})",
                     output_file = os.path.join(path_to_images, f"flow_comparaison_{city}.png"),
-                    show_range = False)
+                    show_range = False,
+                    show_geh = True)
 
     plotter.plot_flow_by_road_type(flows, network, matched, counts,
                                 distance_to_border = 0, 

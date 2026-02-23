@@ -26,9 +26,25 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def GEH(x_d,y_d):
+    x = x_d/24
+    y = y_d/24
+    geh_values = np.sqrt(2 * (x - y) ** 2 / (x + y + 1e-6))
+    geh_within_5 = int(np.sum(geh_values <= 5))
+    geh_within_10 = int(np.sum(geh_values <= 10))
+    geh_within_15 = int(np.sum(geh_values <= 15))
+    geh_within_25 = int(np.sum(geh_values <= 25))
+    n_points = len(geh_values)
+    geh_within_5_pct = (geh_within_5 / n_points) * 100
+    geh_within_10_pct = (geh_within_10 / n_points) * 100
+    geh_within_15_pct = (geh_within_15 / n_points) * 100
+    geh_within_25_pct = (geh_within_25 / n_points) * 100
+    return geh_within_5_pct, geh_within_10_pct, geh_within_15_pct, geh_within_25_pct
+
+
 class Plotter:
     def plot_flow(self, flows, counts:Counts=None, output_file:str=None, 
-                        distance_to_border:int=5000, title:str=None, show_range=False):        
+                        distance_to_border:int=5000, title:str=None, show_range=False, show_geh=False):        
         flows = flows.copy()
         flows = flows.sort_values("flow")
         
@@ -72,7 +88,6 @@ class Plotter:
             r2_in = r2_score(in_flow.flow, in_flow.simulated_flow)
             
         # Add R2 Score
-        
         plt.text( 0.02 * max_val, 0.6 * max_val, 
                  f"$R^2$ = {r2:.3f}\n$R^2_{{\\mathrm{{in}}}}$ = {r2_in:.3f}" if (counts is not None and distance_to_border>0) else f"$R^2$ = {r2:.3f}",            # text
                  fontsize=14,
@@ -80,8 +95,18 @@ class Plotter:
                  bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3')  # white box
                  )
         
+        # Add GEH statistics
+        if show_geh:
+            geh = GEH(x,y)
+            plt.text( 0.7 * max_val, 0.02 * max_val, 
+                    f"GEH ≤ 5: {geh[0]:.1f}%\nGEH ≤ 10: {geh[1]:.1f}%\nGEH ≤ 15: {geh[2]:.1f}%\nGEH ≤ 25: {geh[3]:.1f}%" ,  # text
+                    fontsize=14,
+                    color='steelblue',
+                    bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3')  # white box
+                    )
+        
         # Axis labels and title
-        plt.xlabel("Observed Flow (Weekday Avg, 2023)", fontsize=15, labelpad=13)
+        plt.xlabel("Observed Flow (Weekday Avg)", fontsize=15, labelpad=13)
         plt.ylabel("Simulated Flow (MATSim, 10%)", fontsize=15, labelpad=13)
         plt.title("Observed vs Simulated Traffic Flows" if title is None else title, fontsize=17)
         

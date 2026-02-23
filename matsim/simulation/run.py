@@ -1,7 +1,7 @@
 import os.path
 import shutil
 import matsim.runtime.eqasim as eqasim
-from matsim.simulation.config_utils import get_calibration_args, get_delays_args
+from matsim.simulation.config_utils import get_calibration_args, get_delays_args, get_network_calibration_args
 
 def configure(context):
     context.stage("matsim.simulation.prepare")    
@@ -10,7 +10,8 @@ def configure(context):
     
     context.config("use_vdf", default=False)
     context.config("threads")
-    context.config("last_iteration", 60)    
+    context.config("last_iteration", 60)
+    context.config("data_path")  
 
     context.config("estimate_dmc", default=False)
     context.config("calibrate_alphas_in_matsim", default=False)
@@ -23,6 +24,12 @@ def configure(context):
 
     if context.config("estimate_dmc"):
         context.stage("dmc.model")
+
+    context.config("activate_network_calibration", default=False)
+    context.config("counts_path", default=os.path.join(context.config("data_path"),"traffic_counts"))
+    context.config("calibration_counts_file", default=os.path.join(context.config("counts_path"),"calibration_counts.csv"))
+    context.config("correct_links_capacity", False)
+    context.config("minimum_speed", 2)
 
     context.config("useScheduleBasedTransport", default=True)
     context.config("preventwaitingtoentertraffic", default = "no")
@@ -64,8 +71,12 @@ def execute(context):
         additional_args.extend(["--config:eqasim.modeParametersPath", mode_parameters_path])
 
     additional_args.extend(get_calibration_args(context))
+    
     # delays (signalized intersections delays using webster formula, and unsignalized intersection delays using BPR based approach)
     additional_args.extend(get_delays_args(context))
+
+    # network calibration
+    additional_args.extend(get_network_calibration_args(context))
 
     # Running the simulation
     last_iteration = context.config("last_iteration")

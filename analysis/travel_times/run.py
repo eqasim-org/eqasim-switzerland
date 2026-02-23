@@ -33,7 +33,7 @@ def merge_and_filter_large_differences(df_api, df_matsim):
 
     # Filter out rows with large distance difference (this might be due to network differences, maybe missing links)
     distance_diff = np.abs((df["distance_km_api"] - df["distance_km_matsim"])/df["distance_km_api"]) * 100.0
-    distance_diff_threshold = 25.0  # percent
+    distance_diff_threshold = 20.0  # percent
     n_before = len(df)
     df = df[distance_diff <= distance_diff_threshold].reset_index(drop=True).copy()
     n_after = len(df)
@@ -46,6 +46,14 @@ def merge_and_filter_large_differences(df_api, df_matsim):
             (df["egress_distance_km"] <= access_egress_threshold_km)].reset_index(drop=True).copy()
     n_after = len(df)
     logger.info(f"Filtered out {n_before - n_after} rows with access/egress distance > {access_egress_threshold_km} km")
+
+    # filter out rows with very high travel time differences (this might happend because of one link overcongested in the simulation, which is an outlier)
+    travel_time_threshold_min = 30.0 # this happen in very few points
+    n_before = len(df)
+    df = df[abs(df["travel_time_min_api"] - df["travel_time_min_matsim"]) <= travel_time_threshold_min].reset_index(drop=True).copy()
+    n_after = len(df)
+    logger.info(f"Filtered out {n_before - n_after} rows with high travel times discrepencies > {travel_time_threshold_min} min")
+
 
     return df
 

@@ -171,3 +171,28 @@ def get_delays_args(context):
             "--config:eqasim:intersectionDelays.activateUnsignalized", str(activate_unsignalized_delaus).lower()
         ])
     return additional_args  
+
+
+def get_network_calibration_args(context):
+    additional_args = []
+    if context.config("activate_network_calibration"):
+        counts_file = context.config("calibration_counts_file")
+        assert os.path.exists(counts_file), f"Calibration counts file not found at {counts_file}"
+        additional_args.extend([
+            "--config:eqasim:networkCalibration.activate", "true",
+            "--config:eqasim:networkCalibration.updateInterval", "3",
+            "--config:eqasim:networkCalibration.saveNetworkInterval", "0",
+            "--config:eqasim:networkCalibration.categoriesToCalibrate", "1,2,3,4,5,11,12,13,14,15",
+            "--config:eqasim:networkCalibration.minCapacity", "800",
+            "--config:eqasim:networkCalibration.maxCapacity", "1850",
+            "--config:eqasim:networkCalibration.countsFile", counts_file,
+            "--config:eqasim:networkCalibration.rampFactor", "1.05",
+            "--config:eqasim:networkCalibration.trunkFactor", "1.35",
+            "--config:eqasim:networkCalibration.objective", "penalty",
+            "--config:eqasim:networkCalibration.separateUrbanRoads", "true",
+            "--config:eqasim:networkCalibration.minPenalty", "-0.1",
+            "--config:eqasim:networkCalibration.maxPenalty", "0.35",
+            "--config:eqasim:networkCalibration.correctCapacities", str(context.config("correct_links_capacity")).lower(),
+            "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed"))
+        ])
+    return additional_args
