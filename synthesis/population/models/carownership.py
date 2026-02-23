@@ -48,41 +48,59 @@ def execute(context):
     # -------------------------------------------------------------------
     # 0. LOAD DATA
     # -------------------------------------------------------------------
+    #TODO: add household type to the variables
+    # we need to create the types as reported in mz in hhtyp variable
     survey_df = context.stage("data.microcensus.21.persons").copy()
     survey_hh_df = context.stage("data.microcensus.21.household_persons")[0]
 
-    # --- ensure types ---
+    # --- ensure types (do this BEFORE using age) ---
     survey_hh_df["age"] = pd.to_numeric(survey_hh_df["age"], errors="coerce")
-    survey_hh_df["driving_license"] = pd.to_numeric(survey_hh_df["driving_license"], errors="coerce")  # expects 1/0
+    survey_hh_df["driving_license"] = pd.to_numeric(survey_hh_df["driving_license"], errors="coerce")
+
+    # --- hh_oldest_age (1 row per household) ---
+    hh_oldest = (
+        survey_hh_df.groupby("household_id", as_index=False)["age"]
+        .max()
+        .rename(columns={"age": "hh_oldest_age"})
+    )
 
     # --- compute household aggregates ---
     hh_lic = survey_hh_df.loc[survey_hh_df["age"].notna()].copy()
-
     hh_lic["is_adult"] = (hh_lic["age"] >= 18).astype(int)
+    hh_lic["is_adult_30_64"] = hh_lic["age"].between(25, 60, inclusive="both").astype(int)
 
-    # driving_license among adults: treat missing as 0
+
     hh_lic["dl_adult"] = hh_lic["driving_license"].fillna(0).where(hh_lic["age"] >= 18, 0)
 
     hh_agg = (
         hh_lic.groupby("household_id", as_index=False)
             .agg(
                 N_adults_survey=("is_adult", "sum"),
+                N_adults_30_64=("is_adult_30_64", "sum"),
                 N_drivers_license_adults=("dl_adult", "sum"),
             )
     )
 
-    # ratio per adult (clip 0..1 if it’s meant as “share of adults with license”)
     hh_agg["N_drivers_license_per_adult"] = (
         hh_agg["N_drivers_license_adults"] / hh_agg["N_adults_survey"].replace(0, np.nan)
     ).fillna(0.0)
 
-    # --- merge onto survey_df by household_id ---
+    # --- merge hh_agg + hh_oldest, then onto survey_df by household_id ---
+    hh_out = hh_agg.merge(hh_oldest, on="household_id", how="left")
+
     survey_df = survey_df.merge(
-        hh_agg[["household_id", "N_adults_survey", "N_drivers_license_adults", "N_drivers_license_per_adult"]],
+        hh_out[[
+            "household_id",
+            "N_adults_survey",
+            "N_adults_30_64", 
+            "N_drivers_license_adults",
+            "N_drivers_license_per_adult",
+            "hh_oldest_age",
+        ]],
         left_on="person_id", right_on="household_id",
         how="left"
     )
-    survey_df = survey_df.drop(columns=["household_id"])
+
     pop_df    = context.stage("synthesis.population.models.drlicense").copy()
 
     # Make sure essentials exist
@@ -105,22 +123,20 @@ def execute(context):
         .transform("sum")
     )
 
+    # adults age 30..64 (inclusive) in pop
+    mask_30_64 = pop_df["age"].notna() & pop_df["age"].between(30, 64, inclusive="both")
+    pop_df["N_adults_30_64"] = (
+        mask_30_64.astype(int)
+        .groupby(pop_df["household_id"])
+        .transform("sum")
+    )
+
+
     dl_pop_col = "driving_license"
   
     # -------------------------------------------------------------------
     # 1. PREP SURVEY: build household-level table with target 0/1/2/3+
     # -------------------------------------------------------------------
-    required_survey_cols = [
-        "household_id",
-        "household_size",
-        "canton_id",
-        "municipality_type",
-        "ovgk",
-        "N_adults",
-        "N_children_under_18",
-        "person_weight",
-        SURVEY_CARCOUNT_COL,
-    ]
     # keep only cols that exist; we'll error later if target missing
     missing_target = SURVEY_CARCOUNT_COL not in survey_df.columns
     if missing_target:
@@ -185,6 +201,7 @@ def execute(context):
     n_dl = (dl.where(adult, 0)).groupby(pop_df["household_id"]).transform("sum").astype("float32")
 
     pop_df["N_drivers_license_per_adult"] = n_dl / n_adults
+    pop_df["N_drivers_license_adults"] = n_dl
     pop_df.loc[n_adults == 0, "N_drivers_license_per_adult"] = np.nan  
     # Build HH table in pop
     def mode_or_first(x):
@@ -198,13 +215,17 @@ def execute(context):
     pop_df
     .drop_duplicates("household_id", keep="first")
     [["household_id",
+      "household_size",
       "N_adults",
+      "N_adults_30_64", 
       "presence_of_children_under_18",
       "N_drivers_license_per_adult",
+      'N_drivers_license_adults',
       "canton_id",
       "municipality_type",
       "ovgk",           
-      "income_class"     
+      "income_class",     
+      "hh_oldest_age"
      ]].copy()
 )
 
@@ -234,7 +255,7 @@ def execute(context):
     # categorical + numeric feature lists
     cat_cols = [ "ovgk","canton_id",  "municipality_type", "presence_of_children_under_18"]#, "ovgk" "municipality_type", "presence_of_children_under_18", "income_class"] #presence_of_children_under_18 reduces the  number of those not owning a car
 
-    num_cols = ["N_adults", "N_drivers_license_per_adult"]
+    num_cols = ["N_adults", "N_adults_30_64", "N_drivers_license_adults", "hh_oldest_age"]
     
     for df in (hh_s, hh_p):
         # numeric clean
@@ -290,8 +311,8 @@ def execute(context):
         elif mt in ("catboost", "cat"):
             return CatBoostClassifier(
                 loss_function="MultiClass",
-                iterations=2000,
-                learning_rate=0.05,
+                iterations=1000,
+                learning_rate=0.03,
                 depth=10,
                 l2_leaf_reg=6.0,
                 random_seed=42,
