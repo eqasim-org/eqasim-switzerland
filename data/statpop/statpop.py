@@ -26,6 +26,7 @@ def configure(context):
     context.stage("data.spatial.ovgk")
     context.stage("data.constants")
     context.config("threads")
+    context.config("only_permanent_residents")
 
 
 def execute(context):
@@ -33,10 +34,14 @@ def execute(context):
     df_households = context.stage("data.statpop.households")
     df_link       = context.stage("data.statpop.link")
     c             = context.stage("data.constants")
-
+    only_permanent = str(context.config("only_permanent_residents")).strip().lower() in ("1","true","yes","y","on")
     # Filter non-main residence
     initial_count = len(df_persons)
-    df_persons = df_persons[df_persons["type_of_residence"] == 1]
+    if (only_permanent):
+        df_persons = df_persons[df_persons["type_of_residence"] == 1]
+    else:
+        df_persons = df_persons[(df_persons["type_of_residence"] == 1) | (df_persons["type_of_residence"] == 1)]
+        
     final_count = len(df_persons)
     print(f"{initial_count - final_count} persons were filtered out based on the type of residence.")
     
@@ -172,6 +177,21 @@ def execute(context):
 
         children_columns.append(col_name)
 
+    # ---- Fast household aggregates (no .apply) ----
+    hh_basic = df.groupby("household_id", sort=False).agg(
+        hh_oldest_age=("age", "max"),
+    ).reset_index()
+
+    # hh_basic now has: hh_oldest_age
+    hh = hh_basic
+
+    # merge back to person-level
+    df = df.merge(
+        hh[["household_id", "hh_oldest_age"]],
+        on="household_id",
+        how="left"
+    )
+
     # Wrap everything up
     df = df[[
         "person_id", "household_id",
@@ -181,7 +201,7 @@ def execute(context):
         "household_size", "statpop_household_id","statpop_person_id",
         "age_class", "household_size_class", "home_zone_id", "municipality_type",
         "home_municipality_id", "home_quarter_id", "canton_id", "district_id", "population_density", "sp_region", "ovgk",
-        "collective_housing_resident"] + children_columns]
+        "collective_housing_resident", "hh_oldest_age"] + children_columns]
 
     df = data.statpop.head_of_household.impute(df, c)
 
