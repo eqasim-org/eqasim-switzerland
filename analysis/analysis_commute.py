@@ -4,7 +4,7 @@ import numpy as np
 import os
 
 def configure(context):
-    context.stage("data.statpop.pts_v2")
+    context.stage("synthesis.population.models.subscriptions")
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
 
@@ -28,7 +28,7 @@ def execute(context):
     trips["crowfly_distance"] = trips["crowfly_distance"] / 1000
     trips = trips.rename(columns={"crowfly_distance" : "euclidean_distance_km"})
 
-    persons = context.stage("data.statpop.pts_v2")
+    persons = context.stage("synthesis.population.models.subscriptions")
     #persons = persons[persons["age"]>15]
     ga_persons = persons[persons.pt_subscription==1].person_id
     trips = trips[trips.person_id.isin(ga_persons)]
