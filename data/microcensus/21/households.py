@@ -37,6 +37,25 @@ def execute(context):
     df_mz_households["person_id"]        = df_mz_households["HHNR"]
     df_mz_households["household_weight"] = df_mz_households["WM"]
 
+    # household type
+    col = "hhtyp"
+
+    df_mz_households[col + "_code"] = pd.to_numeric(df_mz_households[col], errors="coerce")
+
+    mapping = {
+        10: 1,
+        30: 2,
+        210: 3,
+        220: 4,
+        230: 5,
+        -97: np.nan,
+        -98: np.nan,
+    }
+
+    df_mz_households["household_type"] = df_mz_households[col + "_code"].map(mapping)
+
+    df_mz_households["household_type"] = df_mz_households["household_type"].fillna(5)
+
     # Income
     df_mz_households["income_class"] = df_mz_households["f20601"] - 1  # Turn into zero-based class
     df_mz_households["income_class"] = np.maximum(-1, df_mz_households["income_class"])  # Make all "invalid" entries -1
@@ -110,5 +129,5 @@ def execute(context):
     return df_mz_households[[
         "person_id", "household_size", "number_of_cars", "number_of_bikes", "income_class",
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
-        "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id", "ovgk",
+        "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id", "ovgk", "household_type",
     ] + household_columns]
