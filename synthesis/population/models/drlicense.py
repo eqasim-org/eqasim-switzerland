@@ -4,7 +4,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassif
 from catboost import CatBoostClassifier
 
 # ---------------------------------------------------------
-# helper: stochastic draw from class probabilities (binary ok)
+# helper: stochastic draw from class probabilities 
 # ---------------------------------------------------------
 def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
     rng = np.random.default_rng(seed)
@@ -124,8 +124,8 @@ def execute(context):
         df["age_bin"] = pd.cut(df["age"], bins=age_bins, labels=age_labels, right=False)
 
     cat_cols = [
-        "age_bin", "sex", "job_position", "canton_id", "income_class", "is_swiss",
-        "municipality_type", "sp_region", "marital_status", "employment_status", "ovgk_grouped",
+        "age_bin", "sex", "canton_id",
+        "municipality_type", "marital_status",  "ovgk_grouped", "employment_status"
     ]
     num_cols = ["age", "age_sq", "household_size", "N_adults", "N_children_under_18"]
 
@@ -141,26 +141,9 @@ def execute(context):
     # -------------------------------------------------------------------
     # 4. DESIGN MATRICES
     # -------------------------------------------------------------------
-    feature_cols = [
-        "age",
-        # "age_sq",
-        "age_bin",
-        "sex",
-        "canton_id",
-        "municipality_type",
-        # "N_children_under_18",
-        "marital_status",
-        #"N_adults",
-        "ovgk_grouped",
-        #"household_size",
-        #"employment_status",
-        #"income_class",
-        #"is_swiss" #does not fit well to MZ 21 with this variable, there are some differences in distribution and overal number (73.35 in pop and 74.95 in MZ 21)
-        # however it fits better to the expected number of driver's licenses in the population
-    ]
 
-    X_survey = pd.get_dummies(survey_df[feature_cols], drop_first=False)
-    X_pop    = pd.get_dummies(pop_df[feature_cols], drop_first=False)
+    X_survey = pd.get_dummies(survey_df[cat_cols], drop_first=False)
+    X_pop    = pd.get_dummies(pop_df[cat_cols], drop_first=False)
 
     # add numeric columns
     X_survey[num_cols] = survey_df[num_cols].astype(float).values
@@ -396,7 +379,7 @@ def execute(context):
     print(inc_comp_c.to_string(index=False))
 
     # -------------------------
-    # ✅ NEW: MUNICIPALITY TYPE (overall + canton)
+    # MUNICIPALITY TYPE (overall + canton)
     # -------------------------
     mun_comp_all = compare_pct("municipality_type", canton_id=None)
     print("\n[MUNICIPALITY TYPE | ALL] municipality_type | survey_weighted_pct_has | pop_pct_has")
@@ -407,7 +390,7 @@ def execute(context):
     print(mun_comp_c.to_string(index=False))
 
     # -------------------------
-    # ✅ NEW: N_CHILDREN_UNDER_18 exact values (overall + canton)
+    # N_CHILDREN_UNDER_18 exact values (overall + canton)
     # (sorting is numeric where possible, with 'Missing' last)
     # -------------------------
     child_comp_all = compare_pct("N_children_under_18_exact", canton_id=None)
