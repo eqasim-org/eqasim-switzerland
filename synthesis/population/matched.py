@@ -413,8 +413,8 @@ def execute(context):
 
         # Define bands (inclusive bounds)
         age_bands = {
-            "u16":   (None, 15),
-            "16_23": (16, 23),
+            "u15":   (None, 14),
+            "15_23": (15, 23),
             "gt24":  (24, 150),
         }
 
@@ -454,14 +454,14 @@ def execute(context):
             )
 
             print(f"  - Matching normal people band: {band_name}")
-            if band_name == "u16":
+            if band_name == "u15":
                 youth = [
                 "age_class", "sex",
-                "ovgk",  "employment_status", "sp_region", "canton_id",
+                "ovgk", "sp_region", "canton_id",
                 ]
                 youth_mandatory = [
                 "age_class", "sex",
-                "ovgk", "employment_status", "sp_region"
+                "ovgk", "sp_region"
                 ]
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,
@@ -472,7 +472,7 @@ def execute(context):
                     population_selector=sel,
                     option="person"
                 )
-            elif band_name == "16_23":
+            elif band_name == "15_23":
                 youth = [
                 "age_class", "sex",
                 "ovgk",  "employment_status", "car_availability", "sp_region", "canton_id",
