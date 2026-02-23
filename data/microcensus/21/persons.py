@@ -28,7 +28,7 @@ def execute(context):
     df_mz_persons["date"] = df_mz_persons["USTag"]
 
     df_mz_persons["is_swiss"] = df_mz_persons["nation"]
-    df_mz_persons["is_swiss"] = np.where(df_mz_persons["is_swiss"] == 8100, 0, 1) # 8100 is coded as swiss
+    df_mz_persons["is_swiss"] = np.where(df_mz_persons["is_swiss"] == 8100, 1, 0) # 8100 is coded as swiss
     columns = ["person_id", "person_weight", "age", "sex", "date", "is_swiss"]
 
     # Marital status

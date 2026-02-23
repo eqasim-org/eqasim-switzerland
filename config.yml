@@ -31,6 +31,8 @@ config:
     # which population census we want to use. There are two options: statpop and are_synpop; default is statpop.
     census: statpop
 
+    only_permanent_residents: true
+
     # do we want to include freight demand in the synthetic population, defailt is true
     use_freight: true
     # do we want to include LCV in the demand, deafult is false

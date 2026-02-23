@@ -20,6 +20,8 @@ def configure(context):
 
 def execute(context):
     df_statpop = context.stage("synthesis.population.models.caravailability")
+    df_statpop = df_statpop.astype({"canton_id": int})
+    
     if context.config("enable_scaling"):
 
         scaling_year = context.config("scaling_year")

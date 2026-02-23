@@ -63,9 +63,9 @@ def execute(context):
 
     # bike availability
     df_mz_persons["bike_availability"] = c.BIKE_AVAILABILITY_NEVER
-    df_mz_persons.loc[df_mz_persons["f42100e"] == 1, "bike_availability"] = c.BIKE_AVAILABILITY_ALWAYS
-    df_mz_persons.loc[df_mz_persons["f42100e"] == 2, "bike_availability"] = c.BIKE_AVAILABILITY_SOMETIMES
-    df_mz_persons.loc[df_mz_persons["f42100e"] == 3, "bike_availability"] = c.BIKE_AVAILABILITY_NEVER
+    df_mz_persons.loc[df_mz_persons["f42100a"] == 1, "bike_availability"] = c.BIKE_AVAILABILITY_ALWAYS
+    df_mz_persons.loc[df_mz_persons["f42100a"] == 2, "bike_availability"] = c.BIKE_AVAILABILITY_SOMETIMES
+    df_mz_persons.loc[df_mz_persons["f42100a"] == 3, "bike_availability"] = c.BIKE_AVAILABILITY_NEVER
 
     columns.append("bike_availability")
 

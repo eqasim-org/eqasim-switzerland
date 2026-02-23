@@ -16,6 +16,7 @@ logger = logging.getLogger("synpp")
 def configure(context):
     context.stage("analysis.travel_times.APIs.get")
     context.stage("analysis.travel_times.matsim.get")
+    context.stage("analysis.travel_times.advanced.process")
 
     context.config("output_path")
     context.config("output_id")
@@ -52,7 +53,8 @@ def execute(context):
     # Load data from APIs and MATSim
     dfs_api = context.stage("analysis.travel_times.APIs.get")
     dfs_matsim = context.stage("analysis.travel_times.matsim.get")
-
+    _ = context.stage("analysis.travel_times.advanced.process")
+    
     # For each API, compare with MATSim data
     out_folders = []
     for api, df_api in dfs_api.items():

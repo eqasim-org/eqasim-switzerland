@@ -628,8 +628,8 @@ def execute(context):
         elif mt in ("catboost", "cat"):
             return CatBoostClassifier(
                 loss_function="MultiClass",
-                iterations=2200,
-                learning_rate=0.05,
+                iterations=1000,
+                learning_rate=0.03,
                 depth=10,
                 l2_leaf_reg=6.0,
                 random_seed=42,

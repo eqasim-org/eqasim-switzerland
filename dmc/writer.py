@@ -161,6 +161,7 @@ NAMES_CONVERSION = {
     'beta_car_passenger_asc': 'cp.alpha_u',
     'beta_car_passenger_travel_time_min': 'cp.betaTravelTime_u_min',
     'lambda_car_passenger_travel_time': 'cp.travelTimeExponent',
+    'beta_car_passenger_distance_km': 'cp.betaDistance_u_km',
     'beta_car_passenger_age': 'cp.betaAge_u',
     'beta_car_passenger_sex': 'cp.betaSex_u',
     'beta_car_passenger_low_income': 'cp.betaLowIncome_u',
@@ -180,6 +181,9 @@ NAMES_CONVERSION = {
     'beta_car_passenger_retired': 'cp.betaRetired_u',
     'beta_car_passenger_junior': 'cp.betaJunior_u',
     'beta_car_passenger_long_distance': 'cp.betaLongDistance_u',
+    'beta_car_passenger_ownership_ratio': 'cp.betaCarOwnershipRatio_u',
+    'beta_car_passenger_has_car': 'cp.betaHasCar_u',
+    "beta_car_passenger_very_long_distance": 'cp.betaVeryLongDistance_u',    
 
     # PT
     'beta_pt_asc': 'pt.alpha_u',

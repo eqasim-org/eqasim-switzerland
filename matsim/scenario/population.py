@@ -8,6 +8,9 @@ import geopandas as gpd
 
 import matsim.writers
 from matsim.writers import backlog_iterator
+import logging
+logger = logging.getLogger("synpp")
+
 
 def _require_cols(df, cols, df_name):
     missing = [c for c in cols if c not in df.columns]
@@ -319,25 +322,30 @@ def execute(context):
         cross_border_vehicles["person_id"]    = cross_border_vehicles["person_id"].map(id_map).fillna(cross_border_vehicles["person_id"])
         cross_border_vehicles["vehicle_id"]   = cross_border_vehicles["person_id"].astype(str) + ":" + cross_border_vehicles["vehicle_type"]
         cross_border_vehicles["owner_id"]     = cross_border_vehicles["person_id"].values
-
         del cross_border_vehicles["person_id"]
         del cross_border_vehicles["vehicle_type"]
 
+        logger.warn("Make sure to correct cross border population beforehand")
         cross_border_persons["person_type"] = "crossborder"
+        cross_border_persons["pt_subscription"] = 0
+        cross_border_persons["bike_availability"] = 0
+        cross_border_persons["car_availability"] = 1
 
         df_persons    = pd.concat([df_persons, cross_border_persons])
         df_activities = pd.concat([df_activities, cross_border_activities])
         df_vehicles   = pd.concat([df_vehicles, cross_border_vehicles])
 
         df_persons["mz_person_id"] = df_persons["mz_person_id"].astype(int)
-        df_persons["mz_head_id"]   = df_persons["mz_head_id"].astype(int)
+        # df_persons["mz_head_id"]   = df_persons["mz_head_id"].astype(int)
         df_persons["home_x"]       = df_persons["home_x"].astype(int)
         df_persons["home_y"]       = df_persons["home_y"].astype(int)
 
         df_persons    = df_persons.sort_values(by="person_id")
         df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
         df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
-        
+    
+    df_persons["is_car_passenger"] = df_persons["is_car_passenger"].fillna(False)
+    
     df_persons    = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
     df_vehicles   = df_vehicles[VEHICLE_FIELDS]    

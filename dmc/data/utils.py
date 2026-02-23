@@ -77,7 +77,7 @@ def adjust_weights(context, df):
     # 1. Build TARGET data (reference distribution)
     # --------------------------------------------------
     ModeShareAnalyzer.set_distance_bins(
-        [0, 700, 1500, 3000, 4500, 7000, 10500, 15000, 20000, 1_000_000]
+        [0, 700, 1500, 3000, 4500, 7000, 10500, 15000, 20000, 30000, 1_000_000]
     )
     ModeShareAnalyzer.set_age_bins([0, 18, 30, 45, 65, 100])
     analyzer = ModeShareAnalyzer(context)

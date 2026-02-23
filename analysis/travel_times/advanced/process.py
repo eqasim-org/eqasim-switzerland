@@ -2,6 +2,10 @@ import pandas as pd
 from analysis.travel_times.run import merge_and_filter_large_differences
 import seaborn as sns
 import matplotlib.pyplot as plt
+import logging
+import os
+
+logger = logging.getLogger(__name__)
 
 def configure(context):
     """
@@ -13,8 +17,11 @@ def configure(context):
     context.stage("analysis.travel_times.APIs.get")
 
     context.config("travel_times_from", default="tomtom")
-    assert context.config("travel_times_from").lower() != "all", \
-        "travel_times_from must be either 'google', 'tomtom', 'mapbox' for calibration process"
+    # assert context.config("travel_times_from").lower() != "all", \
+    #     "travel_times_from must be either 'google', 'tomtom', 'mapbox' for calibration process"
+    context.config("output_path")
+    context.config("output_id")
+    context.config("simulation_directory", default = "simulation_output")
 
 def load_and_merge_data(context):
     """
@@ -23,6 +30,11 @@ def load_and_merge_data(context):
     # Get routed travel times from MATSim
     csv_files = context.stage("analysis.travel_times.matsim.route")
     api = context.config("travel_times_from")
+    
+    if api == "all":
+        logger.warning("travel_times_from is set to 'all'. Defaulting to 'tomtom' for processing.")
+        api = "tomtom"
+    
     routed_data_path = csv_files[1][api]
     df_matsim = pd.read_csv(routed_data_path)[["identifier", "links"]]
     df_matsim["links"] = df_matsim["links"].str.split('-')
@@ -121,13 +133,17 @@ def plot_error_heatmap(context, df_averages):
 
     plt.figure(figsize=(12, 6))  # Increased width to accommodate labels
     sns.heatmap(pivot_table, annot=True, cmap='coolwarm', center=0, fmt='.2f')
-    plt.title('Average Error (min) by Municipality Type and Highway Category')
+    plt.title('Average Error (min) by Municipality Type and Highway Category (Just an Approximation)')
     plt.ylabel('Municipality Type')
     plt.xlabel('Highway Category')
     plt.xticks(rotation=45, ha='right')  # Rotate x-axis labels for better visibility
     plt.tight_layout()  # Adjust layout to fit labels
     
-    path = context.path() + "/average_error_heatmap.png"
+    # get the path
+    api = context.config("travel_times_from")    
+    api = "tomtom" if api == "all" else api        
+    out = os.path.join(context.config("output_path"),context.config("output_id"),context.config("simulation_directory"),"travel_times_"+api)    
+    path = os.path.join(out, "average_error_heatmap.png")
     plt.savefig(path)
     plt.close()
 

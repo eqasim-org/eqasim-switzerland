@@ -48,7 +48,7 @@ def configure(context):
     context.stage("data.microcensus.21.household_persons")   # multiple rows per household, with driving_license per member
 
     # Population:
-    context.stage("synthesis.population.models.carownership")               # person-level population incl. HH_CAR_OWN_draw (cars)
+    context.stage("synthesis.population.models.carownership")  # person-level population incl. number_of_cars_class (cars)
 
 
 def execute(context):
@@ -66,31 +66,23 @@ def execute(context):
     persons_df = context.stage("data.microcensus.21.persons").copy()
     var_raw = pd.to_numeric(persons_df["car_availability"], errors="coerce")
     persons_df["car_availability"] = np.where(var_raw == 2, 0, 1).astype("int64")
+
     hh_persons_df = context.stage("data.microcensus.21.household_persons")[0].copy()
     pop_df = context.stage("synthesis.population.models.carownership").copy()
-    
+
     # -------------------------------------------------------------------
     # 1. KEY COLUMNS & REQUIRED FIELDS
     # -------------------------------------------------------------------
-    # Survey persons has person_id and it is the household identifier for household_persons.household_id
     PERSON_ID_COL = _resolve_col(persons_df, ["person_id"], "person_id (persons_df)")
     HHP_HHID_COL  = _resolve_col(hh_persons_df, ["household_id"], "household_id (household_persons_df)")
-
-    # Population household id (for aggregating DL counts + cars max)
     POP_HHID_COL  = _resolve_col(pop_df, ["household_id", "hh_id", "id_household"], "household_id (pop_df)")
 
-    # Survey outcome name
     CAR_AV_COL = _resolve_col(persons_df, ["car_availability"], "car_availability outcome (persons_df)")
 
-    # - survey persons: number_of_cars_class
-    # - pop: HH_CAR_OWN_draw
     CARS_COL_PERS = "number_of_cars_class"
     CARS_COL_POP  = "number_of_cars_class"
 
-    # Household-persons must contain driving_license
     DL_COL_HHP = "driving_license"
-
-    # Population DL indicator
     DL_POP_COL = "driving_license"
 
     # -------------------------------------------------------------------
@@ -105,7 +97,14 @@ def execute(context):
     # transform to children presence
     if "N_children_under_18" in persons_df.columns:
         persons_df["N_children_under_18"] = persons_df["N_children_under_18"] > 0
+    if "N_children_under_18" in pop_df.columns:
         pop_df["N_children_under_18"] = pop_df["N_children_under_18"] > 0
+
+    # numeric safety casting
+    for df in (persons_df, pop_df):
+        for col in ["household_size", "N_adults", "N_children_under_18"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
 
     # -------------------------------------------------------------------
     # 3. BUILD HH-LEVEL DL COUNTS FROM household_persons_df
@@ -138,7 +137,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 4. CARS COUNTS (survey + pop) AND SCARCITY FEATURES
     # -------------------------------------------------------------------
-    # Survey cars: number_of_cars_class (could be class-like; coerce to numeric if possible)
+    # Survey cars
     persons_df[CARS_COL_PERS] = pd.to_numeric(persons_df[CARS_COL_PERS], errors="coerce")
     persons_df[CARS_COL_PERS] = persons_df[CARS_COL_PERS].fillna(0.0).clip(lower=0.0)
     persons_df["hh_n_cars"] = persons_df[CARS_COL_PERS].astype(float)
@@ -150,10 +149,9 @@ def execute(context):
     )
     persons_df["cars_shortage"] = (persons_df["hh_n_dl"] - persons_df["hh_n_cars"]).clip(lower=0).astype(float)
 
-    # Population cars: HH_CAR_OWN_draw (already numeric draw)
+    # Population cars
     pop_df[CARS_COL_POP] = pd.to_numeric(pop_df[CARS_COL_POP], errors="coerce").fillna(0.0).clip(lower=0.0)
-
-    pop_df[DL_POP_COL] = pd.to_numeric(pop_df[DL_POP_COL], errors="coerce").fillna(0).astype("int64")
+    pop_df[DL_POP_COL]   = pd.to_numeric(pop_df[DL_POP_COL], errors="coerce").fillna(0).astype("int64")
 
     # HH aggregates in pop
     pop_df["hh_n_dl"] = (
@@ -177,31 +175,53 @@ def execute(context):
     pop_df["cars_shortage"] = (pop_df["hh_n_dl"] - pop_df["hh_n_cars"]).clip(lower=0).astype(float)
 
     # -------------------------------------------------------------------
-    # 5. SURVEY: FOCAL PERSON DL FLAG (needed for rules + training mask)
-    #     Since persons_df is 1 row per household, we infer focal DL:
-    #     - if persons_df already has driving_license -> use it
-    #     - else: assume focal has DL if hh_n_dl>0 (weak fallback; but avoids crash)
+    # 5. SURVEY: FOCAL PERSON DL FLAG + SINGLE-ADULT HH FLAG
     # -------------------------------------------------------------------
-    persons_df["dl_has_focal"] = _to_dl_has(persons_df["driving_license"])
+    if "driving_license" in persons_df.columns:
+        persons_df["dl_has_focal"] = _to_dl_has(persons_df["driving_license"])
+    else:
+        # fallback only if missing; keeps pipeline alive
+        persons_df["dl_has_focal"] = (persons_df["hh_n_dl"] > 0).astype("int64")
 
+    persons_df["N_adults"] = pd.to_numeric(persons_df.get("N_adults"), errors="coerce")
+    persons_df["hh_single_adult"] = (persons_df["N_adults"].fillna(0) == 1).astype("int64")
+
+    pop_df["N_adults"] = pd.to_numeric(pop_df.get("N_adults"), errors="coerce")
+    pop_df["hh_single_adult"] = (pop_df["N_adults"].fillna(0) == 1).astype("int64")
 
     # -------------------------------------------------------------------
-    # 6. ENFORCE DETERMINISTIC RULES IN SURVEY OUTCOME
+    # 6. ENFORCE DETERMINISTIC RULES IN SURVEY OUTCOME (CONSISTENT WITH POP)
+    #     - No DL => 0
+    #     - Single-adult HH & DL & has car => 1
+    #     - Cars >= #DL => 1
     # -------------------------------------------------------------------
     persons_df[CAR_AV_COL] = pd.to_numeric(persons_df[CAR_AV_COL], errors="coerce").astype("Int64")
 
     # rule: no DL => 0
     persons_df.loc[persons_df["dl_has_focal"] == 0, CAR_AV_COL] = 0
 
+    # deterministic: single-adult HH AND focal has DL AND hh has at least 1 car => 1
+    det_single_s = (
+        (persons_df["age"] >= 18) &
+        (persons_df["hh_single_adult"] == 1) &
+        (persons_df["dl_has_focal"] == 1) &
+        (persons_df["hh_n_cars"] >= 1.0)
+    )
+    persons_df.loc[det_single_s, CAR_AV_COL] = 1
+
     # rule: if cars >= #DL in hh => focal (DL holder) has availability
     det_s = (persons_df["dl_has_focal"] == 1) & (persons_df["hh_n_cars"] >= persons_df["hh_n_dl"])
     persons_df.loc[det_s, CAR_AV_COL] = 1
 
-    # scarce households (for training)
+    # scarce households (for modeling) — keep definition as "DL holder but cars < DL"
     scarce_s = (persons_df["dl_has_focal"] == 1) & (persons_df["hh_n_cars"] < persons_df["hh_n_dl"])
 
     # -------------------------------------------------------------------
     # 7. POPULATION: INITIALIZE OUTPUTS + DETERMINISTIC RULES
+    #     - No DL => 0
+    #     - Single-adult HH & adult has DL & hh has car => 1
+    #     - Cars >= #DL => 1
+    #     - Otherwise (remaining adults) => model on scarce households
     # -------------------------------------------------------------------
     pop_df["car_avail_hat"] = 0
     pop_df["car_avail_draw"] = 0
@@ -210,11 +230,26 @@ def execute(context):
     no_dl_p = pop_df[DL_POP_COL] == 0
     pop_df.loc[no_dl_p, ["car_avail_hat", "car_avail_draw"]] = 0
 
-    # deterministic: cars enough => 1
+    # deterministic: single-adult HH AND adult (age>=18) has DL AND hh has at least 1 car => 1
+    det_single_p = (
+        (pop_df["age"] >= 18) &
+        (pop_df["hh_single_adult"] == 1) &
+        (pop_df[DL_POP_COL] == 1) &
+        (pop_df["hh_n_cars"] >= 1.0)
+    )
+    pop_df.loc[det_single_p, ["car_avail_hat", "car_avail_draw"]] = 1
+
+    # deterministic: cars enough for DL holders => 1
     det_p = (pop_df[DL_POP_COL] == 1) & (pop_df["hh_n_cars"] >= pop_df["hh_n_dl"])
     pop_df.loc[det_p, ["car_avail_hat", "car_avail_draw"]] = 1
 
-    scarce_p = (pop_df[DL_POP_COL] == 1) & (pop_df["hh_n_cars"] < pop_df["hh_n_dl"])
+    # modeled universe: adults with DL, scarce households, EXCLUDING single-adult deterministic cases
+    scarce_p = (
+        (pop_df["age"] >= 18) &
+        (pop_df[DL_POP_COL] == 1) &
+        (pop_df["hh_n_cars"] < pop_df["hh_n_dl"]) &
+        (~det_single_p)
+    )
 
     # -------------------------------------------------------------------
     # 8. FEATURES (same structure as your DL code + shortage features)
@@ -227,51 +262,31 @@ def execute(context):
         df["age_sq"] = df["age"] ** 2
 
     # categoricals as strings
-    cat_cols = ["age_bin", "sex", "canton_id", "municipality_type", "sp_region", "marital_status", "employment_status", "ovgk"]
+    cat_cols = ["age_bin", "sex", "canton_id",  "municipality_type", "marital_status", "employment_status"]
     for df in (persons_df, pop_df):
         for col in cat_cols:
             if col in df.columns:
                 df[col] = df[col].astype(str).fillna("Missing")
 
-    # numeric safety casting
-    for df in (persons_df, pop_df):
-        for col in ["household_size", "N_adults", "N_children_under_18"]:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
-
-    feature_cols = [
-        "age",
-        "age_sq",
-        "age_bin",
-        "sex",
-        "canton_id",
-        #"municipality_type",
-        #"N_children_under_18",
-        "marital_status",
-        #"N_adults",
-        "employment_status",
-        # shortage features
-        # "hh_n_cars",
-        # "hh_n_dl",
-        #"cars_per_dl",
-         "cars_shortage",
-    ]
-
     num_cols = [
-        "age", "age_sq", "household_size", "N_adults", "N_children_under_18",
-        "hh_n_cars", "hh_n_dl", "cars_per_dl", "cars_shortage",
+        "age", "age_sq",
+        "cars_shortage",
     ]
 
-    # Train on adults, scarce households, nonmissing outcome and weights
+    # -------------------------------------------------------------------
+    # 9. TRAIN MASK (fit ONLY on survey individuals who are NOT the
+    #    single-adult+DL+car deterministic group; keep scarce restriction)
+    # -------------------------------------------------------------------
     train_s = (
         (persons_df["age"] >= 18) &
         scarce_s &
+        (~det_single_s) &
         persons_df[CAR_AV_COL].notna() &
         persons_df["person_weight"].notna()
     )
 
-    X_survey = pd.get_dummies(persons_df.loc[train_s, feature_cols], drop_first=False)
-    X_pop = pd.get_dummies(pop_df.loc[scarce_p, feature_cols], drop_first=False)
+    X_survey = pd.get_dummies(persons_df.loc[train_s, cat_cols], drop_first=False)
+    X_pop = pd.get_dummies(pop_df.loc[scarce_p, cat_cols], drop_first=False)
 
     # numeric block overwrite
     for col in num_cols:
@@ -287,7 +302,7 @@ def execute(context):
     w = persons_df.loc[train_s, "person_weight"].astype(float)
 
     # -------------------------------------------------------------------
-    # 9. FIT MODEL
+    # 10. FIT MODEL
     # -------------------------------------------------------------------
     def build_ca_model(model_type: str):
         mt = str(model_type).lower().strip()
@@ -311,8 +326,8 @@ def execute(context):
         elif mt in ("catboost", "cat"):
             return CatBoostClassifier(
                 loss_function="Logloss",
-                iterations=1500,
-                learning_rate=0.05,
+                iterations=1000,
+                learning_rate=0.03,
                 depth=10,
                 l2_leaf_reg=6.0,
                 random_seed=42,
@@ -330,7 +345,7 @@ def execute(context):
 
     if (len(y) > 0) and (y.nunique() > 1) and (Xp.shape[0] > 0):
         ca_model.fit(Xs, y, sample_weight=w)
-        print("Fitted car availability model (scarce households) using:", CA_MODEL)
+        print("Fitted car availability model (scarce households; excluding single-adult deterministic cases) using:", CA_MODEL)
 
         proba = ca_model.predict_proba(Xp)
         classes = getattr(ca_model, "classes_", np.array([0, 1])).astype("int64")
@@ -343,7 +358,7 @@ def execute(context):
     else:
         print(
             "Skipped car availability model fit: not enough training signal "
-            "(no scarce DL cases in persons_df, constant outcome, or no scarce cases in pop)."
+            "(no eligible scarce cases in persons_df after exclusions, constant outcome, or no scarce cases in pop)."
         )
         pop_df.loc[scarce_p, ["car_avail_hat", "car_avail_draw"]] = 0
 
@@ -352,7 +367,7 @@ def execute(context):
     pop_df.loc[under18, ["car_avail_hat", "car_avail_draw"]] = 0
 
     # -------------------------------------------------------------------
-    # 10. DIAGNOSTICS (Survey weighted % vs Pop modeled %)
+    # 11. DIAGNOSTICS (Survey weighted % vs Pop modeled %)
     # -------------------------------------------------------------------
     print("\n================== DIAGNOSTICS (Survey vs Modeled Pop) ==================")
     pop_ycol = "car_avail_draw" if USE_DRAW else "car_avail_hat"
