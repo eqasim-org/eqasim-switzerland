@@ -26,7 +26,7 @@ def configure(context):
     context.stage("data.spatial.ovgk")
     context.stage("data.constants")
     context.config("threads")
-    context.config("only_permanent_residents")
+    context.config("only_permanent_residents", default=True)
 
 
 def execute(context):
@@ -41,7 +41,7 @@ def execute(context):
         df_persons = df_persons[df_persons["type_of_residence"] == 1]
     else:
         df_persons = df_persons[(df_persons["type_of_residence"] == 1) | (df_persons["type_of_residence"] == 1)]
-        
+
     final_count = len(df_persons)
     print(f"{initial_count - final_count} persons were filtered out based on the type of residence.")
     
