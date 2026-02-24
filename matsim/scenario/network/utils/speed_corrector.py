@@ -98,7 +98,7 @@ class SpeedCorrector:
         # Merge the municipality types with the network links
         links = self.network.links.copy()
         links["municipality_type"] = links['attributes'].apply(lambda attrs: attrs.get('municipalityType', 'outside'))
-        car_links = self.network.links.modes.str.contains(r"\bcar\b")
+        car_links = self.network.links.modes.str.split(',').map(lambda x: 'car' in x)
         
         # Apply speed correction if enabled
         if self.context.config("correct_speed"):
@@ -153,7 +153,7 @@ class SpeedCorrector:
         links = links.merge(slopes, on="link_id", how="left")
 
         # Apply speed correction to uphill car links
-        car_links = self.network.links.modes.str.contains(r"\bcar\b")        
+        car_links = self.network.links.modes.str.split(',').map(lambda x: 'car' in x)
         max_gradient_threshold = self.context.config("max_gradient_threshold")
         speed_factor_uphill = self.context.config("speed_factor_uphill")
 
@@ -163,7 +163,7 @@ class SpeedCorrector:
                 if row['slope'] > 0:
                     return row['freespeed'] * speed_factor_uphill
                 else:
-                    return row['freespeed'] * ((1+speed_factor_uphill)/2) # less reduction for downhill
+                    return row['freespeed'] * ((1+2*speed_factor_uphill)/3) # less reduction for downhill
             else:
                 return row['freespeed']
 
@@ -194,7 +194,7 @@ class SpeedCorrector:
         # Apply speed correction to car links outside the border
         speed_factor = self.context.config("speed_factor_outside_border")
         links = self.network.links.copy()
-        car_links = self.network.links.modes.str.contains(r"\bcar\b")        
+        car_links = self.network.links.modes.str.split(',').map(lambda x: 'car' in x)      
         mask = car_links & links['link_id'].isin(links_outside_border)
         
         links.loc[mask, 'freespeed'] = links.loc[mask, 'freespeed'] * speed_factor
@@ -225,14 +225,26 @@ class SpeedCorrector:
         The correction is applied only to car links classified as motorways.
         """ 
         links = self.network.links.copy()
-        car_links = links.modes.str.contains(r"\bcar\b")
-        motorway_links = links['freespeed']>=(80/3.6)
+        car_links = links.modes.str.split(',').map(lambda x: 'car' in x)
+        road_type = links['attributes'].apply(lambda x: x.get('osm:way:highway') if x is not None else False)
+        motorway_links = road_type.isin(['motorway'])
+        trunk_links = road_type.isin(['trunk'])
+        primary_links = road_type.isin(['primary'])
         
-        # Apply speed correction        
+        # Apply speed correction for motorways        
         speed_factor_motorway = self.context.config("speed_factor_motorway")
-        mask = car_links & motorway_links
-        links.loc[mask, 'freespeed'] = links.loc[mask, 'freespeed'] * speed_factor_motorway
-                
+        mask = car_links & (motorway_links | trunk_links)
+        links.loc[mask, 'freespeed'] = np.round(links.loc[mask, 'freespeed'] * speed_factor_motorway, 2)
+        
+        # apply speed factor for primary roads as well, but less than motorways
+        speed_factor_primary = (1 + 2.0 * speed_factor_motorway) / 3.0 # if motorway factor is 1.2, primary factor is 1.13
+        mask_primary = car_links & primary_links
+        links.loc[mask_primary, 'freespeed'] = np.round(links.loc[mask_primary, 'freespeed'] * speed_factor_primary, 2)
+
+        # correct speeds on these links and avoid unrealistic speeds
+        links.loc[motorway_links, "freespeed"] = links.loc[motorway_links, "freespeed"].clip(lower=70/3.6, upper=150/3.6).round(2)
+        links.loc[trunk_links, "freespeed"] = links.loc[trunk_links, "freespeed"].clip(lower=50/3.6, upper=120/3.6).round(2)
+        links.loc[primary_links, "freespeed"] = links.loc[primary_links, "freespeed"].clip(lower=30/3.6, upper=100/3.6).round(2)
         return links
         
 

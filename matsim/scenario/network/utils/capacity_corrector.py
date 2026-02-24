@@ -13,27 +13,57 @@ class CapacityCorrector:
     
     def __init__(self, context = None, network:Network = None):
         self.context = context
-        self.links = network.links
+        self.links = network.links.copy()
         self.nodes = network.nodes
 
     def _correct_capacity(self, row, sampling_rate, minimum_speed):
         current_capacity = row["capacity"]
         length = row["length"]
-        return np.maximum(current_capacity, 3600*minimum_speed/(length*sampling_rate))
+        min_speed = minimum_speed
+        if row["freespeed"] > 70/3.6:
+            min_speed = minimum_speed * 1.5
+            
+        return np.maximum(current_capacity, 3600*min_speed/(length*sampling_rate))
     
     
+    def correct_capacity_on_motorways(self):
+        
+        car_links = self.links.modes.str.split(',').map(lambda x: 'car' in x)
+        road_type = self.links['attributes'].apply(lambda x: x.get('osm:way:highway') if x is not None else False)
+        motorway_links = car_links & road_type.isin(['motorway'])
+        trunk_links = car_links & road_type.isin(['trunk'])
+        primary_links = car_links & road_type.isin(['primary'])
+        
+        self.links["permlanes"] = self.links["permlanes"].clip(lower=1) # make sure there is at least one lane
+
+        self.links.loc[motorway_links, "capacity"] = np.clip(self.links.loc[motorway_links, "capacity"], 
+                                                             a_min = self.links.loc[motorway_links, "permlanes"] * 1800.0, 
+                                                             a_max = self.links.loc[motorway_links, "permlanes"] * 2400.0)
+
+        self.links.loc[trunk_links, "capacity"] = np.clip(self.links.loc[trunk_links, "capacity"], 
+                                                        a_min = self.links.loc[trunk_links, "permlanes"] * 1600.0, 
+                                                        a_max = self.links.loc[trunk_links, "permlanes"] * 2200.0)
+
+        self.links.loc[primary_links, "capacity"] = np.clip(self.links.loc[primary_links, "capacity"], 
+                                                        a_min = self.links.loc[primary_links, "permlanes"] * 1300.0, 
+                                                        a_max = self.links.loc[primary_links, "permlanes"] * 1900.0)
+
+
     def run(self):
         """        
         This function here correct the capacity of a link based on its length and 
-        the sampling rate of teh population. It will only impact small links.
+        the sampling rate of the population. It will only impact small links.
+        After regorous checking, this function has been modified to correct capacities of important links
         """
+        self.correct_capacity_on_motorways()
+        
         sampling_rate = self.context.config("input_downsampling")
         minimum_speed = self.context.config("minimum_speed")/3.6
         
-        car_links = self.links.modes.str.contains(r"\bcar\b")
+        car_links = self.links.modes.str.split(',').map(lambda x: 'car' in x)
         
         self.links.loc[car_links, "capacity"] = \
-            self.links.loc[car_links, ["capacity", "length"]].apply(
+            self.links.loc[car_links, ["capacity", "length", "freespeed"]].apply(
             lambda x: self._correct_capacity(x, sampling_rate, minimum_speed),
             axis=1)
         return self.links

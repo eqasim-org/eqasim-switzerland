@@ -144,8 +144,24 @@ def execute(context):
             source2="MATSim",
             xlabel="Departure hour of day",
             ylabel="Average travel time (min)",
-            between = [6,22],
+            between = [3,24],
             out_path=os.path.join(out, "binned_travel_times_by_departure_hour_matsim_vs_"+api+".png")
+        )
+        
+        # plot average time by departure hour for long distances
+        mask = df["euclidean_distance_km_matsim"] >= 20.0
+        plot_by(
+            df=df[mask].reset_index(drop=True),
+            by="departure_hour",
+            value1="travel_time_min_api",
+            value2="travel_time_min_matsim",
+            title="Average Travel Time by Departure Hour: MATSim vs. "+api.upper(),
+            source1=api.upper(),
+            source2="MATSim",
+            xlabel="Departure hour of day",
+            ylabel="Average travel time (min)",
+            between = [3,24],
+            out_path=os.path.join(out, "binned_travel_times_by_departure_hour_matsim_vs_"+api+"_long_distances.png")
         )
         
         # boxplot by departure hour

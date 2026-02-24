@@ -122,7 +122,9 @@ def compute_statistics(df, flow_col='flow', simulated_flow_col='simulated_flow',
     nse = 1 - (np.sum((flow_obs - flow_sim) ** 2) / np.sum((flow_obs - mean_obs) ** 2))
 
     # compute goodness-of-fit: GEH Statistic (Geoffrey E. Havers)
-    geh_values = np.sqrt(2 * (flow_sim/24 - flow_obs/24) ** 2 / (flow_sim/24 + flow_obs/24 + 1e-6))
+    obs_veh_h = (flow_obs / 24.0)/2
+    sim_veh_h = (flow_sim / 24.0)/2
+    geh_values = np.sqrt(2 * (sim_veh_h - obs_veh_h) ** 2 / (sim_veh_h + obs_veh_h + 1e-6))
     geh_within_5 = int(np.sum(geh_values <= 5))
     geh_within_10 = int(np.sum(geh_values <= 10))
     geh_within_15 = int(np.sum(geh_values <= 15))
@@ -132,6 +134,16 @@ def compute_statistics(df, flow_col='flow', simulated_flow_col='simulated_flow',
     geh_within_15_pct = (geh_within_15 / n_points) * 100
     geh_within_25_pct = (geh_within_25 / n_points) * 100
     
+        
+    # scalable quality value (SQV)
+    f = 10_000
+    sqv = 1/( 1 + np.sqrt(  (flow_sim/2-flow_obs/2)**2/(f*flow_obs/2)  ) )
+    sqv_09_pct = round(np.sum(sqv >= 0.9) / n_points * 100, 1)
+    sqv_085_pct = round(np.sum(sqv >= 0.85) / n_points * 100, 1)
+    sqv_08_pct = round(np.sum(sqv >= 0.8) / n_points * 100, 1)
+    sqv_07_pct = round(np.sum(sqv >= 0.7) / n_points * 100, 1)
+
+
     stats_dict = {
         'n_points': n_points,
         'r2': r2,
@@ -155,9 +167,14 @@ def compute_statistics(df, flow_col='flow', simulated_flow_col='simulated_flow',
             'within_15_pct': geh_within_15_pct,
             'within_25': geh_within_25,
             'within_25_pct': geh_within_25_pct,
+        },
+        'sqv': {
+            '0.9': sqv_09_pct,
+            '0.85': sqv_085_pct,
+            '0.8': sqv_08_pct,
+            '0.7': sqv_07_pct,
         }
     }
-    
     # Save statistics to JSON if output path is provided
     if output_path is not None:
         if os.path.exists(output_path):
@@ -253,7 +270,7 @@ def create_comprehensive_plot(df, stats_dict, output_path=None):
     ax_main.set_xlabel('Observed Flow (vehicles/day)', fontsize=12)
     ax_main.set_ylabel('Simulated Flow (vehicles/day)', fontsize=12)
     ax_main.set_title('Observed vs Simulated Traffic Flows', fontsize=14, fontweight='bold')
-    ax_main.legend(bbox_to_anchor=(1.02, 1), loc='upper left', ncols = 2)
+    ax_main.legend(bbox_to_anchor=(1.02, 1.1), loc='upper left', ncols = 2)
     ax_main.grid(True, alpha=0.3)
     
     # Statistics text box
@@ -288,11 +305,19 @@ Mean Observed = {stats_dict['mean_observed']:,.0f}
 Mean Simulated = {stats_dict['mean_simulated']:,.0f}
 Percentage difference = {stats_dict['underestimation_percent']:.1f}%
 
+GEH:
+GEH<=5 : {stats_dict['geh']['within_5_pct']:.1f} % | GEH<=10: {stats_dict['geh']['within_10_pct']:.1f} %
+GEH<=15: {stats_dict['geh']['within_15_pct']:.1f} % | GEH<=25: {stats_dict['geh']['within_25_pct']:.1f} %
+
+SQV:
+SQV>=0.9: {stats_dict['sqv']['0.9']} % | SQV>=0.85: {stats_dict['sqv']['0.85']} %
+SQV>=0.8: {stats_dict['sqv']['0.8']} % | SQV>=0.7 : {stats_dict['sqv']['0.7']} %
+
 Cities:
 {cities_lines}
             """
     
-    ax_stats.text(0.0, 0.75, stats_text, transform=ax_stats.transAxes,
+    ax_stats.text(0.0, 0.92, stats_text, transform=ax_stats.transAxes,
                  fontsize=10, verticalalignment='top', fontfamily='monospace',
                  bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
     

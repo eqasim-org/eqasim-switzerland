@@ -24,3 +24,4 @@ routing
 *.jar
 catboost_info
 ch_cutter
+*.pkl

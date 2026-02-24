@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 def GEH(x_d,y_d):
-    x = x_d/24
-    y = y_d/24
+    x = (x_d/24)/2
+    y = (y_d/24)/2
     geh_values = np.sqrt(2 * (x - y) ** 2 / (x + y + 1e-6))
     geh_within_5 = int(np.sum(geh_values <= 5))
     geh_within_10 = int(np.sum(geh_values <= 10))
@@ -41,6 +41,17 @@ def GEH(x_d,y_d):
     geh_within_25_pct = (geh_within_25 / n_points) * 100
     return geh_within_5_pct, geh_within_10_pct, geh_within_15_pct, geh_within_25_pct
 
+def SGV(x_d,y_d):
+    f = 10_000
+    n_points = len(x_d)
+    x = x_d / 2 # this is because these counts or for two directions
+    y = y_d / 2 # this is because these counts or for two directions
+    sqv = 1/( 1 + np.sqrt(  (y-x)**2/(f*x)  ) )
+    sqv_09_pct = round(np.sum(sqv >= 0.9) / n_points * 100, 1)
+    sqv_085_pct = round(np.sum(sqv >= 0.85) / n_points * 100, 1)
+    sqv_08_pct = round(np.sum(sqv >= 0.8) / n_points * 100, 1)
+    sqv_07_pct = round(np.sum(sqv >= 0.7) / n_points * 100, 1)
+    return sqv_09_pct, sqv_085_pct, sqv_08_pct, sqv_07_pct
 
 class Plotter:
     def plot_flow(self, flows, counts:Counts=None, output_file:str=None, 
@@ -102,6 +113,14 @@ class Plotter:
                     f"GEH ≤ 5: {geh[0]:.1f}%\nGEH ≤ 10: {geh[1]:.1f}%\nGEH ≤ 15: {geh[2]:.1f}%\nGEH ≤ 25: {geh[3]:.1f}%" ,  # text
                     fontsize=14,
                     color='steelblue',
+                    bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3')  # white box
+                    )
+            
+            sqv = SGV(x,y)
+            plt.text( 0.7 * max_val, 0.25 * max_val, 
+                    f"SQV ≥ 0.9: {sqv[0]}%\nSQV ≥ 0.85: {sqv[1]}%\nSQV ≥ 0.8: {sqv[2]}%\nSQV ≥ 0.7: {sqv[3]}%" ,  # text
+                    fontsize=14,
+                    color='darkmagenta',
                     bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3')  # white box
                     )
         

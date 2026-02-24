@@ -9,6 +9,7 @@ from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.utils.merge import Merge
 import os
+import geopandas as gpd
 
 def configure(context):
     context.stage("analysis.counts.cantons.ch")
@@ -64,21 +65,25 @@ def execute(context):
     stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>13000)|
                              (flows.simulated_flow< 200 * 24)|
                              (flows.flow< 200 * 24)|
-                             (~flows.pdiff.between(-50,200))]["id"].unique()
+                             (~flows.pdiff.between(-50,170))]["id"].unique()
 
     # Plot the network and highligh these links in green  
     plotter = Plotter()
-    plotter.plot_network_with_counts( 
+    roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link']
+    matched_links = plotter.plot_network_with_counts( 
                                     counts, matched, network,
                                     output=os.path.join(path_to_images, f"{city}_network.png"),
                                     lw = 0.7,
                                     markersize = 8, 
                                     figsize = (80,80),                                                    
-                                    road_types = "all",
+                                    road_types = roads_to_show,
                                     cut = True,
-                                    highlight_stations = stations_to_drop)
+                                    highlight_stations = stations_to_drop,
+                                    return_matched_links = True)
 
     # filter out stations to drop and save results
+    all_flows = flows.copy()
+    all_flows["dropped"] = all_flows["id"].isin(stations_to_drop)
     flows = flows[~flows['id'].isin(stations_to_drop)].reset_index(drop=True)
     matched = matched[~matched['id'].isin(stations_to_drop)].reset_index(drop=True)
 
@@ -101,5 +106,26 @@ def execute(context):
                                 distance_to_border = 0, 
                                 title = f"Average Observed vs Simulated Flow by Highway Type ({city})",
                                 output_file = os.path.join(path_to_images, f"flow_by_road_type_{city}.png"))
+    
+    
+    # Plot the map in html  
+    border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))        
+    Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
+                        matched_links.to_crs(epsg=4326)], 
+                        data_to_show=["link_id"], 
+                        point_gdf=[counts.counts[['id','geometry']].merge(
+                                   flows[["id","pdiff"]], on="id", how="left").to_crs(epsg=4326)],
+                        point_data_to_show=['id',"pdiff"],
+                        border = border,
+                        path_to_save= os.path.join(path_to_images, f"counts_on_network{city}.html"))
+    
+    Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
+                    matched_links.to_crs(epsg=4326)], 
+                    data_to_show=["link_id"], 
+                    point_gdf=[counts.counts[['id','geometry']].merge(
+                               all_flows[["id","pdiff"]], on="id", how="left").to_crs(epsg=4326)],
+                    point_data_to_show=['id',"pdiff"],
+                    border = border,
+                    path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}_unfiltered.html"))
     
     return path_to_results
