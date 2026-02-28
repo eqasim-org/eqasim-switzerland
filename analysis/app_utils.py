@@ -107,6 +107,17 @@ def get_histogram_time(data, feature, bins=None):
 
     return bin_labels, hist
 
+def write_gender_demographics(data):
+    data = data.groupby('sex').sum('person_weight').reset_index()
+    total = data['person_weight'].sum()
+
+    pairs = sorted(zip(data['sex'], data['person_weight']), key=lambda x: x[0])
+    gender = [pair[0] for pair in pairs]
+    proportions = [pair[1] / total for pair in pairs]
+
+    return gender, proportions
+
+
 def write_demographics(data):
     data = data.groupby('age_group').sum('person_weight').reset_index()
     total = data['person_weight'].sum()

@@ -9,9 +9,9 @@ from analysis.app_utils import *
 import numbers
 
 cantons = ['Zurich', 'Bern', 'Basel-Landschaft', 'Neuchatel', 'AppenzellAusserrhoden',
- 'Graubunden', 'Valais', 'Aargau', 'Fribourg', 'Basel-Stadt','Schaffhausen', 
+ 'Graubunden', 'Valais', 'Aargau', 'Fribourg', 'Basel-Stadt','Schaffhausen',
  'Ticino', 'Luzern', 'Solothurn', 'Glarus', 'StGallen', 'Schwyz', 'Zug', 'Geneve',
- 'Uri', 'Obwalden', 'Thurgau', 'Jura', 'Vaud', 'Nidwalden', 'AppenzellInnerrhoden']
+ 'Uri', 'Obwalden', 'Thurgau', 'Jura', 'Vaud', 'Nidwalden', 'AppenzellInnerrhoden', 'All']
 
 def process_filename(file_path):
     temp = file_path.split(".")[2:] # skip synthesis.population
@@ -638,11 +638,16 @@ def write_demographic_data(persons, output_persons, save_directory):
     labels = ['[6, 15)', '[15, 18)', '[18, 24)', '[24, 30)', '[30, 45)', '[45, 65)', '[65, 80)']
     persons['age_group'] = pd.cut(persons['age'], bins=ages, labels=labels, right=False)
     output_persons['age_group'] = pd.cut(output_persons['age'], bins=ages, labels=labels, right=False)
-    
-    data = write_non_category_data(persons, output_persons, write_demographics)
+
+    age_data = write_non_category_data(persons, output_persons, write_demographics)
 
     with open(f"{save_directory}/age.json", "w") as json_file:
-        json.dump(data, json_file, indent=4)
+        json.dump(age_data, json_file, indent=4)
+
+    gender_data = write_non_category_data(persons, output_persons, write_gender_demographics)
+
+    with open(f"{save_directory}/gender.json", "w") as json_file:
+        json.dump(gender_data, json_file, indent=4)
 
 
 def write_all_application_data(microcensus, synthetic, save_directory):
@@ -681,6 +686,7 @@ def write_all_application_data(microcensus, synthetic, save_directory):
     write_num_cars_gender(persons, output_persons, save_directory)
     write_num_cars_income(persons, output_persons, save_directory)
     write_departure_times(trips, output_trips, save_directory)
+    write_demographic_data(persons, output_persons, save_directory)
 
 
 def generate_microcensus_synthetic_comparison(microcensus_directory, synthetic_directory, canton_boundaries, save_directory):

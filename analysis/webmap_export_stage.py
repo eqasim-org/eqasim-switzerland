@@ -12,10 +12,15 @@ from analysis.process_transfer_data import get_transfer_matrix_data
 
 def configure(context):
     context.stage("matsim.simulation.run")  # get working directory
+    context.stage("data.spatial.cantons") # get canton boundaries
+
+    # microcensus
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
-    context.stage("data.spatial.cantons") # get canton boundaries
-    context.config("working_directory")
+    context.stage("data.microcensus.households")
+
+    context.stage("synthesis.output")
+
     context.config("output_path")
 
 # def fix_mojibake(s):
@@ -66,6 +71,7 @@ def execute(context):
     # Microcensus files (fixed path)
     microcensus_trips_df = context.stage("data.microcensus.trips")[0]  # first element of tuple
     microcensus_persons_df = context.stage("data.microcensus.persons")
+    microcensus_households_df = context.stage("data.microcensus.households")
 
     # Cantons
     canton_boundaries = context.stage("data.spatial.cantons")
@@ -137,13 +143,42 @@ def execute(context):
     print("Exporting inter-cantonal stops with volume...")
     webmap_export.export_inter_cantonal_stops(joined, volumes_df)
 
+    print("Building volumes by link line...")
+    pt_link_volumes_path = os.path.join(simulation_output, "pt_link_volumes.csv.gz")
+    webmap_export.build_volumes_by_link_line(pt_link_volumes_path)
 
-    # === Generate plots for comparing activities from microcensus and synthetic datasets
-    microcensus_directory = context.config('working_directory')
-    synthetic_directory = context.config("output_path")
+    # === Generate comparison data between microcensus and synthetic datasets ===
     save_directory = os.path.join(output_dir, "public", "data")
     os.makedirs(save_directory, exist_ok=True)
-    generate_microcensus_synthetic_comparison(microcensus_directory, synthetic_directory, canton_boundaries, save_directory)
+
+    # Microcensus preprocessing (from already-loaded DataFrames)
+    # Note: microcensus_trips_df may already have canton_name from assign_cantons above (line 95).
+    # Drop it before convert_trips to avoid duplicate canton_name columns after merge.
+    trips_for_convert = microcensus_trips_df.drop(columns=['canton_name'], errors='ignore')
+    households_micro = convert_households(microcensus_households_df, canton_boundaries)
+    persons_micro = convert_persons(microcensus_persons_df, households_micro)
+    trips_micro = convert_trips(trips_for_convert, persons_micro)
+    activities_micro = create_activities(trips_micro, persons_micro)
+    microcensus = {
+        'persons': persons_micro,
+        'households': households_micro,
+        'trips': trips_micro,
+        'activities': activities_micro,
+    }
+
+    # Synthetic preprocessing (from output_path directory)
+    synthetic_directory = context.config("output_path")
+    persons_synth, households_synth, trips_synth, activities_synth = preprocess_synthetic_data(
+        directory=synthetic_directory, canton_boundaries=canton_boundaries
+    )
+    synthetic = {
+        'persons': persons_synth,
+        'households': households_synth,
+        'trips': trips_synth,
+        'activities': activities_synth,
+    }
+
+    write_all_application_data(microcensus=microcensus, synthetic=synthetic, save_directory=save_directory)
    
     # === Additional functionality from matsim_destination_zones.py ===
     generate_source_destination_data(synthetic_gz_path, work_dir=output_dir, canton_boundaries=canton_boundaries)

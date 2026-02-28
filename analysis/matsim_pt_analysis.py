@@ -83,7 +83,7 @@ def get_canton_trip_data(df, work_dir):
             }
         nested_data[key]["time_bins"][row["time_bin"]] = row["trip_count"]
 
-    output_dir = os.path.join(work_dir, "public", "data", "trips_by_canton")
+    output_dir = os.path.join(work_dir, "public", "data", "destination_data")
     os.makedirs(output_dir, exist_ok=True)
 
     canton_list = np.unique(np.concatenate([df["origin"].unique(), df["destination"].unique()]))

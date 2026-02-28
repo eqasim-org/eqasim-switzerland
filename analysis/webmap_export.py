@@ -217,6 +217,56 @@ def preprocess_histogram_data(microcensus_data, synthetic_data, data_type, weigh
 
         group_data = {}
 
+        # add histogram for combined data_type (still to be tested to make sure results are good)
+        mc_all_vals = filtered_microcensus[data_type]
+        syn_all_vals = filtered_synthetic[data_type]
+        mc_all_w = (
+            filtered_microcensus[WEIGHT_COL]
+            if weighted and WEIGHT_COL in filtered_microcensus.columns
+            else None
+        )
+
+        if len(mc_all_vals) > 0 and len(syn_all_vals) > 0:
+            # bins based on synthetic, same logic as before
+            q1, q3 = syn_all_vals.quantile(0.25), syn_all_vals.quantile(0.75)
+            iqr = q3 - q1
+            range_max = q3 + max_iqr * iqr
+            bin_size = range_max / num_bins if range_max > 0 else 1.0  # safety
+
+            bins_all = np.arange(0, max(mc_all_vals.max(), syn_all_vals.max()) + bin_size, bin_size)
+
+            mc_hist_all, bins_returned = np.histogram(
+                mc_all_vals, bins=bins_all, range=(0, mc_all_vals.max()),
+                weights=mc_all_w, density=False
+            )
+            syn_hist_all, _ = np.histogram(
+                syn_all_vals, bins=bins_all, range=(0, syn_all_vals.max()),
+                density=False
+            )
+
+            if mc_hist_all.sum() > 0:
+                mc_hist_all = (mc_hist_all / mc_hist_all.sum()) * 100
+            if syn_hist_all.sum() > 0:
+                syn_hist_all = (syn_hist_all / syn_hist_all.sum()) * 100
+
+            mc_mean_all = (
+                np.average(mc_all_vals, weights=mc_all_w)
+                if weighted and mc_all_w is not None
+                else mc_all_vals.mean()
+            )
+            syn_mean_all = syn_all_vals.mean()
+
+            group_data["All"] = {
+                "bin_width": bin_size,
+                "bins": bins_returned.tolist(),
+                "microcensus_histogram": mc_hist_all.tolist(),
+                "synthetic_histogram": syn_hist_all.tolist(),
+                "microcensus_mean": mc_mean_all,
+                "synthetic_mean": syn_mean_all,
+                "microcensus_sample_size": len(mc_all_vals),
+                "synthetic_sample_size": len(syn_all_vals),
+            }
+
         for group in group_values:
             mc_filtered = filtered_microcensus[filtered_microcensus[AGGREGATION_COL] == group]
             syn_filtered = filtered_synthetic[filtered_synthetic[AGGREGATION_COL] == group]
@@ -1613,3 +1663,220 @@ def export_inter_cantonal_stops_2(joined_gdf, volumes_df):
         json.dump(geojson, f, indent=2)
 
     print(f"Saved {len(final_features)} inter-cantonal stops with volume to {output_path}")
+
+
+# === VOLUMES BY LINK LINE ===
+
+def _generate_15min_bins():
+    """Return list of 96 time labels from 00:00 to 23:45 inclusive."""
+    bins = []
+    t = datetime.strptime("00:00", "%H:%M")
+    for _ in range(96):
+        bins.append(t.strftime("%H:%M"))
+        t += timedelta(minutes=15)
+    return bins
+
+_TIME_BINS = _generate_15min_bins()
+_TIME_BIN_SET = set(_TIME_BINS)
+
+
+def _clean_link_id(link_id):
+    """For each part separated by '_', remove from first ':' onward.
+    Example: 'A:foo_B:bar_123' -> 'A_B_123'
+    """
+    parts = str(link_id).split("_")
+    return "_".join(part.split(":")[0] for part in parts)
+
+
+def _normalize_time_bin(tb):
+    """Normalize a time bin to 'HH:MM' on a 15-minute grid.
+    Accepts int/float index [0..95], or 'H:MM'/'HH:MM' strings.
+    Returns None for anything unrecognised.
+    """
+    if pd.isna(tb):
+        return None
+
+    if isinstance(tb, (int, float)) and not isinstance(tb, bool):
+        if math.isfinite(tb):
+            idx = int(tb)
+            if 0 <= idx < 96:
+                return _TIME_BINS[idx]
+        return None
+
+    s = str(tb).strip()
+    try:
+        dt = datetime.strptime(s, "%H:%M")
+        if dt.minute % 15 == 0:
+            return dt.strftime("%H:%M")
+        return None
+    except ValueError:
+        pass
+
+    try:
+        parts = s.split(":")
+        if len(parts) == 2:
+            hour, minute = int(parts[0]), int(parts[1])
+            if 0 <= hour <= 23 and minute in (0, 15, 30, 45):
+                return f"{hour:02d}:{minute:02d}"
+    except Exception:
+        pass
+    return None
+
+
+def build_volumes_by_link_line(pt_link_volumes_path):
+    """
+    Build per-canton JSON files with PT link volumes broken down by line.
+
+    Reads:
+      - pt_link_volumes.csv.gz  (param)
+      - transit_modes_by_canton.json   (from DEFAULT_WORKDIR)
+      - transit_routes.geojson         (from DEFAULT_WORKDIR)
+      - {canton}_merged_segments.geojson (from DEFAULT_WORKDIR)
+
+    Writes:
+      - volumes_by_link_line/pt_link_volumes_by_link_line_{canton}.json
+        per canton under DEFAULT_WORKDIR/public/data/matsim/transit/
+    """
+    transit_dir = os.path.join(DEFAULT_WORKDIR, "public", "data", "matsim", "transit")
+    network_dir = os.path.join(DEFAULT_WORKDIR, "public", "data", "matsim")
+    output_dir = os.path.join(transit_dir, "volumes_by_link_line")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # --- Load CSV ---
+    print("  Loading pt_link_volumes CSV...")
+    df = pd.read_csv(pt_link_volumes_path, compression="gzip")
+    df["linkId"] = df["linkId"].astype(str).apply(_clean_link_id)
+    df["timeBin"] = df["timeBin"].apply(_normalize_time_bin)
+    df = df[df["timeBin"].notna()].copy()
+
+    if not pd.api.types.is_numeric_dtype(df["passengers"]):
+        df["passengers"] = pd.to_numeric(df["passengers"], errors="coerce").fillna(0.0)
+    else:
+        df["passengers"] = df["passengers"].fillna(0.0).astype(float)
+
+    # --- Load modes per canton ---
+    modes_path = os.path.join(transit_dir, "transit_modes_by_canton.json")
+    with open(modes_path, "r", encoding="utf-8") as f:
+        pt_modes_dict = json.load(f)
+
+    # --- Load route metadata (line_id -> mode, lineName) ---
+    routes_path = os.path.join(transit_dir, "routes", "transit_routes.geojson")
+    with open(routes_path, "r", encoding="utf-8") as f:
+        routes_geo = json.load(f)
+
+    line_metadata = {}
+    for feat in routes_geo.get("features", []):
+        props = feat.get("properties", {})
+        line_id = props.get("line_id")
+        if line_id is None:
+            continue
+        line_id = str(line_id)
+        if line_id.lower() == "none":
+            continue
+        line_metadata[line_id] = {
+            "mode": props.get("mode"),
+            "lineName": props.get("line_name") or props.get("name"),
+        }
+
+    # --- Process each canton ---
+    for canton, pt_modes in pt_modes_dict.items():
+        pt_modes_set = set(pt_modes if isinstance(pt_modes, list) else [])
+        network_path = os.path.join(network_dir, f"{canton}_merged_segments.geojson")
+        output_path = os.path.join(output_dir, f"pt_link_volumes_by_link_line_{canton}.json")
+
+        if not os.path.exists(network_path):
+            print(f"  Skipping {canton} -- missing merged_segments")
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump([], f)
+            continue
+
+        with open(network_path, "r", encoding="utf-8") as f:
+            network = json.load(f)
+
+        # Collect valid PT links from merged segments via per_id_keys
+        valid_links_modes = defaultdict(set)
+        for feat in network.get("features", []):
+            props = feat.get("properties", {}) or {}
+            modes_str = props.get("modes", "")
+            seg_modes = {m.strip() for m in modes_str.split(",") if m.strip()}
+            allowed = seg_modes & pt_modes_set
+            if not allowed:
+                continue
+
+            per_id_keys = props.get("per_id_keys", "")
+            if isinstance(per_id_keys, str):
+                for link_id in per_id_keys.split("|"):
+                    link_id = link_id.strip()
+                    if link_id:
+                        valid_links_modes[_clean_link_id(link_id)].update(allowed)
+
+        if not valid_links_modes:
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump([], f)
+            print(f"  {canton}: 0 links (no PT modes in merged segments)")
+            continue
+
+        df_canton = df[df["linkId"].isin(valid_links_modes)].copy()
+
+        if df_canton.empty:
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump([], f)
+            print(f"  {canton}: 0 links (no volumes after filtering)")
+            continue
+
+        # Aggregate by (link, line, timeBin)
+        result = defaultdict(lambda: defaultdict(
+            lambda: {"total": 0.0, "timeBins": defaultdict(float), "mode": None, "lineName": None}
+        ))
+
+        for _, row in df_canton.iterrows():
+            link = str(row["linkId"])
+            line = str(row["lineId"])
+            tb = row["timeBin"]
+            count = float(row["passengers"])
+
+            node = result[link][line]
+            node["total"] += count
+            node["timeBins"][tb] += count
+
+            meta = line_metadata.get(line, {})
+            node["mode"] = meta.get("mode")
+            node["lineName"] = meta.get("lineName") or row.get("lineName")
+
+        # Build output list, stripping zero time bins and minifying
+        final_list = []
+        for link_id, lines in result.items():
+            modes_list = sorted(valid_links_modes.get(link_id, []))
+            link_obj = {
+                "link_id": link_id,
+                "modes_list": modes_list,
+                "lines": [],
+            }
+
+            for line_id, line_data in lines.items():
+                # Only include non-zero time bins
+                hourly = {}
+                for tb, val in line_data["timeBins"].items():
+                    if tb in _TIME_BIN_SET and val != 0:
+                        hourly[tb] = float(val)
+
+                daily_avg = sum(hourly.values())
+
+                link_obj["lines"].append({
+                    "line_id": line_id,
+                    "line_name": line_data["lineName"],
+                    "mode": line_data["mode"],
+                    "hourly_avg_volumes": hourly,
+                    "daily_avg_volume": daily_avg,
+                })
+
+            link_obj["lines"].sort(key=lambda d: (str(d.get("mode")), str(d["line_id"])))
+            final_list.append(link_obj)
+
+        final_list.sort(key=lambda d: d["link_id"])
+
+        # Write minified JSON
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(final_list, f, ensure_ascii=False, separators=(",", ":"))
+
+        print(f"  {canton}: {len(final_list)} links -> {os.path.basename(output_path)}")

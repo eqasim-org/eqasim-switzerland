@@ -10,7 +10,7 @@ def configure(context):
     context.stage("data.osm.clean")
     context.config("data_path")
     context.config("export_detailed_network")
-
+    context.config("parseTurnRestrictions", True)
 def execute(context):
     network_file = context.stage("data.osm.clean")
 
@@ -60,13 +60,7 @@ def execute(context):
             '<param name="maxLinkLength" value="500.0" />',
             '<param name="maxLinkLength" value="100.0" />'
         )
-        # Export detailed geometry of the links if needed
-        if export_detailed_network:
-            content = content.replace(
-                '<param name="outputDetailedLinkGeometryFile" value="null" />',
-                '<param name="outputDetailedLinkGeometryFile" value="%s/detailed_network.csv" />' % context.path(),
-            )
-
+       
         if not context.config("parseTurnRestrictions"):
             content = content.replace(
                 '<param name="parseTurnRestrictions" value="true" />',
