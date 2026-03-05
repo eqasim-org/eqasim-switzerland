@@ -14,7 +14,7 @@ def execute(context):
 
     df_bikes_types = pd.DataFrame.from_records([{
         "type_id": "default_bike", "nb_seats": 1, "length": 2.0, "width": 0.5, "pce": 0.2, "mode": "bike", 
-        "maxVelocity": context.config("maximum_bike_speed_m_s"), "flowEfficiencyFactor": 0.3
+        "maxVelocity": context.config("maximum_bike_speed_m_s"), "flowEfficiencyFactor": 1.0
     }])
 
     df_bikes = df_persons[["person_id"]].copy()
