@@ -29,3 +29,8 @@ seaborn==0.13.2
 h5py==3.15.1
 pyogrio==0.12.1
 catboost==1.2.8
+cma==4.2.0
+ipfn==1.4.4
+contextily==1.7.0
+pyarrow==21.0.0
+pydeck==0.9.1
