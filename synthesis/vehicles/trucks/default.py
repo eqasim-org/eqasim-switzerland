@@ -25,9 +25,9 @@ def execute(context):
     # I'll use a small reduction though, this also should be tested and documented further
 
     df_vehicle_types = pd.DataFrame.from_records([{
-        "type_id": "default_truck", "nb_seats": 1, "length": 12.0, "width": 1.0, "pce": 2.0, "mode": "truck",
+        "type_id": "default_truck", "nb_seats": 1, "length": 12.0, "width": 1.0, "pce": 1.8, "mode": "truck",
         "hbefa_cat": "HEAVY_GOODS_VEHICLE", "hbefa_tech": "average", "hbefa_size": "average", "hbefa_emission": "average",
-        "maxVelocity": round(110/3.6, 2), "flowEfficiencyFactor": 1.0
+        "maxVelocity": round(130/3.6, 2), "flowEfficiencyFactor": 1.0
     }])
 
     df_vehicles = df_persons[["agent_id"]].copy()

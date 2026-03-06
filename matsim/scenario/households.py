@@ -90,6 +90,9 @@ def execute(context):
         cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
 
         id_person_max = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
+        id_household_max = np.max(context.stage("synthesis.population.enriched").copy()["household_id"].values)
+        id_person_max = max(id_person_max, id_household_max)  # just in case person_id and household_id are not on the same scale
+
         N             = id_person_max + 1
 
         cross_border_persons    = cross_border_persons.sort_values(by="person_id")

@@ -112,7 +112,7 @@ def execute(context):
         # higher link length
         content = content.replace(
             '<param name="maxLinkLength" value="500.0" />',
-            '<param name="maxLinkLength" value="100.0" />'
+            '<param name="maxLinkLength" value="1000.0" />'
         )
         # Export detailed geometry of the links if needed
         if export_detailed_network:
@@ -219,10 +219,11 @@ def execute(context):
             net.links = SpeedCorrector(context, net).run("outside_border")
     
     if context.config("adjust_speed"):
-        # adjust link speeds of car links based on municipality types and their speed limit
-        net.links = SpeedCorrector(context, net).run("municipality_type")
         if abs(context.config("speed_factor_motorway")-1.0)>1e-3:
             net.links = SpeedCorrector(context, net).run("motorway")
+        
+        # adjust link speeds of car links based on municipality types and their speed limit
+        net.links = SpeedCorrector(context, net).run("municipality_type")
 
     if context.config("adjust_speed_uphill"):
         if not context.config("assign_elevations"):

@@ -11,9 +11,9 @@ def configure(context):
 def execute(context):
     df_lcv = context.stage("synthesis.lcv.trips")
     df_vehicle_types = pd.DataFrame.from_records([{
-        "type_id": "default_lcv", "nb_seats": 1, "length": 9.0, "width": 1.0, "pce": 1.5, "mode": "truck",
+        "type_id": "default_lcv", "nb_seats": 1, "length": 9.0, "width": 1.0, "pce": 1.2, "mode": "truck",
         "hbefa_cat": "HEAVY_GOODS_VEHICLE", "hbefa_tech": "average", "hbefa_size": "average", "hbefa_emission": "average", ##TODO: check hbefa_category
-        "maxVelocity": round(110/3.6, 2), "flowEfficiencyFactor": 1.0
+        "maxVelocity": round(130/3.6, 2), "flowEfficiencyFactor": 1.0
     }])
 
     df_vehicles = df_lcv[["trip_id"]].copy()
