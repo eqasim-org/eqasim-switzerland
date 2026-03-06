@@ -3,6 +3,7 @@ from data.microcensus.shares import load_clean_trips
 import os
 import numpy as np
 import logging
+import glob
 from .readers import houshold_reader
 logger = logging.getLogger("synpp")
 
@@ -47,17 +48,45 @@ class ModeShareAnalyzer:
     def get_paths_matsim(self, context):
         output_path = context.config("output_path")
         output_id = context.config("output_id")
-        simulation_directory = context.config("simulation_directory")          
+        simulation_directory = context.config("simulation_directory")
+        
+        # get the trips file, if simulation not finished, get one from the intermediate iterations
         trips_path_matsim = f"{output_path}/{output_id}/{simulation_directory}/output_trips.csv.gz"
+        if not os.path.exists(trips_path_matsim):
+            candidate_files = glob.glob(f"{output_path}/{output_id}/{simulation_directory}/ITERS/**/*.trips.csv.gz")
+            if candidate_files:
+                trips_path_matsim = max(candidate_files, key=os.path.getctime)  # Get the most recently created file
+                logger.warning(f"MATSIM trips file not found as an output file. Using {trips_path_matsim} instead.")
+            else:
+                raise FileNotFoundError(f"MATSIM trips file not found as an output file and no candidate files found in {output_path}/{output_id}/{simulation_directory}/ITERS/")
+        
+        # get the persons file
         persons_path_matsim = f"{output_path}/{output_id}/{simulation_directory}/output_persons.csv.gz"
+        if not os.path.exists(persons_path_matsim):
+            candidate_files = glob.glob(f"{output_path}/{output_id}/**/output_persons.csv.gz")
+            if candidate_files:
+                persons_path_matsim = max(candidate_files, key=os.path.getctime)  # Get the most recently created file
+                logger.warning(f"MATSIM persons file not found as an output file. Using {persons_path_matsim} instead.")
+            else:
+                raise FileNotFoundError(f"MATSIM persons file not found as an output file and no candidate files found in {output_path}/{output_id}/{simulation_directory}")
+
+        # get the households file
         hourseholds_path_matsim = f"{output_path}/{output_id}/{simulation_directory}/output_households.xml.gz"
+        if not os.path.exists(hourseholds_path_matsim):
+            candidate_files = glob.glob(f"{output_path}/{output_id}/**/output_households.xml.gz")
+            if candidate_files:
+                hourseholds_path_matsim = max(candidate_files, key=os.path.getctime)  # Get the most recently created file
+                logger.warning(f"MATSIM households file not found as an output file. Using {hourseholds_path_matsim} instead.")
+            else:
+                raise FileNotFoundError(f"MATSIM households file not found as an output file and no candidate files found in {output_path}/{output_id}")
+            
         assert os.path.exists(trips_path_matsim), f"MATSIM trips file not found at {trips_path_matsim}"
         assert os.path.exists(persons_path_matsim), f"MATSIM persons file not found at {persons_path_matsim}"
         assert os.path.exists(hourseholds_path_matsim), f"MATSIM households file not found at {hourseholds_path_matsim}"
         return trips_path_matsim, persons_path_matsim, hourseholds_path_matsim
     
     def get_distance_labels(self):
-        distance_bins = np.array(ModeShareAnalyzer.distance_bins) / 1000
+        distance_bins = np.round(np.array(ModeShareAnalyzer.distance_bins) / 1000,1)
         distance_labels = [
             f"{i}-({distance_bins[i]}km-{distance_bins[i+1]}km)"
             if distance_bins[i+1] < distance_bins[-1]
@@ -195,3 +224,17 @@ class ModeShareAnalyzer:
                         .sort_values(by=by))
                             
         return mode_share
+
+    def compute_distance_by_mode(self):
+        modes = self.trips["mode"].unique()
+        distance_distribution = dict()
+        for mode in modes:
+            mode_trips = self.trips[self.trips["mode"] == mode]
+            if self.from_matsim:
+                distance_distribution[mode] =  mode_trips["euclidean_distance_km"].values
+            else:
+                distance_distribution[mode] = { "distances": mode_trips["euclidean_distance_km"].values,
+                                                "weights": mode_trips["person_weight"].values}
+
+        return distance_distribution
+    

@@ -26,10 +26,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def GEH(x_d,y_d):
+def GEH(x_d,y_d, return_vector = False):
     x = (x_d/24)/2
     y = (y_d/24)/2
     geh_values = np.sqrt(2 * (x - y) ** 2 / (x + y + 1e-6))
+    if return_vector:
+        return geh_values
     geh_within_5 = int(np.sum(geh_values <= 5))
     geh_within_10 = int(np.sum(geh_values <= 10))
     geh_within_15 = int(np.sum(geh_values <= 15))
@@ -55,7 +57,7 @@ def SGV(x_d,y_d):
 
 class Plotter:
     def plot_flow(self, flows, counts:Counts=None, output_file:str=None, 
-                        distance_to_border:int=5000, title:str=None, show_range=False, show_geh=False):        
+                        distance_to_border:int=5000, title:str=None, show_range=False, show_geh=False, remove_near_border = False):        
         flows = flows.copy()
         flows = flows.sort_values("flow")
         
@@ -66,6 +68,14 @@ class Plotter:
                             
         x = flows.flow
         y = flows.simulated_flow
+
+        if remove_near_border:
+            border_points = counts.get_near_border_ids(distance_to_border)
+            flows = flows[~flows["id"].isin(border_points["id"])]
+            x = flows.flow
+            y = flows.simulated_flow
+            logger.info(f"Points within {distance_to_border} meters to borders are removed from flow comparison plot!")
+
         # Create the figure
         plt.figure(figsize=(8, 8))
         
@@ -86,21 +96,24 @@ class Plotter:
         # Get R2
         r2 = r2_score(x,y)
         
+        include_border = False
         if counts is not None and distance_to_border>0:
             border_points = counts.get_near_border_ids(distance_to_border)
             border_flow = flows[flows["id"].isin(border_points["id"])]
-            plt.scatter(border_flow.flow, border_flow.simulated_flow , 
-                        alpha=0.6, s=10, c='orange', label=f"Within {distance_to_border} m to borders")            
-            # Optional: linear trend line (regression)
-            in_flow = flows[~flows["id"].isin(border_points["id"])].reset_index(drop=True)
-            slope = np.sum(in_flow.flow * in_flow.simulated_flow) / np.sum(in_flow.flow * in_flow.flow) 
-            
-            plt.plot(x, slope * x, color='darkmagenta', lw=2, linestyle='-', label=f'Trend without borders: y={slope:.2f} x')
-            r2_in = r2_score(in_flow.flow, in_flow.simulated_flow)
+            if not border_flow.empty:
+                plt.scatter(border_flow.flow, border_flow.simulated_flow , 
+                            alpha=0.6, s=10, c='orange', label=f"Within {distance_to_border} m to borders")            
+                # Optional: linear trend line (regression)
+                in_flow = flows[~flows["id"].isin(border_points["id"])].reset_index(drop=True)
+                slope = np.sum(in_flow.flow * in_flow.simulated_flow) / np.sum(in_flow.flow * in_flow.flow) 
+                
+                plt.plot(x, slope * x, color='darkmagenta', lw=2, linestyle='-', label=f'Trend without borders: y={slope:.2f} x')
+                r2_in = r2_score(in_flow.flow, in_flow.simulated_flow)
+                include_border = True
             
         # Add R2 Score
         plt.text( 0.02 * max_val, 0.6 * max_val, 
-                 f"$R^2$ = {r2:.3f}\n$R^2_{{\\mathrm{{in}}}}$ = {r2_in:.3f}" if (counts is not None and distance_to_border>0) else f"$R^2$ = {r2:.3f}",            # text
+                 f"$R^2$ = {r2:.3f}\n$R^2_{{\\mathrm{{in}}}}$ = {r2_in:.3f}" if include_border else f"$R^2$ = {r2:.3f}",            # text
                  fontsize=14,
                  color='crimson',
                  bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3')  # white box

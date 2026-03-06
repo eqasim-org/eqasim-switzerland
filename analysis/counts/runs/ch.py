@@ -6,10 +6,13 @@ Created on Thu Oct 16 10:17:26 2025
 """
 from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
-from ..matching.plots import Plotter
+from ..matching.plots import Plotter, GEH
 from ..matching.utils.merge import Merge
 import os
 import geopandas as gpd
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("analysis.counts.cantons.ch")
@@ -25,10 +28,10 @@ def configure(context):
 
 def execute(context):        
     # paths and parameters  
-    count_stations_file, counts_data_file  = context.stage("analysis.counts.cantons.ch")
+    count_stations_file, counts_data_file, year  = context.stage("analysis.counts.cantons.ch")
     city = "ch"
     sample_size = context.config("input_downsampling")
-    minimum_months = 3
+    minimum_months = 6
     include_incomplete_data = True
     path_to_images = os.path.join(context.config("output_path"), 
                                   context.config("output_id"), 
@@ -42,7 +45,7 @@ def execute(context):
     # load counts
     counts = Counts(counts_data_file, count_stations_file, 
                 include_incomplete_data = include_incomplete_data, 
-                minimum_months = minimum_months, context = context)
+                minimum_months = minimum_months, context = context, year=year)
             
     # Match the data with the network
     matcher = TrafficDataMatcher(city, cache = context.path())
@@ -65,7 +68,11 @@ def execute(context):
     stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>13000)|
                              (flows.simulated_flow< 200 * 24)|
                              (flows.flow< 200 * 24)|
-                             (~flows.pdiff.between(-50,170))]["id"].unique()
+                             (~flows.pdiff.between(-30,200))]["id"].unique()
+
+    # geh = GEH(flows.flow.values, flows.simulated_flow.values, return_vector=True)
+    # stations_to_drop = flows[(geh>50)]["id"].values
+    # logger.info(f"Identified {len(stations_to_drop)} stations to be removed, out of {len(flows)} total stations. These stations will be dropped from the analysis.")
 
     # Plot the network and highligh these links in green  
     plotter = Plotter()
@@ -96,12 +103,21 @@ def execute(context):
     # Plot statistics
     plotter.plot_flow(flows = flows, 
                     counts = counts, 
-                    distance_to_border = 2000, 
+                    distance_to_border = 3000, 
                     title = f"Observed vs Simulated Traffic Flows ({city})",
                     output_file = os.path.join(path_to_images, f"flow_comparaison_{city}.png"),
                     show_range = False,
                     show_geh = True)
 
+    plotter.plot_flow(flows = flows, 
+                    counts = counts, 
+                    distance_to_border = 3000, 
+                    title = f"Observed vs Simulated Traffic Flows ({city})",
+                    output_file = os.path.join(path_to_images, f"flow_comparaison_without_border_{city}.png"),
+                    show_range = False,
+                    show_geh = False,
+                    remove_near_border = True)
+    
     plotter.plot_flow_by_road_type(flows, network, matched, counts,
                                 distance_to_border = 0, 
                                 title = f"Average Observed vs Simulated Flow by Highway Type ({city})",
@@ -117,14 +133,14 @@ def execute(context):
                                    flows[["id","pdiff"]], on="id", how="left").to_crs(epsg=4326)],
                         point_data_to_show=['id',"pdiff"],
                         border = border,
-                        path_to_save= os.path.join(path_to_images, f"counts_on_network{city}.html"))
+                        path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
     
     Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
                     matched_links.to_crs(epsg=4326)], 
                     data_to_show=["link_id"], 
                     point_gdf=[counts.counts[['id','geometry']].merge(
-                               all_flows[["id","pdiff"]], on="id", how="left").to_crs(epsg=4326)],
-                    point_data_to_show=['id',"pdiff"],
+                               all_flows[["id","pdiff","adiff"]], on="id", how="left").to_crs(epsg=4326)],
+                    point_data_to_show=['id',"pdiff","adiff"],
                     border = border,
                     path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}_unfiltered.html"))
     

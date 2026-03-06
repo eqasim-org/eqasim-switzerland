@@ -25,3 +25,4 @@ routing
 catboost_info
 ch_cutter
 *.pkl
+*.csv

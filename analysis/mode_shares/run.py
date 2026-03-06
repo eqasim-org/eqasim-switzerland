@@ -73,7 +73,7 @@ def execute(context):
                 markersize=DATASET_STYLES["Simulated"]["markersize"], label=f"{mode} (MATSim)")
 
     ax.set_ylabel("Mode Share", fontsize=13)
-    ax.set_xlabel("Euclidean distance [km]", fontsize=13)
+    ax.set_xlabel("Euclidean distance [m]", fontsize=13)
     plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.2), ncol=5, fontsize=10)
     plt.tight_layout()
     plt.grid(axis='y', linestyle='--', alpha=0.7)
@@ -131,8 +131,10 @@ def execute(context):
 
     # plot global mode shares
     fig, ax = plt.subplots(figsize=(8,3))
-    shares = pd.DataFrame(dict(MATSim=simulated_mode_shares["global"].loc[MODE_ORDER, "mode_share"], 
-                               Microcensus=target_mode_shares["global"].loc[MODE_ORDER, "mode_share"]))
+    shares = pd.DataFrame(dict(
+        Microcensus=target_mode_shares["global"].loc[MODE_ORDER, "mode_share"],
+        MATSim=simulated_mode_shares["global"].loc[MODE_ORDER, "mode_share"]
+                               ))
     shares.plot.bar(ax=ax, width=0.8, color=[DATASET_STYLES["Target"]["color"], DATASET_STYLES["Simulated"]["color"]])
     plt.xticks(rotation=0)
     plt.ylabel("Mode Share", fontsize=12)
@@ -167,11 +169,11 @@ def execute(context):
                 markersize=DATASET_STYLES["Simulated"]["markersize"], label=f"{mode} (MATSim)")
     ax.set_ylabel("Mode Share", fontsize=13)
     ax.set_xlabel("Age [years]", fontsize=13)
+    ax.set_xticklabels(["0",*age_labels], rotation=0, fontsize=12)
+    _ = plt.yticks(rotation=0, fontsize=12)
     plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.2), ncol=5, fontsize=10)
     plt.tight_layout()
     plt.grid(axis='y', linestyle='--', alpha=0.7)
-    _ = plt.xticks(rotation=0, fontsize=12)
-    _ = plt.yticks(rotation=0, fontsize=12)
     plt.savefig(os.path.join(figures_dir, "mode_shares_by_age.png"), bbox_inches="tight")
     plt.close()
 
@@ -249,5 +251,35 @@ def execute(context):
     plt.savefig(os.path.join(figures_dir, "mode_shares_by_purpose.png"), bbox_inches="tight")
     plt.close()
 
+    # plot the distribution of distances by mode
+    fig, ax = plt.subplots(1, 5, figsize=(20, 4), sharey=True)
+    distance_bins = np.linspace(0, 50, 51)  # 20 bins from 0 to 50 km
+    factors = {"car":1, "pt":1, "walk":0.5, "bike":0.5, "car_passenger":1}
+    for mode in MODE_ORDER:
+        f = factors[mode]
+        simulated_distances = simulated_mode_shares["distance_by_mode"][mode]
+        target_distances = target_mode_shares["distance_by_mode"][mode]["distances"]
+        target_weights = target_mode_shares["distance_by_mode"][mode]["weights"]
+
+        simulated_distances = simulated_distances[simulated_distances<50]
+        sel = target_distances<50
+        target_distances = target_distances[sel]
+        target_weights = target_weights[sel]
+
+        ax[MODE_ORDER.index(mode)].hist(simulated_distances, bins=distance_bins*f, alpha=0.6, label="Simulated", color=DATASET_STYLES["Simulated"]["color"], density=True)
+        ax[MODE_ORDER.index(mode)].hist(target_distances, bins=distance_bins*f, alpha=0.6, label="Microcensus", color=DATASET_STYLES["Target"]["color"], density=True)
+        ax[MODE_ORDER.index(mode)].axvline(np.mean(simulated_distances), color=DATASET_STYLES["Simulated"]["color"], linestyle="--", linewidth=2, label=f"Mean (Simulated): {np.mean(simulated_distances):.1f}")
+        ax[MODE_ORDER.index(mode)].axvline(np.average(target_distances, weights=target_weights), color=DATASET_STYLES["Target"]["color"], linestyle="--", linewidth=2, label=f"Mean (Microcensus): {np.average(target_distances, weights=target_weights):.1f}")
+        ax[MODE_ORDER.index(mode)].set_title(mode.replace("_"," ").title())
+        ax[MODE_ORDER.index(mode)].set_xlabel("Distance [km]")
+        ax[MODE_ORDER.index(mode)].set_ylabel("Frequency")
+        ax[MODE_ORDER.index(mode)].legend(fontsize=8)
+        ax[MODE_ORDER.index(mode)].set_ylabel("")
+
+    plt.ylim([0,0.3])
+    ax[0].set_ylabel("Density")
+    plt.tight_layout()
+    plt.savefig(os.path.join(figures_dir, "distance_distribution_by_mode.png"), bbox_inches="tight", dpi=300)
+    plt.close()
 
     return dict(done=True, path=figures_dir)
