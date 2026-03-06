@@ -142,7 +142,8 @@ def plot_error_heatmap(context, df_averages):
     # get the path
     api = context.config("travel_times_from")    
     api = "tomtom" if api == "all" else api        
-    out = os.path.join(context.config("output_path"),context.config("output_id"),context.config("simulation_directory"),"travel_times_"+api)    
+    out = os.path.join(context.config("output_path"),context.config("output_id"),context.config("simulation_directory"),"travel_times_"+api)
+    os.makedirs(out, exist_ok = True) 
     path = os.path.join(out, "average_error_heatmap.png")
     plt.savefig(path)
     plt.close()

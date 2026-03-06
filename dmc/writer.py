@@ -48,6 +48,10 @@ class writer:
     def write_mode_parameters(self):
         params_dict = {self.rename(k): float(v) for k, v in self.params.items()}
         
+        # adjust long distance cp
+        params_dict["cp.betaVeryLongDistance_u"] = params_dict.get("cp.betaVeryLongDistance_u", 0.0) * 2
+        params_dict["cp.betaDistance_u_km"] = params_dict.get("cp.betaDistance_u_km", 0.0) * 3
+
         # interactions reference values
         params_dict["referenceIncome"] = self.context.config("reference_income_chf")
         params_dict["referenceEuclideanDistance_km"] = self.context.config("reference_euclidean_distance_km")

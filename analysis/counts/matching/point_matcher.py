@@ -69,8 +69,8 @@ class PointMatcher:
             if count_station_ids==matched_ids:
                 all_matched = True
                 
-            if road_type=="secondary_link":
-                logger.info("    Breaking the while loop at 'tertiary'.")
+            if road_type=="primary_link":
+                logger.info("    Breaking the while loop at 'primary ramps'.")
                 logger.info(f"    {len(count_station_ids)-len(matched_ids)} stations are unfound!")
                 break
             

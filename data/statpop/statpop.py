@@ -40,7 +40,7 @@ def execute(context):
     if (only_permanent):
         df_persons = df_persons[df_persons["type_of_residence"] == 1]
     else:
-        df_persons = df_persons[(df_persons["type_of_residence"] == 1) | (df_persons["type_of_residence"] == 1)]
+        df_persons = df_persons[(df_persons["type_of_residence"] == 1) | (df_persons["type_of_residence"] == 2)]
 
     final_count = len(df_persons)
     print(f"{initial_count - final_count} persons were filtered out based on the type of residence.")

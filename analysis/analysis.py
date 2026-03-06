@@ -455,35 +455,35 @@ def compare_dist_from_home(context, df_syn, df_act, target_purpose = "education"
     return syn, act, act_w
 
 
-# def mode_purpose_comparison(context, df_syn, df_act, suffix = None):
-#     # first in the synthetic data
-#     types = df_syn.groupby(["mode","following_purpose"]).count()["person_id"]
-#     syn = types / types.sum()
+    # def mode_purpose_comparison(context, df_syn, df_act, suffix = None):
+    #     # first in the synthetic data
+    #     types = df_syn.groupby(["mode","following_purpose"]).count()["person_id"]
+    #     syn = types / types.sum()
 
-#     # then in the actual data
-#     df_act.loc[df_act["mode"]=='car_passanger', "mode"] = 'car_passenger'
-#     which = ["car","car_passenger","pt", "taxi","walk"]
-#     atypes = df_act.groupby(["mode","destination_purpose"]).sum().loc[which,"weight_person"].reindex(index=which, level=0)
-#     act = atypes / atypes.sum()
-    
-#     lista = [item for item in list(types.index.levels[0]) for i in range(len(types.index.levels[1]))]
-#     listb = list(types.index.levels[1]) * len(types.index.levels[0])
-#     labels = [a + " " + b for a, b in zip(lista,listb)]
-
-#     # already ready to plot!
-#     title_plot = "Synthetic and HTS Mode-Purpose Distribution"
-#     title_figure = "modepurpose"
-    
-#     if suffix:
-#         title_plot += " - " + suffix
-#         title_figure += "_" + suffix
+    #     # then in the actual data
+    #     df_act.loc[df_act["mode"]=='car_passanger', "mode"] = 'car_passenger'
+    #     which = ["car","car_passenger","pt", "taxi","walk"]
+    #     atypes = df_act.groupby(["mode","destination_purpose"]).sum().loc[which,"weight_person"].reindex(index=which, level=0)
+    #     act = atypes / atypes.sum()
         
-#     title_figure += ".png"
-    
-#     myplottools.plot_comparison_bar(context, imtitle = title_figure, plottitle = title_plot,
-#                                     ylabel = "Percentage", xlabel = "", lab = labels, 
-#                                     actual = act.values.tolist(), synthetic = syn.values.tolist(), 
-#                                     t = 10, xticksrot = True )
+    #     lista = [item for item in list(types.index.levels[0]) for i in range(len(types.index.levels[1]))]
+    #     listb = list(types.index.levels[1]) * len(types.index.levels[0])
+    #     labels = [a + " " + b for a, b in zip(lista,listb)]
+
+    #     # already ready to plot!
+    #     title_plot = "Synthetic and HTS Mode-Purpose Distribution"
+    #     title_figure = "modepurpose"
+        
+    #     if suffix:
+    #         title_plot += " - " + suffix
+    #         title_figure += "_" + suffix
+            
+    #     title_figure += ".png"
+        
+    #     myplottools.plot_comparison_bar(context, imtitle = title_figure, plottitle = title_plot,
+    #                                     ylabel = "Percentage", xlabel = "", lab = labels, 
+    #                                     actual = act.values.tolist(), synthetic = syn.values.tolist(), 
+    #                                     t = 10, xticksrot = True )
 
 
 

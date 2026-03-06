@@ -41,5 +41,6 @@ def execute(context):
     mode_shares["distance_labels"] = mode_shares_analyzer.get_distance_labels()
     mode_shares["age_bins"] = ModeShareAnalyzer.age_bins
     mode_shares["age_labels"] = mode_shares_analyzer.get_age_labels()
+    mode_shares["distance_by_mode"] = mode_shares_analyzer.compute_distance_by_mode()
 
     return mode_shares

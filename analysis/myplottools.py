@@ -50,7 +50,7 @@ def add_small_cdf(axes, r, c, act, x, y, lab = ["Synthetic", "HTS"]):
     return axes
 
 
-def plot_comparison_bar(context, imtitle, plottitle, ylabel, xlabel, lab, actual, synthetic, lablist = ['HTS', 'Synthetic'], t = 15, figsize = [12,7], dpi = 300, w = 0.35, xticksrot = False):
+def plot_comparison_bar(context, imtitle, plottitle, ylabel, xlabel, lab, actual, synthetic, lablist = ['HTS', 'Synthetic'], t = 15, figsize = [8,4], dpi = 300, w = 0.35, xticksrot = False, fontsize = 16):
 
     plt.rcParams['axes.facecolor'] = "#ffffff"
     plt.rcParams['figure.figsize'] = figsize
@@ -76,17 +76,19 @@ def plot_comparison_bar(context, imtitle, plottitle, ylabel, xlabel, lab, actual
     ax.bar(x + width/2, synthetic_means, width, label = lablist[1], color="#D3D3D3", align = "center")
 
     # Add some text for labels, title and custom x-axis tick labels, etc.
-    ax.set_ylabel(ylabel)
-    ax.set_title(plottitle)
+    ax.set_ylabel(ylabel, fontsize = fontsize, labelpad = 15)
+    ax.set_title(plottitle, fontsize = fontsize)
     ax.set_xticks(x)
-    ax.set_xlabel(xlabel)
+    ax.set_xlabel(xlabel, fontsize = fontsize, labelpad = 15)
 
     if xticksrot:
-        ax.set_xticklabels(labels, rotation = 45, ha = "right", rotation_mode='anchor')
+        ax.set_xticklabels(labels, rotation = 40, ha = "right", rotation_mode='anchor', fontsize = (fontsize*0.8))
     else:
-        ax.set_xticklabels(labels)
+        ax.set_xticklabels(labels, fontsize = (fontsize*0.8))
 
-    ax.legend(loc = 'upper right')
+    ax.set_yticklabels(ax.get_yticks(), fontsize = (fontsize*0.8))
+
+    ax.legend(loc = 'upper right', fontsize=fontsize*1.2)
     fig.tight_layout()
     plt.savefig("%s/" % context.config("analysis_path") + imtitle)
     plt.close()

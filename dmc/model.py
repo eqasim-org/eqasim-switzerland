@@ -347,7 +347,7 @@ def define_betas(ignore_car_passenger, use_exponents):
 
             "beta_car_passenger_short_distance": Beta("beta_car_passenger_short_distance", 0.284, None, None, 0),
             "beta_car_passenger_long_distance": Beta("beta_car_passenger_long_distance", 0.148, None, None, 0),     
-            "beta_car_passenger_very_long_distance": Beta("beta_car_passenger_very_long_distance", 0.0, None, None, 1),
+            "beta_car_passenger_very_long_distance": Beta("beta_car_passenger_very_long_distance", 0.0, None, None, 0),
 
             "beta_car_passenger_ownership_ratio": Beta("beta_car_passenger_ownership_ratio", 0.0, None, None, 0),
             "beta_car_passenger_has_car": Beta("beta_car_passenger_has_car", 0.0, None, None, 0),            

@@ -48,7 +48,7 @@ def configure(context):
     context.config("speed_factor_suburban", 1.05)
     context.config("speed_factor_rural", 1.1)
     context.config("speed_factor_motorway", 1.2)
-    context.config("speed_limit_for_correction", 70/3.6) # in m/s (speed limit below which we correct the speed)
+    context.config("speed_limit_for_correction", 75/3.6) # in m/s (speed limit below which we correct the speed)
     # correct speed for uphill links only
     context.config("adjust_speed_uphill", False) # if true, it is triggered only if elevation is assigned
     context.config("max_gradient_threshold", 0.1) # in percentage (10% = 0.1)
@@ -56,7 +56,7 @@ def configure(context):
     # reduce capacity outside border
     context.config("capacity_factor_outside_border", 0.5)
     # reduce speed outside border
-    context.config("speed_factor_outside_border", 0.75)
+    context.config("speed_factor_outside_border", 0.8)
 
     # whether to route the bike in the network or not
     context.config("route_bike", True)
