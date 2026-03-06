@@ -1,6 +1,7 @@
 from lxml import etree
 import os.path
 import pandas as pd
+import gzip
 
 
 def add_SBBPT_module(context):
@@ -109,6 +110,35 @@ def change_param(context, module_name, param_name, new_value):
 
     doctype_str = '<!DOCTYPE config SYSTEM "http://www.matsim.org/files/dtd/config_v2.dtd">'
     tree.write(config_path, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
+
+
+def modify_PCEs(transit_vehicles_input_path, transit_vehicles_output_path, scaling_factor):
+    assert os.path.exists(transit_vehicles_input_path)
+
+    parser = etree.XMLParser(remove_blank_text = True)
+    tree   = etree.parse(transit_vehicles_input_path, parser)
+    root   = tree.getroot()
+
+    ns_uri = "{http://www.matsim.org/files/dtd}"
+
+    for vt in root.findall(f".//{ns_uri}vehicleType"):        
+        nm = vt.find(f"{ns_uri}networkMode")
+        if nm is not None:
+            
+            pce_elem = vt.find(f"{ns_uri}passengerCarEquivalents")
+            current_pce = float(pce_elem.get("pce", "1.0")) if pce_elem is not None else 1.0
+            new_pce = round(scaling_factor * current_pce, 4)
+            
+            if pce_elem is None:
+                pce_elem = etree.SubElement(vt, f"{ns_uri}passengerCarEquivalents")
+            
+            pce_elem.set("pce", str(new_pce))
+
+    
+    doctype_str = '<!DOCTYPE vehicleDefinitions SYSTEM "http://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">'
+    xml_bytes = etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
+    with gzip.open(transit_vehicles_output_path, "wb") as f:
+        f.write(xml_bytes)
 
 
 def get_calibration_args(context):

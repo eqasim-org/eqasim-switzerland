@@ -1,9 +1,6 @@
 import shutil
 import os.path
-import xml.etree.ElementTree as ET
-from lxml import etree
 import matsim.runtime.eqasim as eqasim
-import gzip
 from dmc.constants import constants as dmc_constants
 
 import matsim.simulation.config_utils as config_utils
@@ -36,36 +33,17 @@ def configure(context):
 
 def execute(context):
     # Some files we just copy
-    transit_vehicles_input_path = context.stage("matsim.scenario.network.mapped")["vehicles"]
+    transit_vehicles_input_path  = context.stage("matsim.scenario.network.mapped")["vehicles"]
     transit_vehicles_output_path = "%s/%stransit_vehicles.xml.gz" % (context.path(), context.config("output_prefix"))
 
     sample_size     = context.config("input_downsampling")
-    
+
     if context.config("input_downsampling") < 1.0 and not context.config("useScheduleBasedTransport"):
-
-        pce =  sample_size
-        print(f"INFO setting PCE to {round(pce,2)} for PT vehicles.")
-
-        # Register the namespace
-        namespace = {'m': 'http://www.matsim.org/files/dtd'}
-
-        # Read and parse the gzipped XML file
-        with gzip.open(transit_vehicles_input_path, 'rt', encoding='utf-8') as f:
-            tree = ET.parse(f)
-            root = tree.getroot()
-
-        # Find and update all <flowEfficiencyFactor> elements
-        for fe in root.findall('.//m:passengerCarEquivalents', namespace):
-            fe.set('pce', str(pce))
-
-        ET.register_namespace('', 'http://www.matsim.org/files/dtd')
-
-        # Write the modified XML back to a gzipped file
-        with gzip.open(transit_vehicles_output_path, 'wt', encoding='utf-8') as f:
-            tree.write(f, encoding='unicode', xml_declaration=True)
+        config_utils.modify_PCEs(transit_vehicles_input_path, transit_vehicles_output_path, sample_size)
 
     else:
         shutil.copyfile(transit_vehicles_input_path, transit_vehicles_output_path)
+
 
     vehicles_input_path = context.stage("matsim.scenario.vehicles")
     vehicles_output_path = "%s/%svehicles.xml.gz" % (context.path(), context.config("output_prefix"))

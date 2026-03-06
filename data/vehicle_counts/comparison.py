@@ -6,78 +6,118 @@ import matplotlib.pyplot as plt
 def plot_national_comparison(context, reference_low, reference_high, syn):
     x = 0
 
-    plt.figure(figsize=(8, 6))
-    plt.bar(x, syn, color = "#596B8D")
-    plt.vlines(x, reference_low, reference_high, colors = "#000000")
+    width = 0.35
 
-    plt.xticks([x], ["Switzerland"])
-
-    plt.ylabel("Number of cars")
-    plt.title("Number of cars in Switzerland - BFS data vs. STATPOP + MZ model")
-
+    _, ax = plt.subplots(figsize=(8, 6))
+    
+    ax.bar(x + width / 2, syn, width, label = "Synthetic travel demand",
+           color = "#1A4390", zorder=3 )
+    ax.bar(x - width/2, reference_low, width, label = "BFS private cars",
+           color = "#757575", zorder=3 )
+    ax.bar(x - width/2, reference_high - reference_low, width, bottom = reference_low, label = "BFS company cars",
+           color = "#C0C0C0", zorder=3 )
+    
+    ax.set_xlabel("")
+    ax.set_ylabel("Number of cars")
+    ax.set_title("Number of cars in Switzerland - BFS data vs. STATPOP + MZ model")
+    ax.set_xticks([x])
+    ax.set_xticklabels(["Switzerland"], rotation=90)
+    ax.legend()
+    ax.grid(True, alpha = 0.3, axis = "y", linestyle = "--")
+    
     plt.xlim(-0.5, 0.5)
 
     plt.tight_layout()
-    plt.savefig(f"{context.path()}/national_comparison_nopxtspt.png")
+    plt.savefig(f"{context.path()}/national_comparison_nopxtspt.pdf")
     plt.close()
 
 
 def plot_cantonal_comparison(context, df):
     df = df.sort_values("cars_syn", ascending = False)
-
+    df["canton_name"] = df["canton_name"].str.split(" / ").str[0]
+    df["canton_name"] = df["canton_name"].replace({"Appenzell Ausserrhoden": "Appenzell  A.Rh.",
+                                                                           "Appenzell Innerrhoden": "Appenzell I.Rh."})
     x = np.arange(len(df))
+    width = 0.35
 
-    plt.figure(figsize=(12, 6))
-    plt.bar(x, df["cars_syn"], color = "#596B8D")
+    df["private_cars_ref"] = df["cars_private_ref"]
+    df["company_cars_ref"] = df["cars_all_ref"] - df["cars_private_ref"]
 
-    plt.vlines(x, df["cars_private_ref"], df["cars_all_ref"], colors = "#000000")
+    _, ax = plt.subplots(figsize=(12, 6))
 
-    plt.xticks(x, df["canton_name"], rotation=90)
-
-    plt.ylabel("Number of cars")
-    plt.title("Number of cars by canton - BFS data vs. STATPOP + MZ model")
+    ax.bar(x + width / 2, df["cars_syn"], width, label = "Synthetic travel demand", 
+           color = "#1A4390", zorder=3 )
+    ax.bar(x - width / 2, df["private_cars_ref"], width, label = "BFS private cars", 
+            color = "#757575", zorder=3 )
+    ax.bar(x - width / 2, df["company_cars_ref"], width, bottom = df["private_cars_ref"], 
+            label = "BFS company cars", color = "#C0C0C0", zorder=3 )
+    
+    ax.set_xlabel("Cantons")
+    ax.set_ylabel("Number of cars")
+    ax.set_title("Number of cars by canton - BFS data vs. STATPOP + MZ model")
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["canton_name"], rotation=90)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis = "y", linestyle = "--")
 
     plt.tight_layout()
-    plt.savefig(f"{context.path()}/cantonal_comparison_nopxtspt.png")
+    plt.savefig(f"{context.path()}/cantonal_comparison_nopxtspt.pdf")
+    plt.close()
 
     # Normalize
     df["syn_ratio"]   = df["cars_syn"] / df["cars_private_ref"]
     df["upper_ratio"] = df["cars_all_ref"] / df["cars_private_ref"]
 
-    x = np.arange(len(df))
+    _, ax = plt.subplots(figsize=(12, 6))
+    ax.bar(x + width/2, df["syn_ratio"], width, 
+                    label = "Synthetic ratio", color = "#1A4390", zorder=3)
+    ax.bar(x - width/2, 1.0, width, label = "BFS private cars", 
+            color = "#757575", zorder=3 )
+    ax.bar(x - width/2, df["upper_ratio"] - 1.0, width, bottom=1.0,
+            label = "BFS company cars", color = "#C0C0C0", zorder=3 )
 
-    plt.figure(figsize=(12, 6))
-
-    plt.bar(x, df["syn_ratio"], color = "#596B8D")
-
-    plt.vlines(x, 1, df["upper_ratio"], colors = "#000000")
-
-    plt.xticks(x, df["canton_name"], rotation=90)
-    plt.ylabel("Ratio (relative to private_ref)")
-    plt.title("Normalized car counts by canton")
+    ax.set_xlabel("Cantons")
+    ax.set_ylabel("Ratio (relative to private_ref)")
+    ax.set_title("Normalized car counts by canton")
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["canton_name"], rotation=90)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis = "y", linestyle = "--")
 
     plt.tight_layout()
-    plt.savefig(f"{context.path()}/cantonal_comparison_normalized_nopxtspt.png")
+    plt.savefig(f"{context.path()}/cantonal_comparison_normalized_nopxtspt.pdf")
+    plt.close()
 
 
 def plot_municipality_comparison(context, df):
     df = df[df["cars_private_ref"] >= 10000]
     df = df.sort_values("cars_syn", ascending = False)
 
+    df["private_cars_ref"] = df["cars_private_ref"]
+    df["company_cars_ref"] = df["cars_all_ref"] - df["cars_private_ref"]
+
     x = np.arange(len(df))
+    width = 0.35
 
-    plt.figure(figsize=(12, 6))
-    plt.bar(x, df["cars_syn"], color = "#596B8D")
+    _, ax = plt.subplots(figsize=(12, 6))
+    ax.bar(x + width / 2, df["cars_syn"], width, label = "Synthetic travel demand", 
+           color = "#1A4390", zorder=3 )
+    ax.bar(x - width / 2, df["private_cars_ref"], width, label = "BFS private cars", 
+            color = "#757575", zorder=3 )
+    ax.bar(x - width / 2, df["company_cars_ref"], width, bottom = df["private_cars_ref"], 
+            label = "BFS company cars", color = "#C0C0C0", zorder=3 )
 
-    plt.vlines(x, df["cars_private_ref"], df["cars_all_ref"], colors = "#000000")
-
-    plt.xticks(x, df["municipality_name"], rotation=90)
-
-    plt.ylabel("Number of cars")
-    plt.title("Number of cars by municipality - BFS data vs. STATPOP + MZ model\n Municipalities with more than 10'000 private cars according to BFS")
+    ax.set_xlabel("Municipalities")
+    ax.set_ylabel("Number of cars")
+    ax.set_title("Number of cars by municipality - BFS data vs. STATPOP + MZ model\n Municipalities with more than 10'000 private cars according to BFS")
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["municipality_name"], rotation=90)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis = "y", linestyle = "--")
 
     plt.tight_layout()
-    plt.savefig(f"{context.path()}/municipality_comparison_nopxtspt.png")
+    plt.savefig(f"{context.path()}/municipality_comparison_nopxtspt.pdf")
+    plt.close()
 
     # Normalized
     df["syn_ratio"]   = df["cars_syn"] / df["cars_private_ref"]
@@ -85,18 +125,25 @@ def plot_municipality_comparison(context, df):
 
     x = np.arange(len(df))
 
-    plt.figure(figsize=(12, 6))
-
-    plt.bar(x, df["syn_ratio"], color = "#596B8D")
-
-    plt.vlines(x, 1, df["upper_ratio"], colors = "#000000")
-
-    plt.xticks(x, df["municipality_name"], rotation=90)
-    plt.ylabel("Ratio (relative to private_ref)")
-    plt.title("Normalized car counts by municipality\n Municipalities with more than 10'000 private cars according to BFS")
+    _, ax = plt.subplots(figsize=(12, 6))
+    ax.bar(x + width/2, df["syn_ratio"], width, 
+                    label = "Synthetic ratio", color = "#1A4390", zorder=3)
+    ax.bar(x - width/2, 1.0, width, label = "BFS private cars", 
+            color = "#757575", zorder=3 )
+    ax.bar(x - width/2, df["upper_ratio"] - 1.0, width, bottom=1.0,
+            label = "BFS company cars", color = "#C0C0C0", zorder=3 )
+    
+    ax.set_xlabel("Municipalities")
+    ax.set_ylabel("Ratio (relative to private_ref)")
+    ax.set_title("Normalized car counts by municipality")
+    ax.set_xticks(x)
+    ax.set_xticklabels(df["municipality_name"], rotation=90)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis = "y", linestyle = "--")
 
     plt.tight_layout()
-    plt.savefig(f"{context.path()}/municipality_comparison_normalized_nopxtspt.png")
+    plt.savefig(f"{context.path()}/municipality_comparison_normalized_nopxtspt.pdf")
+    plt.close()
 
 
 def configure(context):
