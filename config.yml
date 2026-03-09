@@ -1,9 +1,9 @@
 # General pipeline settings
 # path to the working directory/cache
-working_directory: .
+working_directory: /cluster/scratch/rsahleanu/cache
 #p path where the pipeline flowchart should be stored
 flowchart_path: ./flowchart.png
-dryrun: true
+dryrun: false
 output_path: /cache
 run:
     - synthesis.output
@@ -11,16 +11,19 @@ run:
 
 # These are configuration options that we use in the pipeline
 config:
-    output_path: /cache
+
+    hot_deck_matching_runners: 1
+    osm_path: switzerland-latest-2025.osm.pbf
+    output_path: /cluster/scratch/rsahleanu/output
     census: statpop    # path to the input data folder
-    data_path: /data
-    threads: 4
+    data_path: /cluster/project/cmdp/ch_data/pipeline/
+    threads: 48
     export_detailed_network: false
     random_seed: 0
     # it seems fastest is with 1
     hot_deck_matching_runners: 1
     disable_progress_bar: false
-    java_memory: 10G
+    java_memory: 192G
     input_downsampling: 0.01
 
     # default to false until we fix projections
@@ -33,7 +36,7 @@ config:
     # there are two options to convert pt schedule: [hafas, gtfs]; default is gtfs
     pt_schedule: gtfs
     # name of the gtfs zip file, should be placed in gtfs folder within data_path
-    gtfs_name: gtfs_fp2024_2023-12-13_04-15
+    gtfs_name: gtfs_fp2024_2024-11-11
     # date from which gtfs should be take. Options are [dayWithMostTrips, dayWithMostServices, <exact date>]
     gtfs_date: "dayWithMostServices" 
     # if hafas is used, the data needs to be specified

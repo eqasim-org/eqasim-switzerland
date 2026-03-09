@@ -12,6 +12,8 @@ def configure(context):
     context.stage("data.microcensus.households")
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
+    context.config("output_path")
+
 
 def execute(context):
     data_path = context.config("data_path")
@@ -148,7 +150,7 @@ def execute(context):
     df_mz_trips, filterout_person_ids = context.stage("data.microcensus.trips")
 
     df_mz_persons = pd.merge(df_mz_persons, df_mz_households)
-    df_mz_persons = data.microcensus.income.impute(df_mz_persons)
+    df_mz_persons = data.microcensus.income.impute(context, df_mz_persons)
 
     initial_size = len(df_mz_persons)
 
@@ -173,9 +175,13 @@ def execute(context):
     car_passenger_ids = df_mz_trips.loc[df_mz_trips["mode"] == "car_passenger", "person_id"].unique()
     df_mz_persons["is_car_passenger"] = df_mz_persons["person_id"].isin(car_passenger_ids)
 
-    root = os.path.join(context.path(), "webmap_data")
+
+    out_root = context.config("output_path")  # muss in config.yml gesetzt sein
+
+    root = os.path.join(out_root, "webmap_data/microcensus")
     os.makedirs(root, exist_ok=True)
-    path = os.path.join(root, "persons.csv")
-    df_mz_persons.to_csv(path, index=False)
+    path = os.path.join(root, "persons.parquet")
+    df_mz_persons.to_parquet(path, index=False)
+    print("")
 
     return df_mz_persons

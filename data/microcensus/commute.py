@@ -1,10 +1,12 @@
 import numpy as np
 import pandas as pd
+import os
 
 
 def configure(context):
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
+    context.config("output_path")
 
 
 def execute(context):
@@ -50,5 +52,14 @@ def execute(context):
                                  "commute_activity_duration", "commute_x", "commute_y"]]
 
         commutes.update({primary_purpose: df_commute})
+    
 
+
+    out_root = context.config("output_path")
+    root = os.path.join(out_root, "webmap_data/microcensus")
+    os.makedirs(root, exist_ok=True)
+
+    for primary_purpose, df_commute in commutes.items():
+        df_commute.to_parquet(os.path.join(root, "commutes_%s.parquet" % primary_purpose), index=False)
+        
     return commutes

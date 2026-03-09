@@ -1,9 +1,8 @@
 import os
-from lib2to3.fixes.fix_input import context
 
 import sklearn.tree
 
-def impute(df_mz):
+def impute(context, df_mz):
     # Train the tree
     no_income_selector = df_mz["income_class"] == -1
 
@@ -29,11 +28,12 @@ def impute(df_mz):
 
     df_mz["income_imputed"] = False
     df_mz.loc[no_income_selector, "income_imputed"] = True
-
-    root = os.path.join(context.path(), "webmap_data")
+    out_root = context.config("output_path")
+    root = os.path.join(out_root, "webmap_data/microcensus")
     os.makedirs(root, exist_ok=True)
-    path = os.path.join(root, "income.csv")
-    df_mz.to_csv(path, index=False)
+    path = os.path.join(root, "income.parquet")
+    print(path)
+    df_mz.to_parquet(path, index=False)
 
     return df_mz
 

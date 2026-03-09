@@ -7,6 +7,7 @@ import pyproj
 def configure(context):
     context.config("data_path")
     context.stage("data.constants")
+    context.config("output_path")
 
 def execute(context):
     data_path = context.config("data_path")
@@ -164,10 +165,15 @@ def execute(context):
         "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
         "mode_detailed"
     ]], filterout_ids
-
-    root = os.path.join(context.path(), "webmap_data")
+    
+    out_root = context.config("output_path")  # muss in config.yml gesetzt sein
+    root = os.path.join(out_root, "webmap_data")
     os.makedirs(root, exist_ok=True)
-    path = os.path.join(root, "income.csv")
-    out.to_csv(path, index=False)
+    path = os.path.join(root, "trips.parquet")
+
+    if isinstance(out, tuple):
+        out[0].to_parquet(path, index=False)
+    else:
+        out.to_parquet(path, index=False)
 
     return out

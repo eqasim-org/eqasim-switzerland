@@ -48,6 +48,9 @@ def clean_gpkg(path):
 
 def execute(context):
     output_path = context.config("output_path")
+    output_path = os.path.join(output_path, "webmap_data/synthetic")
+    os.makedirs(output_path, exist_ok=True)
+
     output_prefix = context.config("output_prefix")
 
     # Prepare households
@@ -62,7 +65,7 @@ def execute(context):
         "statpop_household_id"
     ]]
 
-    df_households.to_csv("%s/%shouseholds.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
+    df_households.to_parquet("%s/%shouseholds.parquet" % (output_path, output_prefix), index=False)
 
     # Prepare persons
     df_persons = context.stage("synthesis.population.enriched").rename(
@@ -70,17 +73,17 @@ def execute(context):
     )
 
     df_persons = df_persons[[
-        "person_id", "household_id",
+        "person_id", "household_id","car_availability",
         "age", "employed", "sex",
         "has_driving_license",
-        "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", 
+        "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
         "subscriptions_strecke", "subscriptions_gleis7", "subscriptions_junior",
         "subscriptions_other", "subscriptions_ga_class",
         "subscriptions_verbund_class", "subscriptions_strecke_class",
         "statpop_person_id", "mz_person_id", "mz_head_id", "canton_id"
     ]]
 
-    df_persons.to_csv("%s/%spersons.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
+    df_persons.to_parquet("%s/%spersons.parquet" % (output_path, output_prefix), index=False)
 
     # Prepare activities
     df_activities = context.stage("synthesis.population.activities")
@@ -100,12 +103,11 @@ def execute(context):
         "is_last"
     ]]
 
-    df_activities.to_csv("%s/%sactivities.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
+    df_activities.to_parquet("%s/%sactivities.parquet" % (output_path, output_prefix), index=False)
 
     # Prepare trips
     df_trips = context.stage("synthesis.population.trips")
     df_locat = context.stage("synthesis.population.spatial.locations")
-
 
     df_trips["preceding_activity_index"] = df_trips["trip_index"]
     df_trips["following_activity_index"] = df_trips["trip_index"] + 1
@@ -116,8 +118,6 @@ def execute(context):
         "departure_time", "arrival_time", "mode",
         "preceding_purpose", "following_purpose"
     ]]
-
-    #df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
 
     # Prepare spatial data sets
     df_locations = context.stage("synthesis.population.spatial.locations")[[
@@ -188,13 +188,11 @@ def execute(context):
     df_spatial["mode"] = df_spatial["mode"].astype(str)
 
     df_spatial["crowfly_distance"] = df_spatial.geometry.length
-    df_trips = pd.merge(df_trips, df_spatial[["crowfly_distance", "person_id", "following_activity_index"]], how="left", 
+    df_trips = pd.merge(df_trips, df_spatial[["crowfly_distance", "person_id", "following_activity_index"]], how="left",
                         on=["person_id", "following_activity_index"])
     df_trips = df_trips.drop(columns = ["following_activity_index"])
-    df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
+    df_trips.to_parquet("%s/%strips.parquet" % (output_path, output_prefix), index=False)
 
     path = "%s/%strips.gpkg" % (output_path, output_prefix)
     df_spatial.to_file(path, driver = "GPKG")
     clean_gpkg(path)
-
-

@@ -90,37 +90,37 @@ def execute(context):
         content = content.replace(
             '</module>',
             """
-              <parameterset type="transportModeAssignment" >
-			        <param name="maxLinkCandidateDistance" value="120.0" />
-			        <param name="nLinkThreshold" value="6" />
-			        <param name="networkModes" value="rail,light_rail,train" />
-			        <param name="scheduleMode" value="rail" />
-			        <param name="strictLinkRule" value="false" />
-		        </parameterset>
-            
+                <parameterset type="transportModeAssignment" >
+                    <param name="maxLinkCandidateDistance" value="120.0" />
+                    <param name="nLinkThreshold" value="2" />
+                    <param name="networkModes" value="rail,light_rail,train" />
+                    <param name="scheduleMode" value="rail" />
+                    <param name="strictLinkRule" value="true" />
+                </parameterset>
+
                <parameterset type="transportModeAssignment" >
-			        <param name="maxLinkCandidateDistance" value="180.0" />
-			        <param name="nLinkThreshold" value="12" />
-			        <param name="networkModes" value="tram" />
-			        <param name="scheduleMode" value="tram" />
-			        <param name="strictLinkRule" value="false" />
-		        </parameterset>
+                    <param name="maxLinkCandidateDistance" value="180.0" />
+                    <param name="nLinkThreshold" value="2" />
+                    <param name="networkModes" value="tram" />
+                    <param name="scheduleMode" value="tram" />
+                    <param name="strictLinkRule" value="true" />
+                </parameterset>
 
-				<parameterset type="transportModeAssignment" >
-			        <param name="maxLinkCandidateDistance" value="180.0" />
-			        <param name="nLinkThreshold" value="12" />
-			        <param name="networkModes" value="light_rail,subway" />
-			        <param name="scheduleMode" value="subway" />
-			        <param name="strictLinkRule" value="false" />
-		        </parameterset>
+                <parameterset type="transportModeAssignment" >
+                    <param name="maxLinkCandidateDistance" value="180.0" />
+                    <param name="nLinkThreshold" value="2" />
+                    <param name="networkModes" value="light_rail,subway" />
+                    <param name="scheduleMode" value="subway" />
+                    <param name="strictLinkRule" value="true" />
+                </parameterset>
 
-				<parameterset type="transportModeAssignment" >
-			        <param name="maxLinkCandidateDistance" value="120.0" />
-			        <param name="nLinkThreshold" value="6" />
-			        <param name="networkModes" value="funicular" />
-			        <param name="scheduleMode" value="funicular" />
-			        <param name="strictLinkRule" value="true" />
-		        </parameterset>
+                <parameterset type="transportModeAssignment" >
+                    <param name="maxLinkCandidateDistance" value="120.0" />
+                    <param name="nLinkThreshold" value="6" />
+                    <param name="networkModes" value="funicular" />
+                    <param name="scheduleMode" value="funicular" />
+                    <param name="strictLinkRule" value="true" />
+                </parameterset>
             </module>
             """
         )

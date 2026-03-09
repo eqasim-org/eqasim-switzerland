@@ -16,7 +16,6 @@ import os
 def configure(context):
     context.config("data_path")
     context.config("output_path")
-
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.zones")
     context.stage("data.spatial.municipality_types")
@@ -116,10 +115,10 @@ def execute(context):
         "home_x", "home_y", "household_size_class", "number_of_cars_class", "number_of_bikes_class", "household_weight",
         "home_zone_id", "municipality_type", "sp_region", "population_density", "canton_id", "ovgk",
     ] + household_columns]
-
-    root = os.path.join(context.path(), "webmap_data")
+    out_root = context.config("output_path")
+    root = os.path.join(out_root, "webmap_data/microcensus")
     os.makedirs(root, exist_ok=True)
-    path = os.path.join(root, "households.csv")
-    out.to_csv(path, index=False)
+    path = os.path.join(root, "households.parquet")
+    out.to_parquet(path, index=False)
 
     return out

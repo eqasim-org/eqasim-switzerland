@@ -43,11 +43,11 @@ def execute(context):
     household_info = pd.merge(household_info, nb_adults, how = "outer", on = "household_id")
 
     household_composition_columns = ["N_children_under_3", "N_children_under_6", "N_children_under_12", "N_children_under_18", "N_adults"]
-
-    root = os.path.join(context.path(), "webmap_data")
+    out_root = context.config("output_path")
+    root = os.path.join(out_root, "webmap_data/microcensus")
     os.makedirs(root, exist_ok=True)
 
-    household_persons.to_csv(os.path.join(root, "household_persons.csv"), index=False)
-    household_info.to_csv(os.path.join(root, "household_info.csv"), index=False)
+    household_persons.to_parquet(os.path.join(root, "household_persons.parquet"), index=False)
+    household_info.to_parquet(os.path.join(root, "household_info.parquet"), index=False)
 
     return household_persons, household_info, household_composition_columns
