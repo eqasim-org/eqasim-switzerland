@@ -134,9 +134,7 @@ def modify_PCEs(transit_vehicles_input_path, transit_vehicles_output_path, scali
             
             pce_elem.set("pce", str(new_pce))
 
-    
-    doctype_str = '<!DOCTYPE vehicleDefinitions SYSTEM "http://www.matsim.org/files/dtd/vehicleDefinitions_v2.0.xsd">'
-    xml_bytes = etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="UTF-8", doctype=doctype_str)
+    xml_bytes = etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="UTF-8")
     with gzip.open(transit_vehicles_output_path, "wb") as f:
         f.write(xml_bytes)
 

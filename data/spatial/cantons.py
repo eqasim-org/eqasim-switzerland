@@ -47,7 +47,10 @@ def impute_sp_region(df):
 
 def process_canton_names(df, col='canton_name', out_col='canton_name_en'):
     def fix_and_ascii(s):
-        fixed = s.encode('latin1').decode('utf8')
+        try:
+            fixed = s.encode('latin1').decode('utf8')
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            fixed = s
 
         norm = unicodedata.normalize('NFKD', fixed)
         ascii_s = norm.encode('ascii', 'ignore').decode('ascii')
