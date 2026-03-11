@@ -14,7 +14,7 @@ def add_SBBPT_module(context):
     root   = tree.getroot()
 
     # Create new module
-    module = etree.Element("module", name="SBBPt")
+    module = etree.Element("module", name="SBBTransit")
 
     etree.SubElement(module, "param", name="deterministicServiceModes",
                     value="rail,subway,ferry,tram,funicular,cable-car,gondola,other")
