@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-
+import pyproj
 import data.microcensus.income
 import data.utils
 
@@ -139,6 +139,15 @@ def execute(context):
 
     columns.append("employment_status")
 
+    # work location
+    coords = df_mz_persons[["A_X", "A_Y"]].values
+    transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:2056")
+    x, y = transformer.transform(coords[:, 1], coords[:, 0])
+    df_mz_persons.loc[:, "work_x"] = x
+    df_mz_persons.loc[:, "work_y"] = y
+
+    columns.extend(["work_x", "work_y"])
+
     # Parking
     df_mz_persons["parking_work"] = "unknown"
     df_mz_persons.loc[df_mz_persons["f41300"] == 1, "parking_work"] = "free"
@@ -180,6 +189,8 @@ def execute(context):
     df_mz_persons = pd.merge(df_mz_persons, df_mz_households)
     df_mz_persons = data.microcensus.income.impute(df_mz_persons)
 
-    initial_size = len(df_mz_persons)
+    # commute distance
+    df_mz_persons["work_commute_distance"] = np.sqrt((df_mz_persons["work_x"] - df_mz_persons["home_x"]) ** 2 +
+                                                    (df_mz_persons["work_y"] - df_mz_persons["home_y"]) ** 2)    
 
     return df_mz_persons
