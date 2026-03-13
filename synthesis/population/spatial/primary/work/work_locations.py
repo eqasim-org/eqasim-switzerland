@@ -2,32 +2,25 @@ import numpy as np
 import pandas as pd
 from itertools import chain, zip_longest
 import data.spatial.utils as spatial_utils
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.statent.statent")
     context.stage("data.spatial.zones")
     context.stage("data.spatial.zone_shapes")
-    context.stage("synthesis.population.enriched")
-    context.stage("data.microcensus.commute")
+    context.stage("synthesis.population.enriched")    
     context.stage("data.od.matrix")
     context.stage("data.od.distances")
-
+    context.stage("synthesis.population.spatial.primary.work.work_remotly")
     if context.config("include_cross_border"):
         context.stage("data.cross_border.destinations")
 
     context.config("random_seed")
     context.config("input_downsampling")
 
-# Algorithm:
-# 1. get the home location
-# 2. from the od matrices, get the probability that the agent work in each zone, based on their residence zone and mode.
-# 3. sample destintion zones
-# 3. give to each company a weight, based on the number of employees.
-# 4. estimate a probability based on the companies' distance to agent's home and the agent's commute distance
-# 5. get the joint probability by multipling the weight and the estimated probability
-# 6. sample one company based on that probability for each agent (sampling is done without replacement, each time a company
-# is selected, its weight decreases)
-# 7. special case (heuristics) for very short commute distances
+
 
 STANDARD_DEVIATION_DISTANCE = 150  # meters (radius of 450 m for 99.7% of distribution)
 
@@ -35,7 +28,7 @@ def get_distance_weight(dx):
     # Gaussian around 0 with adaptive std for numerical stability
     std = max(STANDARD_DEVIATION_DISTANCE, float(np.min(dx)) / 2.0 if dx.size else STANDARD_DEVIATION_DISTANCE)
     coef = 1.0 / (std * np.sqrt(2.0 * np.pi))
-    return coef * np.exp(-0.5 * (dx / std) ** 2)
+    return np.maximum(coef * np.exp(-0.5 * (dx / std) ** 2), 1e-3)
 
 
 def multinomial_sample(n, probs):
@@ -71,26 +64,23 @@ def multinomial_sample(n, probs):
 
     return counts
 
-
-def sort_group(group):
-    # Sort distances ascending
-    return group.sort_values('commute_home_distance').reset_index(drop=True)
-
-
 def execute(context):
+    logger.info("\t Assigning work locations to agents based on OD matrices and company data...")
     # Number of real persons represented by one simulated agent
     persons_per_agent = 1 / context.config("input_downsampling")
 
     # Persons with home location and zone
-    persons = context.stage("synthesis.population.enriched")[["person_id", "mz_person_id", "home_zone_id", "home_x", "home_y"]]
+    persons = context.stage("synthesis.population.enriched")[["person_id", "household_id", "home_zone_id", "home_x", "home_y", "employed"]]
 
-    # Microcensus commute (work)
-    commute = context.stage("data.microcensus.commute")["work"][["person_id", "commute_mode", "commute_home_distance"]]
-    commute = commute.rename(columns={"person_id": "mz_person_id"})
-    
-    # Merge commute info
-    df = pd.merge(persons, commute, on="mz_person_id", how="inner")
-    df = df.groupby('home_zone_id', group_keys=False).apply(sort_group).reset_index(drop=True)
+    # Removed unemployed agents
+    persons = persons[persons["employed"]==1].reset_index(drop=True)
+
+    # Remove those working remotely (they will be assigned a work location later, which is their household_id)
+    remote_working = context.stage("synthesis.population.spatial.primary.work.work_remotly")
+    remote_working = remote_working[remote_working["work_remotly"]==1]
+    work_remotly = persons["person_id"].isin(remote_working.person_id.unique())    
+
+    df = persons[~work_remotly].reset_index(drop=True)
 
     # Zones and index mapping
     df_zones = context.stage("data.spatial.zones").copy()
@@ -105,6 +95,7 @@ def execute(context):
     df_statent = df_statent.dropna(subset=["x", "y", "number_employees", "zone_id"])
 
     if context.config("include_cross_border"):
+        logger.info("\t Adjusting company employee counts to account for cross-border commuters...")
         destinations_cb         = context.stage("data.cross_border.destinations")
         destinations_cb_commute = destinations_cb[destinations_cb["trip_purpose"]=="work"]
 
@@ -115,16 +106,17 @@ def execute(context):
         df_statent = df_statent.merge(nb_empl_cb, on = "enterprise_id", how="left")
         df_statent["nb_employees_crossborder"] = df_statent["nb_employees_crossborder"].fillna(0).astype(int)
 
-        df_statent["number_employees"] = (df_statent["number_employees"] - df_statent["nb_employees_crossborder"]).clip(lower = 0)
+        df_statent["number_employees"] = (df_statent["number_employees"] - df_statent["nb_employees_crossborder"]*persons_per_agent).clip(lower = 0)
 
-        del df_statent["nb_employees_crossborder"]
+        del df_statent["nb_employees_crossborder"], destinations_cb, destinations_cb_commute, nb_empl_cb
 
     # Convert to arrays for speed
+    logger.info("\t Converting data to numpy arrays for efficient processing...")
     comp_x = df_statent["x"].to_numpy(dtype=float)
     comp_y = df_statent["y"].to_numpy(dtype=float)
     comp_emp = df_statent["number_employees"].to_numpy(dtype=float)
     comp_eid = df_statent["enterprise_id"].to_numpy()
-    comp_zone_ids = df_statent["zone_id"].to_numpy()
+    comp_zone_ids = df_statent["zone_id"].to_numpy()    
 
     # Map company zone_id -> matrix index; -1 if unknown (filtered out)
     comp_zone_idx = np.array([zone_index.get(z, -1) for z in comp_zone_ids], dtype=int)
@@ -134,6 +126,8 @@ def execute(context):
     comp_emp = comp_emp[valid_comp_mask]
     comp_eid = comp_eid[valid_comp_mask]
     comp_zone_idx = comp_zone_idx[valid_comp_mask]
+    comp_zone_ids = comp_zone_ids[valid_comp_mask]    
+    comp_min_capacity = comp_emp * 1e-3
 
     # RNG
     rng = np.random.RandomState(context.config("random_seed"))
@@ -141,7 +135,7 @@ def execute(context):
     # Helper to get source mode
     def normalize_mode(mode):
         return "car" if mode == "car_passenger" else mode
-    
+
     # Build zone -> company index list
     zone_to_company_idx = [[] for _ in range(len(zone_ids))]
     for i, zi in enumerate(comp_zone_idx):
@@ -163,7 +157,7 @@ def execute(context):
                         axis=0)
         destination_zones = multinomial_sample(n_commuters, zone_probs / zone_probs.sum())
         num_destination_zones_per_zone[origin_zone] = {zone_ids[i]: count for i, count in enumerate(destination_zones) if count > 0}
-            
+        
     # now we prepare array in order to use numPy for work assignment, it is faster than pandas dataframe manipulation
     # Prepare output arrays
     n = len(df)
@@ -175,56 +169,32 @@ def execute(context):
     p_home_zone = df["home_zone_id"].to_numpy()
     p_home_x = df["home_x"].to_numpy(dtype=float)
     p_home_y = df["home_y"].to_numpy(dtype=float)
-    # p_mode = df["commute_mode"].to_numpy()
-    p_target_dist = df["commute_home_distance"].to_numpy(dtype=float)
 
     # starting assignement
-    no_comp = []
-    include_origin_zone= False
-    DISTANCE_LIMIT = 1000 #meters
-    with context.progress(total=n, label="Assigning work locations (OD+distance)") as prog:
+    no_comp = set()
+    with context.progress(total=n, label="Assigning work locations (OD+distance)") as prog:    
         for idx in range(n):
             # get origin zone index
             origin_zone = p_home_zone[idx]
             origin_idx = zone_index.get(origin_zone, None)
-
-            # get tarket distance
-            target_distance = p_target_dist[idx]
             
-            # Select top zones to reach cumulative threshold
+            # Select zones
             candidate_zones = [z for z, c in num_destination_zones_per_zone[origin_zone].items() if c > 0]
-            candidate_zone_idx = [zone_index[z] for z in candidate_zones]
-
-            if target_distance<DISTANCE_LIMIT:
-                if origin_zone not in candidate_zones:
-                    candidate_zone_idx.append(origin_idx)
-                    include_origin_zone = True
+            candidate_zones_idx = [zone_index[z] for z in candidate_zones]
                     
             # Gather candidate companies in those zones
-            cand_lists = [zone_to_company_idx[zi] for zi in candidate_zone_idx]            
+            cand_lists = [zone_to_company_idx[zi] for zi in candidate_zones_idx]            
             cand_idx = np.concatenate(cand_lists)
             
             if len(cand_idx)==0:
-                # If no company is found, consider all companies, then let the distance decides
-                cand_idx = np.arange(len(comp_emp))
-                no_comp.append(candidate_zone_idx)
+                # If no company is found, consider only the residence zone (if it has companies)                
+                cand_lists = zone_to_company_idx[zone_index[origin_zone]]  
+                if len(cand_idx)==0:
+                    cand_idx = np.arange(len(comp_emp))
+                    no_comp.update(candidate_zones_idx)
             
-            # Compute weights
-            dx = comp_x[cand_idx] - p_home_x[idx]
-            dy = comp_y[cand_idx] - p_home_y[idx]
-            d = np.hypot(dx, dy)
-
-            ## Compute distance weights
-            dist_weight = get_distance_weight(np.abs(d - target_distance))
-
             ## Company weights
-            emp = comp_emp[cand_idx]
-
-            ## Final probabilities
-            weights = dist_weight * emp
-
-            if include_origin_zone:
-                weights[comp_zone_idx[cand_idx]==origin_idx] /= 60 # because are not suppose to be here, just included them in case the agent doesn't find any other place
+            weights = comp_emp[cand_idx]
 
             sumw = weights.sum()
             weights = weights / sumw
@@ -238,21 +208,32 @@ def execute(context):
             dest_zone = comp_zone_ids[sel]
             if dest_zone in num_destination_zones_per_zone[origin_zone]:
                 num_destination_zones_per_zone[origin_zone][dest_zone] -= 1
-            comp_emp[sel] = max(comp_emp[sel] - persons_per_agent, 0.1)  # reduce available capacity, but keep non-zero to avoid issues
+            comp_emp[sel] = max(comp_emp[sel] - persons_per_agent, comp_min_capacity[sel])  # reduce available capacity, but keep non-zero to avoid issues    
 
-            include_origin_zone = False
             prog.update()                
+
+    if len(no_comp):
+        logger.warning(f"There are {len(no_comp)} zones without companies. These are tese zones:")
+        logger.warning(no_comp)
 
     # Build result frame
     out = df[["person_id"]].copy()
     out["x"] = work_x
     out["y"] = work_y
-    out["destination_id"] = work_loc_id
+    out["destination_id"] = work_loc_id    
+    out["work_remotly"] = False
+
+    # concate agents working remotely (their work location is their household_id)
+    remote_agents = persons[work_remotly][["person_id", "household_id", "home_x", "home_y"]].copy()
+    remote_agents = remote_agents.rename(columns={"household_id": "destination_id", "home_x": "x", "home_y": "y"})
+    remote_agents["work_remotly"] = True
+    
+    out = pd.concat([out, remote_agents], ignore_index=True)
 
     # Ensure no missing coordinates
     assert np.isfinite(out["x"]).all() and np.isfinite(out["y"]).all()
 
     out = spatial_utils.to_gpd(context, out, coord_type="work")
-    return out[["person_id", "destination_id", "geometry"]]
+    return out[["person_id", "destination_id", "work_remotly", "geometry"]] 
 
 

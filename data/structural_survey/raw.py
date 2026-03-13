@@ -42,6 +42,12 @@ def execute(context):
                 "CURRACTIVITY_STUDENT": int,
                 "NATIONALITYCAT": int,
                 "ONGOINGEDUCATION": int,
+                "DISTTOWORK_AIR": float,
+                "DISTTOSCHOOL_AIR":float,                       
+                "FREQPERWEEK_TOWORK": float,
+                "COMMUTERTOWORK_DETAIL": int,                
+                "STARTWORK": int,
+                "HIGHESTCOMPLEDU": int
             }
 
             renames = {
@@ -64,8 +70,13 @@ def execute(context):
                 "CURRACTIVITY_STUDENT": "is_student",
                 "NATIONALITYCAT" : "nationality",
                 "ONGOINGEDUCATION" : "current_education",
-            }
-
+                "DISTTOWORK_AIR": "crowfly_distance_to_work",
+                "DISTTOSCHOOL_AIR": "crowfly_distance_to_school",
+                "FREQPERWEEK_TOWORK": "freq_per_week",
+                "COMMUTERTOWORK_DETAIL": "commute_to_work", #0: no displacement or no fixed work location, 2: in the same commune, ...6: abroad
+                "STARTWORK": "start_work", #1: a domicile, 2: different locations, 3: employer adress, >4: other adresses
+                "HIGHESTCOMPLEDU": "highest_completed_education", #1: None, ... 11: Bachelor, 12: Master, 13: Doctorate                   
+            }            
             data_frames.append(data.utils.read_csv(context, f, fields, renames, total=total, sep=sep))
 
     return pd.concat(data_frames, sort=True)

@@ -15,13 +15,17 @@ def execute(context):
     df_od = context.stage("data.structural_survey.structural_survey")[[
         "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
         "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
-        "mode", "weight"
+        "mode", "weight", "crowfly_distance_to_work"
     ]]
 
     # There are some people for which we don't have a valid OD pair
     before_count = len(df_od)
     df_od = df_od[~np.isnan(df_od["home_zone_id"])]
     df_od = df_od[~np.isnan(df_od["work_zone_id"])]
+    # I add an additional filter here, commuters with 0 distance are removed. First, there are the onces producing negative values everywhere, 
+    # and most of them are working from homes or others, start_work<=1
+    # and we do not consider people working remotly, it would just increase the inner zone probability
+    df_od = df_od[(df_od["crowfly_distance_to_work"] > 0.0) | (df_od["start_work"] > 1)]
 
     unknown_count = before_count - len(df_od)
     print("Removed %d (%.2f%%) observations from structural survey for which no work or home location is known" % (unknown_count, 100 * unknown_count / before_count))

@@ -16,6 +16,7 @@ def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
 def configure(context):
     context.stage("data.microcensus.21.persons")
     context.stage("synthesis.population.models.employment")
+    context.stage("data.constants")
 
 
 def execute(context):
@@ -31,21 +32,11 @@ def execute(context):
     survey_df = context.stage("data.microcensus.21.persons")
     pop_df = context.stage("synthesis.population.models.employment")
     survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income
+    c = context.stage("data.constants")
 
     # Map population job_position to survey coding
-    mapping_pop_to_survey = {
-        11: 11,
-        12: 12,
-        20: 20,
-        31: 11,
-        32: 12,
-        41: 31,
-        42: 32,
-        43: 33,
-        50: 40,
-        60: 50,
-        70: 60,
-    }
+    pop_df['survey_job_position'] = pop_df['job_position'].values
+    mapping_pop_to_survey = c.MAP_JOB_POSITIONS_MZ_TO_SURVEY    
     pop_df['job_position'] = pop_df['job_position'].map(mapping_pop_to_survey)
 
     # Boolean mask: who is an adult (>= 18) – used for N_adults
@@ -470,5 +461,7 @@ def execute(context):
         [['income_class', 'share_true', 'share_pred', 'share_diff']]
         .to_string(index=False)
     )
-    pop_df = pop_df.rename(columns={"HH_INCOME_CLASS_draw": "income_class"})
+    
+    pop_df = pop_df.drop(columns=['job_position'])
+    pop_df = pop_df.rename(columns={"HH_INCOME_CLASS_draw": "income_class", "survey_job_position":"job_position"})
     return pop_df

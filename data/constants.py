@@ -60,6 +60,21 @@ class Constants:
         
         self.LOW_INCOME_THRESHOLD = 3000  # CHF per month per equivalent adult (20% quartile of Mz income distribution)
 
+        # Models related constants
+        self.MAP_JOB_POSITIONS_MZ_TO_SURVEY = {
+                                11: 11,
+                                12: 12,
+                                20: 20,
+                                31: 11,
+                                32: 12,
+                                41: 31,
+                                42: 32,
+                                43: 33,
+                                50: 40,
+                                60: 50,
+                                70: 60,
+                            }
+
 def configure(context):
     context.config("census")
 
