@@ -33,6 +33,7 @@ def configure(context):
     context.stage("data.microcensus.21.persons")
     context.stage("data.microcensus.21.household_persons")
     context.stage("synthesis.population.models.drlicense")
+    context.stage("synthesis.population.spatial.primary.work.work_locations")
 
 def execute(context):
     # -------------------------------------------------------------------

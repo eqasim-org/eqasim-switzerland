@@ -7,9 +7,8 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.structural_survey.structural_survey")
-    context.stage("synthesis.population.enriched")
     context.stage("synthesis.population.models.employment")
-    context.config("random_seed")    
+    context.config("random_seed")
 
 
 def _add_age_bin(df):
@@ -68,14 +67,10 @@ def execute(context):
         "weight", "nationality", "start_work", "canton_id"
     ]].copy()
 
-    df_population = context.stage("synthesis.population.enriched")[[
-        "person_id", "sex", "age", "home_zone_id", "employment_status",
+    df_population = context.stage("synthesis.population.models.employment")[[
+        "person_id", "sex", "age", "home_zone_id",
         "employed", "nationality", "canton_id", "job_position"
-    ]].copy()        
-
-    # we get job_position from employment because it is better
-    # emp = context.stage("synthesis.population.models.employment")[["person_id","job_position"]]
-    # df_population = df_population.merge(emp, on="person_id", how="left")
+    ]].copy()
 
     # Prepare survey observations
     df_survey = df_survey[df_survey["employed"] == 1].copy()

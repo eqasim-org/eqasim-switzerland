@@ -10,7 +10,7 @@ def configure(context):
     context.stage("data.statent.statent")
     context.stage("data.spatial.zones")
     context.stage("data.spatial.zone_shapes")
-    context.stage("synthesis.population.enriched")    
+    context.stage("synthesis.population.models.employment")
     context.stage("data.od.matrix")
     context.stage("data.od.distances")
     context.stage("synthesis.population.spatial.primary.work.work_remotly")
@@ -19,16 +19,6 @@ def configure(context):
 
     context.config("random_seed")
     context.config("input_downsampling")
-
-
-
-STANDARD_DEVIATION_DISTANCE = 150  # meters (radius of 450 m for 99.7% of distribution)
-
-def get_distance_weight(dx):
-    # Gaussian around 0 with adaptive std for numerical stability
-    std = max(STANDARD_DEVIATION_DISTANCE, float(np.min(dx)) / 2.0 if dx.size else STANDARD_DEVIATION_DISTANCE)
-    coef = 1.0 / (std * np.sqrt(2.0 * np.pi))
-    return np.maximum(coef * np.exp(-0.5 * (dx / std) ** 2), 1e-3)
 
 
 def multinomial_sample(n, probs):
@@ -70,7 +60,7 @@ def execute(context):
     persons_per_agent = 1 / context.config("input_downsampling")
 
     # Persons with home location and zone
-    persons = context.stage("synthesis.population.enriched")[["person_id", "household_id", "home_zone_id", "home_x", "home_y", "employed"]]
+    persons = context.stage("synthesis.population.models.employment")[["person_id", "household_id", "home_zone_id", "home_x", "home_y", "employed"]]
 
     # Removed unemployed agents
     persons = persons[persons["employed"]==1].reset_index(drop=True)
@@ -217,7 +207,7 @@ def execute(context):
         logger.warning(no_comp)
 
     # Build result frame
-    out = df[["person_id"]].copy()
+    out = df[["person_id","home_x", "home_y"]].copy()
     out["x"] = work_x
     out["y"] = work_y
     out["destination_id"] = work_loc_id    
@@ -225,15 +215,20 @@ def execute(context):
 
     # concate agents working remotely (their work location is their household_id)
     remote_agents = persons[work_remotly][["person_id", "household_id", "home_x", "home_y"]].copy()
-    remote_agents = remote_agents.rename(columns={"household_id": "destination_id", "home_x": "x", "home_y": "y"})
+    remote_agents = remote_agents.rename(columns={"household_id": "destination_id"})
+    remote_agents["x"] = remote_agents["home_x"]
+    remote_agents["y"] = remote_agents["home_y"]
     remote_agents["work_remotly"] = True
     
     out = pd.concat([out, remote_agents], ignore_index=True)
+
+    # compute commute distance
+    out["commute_distance"] = np.sqrt((out["home_x"] - out["x"])**2 + (out["home_y"] - out["y"])**2)
 
     # Ensure no missing coordinates
     assert np.isfinite(out["x"]).all() and np.isfinite(out["y"]).all()
 
     out = spatial_utils.to_gpd(context, out, coord_type="work")
-    return out[["person_id", "destination_id", "work_remotly", "geometry"]] 
+    return out[["person_id", "destination_id", "work_remotly", "commute_distance", "geometry"]] 
 
 
