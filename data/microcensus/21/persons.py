@@ -190,7 +190,11 @@ def execute(context):
     df_mz_persons = data.microcensus.income.impute(df_mz_persons)
 
     # commute distance
-    df_mz_persons["work_commute_distance"] = np.sqrt((df_mz_persons["work_x"] - df_mz_persons["home_x"]) ** 2 +
-                                                    (df_mz_persons["work_y"] - df_mz_persons["home_y"]) ** 2)    
-
+    df_mz_persons["work_commute_distance"] = 0.0
+    sel = df_mz_persons["employed"]
+    df_mz_persons.loc[sel, "work_commute_distance"] = np.sqrt(
+        (df_mz_persons.loc[sel, "work_x"] - df_mz_persons.loc[sel, "home_x"]) ** 2 +
+        (df_mz_persons.loc[sel, "work_y"] - df_mz_persons.loc[sel, "home_y"]) ** 2
+    ).fillna(0.0).replace([np.inf, -np.inf], 0.0)
+    
     return df_mz_persons

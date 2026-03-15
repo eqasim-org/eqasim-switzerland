@@ -15,7 +15,7 @@ def execute(context):
     df_od = context.stage("data.structural_survey.structural_survey")[[
         "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
         "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
-        "mode", "weight", "crowfly_distance_to_work"
+        "mode", "weight", "crowfly_distance_to_work", "start_work"
     ]]
 
     # There are some people for which we don't have a valid OD pair
