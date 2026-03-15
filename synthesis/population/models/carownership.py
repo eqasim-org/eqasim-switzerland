@@ -35,7 +35,6 @@ def configure(context):
     context.stage("data.microcensus.21.persons")
     context.stage("data.microcensus.21.household_persons")
     context.stage("synthesis.population.models.drlicense")
-    context.stage("synthesis.population.spatial.primary.work.work_locations")
 
 def execute(context):
     # -------------------------------------------------------------------
@@ -127,7 +126,7 @@ def execute(context):
     )
 
     # adults age 30..64 (inclusive) in pop
-    mask_30_64 = pop_df["age"].notna() & pop_df["age"].between(30, 64, inclusive="both")
+    mask_30_64 = pop_df["age"].notna() & pop_df["age"].between(25, 60, inclusive="both")
     pop_df["N_adults_30_64"] = (
         mask_30_64.astype(int)
         .groupby(pop_df["household_id"])

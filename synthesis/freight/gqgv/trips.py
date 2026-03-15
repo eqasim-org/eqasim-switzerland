@@ -4,6 +4,7 @@ from sklearn.neighbors import KDTree
 from shapely import get_coordinates
 import logging
 logger = logging.getLogger("synpp")
+
 def configure(context):
     context.stage("data.freight.gqgv.od")
     context.stage("data.spatial.zones")

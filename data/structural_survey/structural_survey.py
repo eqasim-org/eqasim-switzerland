@@ -11,7 +11,7 @@ def configure(context):
     context.stage("data.structural_survey.raw")
     context.stage("data.spatial.municipality_types")
     context.stage("data.statpop.statpop")
-    context.stage("data.statent.statent")
+    # context.stage("data.statent.statent")
     
     context.stage("data.spatial.countries")
     context.stage("data.spatial.municipalities")

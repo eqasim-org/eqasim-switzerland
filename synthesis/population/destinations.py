@@ -6,7 +6,7 @@ import data.spatial.ovgk
 def configure(context):
     context.stage("data.statent.statent")
     context.stage("data.spatial.ovgk")
-
+    context.stage("synthesis.population.spatial.primary.work.remote_locations", alias="remote_work_locations")
 
 def execute(context):
     df = pd.DataFrame(context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga"]],
@@ -37,6 +37,11 @@ def execute(context):
     df_ovgk = context.stage("data.spatial.ovgk")
     df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="facility")
     df = df.merge(df_spatial[["destination_id", "ovgk"]], how="left", on="destination_id")
+
+    # add remote work locations
+    df_remote_work = context.stage("remote_work_locations")
+    df_remote_work["destination_id"] = df_remote_work["destination_id"].astype(df["destination_id"].dtype)
+    df = pd.concat([df, df_remote_work], ignore_index=True)
 
     return df[["destination_id", "destination_x", "destination_y",
                "offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other",
