@@ -68,7 +68,7 @@ def execute(context):
     ]].copy()
 
     df_population = context.stage("synthesis.population.models.employment")[[
-        "person_id", "sex", "age", "home_zone_id","home_municipality_id"
+        "person_id", "sex", "age", "home_zone_id","home_municipality_id",
         "employed", "nationality", "canton_id", "job_position"
     ]].copy()
 
