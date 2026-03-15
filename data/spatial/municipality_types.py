@@ -2,7 +2,9 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import KDTree
+import logging
 
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -46,7 +48,7 @@ def execute(context):
     df_missing.crs = df_municipalities.crs
     df_missing = df_missing[["municipality_id", "geometry"]]
 
-    print("Imputing %d spatial types by distance..." % len(df_missing))
+    logger.info("Imputing %d spatial types by distance..." % len(df_missing))
     coordinates = np.vstack([df_existing["geometry"].centroid.x, df_existing["geometry"].centroid.y]).T
     kd_tree = KDTree(coordinates)
 
@@ -65,7 +67,7 @@ def execute(context):
     df_mapping = pd.DataFrame(df_mapping[["municipality_id", "municipality_type", "imputed_municipality_type"]])
     df_mapping["municipality_type"] = df_mapping["municipality_type"].astype("category")
 
-    print(df_mapping)
+    logger.info(df_mapping)
 
     return df_mapping
 

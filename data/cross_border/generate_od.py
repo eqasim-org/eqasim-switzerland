@@ -4,6 +4,9 @@ from shapely.geometry import Point
 import geopandas as gpd
 import random
 from pathlib import Path
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -471,8 +474,7 @@ def execute(context):
         how="left"
     )
 
-    #missing = borders["scaling_factor"].isna().sum()
-    #print(f"Rows without scaling factor: {missing}")
+    #missing = borders["scaling_factor"].isna().sum()    
 
     borders["weight"] = (
         borders["weight"] *
@@ -550,9 +552,7 @@ def execute(context):
         df["exclude"]    = is_within_region.values
 
         excluded_ids = df.loc[df["exclude"], "cross_border_person_id"].unique()
-        df = df[~df["cross_border_person_id"].isin(excluded_ids)].copy()
-
-    print(len(df))
+        df = df[~df["cross_border_person_id"].isin(excluded_ids)].copy()    
              
 
     return df

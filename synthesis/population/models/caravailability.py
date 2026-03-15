@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from catboost import CatBoostClassifier
+import logging
 
+logger = logging.getLogger("synpp")
 
 # ---------------------------------------------------------
 # helper: stochastic draw from class probabilities (binary ok)
@@ -46,9 +48,10 @@ def configure(context):
     # Survey:
     context.stage("data.microcensus.21.persons")             # 1 row per household, with features + car_availability
     context.stage("data.microcensus.21.household_persons")   # multiple rows per household, with driving_license per member
-
     # Population:
     context.stage("synthesis.population.models.carownership")  # person-level population incl. number_of_cars_class (cars)
+    # commute distances
+    context.stage("synthesis.population.spatial.primary.work.work_locations")
 
 
 def execute(context):
@@ -69,6 +72,14 @@ def execute(context):
 
     hh_persons_df = context.stage("data.microcensus.21.household_persons")[0].copy()
     pop_df = context.stage("synthesis.population.models.carownership").copy()
+    
+    # add commute distance to the population
+    commute = context.stage("synthesis.population.spatial.primary.work.work_locations")[["person_id","commute_distance"]].rename(
+        columns={"commute_distance": "work_commute_distance"}
+    )
+    pop_df = pop_df.merge(commute, on="person_id", how="left")
+    pop_df["work_commute_distance"] = pop_df["work_commute_distance"].fillna(0.0) # those agents don't have a work location
+
 
     # -------------------------------------------------------------------
     # 1. KEY COLUMNS & REQUIRED FIELDS
@@ -102,7 +113,7 @@ def execute(context):
 
     # numeric safety casting
     for df in (persons_df, pop_df):
-        for col in ["household_size", "N_adults", "N_children_under_18"]:
+        for col in ["household_size", "N_adults", "N_children_under_18","work_commute_distance"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
 
@@ -271,6 +282,7 @@ def execute(context):
     num_cols = [
         "age", "age_sq",
         "cars_shortage",
+        "work_commute_distance"
     ]
 
     # -------------------------------------------------------------------
@@ -345,7 +357,7 @@ def execute(context):
 
     if (len(y) > 0) and (y.nunique() > 1) and (Xp.shape[0] > 0):
         ca_model.fit(Xs, y, sample_weight=w)
-        print("Fitted car availability model (scarce households; excluding single-adult deterministic cases) using:", CA_MODEL)
+        logger.info("Fitted car availability model (scarce households; excluding single-adult deterministic cases) using: %s", CA_MODEL)
 
         proba = ca_model.predict_proba(Xp)
         classes = getattr(ca_model, "classes_", np.array([0, 1])).astype("int64")
@@ -356,7 +368,7 @@ def execute(context):
         pop_df.loc[scarce_p, "car_avail_hat"] = hat
         pop_df.loc[scarce_p, "car_avail_draw"] = draw
     else:
-        print(
+        logger.info(
             "Skipped car availability model fit: not enough training signal "
             "(no eligible scarce cases in persons_df after exclusions, constant outcome, or no scarce cases in pop)."
         )
@@ -369,7 +381,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 11. DIAGNOSTICS (Survey weighted % vs Pop modeled %)
     # -------------------------------------------------------------------
-    print("\n================== DIAGNOSTICS (Survey vs Modeled Pop) ==================")
+    logger.info("\n================== DIAGNOSTICS (Survey vs Modeled Pop) ==================")
     pop_ycol = "car_avail_draw" if USE_DRAW else "car_avail_hat"
 
     # ensure key cols are string typed
@@ -422,7 +434,7 @@ def execute(context):
 
     overall_p = 100.0 * pop_df.loc[pop_mask, pop_ycol].mean() if pop_mask.sum() > 0 else np.nan
 
-    print(
+    logger.info(
         f"\n[OVERALL | age>=18] Survey weighted % car_avail=1: {overall_s:.2f} | "
         f"Pop modeled % car_avail=1: {overall_p:.2f} | Diff(pop-survey): {(overall_p - overall_s):.2f}"
     )
@@ -481,32 +493,32 @@ def execute(context):
 
     # AGE GROUP
     age_all = compare_pct("age_group", order=diag_age_labels)
-    print("\n[AGE GROUP | ALL] age_group | survey_weighted_pct_has | pop_pct_has")
-    print(age_all.to_string(index=False))
+    logger.info("\n[AGE GROUP | ALL] age_group | survey_weighted_pct_has | pop_pct_has")
+    logger.info(age_all.to_string(index=False))
 
     age_c = compare_pct("age_group", canton_id=DIAG_CANTON_ID, order=diag_age_labels)
-    print(f"\n[AGE GROUP | canton_id={DIAG_CANTON_ID}] age_group | survey_weighted_pct_has | pop_pct_has")
-    print(age_c.to_string(index=False))
+    logger.info(f"\n[AGE GROUP | canton_id={DIAG_CANTON_ID}] age_group | survey_weighted_pct_has | pop_pct_has")
+    logger.info(age_c.to_string(index=False))
 
     # SEX
     if "sex" in persons_df.columns and "sex" in pop_df.columns:
         sex_all = compare_pct("sex")
-        print("\n[SEX | ALL] sex | survey_weighted_pct_has | pop_pct_has")
-        print(sex_all.to_string(index=False))
+        logger.info("\n[SEX | ALL] sex | survey_weighted_pct_has | pop_pct_has")
+        logger.info(sex_all.to_string(index=False))
 
         sex_c = compare_pct("sex", canton_id=DIAG_CANTON_ID)
-        print(f"\n[SEX | canton_id={DIAG_CANTON_ID}] sex | survey_weighted_pct_has | pop_pct_has")
-        print(sex_c.to_string(index=False))
+        logger.info(f"\n[SEX | canton_id={DIAG_CANTON_ID}] sex | survey_weighted_pct_has | pop_pct_has")
+        logger.info(sex_c.to_string(index=False))
 
     # MUNICIPALITY TYPE
     if "municipality_type" in persons_df.columns and "municipality_type" in pop_df.columns:
         mun_all = compare_pct("municipality_type")
-        print("\n[MUNICIPALITY TYPE | ALL] municipality_type | survey_weighted_pct_has | pop_pct_has")
-        print(mun_all.to_string(index=False))
+        logger.info("\n[MUNICIPALITY TYPE | ALL] municipality_type | survey_weighted_pct_has | pop_pct_has")
+        logger.info(mun_all.to_string(index=False))
 
         mun_c = compare_pct("municipality_type", canton_id=DIAG_CANTON_ID)
-        print(f"\n[MUNICIPALITY TYPE | canton_id={DIAG_CANTON_ID}] municipality_type | survey_weighted_pct_has | pop_pct_has")
-        print(mun_c.to_string(index=False))
+        logger.info(f"\n[MUNICIPALITY TYPE | canton_id={DIAG_CANTON_ID}] municipality_type | survey_weighted_pct_has | pop_pct_has")
+        logger.info(mun_c.to_string(index=False))
 
     # N_CHILDREN_UNDER_18 exact
     child_all = compare_pct("N_children_under_18_exact")
@@ -520,8 +532,8 @@ def execute(context):
             by="N_children_under_18_exact",
             key=lambda s: s.map(_sort_key)
         )
-    print("\n[N_CHILDREN_UNDER_18 (exact) | ALL] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
-    print(child_all.to_string(index=False))
+    logger.info("\n[N_CHILDREN_UNDER_18 (exact) | ALL] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
+    logger.info(child_all.to_string(index=False))
 
     child_c = compare_pct("N_children_under_18_exact", canton_id=DIAG_CANTON_ID)
     if "N_children_under_18_exact" in child_c.columns:
@@ -529,8 +541,8 @@ def execute(context):
             by="N_children_under_18_exact",
             key=lambda s: s.map(_sort_key)
         )
-    print(f"\n[N_CHILDREN_UNDER_18 (exact) | canton_id={DIAG_CANTON_ID}] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
-    print(child_c.to_string(index=False))
+    logger.info(f"\n[N_CHILDREN_UNDER_18 (exact) | canton_id={DIAG_CANTON_ID}] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
+    logger.info(child_c.to_string(index=False))
 
     # Shortage bucket diagnostics
     pop_df["cars_shortage_bucket"] = pd.cut(
@@ -548,14 +560,14 @@ def execute(context):
     ).astype(str).fillna("Missing")
 
     shortage_all = compare_pct("cars_shortage_bucket", order=["0", "1", "2", "3-5", "6+", "Missing"])
-    print("\n[CARS SHORTAGE BUCKET | ALL] cars_shortage_bucket | survey_weighted_pct_has | pop_pct_has")
-    print(shortage_all.to_string(index=False))
+    logger.info("\n[CARS SHORTAGE BUCKET | ALL] cars_shortage_bucket | survey_weighted_pct_has | pop_pct_has")
+    logger.info(shortage_all.to_string(index=False))
 
     shortage_c = compare_pct("cars_shortage_bucket", canton_id=DIAG_CANTON_ID, order=["0", "1", "2", "3-5", "6+", "Missing"])
-    print(f"\n[CARS SHORTAGE BUCKET | canton_id={DIAG_CANTON_ID}] cars_shortage_bucket | survey_weighted_pct_has | pop_pct_has")
-    print(shortage_c.to_string(index=False))
+    logger.info(f"\n[CARS SHORTAGE BUCKET | canton_id={DIAG_CANTON_ID}] cars_shortage_bucket | survey_weighted_pct_has | pop_pct_has")
+    logger.info(shortage_c.to_string(index=False))
 
-    print("\n==========================================================================")
+    logger.info("\n==========================================================================")
 
     pop_df = pop_df.rename(columns={"car_avail_draw": "car_availability"})
     return pop_df

@@ -1,7 +1,8 @@
 import os
 import xml.etree.ElementTree as ET
 from xmldiff import main
-
+import logging
+logger = logging.getLogger("synpp")
 
 def scan_for_use_vdf(directory, item="use_vdf"):
     """
@@ -40,7 +41,7 @@ def scan_for_use_vdf(directory, item="use_vdf"):
                     if item in content:
                         matching_files.append(file_path)
                 except Exception as e:
-                    print(f"Error reading file {file_path}: {e}")
+                    logger.error(f"Error reading file {file_path}: {e}")
 
     return matching_files
 
@@ -52,16 +53,16 @@ if __name__ == "__main__":
     directory_to_scan = os.getcwd()
     item = "matsim.scenario.vehicles"
 
-    print(f"Scanning {directory_to_scan}")
-    print(f"Searching for '{item}'")
+    logger.info(f"Scanning {directory_to_scan}")
+    logger.info(f"Searching for '{item}'")
 
     # Get the list of files containing "use_vdf"
     files_with_use_vdf = scan_for_use_vdf(directory_to_scan, item)
     
     # Print the results
     if files_with_use_vdf:
-        print(f"Files containing '{item}':")
+        logger.info(f"Files containing '{item}':")
         for file in files_with_use_vdf:
-            print(file)
+            logger.info(file)
     else:
-        print("No files containing 'use_vdf' were found.")
+        logger.info("No files containing 'use_vdf' were found.")

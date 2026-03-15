@@ -3,7 +3,9 @@ import shapely.geometry as geo
 from shapely.ops import unary_union, polygonize
 from scipy.spatial import Delaunay
 import numpy as np
+import logging
 
+logger = logging.getLogger("synpp")
 def alpha_shape(points, alpha):
     if len(points) < 4:
         return None
@@ -72,7 +74,7 @@ def create_shapes(gtfs_networks, spatial_zones):
 
 def add_zpass_from_zones(gtfs_network):
 
-    print("Starting to create the Z-Pass network")
+    logger.info("Starting to create the Z-Pass network")
 
     awelle_zvv = {
         "ZVV": [116, 115, 114, 113, 112, 111, 110, 117, 118, 
@@ -141,6 +143,6 @@ def add_zpass_from_zones(gtfs_network):
             gtfs_network.loc[rows, "local network"] = gtfs_network.loc[rows, "local network"].apply(lambda x: list(set(x + [local_network_id])))
             gtfs_network.loc[rows, "zones"]         = gtfs_network.loc[rows, "zones"].apply(lambda x: ", ".join(dict.fromkeys(x.split(", ") + [new_zone_id])))
 
-        print(f"{netw_name} processed")
+        logger.info(f"{netw_name} processed")
 
     return gtfs_network

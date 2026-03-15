@@ -4,6 +4,9 @@ import geopandas as gpd
 import shapely.geometry as geo
 import os
 import numpy as np
+import logging
+
+logger = logging.getLogger("synpp")
 
 REQUIRED_SLOTS = [
     "agency", "stops", "routes", "trips", "stop_times"
@@ -28,7 +31,7 @@ def read_feed(path):
             for slot in available_slots:
                 if slot.endswith("agency.txt"):
                     prefix = slot.replace("agency.txt", "")
-                    print("Warning: GTFS files seem to be located in: %s" % prefix)
+                    logger.warning(f"GTFS files seem to be located in: {prefix}")
                     break
 
             if prefix is None:
@@ -41,16 +44,16 @@ def read_feed(path):
         if not "%scalendar.txt" % prefix in available_slots and not "%scalendar_dates.txt" % prefix in available_slots:
             raise RuntimeError("At least calendar.txt or calendar_dates.txt must be specified.")
 
-        print("Loading GTFS data from %s ..." % path)
+        logger.info(f"Loading GTFS data from {path} ...")
 
         for slot in REQUIRED_SLOTS + OPTIONAL_SLOTS:
             if "%s%s.txt" % (prefix, slot) in available_slots:
-                print("  Loading %s.txt ..." % slot)
+                logger.info(f"  Loading {slot}.txt ...")
 
                 with zip.open("%s%s.txt" % (prefix, slot)) as f:
                     feed[slot] = pd.read_csv(f, skipinitialspace = True)
             else:
-                print("  Not loading %s.txt" % slot)
+                logger.info(f"  Not loading {slot}.txt")
 
     # Some cleanup
 
@@ -61,15 +64,13 @@ def read_feed(path):
             final_count = len(feed[slot])
 
             if final_count != initial_count:
-                print("WARNING Removed %d/%d entries from %s with empty service_id" % (
-                    initial_count - final_count, initial_count, slot
-                ))
+                logger.warning(f"Removed {initial_count - final_count}/{initial_count} entries from {slot} with empty service_id")
 
     if "stops" in feed:
         df_stops = feed["stops"]
 
         if not "parent_station" in df_stops:
-            print("WARNING Missing parent_station in stops, setting to NaN")
+            logger.warning("Missing parent_station in stops, setting to NaN")
             df_stops["parent_station"] = np.nan
 
         df_stops["location_type"]  = df_stops["location_type"].fillna(0).astype(int)
@@ -83,7 +84,7 @@ def read_feed(path):
 
         f = df_transfers["min_transfer_time"].isna()
         if np.any(f):
-            print("WARNING NaN numbers for min_transfer_time in transfers")
+            logger.warning("NaN numbers for min_transfer_time in transfers")
             df_transfers = df_transfers[~f]
 
         df_transfers["min_transfer_time"] = df_transfers["min_transfer_time"].astype(int)
@@ -114,7 +115,7 @@ def read_feed(path):
     return feed
 
 def write_feed(feed, path):
-    print("Writing GTFS data to %s ..." % path)
+    logger.info(f"Writing GTFS data to {path} ...")
 
     if path.endswith(".zip"):
         with zipfile.ZipFile(path, "w") as zip:
@@ -122,7 +123,7 @@ def write_feed(feed, path):
                 if slot in feed:
                     if slot == "stops":
                         df_stops = feed[slot]
-                    print("  Writing %s.txt ..." % slot)
+                    logger.info(f"  Writing {slot}.txt ...")
 
                     # We cannot write directly to the file handle as it
                     # is binary, but pandas only writes in text mode.
@@ -138,7 +139,7 @@ def write_feed(feed, path):
         for slot in REQUIRED_SLOTS + OPTIONAL_SLOTS:
             if slot in feed:
                 with open("%s/%s.txt" % (path, slot), "w+", encoding="utf-8") as f:
-                    print("  Writing %s.txt ..." % slot)
+                    logger.info(f"  Writing {slot}.txt ...")
                     feed[slot].to_csv(f, index = None, lineterminator='\n')
 
 
@@ -148,7 +149,7 @@ def clean_feed(feed, crs = None):
     df_stops = feed["stops"]
 
     if np.count_nonzero(df_stops["location_type"] == 1) == 0:
-        print("Warning! Location types seem to be malformatted. Keeping all stops.")
+        logger.warning("Location types seem to be malformatted. Keeping all stops.")
         df_stations = df_stops.copy()
     else:
         df_stations = df_stops[df_stops["location_type"] == 1].copy()
@@ -161,19 +162,19 @@ def clean_feed(feed, crs = None):
     df_stations = gpd.GeoDataFrame(df_stations, crs = "EPSG:4326")
 
     if not crs is None:
-        print("Converting stops to custom CRS", crs)
+        logger.info(f"Converting stops to custom CRS {crs}")
         df_stations = df_stations.to_crs(crs)
     #elif not df_area.crs is None:
-    #    print("Converting stops to area CRS", df_area.crs)
+    #    logger.info(f"Converting stops to area CRS {df_area.crs}")
     #    df_stations = df_stations.to_crs(df_area.crs)
 
-    print("Filtering stations ...")
+    logger.info("Filtering stations ...")
     initial_count = len(df_stations)
 
     #df_stations = gpd.sjoin(df_stations, df_area, predicate = "within")
     final_count = len(df_stations)
 
-    print("Found %d/%d stations inside the specified area" % (final_count, initial_count))
+    logger.info(f"Found {final_count}/{initial_count} stations inside the specified area")
     inside_stations = df_stations["stop_id"]
 
     # 1) Remove stations that are not inside stations and not have a parent stop
@@ -280,7 +281,7 @@ def merge_feeds(feeds):
 def merge_two_feeds(first, second, suffix = "_merged"):
     feed = {}
 
-    print("Merging GTFS data ...")
+    logger.info("Merging GTFS data ...")
 
     first = copy_feed(first)
     second = copy_feed(second)
@@ -298,8 +299,7 @@ def merge_two_feeds(first, second, suffix = "_merged"):
                 collision["identifier"]].astype(str).unique())
 
             if len(duplicate_ids) > 0:
-                print("   Found %d duplicate identifiers in %s" % (
-                    len(duplicate_ids), collision["slot"]))
+                logger.info(f"   Found {len(duplicate_ids)} duplicate identifiers in {collision['slot']}")
 
                 replacement_ids = [str(id) + suffix for id in duplicate_ids]
 
@@ -347,6 +347,6 @@ def despace_stop_ids(feed, replacement = ":::"):
         if reference_slot in feed:
             feed[reference_slot][reference_field] = feed[reference_slot][reference_field].astype(str).replace(search_ids, replacement_ids)
 
-    print("De-spaced %d/%d stops" % (len(search_ids), len(df_stops)))
+    logger.info(f"De-spaced {len(search_ids)}/{len(df_stops)} stops")
 
     return feed

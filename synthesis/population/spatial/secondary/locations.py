@@ -7,7 +7,9 @@ from synthesis.population.spatial.secondary.components import CustomDistanceSamp
 from synthesis.population.spatial.secondary.problems import find_assignment_problems
 from synthesis.population.spatial.secondary.rda import AssignmentSolver, DiscretizationErrorObjective, \
     GravityChainSolver, AngularTailSolver, GeneralRelaxationSolver
+import logging
 
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.constants")
@@ -142,7 +144,7 @@ def execute(context):
     df_locations = pd.concat(df_locations).sort_values(by=["person_id", "trip_index"])
     df_convergence = pd.concat(df_convergence)
 
-    print("Success rate:", df_convergence["valid"].mean())
+    logger.info("Success rate: %f", df_convergence["valid"].mean())
 
     # df_locations.to_csv("/cluster/project/cmdp/asallard/analysis/Crossborder/MZ/secondary_destinations.csv", index=False)
 

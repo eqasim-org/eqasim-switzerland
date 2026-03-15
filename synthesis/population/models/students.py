@@ -4,7 +4,9 @@ import gc
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from joblib import Parallel, delayed
 from catboost import CatBoostClassifier
+import logging
 
+logger = logging.getLogger("synpp")
 def configure(context):
     context.config("data_path")
     context.stage("synthesis.population.models.income")
@@ -131,7 +133,7 @@ def execute(context):
     else:
         raise ValueError(f"Unknown STUDENT_MODEL={STUDENT_MODEL}, use 'gbm' or 'rf' or 'catboost'.")
 
-    print("Fitted global student model using:", STUDENT_MODEL)
+    logger.info(f"Fitted global student model using: {STUDENT_MODEL}")
 
     # =========================================================
     # 4. STOCHASTIC DRAW HELPER
@@ -156,7 +158,7 @@ def execute(context):
     n = len(pop_df)
     stu_out = np.empty(n, dtype=np.int64)
 
-    print(f"Predicting students in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
+    logger.info(f"Predicting students in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
 
     for start in range(0, n, CHUNK_SIZE):
         end = min(start + CHUNK_SIZE, n)
@@ -183,7 +185,7 @@ def execute(context):
         gc.collect()
 
         if (start // CHUNK_SIZE) % 20 == 0:
-            print(f"  ... processed {end:,}/{n:,}")
+            logger.info(f"  ... processed {end:,}/{n:,}")
 
     pop_df['STUDENT_draw'] = stu_out
 
@@ -191,8 +193,8 @@ def execute(context):
     pop_df = pop_df.rename(columns={"STUDENT_draw": "is_student"})
     pop_df.loc[pop_df['age'] < 15, 'is_student'] = 1
 
-    print("Final STUDENT distribution in population:")
-    print(pop_df['is_student'].value_counts(normalize=True))
+    logger.info("Final STUDENT distribution in population:")
+    logger.info(pop_df['is_student'].value_counts(normalize=True))
 
     # =========================================================
     # 6. DIAGNOSTIC: COMPARE STUDENT RATES BY AGE_BIN (SURVEY vs POP)
@@ -202,11 +204,11 @@ def execute(context):
         canton_key = str(CANTON_FOR_ANALYSIS)
         survey_diag = survey_df[survey_df['canton_id'] == canton_key]
         pop_diag    = pop_df[pop_df['canton_id'].astype(str) == canton_key]
-        print(f"\n[DIAGNOSTIC] Analysis restricted to canton_id = {canton_key}")
+        logger.info(f"\n[DIAGNOSTIC] Analysis restricted to canton_id = {canton_key}")
     else:
         survey_diag = survey_df
         pop_diag    = pop_df
-        print("\n[DIAGNOSTIC] Analysis for ALL cantons (global)")
+        logger.info("\n[DIAGNOSTIC] Analysis for ALL cantons (global)")
 
     def weighted_mean(x, w):
         return np.average(x, weights=w) if len(x) > 0 else np.nan
@@ -252,8 +254,8 @@ def execute(context):
         age_compare['share_student_pop'] - age_compare['share_student_survey']
     )
 
-    print("\nShare of students by age_bin (survey vs population):")
-    print(
+    logger.info("\nShare of students by age_bin (survey vs population):")
+    logger.info(
         age_compare
         .sort_values('age_bin')
         .to_string(index=False)

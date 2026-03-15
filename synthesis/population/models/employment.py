@@ -4,7 +4,9 @@ from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassif
 import gc
 from catboost import CatBoostClassifier, Pool
 from sklearn.model_selection import train_test_split  # <-- ADD
+import logging
 
+logger = logging.getLogger("synpp")
 # ---------------------------------------------------------
 # helper: stochastic draw
 # ---------------------------------------------------------
@@ -45,8 +47,8 @@ def execute(context):
     survey_df['employed']     = survey_df['employed'].astype('int32')
     survey_df['job_position'] = survey_df['job_position'].astype('int32')
 
-    print("Survey employed weighted totals:")
-    print(survey_df.groupby("employed")["weight"].sum())
+    logger.info("Survey employed weighted totals:")
+    logger.info(survey_df.groupby("employed")["weight"].sum())
 
     # -------------------------------------------------------------------
     # 1. CLEAN + AGE BINS
@@ -146,10 +148,10 @@ def execute(context):
                 use_best_model=True,
                 early_stopping_rounds=EARLY_STOP_ROUNDS
             )
-            print(f"Fitted {model_name} activity model | best_iter={model.get_best_iteration()} | trees={model.tree_count_}")
+            logger.info(f"Fitted {model_name} activity model | best_iter={model.get_best_iteration()} | trees={model.tree_count_}")
         else:
             model.fit(X, y, sample_weight=w)
-            print(f"Fitted {model_name} activity model using:", ACTIVITY_MODEL)
+            logger.info(f"Fitted {model_name} activity model using: {ACTIVITY_MODEL}")
 
         return model
     # --- fit youth model (15-23)
@@ -179,7 +181,7 @@ def execute(context):
 
     job_model = build_model(JOB_MODEL)
     job_model.fit(X_job_survey, y_job, sample_weight=w_job)
-    print("Fitted global job model using:", JOB_MODEL)
+    logger.info(f"Fitted global job model using: {JOB_MODEL}")
 
     # -------------------------------------------------------------------
     # 5. POPULATION PREDICTION IN CHUNKS
@@ -192,7 +194,7 @@ def execute(context):
     classes_act_a = act_model_a.classes_.astype('int64')
     classes_job = job_model.classes_.astype('int64')
 
-    print(f"Predicting population in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
+    logger.info(f"Predicting population in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
     for start in range(0, n, CHUNK_SIZE):
         end = min(start + CHUNK_SIZE, n)
         chunk = pop_df.iloc[start:end]
@@ -251,7 +253,7 @@ def execute(context):
         gc.collect()
 
         if (start // CHUNK_SIZE) % 20 == 0:
-            print(f"  ... processed {end:,}/{n:,}")
+            logger.info(f"  ... processed {end:,}/{n:,}")
 
     pop_df['employed']     = employed_out
     pop_df['job_position'] = job_out
@@ -259,8 +261,8 @@ def execute(context):
     pop_df.loc[pop_df['age'] < 15, 'employed'] = 3
     pop_df.loc[pop_df['age'] < 15, 'job_position'] = 70
 
-    print("Final employed distribution:")
-    print(pop_df[pop_df['age'] > 14]['employed'].value_counts(normalize=True))
+    logger.info("Final employed distribution:")
+    logger.info(pop_df[pop_df['age'] > 14]['employed'].value_counts(normalize=True))
 
     # -------------------------------------------------------------------
     # 6. DIAGNOSTICS
@@ -268,12 +270,12 @@ def execute(context):
     if CANTON_FOR_ANALYSIS is None:
         survey_diag = survey_df
         pop_diag = pop_df
-        print("\n[DIAGNOSTIC] Employed-by-age analysis for ALL cantons (global)")
+        logger.info("\n[DIAGNOSTIC] Employed-by-age analysis for ALL cantons (global)")
     else:
         canton_key = str(CANTON_FOR_ANALYSIS)
         survey_diag = survey_df[survey_df['canton_id'] == canton_key]
         pop_diag = pop_df[pop_df['canton_id'].astype(str) == canton_key]
-        print(f"\n[DIAGNOSTIC] Employed-by-age analysis restricted to canton_id={canton_key}")
+        logger.info(f"\n[DIAGNOSTIC] Employed-by-age analysis restricted to canton_id={canton_key}")
 
     # (A) share employed==1 by age_bin (survey weighted vs pop unweighted)
     survey_rate = (
@@ -291,8 +293,8 @@ def execute(context):
     rate_compare = pd.merge(survey_rate, pop_rate, on='age_bin', how='outer').fillna(0.0)
     rate_compare['diff_pop_minus_survey'] = rate_compare['share_employed1_pop'] - rate_compare['share_employed1_survey']
 
-    print("\nShare employed==1 by age_bin (survey vs population):")
-    print(rate_compare.sort_values('age_bin').to_string(index=False))
+    logger.info("\nShare employed==1 by age_bin (survey vs population):")
+    logger.info(rate_compare.sort_values('age_bin').to_string(index=False))
 
     # (B) full distribution employed(1/2/3) by age_bin
     survey_mass = (
@@ -319,7 +321,7 @@ def execute(context):
     ).fillna(0.0)
     dist_compare['share_diff'] = dist_compare['share_pop'] - dist_compare['share_survey']
 
-    print("\nFull employed distribution by age_bin (survey vs population):")
-    print(dist_compare.sort_values(['age_bin', 'employed']).to_string(index=False))
+    logger.info("\nFull employed distribution by age_bin (survey vs population):")
+    logger.info(dist_compare.sort_values(['age_bin', 'employed']).to_string(index=False))
 
     return pop_df

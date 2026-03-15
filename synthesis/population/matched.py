@@ -5,7 +5,8 @@ import itertools
 import numba
 import numpy as np
 import pandas as pd
-
+import logging
+logger = logging.getLogger("synpp")
 """
 This stage attaches observations from the microcensus to the synthetic population sample.
 This is done by statistical matching. Here, a recursive version of statistical matching is implemented.
@@ -65,32 +66,32 @@ def print_matching_diagnostics(df_population_sub, df_source_sub, features, label
     """
     pop_n = len(df_population_sub)
     src_n = len(df_source_sub)
-    print(f"\n--- Matching diagnostics: {label} ---")
-    print(f"Population rows: {pop_n} | Source rows: {src_n}\n")
+    logger.info(f"\n--- Matching diagnostics: {label} ---")
+    logger.info(f"Population rows: {pop_n} | Source rows: {src_n}\n")
 
     if pop_n == 0:
-        print("No population rows in this segment.\n")
+        logger.info("No population rows in this segment.\n")
         return
     if src_n == 0:
-        print("No source rows in this segment.\n")
+        logger.info("No source rows in this segment.\n")
         return
 
     for feat in features:
         if feat not in df_population_sub.columns:
-            print(f"Feature '{feat}' not in population subset -> skipping diagnostics for this feature.\n")
+            logger.info(f"Feature '{feat}' not in population subset -> skipping diagnostics for this feature.\n")
             continue
         if feat not in df_source_sub.columns:
-            print(f"Feature '{feat}' not in source subset -> skipping diagnostics for this feature.\n")
+            logger.info(f"Feature '{feat}' not in source subset -> skipping diagnostics for this feature.\n")
             continue
 
         out = compare_feature_distribution(df_population_sub, df_source_sub, feat, weight_col=weight_col)
         tvd = 0.5 * out["abs_diff"].sum()  # Total Variation Distance
         max_abs = out["abs_diff"].max() if len(out) else 0.0
 
-        print(f"Feature '{feat}': TVD={tvd:.4f} | max_abs_diff={max_abs:.4f}")
+        logger.info(f"Feature '{feat}': TVD={tvd:.4f} | max_abs_diff={max_abs:.4f}")
         show = out[[feat, "share_population", "share_source_weighted", "diff_pop_minus_source"]].head(top_n)
-        print(show.to_string(index=False))
-        print("")
+        logger.info("\n" + show.to_string(index=False))
+        logger.info("")
 
 
 @numba.jit(nopython=True, parallel=True)
@@ -217,7 +218,7 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
 
         share_of_matched_agents = round(len(df_matching) / initial_nb_of_agents * 100,2) + percentage_matched
         
-        print(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
+        logger.info(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
         
         return df_matching, assigned_levels
 
@@ -234,7 +235,7 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
 
         share_of_matched_agents = len(df_matching_on_mandatory) / initial_nb_of_agents * 100 + percentage_matched
 
-        print(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
+        logger.info(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
         
         matching_the_missing, levels = statistical_matching(progress, df_source, source_identifier, weight, df_not_matching_on_mandatory, target_identifier, columns, mandatory_columns, random_seed, next_minimum_observations, share_of_matched_agents, initial_nb_of_agents)
         
@@ -278,7 +279,7 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     })
 
     for count in range(len(columns) + 1):
-        print("%d matched levels:" % count, np.count_nonzero(levels >= count),
+        logger.info("%d matched levels:" % count, np.count_nonzero(levels >= count),
               "%.2f%%" % (100 * np.count_nonzero(levels >= count) / len(df_target),))
         
     # Remove and track unmatchable households (i.e. head of household)
@@ -302,10 +303,10 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
         removed_households_count = sum(unmatchable_household_selector)
         removed_persons_count    = sum(unmatchable_person_selector)
 
-        print("Unmatchable heads of household: ", removed_households_count)
-        print("  Removed households: ", removed_households_count)
-        print("  Removed persons: ", removed_persons_count)
-        print("")
+        logger.info("Unmatchable heads of household: %d", removed_households_count)
+        logger.info("  Removed households: %d", removed_households_count)
+        logger.info("  Removed persons: %d", removed_persons_count)
+        logger.info("")
 
         assert (len(df_target)     == initial_target_length     - removed_households_count)
         assert (len(df_population) == initial_population_length - removed_persons_count)
@@ -324,8 +325,8 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
 
         removed_persons_count = sum(unmatchable_person_selector)
 
-        print("  Removed persons: ", removed_persons_count)
-        print("")
+        logger.info("  Removed persons: %d", removed_persons_count)
+        logger.info("")
 
         assert (len(df_target)     == initial_target_length     - removed_persons_count)
         assert (len(df_population) == initial_population_length - removed_persons_count)
@@ -404,7 +405,7 @@ def execute(context):
 
         mandatory_columns_individual_matching = columns_individual_matching[:7]
 
-        print("Statistical matching starting (normal people split by age band with band-filtered source)")
+        logger.info("Statistical matching starting (normal people split by age band with band-filtered source)")
 
         # --- NORMAL PEOPLE: split into age bands + filter source by same band ---
         df_population_work = df_population.copy()
@@ -438,7 +439,7 @@ def execute(context):
 
             # Safety fallback: if band-filtered source is empty, fall back to full source
             if len(src_band) == 0:
-                print(f"WARNING: Source is empty for band '{band_name}' after age filter; falling back to full df_source.")
+                logger.warning(f"Source is empty for band '{band_name}' after age filter; falling back to full df_source.")
                 src_band = df_source
                 
             # Diagnostics BEFORE matching this band (systematic feature checks)
@@ -453,7 +454,7 @@ def execute(context):
                 top_n=8
             )
 
-            print(f"  - Matching normal people band: {band_name}")
+            logger.info(f"  - Matching normal people band: {band_name}")
             if band_name == "u15":
                 youth = [
                 "age_class", "sex",
@@ -541,7 +542,7 @@ def execute(context):
             )
             df_source_center = df_source_center[df_source_center["activity_chain"] == "home"]
 
-            print("Second statistical matching starting - people with strange residence")
+            logger.info("Second statistical matching starting - people with strange residence")
 
             df_target_center, df_population_center, removed_ids_list_center  = run_statistical_matching_extended(
                 context,
@@ -621,10 +622,10 @@ def execute(context):
             )
         ]["age_class"] == 0))
 
-    print("Matching is done. In total, the following observations were removed from the census: ")
+    logger.info("Matching is done. In total, the following observations were removed from the census: ")
 
     removed_person_ids = removed_ids_list[0]
-    print("  Persons: %d (%.2f%%)" % (len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_population_persons))
+    logger.info("  Persons: %d (%.2f%%)", len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_population_persons)
 
     # Return
     return df_matching, removed_person_ids

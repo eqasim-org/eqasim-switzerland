@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from catboost import CatBoostClassifier
+import logging
 
+logger = logging.getLogger("synpp")
 # ---------------------------------------------------------
 # helper: stochastic draw from class probabilities
 # ---------------------------------------------------------
@@ -329,9 +331,9 @@ def execute(context):
     Xs_np = Xs.to_numpy(dtype=float, copy=False)
     Xp_np = Xp.to_numpy(dtype=float, copy=False)
     
-    print("Started to fit household car-ownership model using:", CAR_MODEL)
+    logger.info("Started to fit household car-ownership model using: %s", CAR_MODEL)
     car_model.fit(Xs_np, y, sample_weight=w)
-    print("Fitted household car-ownership model using:", CAR_MODEL)
+    logger.info("Fitted household car-ownership model using: %s", CAR_MODEL)
 
     # -------------------------------------------------------------------
     # 6. PREDICT + STOCHASTIC DRAW
@@ -356,7 +358,7 @@ def execute(context):
     # 7. DIAGNOSTICS (household level): survey weighted vs pop modeled
     #    Compare distributions of classes 0/1/2/3+ overall and by group (and by canton choice).
     # -------------------------------------------------------------------
-    print("\n================== DIAGNOSTICS (Survey vs Modeled Pop, HH car ownership) ==================")
+    logger.info("\n================== DIAGNOSTICS (Survey vs Modeled Pop, HH car ownership) ==================")
 
     USE_DRAW = True
     pop_ycol = "HH_CAR_OWN_draw" if USE_DRAW else "HH_CAR_OWN_hat"
@@ -446,11 +448,11 @@ def execute(context):
             out[c] = (np.sum(w[yv == c]) / tot * 100.0) if tot > 0 else 0.0
         return pd.Series(out)
 
-    print("\n[OVERALL | Survey weighted % by class 0/1/2/3+]")
-    print(overall_dist(hh_s, "HH_CAR_OWN_class", wcol="hh_weight").to_string())
+    logger.info("\n[OVERALL | Survey weighted % by class 0/1/2/3+]")
+    logger.info(overall_dist(hh_s, "HH_CAR_OWN_class", wcol="hh_weight").to_string())
 
-    print("\n[OVERALL | Pop modeled % by class 0/1/2/3+]")
-    print(overall_dist(hh_p, pop_ycol, wcol=None).to_string())
+    logger.info("\n[OVERALL | Pop modeled % by class 0/1/2/3+]")
+    logger.info(overall_dist(hh_p, pop_ycol, wcol=None).to_string())
 
     # Diagnostics by requested variables (overall + selected canton)
     diag_groups = [
@@ -479,12 +481,12 @@ def execute(context):
     #diag_groups.append(("hhsize_bin", ["1", "2", "3", "4", "5+"]))
 
     for g, order in diag_groups:
-        print(f"\n[{g.upper()} | ALL] survey vs pop (% by class)")
-        print(compare_multiclass(g, canton_id=None, order=order).to_string(index=False))
+        logger.info(f"\n[{g.upper()} | ALL] survey vs pop (% by class)")
+        logger.info(compare_multiclass(g, canton_id=None, order=order).to_string(index=False))
 
-        print(f"\n[{g.upper()} | canton_id={DIAG_CANTON_ID}] survey vs pop (% by class)")
-        print(compare_multiclass(g, canton_id=DIAG_CANTON_ID, order=order).to_string(index=False))
+        logger.info(f"\n[{g.upper()} | canton_id={DIAG_CANTON_ID}] survey vs pop (% by class)")
+        logger.info(compare_multiclass(g, canton_id=DIAG_CANTON_ID, order=order).to_string(index=False))
 
-    print("\n==========================================================================================")
+    logger.info("\n==========================================================================================")
     pop_df = pop_df.rename(columns={"HH_CAR_OWN_draw": "number_of_cars_class"}) # 0, 1, 2, 3+ (coded as 3)
     return pop_df

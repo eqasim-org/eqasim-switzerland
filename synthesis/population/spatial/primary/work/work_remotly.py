@@ -64,11 +64,11 @@ def execute(context):
     # Load survey and population    
     df_survey = context.stage("data.structural_survey.structural_survey")[[
         "home_zone_id", "employed", "job_position", "age", "sex",
-        "weight", "nationality", "start_work", "canton_id"
+        "weight", "nationality", "start_work", "canton_id","home_municipality_id"
     ]].copy()
 
     df_population = context.stage("synthesis.population.models.employment")[[
-        "person_id", "sex", "age", "home_zone_id",
+        "person_id", "sex", "age", "home_zone_id","home_municipality_id"
         "employed", "nationality", "canton_id", "job_position"
     ]].copy()
 

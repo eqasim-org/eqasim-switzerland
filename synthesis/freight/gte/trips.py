@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 from sklearn.neighbors import KDTree
 from shapely import get_coordinates
-
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.freight.gte.od")
@@ -24,7 +25,7 @@ def execute(context):
 
     trips_frames = []
 
-    print("Computing freight origin-destination counts ...")
+    logger.info("Computing freight origin-destination counts ...")
     for vehicle_type in demands.keys():
 
         demand = np.round(input_downsampling * demands[vehicle_type])

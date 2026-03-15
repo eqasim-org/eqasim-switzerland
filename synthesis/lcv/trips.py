@@ -17,6 +17,8 @@ import h5py
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.statent.statent")
@@ -87,9 +89,9 @@ def sample_integer_trips(od_long_df, value_col="value",
             scale = max_total_trips / total
             od_counts["n_trips"] = np.floor(od_counts["n_trips"] * scale).astype(int)
             od_counts = od_counts.loc[od_counts["n_trips"] > 0].reset_index(drop=True)
-            print(
-                f"[INFO] Total trips exceeded max_total_trips, "
-                f"downscaled by factor {scale:.3f}."
+            logger.info(
+                "Total trips exceeded max_total_trips, "
+                "downscaled by factor %.3f.", scale
             )
 
     return od_counts
@@ -135,7 +137,7 @@ def build_zone_sampling_points(
 
     valid_zone_ids = set(zones_gdf["zone_id"].unique())
     n_valid_zones = len(valid_zone_ids)
-    print(f"[DEBUG] Zones in GPKG (unique zone_id): {n_valid_zones}")
+    logger.debug("Zones in GPKG (unique zone_id): %d", n_valid_zones)
 
     # ----------------------------------------------------------------------
     # 2) Load enterprises and prepare as GeoDataFrame
@@ -144,7 +146,7 @@ def build_zone_sampling_points(
 
     # Make sure enterprises table does NOT have a conflicting 'zone_id' column
     if "zone_id" in df_statent.columns:
-        print("[DEBUG] Dropping 'zone_id' column from enterprises to avoid conflict.")
+        logger.debug("Dropping 'zone_id' column from enterprises to avoid conflict.")
         df_statent = df_statent.drop(columns=["zone_id"])
 
     enterprises_gdf = gpd.GeoDataFrame(
@@ -361,18 +363,16 @@ def execute(context):
     seed = context.config("random_seed")
     data_path = context.config("data_path")
     # 1) Load OD from OMX and make it long
-    print("[1/4] Loading OD matrix from OMX...")
+    logger.info("[1/4] Loading OD matrix from OMX...")
     od_long = load_od_from_omx("%s/npvm/LI_Binnen.omx" % data_path, "10", "NO")
-    print(f"    OD long shape: {od_long.shape}, "
-          f"total demand = {od_long['value'].sum():.2f}")
+    logger.info("    OD long shape: %s, total demand = %.2f", od_long.shape, od_long['value'].sum())
 
     od_long["value"] *= context.config("input_downsampling")
 
-    print(f"    OD long shape: {od_long.shape}, "
-          f"total demand after downsampling = {od_long['value'].sum():.2f}")
+    logger.info("    OD long shape: %s, total demand after downsampling = %.2f", od_long.shape, od_long['value'].sum())
     
     # 2) Sample integer trips per OD pair
-    print("[2/4] Sampling integer trips from float OD...")
+    logger.info("[2/4] Sampling integer trips from float OD...")
     od_counts = sample_integer_trips(
         od_long,
         value_col="value",
@@ -380,30 +380,29 @@ def execute(context):
         seed=seed,
         max_total_trips=None,
     )
-    print(f"    Non-zero OD pairs: {len(od_counts)}, "
-          f"total integer trips = {od_counts['n_trips'].sum()}")
+    logger.info("    Non-zero OD pairs: %d, total integer trips = %d", len(od_counts), od_counts['n_trips'].sum())
 
     # 3) Build sampling points per zone (enterprises or centroids)
-    print("[3/4] Building zone->points dictionary from shapefile + enterprises...")
+    logger.info("[3/4] Building zone->points dictionary from shapefile + enterprises...")
     zone_to_points = build_zone_sampling_points(context,
         "%s/npvm/1_Verkehrszonen_Schweiz_NPVM_2023.gpkg" % data_path, None,
         "No",
         "x",
         "y",
     )
-    print(f"    Zones with sampling points: {len(zone_to_points)}")
+    logger.info("    Zones with sampling points: %d", len(zone_to_points))
 
     # 4) Generate the trip list with coordinates
-    print("[4/4] Generating trip list...")
+    logger.info("[4/4] Generating trip list...")
     trips_df = generate_trip_list(
         od_counts,
         zone_to_points,
         seed=seed,
     )
-    print(f"    Generated {len(trips_df)} trips.")
+    logger.info("    Generated %d trips.", len(trips_df))
 
      # 5) Sample departure times and attach to trips
-    print("[5/5] Sampling departure times for each trip...")
+    logger.info("[5/5] Sampling departure times for each trip...")
 
     df_mz_trips   = pd.read_csv("%s/microcensus/wege.csv" % data_path, encoding = "latin1")
     df_mz_persons = pd.read_csv("%s/microcensus/zielpersonen.csv" % data_path, encoding = "latin1")

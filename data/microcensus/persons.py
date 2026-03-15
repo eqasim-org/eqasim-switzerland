@@ -3,7 +3,9 @@ import pandas as pd
 
 import data.microcensus.income
 import data.utils
+import logging
 
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -209,11 +211,11 @@ def execute(context):
 
     # Note: Around 7000 of them are those, which do not even have an activity chain in the first place
     # because they have not been asked.
-    print("  Removed %d (%.2f%%) persons from MZ because of insufficient trip data" % (
+    logger.info("  Removed %d (%.2f%%) persons from MZ because of insufficient trip data" % (
         len(filterout_person_ids), 100.0 * len(filterout_person_ids) / initial_size
     ))
     
-    print("  Percentage of agents staying home (not weighted): %d (%.2f%%)" % (
+    logger.info("  Percentage of agents staying home (not weighted): %d (%.2f%%)" % (
         len(home_ids), 100.0 * len(home_ids) / then_size
     ))
 

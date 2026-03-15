@@ -3,7 +3,9 @@ import pandas as pd
 
 from data.statpop.multilevelipf import multilevelipf
 from data.statpop.multilevelipf.multilevelipf import FittingProblem, IPUSolver
+import logging
 
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("synthesis.population.models.caravailability")
@@ -26,7 +28,7 @@ def execute(context):
 
         scaling_year = context.config("scaling_year")
 
-        print("Scaling STATPOP to year", scaling_year, "using IPU.")
+        logger.info("Scaling STATPOP to year %d using IPU.", scaling_year)
 
         processes = context.config("threads")
         df_household_controls, hh_year = context.stage("data.statpop.projections.households")
@@ -35,10 +37,10 @@ def execute(context):
         assert hh_year == scaling_year
         assert pop_year == scaling_year
 
-        print("Number of households in household controls :", df_household_controls["weight"].sum())
-        print("Number of persons in population controls :", df_population_controls["weight"].sum())
-        print("Number of households before scaling :", len(df_statpop["household_id"].unique()))
-        print("Number of persons before scaling :", len(df_statpop["person_id"].unique()))
+        logger.info("Number of households in household controls : %d", df_household_controls["weight"].sum())
+        logger.info("Number of persons in population controls : %d", df_population_controls["weight"].sum())
+        logger.info("Number of households before scaling : %d", len(df_statpop["household_id"].unique()))
+        logger.info("Number of persons before scaling : %d", len(df_statpop["person_id"].unique()))
 
         # create IPU fitting problem by canton
         problems = []
@@ -65,8 +67,8 @@ def execute(context):
             problem = FittingProblem(df, group_controls, group_id, individual_controls, individual_id)
             problems.append(problem)
 
-        print("Constructed %d IPU fitting problems." % len(problems))
-        print("Starting IPU.")
+        logger.info("Constructed %d IPU fitting problems.", len(problems))
+        logger.info("Starting IPU.")
 
         # Run IPU algorithm in parallel
         with context.progress(label="Performing IPU on STATPOP by canton...", total=len(problems)):
@@ -78,10 +80,10 @@ def execute(context):
                     convergence.append(convergence_item)
 
         df_households = pd.concat(df_households)
-        print("Convergence rate:", np.round(np.mean(convergence), 3))
+        logger.info("Convergence rate: %f", np.round(np.mean(convergence), 3))
 
         # Generate new unique ids
-        print("Generating new household ids.")
+        logger.info("Generating new household ids.")
         df_households["household_id_new"] = np.arange(df_households.shape[0]) + 1
         del df_statpop["household_id"]
 
@@ -91,17 +93,17 @@ def execute(context):
         del df_statpop["household_id_new"]
 
         # sort by household id and generate new person ids
-        print("Generating new person ids.")
+        logger.info("Generating new person ids.")
         df_statpop = df_statpop.sort_values(by=["household_id", "person_id"])
         df_statpop["person_id"] = np.arange(df_statpop.shape[0]) + 1
 
         # remove unneeded columns
 
 
-        print("Number of households in household controls :", df_household_controls["weight"].sum())
-        print("Number of persons in population controls :", df_population_controls["weight"].sum())
-        print("Number of households after scaling :", len(df_statpop["household_id"].unique()))
-        print("Number of persons after scaling :", len(df_statpop["person_id"].unique()))
+        logger.info("Number of households in household controls : %d", df_household_controls["weight"].sum())
+        logger.info("Number of persons in population controls : %d", df_population_controls["weight"].sum())
+        logger.info("Number of households after scaling : %d", len(df_statpop["household_id"].unique()))
+        logger.info("Number of persons after scaling : %d", len(df_statpop["person_id"].unique()))
 
     return df_statpop
 

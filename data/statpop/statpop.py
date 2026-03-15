@@ -10,7 +10,8 @@ import data.spatial.zones
 import data.statpop.density
 import data.statpop.head_of_household
 import data.utils
-
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.statpop.persons")
@@ -43,13 +44,13 @@ def execute(context):
         df_persons = df_persons[(df_persons["type_of_residence"] == 1) | (df_persons["type_of_residence"] == 2)]
 
     final_count = len(df_persons)
-    print(f"{initial_count - final_count} persons were filtered out based on the type of residence.")
+    logger.info("%d persons were filtered out based on the type of residence.", initial_count - final_count)
     
     # Only allow permanent residents
     initial_count = len(df_persons)
     df_persons = df_persons[df_persons["population_type"] == 1]
     final_count = len(df_persons)
-    print(f"{initial_count - final_count} persons without permanent residence filtered out.")
+    logger.info("%d persons without permanent residence filtered out.", initial_count - final_count)
 
     # Merge STATPOP persons and households into a list of persons with household attributes
     df = pd.merge(df_persons, df_link, on=("person_id", "municipality_id"))
@@ -63,7 +64,7 @@ def execute(context):
     initial_count = len(df)
     df = df[df["household_size"] <= c.MAXIMUM_HOUSEHOLD_SIZE]
     final_count = len(df)
-    print(f"{initial_count - final_count} persons were filtered out based on the the household size max constraint.")
+    logger.info("%d persons were filtered out based on the the household size max constraint.", initial_count - final_count)
 
     # Remove all households where ALL persons are under a certain age
     df_filter = df[["household_id", "age"]].groupby("household_id").max().reset_index()

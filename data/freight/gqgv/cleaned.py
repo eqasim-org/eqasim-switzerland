@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger("synpp")
+
 RENAMES = {"ORIGIN":"origin_nuts_id",
            "DESTINATION":"destination_nuts_id",
            "CH_MUNICIPALITY_ORIGIN": "origin_municipality",
@@ -50,13 +54,13 @@ def execute(context):
 
     # There are some NUTS ids that do not exist in our NUTS data (maybe old ids)
     # for now, drop all trips where NUTS not in NUTS data
-    print("Dropping all OD pairs where NUTS id not contained in NUTS data ...")
+    logger.info("Dropping all OD pairs where NUTS id not contained in NUTS data ...")
     number_trips = len(df)
     df_nuts = context.stage("data.spatial.nuts")
     nuts_ids = list(df_nuts["nuts_id"].unique())
     df = df[(df["origin_nuts_id"].isin(nuts_ids)) & (df["destination_nuts_id"].isin(nuts_ids))]
     number_trips_dropped = number_trips - len(df)
-    print("Dropped %s of %s OD pairs" % (number_trips_dropped, number_trips))
+    logger.info(f"Dropped {number_trips_dropped} of {number_trips} OD pairs")
 
     # package
     df = df[FIELDS]

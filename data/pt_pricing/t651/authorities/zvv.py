@@ -131,8 +131,7 @@ def clean(name):
 def create_stations(pdf_path, temp_path):
     stations = []
 
-    for page in range(PAGES[0], PAGES[1] + 1):
-        #print(f"Converting page {page}...")
+    for page in range(PAGES[0], PAGES[1] + 1):        
 
         page_pdf = Path(temp_path) / f"{page}.pdf"
         page_txt = Path(temp_path) / f"{page}.txt"

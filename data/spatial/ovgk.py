@@ -1,7 +1,9 @@
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import logging
 
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -20,7 +22,7 @@ def impute(context, df_ovgk, df, on, point_type="", chunk_size=100):
     indices = np.array_split(np.arange(len(df)), chunk_size)
     df_join = []
 
-    print(f"Imputing ÖV Güteklasse for {len(df)} {point_type} coordinates...")
+    logger.info(f"Imputing ÖV Güteklasse for {len(df)} {point_type} coordinates...")
     for chunk in context.progress(indices, total=len(indices), label="Imputing ÖV Güteklasse..."):
         df_join.append(gpd.sjoin(df.iloc[chunk], df_ovgk, predicate="within")[on + ["ovgk"]])
 

@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import logging
+logger = logging.getLogger("synpp")
 
 CANTON_TO_ID = {"Zürich": 1,
                 "Bern / Berne": 2,
@@ -36,7 +38,7 @@ def configure(context):
 
 def execute(context):
     if not context.config("enable_scaling"):
-        print("Skipping projecting population as scaling is disabled!")
+        logger.info("Skipping projecting population as scaling is disabled!")
         return
     data_path = context.config("data_path")
     c         = context.stage("data.constants")

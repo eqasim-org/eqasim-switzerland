@@ -1,7 +1,9 @@
 import synthesis.population.spatial.secondary.rda as rda
 import sklearn.neighbors
 import numpy as np
+import logging
 
+logger = logging.getLogger("synpp")
 
 class CustomDistanceSampler(rda.FeasibleDistanceSampler):
     def __init__(self, random, distributions, maximum_iterations = 1000):
@@ -32,7 +34,7 @@ class CandidateIndex:
         self.indices = {}
 
         for purpose, data in self.data.items():
-            print("Constructing spatial index for %s ..." % purpose)
+            logger.info("Constructing spatial index for %s ...", purpose)
             self.indices[purpose] = sklearn.neighbors.KDTree(data["locations"])
 
     def query(self, purpose, location):

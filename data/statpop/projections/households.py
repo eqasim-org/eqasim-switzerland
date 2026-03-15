@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import logging
+logger = logging.getLogger("synpp")
 
 CANTON_TO_ID: dict[str, int] = {
     "Zürich": 1,
@@ -50,7 +52,7 @@ def configure(context):
 
 def execute(context):
     if not context.config("enable_scaling"):
-        print("Skipping projecting households as scaling is disabled!")
+        logger.info("Skipping projecting households as scaling is disabled!")
         return
     data_path = context.config("data_path")
     c         = context.stage("data.constants")
@@ -75,7 +77,7 @@ def execute(context):
     # Keep only rows that successfully mapped (and warn if any didn’t)
     missing = df[df["canton_id"].isna()].iloc[:, 0].unique().tolist()
     if missing:
-        print("Warning: Unmapped canton names (skipped):", missing)
+        logger.warning("Unmapped canton names (skipped): %s", missing)
     df = df[~df["canton_id"].isna()].copy()
 
     # Build the output

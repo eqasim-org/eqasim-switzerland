@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
+import logging
 
+logger = logging.getLogger("synpp")
 def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
@@ -53,7 +55,7 @@ def execute(context):
     df = df_trips[["mode", "travel_time", distance_column, "weight"]].rename(columns={distance_column: "distance"})
 
     modes = df["mode"].unique()
-    print(f"INFO: computing distance distributions for the following modes: {modes}")
+    logger.info(f"INFO: computing distance distributions for the following modes: {modes}")
 
     bin_size = 200
     distributions = {}

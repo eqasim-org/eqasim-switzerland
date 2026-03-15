@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
+import logging
 
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.structural_survey.structural_survey")
@@ -28,7 +30,7 @@ def execute(context):
     df_od = df_od[(df_od["crowfly_distance_to_work"] > 0.0) | (df_od["start_work"] > 1)]
 
     unknown_count = before_count - len(df_od)
-    print("Removed %d (%.2f%%) observations from structural survey for which no work or home location is known" % (unknown_count, 100 * unknown_count / before_count))
+    logger.info("Removed %d (%.2f%%) observations from structural survey for which no work or home location is known" % (unknown_count, 100 * unknown_count / before_count))
     #assert(len(df_od) == len(df_od.dropna())) Commented this, because home_quarter_id may be NaN deliberately
 
     # Filter out people who are not working in a neighboring country
@@ -42,14 +44,14 @@ def execute(context):
     df_od = df_od[~(df_od["home_zone_level"] == "country")]
 
     outside_count = before_count - len(df_od)
-    print("Removed %d (%.2f%%) observations from structural survey which live or work abroad (TODO: eventually we want them back in!)" % (outside_count, 100 * outside_count / before_count))
+    logger.info("Removed %d (%.2f%%) observations from structural survey which live or work abroad (TODO: eventually we want them back in!)" % (outside_count, 100 * outside_count / before_count))
     #assert(len(df_od) == len(df_od.dropna())) Commented this, because home_quarter_id may be NaN deliberately
 
     # Filter unknonwn modes
     before_count = len(df_od)
     df_od = df_od[~((df_od["mode"] == "unknown") | (df_od["mode"] == "other"))]
     unknown_mode_count = before_count - len(df_od)
-    print("Removed %d (%.2f%%) observations from structural survey with unknown mode" % (unknown_mode_count, 100 * unknown_mode_count / before_count))
+    logger.info("Removed %d (%.2f%%) observations from structural survey with unknown mode" % (unknown_mode_count, 100 * unknown_mode_count / before_count))
 
     # Create the matrices
     zone_ids = list(df_zones["zone_id"])
@@ -120,7 +122,7 @@ def execute(context):
         pdf_matrices[mode] = pdf_matrix
         cdf_matrices[mode] = cdf_matrix
 
-        print("  - Finished %s (%d fixed municipalities)" % (mode, np.count_nonzero(f_origin & f_zero)))
+        logger.info("  - Finished %s (%d fixed municipalities)" % (mode, np.count_nonzero(f_origin & f_zero)))
 
     # A final note on the structure of these OD matrices:
     # - The origin counts for municipalities contain all originating trips, also

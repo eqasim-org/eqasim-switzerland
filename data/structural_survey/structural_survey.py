@@ -4,6 +4,8 @@ import pandas as pd
 from data.spatial import countries, municipalities, quarters, zones, utils
 import data.utils
 from data.spatial.municipality_types import impute as impute_municipality_type
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.structural_survey.raw")
@@ -89,9 +91,9 @@ def execute(context):
                  (np.isnan(df_se["work_quarter_id"])))
     f_no_education = ((np.isnan(df_se["education_municipality_id"])) & 
                       (np.isnan(df_se["education_quarter_id"])))
-    print("Found %d observations without home location information" % np.count_nonzero(f_no_home))
-    print("Found %d observations without work location information" % np.count_nonzero(f_no_work))
-    print("Found %d observations without education location information" % np.count_nonzero(f_no_education))
+    logger.info("Found %d observations without home location information", np.count_nonzero(f_no_home))
+    logger.info("Found %d observations without work location information", np.count_nonzero(f_no_work))
+    logger.info("Found %d observations without education location information", np.count_nonzero(f_no_education))
 
     # in certain cases it can happen that quarter is not reported for the work municipality
     # even though this municipality is divided into quarters.
@@ -269,7 +271,7 @@ def execute(context):
 
     #!!! End of the ignored part
     
-    print("Imputing home zones ...")
+    logger.info("Imputing home zones ...")
     df_se = zones.impute(df_se, df_zones, 
                                       zone_id_prefix="home_",
                                       zone_fields={"quarter": "home_quarter_id",
@@ -278,21 +280,21 @@ def execute(context):
                                                     "nuts": "nuts_id",
                                                     "postal_code": "postal_code"})
 
-    print("Imputing work zones ...")
+    logger.info("Imputing work zones ...")
     df_se = zones.impute(df_se, df_zones, zone_id_prefix="work_", 
                                       zone_fields={"quarter": "work_quarter_id",
                                                     "municipality": "work_municipality_id",
                                                     "country": "work_country_id",
                                                     "nuts": "nuts_id",
                                                     "postal_code": "postal_code"})
-    print("Imputing education zones ...")
+    logger.info("Imputing education zones ...")
     df_se = zones.impute(df_se, df_zones, zone_id_prefix="education_", 
                                       zone_fields={"quarter": "education_quarter_id",
                                                     "municipality": "education_municipality_id",
                                                     "country": "country_id",
                                                     "nuts": "nuts_id",
                                                     "postal_code": "postal_code"})
-    print("Imputing municipality type at home location ...")
+    logger.info("Imputing municipality type at home location ...")
     df_municipality_types = context.stage("data.spatial.municipality_types")
     df_se = df_se.reset_index(drop=True)
     df_se.insert(0, "id", np.arange(1, len(df_se) + 1, dtype=np.int64))

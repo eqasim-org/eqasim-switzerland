@@ -227,9 +227,9 @@ def print_detailed_statistics(stats_dict):
 
 def create_comprehensive_plot(df, stats_dict, output_path=None):
     """Create a comprehensive scatter plot with statistics."""
-    print("\n" + "=" * 60)
-    print("CREATING COMPREHENSIVE PLOT")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("CREATING COMPREHENSIVE PLOT")
+    logger.info("=" * 60)
     
     # Clean data
     df_clean = df.dropna(subset=['flow', 'simulated_flow'])
@@ -369,7 +369,7 @@ def plot_by_road_cat(df, output_path=None, title=None):
     df = df.copy()
 
     if 'highway' not in df.columns or df['highway'].isna().all():
-        print("❌ No highway information available after merge. Cannot produce highway-type plot.")
+        logger.info("❌ No highway information available after merge. Cannot produce highway-type plot.")
         return None
 
     # Filter out rows without highway

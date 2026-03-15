@@ -4,7 +4,8 @@ from pathlib import Path
 import re
 import pandas as pd
 import data.pt_pricing.t603.utils as t603utils
-
+import logging
+logger = logging.getLogger("synpp")
 
 FIRST_IS_NUMBER_PATTERN = re.compile(r"[0-9]+")
 STATION_NAME_PATTERN    = re.compile(r"[\S ]+? [0-9X]{4,5}")
@@ -14,7 +15,7 @@ PAGE_RANGE_2018         = [20, 65]
 
 
 def process_2018_page(path2018, page, temp_path):
-    print(f"Converting page {page}...")
+    logger.info("Converting page %d...", page)
     temp_path_path = Path(temp_path)
 
     page_pdf = temp_path_path / f"{page}.pdf"
@@ -51,11 +52,10 @@ def process_2018_page(path2018, page, temp_path):
         for line in lines[first_station_index:]:
             # Some special lines
             if len(line) == 0:
-                #print("Ending page %d with empty line" % page_number)
                 break
 
             if "Streckenabonnemente" in line:
-                print("Skipping 'Streckenabonnemente' on page %d" % page)
+                logger.info("Skipping 'Streckenabonnemente' on page %d", page)
                 continue
 
             # Some fixing
@@ -147,7 +147,7 @@ def process_2025_pdf(pdf_2025, temp_path):
         return re.match(r"^[A-Za-zÀ-ÖØ-öø-ÿ\s\-]+$", s)
     
     for page in range(page_range[0], page_range[1]): 
-        print(f"Converting page {page}...")
+        logger.info("Converting page %d...", page)
 
         page_pdf = target_directory / f"{page}.pdf"
         page_txt = target_directory / f"{page}.txt"

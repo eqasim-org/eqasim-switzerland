@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.are_synpop.persons")
@@ -35,7 +38,7 @@ def compute_individual_filters(df, individual_controls):
 
 def process_canton(canton_id, projection_df, df_population):
 
-    print(f"Starting to weight and scale the population of canton {canton_id}.")
+    logger.info(f"Starting to weight and scale the population of canton {canton_id}.")
 
     # Isolate agents living in the canton
     df         = df_population[df_population["canton_id"]==canton_id]
@@ -89,14 +92,14 @@ def execute(context):
 
         scaling_year = context.config("scaling_year")
 
-        print("Scaling Synpop to year ", scaling_year, " using IPU.")
+        logger.info(f"Scaling Synpop to year {scaling_year} using IPU.")
 
         df_population_controls, pop_year = context.stage("data.are_synpop.projections.population")
 
         assert pop_year == scaling_year
 
-        print("Number of persons in population controls :", df_population_controls["weight"].sum())
-        print("Number of persons before scaling :", len(df_synpop["person_id"].unique()))
+        logger.info(f"Number of persons in population controls : {df_population_controls['weight'].sum()}")
+        logger.info(f"Number of persons before scaling : {len(df_synpop['person_id'].unique())}")
 
         # Weighting by canton
         canton_ids        = list(df_synpop.sort_values("canton_id")["canton_id"].unique())
@@ -116,8 +119,8 @@ def execute(context):
         # Merge with all attributes
         df_synpop_new = pd.merge(df_synpop_new[["person_id", "synpop_person_id"]], df_synpop[df_synpop.columns[1:]], on="synpop_person_id", how="left")
 
-        print("Number of persons in population controls :", df_population_controls["weight"].sum())
-        print("Number of persons after scaling :", len(df_synpop_new["person_id"].unique()))
+        logger.info(f"Number of persons in population controls : {df_population_controls['weight'].sum()}")
+        logger.info(f"Number of persons after scaling : {len(df_synpop_new['person_id'].unique())}")
 
         return df_synpop_new
     else:

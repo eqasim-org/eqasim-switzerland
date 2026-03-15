@@ -2,6 +2,8 @@ import os.path
 import shutil
 import matsim.runtime.eqasim as eqasim
 from matsim.simulation.config_utils import get_calibration_args, get_delays_args, get_network_calibration_args
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("matsim.simulation.prepare")    
@@ -52,12 +54,12 @@ def execute(context):
     preventwaitingtoentertraffic = "n"
     if context.config("preventwaitingtoentertraffic"):
         preventwaitingtoentertraffic = "y"
-        print("Prevent waiting to enter traffic: " + preventwaitingtoentertraffic)
+        logger.info("Prevent waiting to enter traffic: %s", preventwaitingtoentertraffic)
 
     writeExperiencedPlans = "false"
     if context.config("writeexperiencedplans"):
         writeExperiencedPlans = "true"
-        print("Write experienced plans: " + writeExperiencedPlans)
+        logger.info("Write experienced plans: %s", writeExperiencedPlans)
 
     # dmc estimation and calibration
     additional_args = []

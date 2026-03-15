@@ -368,7 +368,7 @@ def execute(context):
 
     number_of_written_persons    = 0
     number_of_written_activities = 0
-    print("Starting to write population!!")
+    logger.info("Starting to write population!!")
 
     with gzip.open("%s/population.xml.gz" % cache_path, "wb+", compresslevel=1) as f:
         with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:

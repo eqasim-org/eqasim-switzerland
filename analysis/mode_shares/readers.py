@@ -1,6 +1,8 @@
 import xopen
 import xml.etree.ElementTree as ET
 import pandas as pd
+import logging
+logger = logging.getLogger("synpp")
 
 class Household:
     def __init__(self, households):
@@ -52,6 +54,6 @@ def houshold_reader(filename, convert_dataframes_types=True):
             households['censusId'] = households['censusId'].astype(int)
             households['household_income'] = households['household_income'].astype(float)
         except KeyError:
-            print('dataframe types conversion failed')
+            logger.warning('Dataframe types conversion failed')
     
     return Household(households)

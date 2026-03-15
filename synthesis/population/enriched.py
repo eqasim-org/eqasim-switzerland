@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
-
+import logging
+logger = logging.getLogger("synpp")
 """
 This stage fuses sampled census data with microcensus data.
 """
@@ -117,9 +118,9 @@ def execute(context):
 
         # Clean driving license attribute
         N_underage_driving = len(df_persons[(df_persons["age_class"]<=1) & (df_persons["driving_license"])])
-        print(f"Identified {N_underage_driving} agents under 18 years but having a driving license.")
-        print("This is due to statistical matching - those agents were not matched using the age variable.")
-        print("Fixing this to ensure consistency of the results.")
+        logger.info("Identified %d agents under 18 years but having a driving license.", N_underage_driving)
+        logger.info("This is due to statistical matching - those agents were not matched using the age variable.")
+        logger.info("Fixing this to ensure consistency of the results.")
         df_persons.loc[df_persons["age_class"]<=1, "driving_license"] = False
 
     #print(df_persons["collective_housing_resident"].value_counts())

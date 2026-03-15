@@ -1,5 +1,7 @@
 import subprocess as sp
 import shutil
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("git_binary", "git")
@@ -35,7 +37,7 @@ def validate(context):
         shutil.which(context.config("git_binary")),
         "--version"
     ], stderr = sp.STDOUT):
-        print("WARNING! Git of at least version 2.x.x is recommended!")
+        logger.warning("Git of at least version 2.x.x is recommended!")
 
 def execute(context):
     return {
