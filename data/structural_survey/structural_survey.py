@@ -325,3 +325,24 @@ def execute(context):
         "nationality", "crowfly_distance_to_work", "crowfly_distance_to_school", "freq_per_week", "commute_to_work", "start_work", 
         "highest_completed_education",        
     ]]
+
+
+def get_filtered_data(context, filter_type = "all"):
+    df_od = context.stage("data.structural_survey.structural_survey")
+    df_od = df_od[~np.isnan(df_od["home_zone_id"])]
+    df_od = df_od[~np.isnan(df_od["work_zone_id"])]
+    df_od = df_od[~(df_od["work_zone_level"] == "country")]
+    df_od = df_od[~(df_od["home_zone_level"] == "country")]
+    df_od = df_od[df_od["employed"] == 1]    
+    
+    match filter_type:
+        case "all":
+            return df_od
+        case "fixed":
+            return df_od[df_od["start_work"] > 2]
+        case "moving":
+            return df_od[df_od["start_work"] == 2]
+        case "remote":
+            return df_od[df_od["start_work"] == 1]
+        case _:
+            raise ValueError("Unknown filter type: %s" % filter_type)

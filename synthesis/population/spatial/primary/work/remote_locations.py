@@ -4,18 +4,18 @@ import logging
 logger = logging.getLogger("synpp")
 
 def configure(context):
-    context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
+    context.stage("synthesis.population.spatial.primary.work.work_remotly", alias="remote_locations")
     context.stage("data.spatial.ovgk")
     
-def configure(context):
-    df = context.stage("work_locations")
-    df = df[df["work_remotly"] == True]
-    df["destination_x"] = df.geometry.x
-    df["destination_y"] = df.geometry.y
+def execute(context):
+    df = context.stage("remote_locations")
+    
+    df["destination_x"] = df["x"]
+    df["destination_y"] = df["y"]
     df = df[["destination_id", "destination_x", "destination_y"]]
     df = df.drop_duplicates(subset=["destination_id"]).reset_index(drop=True)
 
-    df.loc[:, "offers_work"]  = True
+    df.loc[:, "offers_work"]  = False
     df.loc[:, "offers_other"] = False
     df.loc[:, "offers_work_secondary"] = False
     df.loc[:, "offers_home_secondary"] = False

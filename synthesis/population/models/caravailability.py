@@ -48,10 +48,9 @@ def configure(context):
     # Survey:
     context.stage("data.microcensus.21.persons")             # 1 row per household, with features + car_availability
     context.stage("data.microcensus.21.household_persons")   # multiple rows per household, with driving_license per member
+
     # Population:
     context.stage("synthesis.population.models.carownership")  # person-level population incl. number_of_cars_class (cars)
-    # commute distances
-    context.stage("synthesis.population.spatial.primary.work.work_locations")
 
 
 def execute(context):
@@ -72,14 +71,6 @@ def execute(context):
 
     hh_persons_df = context.stage("data.microcensus.21.household_persons")[0].copy()
     pop_df = context.stage("synthesis.population.models.carownership").copy()
-    
-    # add commute distance to the population
-    commute = context.stage("synthesis.population.spatial.primary.work.work_locations")[["person_id","commute_distance"]].rename(
-        columns={"commute_distance": "work_commute_distance"}
-    )
-    pop_df = pop_df.merge(commute, on="person_id", how="left")
-    pop_df["work_commute_distance"] = pop_df["work_commute_distance"].fillna(0.0) # those agents don't have a work location
-
 
     # -------------------------------------------------------------------
     # 1. KEY COLUMNS & REQUIRED FIELDS
@@ -113,7 +104,7 @@ def execute(context):
 
     # numeric safety casting
     for df in (persons_df, pop_df):
-        for col in ["household_size", "N_adults", "N_children_under_18","work_commute_distance"]:
+        for col in ["household_size", "N_adults", "N_children_under_18"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
 
@@ -282,7 +273,6 @@ def execute(context):
     num_cols = [
         "age", "age_sq",
         "cars_shortage",
-        "work_commute_distance"
     ]
 
     # -------------------------------------------------------------------
@@ -494,31 +484,31 @@ def execute(context):
     # AGE GROUP
     age_all = compare_pct("age_group", order=diag_age_labels)
     logger.info("\n[AGE GROUP | ALL] age_group | survey_weighted_pct_has | pop_pct_has")
-    logger.info(age_all.to_string(index=False))
+    logger.info("\n%s", age_all.to_string(index=False))
 
     age_c = compare_pct("age_group", canton_id=DIAG_CANTON_ID, order=diag_age_labels)
     logger.info(f"\n[AGE GROUP | canton_id={DIAG_CANTON_ID}] age_group | survey_weighted_pct_has | pop_pct_has")
-    logger.info(age_c.to_string(index=False))
+    logger.info("\n%s", age_c.to_string(index=False))
 
     # SEX
     if "sex" in persons_df.columns and "sex" in pop_df.columns:
         sex_all = compare_pct("sex")
         logger.info("\n[SEX | ALL] sex | survey_weighted_pct_has | pop_pct_has")
-        logger.info(sex_all.to_string(index=False))
+        logger.info("\n%s", sex_all.to_string(index=False))
 
         sex_c = compare_pct("sex", canton_id=DIAG_CANTON_ID)
         logger.info(f"\n[SEX | canton_id={DIAG_CANTON_ID}] sex | survey_weighted_pct_has | pop_pct_has")
-        logger.info(sex_c.to_string(index=False))
+        logger.info("\n%s", sex_c.to_string(index=False))
 
     # MUNICIPALITY TYPE
     if "municipality_type" in persons_df.columns and "municipality_type" in pop_df.columns:
         mun_all = compare_pct("municipality_type")
         logger.info("\n[MUNICIPALITY TYPE | ALL] municipality_type | survey_weighted_pct_has | pop_pct_has")
-        logger.info(mun_all.to_string(index=False))
+        logger.info("\n%s", mun_all.to_string(index=False))
 
         mun_c = compare_pct("municipality_type", canton_id=DIAG_CANTON_ID)
         logger.info(f"\n[MUNICIPALITY TYPE | canton_id={DIAG_CANTON_ID}] municipality_type | survey_weighted_pct_has | pop_pct_has")
-        logger.info(mun_c.to_string(index=False))
+        logger.info("\n%s", mun_c.to_string(index=False))
 
     # N_CHILDREN_UNDER_18 exact
     child_all = compare_pct("N_children_under_18_exact")
@@ -533,7 +523,7 @@ def execute(context):
             key=lambda s: s.map(_sort_key)
         )
     logger.info("\n[N_CHILDREN_UNDER_18 (exact) | ALL] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
-    logger.info(child_all.to_string(index=False))
+    logger.info("\n%s", child_all.to_string(index=False))
 
     child_c = compare_pct("N_children_under_18_exact", canton_id=DIAG_CANTON_ID)
     if "N_children_under_18_exact" in child_c.columns:
@@ -542,7 +532,7 @@ def execute(context):
             key=lambda s: s.map(_sort_key)
         )
     logger.info(f"\n[N_CHILDREN_UNDER_18 (exact) | canton_id={DIAG_CANTON_ID}] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
-    logger.info(child_c.to_string(index=False))
+    logger.info("\n%s", child_c.to_string(index=False))
 
     # Shortage bucket diagnostics
     pop_df["cars_shortage_bucket"] = pd.cut(
@@ -561,11 +551,11 @@ def execute(context):
 
     shortage_all = compare_pct("cars_shortage_bucket", order=["0", "1", "2", "3-5", "6+", "Missing"])
     logger.info("\n[CARS SHORTAGE BUCKET | ALL] cars_shortage_bucket | survey_weighted_pct_has | pop_pct_has")
-    logger.info(shortage_all.to_string(index=False))
+    logger.info("\n%s", shortage_all.to_string(index=False))
 
     shortage_c = compare_pct("cars_shortage_bucket", canton_id=DIAG_CANTON_ID, order=["0", "1", "2", "3-5", "6+", "Missing"])
     logger.info(f"\n[CARS SHORTAGE BUCKET | canton_id={DIAG_CANTON_ID}] cars_shortage_bucket | survey_weighted_pct_has | pop_pct_has")
-    logger.info(shortage_c.to_string(index=False))
+    logger.info("\n%s", shortage_c.to_string(index=False))
 
     logger.info("\n==========================================================================")
 

@@ -1,234 +1,223 @@
 import numpy as np
 import pandas as pd
-from itertools import chain, zip_longest
 import data.spatial.utils as spatial_utils
 import logging
 
 logger = logging.getLogger("synpp")
 
 def configure(context):
-    context.stage("data.statent.statent")
-    context.stage("data.spatial.zones")
-    context.stage("data.spatial.zone_shapes")
-    context.stage("synthesis.population.models.employment")
-    context.stage("data.od.matrix")
-    context.stage("data.od.distances")
+
+    context.stage("data.structural_survey.structural_survey")
     context.stage("synthesis.population.spatial.primary.work.work_remotly")
-    if context.config("include_cross_border"):
-        context.stage("data.cross_border.destinations")
+    context.stage("synthesis.population.spatial.primary.work.fixed_work_locations")
+    context.stage("synthesis.population.spatial.primary.work.moving_work_locations")
+    context.stage("data.microcensus.commute")
+    context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.21.persons")
 
     context.config("random_seed")
-    context.config("input_downsampling")
-
-
-def multinomial_sample(n, probs):
-    """
-    Deterministic version of multinomial sampling.
-
-    Parameters
-    ----------
-    n : int
-        Total number of items to allocate.
-    probs : array-like
-        Probabilities for each category. Does not need to sum to 1.
-
-    Returns
-    -------
-    counts : np.ndarray
-        Integer counts per category, summing exactly to n.
-    """
-    probs = np.array(probs, dtype=float)
-    probs /= probs.sum()  # normalize just in case
-    
-    # Step 1: initial deterministic allocation
-    raw_counts = n * probs
-    counts = np.floor(raw_counts).astype(int)
-    
-    # Step 2: distribute leftover counts based on largest fractional parts
-    remainder = n - counts.sum()
-    if remainder > 0:
-        fractional = raw_counts - counts
-        # pick indices with largest fractional remainder
-        top_indices = np.argsort(fractional)[-remainder:]
-        counts[top_indices] += 1
-
-    return counts
+    context.config("input_downsampling")    
 
 def execute(context):
-    logger.info("\t Assigning work locations to agents based on OD matrices and company data...")
-    # Number of real persons represented by one simulated agent
-    persons_per_agent = 1 / context.config("input_downsampling")
+    fixed_work_locations = context.stage("synthesis.population.spatial.primary.work.fixed_work_locations")
+    moving_work_locations = context.stage("synthesis.population.spatial.primary.work.moving_work_locations")
+    remote_agents = context.stage("synthesis.population.spatial.primary.work.work_remotly")
 
-    # Persons with home location and zone
-    persons = context.stage("synthesis.population.models.employment")[["person_id", "household_id", "home_zone_id", "home_x", "home_y", "employed"]]
-
-    # Removed unemployed agents
-    persons = persons[persons["employed"]==1].reset_index(drop=True)
-
-    # Remove those working remotely (they will be assigned a work location later, which is their household_id)
-    remote_working = context.stage("synthesis.population.spatial.primary.work.work_remotly")
-    remote_working = remote_working[remote_working["work_remotly"]==1]
-    work_remotly = persons["person_id"].isin(remote_working.person_id.unique())    
-
-    df = persons[~work_remotly].reset_index(drop=True)
-
-    # Zones and index mapping
-    df_zones = context.stage("data.spatial.zones").copy()
-    zone_ids = df_zones["zone_id"].values
-    zone_index = {z: i for i, z in enumerate(zone_ids)}
-
-    # OD matrices and distances
-    pdf_matrices, _ = context.stage("data.od.matrix")
-
-    # STATENT enterprises
-    df_statent = context.stage("data.statent.statent")[["enterprise_id", "x", "y", "zone_id", "zone_municipality_id", "number_employees"]].copy()
-    df_statent = df_statent.dropna(subset=["x", "y", "number_employees", "zone_id"])
-
-    if context.config("include_cross_border"):
-        logger.info("\t Adjusting company employee counts to account for cross-border commuters...")
-        destinations_cb         = context.stage("data.cross_border.destinations")
-        destinations_cb_commute = destinations_cb[destinations_cb["trip_purpose"]=="work"]
-
-        nb_empl_cb = destinations_cb_commute.groupby("destination_id")["cross_border_person_id"].count().reset_index()
-        nb_empl_cb.columns = ["enterprise_id", "nb_employees_crossborder"]
-        nb_empl_cb["enterprise_id"] = nb_empl_cb["enterprise_id"].astype(int)
-
-        df_statent = df_statent.merge(nb_empl_cb, on = "enterprise_id", how="left")
-        df_statent["nb_employees_crossborder"] = df_statent["nb_employees_crossborder"].fillna(0).astype(int)
-
-        df_statent["number_employees"] = (df_statent["number_employees"] - df_statent["nb_employees_crossborder"]*persons_per_agent).clip(lower = 0)
-
-        del df_statent["nb_employees_crossborder"], destinations_cb, destinations_cb_commute, nb_empl_cb
-
-    # Convert to arrays for speed
-    logger.info("\t Converting data to numpy arrays for efficient processing...")
-    comp_x = df_statent["x"].to_numpy(dtype=float)
-    comp_y = df_statent["y"].to_numpy(dtype=float)
-    comp_emp = df_statent["number_employees"].to_numpy(dtype=float)
-    comp_eid = df_statent["enterprise_id"].to_numpy()
-    comp_zone_ids = df_statent["zone_id"].to_numpy()    
-
-    # Map company zone_id -> matrix index; -1 if unknown (filtered out)
-    comp_zone_idx = np.array([zone_index.get(z, -1) for z in comp_zone_ids], dtype=int)
-    valid_comp_mask = comp_zone_idx >= 0
-    comp_x = comp_x[valid_comp_mask]
-    comp_y = comp_y[valid_comp_mask]
-    comp_emp = comp_emp[valid_comp_mask]
-    comp_eid = comp_eid[valid_comp_mask]
-    comp_zone_idx = comp_zone_idx[valid_comp_mask]
-    comp_zone_ids = comp_zone_ids[valid_comp_mask]    
-    comp_min_capacity = comp_emp * 1e-3
-
-    # RNG
-    rng = np.random.RandomState(context.config("random_seed"))
-
-    # Helper to get source mode
-    def normalize_mode(mode):
-        return "car" if mode == "car_passenger" else mode
-
-    # Build zone -> company index list
-    zone_to_company_idx = [[] for _ in range(len(zone_ids))]
-    for i, zi in enumerate(comp_zone_idx):
-        zone_to_company_idx[zi].append(i)
-    zone_to_company_idx = [np.array(lst, dtype=int) if len(lst) else np.array([], dtype=int) for lst in zone_to_company_idx]
-
-    # Build zone -> destination zones list from OD matrices
-    commuters_per_zone = df.groupby("home_zone_id").size().to_dict()
-    modes_counts_per_zone = df.groupby(["home_zone_id", "commute_mode"]).size().unstack(fill_value=0).T.to_dict(orient="dict")
-    num_destination_zones_per_zone = {}
-    for origin_idx, origin_zone in enumerate(zone_ids):
-        n_commuters = commuters_per_zone.get(origin_zone, 0)
-        if n_commuters == 0:
-            num_destination_zones_per_zone[origin_zone] = 0
-            continue
-        modes_counts = modes_counts_per_zone.get(origin_zone, {})
-        # We use this to respect the mode split in determining possible destination zones
-        zone_probs = np.sum([mode_count * pdf_matrices[normalize_mode(mode)][origin_idx, :]  for mode, mode_count in modes_counts.items()],
-                        axis=0)
-        destination_zones = multinomial_sample(n_commuters, zone_probs / zone_probs.sum())
-        num_destination_zones_per_zone[origin_zone] = {zone_ids[i]: count for i, count in enumerate(destination_zones) if count > 0}
-        
-    # now we prepare array in order to use numPy for work assignment, it is faster than pandas dataframe manipulation
-    # Prepare output arrays
-    n = len(df)
-    work_x = np.full(n, np.nan, dtype=float)
-    work_y = np.full(n, np.nan, dtype=float)
-    work_loc_id = np.full(n, np.nan, dtype=object)
-
-    # Pre-fetch person arrays
-    p_home_zone = df["home_zone_id"].to_numpy()
-    p_home_x = df["home_x"].to_numpy(dtype=float)
-    p_home_y = df["home_y"].to_numpy(dtype=float)
-
-    # starting assignement
-    no_comp = set()
-    with context.progress(total=n, label="Assigning work locations (OD+distance)") as prog:    
-        for idx in range(n):
-            # get origin zone index
-            origin_zone = p_home_zone[idx]
-            origin_idx = zone_index.get(origin_zone, None)
-            
-            # Select zones
-            candidate_zones = [z for z, c in num_destination_zones_per_zone[origin_zone].items() if c > 0]
-            candidate_zones_idx = [zone_index[z] for z in candidate_zones]
-                    
-            # Gather candidate companies in those zones
-            cand_lists = [zone_to_company_idx[zi] for zi in candidate_zones_idx]            
-            cand_idx = np.concatenate(cand_lists)
-            
-            if len(cand_idx)==0:
-                # If no company is found, consider only the residence zone (if it has companies)                
-                cand_lists = zone_to_company_idx[zone_index[origin_zone]]  
-                if len(cand_idx)==0:
-                    cand_idx = np.arange(len(comp_emp))
-                    no_comp.update(candidate_zones_idx)
-            
-            ## Company weights
-            weights = comp_emp[cand_idx]
-
-            sumw = weights.sum()
-            weights = weights / sumw
-            sel_local = rng.choice(len(cand_idx), p=weights)
-            sel = cand_idx[sel_local]
-            work_x[idx] = comp_x[sel]
-            work_y[idx] = comp_y[sel]
-            work_loc_id[idx] = comp_eid[sel]
-            
-            # Correct distributions after sampling to respect mode/zone splits
-            dest_zone = comp_zone_ids[sel]
-            if dest_zone in num_destination_zones_per_zone[origin_zone]:
-                num_destination_zones_per_zone[origin_zone][dest_zone] -= 1
-            comp_emp[sel] = max(comp_emp[sel] - persons_per_agent, comp_min_capacity[sel])  # reduce available capacity, but keep non-zero to avoid issues    
-
-            prog.update()                
-
-    if len(no_comp):
-        logger.warning(f"There are {len(no_comp)} zones without companies. These are tese zones:")
-        logger.warning(no_comp)
-
-    # Build result frame
-    out = df[["person_id","home_x", "home_y"]].copy()
-    out["x"] = work_x
-    out["y"] = work_y
-    out["destination_id"] = work_loc_id    
-    out["work_remotly"] = False
-
-    # concate agents working remotely (their work location is their household_id)
-    remote_agents = persons[work_remotly][["person_id", "household_id", "home_x", "home_y"]].copy()
-    remote_agents = remote_agents.rename(columns={"household_id": "destination_id"})
-    remote_agents["x"] = remote_agents["home_x"]
-    remote_agents["y"] = remote_agents["home_y"]
-    remote_agents["work_remotly"] = True
-    
-    out = pd.concat([out, remote_agents], ignore_index=True)
-
-    # compute commute distance
-    out["commute_distance"] = np.sqrt((out["home_x"] - out["x"])**2 + (out["home_y"] - out["y"])**2)
+    # Concatenate all work locations
+    fixed_work_locations["work_location_type"] = "fixed"
+    moving_work_locations["work_location_type"] = "moving"
+    remote_agents["work_location_type"] = "remote"
+    cols = ["person_id", "destination_id", "commute_distance", "x", "y"] + ["work_location_type"]
+    out = pd.concat([fixed_work_locations[cols], moving_work_locations[cols], remote_agents[cols]], ignore_index=True)
 
     # Ensure no missing coordinates
     assert np.isfinite(out["x"]).all() and np.isfinite(out["y"]).all()
 
     out = spatial_utils.to_gpd(context, out, coord_type="work")
-    return out[["person_id", "destination_id", "work_remotly", "commute_distance", "geometry"]] 
+    
+    # try:
+    #     plot_analysis(context, out, df_statent, pdf_matrices, zone_ids, persons_per_agent)
+    # except Exception as e:
+    #     logger.warning(f"Plotting analysis failed: {e}")
+    
+    return out[["person_id", "destination_id", "work_location_type", "commute_distance", "geometry"]] 
 
 
+
+
+
+def plot_analysis(context, work_locations, df_statent, pdf_matrices, zone_ids, persons_per_agent):    
+    import matplotlib.pyplot as plt
+    from sklearn.linear_model import LinearRegression
+    work_locations = work_locations.copy()
+    
+    # path to figures
+    path = context.path()
+
+    # load structural survey data to compare commute distances
+    df_ss = context.stage("data.structural_survey.structural_survey")[["home_zone_id", "work_zone_id", "start_work","crowfly_distance_to_work","weight",
+                                                                       "mode", "home_zone_level", "work_zone_level"]]
+    # working home
+    df_ss["crowfly_distance"] = df_ss["crowfly_distance_to_work"] * 1e3
+    df_ss.loc[df_ss["start_work"]==1,"crowfly_distance"] = 0
+    df_ss_home = df_ss.loc[df_ss["start_work"]==1].copy()
+    
+    # filter df_ss as in matrix
+    df_ss = df_ss[~np.isnan(df_ss["home_zone_id"])]
+    df_ss = df_ss[~np.isnan(df_ss["work_zone_id"])]
+    df_ss = df_ss[(df_ss["crowfly_distance_to_work"] > 0.0) | (df_ss["start_work"] > 1)]
+    df_ss = df_ss[~(df_ss["work_zone_level"] == "country")]
+    df_ss = df_ss[~(df_ss["home_zone_level"] == "country")]
+    # df_ss = df_ss[~((df_ss["mode"] == "unknown") | (df_ss["mode"] == "other"))]
+
+    # bring back working home for comparison
+    df_ss = pd.concat([df_ss, df_ss_home], ignore_index=True)
+
+    # load Mz commute
+    mz = context.stage("data.microcensus.21.persons")
+    mz = mz[mz["employed"]]
+
+    # Plot commute distance distribution
+    fig, ax = plt.subplots(figsize=(12,4))
+
+    # Define colors
+    color1 = 'blue' 
+    color2 = 'red'
+    color3 = 'c'
+    bins = np.linspace(0,80000,41)
+
+    # Plot filled histograms with low alpha
+    mz.work_commute_distance.plot.hist(ax=ax, bins=bins, alpha=0.3, density=True, color=color1, label='Commute Distance (Microcensus21)', weights=mz["person_weight"])
+    df_ss.crowfly_distance.plot.hist(ax=ax, bins=bins, alpha=0.2, density=True, color=color2, label='Commute Distance (SSurvey)', weights=df_ss["weight"])
+    work_locations.commute_distance.plot.hist(ax=ax, bins=bins, alpha=0.2, density=True, color=color3, label='Commute Distance (Assigned)')
+
+    # Plot step histograms with higher alpha and same colors
+    mz.work_commute_distance.plot.hist(ax=ax, bins=bins, alpha=0.8, histtype='step', linewidth=1, color=color1, density=True, label="", weights=mz["person_weight"])
+    df_ss.crowfly_distance.plot.hist(ax=ax, bins=bins, alpha=0.8, histtype='step', linewidth=1, color=color2, density=True, label="", weights=df_ss["weight"])
+    work_locations.commute_distance.plot.hist(ax=ax, bins=bins, alpha=0.8, histtype='step', linewidth=1, color=color3, density=True, label="")
+
+    # Mz commute stats
+    sel = mz.work_commute_distance > -1e3
+    commute_mean = np.average(mz.work_commute_distance[sel], weights=mz["person_weight"][sel])
+    commute_median = weighted_median(mz.work_commute_distance[sel], mz["person_weight"][sel])
+    ax.axvline(commute_mean, color=color1, linestyle='-', alpha=0.8, linewidth=1., label=f'Microcensus Mean: {commute_mean:.1f}')
+    ax.axvline(commute_median, color=color1, linestyle=':', alpha=0.8, linewidth=1., label=f'Microcensus Median: {commute_median:.1f}')
+
+    # Survey commute stats
+    sel = df_ss.crowfly_distance >-1e3
+    commute_mean = np.average(df_ss.crowfly_distance[sel], weights=df_ss["weight"][sel])
+    commute_median = weighted_median(df_ss.crowfly_distance[sel], df_ss["weight"][sel])
+    ax.axvline(commute_mean, color=color2, linestyle='-', alpha=0.8, linewidth=1., label=f'SSurvey Mean: {commute_mean:.1f}')
+    ax.axvline(commute_median, color=color2, linestyle=':', alpha=0.8, linewidth=1., label=f'SSurvey Median: {commute_median:.1f}')
+
+    # Assigned commute stats
+    sel = work_locations.commute_distance >-1e3
+    commute_mean = work_locations.commute_distance[sel].mean()
+    commute_median = work_locations.commute_distance[sel].median()
+    ax.axvline(commute_mean, color=color3, linestyle='-', alpha=0.8, linewidth=1., label=f'Assigned Mean: {commute_mean:.1f}')
+    ax.axvline(commute_median, color=color3, linestyle=':', alpha=0.8, linewidth=1., label=f'Assigned Median: {commute_median:.1f}')
+
+    plt.grid(linestyle="--", alpha=0.3)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.ylabel('Density')
+    plt.xlabel('Distance')    
+    plt.savefig(f"{path}/commute_distance_distribution.png", dpi=200, bbox_inches='tight')
+    plt.close()
+
+    # from this point we only keep agents not working from home
+    work_locations = work_locations[~work_locations.work_remotly].reset_index(drop=True)
+    # companies number of employees
+    out = work_locations.merge(df_statent[["enterprise_id", "zone_id"]], left_on="destination_id", right_on="enterprise_id")
+    employees_by_zone_statent = df_statent.groupby("zone_id").number_employees.sum().reset_index()
+    employees_by_zone_assigned = out.groupby("zone_id").size().mul(persons_per_agent).reset_index(name="number_employees_assigned")
+    employees = employees_by_zone_statent.merge(employees_by_zone_assigned, on="zone_id", how="left")
+    employees["number_employees_assigned"] = employees["number_employees_assigned"].fillna(0.0)
+    
+    fig, ax = plt.subplots(figsize=(7,7))
+    plt.scatter(employees.number_employees, employees.number_employees_assigned, label = "Employees per zone")
+    
+    max_employment = max(employees.number_employees.max(), employees.number_employees_assigned.max())    
+    plt.plot([0, max_employment], [0, max_employment], "k--", alpha=0.5, label = f"Line: y = x")
+    # regression    
+    model = LinearRegression(fit_intercept=False)
+    model.fit(employees.number_employees.values.reshape(-1, 1), employees.number_employees_assigned.values)
+    slope = model.coef_[0]
+    x_range = np.linspace(0, employees.number_employees.max(), 100)
+    plt.plot(x_range, slope * x_range, "r-", alpha=0.7, label=f"Fitted: y = {slope:.3f}x")
+    # plot labels
+    plt.grid(linestyle='--',alpha=0.3)
+    plt.legend()
+    plt.xlabel("Sum of employees (from statent)")
+    plt.ylabel("Assigned represented employees per zone")
+    plt.savefig(f"{path}/number_of_employees_per_zone.png", dpi=200, bbox_inches='tight')
+    plt.close()
+
+
+    # plot ODs
+    matrix = pdf_matrices
+    matrix = pd.DataFrame(matrix, columns = zone_ids, index = zone_ids)
+    matrix = matrix.reset_index().melt(id_vars='index', var_name='destination_zone_id', value_name='flow').rename(columns={"index":"origin_zone_id"})
+    matrix = matrix[(matrix.flow.notna())&(matrix.flow>0)].reset_index(drop=True)
+
+    out = out.merge(context.stage("synthesis.population.sampled")[["person_id","home_zone_id","car_availability"]], on="person_id", how="left")
+    origin_counts = out.groupby("home_zone_id").size().reset_index(name="count")
+
+    flows = out.groupby(["home_zone_id", "zone_id"]).size().reset_index(name="assigned_count")
+    flows = flows.merge(origin_counts, on="home_zone_id", how="left")
+    flows["flow_assigned"] = flows["assigned_count"] / flows["count"]
+    flows = flows.rename(columns={"home_zone_id": "origin_zone_id", "zone_id": "destination_zone_id"})
+
+    flows = matrix.merge(
+        flows[["origin_zone_id", "destination_zone_id", "flow_assigned", "count"]],
+        on=["origin_zone_id", "destination_zone_id"],
+        how="left"
+    ).rename(columns={"flow": "flow_od"})
+    flows["flow_assigned"] = flows["flow_assigned"].fillna(0.0)
+    flows["count"] = flows["count"].fillna(0)
+
+    threshold = 50
+    mask = flows["count"]>threshold
+
+    fig, ax = plt.subplots(figsize=(7,7))
+    plt.scatter(flows.flow_od[mask], flows.flow_assigned[mask], label = "OD Probabilities")
+    plt.plot([0,1],[0,1], "k--", alpha=0.5, label = "Line : y = x")
+    # plot labels
+    plt.grid(linestyle='--',alpha=0.3)
+    plt.legend()
+    plt.xlabel("OD Probabilities (survey)")
+    plt.ylabel("OD Probabilities (Assigned work location)")
+    _=plt.title(f"Only ODs with more than {threshold} trips are considered")
+    plt.savefig(f"{path}/od_probabilities.png", dpi=200, bbox_inches='tight')
+    plt.close()
+
+    # Plot ovgk distribution for assigned work locations (distinction by car availability)
+    out = out.merge(df_statent[["enterprise_id", "ovgk"]], left_on="destination_id", right_on="enterprise_id", how="left")
+    out["ovgk"] = out["ovgk"].fillna("Other")
+    fig, ax = plt.subplots(figsize=(5,5))
+    colors = ["navy","darkorange"]
+    
+    ovgk_data = []
+    for car_status, group in out.groupby("car_availability"):
+        ovgk_data.append(group["ovgk"].value_counts(normalize=True).sort_index())
+    
+    pd.DataFrame(ovgk_data, index=["Without Car", "With Car"]).T.plot(kind='bar', ax=ax, color=colors, width=0.8)
+    
+    plt.grid(linestyle='--', alpha=0.3)
+    plt.legend()
+    plt.xlabel("OVGK Category")
+    plt.ylabel("Proportion of Assigned Work Locations")
+    plt.title("Distribution of OVGK Categories for Assigned Work Locations by Car Availability")
+    plt.savefig(f"{path}/ovgk_distribution_by_car_availability.png", dpi=200, bbox_inches='tight')
+    plt.close()
+
+    logger.info(f"\n Work Assignement: \t Plots saved to {path} \n")
+
+def weighted_median(values, weights):
+    values = np.array(values)
+    weights = np.array(weights)
+    sorted_idx = np.argsort(values)
+    values_sorted = values[sorted_idx]
+    weights_sorted = weights[sorted_idx]
+    cum_weights = np.cumsum(weights_sorted)
+    cutoff = weights_sorted.sum() / 2.0
+    return values_sorted[cum_weights >= cutoff][0]

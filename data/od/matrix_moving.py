@@ -1,16 +1,18 @@
 import numpy as np
 import pandas as pd
-import logging
 from data.structural_survey.structural_survey import get_filtered_data
+import logging
+
 logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.structural_survey.structural_survey")
     context.stage("data.spatial.zones")
 
+
 def execute(context):
     df_zones = context.stage("data.spatial.zones")
-    df_od = get_filtered_data(context, "fixed")[[
+    df_od = get_filtered_data(context, "moving")[[
         "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
         "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
         "mode", "weight", "crowfly_distance_to_work", "start_work"
@@ -56,15 +58,6 @@ def execute(context):
     f_origin = df_zones["zone_level"].isin(("municipality", "quarter"))
     f_zero = np.sum(matrix, axis = 1) == 0.0
 
-    # There are two types of origins with zero observations:
-    # - Quarters or municipalities for which we simply don't have data
-    # - Countries which we do not want to handle for now
-    #
-    # The latter ones will simply be set to NaN after avoiding a division
-    # by zero error. The former ones will be set for now in a way that all
-    # people stay inside this zone. (TODO: Probably it would be better to
-    # attach them to adjacent zones.)
-
     for index in np.where(f_origin & f_zero)[0]:
         matrix[index,:] = 0.0
         matrix[index,index] = 1.0
@@ -78,15 +71,5 @@ def execute(context):
     cdf_matrix /= cdf_matrix[:, -1][:, np.newaxis]
 
     logger.info("  - Finished (%d fixed municipalities)" % (np.count_nonzero(f_origin & f_zero)))
-
-    # A final note on the structure of these OD matrices:
-    # - The origin counts for municipalities contain all originating trips, also
-    #   those which are actually assigned to quarters within this zone
-    # - The destination counts target the assigned top-level zone. So arrivals
-    #   in a quarter are NOT included in the arrivals for the municipality. This
-    #   way, arrivals in municipalities with quarters can only happen if the
-    #   municipality is not covered 1:1 by the quarters, which is usually the case
-    #   in our zoning system. This way the municipality itself will only have little
-    #   arrivals, while the quarters will have more.
 
     return pdf_matrix, cdf_matrix

@@ -58,7 +58,7 @@ def prepare_network_links(context):
     """
     network = context.stage("analysis.counts.matching.network")
     links = network.net.links
-    links = links[links["modes"].str.contains(r"\bcar\b", regex=True)]
+    links = links[links["modes"].str.split(",").apply(lambda x: "car" in x)]
     links["municipalityType"] = links["attributes"].apply(lambda x: x.get("municipalityType", None))
     links = links[["link_id", "freespeed", "length", "municipalityType", "highway"]].set_index("link_id")
     links["free_travel_time"] = links["length"] / links["freespeed"]

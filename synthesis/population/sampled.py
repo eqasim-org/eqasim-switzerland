@@ -12,46 +12,25 @@ def configure(context):
 
 def execute(context):
     df = context.stage("data.census.selected")
-
-    # If we do not want to downsample, set the value to 1.0 in config
     probability = context.config("input_downsampling")
+    aggregation_col = "home_zone_id" if "home_zone_id" in df.columns else "home_municipality_id"
+    sampling_col = "household_id" if "household_id" in df.columns else "person_id"
 
     if probability < 1.0:
         logger.info("Downsampling (%f)", probability)
+        random = np.random.RandomState(context.config("random_seed"))
 
-        if "household_id" in df.columns:
+        df_hh = df.drop_duplicates(sampling_col)[[sampling_col, aggregation_col]]
+        logger.info("  Initial unique %s: %d, persons: %d", sampling_col, df_hh.shape[0], len(df["person_id"].unique()))
 
-            household_ids = np.unique(df["household_id"])
-            logger.info("  Initial number of households: %d", len(household_ids))
-            logger.info("  Initial number of persons: %d", len(np.unique(df["person_id"])))
+        def sample_stratum(g):
+            idx = random.choice(len(g), size=max(1, round(len(g) * probability)), replace=False)
+            return g.iloc[idx]
 
-            # Set up RNG
-            random = np.random.RandomState(context.config("random_seed"))
-            
-            # Perform sampling
-            f = random.random_sample(size=(len(household_ids),)) < probability
-            remaining_household_ids = household_ids[f]
-            logger.info("  Sampled number of households: %d", len(remaining_household_ids))
+        kept_ids = df_hh.groupby(aggregation_col, group_keys=False).apply(sample_stratum)[sampling_col].values
+        df = df[df[sampling_col].isin(kept_ids)]
+        logger.info("  Sampled %s: %d, persons: %d", sampling_col, len(kept_ids), len(df["person_id"].unique()))
+        logger.info("Proportion of original population: %f", len(df) / len(context.stage("data.census.selected")))
 
-            df = df[df["household_id"].isin(remaining_household_ids)]
-            logger.info("  Sampled number of persons: %d", len(np.unique(df["person_id"])))
-
-        else:
-
-            person_ids = np.unique(df["person_id"])
-            logger.info("  Initial number of persons: %d", len(person_ids))
-
-            # Set up RNG
-            random = np.random.RandomState(context.config("random_seed"))
-            
-            # Perform sampling
-            f = random.random_sample(size=(len(person_ids),)) < probability
-            remaining_person_ids = person_ids[f]
-            logger.info("  Sampled number of persons: %d", len(remaining_person_ids))
-
-            df = df[df["person_id"].isin(remaining_person_ids)]
-
-            # Create household id to avoid issues later in the pipeline
-            df["household_id"] = df["person_id"]
 
     return df

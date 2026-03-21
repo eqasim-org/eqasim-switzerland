@@ -27,7 +27,12 @@ def execute(context):
     output_path = context.config("output_path")
     output_id   = context.config("output_id")
     simulation_directory = context.config("simulation_directory")
+    
     network_file = os.path.join(output_path, output_id, simulation_directory, "output_network.xml.gz")
+    if not os.path.exists(network_file):
+        network_file = os.path.join(output_path, output_id, context.config("output_prefix") + "network.xml.gz")
+    assert os.path.exists(network_file), f"Network file not found at {network_file}"
+
     network_geometry_file = os.path.join(output_path, output_id, 
                                          "%sdetailed_network.csv" % context.config("output_prefix"))
     

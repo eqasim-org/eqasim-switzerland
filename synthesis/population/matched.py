@@ -16,12 +16,14 @@ It progressively decreases the minimum number of observations to ensure the most
 def configure(context):
     context.config("hot_deck_matching_runners")
     context.config("random_seed")
-    context.config("matching_minimum_observations", 20)
+    context.config("matching_minimum_observations", 15)
     context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.trips")
     context.stage("data.microcensus.activity_chains")
     context.stage("synthesis.population.sampled")
+    context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
     context.stage("data.constants")
 
 def compare_feature_distribution(df_population_sub, df_source_sub, feature, weight_col="person_weight"):
@@ -279,8 +281,9 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     })
 
     for count in range(len(columns) + 1):
-        logger.info("%d matched levels:" % count, np.count_nonzero(levels >= count),
-              "%.2f%%" % (100 * np.count_nonzero(levels >= count) / len(df_target),))
+        matched_count = np.count_nonzero(levels >= count)
+        matched_percent = 100 * matched_count / len(df_target) if len(df_target) > 0 else 0.0
+        logger.info(f"{count} matched levels: {matched_count} ({matched_percent:.2f}%)")
         
     # Remove and track unmatchable households (i.e. head of household)
 
@@ -334,9 +337,21 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
         return df_target, df_population, [unmatchable_person_ids, None]
 
     
+def get_mz_persons(context):
+    df_persons = context.stage("data.microcensus.persons")
+    df_trips = context.stage("data.microcensus.trips")[0]
+    
+    # remove persons who are not employed, but have a work as one of the purposes in their activity chain
+    employed_persons = set(df_persons[df_persons["employed"] == True]["person_id"])
+    persons_with_work_purpose = set(df_trips[(df_trips["origin_purpose"] == "work") | (df_trips["purpose"] == "work")]["person_id"])
+    persons_to_remove = persons_with_work_purpose - employed_persons
+    logger.info(f"Removing {len(persons_to_remove)} persons who are not employed but have 'work' as a purpose in their activity chain.")
+
+    df_persons = df_persons[~df_persons["person_id"].isin(persons_to_remove)]
+    return df_persons
 
 def execute(context):
-    df_mz        = context.stage("data.microcensus.persons")
+    df_mz = get_mz_persons(context)
     const        = context.stage("data.constants")
     scenario_day = context.config("specific_day_scenario")
 
@@ -363,11 +378,34 @@ def execute(context):
     df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"] = 3
 
     df_population["sex"] = df_population["sex"].astype(np.int64)
+    
+    # add commute distance and work location type
+    df_work = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]]
+    df_population = pd.merge(df_population, df_work, on="person_id", how="left")
+    assert df_population.loc[df_population.employed==1,"work_location_type"].notna().all(), "Some employed gents are missing commute distance"
+    df_population[ "commute_distance"] = df_population["commute_distance"].fillna(-1)
+    df_population[ "work_location_type"] = df_population["work_location_type"].fillna("none")
+    
+    # trasform work_location_type to int
+    DICT_WORK_LOCATION_TYPE = {"none": 0, "fixed": 1, "remote": 2, "moving": 3}
+    df_population["work_location_type"] = df_population["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
+    df_source["work_location_type"] = df_source["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
 
+    # add commute distance classes
+    COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 1, 3, 6, 9, 12, 15, 20, 50, 1000]) * 1e3 # convert km -> m
+    df_population["commute_distance_class"] = np.digitize(df_population["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
+    df_source["commute_distance_class"] = np.digitize(df_source["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
+
+    # add age classes 
     AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
     df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
     df_source["age_class"] = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
 
+    # this is not necessary, but just to make sure employment is working correctly
+    df_source["employed"] = df_source["employed"].astype(int)
+    df_population["employed"] = (df_population["employed"]==1).astype(int)
+
+    # further cleaning
     df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
     df_population["household_size"] = df_population["household_size"].clip(upper=2)
 
@@ -375,7 +413,12 @@ def execute(context):
 
     df_source["sex"] = df_source["sex"].astype(np.int64)
     var_raw = pd.to_numeric(df_source["car_availability"], errors="coerce")
-    df_source["car_availability"] = np.where(var_raw == 2, 0, 1).astype("int64")
+    df_source["car_availability"] = np.where(var_raw == const.CAR_AVAILABILITY_NEVER, 0, 1).astype("int64")
+
+
+    # checkig if any duplicates
+    assert df_population['person_id'].duplicated().sum()==0, "Duplicate person_id found in population dataframe. Please ensure person_id is unique for each individual in the population."
+    assert df_source['mz_id'].duplicated().sum()==0, "Duplicate mz_id found in source dataframe. Please ensure mz_id is unique for each individual in the source."
 
     if const.census == "statpop":
 
@@ -388,8 +431,8 @@ def execute(context):
 
         # HT and activity-chains are better with canton_id instead of muncipality_type
         columns_individual_matching = [
-            "age_class", "sex", "car_availability", "employment_status",
-            "ovgk",  "N_children_under_12", "sp_region", "canton_id",
+            "age_class", "sex", "car_availability", "employed", "employment_status", "commute_distance_class",
+            "ovgk",  "N_children_under_12", "sp_region", "work_location_type", "canton_id"
         ]
 
         df_population["marital_status"] = df_population["marital_status"].astype("int64")
@@ -403,7 +446,7 @@ def execute(context):
         df_population["ovgk"] = (df_population["ovgk"] != "None").astype("int64")
         df_source["ovgk"] = (df_source["ovgk"] != "None").astype("int64")
 
-        mandatory_columns_individual_matching = columns_individual_matching[:7]
+        mandatory_columns_individual_matching = columns_individual_matching[:9]
 
         logger.info("Statistical matching starting (normal people split by age band with band-filtered source)")
 
@@ -476,11 +519,11 @@ def execute(context):
             elif band_name == "15_23":
                 youth = [
                 "age_class", "sex",
-                "ovgk",  "employment_status", "car_availability", "sp_region", "canton_id",
+                "ovgk", "employed", "employment_status", "car_availability", "sp_region", "commute_distance_class", "canton_id", "work_location_type"
                 ]
                 youth_mandatory = [
                 "age_class", "sex",
-                "ovgk", "employment_status", "car_availability", "sp_region"
+                "ovgk", "employed", "employment_status", "car_availability", "sp_region"
                 ]
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,
@@ -625,7 +668,8 @@ def execute(context):
     logger.info("Matching is done. In total, the following observations were removed from the census: ")
 
     removed_person_ids = removed_ids_list[0]
-    logger.info("  Persons: %d (%.2f%%)", len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_population_persons)
+    pct_removed = 100.0 * len(removed_person_ids) / number_of_population_persons if number_of_population_persons > 0 else 0.0
+    logger.info("  Persons: %d (%.2f%%)", len(removed_person_ids), pct_removed)
 
     # Return
     return df_matching, removed_person_ids

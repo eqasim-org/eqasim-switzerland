@@ -10,7 +10,6 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.structural_survey.structural_survey")
-    context.stage("synthesis.population.spatial.primary.work.work_at_different_locations")
     context.stage("synthesis.population.sampled")
     context.config("random_seed")
 
@@ -52,8 +51,8 @@ def group_job_positions(df):
     return df
 
 def aggregate_smoothed_rate(df, group_cols, alpha, beta):
-    tmp = df[group_cols + ["weight", "work_remotly"]].copy()
-    tmp["weighted_remote"] = tmp["weight"] * tmp["work_remotly"]
+    tmp = df[group_cols + ["weight", "work_diff_locations"]].copy()
+    tmp["weighted_remote"] = tmp["weight"] * tmp["work_diff_locations"]
     agg = tmp.groupby(group_cols, dropna=False).agg(
         s=("weighted_remote", "sum"),
         n=("weight", "sum")
@@ -74,22 +73,16 @@ def execute(context):
         "employed", "nationality", "canton_id", "job_position", "home_x", "home_y"
     ]].copy()
 
-    moving_work_locations = context.stage("synthesis.population.spatial.primary.work.work_at_different_locations")["person_id"].unique()
     num_agents = (df_population["employed"]==1).sum()
-
     # Prepare survey observations    
-    df_survey = df_survey[~df_survey["home_municipality_id"].isna()]        
-    df_survey = df_survey[df_survey["start_work"].isin([1, 2, 3, 4, 5, 6])].copy()
-
-    # filter out those working from different locations (This is important, as we might predict the agent work remotly and work  from different locations as well)
-    df_population = df_population[~df_population["person_id"].isin(moving_work_locations)].reset_index(drop=True)
-    df_survey = df_survey[df_survey["start_work"]!=2].reset_index(drop=True)
+    df_survey = df_survey[~df_survey["home_municipality_id"].isna()]
+    df_survey = df_survey[df_survey["start_work"].isin([1, 2, 3, 4, 5, 6])]
 
     # 1 means "at domicile" in structural survey coding -> remote work
-    df_survey["work_remotly"] = (df_survey["start_work"] == 1).astype(float)
+    df_survey["work_diff_locations"] = (df_survey["start_work"] == 2).astype(float)
     df_survey["weight"] = df_survey["weight"].fillna(df_survey["weight"].mean()).clip(lower=0.0)
 
-    survey_remote_share = np.average(df_survey["work_remotly"], weights=df_survey["weight"])
+    survey_remote_share = np.average(df_survey["work_diff_locations"], weights=df_survey["weight"])
     logger.info(
         f"Remote share in employed structural survey: {100.0 * survey_remote_share:.2f}%%"
     )
@@ -117,8 +110,8 @@ def execute(context):
         ["home_municipality_id"],
         ["canton_id", "sex", "age_bin"],
         ["home_municipality_id", "sex", "age_bin"],    
-        ["home_municipality_id", "sex", "age_bin", "nationality"],    
-        ["home_municipality_id", "sex", "age_bin", "nationality", "job_position"]        
+        ["home_municipality_id", "sex", "age_bin", "job_position"],    
+        ["home_municipality_id", "sex", "age_bin", "nationality", "job_position"]              
     ]
 
     # Predict for employed population only
@@ -131,7 +124,7 @@ def execute(context):
     # Controls how fast we trust a group estimate as sample size grows
     blend_tau = 100
     pop_threshold = 50
-    with context.progress(total=len(group_levels)+1, label="Prediction remote working ") as prog:
+    with context.progress(total=len(group_levels)+1, label="Prediction work at different locations ") as prog:
         for level in group_levels:
             agg = aggregate_smoothed_rate(df_survey, level, alpha, beta)
             merged = df_employed[level].merge(agg, on=level, how="left")
@@ -151,31 +144,29 @@ def execute(context):
         remote_flag = rng.random(len(df_employed)) < p
 
         # Build output for all agents
-        out = df_population[["household_id", "person_id", "home_x", "home_y"]].copy()
-        out["p_work_remotly"] = 0.0
-        out["work_remotly"] = False
+        out = df_population[["person_id"]].copy()
+        out["p_work_diff_locations"] = 0.0
+        out["work_diff_locations"] = False
 
-        out.loc[employed_mask, "p_work_remotly"] = p
-        out.loc[employed_mask, "work_remotly"] = remote_flag
+        out.loc[employed_mask, "p_work_diff_locations"] = p
+        out.loc[employed_mask, "work_diff_locations"] = remote_flag
         prog.update()
 
     logger.info(
-        "Survey remote work: %.2f%% | Assigned: %.2f%% | Avg prob: %.2f%%" % (
+        "Survey work at different locations: %.2f%% | Assigned: %.2f%% | Avg prob: %.2f%%" % (
             100.0 * survey_remote_share,
-            100.0 * out.loc[employed_mask, "work_remotly"].mean(),
-            100.0 * out.loc[employed_mask, "p_work_remotly"].mean()
+            100.0 * out.loc[employed_mask, "work_diff_locations"].mean(),
+            100.0 * out.loc[employed_mask, "p_work_diff_locations"].mean()
         )
     )
     # plot analysis
     plot_analysis(context, df_survey, df_population, out)
-
-    # reformat for compatibillity with other stages
-    out = out.rename(columns={"household_id": "destination_id", "home_x": "x", "home_y": "y"})
-    out["commute_distance"]   = 0.0
-    out = out[out["work_remotly"] == True].reset_index(drop=True)
     
-    assert num_agents * 0.3 > len(out), f"We cannot have more than 30% of the employed population working remotly"
-    return out[["person_id", "destination_id", "commute_distance", "x", "y"]] 
+    # only keep those agents
+    out = out[out["work_diff_locations"] == True].reset_index(drop=True)
+    assert num_agents * 0.3 > len(out), f"We cannot have more than 30% of the employed population working from different locations"
+    return out[["person_id"]]
+
 
 
 
@@ -197,8 +188,8 @@ def plot_analysis(context, df_survey, df_population, out):
     for idx, (group_cols, title) in enumerate(groupings):
         # Survey group remote share
         survey_group = df_survey.groupby(group_cols).apply(
-            lambda x: np.average(x["work_remotly"], weights=x["weight"])
-        ).reset_index(name="survey_remote_share")
+            lambda x: np.average(x["work_diff_locations"], weights=x["weight"])
+        ).reset_index(name="survey_work_diff_locations_share")
 
         # Assigned group remote share
         assigned_group = out.copy()
@@ -207,7 +198,7 @@ def plot_analysis(context, df_survey, df_population, out):
         assigned_group = assigned_group[employed_mask]
         num_obs = assigned_group.groupby(group_cols).person_id.transform(len)
         assigned_group = assigned_group[num_obs>100]
-        assigned_group = assigned_group.groupby(group_cols)["work_remotly"].mean().reset_index(name="assigned_remote_share")
+        assigned_group = assigned_group.groupby(group_cols)["work_diff_locations"].mean().reset_index(name="assigned_work_diff_locations_share")
 
         # Merge for comparison
         group_compare = pd.merge(survey_group, assigned_group, on=group_cols, how="inner")
@@ -223,20 +214,20 @@ def plot_analysis(context, df_survey, df_population, out):
             
             for color_val in unique_colors:
                 mask = group_compare[group_cols[1]] == color_val
-                ax.scatter(group_compare[mask]["survey_remote_share"],
-                          group_compare[mask]["assigned_remote_share"], 
+                ax.scatter(group_compare[mask]["survey_work_diff_locations_share"], 
+                          group_compare[mask]["assigned_work_diff_locations_share"], 
                           alpha=0.7, label=f"{group_cols[1]}={color_val}", color=color_map[color_val])
         else:
-            ax.scatter(group_compare["survey_remote_share"], 
-                      group_compare["assigned_remote_share"], alpha=0.7)
+            ax.scatter(group_compare["survey_work_diff_locations_share"], 
+                      group_compare["assigned_work_diff_locations_share"], alpha=0.7)
         
         ax.plot([0, 0.2], [0, 0.2], 'r--', label="y=x")
-        ax.set_xlabel("Survey Remote Share")
-        ax.set_ylabel("Assigned Remote Share")
-        ax.set_title(f"Remote Work Share: {title}")
+        ax.set_xlabel("Survey Work Diff Locations Share")
+        ax.set_ylabel("Assigned Work Diff Locations Share")
+        ax.set_title(f"Work Diff Locations Share: {title}")
         ax.legend()
 
     plt.tight_layout()
-    path_to_figure = os.path.join(context.path(), "remote_work_share_comparison.png")
+    path_to_figure = os.path.join(context.path(), "work_diff_locations_share_comparison.png")
     plt.savefig(path_to_figure, dpi=200, bbox_inches="tight")
     plt.close()    

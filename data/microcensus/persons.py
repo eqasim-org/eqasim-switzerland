@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-
+import pyproj
 import data.microcensus.income
 import data.utils
 import logging
@@ -151,6 +151,15 @@ def execute(context):
 
     columns.append("employment_status")
 
+    # work location
+    coords = df_mz_persons[["A_X", "A_Y"]].values
+    transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:2056")
+    x, y = transformer.transform(coords[:, 1], coords[:, 0])
+    df_mz_persons.loc[:, "work_x"] = x
+    df_mz_persons.loc[:, "work_y"] = y
+
+    columns.extend(["work_x", "work_y"])
+
     # Parking
     df_mz_persons["parking_work"] = "unknown"
     df_mz_persons.loc[df_mz_persons["f41300"] == 1, "parking_work"] = "free"
@@ -222,5 +231,42 @@ def execute(context):
     # Add car passenger flag
     car_passenger_ids = df_mz_trips.loc[df_mz_trips["mode"] == "car_passenger", "person_id"].unique()
     df_mz_persons["is_car_passenger"] = df_mz_persons["person_id"].isin(car_passenger_ids)
+
+    # commute distance
+    df_mz_persons["commute_distance"] = -1
+    employed = df_mz_persons["employed"]
+    df_mz_persons.loc[employed, "commute_distance"] = np.sqrt(
+        (df_mz_persons.loc[employed, "work_x"] - df_mz_persons.loc[employed, "home_x"]) ** 2 +
+        (df_mz_persons.loc[employed, "work_y"] - df_mz_persons.loc[employed, "home_y"]) ** 2
+    ).fillna(0.0).replace([np.inf, -np.inf], 0.0)
+    
+    # work_location_type
+    df_mz_persons["work_location_type"] = "none"    
+    df_mz_persons.loc[employed, "work_location_type"] = "fixed"
+    # 1.those working from different locations
+    # 1.1 they have secondary work
+    moving = df_mz_trips[(df_mz_trips.purpose=="work_secondary")|(df_mz_trips.origin_purpose=="work_secondary")].person_id.unique()
+    df_mz_persons.loc[employed & df_mz_persons["person_id"].isin(moving), "work_location_type"] = "moving"    
+    # 1.2 trips to work don't go to the declared work location
+    work_trips = df_mz_trips[df_mz_trips.purpose.isin(["work","work_secondary"])].copy()
+    work_trips = work_trips.merge(df_mz_persons[["person_id", "work_x", "work_y"]], on="person_id", how="left")
+    work_trips["distance_from_work_to_work"] = np.sqrt(
+        (work_trips["destination_x"] - work_trips["work_x"]) ** 2 +
+        (work_trips["destination_y"] - work_trips["work_y"]) ** 2
+    ).fillna(0.0).replace([np.inf, -np.inf], 0.0)
+    moving2 = work_trips[work_trips["distance_from_work_to_work"] > 10].person_id.unique()
+    df_mz_persons.loc[employed & df_mz_persons["person_id"].isin(moving2), "work_location_type"] = "moving"
+    # 1.3 trips from work don't start from the declared work location
+    work_trips = df_mz_trips[df_mz_trips.origin_purpose.isin(["work","work_secondary"])].copy()
+    work_trips = work_trips.merge(df_mz_persons[["person_id", "work_x", "work_y"]], on="person_id", how="left")
+    work_trips["distance_from_work_to_work"] = np.sqrt(
+        (work_trips["origin_x"] - work_trips["work_x"]) ** 2 +
+        (work_trips["origin_y"] - work_trips["work_y"]) ** 2
+    ).fillna(0.0).replace([np.inf, -np.inf], 0.0)
+    moving3 = work_trips[work_trips["distance_from_work_to_work"] > 10].person_id.unique()
+    df_mz_persons.loc[employed & df_mz_persons["person_id"].isin(moving3), "work_location_type"] = "moving"
+
+    # 2.add employed people with no work trip to those working remotly
+    df_mz_persons.loc[employed & (df_mz_persons["commute_distance"] < 10), "work_location_type"] = "remote" # small errors might come from coordinate conversion
 
     return df_mz_persons
