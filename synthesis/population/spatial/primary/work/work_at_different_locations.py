@@ -122,8 +122,8 @@ def execute(context):
     p = np.full(len(df_employed), survey_remote_share, dtype=float)
 
     # Controls how fast we trust a group estimate as sample size grows
-    blend_tau = 100
-    pop_threshold = 50
+    blend_tau = 20
+    pop_threshold = 20
     with context.progress(total=len(group_levels)+1, label="Prediction work at different locations ") as prog:
         for level in group_levels:
             agg = aggregate_smoothed_rate(df_survey, level, alpha, beta)

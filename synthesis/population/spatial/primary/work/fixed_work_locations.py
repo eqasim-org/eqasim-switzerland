@@ -121,6 +121,8 @@ def execute(context):
     # Pre-fetch person arrays
     p_home_zone = df["home_zone_id"].to_numpy()
     p_has_car = df["car_availability"].to_numpy(dtype=bool)
+    p_home_x = df["home_x"].to_numpy(dtype=float)
+    p_home_y = df["home_y"].to_numpy(dtype=float)
 
     # starting assignement
     no_comp = set()
@@ -146,8 +148,13 @@ def execute(context):
                 if len(cand_idx)==0:
                     cand_idx = np.arange(len(comp_emp))                
 
-            ## Company weights
-            weights = calculate_company_weights(cand_idx, p_has_car[idx], comp_emp, comp_pt1, comp_pt2)
+            # distances to candidate companies
+            dx = comp_x[cand_idx] - p_home_x[idx]
+            dy = comp_y[cand_idx] - p_home_y[idx]
+            d = np.hypot(dx, dy)
+
+            # Company weights
+            weights = calculate_company_weights(cand_idx, p_has_car[idx], comp_emp, comp_pt1, comp_pt2, d)
 
             sel_local = rng.choice(len(cand_idx), p=weights)
             sel = cand_idx[sel_local]

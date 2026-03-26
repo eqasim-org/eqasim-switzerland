@@ -42,7 +42,23 @@ def multinomial_sample(n, probs):
 
     return counts
 
-def calculate_company_weights(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2):
+def _apply_distance_reweighting(weights, distances):    
+    mean_d = distances.mean()
+    min_d = distances.min()
+    max_d = distances.max()
+    normalized_distance = (distances - min_d) / (max_d - min_d + 1e-6)
+    
+    if mean_d > 40000:        
+        distance_factor = 0.9 * normalized_distance
+        return weights * (1 - distance_factor)
+    elif mean_d < 10000:
+        distance_factor = 0.3 + 0.7 * normalized_distance
+        return weights * distance_factor
+
+    return weights
+
+
+def calculate_company_weights(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2, distances=None):
     weights = comp_emp[cand_idx].astype(float, copy=True)
 
     if not has_car:
@@ -51,7 +67,16 @@ def calculate_company_weights(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2):
         preference_factors[comp_pt1[cand_idx]] = PT1_PREFERENCE_FACTOR
         weights *= preference_factors
 
-    return weights / weights.sum()
+    if distances is not None:
+        weights = _apply_distance_reweighting(weights, distances)
+
+    total = weights.sum()
+    if total <= 0.0:
+        return np.ones(len(cand_idx), dtype=float) / len(cand_idx)
+
+    return weights / total
+
+
 
 
 def correct_companies_number_of_employees(context, df_statent, df_fixed_locations=None):
