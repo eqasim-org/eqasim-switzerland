@@ -494,6 +494,25 @@ def get_average_flow_veh_h_by_category(df, output_path=None):
 
     plt.close()
 
+def save_as_target(network, df, path_to_output):
+    df = df[['link_id','obs_vphpl']]
+    df = df.explode("link_id")
+    df = df.rename(columns={"link_id":"linkId",
+                            "obs_vphpl":"count"})
+
+    # links that are duplicates of others, we give them the original link id
+    replicated_links = network.links[network.links.replicate_of.notna()][["link_id","replicate_of"]]
+    df = df.merge(replicated_links.rename(columns={"link_id":"linkId", "replicate_of":"original_linkId"}), on="linkId", how="left")
+    df["linkId"] = df["original_linkId"].fillna(df["linkId"])
+    df = df.drop(columns=["original_linkId"])
+    
+    # If multiple link ids, we average the counts
+    df = df.groupby("linkId", as_index=False)["count"].mean()
+
+    # save it as csv file
+    file_path = os.path.join(path_to_output, "target_flow.csv")
+    df.to_csv(file_path, index=False, sep=",")
+    logger.info(f"✅ Target flow saved to: {file_path}")
 
 
 
