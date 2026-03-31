@@ -95,8 +95,8 @@ def execute(context):
     df["car_availability"] = df["car_available"]
 
     # Number of bikes class cannot be used for matching as it is given at the household level in MZ
-    df.loc[df["number_of_bikes_class"] == "null", "number_of_bikes_class"]                                                            = c.BIKE_AVAILABILITY_FOR_NONE
-    df.loc[df["number_of_bikes_class"].isin(["bike", "eBike25", "eBike45", "bike+eBike25", "bike+eBike45"]), "number_of_bikes_class"] = c.BIKE_AVAILABILITY_FOR_ALL
+    df.loc[df["number_of_bikes_class"] == "null", "number_of_bikes_class"]                                                            = c.BIKE_AVAILABILITY_NEVER
+    df.loc[df["number_of_bikes_class"].isin(["bike", "eBike25", "eBike45", "bike+eBike25", "bike+eBike45"]), "number_of_bikes_class"] = c.BIKE_AVAILABILITY_ALWAYS
 
     del df["cars_in_hh"]
     del df["bike_ownership"]
@@ -119,7 +119,7 @@ def execute(context):
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id",
                                             zone_type="municipality", point_type="home")[
         ["person_id", "municipality_id", "geometry"]])
-    df_spatial["municipality_id"] = df_spatial["municipality_id"].astype(np.int)
+    df_spatial["municipality_id"] = df_spatial["municipality_id"].astype(int)
 
     # Impute quarters
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_quarters, "person_id", "quarter_id",

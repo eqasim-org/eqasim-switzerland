@@ -56,7 +56,7 @@ def impute(df, df_zones, zone_id_prefix = "",
                         "nuts": "nuts_id",
                         "postal_code": "postal_code"}):
     print(f"Imputing {list(zone_fields.keys())} zones for {len(df)} points...")
-    remaining_mask = np.ones((len(df),), dtype = np.bool)
+    remaining_mask = np.ones((len(df),), dtype = bool)
     df[zone_id_prefix + "zone_id"] = np.nan
     df[zone_id_prefix + "zone_level"] = np.nan
     

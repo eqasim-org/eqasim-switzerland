@@ -423,16 +423,16 @@ def compare_dist_from_home(context, df_syn, df_act, target_purpose = "education"
     act_w = dist_df_act["weight_person"].values
 
     fig, ax = plt.subplots(1,1)
-    x_data = np.array(syn, dtype=np.float64)
+    x_data = np.array(syn, dtype=float)
     x_sorted = np.argsort(x_data)
-    x_weights = np.array([1.0 for i in range(len(syn))], dtype=np.float64)
+    x_weights = np.array([1.0 for i in range(len(syn))], dtype=float)
     x_cdf = np.cumsum(x_weights[x_sorted])
     if len(x_cdf) >= 1:
         x_cdf /= x_cdf[-1]
 
-    y_data = np.array(act, dtype=np.float64)
+    y_data = np.array(act, dtype=float)
     y_sorted = np.argsort(y_data)
-    y_weights = np.array(act_w, dtype=np.float64)
+    y_weights = np.array(act_w, dtype=float)
     y_cdf = np.cumsum(y_weights[y_sorted])
     if len(y_cdf) >= 1:
         y_cdf /= y_cdf[-1]

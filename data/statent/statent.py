@@ -25,7 +25,7 @@ def execute(context):
 
     df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08_CD", "EMPTOT"]])
     df.columns = ["x", "y", "noga", "number_employees"]
-    df.loc[:, "noga"] = df["noga"].astype(np.str)
+    df.loc[:, "noga"] = df["noga"].astype(str)
     df.loc[:, "enterprise_id"] = np.arange(len(df))
 
     df.loc[df["noga"].str.startswith("851"), "education_type"] = "kindergarten"
@@ -120,6 +120,6 @@ def execute(context):
         df, df_spatial[columns],
         on = "enterprise_id"
     )
-    df["zone_id"] = df["zone_id"].astype(np.int)
-    df["zone_municipality_id"] = df["zone_municipality_id"].astype(np.int)
+    df["zone_id"] = df["zone_id"].astype(int)
+    df["zone_municipality_id"] = df["zone_municipality_id"].astype(int)
     return df

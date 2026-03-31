@@ -142,9 +142,9 @@ def recursive_iteration_statmatch(df_source, source_identifier, weight, df_targe
 
     # Perform matching
     weights = df_source[weight].values
-    assigned_indices = np.ones((len(df_target),), dtype=np.int64) * -1
-    unassigned_mask = np.ones((len(df_target),), dtype=np.bool_)
-    assigned_levels = np.ones((len(df_target),), dtype=np.int64) * -1
+    assigned_indices = np.ones((len(df_target),), dtype=int) * -1
+    unassigned_mask = np.ones((len(df_target),), dtype=bool)
+    assigned_levels = np.ones((len(df_target),), dtype=int) * -1
     uniform = rng.random_sample(size=(len(df_target),))
 
     column_indices = [np.arange(len(unique_values[column])) for column in columns]
@@ -351,7 +351,7 @@ def execute(context):
         raise ValueError(f"Unimplemented day for scenario: {scenario_day}")
 
     df_source     = df_source.rename(columns={"person_id": "mz_id"})
-    df_source["canton_id"] = df_source["canton_id"].astype("int64")
+    df_source["canton_id"] = df_source["canton_id"].astype(int)
 
     df_population = context.stage("synthesis.population.sampled")
 
@@ -361,25 +361,23 @@ def execute(context):
     df_population.loc[(df_population["employed"] == 2) & (df_population["is_student"] == 1), "employment_status"] = 2
     df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"] = 3
 
-    df_population["sex"] = df_population["sex"].astype(np.int64)
-
-    AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
-    df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
-    df_source["age_class"] = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
-
-    df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
-    df_population["household_size"] = df_population["household_size"].clip(upper=2)
+    df_population["sex"] = df_population["sex"].astype(int)
 
     df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0)  # presence of children under 12
 
-    df_source["sex"] = df_source["sex"].astype(np.int64)
+    df_source["sex"] = df_source["sex"].astype(int)
     var_raw = pd.to_numeric(df_source["car_availability"], errors="coerce")
-    df_source["car_availability"] = np.where(var_raw == 2, 0, 1).astype("int64")
+    df_source["car_availability"] = np.where(var_raw == 2, 0, 1).astype(int)
 
     if const.census == "statpop":
 
+        AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
+        df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
+        df_source["age_class"] = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
+        df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
+        df_population["household_size"] = df_population["household_size"].clip(upper=2)
+
         number_of_population_persons    = len(np.unique(df_population["person_id"]))
-        number_of_population_households = len(np.unique(df_population["household_id"]))
 
         population_selector  = df_population["age"] >= const.MZ_AGE_THRESHOLD
         df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=3)
@@ -391,16 +389,16 @@ def execute(context):
             "ovgk",  "N_children_under_12", "sp_region", "canton_id",
         ]
 
-        df_population["marital_status"] = df_population["marital_status"].astype("int64")
-        df_population["car_availability"] = df_population["car_availability"].astype("int64")
+        df_population["marital_status"] = df_population["marital_status"].astype(int)
+        df_population["car_availability"] = df_population["car_availability"].astype(int)
         df_population["municipality_type"] = df_population["municipality_type"].astype("object")
         df_source["municipality_type"] = df_source["municipality_type"].astype("object")
-        df_population["sp_region"] = df_population["sp_region"].astype("int64")
-        df_source["sp_region"] = df_source["sp_region"].astype("int64")
-        df_source["canton_id"] = df_source["canton_id"].astype("int64")
-        df_population["canton_id"] = df_population["canton_id"].astype("int64")
-        df_population["ovgk"] = (df_population["ovgk"] != "None").astype("int64")
-        df_source["ovgk"] = (df_source["ovgk"] != "None").astype("int64")
+        df_population["sp_region"] = df_population["sp_region"].astype(int)
+        df_source["sp_region"] = df_source["sp_region"].astype(int)
+        df_source["canton_id"] = df_source["canton_id"].astype(int)
+        df_population["canton_id"] = df_population["canton_id"].astype(int)
+        df_population["ovgk"] = (df_population["ovgk"] != "None").astype(int)
+        df_source["ovgk"] = (df_source["ovgk"] != "None").astype(int)
 
         mandatory_columns_individual_matching = columns_individual_matching[:7]
 
@@ -599,7 +597,7 @@ def execute(context):
 
     # Wrap up
     # Ensure missing mz_id becomes -1 (so your downstream assertions using == -1 work)
-    df_matching["mz_id"] = pd.to_numeric(df_matching["mz_id"], errors="coerce").fillna(-1).astype(np.int64)
+    df_matching["mz_id"] = pd.to_numeric(df_matching["mz_id"], errors="coerce").fillna(-1).astype(int)
 
     df_matching["mz_person_id"] = df_matching["mz_id"]
     del df_matching["mz_id"]

@@ -80,10 +80,10 @@ def execute(context):
     X_student_survey = pd.get_dummies(survey_df[student_feat_cols], drop_first=False)
 
     # ensure 'age' is numeric after get_dummies (robust)
-    X_student_survey['age'] = survey_df['age'].astype(np.float32).to_numpy()
+    X_student_survey['age'] = survey_df['age'].astype(float).to_numpy()
 
     # reduce memory
-    X_student_survey = X_student_survey.astype(np.float32)
+    X_student_survey = X_student_survey.astype(float)
 
     student_feature_cols = X_student_survey.columns
 
@@ -154,7 +154,7 @@ def execute(context):
     classes_stu = student_model.classes_.astype('int64')
 
     n = len(pop_df)
-    stu_out = np.empty(n, dtype=np.int64)
+    stu_out = np.empty(n, dtype=int)
 
     print(f"Predicting students in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
 
@@ -165,9 +165,9 @@ def execute(context):
         X_chunk = pd.get_dummies(chunk[student_feat_cols], drop_first=False)
 
         # ✅ ensure numeric 'age' exists in chunk too
-        X_chunk['age'] = chunk['age'].astype(np.float32).to_numpy()
+        X_chunk['age'] = chunk['age'].astype(float).to_numpy()
 
-        X_chunk = X_chunk.reindex(columns=student_feature_cols, fill_value=0).astype(np.float32)
+        X_chunk = X_chunk.reindex(columns=student_feature_cols, fill_value=0).astype(float)
 
         proba_stu = student_model.predict_proba(X_chunk)
 

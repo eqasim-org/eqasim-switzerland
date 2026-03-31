@@ -110,7 +110,7 @@ def execute(context):
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_municipalities, "person_id", "municipality_id",
                                             zone_type="municipality", point_type="home")[
         ["person_id", "municipality_id", "geometry"]])
-    df_spatial["municipality_id"] = df_spatial["municipality_id"].astype(np.int)
+    df_spatial["municipality_id"] = df_spatial["municipality_id"].astype(int)
 
     # Impute quarters
     df_spatial = (data.spatial.utils.impute(context, df_spatial, df_quarters, "person_id", "quarter_id",

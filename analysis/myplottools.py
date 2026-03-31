@@ -26,15 +26,15 @@ def add_small_hist(axes, r, c, act, x, y, bins, lab = ["Synthetic", "HTS"]):
 
 
 def add_small_cdf(axes, r, c, act, x, y, lab = ["Synthetic", "HTS"]):
-    x_data = np.array(x, dtype=np.float64)
+    x_data = np.array(x, dtype=float)
     x_sorted = np.argsort(x_data)
-    x_weights = np.array([1.0 for i in range(len(x))], dtype=np.float64)
+    x_weights = np.array([1.0 for i in range(len(x))], dtype=float)
     x_cdf = np.cumsum(x_weights[x_sorted])
     x_cdf /= x_cdf[-1]
 
-    y_data = np.array(y["crowfly_distance"], dtype=np.float64)
+    y_data = np.array(y["crowfly_distance"], dtype=float)
     y_sorted = np.argsort(y_data)
-    y_weights = np.array(y["weight_person"], dtype=np.float64)
+    y_weights = np.array(y["weight_person"], dtype=float)
     y_cdf = np.cumsum(y_weights[y_sorted])
 
     if len(y_cdf) >0:

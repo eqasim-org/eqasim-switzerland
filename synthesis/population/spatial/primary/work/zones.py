@@ -52,7 +52,7 @@ def execute(context):
                    ]) for origin_zone in context.progress(df_zones["zone_id"], label=mode)
         ])[:, np.newaxis]
 
-        counts = np.zeros(pdf_matrices[source_mode].shape, dtype=np.int)
+        counts = np.zeros(pdf_matrices[source_mode].shape, dtype = int)
 
         for i in range(len(df_zones)):
             if origin_counts[i] > 0:
@@ -63,7 +63,7 @@ def execute(context):
         assert (len(counts) == len(df_zones))
 
     distances = context.stage("data.od.distances")
-    work_zones = np.zeros((len(df),), dtype=np.int)
+    work_zones = np.zeros((len(df),), dtype= int)
     zone_ids = list(df_zones["zone_id"])
 
     with context.progress(label="Assigning work zones", total=5 * len(df_zones)) as progress:

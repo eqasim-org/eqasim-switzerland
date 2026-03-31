@@ -76,8 +76,8 @@ def execute(context):
     feature_cols = ['age', 'age_bin', 'sex', 'nationality', 'municipality_type', 'district_id', 'canton_id']
 
     X_survey = pd.get_dummies(survey_df[feature_cols], drop_first=False)
-    X_survey['age'] = survey_df['age'].astype(np.float32).to_numpy()
-    X_survey = X_survey.astype(np.float32)
+    X_survey['age'] = survey_df['age'].astype(float).to_numpy()
+    X_survey = X_survey.astype(float)
 
     global_feature_cols = X_survey.columns
     w = survey_df['weight'].astype(float).to_numpy()
@@ -156,8 +156,8 @@ def execute(context):
 
     y_features = ['age', 'sex', 'canton_id']
     X_survey_y = pd.get_dummies(survey_df[y_features], drop_first=False)
-    X_survey_y['age'] = X_survey_y['age'].astype(np.float32).to_numpy()
-    X_survey_y = X_survey_y.astype(np.float32)
+    X_survey_y['age'] = X_survey_y['age'].astype(float).to_numpy()
+    X_survey_y = X_survey_y.astype(float)
     X_y = X_survey_y.loc[youth_mask_s]
     y_y = y_act[youth_mask_s]
     w_y = w[youth_mask_s]
@@ -185,8 +185,8 @@ def execute(context):
     # 5. POPULATION PREDICTION IN CHUNKS
     # -------------------------------------------------------------------
     n = len(pop_df)
-    employed_out = np.empty(n, dtype=np.int16)
-    job_out      = np.empty(n, dtype=np.int16)
+    employed_out = np.empty(n, dtype=int)
+    job_out      = np.empty(n, dtype=int)
     # activity model classes (assume both models saw same label set; we still handle safely)
     classes_act_y = act_model_y.classes_.astype('int64')
     classes_act_a = act_model_a.classes_.astype('int64')
@@ -198,15 +198,15 @@ def execute(context):
         chunk = pop_df.iloc[start:end]
 
         X_chunk = pd.get_dummies(chunk[feature_cols], drop_first=False)
-        X_chunk['age'] = chunk['age'].astype(np.float32).to_numpy()
-        X_chunk = X_chunk.reindex(columns=global_feature_cols, fill_value=0).astype(np.float32)
+        X_chunk['age'] = chunk['age'].astype(float).to_numpy()
+        X_chunk = X_chunk.reindex(columns=global_feature_cols, fill_value=0).astype(float)
 
         # route by age
         age_arr = chunk["age"].to_numpy()
         youth_mask = (age_arr >= 15) & (age_arr <= 23)
         adult_mask = (age_arr >= 24)
 
-        act_draw = np.empty(end - start, dtype=np.int16)
+        act_draw = np.empty(end - start, dtype=int)
 
         # youth predictions
         if youth_mask.any():
@@ -214,7 +214,7 @@ def execute(context):
             proba_y = act_model_y.predict_proba(X_yc)
             draw_y = draw_multinomial_from_proba(
                 proba_y, classes_act_y, seed=SEED_ACTIVITY + start + 1
-            ).astype(np.int16)
+            ).astype(int)
             act_draw[youth_mask] = draw_y
             del X_yc, proba_y
 
@@ -224,14 +224,14 @@ def execute(context):
             proba_a = act_model_a.predict_proba(X_ac)
             draw_a = draw_multinomial_from_proba(
                 proba_a, classes_act_a, seed=SEED_ACTIVITY + start + 2
-            ).astype(np.int16)
+            ).astype(int)
             act_draw[adult_mask] = draw_a
             del X_ac, proba_a
 
         employed_out[start:end] = act_draw
 
         # job draw (unchanged)
-        job_chunk = np.empty(end - start, dtype=np.int16)
+        job_chunk = np.empty(end - start, dtype=int)
         job_chunk[act_draw == 2] = 60
         job_chunk[act_draw == 3] = 70
 
@@ -241,7 +241,7 @@ def execute(context):
             proba_job = job_model.predict_proba(X_emp)
             job_draw_emp = draw_multinomial_from_proba(
                 proba_job, classes_job, seed=SEED_JOB + start
-            ).astype(np.int16)
+            ).astype(int)
             job_chunk[emp_mask_local] = job_draw_emp
             del X_emp, proba_job
 
