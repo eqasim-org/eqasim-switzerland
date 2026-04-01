@@ -1,34 +1,10 @@
 import numpy as np
 import logging
 import pandas as pd
+import numba
 
 logger = logging.getLogger("synpp")
 
-
-def _to_binary_indicator(series, positive_numeric=False):
-    values = pd.Series(series)
-    numeric = pd.to_numeric(values, errors="coerce")
-
-    if positive_numeric:
-        binary = np.where(numeric > 0.0, 1, 0)
-    else:
-        binary = np.where(numeric == 1.0, 1, 0)
-
-    undecided = numeric.isna()
-    if undecided.any():
-        truthy = {
-            "1",
-            "true",
-            "t",
-            "yes",
-            "y",
-            "available",
-            "always",
-        }
-        text = values.astype(str).str.strip().str.lower()
-        binary = np.where(undecided & text.isin(truthy), 1, binary)
-
-    return np.asarray(binary, dtype=int)
 
 
 def _allocate_largest_remainder(counts, probability):
@@ -57,7 +33,7 @@ def _household_features(df, sampling_col, aggregation_col):
     hh["persons"] = df.groupby(sampling_col)["person_id"].size().reindex(hh[sampling_col]).values
 
     if "employed" in df.columns:
-        employed = _to_binary_indicator(df["employed"], positive_numeric=False)
+        employed = (df["employed"] == 1).astype(int)
         hh["employed_persons"] = (
             df.assign(_employed_bin=employed)
             .groupby(sampling_col)["_employed_bin"]
@@ -69,8 +45,8 @@ def _household_features(df, sampling_col, aggregation_col):
         hh["employed_persons"] = 0
 
     if "car_availability" in df.columns:
-        # Person-level car availability: count how many agents in each sampled unit can use a car.
-        car_values = _to_binary_indicator(df["car_availability"], positive_numeric=True)
+        assert set(df["car_availability"].unique()) <= {0, 1}, "Expected 0 or 1 for car availability at this stage"
+        car_values = (df["car_availability"] == 1).astype(int)
         hh["car_available_persons"] = (
             df.assign(_car_bin=car_values)
             .groupby(sampling_col)["_car_bin"]
@@ -84,7 +60,7 @@ def _household_features(df, sampling_col, aggregation_col):
 
     return hh
 
-
+@numba.njit(cache=True)
 def _objective(
     cur_persons,
     cur_employed,
@@ -94,8 +70,8 @@ def _objective(
     target_car_persons,
 ):
     wp = 1.0 / max(1.0, target_persons)
-    we = 1.2 / max(1.0, target_employed)
-    wc = 1.2 / max(1.0, target_car_persons)
+    we = 1.0 / max(1.0, target_employed)
+    wc = 1.0 / max(1.0, target_car_persons)
     return (
         wp * abs(cur_persons - target_persons)
         + we * abs(cur_employed - target_employed)
@@ -103,35 +79,60 @@ def _objective(
     )
 
 
-def _sample_balanced_group(group, target_households, random):
-    n = len(group)
+@numba.njit(cache=True)
+def _sample_balanced_indices_numba(persons, employed, car_available, target_households, probability, seed):
+    n = persons.shape[0]
+    convergence_threshold = 1e-3
+
     if target_households <= 0:
-        return np.array([], dtype=group["_idx"].dtype)
+        return np.empty(0, dtype=np.int64)
     if target_households >= n:
-        return group["_idx"].values
+        return np.arange(n, dtype=np.int64)
 
-    persons = group["persons"].to_numpy()
-    employed = group["employed_persons"].to_numpy()
-    car_available = group["car_available_persons"].to_numpy()
+    np.random.seed(seed)
 
-    ratio = target_households / n
-    target_persons = int(round(persons.sum() * ratio))
-    target_employed = int(round(employed.sum() * ratio))
-    target_car_persons = int(round(car_available.sum() * ratio))
+    target_persons = int(np.rint(persons.sum() * probability))
+    target_employed = int(np.rint(employed.sum() * probability))
+    target_car_persons = int(np.rint(car_available.sum() * probability))
 
     n_restarts = max(4, min(12, int(np.ceil(np.log2(n + 1)) + 2)))
-    max_iter = min(6000, 80 * target_households + 400)
+    max_iter =int(min(20000, (1/probability) * target_households + 1e3))
+    non_selected_count = n - target_households
 
-    best_selected = None
     best_objective = np.inf
+    best_selected = np.zeros(n, dtype=np.bool_)
+    has_best = False
 
     for _ in range(n_restarts):
-        selected = np.zeros(n, dtype=bool)
-        selected[random.choice(n, size=target_households, replace=False)] = True
+        permutation = np.arange(n, dtype=np.int64)
+        for i in range(n - 1, 0, -1):
+            j = np.random.randint(i + 1)
+            tmp = permutation[i]
+            permutation[i] = permutation[j]
+            permutation[j] = tmp
 
-        cur_persons = persons[selected].sum()
-        cur_employed = employed[selected].sum()
-        cur_car_persons = car_available[selected].sum()
+        selected = np.zeros(n, dtype=np.bool_)
+        selected_idx = np.empty(target_households, dtype=np.int64)
+        non_selected_idx = np.empty(non_selected_count, dtype=np.int64)
+
+        for i in range(target_households):
+            idx = permutation[i]
+            selected[idx] = True
+            selected_idx[i] = idx
+
+        for i in range(non_selected_count):
+            non_selected_idx[i] = permutation[target_households + i]
+
+        cur_persons = 0
+        cur_employed = 0
+        cur_car_persons = 0
+
+        for i in range(target_households):
+            idx = selected_idx[i]
+            cur_persons += persons[idx]
+            cur_employed += employed[idx]
+            cur_car_persons += car_available[idx]
+
         current = _objective(
             cur_persons,
             cur_employed,
@@ -141,12 +142,19 @@ def _sample_balanced_group(group, target_households, random):
             target_car_persons,
         )
 
-        for _ in range(max_iter):
-            selected_idx = np.where(selected)[0]
-            non_selected_idx = np.where(~selected)[0]
+        if current < best_objective:
+            best_objective = current
+            best_selected[:] = selected
+            has_best = True
+            if best_objective < convergence_threshold:
+                break
 
-            out_i = selected_idx[random.randint(len(selected_idx))]
-            in_i = non_selected_idx[random.randint(len(non_selected_idx))]
+        for _ in range(max_iter):
+            out_pos = np.random.randint(target_households)
+            in_pos = np.random.randint(non_selected_count)
+
+            out_i = selected_idx[out_pos]
+            in_i = non_selected_idx[in_pos]
 
             new_persons = cur_persons - persons[out_i] + persons[in_i]
             new_employed = cur_employed - employed[out_i] + employed[in_i]
@@ -161,9 +169,13 @@ def _sample_balanced_group(group, target_households, random):
                 target_car_persons,
             )
 
-            if candidate < current or (candidate == current and random.rand() < 0.01):
+            if candidate < current or (candidate == current and np.random.random() < 0.01):
                 selected[out_i] = False
                 selected[in_i] = True
+
+                selected_idx[out_pos] = in_i
+                non_selected_idx[in_pos] = out_i
+
                 cur_persons = new_persons
                 cur_employed = new_employed
                 cur_car_persons = new_car_persons
@@ -171,17 +183,58 @@ def _sample_balanced_group(group, target_households, random):
 
                 if current < best_objective:
                     best_objective = current
-                    best_selected = selected.copy()
-                    if best_objective == 0.0:
+                    best_selected[:] = selected
+                    has_best = True
+                    if best_objective < convergence_threshold:
                         break
 
-        if best_objective == 0.0:
+        if best_objective < convergence_threshold:
             break
 
-    if best_selected is None:
-        best_selected = selected
+    if not has_best:
+        return np.empty(0, dtype=np.int64)
 
-    return group.loc[best_selected, "_idx"].values
+    result = np.empty(target_households, dtype=np.int64)
+    cursor = 0
+    for i in range(n):
+        if best_selected[i]:
+            if cursor < target_households:
+                result[cursor] = i
+                cursor += 1
+
+    if cursor == target_households:
+        return result
+
+    fallback = np.empty(cursor, dtype=np.int64)
+    for i in range(cursor):
+        fallback[i] = result[i]
+    return fallback
+
+
+def _sample_balanced_group(group, target_households, probability, random):
+    n = len(group)
+
+    if target_households <= 0:
+        return np.array([], dtype=group["_idx"].dtype)
+    if target_households >= n:
+        return group["_idx"].to_numpy()
+
+    group_indices = group["_idx"].to_numpy(dtype=np.int64)
+    persons = group["persons"].to_numpy(dtype=np.int64)
+    employed = group["employed_persons"].to_numpy(dtype=np.int64)
+    car_available = group["car_available_persons"].to_numpy(dtype=np.int64)
+
+    seed = int(random.randint(0, np.iinfo(np.int32).max))
+    selected_local_idx = _sample_balanced_indices_numba(
+        persons,
+        employed,
+        car_available,
+        int(target_households),
+        probability,
+        seed,
+    )
+
+    return group_indices[selected_local_idx]
 
 def configure(context):
     context.stage("data.census.selected")
@@ -220,25 +273,14 @@ def execute(context):
     target_counts = _allocate_largest_remainder(household_counts, probability)
 
     kept_row_indices = []
-    for (group_key, group_df), target_n in zip(groups, target_counts):
-        selected_idx = _sample_balanced_group(group_df.reset_index(drop=True), int(target_n), random)
+    for ( _ , group_df ), target_n in context.progress(zip(groups, target_counts), label="Sampling population"):
+        selected_idx = _sample_balanced_group(group_df, int(target_n), probability, random)
         if len(selected_idx) > 0:
             kept_row_indices.extend(selected_idx.tolist())
 
-        if group_df.shape[0] > 0:
-            source_persons = group_df["persons"].sum()
-            source_employed = group_df["employed_persons"].sum()
-            source_car_persons = group_df["car_available_persons"].sum()
-            kept = hh.loc[selected_idx] if len(selected_idx) > 0 else hh.iloc[0:0]
-            logger.info(
-                f"    {aggregation_col}={group_key}: hh {len(selected_idx)}/{len(group_df)} | "
-                f"persons {int(kept['persons'].sum()) if len(selected_idx) > 0 else 0}/{int(source_persons)} | "
-                f"employed {int(kept['employed_persons'].sum()) if len(selected_idx) > 0 else 0}/{int(source_employed)} | "
-                f"car_persons {int(kept['car_available_persons'].sum()) if len(selected_idx) > 0 else 0}/{int(source_car_persons)}",
-            )
-
     kept_ids = hh.loc[kept_row_indices, sampling_col].values
-    df = df[df[sampling_col].isin(kept_ids)]
+    df = df[df[sampling_col].isin(kept_ids)].reset_index(drop=True)
+    
     logger.info(f"  Sampled {sampling_col}: {len(kept_ids)}, persons: {df['person_id'].nunique()}")
     logger.info(f"Proportion of original population: {len(df) / num_persons}")
 
