@@ -6,7 +6,7 @@ def configure(context):
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
 
-    context.config("num_highway_trips", default=10000)    
+    context.config("num_highway_trips", default=20000)    
     context.config("random_seed")
 
 def execute(context):
@@ -32,11 +32,11 @@ def execute(context):
     # get swiss border
     border = context.stage("data.spatial.swiss_border").geometry.simplify(2000).iloc[0]
 
-    # filter nodes inside a 7km *inward-buffered* Swiss border (single-step filter)
-    # EPSG:2056 is metric (meters), so 7km == 7_000m.
-    buffered_border = border.buffer(-7_000)
+    # filter nodes inside a 10km *inward-buffered* Swiss border (single-step filter)
+    # EPSG:2056 is metric (meters), so 10km == 10_000m.
+    buffered_border = border.buffer(-10_000)
     if buffered_border.is_empty:
-        raise ValueError("Buffered border is empty; cannot filter nodes using a -7km border buffer")
+        raise ValueError("Buffered border is empty; cannot filter nodes using a -10km border buffer")
 
     within_buffered_border_origins = vectorized.contains(
         buffered_border, origin_nodes_gdf.geometry.x.values, origin_nodes_gdf.geometry.y.values
@@ -76,7 +76,16 @@ def execute(context):
     
     # sample departure times (between 6 AM and 9 PM)
     rng = np.random.default_rng(seed)
-    departure_times = rng.integers(6 * 3600, 21 * 3600, size=num_trips)
+    
+    # 70% of trips between 7-9 AM and 4-7 PM, 30% uniformly distributed
+    num_peak = int(num_trips * 0.7)
+    num_off_peak = num_trips - num_peak
+    departure_times = np.concatenate([
+        rng.integers(7 * 3600, 9 * 3600, size=num_peak // 2),
+        rng.integers(16 * 3600, 19 * 3600, size=num_peak - num_peak // 2),
+        rng.integers(6 * 3600, 21 * 3600, size=num_off_peak)
+    ])
+    rng.shuffle(departure_times)
 
     # build trips dataframe
     trips = gpd.GeoDataFrame({

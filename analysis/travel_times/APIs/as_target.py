@@ -6,6 +6,10 @@ import os
 logger = logging.getLogger("synpp")
 
 def configure(context):
+    context.config("output_path")
+    context.config("output_id")
+    context.config("simulation_directory", default = "simulation_output")
+
     context.config("travel_times_from", default="tomtom")
     if not context.config("travel_times_from").lower() in ["google", "tomtom", "mapbox"]:
         logger.warning("Invalid value for 'travel_times_from'. Defaulting to 'tomtom'.")
@@ -31,7 +35,14 @@ def execute(context):
     df = df[["identifier", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time","travel_time","traveled_distance"]]
 
     # save file
-    path_to_output = os.path.join(context.path(), f"calibration_target_travel_times.csv")
+    api = context.config("travel_times_from").lower().replace("all","tomtom")
+    path_to_output = os.path.join(context.config("output_path"), 
+                                context.config("output_id"), 
+                                context.config("simulation_directory"),
+                                "travel_times_"+api,
+                                f"calibration_target_travel_times.csv") 
+    os.makedirs(os.path.dirname(path_to_output), exist_ok=True)
+    
     df.to_csv(path_to_output, index=False, sep=",")
     logger.info(f"Saved calibration target travel times to {path_to_output}")
     

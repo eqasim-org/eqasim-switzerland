@@ -201,10 +201,11 @@ def get_delays_args(context):
     return additional_args  
 
 
-def get_network_calibration_args(context):
+def get_network_calibration_args(context, counts_file=None):
     additional_args = []
     if context.config("activate_network_calibration"):
-        counts_file = context.config("calibration_counts_file")
+        if counts_file is None:
+            counts_file = context.config("calibration_counts_file")
         assert os.path.exists(counts_file), f"Calibration counts file not found at {counts_file}"
         additional_args.extend([
             "--config:eqasim:networkCalibration.activate", "true",

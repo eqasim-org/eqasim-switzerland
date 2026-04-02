@@ -6,6 +6,7 @@ import os
 import numpy as np
 from scipy.stats import pearsonr
 from sklearn.metrics import r2_score
+from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.ticker as ticker
 
 def plot_scatter(x, y, title, xlabel, ylabel, out_path, figsize=(6,6)):
@@ -231,3 +232,105 @@ def plot_by(df, by, value1, value2, title, source1, source2, out_path, between=N
     plt.close(fig)
     
 
+def plot_distribution(
+    df,
+    value,
+    by=None,
+    title="",
+    out_path="",
+    xlabel="",
+    ylabel="Density",
+    figsize=(8, 5),
+    bins=30
+):
+    from scipy.stats import gaussian_kde
+
+    data = df.copy()
+    if value not in data.columns:
+        raise KeyError(f"Column '{value}' not found in dataframe.")
+
+    # Ensure numeric plotting column
+    data[value] = pd.to_numeric(data[value], errors="coerce")
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if by is not None:
+        data = data.sort_values(by)  # Ensure consistent group order
+        
+        if by not in data.columns:
+            raise KeyError(f"Column '{by}' not found in dataframe.")
+
+        plot_df = data[[value, by]].dropna()
+        if plot_df.empty:
+            raise ValueError(f"No valid data to plot for '{value}' grouped by '{by}'.")
+
+        groups = sorted(plot_df[by].unique())
+        cmap = plt.cm.get_cmap("tab10", len(groups))
+
+        for i, group in enumerate(groups):
+            vals = plot_df.loc[plot_df[by] == group, value].to_numpy()
+            if vals.size == 0:
+                continue
+
+            color = cmap(i)
+
+            # Light histogram for shape
+            ax.hist(
+                vals,
+                bins=bins,
+                density=True,
+                alpha=0.18,
+                color=color,
+                edgecolor="none"
+            )
+
+            # Smooth KDE line when possible
+            label = f"{group} (n={vals.size})"
+            if np.unique(vals).size > 1:
+                x_grid = np.linspace(vals.min(), vals.max(), 400)
+                kde = gaussian_kde(vals)
+                ax.plot(x_grid, kde(x_grid), color=color, linewidth=2, label=label)
+            else:
+                ax.axvline(vals[0], color=color, linewidth=2, label=label)
+
+        ax.set_xlabel(xlabel if xlabel else value)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(frameon=False, ncol=2)
+    else:
+        vals = data[value].dropna().to_numpy()
+        if vals.size == 0:
+            raise ValueError(f"No valid data to plot for '{value}'.")
+
+        ax.hist(
+            vals,
+            bins=bins,
+            density=True,
+            alpha=0.28,
+            color="#4C78A8",
+            edgecolor="white",
+            linewidth=0.8,
+            label="Histogram"
+        )
+
+        if np.unique(vals).size > 1:
+            x_grid = np.linspace(vals.min(), vals.max(), 400)
+            kde = gaussian_kde(vals)
+            ax.plot(x_grid, kde(x_grid), color="#1F3B73", linewidth=2.2, label="KDE")
+
+        ax.axvline(np.mean(vals), color="#D62728", linestyle="--", linewidth=1.5, label="Mean")
+        ax.axvline(np.median(vals), color="#2CA02C", linestyle=":", linewidth=1.8, label="Median")
+
+        ax.set_xlabel(xlabel if xlabel else value)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(frameon=False)
+
+    # Visual polish
+    ax.grid(True, axis="y", linestyle="--", alpha=0.35)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=200)
+    plt.close(fig)

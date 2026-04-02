@@ -28,10 +28,14 @@ def configure(context):
         context.stage("dmc.model")
 
     context.config("activate_network_calibration", default=False)
+    context.config("prepare_counts_target_before_simulation", default=False)
     context.config("counts_path", default=os.path.join(context.config("data_path"),"traffic_counts"))
     context.config("calibration_counts_file", default=os.path.join(context.config("counts_path"),"calibration_counts.csv"))
     context.config("correct_links_capacity", False)
     context.config("minimum_speed", 2)
+
+    if context.config("prepare_counts_target_before_simulation"):
+        context.stage("analysis.counts.target")
 
     context.config("useScheduleBasedTransport", default=True)
     context.config("preventwaitingtoentertraffic", default = "no")
@@ -78,7 +82,11 @@ def execute(context):
     additional_args.extend(get_delays_args(context))
 
     # network calibration
-    additional_args.extend(get_network_calibration_args(context))
+    calibration_counts_file = None
+    if context.config("activate_network_calibration") and context.config("prepare_counts_target_before_simulation"):
+        calibration_counts_file = context.stage("analysis.counts.target")
+        logger.info("Using pre-simulation matched counts file for calibration: %s", calibration_counts_file)
+    additional_args.extend(get_network_calibration_args(context, counts_file=calibration_counts_file))
 
     # Running the simulation
     last_iteration = context.config("last_iteration")

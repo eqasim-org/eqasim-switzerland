@@ -17,7 +17,7 @@ import json
 
 logger = logging.getLogger("synpp")
 
-def filter_data(df, network):
+def filter_data(df, network, require_simulated=True):
     # Work on a copy
     df = df.copy()
 
@@ -42,10 +42,17 @@ def filter_data(df, network):
     # Compute vehicles per HOUR per LANE
     # divide by 24 to get per hour, then divide by number of lanes
     df['obs_vphpl'] = df['flow'] / 24.0 / df['permlanes']
-    df['sim_vphpl'] = df['simulated_flow'] / 24.0 / df['permlanes']
+    if require_simulated:
+        if 'simulated_flow' not in df.columns:
+            logger.info("\t Missing simulated_flow column while require_simulated=True.")
+            return None
+        df['sim_vphpl'] = df['simulated_flow'] / 24.0 / df['permlanes']
 
     # Drop rows with NaN vphpl
-    df = df[df['obs_vphpl'].notna() | df['sim_vphpl'].notna()].copy()
+    if require_simulated:
+        df = df[df['obs_vphpl'].notna() | df['sim_vphpl'].notna()].copy()
+    else:
+        df = df[df['obs_vphpl'].notna()].copy()
     if df.empty:
         logger.info("\t No valid vphpl values after computation.")
         return None
@@ -73,7 +80,8 @@ def filter_data(df, network):
         return group[(group[column] >= lower_bound) & (group[column] <= upper_bound)]
     
     df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'obs_vphpl')).reset_index(drop=True)
-    df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'sim_vphpl')).reset_index(drop=True)
+    if require_simulated:
+        df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'sim_vphpl')).reset_index(drop=True)
     len_after = len(df)
     logger.info(f"\t Filtered dataset: {len_after} records remaining (removed {len_before - len_after} records)")
     return df

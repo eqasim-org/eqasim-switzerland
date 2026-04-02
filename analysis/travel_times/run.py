@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib
 
 matplotlib.use("Agg")
-from analysis.travel_times.plot_utils import (plot_scatter, plot_boxplot, 
+from analysis.travel_times.plot_utils import (plot_scatter, plot_boxplot, plot_distribution,
                                               plot_average_by_distance_bin,
                                               plot_by, plot_boxplot_by)
 
@@ -14,6 +14,7 @@ logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    context.stage("analysis.travel_times.APIs.as_target")
     context.stage("analysis.travel_times.APIs.get")
     context.stage("analysis.travel_times.matsim.get")
     context.stage("analysis.travel_times.advanced.process")
@@ -58,6 +59,9 @@ def merge_and_filter_large_differences(df_api, df_matsim):
     return df
 
 def execute(context):
+    # Save travel times as csv in the output dir
+    _ = context.stage("analysis.travel_times.APIs.as_target")
+    
     # Load data from APIs and MATSim
     dfs_api = context.stage("analysis.travel_times.APIs.get")
     dfs_matsim = context.stage("analysis.travel_times.matsim.get")
@@ -163,6 +167,23 @@ def execute(context):
             between = [3,24],
             out_path=os.path.join(out, "binned_travel_times_by_departure_hour_matsim_vs_"+api+"_long_distances.png")
         )
+
+        # plot average speed by departrue hour
+        df["average_speed_kmh_api"] = df["distance_km_api"] / (df["travel_time_min_api"] / 60.0)
+        df["average_speed_kmh_matsim"] = df["distance_km_matsim"] / (df["travel_time_min_matsim"] / 60.0)
+        plot_by(
+            df=df,
+            by="departure_hour",
+            value1="average_speed_kmh_api",
+            value2="average_speed_kmh_matsim",
+            title="Average Speed by Departure Hour: MATSim vs. "+api.upper(),
+            source1=api.upper(),
+            source2="MATSim",
+            xlabel="Departure hour of day",
+            ylabel="Average speed (km/h)",
+            between = [3,24],
+            out_path=os.path.join(out, "binned_average_speed_by_departure_hour_matsim_vs_"+api+".png")
+        )
         
         # boxplot by departure hour
         plot_boxplot_by(
@@ -174,6 +195,17 @@ def execute(context):
             xlabel="Departure hour of day",
             out_path=os.path.join(out, "boxplot_diff_by_departure_hour_matsim_vs_"+api+".png"),
             between = [6,22]
+        )
+
+        # plot distribution of Euclidean distances
+        df["departure_hour"] = df["departure_hour"].astype(int)
+        plot_distribution(
+            df=df,
+            by="departure_hour",
+            value="euclidean_distance_km_matsim",
+            title="Distribution of Trips Euclidean Distances",
+            xlabel="Euclidean distance (km)",
+            out_path=os.path.join(out, "distribution_euclidean_distances_matsim_vs_"+api+".png")
         )
 
     return dict(done = True, path = out_folders)
