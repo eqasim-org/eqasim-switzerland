@@ -151,11 +151,17 @@ def execute(context):
     os.makedirs(output_path, exist_ok=True)
     output_path = os.path.join(output_path, "microcensus_routed_trips_mapbox.json")
 
+    mapbox_api_key = context.config("mapbox_api_key")
+    max_requests = context.config("num_mapbox_requests")
+    if (mapbox_api_key == "") or (max_requests <= 0):
+        logger.info("No routing required (missing Mapbox API key or num_mapbox_requests <= 0). Skipping routing and returning existing data if available.")
+        return output_path
+
     # read trips
     df_trips = context.stage("analysis.travel_times.trips.car_trips")    
     logger.info(f"Loaded {len(df_trips)} car trips to be routed using Mapbox API.")
 
-    # Convert coordinates to fro EPSG:2056 to EPSG:4326
+    # Convert coordinates from EPSG:2056 to EPSG:4326
     df_trips["origin_x"], df_trips["origin_y"] = convert_crs( df_trips["origin_x"].values, 
                                                               df_trips["origin_y"].values, 
                                                               original_crs="EPSG:2056", 
@@ -182,8 +188,6 @@ def execute(context):
     df_remaining = df_trips[~df_trips['identifier'].isin(routed_ids)]
     logger.info(f"Remaining trips to route: {len(df_remaining)}")
 
-    mapbox_api_key = context.config("mapbox_api_key")
-    max_requests = context.config("num_mapbox_requests")
     if (not df_remaining.empty) and (mapbox_api_key != "") and (max_requests > 0):
         new_routed_data = route_with_mapbox(df_remaining, mapbox_api_key, max_requests)
 
