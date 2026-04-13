@@ -40,7 +40,7 @@ def execute(context):
                             )
         # recode bike availability to two values:
         var_raw = pd.to_numeric(df_persons["bike_availability"], errors="coerce")
-        df_persons["bike_availability"] = np.where(var_raw == 2, 0, 1).astype("int64")
+        df_persons["bike_availability"] = np.where(var_raw == c.BIKE_AVAILABILITY_NEVER, 0, 1).astype("int64")
         # Reset children
         children_selector = df_persons["age"] < c.MZ_AGE_THRESHOLD
         df_persons.loc[children_selector, "driving_license"]  = False

@@ -3,8 +3,38 @@ import pandas as pd
 import data.spatial.utils as spatial_utils
 import logging
 from data.structural_survey.structural_survey import get_filtered_data
+from data.od.matrix import (DEFAULT_SEGMENT_KEY, AGE_BIN_EDGES)
 
 logger = logging.getLogger("synpp")
+
+
+def get_segment_key(sex_value, age_value):
+    try:
+        sex = int(sex_value)
+    except (TypeError, ValueError):
+        return DEFAULT_SEGMENT_KEY
+
+    if sex not in (0, 1):
+        return DEFAULT_SEGMENT_KEY
+
+    if not np.isfinite(age_value):
+        return DEFAULT_SEGMENT_KEY
+
+    age_bin = int(np.digitize(float(age_value), AGE_BIN_EDGES, right=False))
+    if age_bin not in (0, 1, 2, 3):
+        return DEFAULT_SEGMENT_KEY
+
+    return (sex, age_bin)
+
+
+def age_bin_label(age_bin):
+    labels = {
+        0: "<30",
+        1: "30-45",
+        2: "45-65",
+        3: "65+",
+    }
+    return labels.get(age_bin, str(age_bin))
 
 def configure(context):
 
@@ -63,7 +93,18 @@ def plot_analysis(context, fixed_work_locations, moving_work_locations):
     pdf_fixed, _ = context.stage("data.od.matrix")
     pdf_moving, _ = context.stage("data.od.matrix_moving")
 
-    persons = context.stage("synthesis.population.sampled")[["person_id", "home_zone_id"]].copy()
+    def get_reference_matrix(pdf_by_segment):
+        if isinstance(pdf_by_segment, dict):
+            if DEFAULT_SEGMENT_KEY in pdf_by_segment:
+                return pdf_by_segment[DEFAULT_SEGMENT_KEY]
+            return next(iter(pdf_by_segment.values()))
+        return pdf_by_segment
+
+    pdf_fixed_reference = get_reference_matrix(pdf_fixed)
+    pdf_moving_reference = get_reference_matrix(pdf_moving)
+
+    persons = context.stage("synthesis.population.sampled")[["person_id", "home_zone_id", "sex", "age"]].copy()
+    persons["age"] = pd.to_numeric(persons["age"], errors="coerce")
     df_statent = context.stage("data.statent.statent")[["enterprise_id", "zone_id", "number_employees"]].copy()
     df_statent = df_statent.dropna(subset=["enterprise_id", "zone_id", "number_employees"])
 
@@ -163,15 +204,45 @@ def plot_analysis(context, fixed_work_locations, moving_work_locations):
     assigned_fixed = prepare_assigned(fixed_work_locations)
     assigned_moving = prepare_assigned(moving_work_locations)
 
+    if len(assigned_fixed) > 0:
+        assigned_fixed["segment_key"] = [
+            get_segment_key(sex, age)
+            for sex, age in zip(assigned_fixed["sex"].values, assigned_fixed["age"].values)
+        ]
+
     if len(survey_fixed) > 0 and len(assigned_fixed) > 0:
         plot_distance_comparison("fixed", survey_fixed, assigned_fixed, "commute_distance_distribution_fixed.png")
     if len(survey_moving) > 0 and len(assigned_moving) > 0:
         plot_distance_comparison("moving", survey_moving, assigned_moving, "commute_distance_distribution_moving.png")
 
     if len(assigned_fixed) > 0:
-        plot_od_comparison("fixed", matrix_to_long(pdf_fixed), assigned_fixed, "od_probabilities_fixed.png")
+        plot_od_comparison("fixed", matrix_to_long(pdf_fixed_reference), assigned_fixed, "od_probabilities_fixed.png")
+
+        # Additional OD comparisons for each fixed-work sex/age segment.
+        if isinstance(pdf_fixed, dict):
+            segment_keys = [
+                key for key in pdf_fixed.keys()
+                if key != DEFAULT_SEGMENT_KEY and isinstance(key, tuple) and len(key) == 2
+            ]
+
+            for key in sorted(segment_keys):
+                seg_assigned = assigned_fixed[assigned_fixed["segment_key"] == key]
+                if len(seg_assigned) == 0:
+                    continue
+
+                seg_matrix = pdf_fixed.get(key, pdf_fixed_reference)
+                sex, age_bin = key
+                segment_label = f"fixed sex={sex} age={age_bin_label(age_bin)}"
+                segment_filename = f"od_probabilities_fixed_sex{sex}_agebin{age_bin}.png"
+                plot_od_comparison(
+                    segment_label,
+                    matrix_to_long(seg_matrix),
+                    seg_assigned,
+                    segment_filename,
+                )
+
     if len(assigned_moving) > 0:
-        plot_od_comparison("moving", matrix_to_long(pdf_moving), assigned_moving, "od_probabilities_moving.png")
+        plot_od_comparison("moving", matrix_to_long(pdf_moving_reference), assigned_moving, "od_probabilities_moving.png")
 
     assigned_all = pd.concat([assigned_fixed, assigned_moving], ignore_index=True)
     if context.config("include_cross_border"):

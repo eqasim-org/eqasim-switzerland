@@ -187,7 +187,7 @@ def define_betas(ignore_car_passenger, use_exponents):
     betas = {
         # lambdas
         "lambda_cost_distance": Beta("lambda_cost_distance", -0.08, None, max_disutility, 0),
-        "lambda_cost_income": Beta("lambda_cost_income", -0.002, None, max_disutility, 0),
+        "lambda_cost_income": Beta("lambda_cost_income", 0.0, None, max_disutility, 1),
 
         "lambda_car_travel_time": Beta("lambda_car_travel_time", 0.72 if trainable else 1.0, min_lambda, max_lambda, trainable),
         "lambda_pt_in_vehicle_time": Beta("lambda_pt_in_vehicle_time", 1.5 if trainable else 1.0, min_lambda, max_lambda, trainable),
@@ -214,15 +214,15 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_car_destination_other": Beta("beta_car_destination_other", 0.9, None, None, 0),
         "beta_car_origin_home": Beta("beta_car_origin_home", 0, None, None, 1), # not significant
 
-        "beta_car_destination_urban": Beta("beta_car_destination_urban", -0.072, None, None, 0),
-        "beta_car_destination_urbancore": Beta("beta_car_destination_urbancore", -1.039, None, None, 0),
+        "beta_car_destination_urban": Beta("beta_car_destination_urban", -0.072, None, 0.0, 0),
+        "beta_car_destination_urbancore": Beta("beta_car_destination_urbancore", -1.039, None, 0.0, 0),
         
         "beta_car_sex": Beta("beta_car_sex", -0.574, None, None, 0),
         "beta_car_age": Beta("beta_car_age", 0.015, None, None, 0),
         "beta_car_retired": Beta("beta_car_retired", -0.521, None, None, 0),
         "beta_car_junior": Beta("beta_car_junior", 0.0, None, None, 1),
         "beta_car_ownership_ratio": Beta("beta_car_ownership_ratio", -2.25, None, None, 0),        
-        "beta_car_low_income": Beta("beta_car_low_income", 0.249, None, None, 0),
+        "beta_car_low_income": Beta("beta_car_low_income", 0.0, None, None, 0),
 
         "beta_car_region_1": Beta("beta_car_region_1", 0.223, None, None, 0),
         "beta_car_region_2": Beta("beta_car_region_2", -0.467, None, None, 0),        
@@ -236,13 +236,13 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_pt_in_vehicle_time_min": Beta("beta_pt_in_vehicle_time_min", -0.044, None, max_disutility, 0),        
         "beta_pt_transfers": Beta("beta_pt_transfers", -0.477, None, max_disutility, 0),
         "beta_pt_transfer_time_min": Beta("beta_pt_transfer_time_min", -0.0234, None, -0.02, 0),
-        "beta_pt_distance_km": Beta("beta_pt_distance_km", -0.4, -0.5, 0.5, 0),
+        "beta_pt_distance_km": Beta("beta_pt_distance_km", -0.4, -2.0, 2.0, 0),
         
         "beta_pt_sex": Beta("beta_pt_sex", 0, None, None, 1),
         "beta_pt_age": Beta("beta_pt_age", 0, None, None, 1),
         "beta_pt_retired": Beta("beta_pt_retired", 0, None, None, 1),
         "beta_pt_junior": Beta("beta_pt_junior", 0, None, None, 0),
-        "beta_pt_low_income": Beta("beta_pt_low_income", 0.026, None, None, 0),
+        "beta_pt_low_income": Beta("beta_pt_low_income", 0.05, None, None, 0),
 
         "beta_pt_destination_work": Beta("beta_pt_destination_work", 0, None, None, 1),
         "beta_pt_destination_home": Beta("beta_pt_destination_home", 0, None, None, 1),
@@ -272,7 +272,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_bike_sex": Beta("beta_bike_sex", -0.441, None, None, 0),
         "beta_bike_retired": Beta("beta_bike_retired", -0.848, None, None, 0),
         "beta_bike_junior": Beta("beta_bike_junior", 0, None, None, 1),
-        "beta_bike_low_income": Beta("beta_bike_low_income", -0.24, None, None, 0),
+        "beta_bike_low_income": Beta("beta_bike_low_income", 0.0, None, None, 0),
 
         "beta_bike_destination_work": Beta("beta_bike_destination_work", 0, None, None, 1), # not significant
         "beta_bike_destination_home": Beta("beta_bike_destination_home", 0, None, None, 1), # not significant
@@ -289,7 +289,7 @@ def define_betas(ignore_car_passenger, use_exponents):
         "beta_bike_region_2": Beta("beta_bike_region_2", -0.413, None, None, 0),
 
         "beta_bike_short_distance": Beta("beta_bike_short_distance", 0.429, None, None, 0),
-        "beta_bike_long_distance": Beta("beta_bike_long_distance", -0.743, None, None, 0),
+        "beta_bike_long_distance": Beta("beta_bike_long_distance", 0.0, None, None, 1),
         
         # walk
         "beta_walk_asc": Beta("beta_walk_asc", 10.58, None, None, 0),

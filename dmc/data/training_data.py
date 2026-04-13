@@ -53,7 +53,7 @@ def execute(context):
 
     # Availabilities
     persons = context.stage("data.microcensus.persons")
-    persons = persons[["person_id","car_availability","number_of_cars","number_of_bikes_class",
+    persons = persons[["person_id","car_availability","number_of_cars","bike_availability",
                        "driving_license","is_car_passenger", "age"]].reset_index(drop=True)
 
     persons["car_passenger_availability"] = True # car passenger available for all persons
@@ -63,7 +63,7 @@ def execute(context):
     persons["car_availability"] = ((persons["car_availability"])&
                                    (persons["driving_license"]==True)&
                                    (persons["age"]>=18))
-    persons["bike_availability"] = persons["number_of_bikes_class"] != c.BIKE_AVAILABILITY_NEVER    
+    persons["bike_availability"] = persons["bike_availability"] != c.BIKE_AVAILABILITY_NEVER    
 
     persons = persons[["person_id","car_availability","car_passenger_availability","bike_availability","walk_availability","pt_availability"]]
     df = df.merge(persons, on="person_id", how="left")

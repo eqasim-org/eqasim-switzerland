@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import logging
+import numba
 
 logger = logging.getLogger("synpp")
 
@@ -9,6 +10,7 @@ PT2_PREFERENCE_FACTOR = 3.0
 OTHER_PREFERENCE_FACTOR = 0.5
 COMP_SATURATION_FACTOR = 1.4
 
+# @numba.njit(cache=True)
 def multinomial_sample(n, probs):
     """
     Deterministic version of multinomial sampling.
@@ -25,12 +27,15 @@ def multinomial_sample(n, probs):
     counts : np.ndarray
         Integer counts per category, summing exactly to n.
     """
-    probs = np.array(probs, dtype=float)
-    probs /= probs.sum()  # normalize just in case
+    probs = np.array(probs, dtype=np.float64)
+    total_prob = probs.sum()
+    if total_prob <= 0.0:
+        return np.zeros(len(probs), dtype=np.int64)
+    probs /= total_prob  # normalize just in case
     
     # Step 1: initial deterministic allocation
     raw_counts = n * probs
-    counts = np.floor(raw_counts).astype(int)
+    counts = np.floor(raw_counts).astype(np.int64)
     
     # Step 2: distribute leftover counts based on largest fractional parts
     remainder = n - counts.sum()
@@ -42,6 +47,7 @@ def multinomial_sample(n, probs):
 
     return counts
 
+# @numba.njit(cache=True)
 def _apply_distance_reweighting(weights, distances):    
     mean_d = distances.mean()
     min_d = distances.min()
@@ -57,8 +63,8 @@ def _apply_distance_reweighting(weights, distances):
 
     return weights
 
-
-def calculate_company_weights(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2, distances=None):
+# @numba.njit(cache=True)
+def _calculate_company_weights_no_distance(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2):
     weights = comp_emp[cand_idx].astype(float, copy=True)
 
     if not has_car:
@@ -67,8 +73,24 @@ def calculate_company_weights(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2, d
         preference_factors[comp_pt1[cand_idx]] = PT1_PREFERENCE_FACTOR
         weights *= preference_factors
 
-    if distances is not None:
-        weights = _apply_distance_reweighting(weights, distances)
+    total = weights.sum()
+    if total <= 0.0:
+        return np.ones(len(cand_idx), dtype=float) / len(cand_idx)
+
+    return weights / total
+
+
+# @numba.njit(cache=True)
+def _calculate_company_weights_with_distance(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2, distances):
+    weights = comp_emp[cand_idx].astype(float, copy=True)
+
+    if not has_car:
+        preference_factors = np.full(len(cand_idx), OTHER_PREFERENCE_FACTOR, dtype=float)
+        preference_factors[comp_pt2[cand_idx]] = PT2_PREFERENCE_FACTOR
+        preference_factors[comp_pt1[cand_idx]] = PT1_PREFERENCE_FACTOR
+        weights *= preference_factors
+
+    weights = _apply_distance_reweighting(weights, distances)
 
     total = weights.sum()
     if total <= 0.0:
@@ -77,7 +99,10 @@ def calculate_company_weights(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2, d
     return weights / total
 
 
-
+def calculate_company_weights(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2, distances=None):
+    if distances is None:
+        return _calculate_company_weights_no_distance(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2)
+    return _calculate_company_weights_with_distance(cand_idx, has_car, comp_emp, comp_pt1, comp_pt2, distances)
 
 def correct_companies_number_of_employees(context, df_statent, df_fixed_locations=None):
     persons_per_agent = 1 / context.config("input_downsampling")
@@ -115,3 +140,4 @@ def correct_companies_number_of_employees(context, df_statent, df_fixed_location
         del df_statent["nb_fixed_employees"], df_fixed_locations, nb_fixed_agents
     
     return df_statent
+
