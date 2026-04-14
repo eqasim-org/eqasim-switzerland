@@ -139,7 +139,7 @@ def modify_PCEs(transit_vehicles_input_path, transit_vehicles_output_path, scali
         f.write(xml_bytes)
 
 
-def get_calibration_args(context):
+def get_mode_shares_calibration_args(context):
     additional_args = []
     if context.config("calibrate_betas_in_matsim"):
         cache_path = context.working_directory
@@ -201,27 +201,54 @@ def get_delays_args(context):
     return additional_args  
 
 
-def get_network_calibration_args(context, counts_file=None):
+def get_network_calibration_args(context):
+    calibrate_network = context.config("network_calibration.activate")
+    calibrate_counts = context.config("network_calibration.calibrate_disutilities")
+    calibrate_freespeed = context.config("network_calibration.calibrate_freespeed")
+    
     additional_args = []
-    if context.config("activate_network_calibration"):
-        if counts_file is None:
-            counts_file = context.config("calibration_counts_file")
-        assert os.path.exists(counts_file), f"Calibration counts file not found at {counts_file}"
+    if calibrate_network:
+        assert (calibrate_counts or calibrate_freespeed), "Network calibration is activated, one of disutilities calibration or freespeed calibration need to be activated"
+        additional_args.extend(
+               ["--config:eqasim:networkCalibration.activate", "true",
+                "--config:eqasim:networkCalibration.calibrate", "true",
+                "--config:eqasim:networkCalibration.updateInterval", "5",
+                "--config:eqasim:networkCalibration.saveNetworkInterval", "0",
+                "--config:eqasim:networkCalibration.categoriesToCalibrate", "1,2,3,4,5,11,12,13,14,15,21,22,23,24,25",
+                "--config:eqasim:networkCalibration.minCapacity", "600",
+                "--config:eqasim:networkCalibration.maxCapacity", "2100",
+                "--config:eqasim:networkCalibration.rampFactor", "1.1",
+                "--config:eqasim:networkCalibration.trunkFactor", "1.3",
+                "--config:eqasim:networkCalibration.separateUrbanRoads", "true",
+                "--config:eqasim:networkCalibration.minPenalty", "-0.1",
+                "--config:eqasim:networkCalibration.maxPenalty", "0.4",
+                "--config:eqasim:networkCalibration.maxFreespeedFactor", "1.4",
+                "--config:eqasim:networkCalibration.minFreespeedFactor", "0.5",
+                "--config:eqasim:networkCalibration.penaltiesWarmupIterations", "20",
+                "--config:eqasim:networkCalibration.freespeedWarmupIterations", "25",
+                "--config:eqasim:networkCalibration.correctCapacities", str(context.config("correct_links_capacity")).lower(),
+                "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed"))]
+        )
+        
+        objective = []
+        if calibrate_counts:  
+            objective.append("penalty")
+            calibration_counts_file = context.stage("analysis.counts.target")
+            calibration_regions = context.stage("calibration.road_regions.regions")
+            additional_args.extend([
+                "--config:eqasim:networkCalibration.countsFile", calibration_counts_file,
+                "--config:eqasim:networkCalibration.penaltiesSpecialRegionPath", calibration_regions
+            ])
+        
+        if calibrate_freespeed:
+            objective.append("freespeed")
+            calibration_travel_times = context.stage("analysis.travel_times.APIs.target")
+            additional_args.extend([
+                "--config:eqasim:networkCalibration.observedSpeedTripsFile", calibration_travel_times,
+            ])
+    
         additional_args.extend([
-            "--config:eqasim:networkCalibration.activate", "true",
-            "--config:eqasim:networkCalibration.updateInterval", "3",
-            "--config:eqasim:networkCalibration.saveNetworkInterval", "0",
-            "--config:eqasim:networkCalibration.categoriesToCalibrate", "1,2,3,4,5,11,12,13,14,15",
-            "--config:eqasim:networkCalibration.minCapacity", "800",
-            "--config:eqasim:networkCalibration.maxCapacity", "2000",
-            "--config:eqasim:networkCalibration.countsFile", counts_file,
-            "--config:eqasim:networkCalibration.rampFactor", "1.05",
-            "--config:eqasim:networkCalibration.trunkFactor", "1.4",
-            "--config:eqasim:networkCalibration.objective", "penalty",
-            "--config:eqasim:networkCalibration.separateUrbanRoads", "true",
-            "--config:eqasim:networkCalibration.minPenalty", "-0.1",
-            "--config:eqasim:networkCalibration.maxPenalty", "0.35",
-            "--config:eqasim:networkCalibration.correctCapacities", str(context.config("correct_links_capacity")).lower(),
-            "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed"))
-        ])
+            "--config:eqasim:networkCalibration.objective", ",".join(objective)
+            ])
+       
     return additional_args

@@ -14,7 +14,7 @@ logger = logging.getLogger("synpp")
 
 
 def configure(context):
-    context.stage("analysis.travel_times.APIs.as_target")
+    context.stage("analysis.travel_times.APIs.target")
     context.stage("analysis.travel_times.APIs.get")
     context.stage("analysis.travel_times.matsim.get")
     context.stage("analysis.travel_times.advanced.process")
@@ -60,7 +60,7 @@ def merge_and_filter_large_differences(df_api, df_matsim):
 
 def execute(context):
     # Save travel times as csv in the output dir
-    _ = context.stage("analysis.travel_times.APIs.as_target")
+    _ = context.stage("analysis.travel_times.APIs.target")
     
     # Load data from APIs and MATSim
     dfs_api = context.stage("analysis.travel_times.APIs.get")

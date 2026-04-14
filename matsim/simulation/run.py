@@ -1,7 +1,7 @@
 import os.path
 import shutil
 import matsim.runtime.eqasim as eqasim
-from matsim.simulation.config_utils import get_calibration_args, get_delays_args, get_network_calibration_args
+from matsim.simulation.config_utils import get_mode_shares_calibration_args, get_delays_args, get_network_calibration_args
 import logging
 logger = logging.getLogger("synpp")
 
@@ -9,33 +9,41 @@ def configure(context):
     context.stage("matsim.simulation.prepare")    
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
+    context.stage("data.microcensus.shares")
     
     context.config("use_vdf", default=False)
     context.config("threads")
     context.config("last_iteration", 60)
     context.config("data_path")  
 
-    context.config("estimate_dmc", default=False)
-    context.config("calibrate_alphas_in_matsim", default=False)
-    context.config("alphaCalibration.level", default="global")
-    context.stage("data.microcensus.shares")
-
-    context.config("calibrate_betas_in_matsim", default=False)
-    context.config("activate_traffic_light_delays", default=False)
-    context.config("activate_unsignalized_intersections_delays", default=False)
-
+    # dmc
     if context.config("estimate_dmc"):
         context.stage("dmc.model")
 
-    context.config("activate_network_calibration", default=False)
-    context.config("prepare_counts_target_before_simulation", default=False)
-    context.config("counts_path", default=os.path.join(context.config("data_path"),"traffic_counts"))
-    context.config("calibration_counts_file", default=os.path.join(context.config("counts_path"),"calibration_counts.csv"))
-    context.config("correct_links_capacity", False)
-    context.config("minimum_speed", 2)
+    # mode shares calibration
+    context.config("estimate_dmc", default=False)
+    context.config("calibrate_alphas_in_matsim", default=False)
+    context.config("alphaCalibration.level", default="global")    
+    context.config("calibrate_betas_in_matsim", default=False)
 
-    if context.config("prepare_counts_target_before_simulation"):
+    # traffic light and intersection delays
+    context.config("activate_traffic_light_delays", default=False)
+    context.config("activate_unsignalized_intersections_delays", default=False)
+
+    # network calibration
+    context.config("network_calibration.activate", default=False)
+    context.config("network_calibration.calibrate_disutilities", default=True)
+    context.config("network_calibration.calibrate_freespeed", default=True)
+    
+    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_disutilities"):
         context.stage("analysis.counts.target")
+        context.stage("calibration.road_regions.regions")
+    
+    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
+        context.stage("analysis.travel_times.APIs.target")
+
+    context.config("correct_links_capacity", False)
+    context.config("minimum_speed", 1.5)
 
     context.config("useScheduleBasedTransport", default=True)
     context.config("preventwaitingtoentertraffic", default = "no")
@@ -76,17 +84,13 @@ def execute(context):
         additional_args.extend(["--config:eqasim.costParametersPath", cost_parameters_path])
         additional_args.extend(["--config:eqasim.modeParametersPath", mode_parameters_path])
 
-    additional_args.extend(get_calibration_args(context))
+    additional_args.extend(get_mode_shares_calibration_args(context))
     
     # delays (signalized intersections delays using webster formula, and unsignalized intersection delays using BPR based approach)
     additional_args.extend(get_delays_args(context))
 
     # network calibration
-    calibration_counts_file = None
-    if context.config("activate_network_calibration") and context.config("prepare_counts_target_before_simulation"):
-        calibration_counts_file = context.stage("analysis.counts.target")
-        logger.info("Using pre-simulation matched counts file for calibration: %s", calibration_counts_file)
-    additional_args.extend(get_network_calibration_args(context, counts_file=calibration_counts_file))
+    additional_args.extend(get_network_calibration_args(context))
 
     # Running the simulation
     last_iteration = context.config("last_iteration")
@@ -95,7 +99,7 @@ def execute(context):
         eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunSimulation", [
             "--config-path", config_path,
             "--config:controler.lastIteration", str(last_iteration),
-            "--config:controler.writeEventsInterval", str(last_iteration),
+            "--config:controler.writeEventsInterval", str(last_iteration/2),
             "--config:controler.writePlansInterval", str(last_iteration),
             "--config:qsim.numberOfThreads", str(min(context.config("threads"),12)),
             "--config:linkStats.writeLinkStatsInterval", str(int(last_iteration/2)),

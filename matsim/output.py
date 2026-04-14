@@ -16,6 +16,7 @@ def configure(context):
     context.config("write_jar", True)
     context.config("estimate_dmc", default=False)
     context.config("calibrate_alphas_in_matsim", default=False)
+    context.config("simulation_directory", "simulation_output")
 
 def execute(context):
     source_path = context.path("matsim.simulation.prepare")
@@ -74,7 +75,7 @@ def execute(context):
     
     # move the results to the output
     path_to_results =  "%s/simulation_output" % context.path("matsim.simulation.run")
-    new_path_to_results = "%s/simulation_output" % target_path
+    new_path_to_results = "%s/%s" % (target_path, context.config("simulation_directory"))
     shutil.move(path_to_results, new_path_to_results)
     
     # if calibration is activated, copy the calibrated parameters

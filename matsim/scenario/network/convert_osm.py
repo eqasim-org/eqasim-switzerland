@@ -29,7 +29,7 @@ def configure(context):
     context.config("border_offset", 20000)    
     context.config("export_detailed_network", False)    
     context.config("correct_links_capacity", False)
-    context.config("minimum_speed", 2) #in km/h
+    context.config("minimum_speed", 1.5) #in km/h
     context.config("input_downsampling")
     context.config("add_traffic_lights", False)
     context.config("assign_elevations", False)

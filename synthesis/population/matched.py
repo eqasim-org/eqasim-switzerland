@@ -16,7 +16,7 @@ It progressively decreases the minimum number of observations to ensure the most
 def configure(context):
     context.config("hot_deck_matching_runners")
     context.config("random_seed")
-    context.config("matching_minimum_observations", 15)
+    context.config("matching_minimum_observations", 10)
     context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.microcensus.persons")
@@ -431,7 +431,7 @@ def execute(context):
 
         # HT and activity-chains are better with canton_id instead of muncipality_type
         columns_individual_matching = [
-            "age_class", "sex", "car_availability", "employed", "employment_status", "commute_distance_class",
+            "age_class", "sex", "car_availability", "employment_status", "commute_distance_class",
             "ovgk",  "N_children_under_12", "sp_region", "work_location_type", "canton_id"
         ]
 
@@ -446,7 +446,7 @@ def execute(context):
         df_population["ovgk"] = (df_population["ovgk"] != "None").astype("int64")
         df_source["ovgk"] = (df_source["ovgk"] != "None").astype("int64")
 
-        mandatory_columns_individual_matching = columns_individual_matching[:9]
+        mandatory_columns_individual_matching = columns_individual_matching[:8]
 
         logger.info("Statistical matching starting (normal people split by age band with band-filtered source)")
 
@@ -519,11 +519,11 @@ def execute(context):
             elif band_name == "15_23":
                 youth = [
                 "age_class", "sex",
-                "ovgk", "employed", "employment_status", "car_availability", "sp_region", "commute_distance_class", "canton_id", "work_location_type"
+                "ovgk", "employment_status", "car_availability", "sp_region", "commute_distance_class", "canton_id", "work_location_type"
                 ]
                 youth_mandatory = [
                 "age_class", "sex",
-                "ovgk", "employed", "employment_status", "car_availability", "sp_region"
+                "ovgk", "employment_status", "car_availability", "sp_region"
                 ]
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,

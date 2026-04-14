@@ -1,5 +1,5 @@
 import os
-from .matching.network import Network
+from .matching.network import RoadNetwork
 import glob
 import subprocess
 import pandas as pd

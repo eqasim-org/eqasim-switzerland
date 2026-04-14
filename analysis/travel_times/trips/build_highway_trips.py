@@ -81,9 +81,9 @@ def execute(context):
     num_peak = int(num_trips * 0.7)
     num_off_peak = num_trips - num_peak
     departure_times = np.concatenate([
-        rng.integers(7 * 3600, 9 * 3600, size=num_peak // 2),
+        rng.integers(6.5 * 3600, 10 * 3600, size=num_peak // 2),
         rng.integers(16 * 3600, 19 * 3600, size=num_peak - num_peak // 2),
-        rng.integers(6 * 3600, 21 * 3600, size=num_off_peak)
+        rng.integers(5 * 3600, 23 * 3600, size=num_off_peak)
     ])
     rng.shuffle(departure_times)
 
