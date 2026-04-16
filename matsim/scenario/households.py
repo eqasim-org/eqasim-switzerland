@@ -18,8 +18,15 @@ def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.constants")
     context.stage("data.spatial.cantons")
-    context.config("include_cross_border")
-    context.stage("data.cross_border.generate_cross_border_traffic")
+
+    if context.config("include_cross_border"):
+        context.stage("data.cross_border.generate_cross_border_traffic")
+        context.stage("synthesis.population.enriched")
+
+    context.config("include_external_population", default = False)
+    if context.config("include_external_population"):
+        context.stage("data.external_population.read_outputs")
+
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class",
           "municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"]
@@ -79,21 +86,33 @@ def execute(context):
     equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children
     df_persons["income_per_capita"] = df_persons["income"] / equvalent_size
 
-    
     _require_cols(df_persons, ["household_id", "person_id", "income_class", "number_of_cars_class",
                            "municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"], "df_persons")
 
     # Keep only the fields you need, but don't crash if you later add extras elsewhere
     df_persons = df_persons[[c for c in FIELDS if c in df_persons.columns]]
 
+    if context.config("include_external_population"):
+        external_persons   = context.stage("data.external_population.read_outputs")[0].copy()
+
+        external_persons["municipality_type"] = "fr"
+        external_persons["sp_region"]         = -1
+        external_persons["canton_id"]         = 0
+        external_persons["ovgk"]              = "fr"
+
+        external_persons["canton_name"] = "fr"
+        external_persons["income_per_capita"] = 0
+
+        external_persons = external_persons[[c for c in FIELDS if c in external_persons.columns]]
+        df_persons = pd.concat([df_persons, external_persons])
+
     if context.config("include_cross_border"):
         cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
 
-        id_person_max = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
+        id_person_max    = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
         id_household_max = np.max(context.stage("synthesis.population.enriched").copy()["household_id"].values)
-        id_person_max = max(id_person_max, id_household_max)  # just in case person_id and household_id are not on the same scale
-
-        N             = id_person_max + 1
+        id_person_max    = max(id_person_max, id_household_max)  # just in case person_id and household_id are not on the same scale
+        N                = id_person_max + 1
 
         cross_border_persons    = cross_border_persons.sort_values(by="person_id")
 

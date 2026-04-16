@@ -264,6 +264,27 @@ SLOT_COLLISIONS = [
     { "slot": "attributions", "identifier": "attribution_id" },
 ]
 
+def validate_feed(feed):
+    if "trips" not in feed:
+        return
+
+    trip_service_ids = set(feed["trips"]["service_id"].astype(str).unique())
+
+    defined_ids = set()
+    if "calendar" in feed:
+        defined_ids |= set(feed["calendar"]["service_id"].astype(str).unique())
+    if "calendar_dates" in feed:
+        defined_ids |= set(feed["calendar_dates"]["service_id"].astype(str).unique())
+
+    missing = trip_service_ids - defined_ids
+
+    if missing:
+        print(f"WARNING: {len(missing)} service_ids in trips not found in calendar/calendar_dates:")
+        print(sorted(missing)[:20], "..." if len(missing) > 20 else "")
+    else:
+        print(f"OK: all {len(trip_service_ids)} service_ids are defined")
+
+
 def copy_feed(feed):
     return {
         slot: feed[slot].copy() for slot in feed
@@ -273,57 +294,87 @@ def merge_feeds(feeds):
     result = {}
 
     for k, feed in enumerate(feeds):
+        print(f"\n--- Validating feed {k+1} before merge ---")
+        validate_feed(feed)                          # <-- add this
         result = merge_two_feeds(result, feed, "_m{}".format(k + 1))
+        print(f"--- Validating merged result after feed {k+1} ---")
+        validate_feed(result)
 
     return result
 
-def merge_two_feeds(first, second, suffix = "_merged"):
-    feed = {}
-
+def merge_two_feeds(first, second, suffix="_merged"):
     print("Merging GTFS data ...")
-
-    first = copy_feed(first)
+    first  = copy_feed(first)
     second = copy_feed(second)
 
+    # Convert all identifiers and references to str once upfront
     for collision in SLOT_COLLISIONS:
-        if collision["slot"] in first and collision["slot"] in second:
-            df_first = first[collision["slot"]]
-            df_second = second[collision["slot"]]
+        col = collision["identifier"]
+        if collision["slot"] in first:
+            first[collision["slot"]][col] = first[collision["slot"]][col].astype(str)
+        if collision["slot"] in second:
+            second[collision["slot"]][col] = second[collision["slot"]][col].astype(str)
+        for ref_slot, ref_col in collision.get("references", []):
+            if ref_slot in first and ref_col in first[ref_slot].columns:
+                first[ref_slot][ref_col] = first[ref_slot][ref_col].astype(str)
+            if ref_slot in second and ref_col in second[ref_slot].columns:
+                second[ref_slot][ref_col] = second[ref_slot][ref_col].astype(str)
 
-            df_first[collision["identifier"]] = df_first[collision["identifier"]].astype(str)
-            df_second[collision["identifier"]] = df_second[collision["identifier"]].astype(str)
+    for collision in SLOT_COLLISIONS:
+        if collision["slot"] not in first or collision["slot"] not in second:
+            continue
 
-            df_concat = pd.concat([df_first, df_second], sort = True).drop_duplicates()
-            duplicate_ids = list(df_concat[df_concat[collision["identifier"]].duplicated()][
-                collision["identifier"]].astype(str).unique())
+        col       = collision["identifier"]
+        df_first  = first[collision["slot"]]
+        df_second = second[collision["slot"]]
 
-            if len(duplicate_ids) > 0:
-                print("   Found %d duplicate identifiers in %s" % (
-                    len(duplicate_ids), collision["slot"]))
+        # Find duplicate IDs between the two feeds
+        ids_first  = set(df_first[col].unique())
+        ids_second = set(df_second[col].unique())
+        duplicate_ids = ids_first & ids_second
 
-                replacement_ids = [str(id) + suffix for id in duplicate_ids]
+        if len(duplicate_ids) > 0:
+            print("   Found %d duplicate identifiers in %s" % (
+                len(duplicate_ids), collision["slot"]))
 
-                df_second[collision["identifier"]] = df_second[collision["identifier"]].replace(
-                    duplicate_ids, replacement_ids
-                )
+            replacement_map = {id_: id_ + suffix for id_ in duplicate_ids}
 
-                for ref_slot, ref_identifier in collision["references"]:
-                    if ref_slot in first and ref_slot in second:
-                        first[ref_slot][ref_identifier] = first[ref_slot][ref_identifier].astype(str)
-                        second[ref_slot][ref_identifier] = second[ref_slot][ref_identifier].astype(str)
+            # Remap in the second feed's main slot
+            second[collision["slot"]][col] = second[collision["slot"]][col].map(
+                lambda x: replacement_map.get(x, x)
+            )
 
-                        second[ref_slot][ref_identifier] = second[ref_slot][ref_identifier].replace(
-                            duplicate_ids, replacement_ids
-                        )
+            # Remap all references in second feed
+            for ref_slot, ref_col in collision.get("references", []):
+                if ref_slot in second and ref_col in second[ref_slot].columns:
+                    second[ref_slot][ref_col] = second[ref_slot][ref_col].map(
+                        lambda x: replacement_map.get(x, x)
+                    )
 
+    # Concatenate all slots
+    feed = {}
     for slot in REQUIRED_SLOTS + OPTIONAL_SLOTS:
         if slot in first and slot in second:
-            feed[slot] = pd.concat([first[slot], second[slot]], sort = True).drop_duplicates()
+            feed[slot] = pd.concat([first[slot], second[slot]], sort=True).drop_duplicates()
         elif slot in first:
             feed[slot] = first[slot].copy()
         elif slot in second:
             feed[slot] = second[slot].copy()
 
+    defined = set()
+    if "calendar" in feed:
+        defined |= set(feed["calendar"]["service_id"])
+    if "calendar_dates" in feed:
+        defined |= set(feed["calendar_dates"]["service_id"])
+
+    if defined:
+        mask = feed["trips"]["service_id"].isin(defined)
+        missing = feed["trips"][~mask]["service_id"].unique()
+        if len(missing):
+            print(f"Dropping {len(missing)} trips with undefined service_ids: {missing}")
+            feed["trips"] = feed["trips"][mask]
+
+    validate_feed(feed)
     return feed
 
 def despace_stop_ids(feed, replacement = ":::"):
