@@ -1,17 +1,29 @@
 import geopandas as gpd
 from shapely import vectorized
 import numpy as np
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
-    context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
 
     context.config("num_highway_trips", default=20000)    
     context.config("random_seed")
+    
+    # here we check if any of the stages that require the network from prepare are requested, to avoid unnecessary dependencies and re-running prepare when not needed
+    stages_to_check = [ "matsim.output", "matsim.simulation.run", "matsim.simulation.prepare"]
+    get_network_from_prepare = any(requested_stage.__name__ in stages_to_check for requested_stage in context.config_requested_stages)
+
+    if get_network_from_prepare:
+        context.stage("analysis.counts.matching.network_from_prepare", alias="network")
+    else:
+        context.stage("analysis.counts.matching.network", alias="network")
+    
 
 def execute(context):
-    # load network
-    net = context.stage("analysis.counts.matching.network")
+    # load network (do not create dependency on the network stage to avoid running the prepare (maybe the whole pipeline) again)
+    net = context.stage("network")
 
     # get highway links    
     highway_links = net.links[net.links["highway"].isin(('motorway', 'trunk', 'motorway_link', 'trunk_link','primary'))]

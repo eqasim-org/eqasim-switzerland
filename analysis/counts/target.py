@@ -19,13 +19,9 @@ def configure(context):
     context.stage("analysis.counts.cantons.saint_gallen")
     context.stage("analysis.counts.cantons.vaud")
     context.stage("analysis.counts.cantons.zurich")
-    context.stage("data.spatial.swiss_border")
-    context.stage("matsim.simulation.prepare")
-    context.stage("matsim.scenario.network.convert_osm")
+    context.stage("analysis.counts.matching.network_from_prepare")
 
     context.config("only_weekday", default=False)
-    context.config("output_prefix", "switzerland_")
-    context.config("export_detailed_network", False)
     context.config("input_downsampling")
 
 
@@ -184,13 +180,7 @@ def _load_counts_and_match(context, network, city):
 def execute(context):
     logger.info("Preparing calibration target from authority counts before simulation...")
     
-    network_file = os.path.join(context.path("matsim.simulation.prepare"), f"{context.config('output_prefix')}network.xml.gz")
-    network_geometry_file = None
-    if context.config("export_detailed_network"):
-        network_geometry_file = os.path.join(context.path("matsim.scenario.network.convert_osm"), "detailed_network.csv")
-    
-    logger.info("\t LOADING NETWORK FROM: %s" % network_file)
-    network = RoadNetwork(network_file, network_geometry_file, overwrite=False, cache_dir= context.path())
+    network = context.stage("analysis.counts.matching.network_from_prepare")
 
     # Get prepared count data
     city_order = [
