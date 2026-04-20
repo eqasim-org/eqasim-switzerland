@@ -4,9 +4,9 @@ import logging
 from data.structural_survey.structural_survey import get_filtered_data
 logger = logging.getLogger("synpp")
 
-AGE_BIN_EDGES = np.array([30, 45, 65], dtype=float)
+AGE_BIN_EDGES = np.array([35], dtype=float)
 SEX_VALUES = (0, 1)
-AGE_BINS = (0, 1, 2, 3)
+AGE_BINS = (0, 1)
 DEFAULT_SEGMENT_KEY = ("all", "all")
 
 def configure(context):

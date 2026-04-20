@@ -49,8 +49,8 @@ class writer:
         params_dict = {self.rename(k): float(v) for k, v in self.params.items()}
         
         # adjust long distance cp
-        params_dict["cp.betaVeryLongDistance_u"] = params_dict.get("cp.betaVeryLongDistance_u", 0.0) * 2
-        params_dict["cp.betaDistance_u_km"] = params_dict.get("cp.betaDistance_u_km", 0.0) * 3
+        params_dict["cp.betaVeryLongDistance_u"] = min(params_dict.get("cp.betaVeryLongDistance_u", 0.0) * 3, 0.0)
+        params_dict["cp.betaDistance_u_km"] = min(params_dict.get("cp.betaDistance_u_km", 0.0) * 3, 0.0)
 
         # interactions reference values
         params_dict["referenceIncome"] = self.context.config("reference_income_chf")
@@ -59,6 +59,22 @@ class writer:
         # scale parameters
         params_dict["timeScale_min"] = constants.TIME_SCALE_MIN
         params_dict["distanceScale_km"] = constants.DISTANCE_SCALE_KM
+
+        # densities_parameters
+        params_dict["populationDensityScale"] = constants.POPULATION_DENSITY_SCALE
+        params_dict["populationDensityExponent"] = constants.POPULATION_DENSITY_EXPONENT
+        params_dict["employeesDensityScale"] = constants.EMPLOYEES_DENSITY_SCALE
+        params_dict["employeesDensityExponent"] = constants.EMPLOYEES_DENSITY_EXPONENT
+        params_dict["companiesDensityScale"] = constants.COMPANIES_DENSITY_SCALE
+        params_dict["companiesDensityExponent"] = constants.COMPANIES_DENSITY_EXPONENT
+        c = self.context.stage("data.constants")
+        params_dict["lowIncomeThreshold"] = c.LOW_INCOME_THRESHOLD
+        params_dict["highIncomeThreshold"] = c.HIGH_INCOME_THRESHOLD
+
+        # distances
+        params_dict["shortDistance_km"] = constants.SHORT_DISTANCE_KM
+        params_dict["longDistance_km"] = constants.LONG_DISTANCE_KM
+        params_dict["veryLongDistance_km"] = constants.VERY_LONG_DISTANCE_KM
 
         # parking informations
         params_dict["parking.urbancoreParkingSearchDuration_min"] = self.context.config("urbancore_parking_search_min")
@@ -121,6 +137,7 @@ NAMES_CONVERSION = {
     'beta_bike_age': 'bike.betaAge_u',
     'beta_bike_sex': 'bike.betaSex_u',
     'beta_bike_low_income': 'bike.betaLowIncome_u',
+    'beta_bike_high_income': 'bike.betaHighIncome_u',
     'beta_bike_region_1': 'bike.betaRegion1_u',
     'beta_bike_region_2': 'bike.betaRegion2_u',  
     'beta_bike_origin_home': 'bike.betaOriginHome_u',
@@ -136,6 +153,7 @@ NAMES_CONVERSION = {
     'beta_bike_retired': 'bike.betaRetired_u',
     'beta_bike_junior': 'bike.betaJunior_u',
     'beta_bike_long_distance': 'bike.betaLongDistance_u',
+    'beta_bike_densities': 'bike.betaDensities_u',
     
     # Car
     'beta_car_asc': 'car.alpha_u',
@@ -144,6 +162,7 @@ NAMES_CONVERSION = {
     'beta_car_age': 'car.betaAge_u',
     'beta_car_sex': 'car.betaSex_u',
     'beta_car_low_income': 'car.betaLowIncome_u',
+    'beta_car_high_income': 'car.betaHighIncome_u',
     'beta_car_region_1': 'car.betaRegion1_u',
     'beta_car_region_2': 'car.betaRegion2_u', 
     'beta_car_origin_home': 'car.betaOriginHome_u',
@@ -160,6 +179,13 @@ NAMES_CONVERSION = {
     'beta_car_ownership_ratio': 'car.betaCarOwnershipRatio_u',
     'beta_car_short_distance': 'car.betaShortDistance_u',
     'beta_car_long_distance': 'car.betaLongDistance_u',
+    'beta_car_densities': 'car.betaDensities_u',
+    'beta_car_destination_zurich': 'car.betaDestinationZurich_u',
+    'beta_car_destination_geneva': 'car.betaDestinationGeneva_u',
+    'beta_car_destination_basel': 'car.betaDestinationBasel_u',
+    'beta_car_destination_lausanne': 'car.betaDestinationLausanne_u',
+    'beta_car_destination_luzern': 'car.betaDestinationLuzern_u',
+    'beta_car_destination_bern': 'car.betaDestinationBern_u',
 
     # Car Passenger
     'beta_car_passenger_asc': 'cp.alpha_u',
@@ -169,6 +195,7 @@ NAMES_CONVERSION = {
     'beta_car_passenger_age': 'cp.betaAge_u',
     'beta_car_passenger_sex': 'cp.betaSex_u',
     'beta_car_passenger_low_income': 'cp.betaLowIncome_u',
+    'beta_car_passenger_high_income': 'cp.betaHighIncome_u',
     'beta_car_passenger_region_1': 'cp.betaRegion1_u',
     'beta_car_passenger_region_2': 'cp.betaRegion2_u',
     'beta_car_passenger_origin_home': 'cp.betaOriginHome_u',
@@ -187,7 +214,8 @@ NAMES_CONVERSION = {
     'beta_car_passenger_long_distance': 'cp.betaLongDistance_u',
     'beta_car_passenger_ownership_ratio': 'cp.betaCarOwnershipRatio_u',
     'beta_car_passenger_has_car': 'cp.betaHasCar_u',
-    "beta_car_passenger_very_long_distance": 'cp.betaVeryLongDistance_u',    
+    "beta_car_passenger_very_long_distance": 'cp.betaVeryLongDistance_u',
+    'beta_car_passenger_densities': 'cp.betaDensities_u',
 
     # PT
     'beta_pt_asc': 'pt.alpha_u',
@@ -206,6 +234,7 @@ NAMES_CONVERSION = {
     'beta_pt_age': 'pt.betaAge_u',
     'beta_pt_sex': 'pt.betaSex_u',
     'beta_pt_low_income': 'pt.betaLowIncome_u',
+    'beta_pt_high_income': 'pt.betaHighIncome_u',
     'beta_pt_region_1': 'pt.betaRegion1_u',
     'beta_pt_region_2': 'pt.betaRegion2_u', 
     'beta_pt_origin_home': 'pt.betaOriginHome_u',
@@ -223,6 +252,9 @@ NAMES_CONVERSION = {
     'beta_pt_long_distance': 'pt.betaLongDistance_u',
     'beta_pt_good_service': 'pt.betaGoodService_u',
     'beta_pt_medium_service': 'pt.betaMediumService_u',
+    'beta_pt_destination_good_service': 'pt.betaDestinationGoodService_u',
+    'beta_pt_destination_medium_service': 'pt.betaDestinationMediumService_u',
+    'beta_pt_densities': 'pt.betaDensities_u',
     
     # Walk
     'beta_walk_asc': 'walk.alpha_u',
@@ -231,6 +263,7 @@ NAMES_CONVERSION = {
     'beta_walk_age': 'walk.betaAge_u',
     'beta_walk_sex': 'walk.betaSex_u',
     'beta_walk_low_income': 'walk.betaLowIncome_u',
+    'beta_walk_high_income': 'walk.betaHighIncome_u',
     'beta_walk_region_1': 'walk.betaRegion1_u',
     'beta_walk_region_2': 'walk.betaRegion2_u', 
     'beta_walk_origin_home': 'walk.betaOriginHome_u',
@@ -246,9 +279,13 @@ NAMES_CONVERSION = {
     'beta_walk_retired': 'walk.betaRetired_u',
     'beta_walk_junior': 'walk.betaJunior_u',
     'beta_walk_long_distance': 'walk.betaLongDistance_u',
+    'beta_walk_densities': 'walk.betaDensities_u',
 
     # Cost
     'beta_cost_CHF': 'betaCost_u_MU',
     'lambda_cost_income': 'lambdaCostIncome',
     'lambda_cost_distance': 'lambdaCostEuclideanDistance',
+    'beta_destination_employee_density': 'betaDestinationEmployeeDensity_u',
+    'beta_destination_population_density': 'betaDestinationPopulationDensity_u',
+    'beta_destination_companies_density': 'betaDestinationCompaniesDensity_u',
 }

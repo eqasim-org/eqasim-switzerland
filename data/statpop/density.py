@@ -28,6 +28,7 @@ def impute(context, kd_tree, df, x="x", y="y", radius= 2.5 * 1e3, point_type="",
         counts.extend(kd_tree.query_radius(coordinates, radius, count_only=True))
     
     df["population_density"] = counts # / (np.pi * c.POPULATION_DENSITY_RADIUS**2)
+    return df
 
 def impute_parallel(context, kd_tree, df, x="x", y="y", radius=2.5 * 1e3, point_type="", chunk_size=1000, n_jobs=10):
 

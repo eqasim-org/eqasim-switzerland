@@ -150,7 +150,7 @@ def execute(context):
     df = impute_sp_region(df)
 
     # Impute population density
-    data.statpop.density.impute_parallel(
+    df = data.statpop.density.impute_parallel(
         context, 
         context.stage("data.statpop.density"), df, 
         "home_x", "home_y", 

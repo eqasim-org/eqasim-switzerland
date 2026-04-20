@@ -3,7 +3,7 @@ import pandas as pd
 import data.spatial.utils as spatial_utils
 import logging
 from data.structural_survey.structural_survey import get_filtered_data
-from data.od.matrix import (DEFAULT_SEGMENT_KEY, AGE_BIN_EDGES)
+from data.od.matrix import (DEFAULT_SEGMENT_KEY, AGE_BIN_EDGES, AGE_BINS, SEX_VALUES)
 
 logger = logging.getLogger("synpp")
 
@@ -14,14 +14,14 @@ def get_segment_key(sex_value, age_value):
     except (TypeError, ValueError):
         return DEFAULT_SEGMENT_KEY
 
-    if sex not in (0, 1):
+    if sex not in SEX_VALUES:
         return DEFAULT_SEGMENT_KEY
 
     if not np.isfinite(age_value):
         return DEFAULT_SEGMENT_KEY
 
     age_bin = int(np.digitize(float(age_value), AGE_BIN_EDGES, right=False))
-    if age_bin not in (0, 1, 2, 3):
+    if age_bin not in AGE_BINS:
         return DEFAULT_SEGMENT_KEY
 
     return (sex, age_bin)
@@ -29,10 +29,8 @@ def get_segment_key(sex_value, age_value):
 
 def age_bin_label(age_bin):
     labels = {
-        0: "<30",
-        1: "30-45",
-        2: "45-65",
-        3: "65+",
+        0: "<=35",
+        1: ">35"
     }
     return labels.get(age_bin, str(age_bin))
 

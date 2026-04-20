@@ -32,8 +32,6 @@ def configure(context):
     context.stage("synthesis.lcv.trips")
 
     context.stage("synthesis.vehicles.vehicles")
-    context.stage("data.spatial.municipality_types")
-    context.stage("data.spatial.municipalities")
 
     context.config("include_cross_border", default = False)
     if context.config("include_cross_border"):
@@ -42,6 +40,12 @@ def configure(context):
 VEHICLE_FIELDS = [
     "mode", "vehicle_id", "owner_id"
 ]
+ACTIVITY_ATTRIBUTES_TO_SAVE = dict(municipalityType='municipality_type', 
+                                   municipalityId='municipality_id', 
+                                   employeeDensity='employee_density', 
+                                   companiesDensity='companies_density', 
+                                   populationDensity='population_density', 
+                                   ovgk='ovgk')
 
 class PersonWriter:
     def __init__(self, person):
@@ -121,7 +125,7 @@ class PersonWriter:
             start_time = _na_to_none(a.start_time)
             end_time = _na_to_none(a.end_time)
 
-            attributes = dict(municipalityType=a.municipality_type, municipalityId=a.municipality_id)
+            attributes = {attr_name: getattr(a, attr) for attr_name, attr in ACTIVITY_ATTRIBUTES_TO_SAVE.items()}
             writer.add_activity(a.purpose, location, start_time, end_time, attributes=attributes)
 
             if not a.is_last:
@@ -208,7 +212,8 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
                  "bike_availability",]
 
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
-                   "geometry", "destination_id", "following_mode", "municipality_type","municipality_id"]
+                   "geometry", "destination_id", "following_mode", "municipality_type","municipality_id",
+                   'employee_density', 'companies_density', 'population_density','ovgk']
 
 PERSONS_DTYPES = {
         "person_id": int,
@@ -237,8 +242,6 @@ def execute(context):
     df_persons    = context.stage("synthesis.population.models.subscriptions")
     df_activities = context.stage("synthesis.population.activities")
     df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]    
-    df_municipality_type = context.stage("data.spatial.municipality_types")
-    df_municipalities,_ = context.stage("data.spatial.municipalities")
 
     # Attach following modes to activities
     df_trips         = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
@@ -248,13 +251,6 @@ def execute(context):
     # Attach locations to activities
     df_locations  = context.stage("synthesis.population.spatial.locations")
     df_activities = pd.merge(df_activities, df_locations, on=["person_id", "activity_index"], how="left")
-
-    # Attach municipality to activities (TODO: Maybe this can be done in previous stages by keeping track of municipality id)
-    df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_type","municipality_id", "geometry"]]
-    df_activities = gpd.GeoDataFrame(df_activities, geometry="geometry", crs="EPSG:2056")
-    assert df_activities.crs == df_municipalities.crs
-    df_activities = gpd.sjoin_nearest(df_activities, df_municipalities, how="left").drop(columns=["index_right"]) # way faster than sjoin   
-
 
     # Replace the primary-secondary purposes with normal ones
     # Now that the secondary locations are assigned, no need to continue working with these purposes
@@ -355,7 +351,8 @@ def execute(context):
     # Make sure the minimum required columns exist (order does NOT matter)
     _require_cols(df_persons, ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y"], "df_persons")
     _require_cols(df_activities, ["person_id", "activity_index", "start_time", "end_time", "purpose", "is_last",
-                                "geometry", "destination_id", "following_mode", "municipality_type", "municipality_id"], "df_activities")
+                                "geometry", "destination_id", "following_mode", "municipality_type", "municipality_id",
+                                "employee_density", "companies_density", "population_density"], "df_activities")
     _require_cols(df_vehicles, ["mode", "vehicle_id", "owner_id"], "df_vehicles")
 
     # Cast only the columns that exist (so removing/adding columns won't break)

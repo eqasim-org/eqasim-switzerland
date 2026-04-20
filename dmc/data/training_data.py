@@ -182,12 +182,19 @@ def execute(context):
         "home_municipality", "origin_municipality", "destination_municipality", 
         "destination_work", "origin_home", "destination_home", "destination_education",
         "destination_shopping", "destination_leisure", "destination_other",        
-        "elevation_difference", "purpose",
+        "elevation_difference", "purpose", 
+        'destination_zurich', 'destination_geneva', 'destination_basel', 'destination_lausanne', 'destination_luzern', 'destination_bern',
+        
+        # densities at destination
+        'destination_employee_density','destination_population_density','destination_companies_density',
+
+        # distances
+        'short_distance', 'long_distance', 'very_long_distance',
 
         # person
         "age", "sex", "income", "income_class", "sp_region", "ms_region", "is_car_passenger", "ovgk", 
-        "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired","is_junior","low_income",
-        'has_car','num_adults',
+        "good_pt_service", "medium_pt_service", "destination_good_pt_service", "destination_medium_pt_service",
+        "car_ownership_ratio", "is_retired","is_junior", "low_income","high_income", 'has_car','num_adults',
 
         # car
         'car_availability' ,'car_travel_time_min', 'car_cost_CHF', 'driving_license', "car_distance_km",

@@ -343,7 +343,9 @@ def get_mz_persons(context):
     
     # remove persons who are not employed, but have a work as one of the purposes in their activity chain
     employed_persons = set(df_persons[df_persons["employed"] == True]["person_id"])
-    persons_with_work_purpose = set(df_trips[(df_trips["origin_purpose"] == "work") | (df_trips["purpose"] == "work")]["person_id"])
+    work_activities = ["work","work_secondary"]
+    persons_with_work_purpose = set(df_trips[(df_trips["origin_purpose"].isin(work_activities)) | 
+                                             (df_trips["purpose"].isin(work_activities))]["person_id"])
     persons_to_remove = persons_with_work_purpose - employed_persons
     logger.info(f"Removing {len(persons_to_remove)} persons who are not employed but have 'work' as a purpose in their activity chain.")
 
@@ -382,7 +384,7 @@ def execute(context):
     # add commute distance and work location type
     df_work = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]]
     df_population = pd.merge(df_population, df_work, on="person_id", how="left")
-    assert df_population.loc[df_population.employed==1,"work_location_type"].notna().all(), "Some employed gents are missing commute distance"
+    assert df_population.loc[df_population.employed==1,"work_location_type"].notna().all(), "Some employed agents are missing commute distance"
     df_population[ "commute_distance"] = df_population["commute_distance"].fillna(-1)
     df_population[ "work_location_type"] = df_population["work_location_type"].fillna("none")
     
@@ -395,6 +397,10 @@ def execute(context):
     COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 1, 3, 6, 9, 12, 15, 20, 50, 1000]) * 1e3 # convert km -> m
     df_population["commute_distance_class"] = np.digitize(df_population["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
     df_source["commute_distance_class"] = np.digitize(df_source["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
+    
+    COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 2, 8, 20, 50, 1000]) * 1e3
+    df_population["broad_commute_distance_class"] = np.digitize(df_population["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
+    df_source["broad_commute_distance_class"] = np.digitize(df_source["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
 
     # add age classes 
     AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
@@ -431,8 +437,12 @@ def execute(context):
 
         # HT and activity-chains are better with canton_id instead of muncipality_type
         columns_individual_matching = [
-            "age_class", "sex", "car_availability", "employment_status", "commute_distance_class",
-            "ovgk",  "N_children_under_12", "sp_region", "work_location_type", "canton_id"
+            "age_class", "sex", "car_availability", "employed", "employment_status", "broad_commute_distance_class",
+            "ovgk",  "N_children_under_12", "sp_region", "commute_distance_class", "work_location_type", "canton_id"
+        ]
+        mandatory_columns_individual_matching = [
+            "age_class", "sex", "car_availability", "employed", "employment_status", "broad_commute_distance_class",
+            "ovgk",  "N_children_under_12", "sp_region"
         ]
 
         df_population["marital_status"] = df_population["marital_status"].astype("int64")
@@ -445,8 +455,6 @@ def execute(context):
         df_population["canton_id"] = df_population["canton_id"].astype("int64")
         df_population["ovgk"] = (df_population["ovgk"] != "None").astype("int64")
         df_source["ovgk"] = (df_source["ovgk"] != "None").astype("int64")
-
-        mandatory_columns_individual_matching = columns_individual_matching[:8]
 
         logger.info("Statistical matching starting (normal people split by age band with band-filtered source)")
 
@@ -518,11 +526,12 @@ def execute(context):
                 )
             elif band_name == "15_23":
                 youth = [
-                "age_class", "sex",
-                "ovgk", "employment_status", "car_availability", "sp_region", "commute_distance_class", "canton_id", "work_location_type"
+                "age_class", "sex", "employed",
+                "ovgk", "employment_status", "car_availability", "sp_region", 
+                "broad_commute_distance_class", "canton_id", "work_location_type", "commute_distance_class"
                 ]
                 youth_mandatory = [
-                "age_class", "sex",
+                "age_class", "sex", "employed",
                 "ovgk", "employment_status", "car_availability", "sp_region"
                 ]
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(

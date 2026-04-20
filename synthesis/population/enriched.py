@@ -95,7 +95,7 @@ def execute(context):
         children_selector = df_persons["age_class"] == 0
         df_persons.loc[children_selector, "driving_license"] = False
         df_persons.loc[children_selector, "employment_status"] = "student"
-        df_persons.loc[children_selector, "car_availability"] = c.CAR_AVAILABILITY_NEVER
+        df_persons.loc[children_selector, "car_availability"] = 0
 
         # Filling those with NA income class with 0
         df_persons.loc[df_persons["income_class"].isna(), "income_class"] = 0

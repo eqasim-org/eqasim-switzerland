@@ -2,7 +2,7 @@ import numpy as np
 import logging
 from .wla_tools import multinomial_sample, calculate_company_weights, correct_companies_number_of_employees, COMP_SATURATION_FACTOR
 from data.od.matrix import (AGE_BIN_EDGES, DEFAULT_SEGMENT_KEY)
-from .fixed_work_locations import get_segment_key
+from .work_locations import get_segment_key
 
 logger = logging.getLogger("synpp")
 

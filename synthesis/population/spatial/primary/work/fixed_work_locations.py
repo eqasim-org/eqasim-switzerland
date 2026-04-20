@@ -2,26 +2,9 @@ import numpy as np
 import logging
 from .wla_tools import multinomial_sample, calculate_company_weights, correct_companies_number_of_employees, COMP_SATURATION_FACTOR
 from data.od.matrix import (AGE_BIN_EDGES, DEFAULT_SEGMENT_KEY)
+from .work_locations import get_segment_key
 
 logger = logging.getLogger("synpp")
-
-def get_segment_key(sex_value, age_value):
-    try:
-        sex = int(sex_value)
-    except (TypeError, ValueError):
-        return DEFAULT_SEGMENT_KEY
-
-    if sex not in (0, 1):
-        return DEFAULT_SEGMENT_KEY
-
-    if not np.isfinite(age_value):
-        return DEFAULT_SEGMENT_KEY
-
-    age_bin = int(np.digitize(float(age_value), AGE_BIN_EDGES, right=False))
-    if age_bin not in (0, 1, 2, 3):
-        return DEFAULT_SEGMENT_KEY
-
-    return (sex, age_bin)
 
 def configure(context):
     context.stage("data.statent.statent")

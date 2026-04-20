@@ -58,7 +58,8 @@ class Constants:
         # This dictionnary is used to convert income class to income per capita
         self.INCOME_CLASS_MAP = {0: 2000, 1: 3000, 2: 5000, 3: 7000, 4: 9000, 5: 11000,  6: 13000, 7: 15000, 8: 17000}
         
-        self.LOW_INCOME_THRESHOLD = 3000  # CHF per month per equivalent adult (20% quartile of Mz income distribution)
+        self.LOW_INCOME_THRESHOLD = 3000
+        self.HIGH_INCOME_THRESHOLD = 8000
 
         # Models related constants
         self.MAP_JOB_POSITIONS_MZ_TO_SURVEY = {

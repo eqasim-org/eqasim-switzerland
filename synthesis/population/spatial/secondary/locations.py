@@ -82,8 +82,8 @@ def execute(context):
 
     # Load car availability
     df_car_availability     = context.stage("synthesis.population.enriched")[["person_id","car_availability","driving_license"]]
-    df_car_availability["car_availability"] = ((df_car_availability["car_availability"].astype(int)!=c.CAR_AVAILABILITY_NEVER) &
-                                               (df_car_availability["driving_license"])).astype(bool)        
+    df_car_availability["car_availability"] = ((df_car_availability["car_availability"].astype(int)==1) &
+                                               (df_car_availability["driving_license"]).astype(int)==1).astype(bool)        
 
     # Load trips and primary locations
     df_trips                = context.stage("synthesis.population.trips").sort_values(by=["person_id", "trip_index"])
