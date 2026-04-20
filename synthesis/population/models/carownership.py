@@ -255,7 +255,7 @@ def execute(context):
     # categorical + numeric feature lists
     cat_cols = [ "ovgk","canton_id",  "municipality_type", "presence_of_children_under_18"]#, "ovgk" "municipality_type", "presence_of_children_under_18", "income_class"] #presence_of_children_under_18 reduces the  number of those not owning a car
 
-    num_cols = ["N_adults", "N_adults_30_64", "N_drivers_license_adults", "hh_oldest_age"]
+    num_cols = ["N_adults", "N_adults_30_64", "N_drivers_license_adults", "hh_oldest_age", "income_class"]
     
     for df in (hh_s, hh_p):
         # numeric clean
