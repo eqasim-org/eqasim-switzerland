@@ -29,10 +29,6 @@ def execute(context):
 
     CHUNK_SIZE = 50_000
 
-    # pre-training district check
-    N_RANDOM_DISTRICTS_FOR_PRECHECK = 5
-    RANDOM_DISTRICT_SEED = 42
-
     # =========================================================
     # 0. PREP: CLEAN + ALIGN EMPLOYMENT INFO
     # =========================================================
