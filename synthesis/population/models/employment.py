@@ -65,6 +65,12 @@ def execute(context):
     for df in (survey_df, pop_df):
         df['age_bin'] = pd.cut(df['age'], bins=age_bins, labels=age_labels, right=False)
 
+    id_cols = ['home_municipality_id', 'district_id', 'canton_id']
+
+    for df in (survey_df, pop_df):
+        for col in id_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
+
     cat_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id', 'municipality_type']
     for df in (survey_df, pop_df):
         for col in cat_cols:
