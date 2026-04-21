@@ -306,6 +306,10 @@ def execute(context):
         external_activities["destination_x"]       = external_activities["destination_x"].astype(int)
         external_activities["destination_y"]       = external_activities["destination_y"].astype(int)
 
+        for col in ACTIVITY_ATTRIBUTES_TO_SAVE.values():
+            logger.warning(f"Column {col} does not exist in the external population activities. Filling it with default values (0).")
+            external_activities[col] = 0
+        
         external_vehicles = external_vehicles[VEHICLE_FIELDS]
 
         df_persons    = pd.concat([df_persons, external_persons])
@@ -348,9 +352,9 @@ def execute(context):
         cross_border_activities["purpose"] = cross_border_activities["purpose"].replace({"home_secondary":"other",
                                                                  "work_secondary": "work",
                                                                  "education_secondary":"education"})
-        
-        cross_border_activities["municipality_type"] = 0
-        cross_border_activities["municipality_id"] = 0
+        for col in ACTIVITY_ATTRIBUTES_TO_SAVE.values():
+            if col not in cross_border_activities.columns:
+                cross_border_activities[col] = 0
         
         cross_border_vehicles["person_id"]    = cross_border_vehicles["vehicle_id"].str.split(":").str[0]
         cross_border_vehicles["vehicle_type"] = cross_border_vehicles["vehicle_id"].str.split(":").str[1]
