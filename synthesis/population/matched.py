@@ -1,6 +1,5 @@
 import os
 #os.environ["NUMBA_DISABLE_JIT"] = "1"
-import itertools
 
 import numba
 import numpy as np
@@ -17,6 +16,7 @@ def configure(context):
     context.config("hot_deck_matching_runners")
     context.config("random_seed")
     context.config("matching_minimum_observations", 10)
+    context.config("matching_enable_diagnostics", False)
     context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.microcensus.persons")
@@ -96,14 +96,27 @@ def print_matching_diagnostics(df_population_sub, df_source_sub, features, label
         logger.info("")
 
 
-@numba.jit(nopython=True, parallel=True)
+@numba.njit(cache=True)
 def sample_indices(uniform, cdf, selected_indices):
-    indices = np.arange(len(uniform))
+    n = len(uniform)
+    out = np.empty(n, dtype=np.int64)
 
-    for i, u in enumerate(uniform):
-        indices[i] = np.count_nonzero(cdf < u)
+    # Binary search over CDF for each random draw.
+    for i in range(n):
+        u = uniform[i]
+        lo = 0
+        hi = len(cdf)
 
-    return selected_indices[indices]
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if cdf[mid] < u:
+                lo = mid + 1
+            else:
+                hi = mid
+
+        out[i] = selected_indices[lo]
+
+    return out
 
 
 def decrease_minimum_observation(N):
@@ -126,23 +139,6 @@ def recursive_iteration_statmatch(df_source, source_identifier, weight, df_targe
     df_source = df_source.sort_values(by=columns)
     df_target = df_target.sort_values(by=columns)
 
-    # Find unique values for all columns
-    unique_values = {}
-
-    for column in columns:
-        unique_values[column] = list(sorted(set(df_source[column].unique()) | set(df_target[column].unique())))
-
-    # Generate filters for all columns and values
-    source_filters, target_filters = {}, {}
-
-    for column, column_unique_values in unique_values.items():
-        source_filters[column] = [df_source[column].values == value for value in column_unique_values]
-        target_filters[column] = [df_target[column].values == value for value in column_unique_values]
-
-    # Define search order
-    source_filters = [source_filters[column] for column in columns]
-    target_filters = [target_filters[column] for column in columns]
-
     # Perform matching
     weights = df_source[weight].values
     assigned_indices = np.ones((len(df_target),), dtype=int) * -1
@@ -150,44 +146,48 @@ def recursive_iteration_statmatch(df_source, source_identifier, weight, df_targe
     assigned_levels = np.ones((len(df_target),), dtype=int) * -1
     uniform = rng.random_sample(size=(len(df_target),))
 
-    column_indices = [np.arange(len(unique_values[column])) for column in columns]
-
     if mandatory_columns:
         minimum_level = len(mandatory_columns)
     else:
         minimum_level = 1
 
-    for level in range(minimum_level, len(column_indices) + 1)[::-1]:
-        level_column_indices = column_indices[:level]
-        
-        if np.count_nonzero(unassigned_mask) > 0:
-            for column_index in itertools.product(*level_column_indices):
-                f_source = np.logical_and.reduce([source_filters[i][k] for i, k in enumerate(column_index)])
-                f_target = np.logical_and.reduce(
-                    [target_filters[i][k] for i, k in enumerate(column_index)] + [unassigned_mask])
+    for level in range(len(columns), minimum_level - 1, -1):
+        if not np.any(unassigned_mask):
+            break
 
-                selected_indices = np.nonzero(f_source)[0]
-                requested_samples = np.count_nonzero(f_target)
+        level_columns = columns[:level]
 
-                if requested_samples == 0:
-                    continue
+        # Group indices once per level instead of evaluating all value combinations
+        # against full-length boolean masks.
+        source_groups = df_source.groupby(level_columns, sort=False).indices
+        target_groups = df_target.groupby(level_columns, sort=False).indices
 
-                if len(selected_indices) < minimum_observations:
-                    continue
+        for key, target_indices_all in target_groups.items():
+            target_indices = target_indices_all[unassigned_mask[target_indices_all]]
 
-                selected_weights = weights[f_source]
-                cdf = np.cumsum(selected_weights)
-                cdf /= cdf[-1]
+            if len(target_indices) == 0:
+                continue
 
-                assigned_indices[f_target] = sample_indices(uniform[f_target], cdf, selected_indices)
-                assigned_levels[f_target] = level
-                unassigned_mask[f_target] = False
+            selected_indices = source_groups.get(key, None)
+            if selected_indices is None:
+                continue
+
+            if len(selected_indices) < minimum_observations:
+                continue
+
+            selected_weights = weights[selected_indices]
+            cdf = np.cumsum(selected_weights)
+            cdf /= cdf[-1]
+
+            assigned_indices[target_indices] = sample_indices(uniform[target_indices], cdf, selected_indices)
+            assigned_levels[target_indices] = level
+            unassigned_mask[target_indices] = False
 
     # Randomly assign unmatched observations
     cdf = np.cumsum(weights)
     cdf /= cdf[-1]
 
-    assigned_indices[unassigned_mask] = sample_indices(uniform[unassigned_mask], cdf, np.arange(len(weights)))
+    assigned_indices[unassigned_mask] = sample_indices(uniform[unassigned_mask], cdf, np.arange(len(weights), dtype=np.int64))
     assigned_levels[unassigned_mask] = 0
 
     # Write back indices
@@ -262,7 +262,7 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     df_target = df_population.copy()
     
     if population_selector is not None:
-        df_target = pd.DataFrame(df_target[population_selector]).copy()
+        df_target = df_target.loc[population_selector].copy()
 
     df_assignment, levels = nonparallel_statistical_matching(
         context,
@@ -343,7 +343,7 @@ def get_mz_persons(context):
     
     # remove persons who are not employed, but have a work as one of the purposes in their activity chain
     employed_persons = set(df_persons[df_persons["employed"] == True]["person_id"])
-    work_activities = ["work","work_secondary"]
+    work_activities = ["work"] #,"work_secondary"]
     persons_with_work_purpose = set(df_trips[(df_trips["origin_purpose"].isin(work_activities)) | 
                                              (df_trips["purpose"].isin(work_activities))]["person_id"])
     persons_to_remove = persons_with_work_purpose - employed_persons
@@ -356,6 +356,7 @@ def execute(context):
     df_mz = get_mz_persons(context)
     const        = context.stage("data.constants")
     scenario_day = context.config("specific_day_scenario")
+    diagnostics_enabled = context.config("matching_enable_diagnostics")
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
     df_source = df_mz.copy()
@@ -398,22 +399,13 @@ def execute(context):
     df_population["commute_distance_class"] = np.digitize(df_population["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
     df_source["commute_distance_class"] = np.digitize(df_source["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
     
-    COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 2, 8, 20, 50, 1000]) * 1e3
-    df_population["broad_commute_distance_class"] = np.digitize(df_population["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
-    df_source["broad_commute_distance_class"] = np.digitize(df_source["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
-
-    # add age classes 
-    AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
-    df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
-    df_source["age_class"] = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
+    BROAD_COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 3, 8, 30, 1000]) * 1e3
+    df_population["broad_commute_distance_class"] = np.digitize(df_population["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
+    df_source["broad_commute_distance_class"] = np.digitize(df_source["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
 
     # this is not necessary, but just to make sure employment is working correctly
     df_source["employed"] = df_source["employed"].astype(int)
     df_population["employed"] = (df_population["employed"]==1).astype(int)
-
-    # further cleaning
-    df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
-    df_population["household_size"] = df_population["household_size"].clip(upper=2)
 
     df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0)  # presence of children under 12
 
@@ -421,16 +413,16 @@ def execute(context):
     var_raw = pd.to_numeric(df_source["car_availability"], errors="coerce")
     df_source["car_availability"] = np.where(var_raw == const.CAR_AVAILABILITY_NEVER, 0, 1).astype("int64")
 
-
     # checkig if any duplicates
     assert df_population['person_id'].duplicated().sum()==0, "Duplicate person_id found in population dataframe. Please ensure person_id is unique for each individual in the population."
     assert df_source['mz_id'].duplicated().sum()==0, "Duplicate mz_id found in source dataframe. Please ensure mz_id is unique for each individual in the source."
 
     if const.census == "statpop":
-
+        # age class
         AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
         df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
         df_source["age_class"] = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
+        # further cleaning
         df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
         df_population["household_size"] = df_population["household_size"].clip(upper=2)
 
@@ -442,18 +434,20 @@ def execute(context):
 
         # HT and activity-chains are better with canton_id instead of muncipality_type
         columns_individual_matching = [
-            "age_class", "sex", "car_availability", "employed", "employment_status", "broad_commute_distance_class",
-            "ovgk",  "N_children_under_12", "sp_region", "commute_distance_class", "work_location_type", "canton_id"
+            "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk",  "N_children_under_12", "sp_region", 
+            "broad_commute_distance_class", "commute_distance_class", "canton_id", "work_location_type", "urban"
         ]
         mandatory_columns_individual_matching = [
-            "age_class", "sex", "car_availability", "employed", "employment_status", "broad_commute_distance_class",
-            "ovgk",  "N_children_under_12", "sp_region"
+            "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk",  "N_children_under_12", "sp_region", 
+            "broad_commute_distance_class"
         ]
 
         df_population["marital_status"] = df_population["marital_status"].astype(int)
         df_population["car_availability"] = df_population["car_availability"].astype(int)
-        df_population["municipality_type"] = df_population["municipality_type"].astype("object")
-        df_source["municipality_type"] = df_source["municipality_type"].astype("object")
+        df_population["municipality_type"] = df_population["municipality_type"].astype(str)
+        df_source["municipality_type"] = df_source["municipality_type"].astype(str)
+        df_population["urban"] = (df_population["municipality_type"].isin(["urbancore","urban"])).astype(int)
+        df_source["urban"] = (df_source["municipality_type"].isin(["urbancore","urban"])).astype(int)
         df_population["sp_region"] = df_population["sp_region"].astype(int)
         df_source["sp_region"] = df_source["sp_region"].astype(int)
         df_source["canton_id"] = df_source["canton_id"].astype(int)
@@ -487,7 +481,7 @@ def execute(context):
                 continue
 
             # Filter source to the same age band
-            src_band = df_source.copy()
+            src_band = df_source
             if age_min is not None:
                 src_band = src_band[src_band["age"] >= age_min]
             if age_max is not None:
@@ -499,22 +493,23 @@ def execute(context):
                 src_band = df_source
                 
             # Diagnostics BEFORE matching this band (systematic feature checks)
-            pop_diag = df_population_work.loc[sel, columns_individual_matching + ["person_id", "household_id"]].copy()
-            src_diag = src_band.loc[:, columns_individual_matching + ["mz_id", "person_weight"]].copy()
-            print_matching_diagnostics(
-                pop_diag,
-                src_diag,
-                features=columns_individual_matching,
-                label=f"normal band '{band_name}' (pre-match)",
-                weight_col="person_weight",
-                top_n=8
-            )
+            if diagnostics_enabled:
+                pop_diag = df_population_work.loc[sel, columns_individual_matching + ["person_id", "household_id"]].copy()
+                src_diag = src_band.loc[:, columns_individual_matching + ["mz_id", "person_weight"]].copy()
+                print_matching_diagnostics(
+                    pop_diag,
+                    src_diag,
+                    features=columns_individual_matching,
+                    label=f"normal band '{band_name}' (pre-match)",
+                    weight_col="person_weight",
+                    top_n=8
+                )
 
             logger.info(f"  - Matching normal people band: {band_name}")
             if band_name == "u15":
                 youth = [
                 "age_class", "sex",
-                "ovgk", "sp_region", "canton_id",
+                "ovgk", "sp_region", "urban", "canton_id",
                 ]
                 youth_mandatory = [
                 "age_class", "sex",
@@ -531,13 +526,12 @@ def execute(context):
                 )
             elif band_name == "15_23":
                 youth = [
-                "age_class", "sex", "employed",
-                "ovgk", "employment_status", "car_availability", "sp_region", 
-                "broad_commute_distance_class", "canton_id", "work_location_type", "commute_distance_class"
+                "age_class", "sex", "employed", "car_availability", "ovgk", "employment_status", "sp_region", 
+                "broad_commute_distance_class", "urban", "work_location_type","commute_distance_class", "canton_id"
                 ]
                 youth_mandatory = [
-                "age_class", "sex", "employed",
-                "ovgk", "employment_status", "car_availability", "sp_region"
+                "age_class", "sex", "employed", "car_availability",
+                "ovgk", "employment_status","sp_region"
                 ]
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,
