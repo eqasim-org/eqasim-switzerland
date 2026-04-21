@@ -127,7 +127,7 @@ def execute(context):
 
     cat_cols = [
         "age_bin", "sex", "canton_id",
-        "municipality_type", "marital_status",  "ovgk_grouped", "employment_status"
+        "municipality_type", "marital_status",  "ovgk_grouped", "employment_status", "income_class"
     ]
     num_cols = ["age", "age_sq", "household_size", "N_adults", "N_children_under_18"]
 

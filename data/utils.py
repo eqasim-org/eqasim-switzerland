@@ -7,7 +7,7 @@ def fix_marital_status(df, c):
     f = ((df["marital_status"] == c.MARITAL_STATUS_SEPARATE) & 
          (df["age"] < c.SEPARATE_SINGLE_THRESHOLD))
     df.loc[f, "marital_status"] = c.MARITAL_STATUS_SINGLE
-    df["marital_status"] = df["marital_status"].astype(np.int)
+    df["marital_status"] = df["marital_status"].astype(int)
 
 
 def assign_household_class(df):

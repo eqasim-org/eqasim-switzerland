@@ -13,6 +13,10 @@ def configure(context):
     if context.config("include_cross_border"):
         context.stage("data.cross_border.generate_cross_border_traffic")
 
+    context.config("include_external_population", default = False)
+    if context.config("include_external_population"):
+        context.stage("data.external_population.read_outputs")
+
 
 FIELDS = [
     "destination_id", "destination_x", "destination_y",
@@ -80,6 +84,29 @@ def execute(context):
                 for item in context.progress(cbs_hhl.itertuples(), total=len(cbs_hhl), label="Homes - crossborder"):
                     writer.start_facility("home%s" % item[1], item[2], item[3])
                     writer.add_activity("home")
+                    writer.end_facility()
+
+            if context.config("include_external_population"):
+                external_activities = context.stage("data.external_population.read_outputs")[1].copy()[["destination_id", "destination_x", "destination_y"]].drop_duplicates(subset = ["destination_id"], keep = "first")
+
+                for col in ["offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other"]:
+                    external_activities[col] = True
+                
+                homes    = external_activities[external_activities["destination_id"].astype(str).str.startswith("home")]
+                nonhomes = external_activities[~external_activities["destination_id"].astype(str).str.startswith("home")]
+
+                for item in context.progress(homes.itertuples(), total=len(homes), label="Homes - FR"):
+                    writer.start_facility(item[1], int(item[2]), int(item[3]))
+                    writer.add_activity("home")
+                    writer.end_facility()
+
+                for item in context.progress(nonhomes.itertuples(), total=len(nonhomes), label="Destinations - FR"):
+                    writer.start_facility(item[1], int(item[2]), int(item[3]))
+                    if item[4]: writer.add_activity("work")
+                    if item[5]: writer.add_activity("education")
+                    if item[6]: writer.add_activity("other")
+                    if item[7]: writer.add_activity("leisure")
+                    if item[8]: writer.add_activity("shop")
                     writer.end_facility()
 
             writer.end_facilities()

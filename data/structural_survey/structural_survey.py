@@ -297,7 +297,7 @@ def execute(context):
     logger.info("Imputing municipality type at home location ...")
     df_municipality_types = context.stage("data.spatial.municipality_types")
     df_se = df_se.reset_index(drop=True)
-    df_se.insert(0, "id", np.arange(1, len(df_se) + 1, dtype=np.int64))
+    df_se.insert(0, "id", np.arange(1, len(df_se) + 1, dtype=int))
 
     df_spatial = pd.DataFrame(df_se[["id", "home_municipality_id"]])
     df_spatial = df_spatial.rename(columns={"home_municipality_id" : "municipality_id"})

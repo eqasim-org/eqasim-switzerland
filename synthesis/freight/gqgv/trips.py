@@ -32,7 +32,7 @@ def execute(context):
 
         # compute origin counts
         origin_counts = rng.multinomial(n=demand, pvals=origin_pdf_matrices[vehicle_type].values[:, 0])
-        counts = np.zeros(od_pdf_matrices[vehicle_type].shape, dtype=np.int)
+        counts = np.zeros(od_pdf_matrices[vehicle_type].shape, dtype=int)
 
         # compute origin-destination counts
         for i in range(len(origin_counts)):

@@ -173,8 +173,8 @@ def execute(context):
     df_mz_persons.loc[df_mz_persons["f41301"] == 3, "parking_education"] = "no"
     df_mz_persons["parking_education"] = df_mz_persons["parking_education"].astype("category")
 
-    df_mz_persons["parking_cost_work"] = np.maximum(0, df_mz_persons["f41400"].astype(np.float))
-    df_mz_persons["parking_cost_education"] = np.maximum(0, df_mz_persons["f41401"].astype(np.float))
+    df_mz_persons["parking_cost_work"] = np.maximum(0, df_mz_persons["f41400"].astype(float))
+    df_mz_persons["parking_cost_education"] = np.maximum(0, df_mz_persons["f41401"].astype(float))
     df_mz_persons["occupation"] = df_mz_persons["ISCO_08"]
     
     # BSTELL codes

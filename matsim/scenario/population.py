@@ -1,6 +1,6 @@
 import gzip
 import io
-import itertools
+from shapely import wkt
 
 import numpy as np
 import pandas as pd
@@ -36,6 +36,10 @@ def configure(context):
     context.config("include_cross_border", default = False)
     if context.config("include_cross_border"):
         context.stage("data.cross_border.generate_cross_border_traffic")
+
+    context.config("include_external_population", default = False)
+    if context.config("include_external_population"):
+        context.stage("data.external_population.read_outputs")
 
 VEHICLE_FIELDS = [
     "mode", "vehicle_id", "owner_id"
@@ -123,7 +127,7 @@ class PersonWriter:
             )
 
             start_time = _na_to_none(a.start_time)
-            end_time = _na_to_none(a.end_time)
+            end_time   = _na_to_none(a.end_time)
 
             attributes = {attr_name: getattr(a, attr) for attr_name, attr in ACTIVITY_ATTRIBUTES_TO_SAVE.items()}
             writer.add_activity(a.purpose, location, start_time, end_time, attributes=attributes)
@@ -270,9 +274,6 @@ def execute(context):
 
     df_persons = df_persons.merge(unique_modes_per_agent[loop_columns], on = "person_id", how="left")
     df_persons[loop_columns] = df_persons[loop_columns].fillna(False)
-
-    # TODO remove ASAP
-    #df_activities["following_mode"] = df_activities["following_mode"].str.replace("_loop", "", regex=False)
     
     # Bring in correct order (although it should already be)
     df_persons    = df_persons.sort_values(by="person_id")
@@ -280,6 +281,44 @@ def execute(context):
     df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
 
     df_persons["person_type"] = "normal"
+
+    if context.config("include_external_population"):
+        external_persons    = context.stage("data.external_population.read_outputs")[0].copy()
+        external_activities = context.stage("data.external_population.read_outputs")[1].copy()
+        external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
+
+        external_persons["person_type"] = "external"
+        external_persons["pt_subscription"]   = 0
+        external_persons["bike_availability"] = 0
+        external_persons["car_availability"]  = 1
+
+        external_persons.loc[external_persons["sex"]=="male", "sex"] = 0
+        external_persons.loc[external_persons["sex"]=="female", "sex"] = 1
+        external_persons["sex"] = external_persons["sex"].astype(int)
+
+        external_persons = external_persons[external_persons["home_x"].notna()]
+        external_persons = external_persons[external_persons["home_y"].notna()]
+        
+        external_persons["person_type"] = "FR"
+
+        external_activities.loc[external_activities["purpose"] == "home", "destination_id"] = -1
+
+        external_activities["destination_x"]       = external_activities["destination_x"].astype(int)
+        external_activities["destination_y"]       = external_activities["destination_y"].astype(int)
+
+        external_vehicles = external_vehicles[VEHICLE_FIELDS]
+
+        df_persons    = pd.concat([df_persons, external_persons])
+        df_activities = pd.concat([df_activities, external_activities])
+        df_vehicles   = pd.concat([df_vehicles, external_vehicles])
+
+        df_persons["mz_person_id"] = df_persons["mz_person_id"].astype(int)
+        df_persons["home_x"]       = df_persons["home_x"].astype(int)
+        df_persons["home_y"]       = df_persons["home_y"].astype(int)
+
+        df_persons    = df_persons.sort_values(by="person_id")
+        df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
+        df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
 
     if context.config("include_cross_border"):
         cross_border_persons    = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
@@ -321,11 +360,11 @@ def execute(context):
         del cross_border_vehicles["person_id"]
         del cross_border_vehicles["vehicle_type"]
 
-        logger.warn("Make sure to correct cross border population beforehand")
+        logger.warning("Make sure to correct cross border population beforehand")
         cross_border_persons["person_type"] = "crossborder"
-        cross_border_persons["pt_subscription"] = 0
+        cross_border_persons["pt_subscription"]   = 0
         cross_border_persons["bike_availability"] = 0
-        cross_border_persons["car_availability"] = 1
+        cross_border_persons["car_availability"]  = 1
 
         df_persons    = pd.concat([df_persons, cross_border_persons])
         df_activities = pd.concat([df_activities, cross_border_activities])
@@ -344,9 +383,21 @@ def execute(context):
     
     df_persons    = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
-    df_vehicles   = df_vehicles[VEHICLE_FIELDS]    
+    df_vehicles   = df_vehicles[VEHICLE_FIELDS]  
+
     # correct types before saving the data    
     df_persons = df_persons.astype(PERSONS_DTYPES)
+    df_activities["geometry"] = df_activities["geometry"].apply(lambda g: wkt.loads(g) if isinstance(g, str) else g)
+    valid_ids = df_activities.groupby("person_id")["geometry"].apply(
+        lambda g: g.notna().all()
+    )
+    valid_ids = valid_ids[valid_ids].index
+
+    df_persons    = df_persons[df_persons["person_id"].isin(valid_ids)]
+    df_activities = df_activities[df_activities["person_id"].isin(df_persons["person_id"].values.tolist())]
+
+    # TODO check why there are multiple activities with same attributes but only different municipality_id and municipality_types.
+    df_activities = df_activities.drop_duplicates(["person_id", "activity_index"], keep = "first")
 
     # Make sure the minimum required columns exist (order does NOT matter)
     _require_cols(df_persons, ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y"], "df_persons")
@@ -361,7 +412,6 @@ def execute(context):
     person_iterator   = iter(df_persons.itertuples(index=False, name="Person"))
     activity_iterator = iter(df_activities.itertuples(index=False, name="Activity"))
     vehicle_iterator  = backlog_iterator(iter(df_vehicles.itertuples(index=False, name="Vehicle")))
-
 
     number_of_written_persons    = 0
     number_of_written_activities = 0
@@ -390,15 +440,16 @@ def execute(context):
                             person_writer.add_activity(activity)
                             number_of_written_activities += 1
 
-                        # Track all vehicles for person
-                        while vehicle_iterator.has_next():
-                            vehicle = vehicle_iterator.next()
+                        person_vehicles = df_vehicles[df_vehicles["owner_id"] == person_id]
 
-                            if vehicle.owner_id != person_id:
-                                vehicle_iterator.previous()
-                                break
-                            else:
-                                vehicles.append(vehicle)
+                        for vehicle in person_vehicles.itertuples(index=False, name="Vehicles"):
+                            vehicles.append(vehicle)
+
+                            #if vehicle.owner_id != person_id:
+                            #    vehicle_iterator.previous()
+                            #    break
+                            #else:
+                            #    vehicles.append(vehicle)
 
                         person_writer.add_vehicles(vehicles)
                         person_writer.write(writer)

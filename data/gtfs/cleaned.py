@@ -8,9 +8,11 @@ This file reads GTFS schedule.
 def configure(context):
     context.config("data_path")
     context.config("gtfs_name", default = "")
+    context.config("gtfs_folder", default = "gtfs")
 
 def execute(context):
-    all_input_files = get_input_files("{}/{}".format(context.config("data_path"), "gtfs"))
+    gtfs_folder = context.config("gtfs_folder")
+    all_input_files = get_input_files("{}/{}".format(context.config("data_path"), gtfs_folder))
 
     if context.config("gtfs_name") == "":
         # Keep all files
@@ -30,6 +32,7 @@ def execute(context):
     # Load feeds
     feeds = []
     for path in input_files:
+        print(path)
         feed = gtfs.read_feed(path)
         feed = gtfs.clean_feed(feed)
         
@@ -37,7 +40,7 @@ def execute(context):
         feed = gtfs.despace_stop_ids(feed) # Necessary as MATSim does not like stops/links with spaces
 
         feeds.append(feed)
-
+        
     # Merge feeds
     merged_feed = gtfs.merge_feeds(feeds) if len(feeds) > 1 else feeds[0]
 
