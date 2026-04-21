@@ -280,10 +280,10 @@ def validate_feed(feed):
     missing = trip_service_ids - defined_ids
 
     if missing:
-        print(f"WARNING: {len(missing)} service_ids in trips not found in calendar/calendar_dates:")
-        print(sorted(missing)[:20], "..." if len(missing) > 20 else "")
+        logger.info(f"WARNING: {len(missing)} service_ids in trips not found in calendar/calendar_dates:")
+        logger.info(sorted(missing)[:20], "..." if len(missing) > 20 else "")
     else:
-        print(f"OK: all {len(trip_service_ids)} service_ids are defined")
+        logger.info(f"OK: all {len(trip_service_ids)} service_ids are defined")
 
 
 def copy_feed(feed):
@@ -295,10 +295,10 @@ def merge_feeds(feeds):
     result = {}
 
     for k, feed in enumerate(feeds):
-        print(f"\n--- Validating feed {k+1} before merge ---")
+        logger.info(f"\n--- Validating feed {k+1} before merge ---")
         validate_feed(feed)                          # <-- add this
         result = merge_two_feeds(result, feed, "_m{}".format(k + 1))
-        print(f"--- Validating merged result after feed {k+1} ---")
+        logger.info(f"--- Validating merged result after feed {k+1} ---")
         validate_feed(result)
 
     return result
@@ -371,7 +371,7 @@ def merge_two_feeds(first, second, suffix="_merged"):
         mask = feed["trips"]["service_id"].isin(defined)
         missing = feed["trips"][~mask]["service_id"].unique()
         if len(missing):
-            print(f"Dropping {len(missing)} trips with undefined service_ids: {missing}")
+            logger.info(f"Dropping {len(missing)} trips with undefined service_ids: {missing}")
             feed["trips"] = feed["trips"][mask]
 
     validate_feed(feed)

@@ -7,7 +7,6 @@ def configure(context):
     context.stage("data.statent.statent")
     context.stage("data.spatial.ovgk")
 
-
 def execute(context):
     df = pd.DataFrame(context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga"]],
                                     copy=True)
