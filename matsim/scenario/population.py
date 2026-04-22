@@ -288,6 +288,8 @@ def execute(context):
         external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
 
         external_persons["person_type"] = "external"
+        for i in range(100):
+            logger.warning(f"All these are wrong and need to be corrected")
         external_persons["pt_subscription"]   = 0
         external_persons["bike_availability"] = 0
         external_persons["car_availability"]  = 1

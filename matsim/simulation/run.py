@@ -99,7 +99,7 @@ def execute(context):
         eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunSimulation", [
             "--config-path", config_path,
             "--config:controler.lastIteration", str(last_iteration),
-            "--config:controler.writeEventsInterval", str(last_iteration/2),
+            "--config:controler.writeEventsInterval", str(int(last_iteration/2)),
             "--config:controler.writePlansInterval", str(last_iteration),
             "--config:qsim.numberOfThreads", str(min(context.config("threads"),12)),
             "--config:linkStats.writeLinkStatsInterval", str(int(last_iteration/2)),

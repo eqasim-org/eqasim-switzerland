@@ -20,6 +20,7 @@ def configure(context):
     context.stage("analysis.counts.cantons.vaud")
     context.stage("analysis.counts.cantons.zurich")
     context.stage("analysis.counts.matching.network_from_prepare")
+    context.stage("data.spatial.swiss_border")
 
     context.config("only_weekday", default=False)
     context.config("input_downsampling")
