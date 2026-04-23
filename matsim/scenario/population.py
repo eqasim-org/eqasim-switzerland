@@ -1,5 +1,7 @@
 import gzip
 import io
+import shutil
+import subprocess
 from shapely import wkt
 
 import numpy as np
@@ -32,6 +34,9 @@ def configure(context):
     context.stage("synthesis.lcv.trips")
 
     context.stage("synthesis.vehicles.vehicles")
+    context.config("population_compresslevel", default=1)
+    context.config("population_use_pigz", default=True)
+    context.config("population_pigz_threads", default=8)
 
     context.config("include_cross_border", default = False)
     if context.config("include_cross_border"):
@@ -63,7 +68,31 @@ class PersonWriter:
     def add_vehicles(self, vehicles):
         self.vehicles = vehicles
 
-    def write(self, writer):
+    def _write_single_activity(self, writer, activity, home_location):
+        geometry = activity.geometry
+        destination_id = activity.destination_id
+
+        location = (
+            home_location
+            if destination_id == -1
+            else writer.location(int(geometry.x), int(geometry.y), int(destination_id))
+        )
+
+        start_time = _na_to_none(activity.start_time)
+        end_time = _na_to_none(activity.end_time)
+
+        attributes = {
+            "municipalityType": activity.municipality_type,
+            "municipalityId": activity.municipality_id,
+            "employeeDensity": activity.employee_density,
+            "companiesDensity": activity.companies_density,
+            "populationDensity": activity.population_density,
+            "ovgk": activity.ovgk,
+        }
+
+        writer.add_activity(activity.purpose, location, start_time, end_time, attributes=attributes)
+
+    def write(self, writer, first_activity=None, activity_iterator=None):
         p = self.person
 
         writer.start_person(str(p.person_id))
@@ -115,29 +144,38 @@ class PersonWriter:
 
         home_location = writer.location(p.home_x, p.home_y, "home%s" % getattr(p, "household_id", 0))
 
-        for i in range(len(self.activities)):
-            a = self.activities[i]
-            geometry = a.geometry
-            destination_id = a.destination_id
+        written_activities = 0
 
-            location = (
-                home_location
-                if destination_id == -1
-                else writer.location(int(geometry.x), int(geometry.y), int(destination_id))
-            )
+        if first_activity is None:
+            for i in range(len(self.activities)):
+                a = self.activities[i]
+                self._write_single_activity(writer, a, home_location)
+                written_activities += 1
 
-            start_time = _na_to_none(a.start_time)
-            end_time   = _na_to_none(a.end_time)
+                if not a.is_last:
+                    next_a = self.activities[i + 1]
+                    writer.add_leg(a.following_mode, a.end_time, next_a.start_time - a.end_time)
+        else:
+            current_activity = first_activity
+            while True:
+                self._write_single_activity(writer, current_activity, home_location)
+                written_activities += 1
 
-            attributes = {attr_name: getattr(a, attr) for attr_name, attr in ACTIVITY_ATTRIBUTES_TO_SAVE.items()}
-            writer.add_activity(a.purpose, location, start_time, end_time, attributes=attributes)
+                if current_activity.is_last:
+                    break
 
-            if not a.is_last:
-                next_a = self.activities[i + 1]
-                writer.add_leg(a.following_mode, a.end_time, next_a.start_time - a.end_time)
+                next_activity = next(activity_iterator)
+                assert p.person_id == next_activity.person_id
+                writer.add_leg(
+                    current_activity.following_mode,
+                    current_activity.end_time,
+                    next_activity.start_time - current_activity.end_time,
+                )
+                current_activity = next_activity
 
         writer.end_plan()
         writer.end_person()
+        return written_activities
 
 
 
@@ -389,7 +427,8 @@ def execute(context):
     
     df_persons    = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
-    df_vehicles   = df_vehicles[VEHICLE_FIELDS]  
+    df_vehicles   = df_vehicles[VEHICLE_FIELDS]
+    df_vehicles["owner_id"] = df_vehicles["owner_id"].astype(int)
 
     # correct types before saving the data    
     df_persons = df_persons.astype(PERSONS_DTYPES)
@@ -423,7 +462,20 @@ def execute(context):
     number_of_written_activities = 0
     logger.info("Starting to write population!!")
 
-    with gzip.open("%s/population.xml.gz" % cache_path, "wb+", compresslevel=1) as f:
+    population_xml_path = "%s/population.xml" % cache_path
+    population_gz_path = "%s/population.xml.gz" % cache_path
+    compresslevel = int(context.config("population_compresslevel"))
+
+    use_pigz = bool(context.config("population_use_pigz")) and shutil.which("pigz") is not None
+    if bool(context.config("population_use_pigz")) and not use_pigz:
+        logger.warning("population_use_pigz=True but pigz was not found in PATH. Falling back to Python gzip.")
+
+    output_path = population_xml_path if use_pigz else population_gz_path
+
+    open_fn = open if use_pigz else gzip.open
+    open_kwargs = {} if use_pigz else {"compresslevel": compresslevel}
+
+    with open_fn(output_path, "wb+", **open_kwargs) as f:
         with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:
             writer = matsim.writers.PopulationWriter(raw_writer)
             writer.start_population()
@@ -433,32 +485,26 @@ def execute(context):
                     while True:
                         person = next(person_iterator)
                         person_id = person.person_id
-                        is_last = False
-
                         person_writer = PersonWriter(person)
                         vehicles = []
 
-                        while not is_last:
-                            activity = next(activity_iterator)
-                            is_last = activity.is_last
-                            assert person.person_id == activity.person_id
+                        first_activity = next(activity_iterator)
+                        assert person.person_id == first_activity.person_id
 
-                            person_writer.add_activity(activity)
-                            number_of_written_activities += 1
-
-                        person_vehicles = df_vehicles[df_vehicles["owner_id"] == person_id]
-
-                        for vehicle in person_vehicles.itertuples(index=False, name="Vehicles"):
+                        # Consume vehicles in one pass (owner_id-sorted); avoids O(N_persons * N_vehicles) scans.
+                        while vehicle_iterator.has_next():
+                            vehicle = vehicle_iterator.next()
+                            if vehicle.owner_id != person_id:
+                                vehicle_iterator.previous()
+                                break
                             vehicles.append(vehicle)
 
-                            #if vehicle.owner_id != person_id:
-                            #    vehicle_iterator.previous()
-                            #    break
-                            #else:
-                            #    vehicles.append(vehicle)
-
                         person_writer.add_vehicles(vehicles)
-                        person_writer.write(writer)
+                        number_of_written_activities += person_writer.write(
+                            writer,
+                            first_activity=first_activity,
+                            activity_iterator=activity_iterator,
+                        )
                         number_of_written_persons += 1
                         progress.update()
                         
@@ -538,4 +584,16 @@ def execute(context):
 
             writer.end_population()
 
-    return "%s/population.xml.gz" % cache_path
+    if use_pigz:
+        pigz_threads = max(1, int(context.config("population_pigz_threads")))
+        logger.info("Compressing population.xml with pigz using %d threads ...", pigz_threads)
+        subprocess.run([
+            "pigz",
+            "-f",
+            "-p",
+            str(pigz_threads),
+            "-" + str(compresslevel),
+            population_xml_path,
+        ], check=True)
+
+    return population_gz_path

@@ -1,8 +1,7 @@
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import shapely.geometry as geo
-
+import os
 from synthesis.population.spatial.secondary.components import CustomDistanceSampler, CustomDiscretizationSolver, CandidateIndex, CustomFreeChainSolver
 from synthesis.population.spatial.secondary.problems import find_assignment_problems
 from synthesis.population.spatial.secondary.rda import AssignmentSolver, DiscretizationErrorObjective, \
@@ -10,6 +9,9 @@ from synthesis.population.spatial.secondary.rda import AssignmentSolver, Discret
 import logging
 
 logger = logging.getLogger("synpp")
+
+NUMBER_CANDIDATES = 20
+ALPHA_PROBABILITIES = 0.8
 
 def configure(context):
     context.stage("data.constants")
@@ -45,6 +47,7 @@ def prepare_destinations(context):
 
     identifiers = df_destinations["destination_id"].values
     locations   = np.vstack(df_destinations["geometry"].apply(lambda x: np.array([x.x, x.y])).values)
+    number_employees = df_destinations["number_employees"].values
 
     data = {}
 
@@ -54,7 +57,8 @@ def prepare_destinations(context):
         data[purpose] = dict(
             identifiers=identifiers[f],
             locations=locations[f],
-            ovgk=df_destinations["ovgk"].values[f]
+            ovgk=df_destinations["ovgk"].values[f],
+            number_employees=np.nan_to_num(number_employees[f], nan=1.0, posinf=1.0, neginf=1.0)
         )
 
     return data
@@ -101,7 +105,7 @@ def execute(context):
     ))
 
     # Segment into subsamples (pt agents with car availability / without car availability in the same batch)
-    processes = context.config("threads")
+    processes = max(1, min(context.config("threads"), 24))
 
     unique_person_ids_carAvail = df_trips[df_trips["car_availability"] == True]["person_id"].unique()
     unique_person_ids_noCar = df_trips[df_trips["car_availability"] == False]["person_id"].unique()
@@ -166,13 +170,14 @@ def process(context, arguments):
             mask = (v["ovgk"]=='A') | (v["ovgk"]=='B') | (v["ovgk"]=='C') | (v["ovgk"]=='D')
             v["identifiers"] = v["identifiers"][mask]
             v["locations"]   = v["locations"][mask]
+            v["number_employees"] = v["number_employees"][mask]
 
     # drop ovgk as it is not needed in the candidate index
     for v in destinations.values():
         del v["ovgk"]            
 
     # Set up discretization solver
-    candidate_index = CandidateIndex(destinations)
+    candidate_index = CandidateIndex(destinations, number_candidates = NUMBER_CANDIDATES, alpha_probabilities = ALPHA_PROBABILITIES, random=rng)
     discretization_solver = CustomDiscretizationSolver(candidate_index)
 
     # Set up distance sampler
@@ -194,10 +199,10 @@ def process(context, arguments):
 
     # Set up assignment solver
     thresholds = dict(
-        car=200.0, car_passenger=200.0, pt=200.0,
-        bike=100.0, walk=100.0,
-        bike_loop=100.0, walk_loop=100.0,
-        car_loop=200.0, pt_loop=200.0
+        car=300.0, car_passenger=300.0, pt=300.0,
+        bike=200.0, walk=200.0,
+        bike_loop=200.0, walk_loop=200.0,
+        car_loop=300.0, pt_loop=300.0
     )
 
     assignment_objective = DiscretizationErrorObjective(thresholds=thresholds)
@@ -206,10 +211,14 @@ def process(context, arguments):
         relaxation_solver=relaxation_solver,
         discretization_solver=discretization_solver,
         objective=assignment_objective,
-        maximum_iterations=100
+        maximum_iterations=200
     )
 
-    df_locations = []
+    person_ids = []
+    trip_indices = []
+    destination_ids = []
+    x_coordinates = []
+    y_coordinates = []
     df_convergence = []
 
     last_person_id = None
@@ -219,10 +228,16 @@ def process(context, arguments):
 
         starting_activity_index = problem["activity_index"]
 
-        for index, (identifier, location) in enumerate(zip(result["discretization"]["identifiers"], result["discretization"]["locations"])):
-          df_locations.append((
-              problem["person_id"], starting_activity_index + index, identifier, geo.Point(location)
-          ))
+        identifiers = np.asarray(result["discretization"]["identifiers"])
+        locations = np.asarray(result["discretization"]["locations"])
+        number_of_locations = len(identifiers)
+
+        if number_of_locations > 0:
+            person_ids.append(np.full(number_of_locations, problem["person_id"]))
+            trip_indices.append(starting_activity_index + np.arange(number_of_locations))
+            destination_ids.append(identifiers)
+            x_coordinates.append(locations[:, 0])
+            y_coordinates.append(locations[:, 1])
 
         df_convergence.append((
             result["valid"], problem["size"]
@@ -232,10 +247,30 @@ def process(context, arguments):
             last_person_id = problem["person_id"]
             context.progress.update()
 
-    df_locations = pd.DataFrame.from_records(df_locations,
-                                             columns=["person_id", "trip_index", "destination_id", "geometry"])
+    if len(person_ids) > 0:
+        person_ids = np.concatenate(person_ids)
+        trip_indices = np.concatenate(trip_indices)
+        destination_ids = np.concatenate(destination_ids)
+        x_coordinates = np.concatenate(x_coordinates)
+        y_coordinates = np.concatenate(y_coordinates)
+    else:
+        person_ids = np.array([], dtype=np.int64)
+        trip_indices = np.array([], dtype=np.int64)
+        destination_ids = np.array([], dtype=object)
+        x_coordinates = np.array([], dtype=float)
+        y_coordinates = np.array([], dtype=float)
 
-    df_locations = gpd.GeoDataFrame(df_locations, crs=crs)
+    df_locations = pd.DataFrame(dict(
+        person_id=person_ids,
+        trip_index=trip_indices,
+        destination_id=destination_ids
+    ))
+
+    df_locations = gpd.GeoDataFrame(
+        df_locations,
+        geometry=gpd.points_from_xy(x_coordinates, y_coordinates),
+        crs=crs
+    )
     assert not df_locations["geometry"].isna().any()
 
     df_convergence = pd.DataFrame.from_records(df_convergence, columns=["valid", "size"])

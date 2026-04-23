@@ -23,6 +23,7 @@ def execute(context):
     df.loc[:, "offers_education_secondary"] = False
     df.loc[:, "offers_leisure"] = False
     df.loc[:, "offers_shop"] = False
+    df.loc[:, "number_employees"] = 0
 
     df = spatial_utils.to_gpd(context, df, x="destination_x", y="destination_y", coord_type="facility")
 
@@ -31,7 +32,7 @@ def execute(context):
     df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="facility")
     df = df.merge(df_spatial[["destination_id", "ovgk"]], how="left", on="destination_id")
 
-    return df[["destination_id", "destination_x", "destination_y",
+    return df[["destination_id", "number_employees", "destination_x", "destination_y",
                "offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other",
                "offers_work_secondary", "offers_education_secondary", "offers_home_secondary", "ovgk",
                "geometry"]]

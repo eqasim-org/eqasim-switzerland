@@ -18,7 +18,7 @@ def execute(context):
     start_destination_id = statent_max_id + 1
 
     df_locations = context.stage("data.locations_fr.bpe.cleaned")[[
-        "enterprise_id", "x", "y", "activity_type", "commune_id", "geometry"
+        "enterprise_id", "x", "y", "activity_type", "commune_id", "geometry", "weight"
     ]].copy()
     df_locations["destination_id"] = np.arange(start_destination_id, start_destination_id + len(df_locations))
     del df_locations["enterprise_id"]
@@ -42,6 +42,12 @@ def execute(context):
     df_locations["offers_education_secondary"] = False 
     df_locations["offers_home_secondary"]      = False
 
+    # At this point we have no ideas abot the number of employees in each location, but the weight here is the capacity which is the maximum number of people that can enter the facility. We can use it as a proxy for the number of employees, but we need to scale it down to avoid having locations with an unrealistically high number of employees. 
+    # The factor of 0.5 is arbitrary and can be adjusted based on the desired distribution of employees across locations.
+    # TODO: find a better way to estimate the number of employees in each location, for example by using the distribution of employees in the statent dataset and applying it to the locations in the bpe dataset based on their activity type and weight.
+    df_locations["number_employees"] = df_locations["weight"].fillna(1).astype(int)*0.5
+    del df_locations["weight"]
+    
     perimeter    = context.config("outbound_flows_perimeter")
     swiss_border = context.stage("data.spatial.swiss_border").iloc[0]
 
@@ -71,7 +77,7 @@ def execute(context):
     df_locations = df_locations[df_locations.within(target_region)]
 
 
-    df_locations = df_locations[["destination_id", "destination_x", "destination_y", 
+    df_locations = df_locations[["destination_id", "number_employees", "destination_x", "destination_y", 
                                  "offers_work", "offers_education",
                                  "offers_leisure", "offers_shop", "offers_other",
                                  "offers_work_secondary", "offers_education_secondary", "offers_home_secondary",

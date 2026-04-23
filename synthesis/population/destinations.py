@@ -20,6 +20,6 @@ def execute(context):
     # add the french population
     if context.config("generate_outbound_flows"):
         df_FR = context.stage("data.locations_fr.secondary")
-        df_destinations = pd.concat([df_destinations, df_FR])
+        df_destinations = pd.concat([df_destinations, df_FR], ignore_index=True)
 
     return df_destinations

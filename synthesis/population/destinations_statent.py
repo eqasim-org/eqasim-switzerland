@@ -8,9 +8,9 @@ def configure(context):
     context.stage("data.spatial.ovgk")
 
 def execute(context):
-    df = pd.DataFrame(context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga"]],
+    df = pd.DataFrame(context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga","number_employees"]],
                                     copy=True)
-    df.columns = ["destination_id", "destination_x", "destination_y", "noga"]
+    df.columns = ["destination_id", "destination_x", "destination_y", "noga", "number_employees"]
 
     df.loc[:, "offers_work"]  = True
     df.loc[:, "offers_other"] = True
@@ -37,7 +37,7 @@ def execute(context):
     df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="facility")
     df = df.merge(df_spatial[["destination_id", "ovgk"]], how="left", on="destination_id")
 
-    return df[["destination_id", "destination_x", "destination_y",
+    return df[["destination_id", "number_employees", "destination_x", "destination_y",
                "offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other",
                "offers_work_secondary", "offers_education_secondary", "offers_home_secondary", "ovgk",
                "geometry"]]
