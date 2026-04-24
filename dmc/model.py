@@ -17,6 +17,7 @@ MODES = ['car', 'pt', 'bike', 'walk', 'car_passenger']
 TIME_SCALE_MIN = constants.TIME_SCALE_MIN
 DISTANCE_SCALE_KM = constants.DISTANCE_SCALE_KM
 PT_REGIONAL_RADIUS_KM = constants.PT_REGIONAL_RADIUS_KM
+AGE_SCALE_YEAR = constants.AGE_SCALE_YEAR
 
 def configure(context):
     context.stage("dmc.data.training_data")
@@ -226,9 +227,9 @@ def define_betas(ignore_car_passenger, use_exponents, use_income):
 
         # cost & other
         "beta_cost_CHF": Beta("beta_cost_CHF", -0.12, None, max_disutility, 0), 
-        "beta_destination_employee_density": Beta("beta_destination_employee_density", 0.0, None, None, 1),
+        "beta_destination_employee_density": Beta("beta_destination_employee_density", 0.1, None, None, 0),
         "beta_destination_population_density": Beta("beta_destination_population_density", 0.2, None, None, 0),
-        "beta_destination_companies_density": Beta("beta_destination_companies_density", 0.3, None, None, 0),
+        "beta_destination_companies_density": Beta("beta_destination_companies_density", 0.3, None, None, 1),
 
         # car
         "beta_car_asc": Beta("beta_car_asc", 3.48, None, None, 0),
@@ -442,7 +443,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_car_destination_urban"] * vars["urban_destination"]
         + betas["beta_car_destination_urbancore"] * vars["urbancore_destination"]
         + betas["beta_car_sex"] * vars["sex"]
-        + betas["beta_car_age"] * bioMax(0, vars["age"] - 17)
+        + betas["beta_car_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
         + betas["beta_car_retired"] * vars["is_retired"]
         + betas["beta_car_junior"] * vars["is_junior"]
         + betas["beta_car_ownership_ratio"] * vars["car_ownership_ratio"]
@@ -481,7 +482,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_cost_CHF"] * pt_cost * cost_interaction
 
         + betas["beta_pt_sex"] * vars["sex"]
-        + betas["beta_pt_age"] * bioMax(0, vars["age"] - 17)
+        + betas["beta_pt_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
         + betas["beta_pt_retired"] * vars["is_retired"]
         + betas["beta_pt_junior"] * vars["is_junior"]
         + betas["beta_pt_low_income"] * vars["low_income"]
@@ -512,7 +513,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         betas["beta_bike_asc"]
         + betas["beta_bike_travel_time_min"] * (bike_travel_time**betas["lambda_bike"])
 
-        + betas["beta_bike_age"] * bioMax(0, vars["age"] - 17)
+        + betas["beta_bike_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
         + betas["beta_bike_sex"] * vars["sex"]
         + betas["beta_bike_retired"] * vars["is_retired"]
         + betas["beta_bike_junior"] * vars["is_junior"]
@@ -540,7 +541,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         betas["beta_walk_asc"]
         + betas["beta_walk_travel_time_min"] * (walk_travel_time**betas["lambda_walk"])
 
-        + betas["beta_walk_age"] * bioMax(0, vars["age"] - 17)
+        + betas["beta_walk_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
         + betas["beta_walk_sex"] * vars["sex"]
         + betas["beta_walk_retired"] * vars["is_retired"]
         + betas["beta_walk_junior"] * vars["is_junior"]
@@ -570,7 +571,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
             + betas["beta_car_passenger_travel_time_min"] * (car_passenger_travel_time**betas["lambda_car_passenger_travel_time"])            
             + betas["beta_car_passenger_distance_km"] * bioMax(0,(vars["car_passenger_distance_km"]-50.0)/DISTANCE_SCALE_KM)
             + betas["beta_car_passenger_driving_permit"] * vars["driving_license"]
-            + betas["beta_car_passenger_age"] * bioMax(0, vars["age"] - 17)
+            + betas["beta_car_passenger_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
             + betas["beta_car_passenger_sex"] * vars["sex"]
             + betas["beta_car_passenger_retired"] * vars["is_retired"]
             + betas["beta_car_passenger_junior"] * vars["is_junior"]
@@ -657,7 +658,7 @@ def execute(context):
     logger.info(result.shortSummary())
 
     # write the optimal parameters to a yaml file in MATSim input format    
-    mode_params_path, cost_params_path = writer(context, result).write()
+    mode_params_path, cost_params_path = writer(context, result, betas).write()
 
     # write the optimal parameters to a csv file
     csv_params_path = os.path.join(context.path(), "dmc_model_parameters.csv")

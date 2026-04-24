@@ -10,6 +10,7 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.spatial.swiss_border")
     context.stage("analysis.travel_times.trips.build_highway_trips")
+    context.stage("analysis.travel_times.trips.build_urban_trips")
 
 def execute(context):
     logger.info("\t - Loading microcensus trip data")
@@ -46,10 +47,11 @@ def execute(context):
     assert car_trips["identifier"].is_unique, "Identifiers are not unique in car trips!"
     assert car_trips[["origin_x", "origin_y", "destination_x", "destination_y", "departure_time"]].notna().all().all(), "There are NaNs in car trips!"
 
-    # load highway trips
+    # load highway and urban trips
     highway_trips = context.stage("analysis.travel_times.trips.build_highway_trips")
-    car_trips = pd.concat([highway_trips, car_trips], ignore_index=True)
-    logger.info(f"\t - Total car trips after adding highway trips: {len(car_trips)}")
+    urban_trips = context.stage("analysis.travel_times.trips.build_urban_trips")
+    car_trips = pd.concat([highway_trips, urban_trips, car_trips], ignore_index=True)
+    logger.info(f"\t - Total car trips after adding highway and urban trips: {len(car_trips)}")
 
     # save to csv    
     # logger.info("\t - Saving car trips to temporary file")   

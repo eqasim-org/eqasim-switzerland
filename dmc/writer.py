@@ -10,11 +10,12 @@ logging.basicConfig(level=logging.INFO)
 
 
 class writer:
-    def __init__(self, context, biogeme_model, 
+    def __init__(self, context, biogeme_model, betas,
                  mode_parameters_file = "model_parameters.yaml",
                  cost_parameters_file = "cost_parameters.yaml"):
         self.context = context
         self.model = biogeme_model
+        self.betas = betas
         self.mode_output_path = os.path.join(context.path(), mode_parameters_file)
         self.cost_output_path = os.path.join(context.path(), cost_parameters_file)
         self.params = biogeme_model.getEstimatedParameters()["Value"].to_dict()
@@ -59,6 +60,7 @@ class writer:
         # scale parameters
         params_dict["timeScale_min"] = constants.TIME_SCALE_MIN
         params_dict["distanceScale_km"] = constants.DISTANCE_SCALE_KM
+        params_dict["ageScale_year"] = constants.AGE_SCALE_YEAR
 
         # densities_parameters
         params_dict["populationDensityScale"] = constants.POPULATION_DENSITY_SCALE
@@ -81,8 +83,11 @@ class writer:
         params_dict["parking.urbanParkingSearchDuration_min"] = self.context.config("urban_parking_search_min")        
         params_dict["parking.suburbanParkingSearchDuration_min"] = self.context.config("suburban_parking_search_min")
 
-        # set the rest to 0 and 1 for exponents
-        params_dict = self.set_the_rest_to_zeros(params_dict)
+        # set non-estimated parameters to their beta initial values
+        params_dict = self.get_initial_if_not_estimated(params_dict)
+        
+        # round all floats to 4 decimals
+        params_dict = {k: round(v, 4) if isinstance(v, float) else v for k, v in params_dict.items()}
 
         # Organize parameters by mode
         modes = ["car",  "pt", "bike", "walk", "cp", "parking"]
@@ -108,13 +113,29 @@ class writer:
         """
         return NAMES_CONVERSION[name]
 
-    def set_the_rest_to_zeros(self, params):
+    def get_initial_if_not_estimated(self, params):
         """
-        Set all parameters that are not estimated in the model to zero.
+        Fill non-estimated parameters with their initial beta values.
         """
-        for new_name in NAMES_CONVERSION.values():
-            if new_name not in params:
-                params[new_name] = 1.0 if "exponent" in new_name.lower() else 0.0
+        for old_name, new_name in NAMES_CONVERSION.items():
+            if new_name in params:
+                continue
+
+            beta = self.betas.get(old_name)
+            if beta is not None:
+                init_value = getattr(beta, "initValue", None)
+                if init_value is None:
+                    init_value = getattr(beta, "_initValue", None)
+                if init_value is not None:
+                    params[new_name] = float(init_value)
+                    continue
+
+            logger.warning(
+                "Could not find beta initial value for %s (%s); falling back to legacy default.",
+                old_name,
+                new_name,
+            )
+            params[new_name] = 1.0 if "exponent" in new_name.lower() else 0.0
         return params
 
     @staticmethod
