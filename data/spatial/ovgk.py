@@ -70,7 +70,7 @@ def impute_parallel(context, df, x="x", y="y", geometry="geometry", output_colum
 
     def process_chunk(ids):
         chunk = left.iloc[ids]
-        joined = gpd.sjoin_nearest(chunk, right, how="left")
+        joined = gpd.sjoin(chunk, right, how="left")
         joined = joined[["__row_id", output_column]].drop_duplicates("__row_id", keep="first")
         return joined
 
