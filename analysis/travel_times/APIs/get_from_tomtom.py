@@ -77,7 +77,7 @@ def route_one_trip(origin_x, origin_y, destination_x, destination_y, departure_t
         return data["routes"][0]
     else:
         logger.error(f"TomTom API request failed with status code {response.status_code}: {response.text}")
-        if response.status_code == 400 and "NO_ROUTE_FOUND" in response.text["detailedError"]["code"]:
+        if response.status_code == 400 and "NO_ROUTE_FOUND" in response.text:
             return []
         return None
     
