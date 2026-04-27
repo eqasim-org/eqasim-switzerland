@@ -403,7 +403,7 @@ def execute(context):
     df_population["broad_commute_distance_class"] = np.digitize(df_population["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
     df_source["broad_commute_distance_class"] = np.digitize(df_source["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
 
-    # this is not necessary, but just to make sure employment is working correctly
+    # this is now necessary to include, to make sure employement is well matched, otherwise we get errors in work location assignement
     df_source["employed"] = df_source["employed"].astype(int)
     df_population["employed"] = (df_population["employed"]==1).astype(int)
 
@@ -422,6 +422,14 @@ def execute(context):
         AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
         df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
         df_source["age_class"] = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
+        
+        # income classes
+        df_population['income_class'] = df_population['income_class'].astype(int)
+        df_source['income_class'] = df_source['income_class'].astype(int)
+        INCOME_CLASSIFICATION = {1:1, 2:1, 3:2, 4:2, 5:2, 6:3, 7:3, 8:3} # map 6 income classes to 3 classes (low, medium, high)
+        df_population['income_class'] = df_population['income_class'].map(INCOME_CLASSIFICATION)
+        df_source['income_class'] = df_source['income_class'].map(INCOME_CLASSIFICATION)
+
         # further cleaning
         df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
         df_population["household_size"] = df_population["household_size"].clip(upper=2)
@@ -432,10 +440,11 @@ def execute(context):
         df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=3)
         df_source["number_of_cars_class"] = df_source["number_of_cars_class"].clip(upper=3)
 
-        # HT and activity-chains are better with canton_id instead of muncipality_type
+        # HT and activity-chains are better with canton_id instead of municipality_type
+        # TODO: 3 levels income class here
         columns_individual_matching = [
             "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk",  "N_children_under_12", "sp_region", 
-            "broad_commute_distance_class", "commute_distance_class", "canton_id", "work_location_type", "urban"
+            "broad_commute_distance_class", "commute_distance_class", "income_class", "canton_id", "work_location_type", "urban"
         ]
         mandatory_columns_individual_matching = [
             "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk",  "N_children_under_12", "sp_region", 
@@ -446,8 +455,8 @@ def execute(context):
         df_population["car_availability"] = df_population["car_availability"].astype(int)
         df_population["municipality_type"] = df_population["municipality_type"].astype(str)
         df_source["municipality_type"] = df_source["municipality_type"].astype(str)
-        df_population["urban"] = (df_population["municipality_type"].isin(["urbancore","urban"])).astype(int)
-        df_source["urban"] = (df_source["municipality_type"].isin(["urbancore","urban"])).astype(int)
+        df_population["urban"] = (df_population["municipality_type"].isin(["urbancore"])).astype(int)
+        df_source["urban"] = (df_source["municipality_type"].isin(["urbancore"])).astype(int)
         df_population["sp_region"] = df_population["sp_region"].astype(int)
         df_source["sp_region"] = df_source["sp_region"].astype(int)
         df_source["canton_id"] = df_source["canton_id"].astype(int)
