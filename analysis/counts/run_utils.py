@@ -361,6 +361,73 @@ Cities:
     # Display plot
     plt.close()
 
+def create_simple_scatter_plot(df, stats_dict, output_path=None):
+    """Create a simple scatter plot of observed vs simulated flows."""
+    logger.info("\n" + "=" * 60)
+    logger.info("CREATING SIMPLE SCATTER PLOT")
+    logger.info("=" * 60)
+    
+    # Clean data
+    df_clean = df.dropna(subset=['flow', 'simulated_flow'])
+    
+    # Set up the plot style
+    plt.style.use('default')
+    sns.set_palette("husl")
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8, 8))
+    
+    # Color by city with more vibrant colors
+    cities = df_clean['city'].unique()
+    colors = plt.cm.Set1(np.linspace(0, 1, len(cities)))
+    
+    for i, city in enumerate(cities):
+        city_data = df_clean[df_clean['city'] == city]
+        ax.scatter(city_data['flow'], city_data['simulated_flow'],
+                   alpha=0.6, s=50, label=city.capitalize(),
+                   color=colors[i], edgecolors="white")
+    
+    # Add perfect correlation line (1:1)
+    min_val = min(df_clean['flow'].min(), df_clean['simulated_flow'].min())
+    max_val = max(df_clean['flow'].max(), df_clean['simulated_flow'].max())
+    ax.plot([min_val, max_val], [min_val, max_val], 
+            'k--', alpha=0.8, linewidth=2, label='Perfect correlation (1:1)')
+    
+    # Add regression line (no intercept)
+    x_range = np.linspace(min_val, max_val, 100)
+    y_fit = stats_dict['slope'] * x_range
+    ax.plot(x_range, y_fit, 'r-', linewidth=2, alpha=0.5,
+            label=f'Fitted line (y = {stats_dict["slope"]:.3f}x)')
+    
+    ax.set_xlabel('Observed Flow (vehicles/day)', fontsize=12)
+    ax.set_ylabel('Simulated Flow (vehicles/day)', fontsize=12)
+    ax.set_title('Observed vs Simulated Traffic Flows', fontsize=14, fontweight='bold')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # Add R2 text
+    ax.text(0.02 * max_val, 0.6 * max_val, 
+            f"$R^2$ = {stats_dict['r2']:.3f}",
+            fontsize=14,
+            color='crimson',
+            bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3'))
+    
+    # Add GEH text
+    ax.text(0.7 * max_val, 0.02 * max_val, 
+            f"GEH ≤ 5: {stats_dict['geh']['within_5_pct']:.1f}%\nGEH ≤ 10: {stats_dict['geh']['within_10_pct']:.1f}%\nGEH ≤ 15: {stats_dict['geh']['within_15_pct']:.1f}%\nGEH ≤ 25: {stats_dict['geh']['within_25_pct']:.1f}%",
+            fontsize=14,
+            color='steelblue',
+            bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3'))
+    
+    # Save plot
+    if output_path is not None:
+        output_file = os.path.join(output_path, "simple_scatter_plot.png")
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        logger.info(f"✅ Simple scatter plot saved as: {output_file}")
+        
+    # Display plot
+    plt.close()
+
 def plot_by_road_cat(df, output_path=None, title=None):
     """
     Plot average observed and simulated flow by highway (road) category.

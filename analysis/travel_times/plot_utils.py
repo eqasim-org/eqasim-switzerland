@@ -334,3 +334,116 @@ def plot_distribution(
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight", dpi=200)
     plt.close(fig)
+
+
+def plot_link_error_on_network(
+    network_gdf,
+    routed_df,
+    swiss_border,
+    out_path,
+    title="Network map of MATSim travel-time error",
+    figsize=(22, 22)
+):
+    """Plot link-level MATSim over/underestimation on the network.
+
+    Parameters
+    ----------
+    network_gdf : GeoDataFrame
+        Network links with at least columns ['link_id', 'geometry'].
+    routed_df : DataFrame
+        Trip dataframe with columns ['links', 'travel_time_min_api', 'travel_time_min_matsim'].
+        'links' must contain '-' separated link ids.
+    out_path : str
+        Output PNG path.
+    """
+    required_network_cols = {"link_id", "geometry"}
+    required_routed_cols = {"links", "travel_time_min_api", "travel_time_min_matsim"}
+
+    if not required_network_cols.issubset(set(network_gdf.columns)):
+        raise KeyError(f"network_gdf must contain columns {required_network_cols}")
+    if not required_routed_cols.issubset(set(routed_df.columns)):
+        raise KeyError(f"routed_df must contain columns {required_routed_cols}")
+
+    df = routed_df.copy()
+    df = df[df["links"].notna()].copy()
+
+    # Vote per trip: +1 for overestimation, -1 for underestimation, 0 for equal.
+    diff = df["travel_time_min_matsim"] - df["travel_time_min_api"]
+    df["trip_vote"] = np.sign(diff).astype(float)
+    df = df[df["trip_vote"].notna()].copy()
+    if df.empty:
+        raise ValueError("No valid routed trips with travel-time error to plot.")
+
+    df["link_id"] = df["links"].astype(str).str.split("-")
+    df = df.explode("link_id").dropna(subset=["link_id"]).copy()
+    df["link_id"] = df["link_id"].astype(str).str.strip()
+    df = df[df["link_id"] != ""].copy()
+
+    # Aggregate votes per traversed link.
+    link_stats = df.groupby("link_id", as_index=False).agg(
+        vote_sum=("trip_vote", "sum"),
+        n_trips=("trip_vote", "size")
+    )
+    link_stats["signed_error_pct"] = 100.0 * link_stats["vote_sum"] / link_stats["n_trips"].replace(0, np.nan)
+
+    net = network_gdf[["link_id", "geometry"]].copy()
+    net["link_id"] = net["link_id"].astype(str)
+
+    # Keep only links inside Swiss border.
+    if isinstance(swiss_border, gpd.GeoSeries):
+        border_geom = swiss_border.unary_union
+        border_gdf = gpd.GeoDataFrame(geometry=swiss_border)
+    elif isinstance(swiss_border, gpd.GeoDataFrame):
+        border_geom = swiss_border.geometry.unary_union
+        border_gdf = swiss_border[["geometry"]].copy()
+    else:
+        border_geom = swiss_border
+        border_gdf = gpd.GeoDataFrame(geometry=[swiss_border], crs=getattr(network_gdf, "crs", None))
+
+    net = net[net.geometry.within(border_geom)].copy()
+
+    plot_gdf = net.merge(link_stats, on="link_id", how="left")
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Draw inside-border network in light gray and border in black.
+    plot_gdf.plot(ax=ax, color="#D9D9D9", linewidth=0.35, alpha=0.8)
+    border_gdf.boundary.plot(ax=ax, color="black", linewidth=1.2)
+
+    used = plot_gdf[plot_gdf["signed_error_pct"].notna()].copy()
+    if used.empty:
+        raise ValueError("No routed links matched network link ids for plotting.")
+
+    vmax = float(np.nanpercentile(np.abs(used["signed_error_pct"].values), 95))
+    vmax = max(vmax, 10.0)
+    vmin = -vmax
+
+    used.plot(
+        ax=ax,
+        column="signed_error_pct",
+        cmap="RdYlBu_r",
+        vmin=vmin,
+        vmax=vmax,
+        linewidth=0.9,
+        legend=True,
+        legend_kwds={
+            "label": "Signed trip error share (%)",
+            "shrink": 0.75,
+            "orientation": "horizontal",
+            "pad": 0.02
+        }
+    )
+
+    cbar_ax = fig.axes[-1]
+    cbar_ax.set_title(
+        "Negative: underestimation | Positive: overestimation",
+        fontsize=16,
+        pad=10
+    )
+    cbar_ax.tick_params(labelsize=12)
+
+    ax.set_title(title)
+    ax.set_axis_off()
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight", dpi=300)
+    plt.close(fig)

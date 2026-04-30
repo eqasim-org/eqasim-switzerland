@@ -8,7 +8,8 @@ import matplotlib
 matplotlib.use("Agg")
 from analysis.travel_times.plot_utils import (plot_scatter, plot_boxplot, plot_distribution,
                                               plot_average_by_distance_bin,
-                                              plot_by, plot_boxplot_by)
+                                              plot_by, plot_boxplot_by,
+                                              plot_link_error_on_network)
 
 logger = logging.getLogger("synpp")
 
@@ -17,7 +18,10 @@ def configure(context):
     context.stage("analysis.travel_times.APIs.target")
     context.stage("analysis.travel_times.APIs.get")
     context.stage("analysis.travel_times.matsim.get")
+    context.stage("analysis.travel_times.matsim.route")
     context.stage("analysis.travel_times.advanced.process")
+    context.stage("analysis.counts.matching.network")
+    context.stage("data.spatial.swiss_border")
 
     context.config("output_path")
     context.config("output_id")
@@ -65,6 +69,9 @@ def execute(context):
     # Load data from APIs and MATSim
     dfs_api = context.stage("analysis.travel_times.APIs.get")
     dfs_matsim = context.stage("analysis.travel_times.matsim.get")
+    _, routed_paths = context.stage("analysis.travel_times.matsim.route")
+    network = context.stage("analysis.counts.matching.network")
+    swiss_border = context.stage("data.spatial.swiss_border")
     _ = context.stage("analysis.travel_times.advanced.process")
     
     # For each API, compare with MATSim data
@@ -83,6 +90,10 @@ def execute(context):
 
         # Merge and filter large differences
         df = merge_and_filter_large_differences(df_api, df_matsim)
+
+        # Keep routed link paths for network error visualization
+        routed_links = pd.read_csv(routed_paths[api], usecols=["identifier", "links"])
+        df_links = df.merge(routed_links, on="identifier", how="left")
 
         # Plots
         bin_km = float(context.config("distance_bin_km"))
@@ -206,6 +217,15 @@ def execute(context):
             title="Distribution of Trips Euclidean Distances",
             xlabel="Euclidean distance (km)",
             out_path=os.path.join(out, "distribution_euclidean_distances_matsim_vs_"+api+".png")
+        )
+
+        # network map of over/underestimation, aggregated by traversed links
+        plot_link_error_on_network(
+            network_gdf=network.net_geo,
+            routed_df=df_links,
+            swiss_border=swiss_border,
+            title="Link-level travel-time error: MATSim vs " + api.upper(),
+            out_path=os.path.join(out, "network_link_error_matsim_vs_" + api + ".png")
         )
 
     return dict(done = True, path = out_folders)

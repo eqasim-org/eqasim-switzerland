@@ -64,7 +64,7 @@ def execute(context):
     stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>15000)|
                             (flows.simulated_flow<1000)|
                             (flows.flow<1000)|
-                            (~flows.pdiff.between(-80,250))]["id"].unique()
+                            (~flows.pdiff.between(-70,200))]["id"].unique()
 
     # Plot the network and highligh these links in green  
     plotter = Plotter()

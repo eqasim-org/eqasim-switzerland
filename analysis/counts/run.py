@@ -3,7 +3,7 @@ import os
 import pandas as pd
 import json
 from .run_utils import (filter_data, compute_statistics, save_as_target,
-                        create_comprehensive_plot, plot_by_road_cat,
+                        create_comprehensive_plot, create_simple_scatter_plot, plot_by_road_cat,
                         print_detailed_statistics, get_average_flow_veh_h_by_category)
 
 
@@ -64,6 +64,9 @@ def execute(context):
 
     # plot comprehensive comparison
     create_comprehensive_plot(df, stats, output_path=path_to_output)
+
+    # plot simple scatter plot
+    create_simple_scatter_plot(df, stats, output_path=path_to_output)
 
     # Plot by road category
     plot_by_road_cat(df, output_path=path_to_output)
