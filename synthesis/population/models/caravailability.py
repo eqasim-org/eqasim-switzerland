@@ -3,10 +3,6 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from catboost import CatBoostClassifier
 
-
-# ---------------------------------------------------------
-# helper: stochastic draw from class probabilities (binary ok)
-# ---------------------------------------------------------
 def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
     rng = np.random.default_rng(seed)
     cum_proba = np.cumsum(proba_matrix, axis=1)
@@ -44,11 +40,11 @@ def _to_dl_has(series):
 
 def configure(context):
     # Survey:
-    context.stage("data.microcensus.21.persons")             # 1 row per household, with features + car_availability
-    context.stage("data.microcensus.21.household_persons")   # multiple rows per household, with driving_license per member
+    context.stage("data.microcensus.21.persons")
+    context.stage("data.microcensus.21.household_persons")
 
     # Population:
-    context.stage("synthesis.population.models.carownership")  # person-level population incl. number_of_cars_class (cars)
+    context.stage("synthesis.population.models.carownership")
 
 
 def execute(context):
@@ -108,7 +104,7 @@ def execute(context):
 
     # -------------------------------------------------------------------
     # 3. BUILD HH-LEVEL DL COUNTS FROM household_persons_df
-    #     household_persons.household_id == persons.person_id (your setup)
+    #     household_persons.household_id == persons.person_id
     # -------------------------------------------------------------------
     hh_persons_df = hh_persons_df.copy()
     hh_persons_df["dl_has"] = _to_dl_has(hh_persons_df[DL_COL_HHP])
@@ -190,7 +186,7 @@ def execute(context):
     pop_df["hh_single_adult"] = (pop_df["N_adults"].fillna(0) == 1).astype("int64")
 
     # -------------------------------------------------------------------
-    # 6. ENFORCE DETERMINISTIC RULES IN SURVEY OUTCOME (CONSISTENT WITH POP)
+    # 6. ENFORCE DETERMINISTIC RULES IN SURVEY OUTCOME
     #     - No DL => 0
     #     - Single-adult HH & DL & has car => 1
     #     - Cars >= #DL => 1
@@ -252,7 +248,7 @@ def execute(context):
     )
 
     # -------------------------------------------------------------------
-    # 8. FEATURES (same structure as your DL code + shortage features)
+    # 8. FEATURES
     # -------------------------------------------------------------------
     age_bins = [0, 18, 21, 26, 45, 60, 71, 81, 200]
     age_labels = ["0-17", "18-20", "21-25", "25-44", "45-59", "60-70", "71-80", "81+"]
@@ -274,7 +270,7 @@ def execute(context):
     ]
 
     # -------------------------------------------------------------------
-    # 9. TRAIN MASK (fit ONLY on survey individuals who are NOT the
+    # 9. TRAIN MASK (fit only on survey individuals who are not the
     #    single-adult+DL+car deterministic group; keep scarce restriction)
     # -------------------------------------------------------------------
     train_s = (

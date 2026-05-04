@@ -3,9 +3,6 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from catboost import CatBoostClassifier
 
-# ---------------------------------------------------------
-# helper: stochastic draw from class probabilities
-# ---------------------------------------------------------
 def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
     rng = np.random.default_rng(seed)
     cum_proba = np.cumsum(proba_matrix, axis=1)
@@ -42,7 +39,7 @@ def execute(context):
     SEED_CAR  = 2026
     DIAG_CANTON_ID = "25"
 
-    # Survey car count column (change if needed)
+    # Survey car count column
     SURVEY_CARCOUNT_COL = "number_of_cars_class"
 
     # -------------------------------------------------------------------
@@ -146,17 +143,11 @@ def execute(context):
     # Ensure numeric car count
     survey_df[SURVEY_CARCOUNT_COL] = pd.to_numeric(survey_df[SURVEY_CARCOUNT_COL], errors="coerce")
 
-    # Optional: if your survey has DL at person level and you want N_drivers_license_per_adult from survey too
-    # (this is important if you use that feature in training, so survey and pop align)
+    # driving_license assumed boolean; convert to 0/1 on adults
+    lic = survey_df["driving_license"].astype(float)
+    lic = lic.where(survey_df["age"] >= 18, 0.0)
+    survey_df["_dl_adult"] = lic.fillna(0.0)
 
-    if "driving_license" in survey_df.columns:
-        # driving_license assumed boolean; convert to 0/1 on adults
-        lic = survey_df["driving_license"].astype(float)
-        lic = lic.where(survey_df["age"] >= 18, 0.0)
-        survey_df["_dl_adult"] = lic.fillna(0.0)
-    else:
-        # If not available, set missing; feature will be dropped if you enforce notna
-        survey_df["_dl_adult"] = np.nan
 
     # Household-level aggregation helpers
     def first_nonnull(x):
@@ -185,7 +176,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 2. PREP POP: household-level features, then predict HH car ownership
     # -------------------------------------------------------------------
-    # Household size in pop: if you already have household_size column, use max; else compute
+    # Household size in pop
     if "household_size" not in pop_df.columns:
         pop_df["household_size"] = pop_df.groupby("household_id")["household_id"].transform("size")
 
@@ -193,7 +184,6 @@ def execute(context):
     pop_df["presence_of_children_under_18"] = (pop_df["N_children_under_18"] > 0).astype(int)
 
     adult = pop_df["age"].ge(18)
-    # if driving_license is already 0/1; otherwise do: (pop_df["driving_license"] == 1).astype(int)
     dl = pd.to_numeric(pop_df["driving_license"], errors="coerce").fillna(0).astype("int8")
 
     # group-wise totals aligned to pop_df rows
@@ -230,7 +220,7 @@ def execute(context):
 )
 
     # --- hh_s: weighted frequency (and %), by presence_of_children_under_18 ---
-    wcol = "hh_weight"  # change if your weight column name differs
+    wcol = "hh_weight"
     gcol = "presence_of_children_under_18"
 
     tmp = hh_s[[gcol, wcol]].copy()
@@ -249,7 +239,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 3. FEATURE ENGINEERING / CLEANING
     # -------------------------------------------------------------------
-    # Use income_class if available (high impact); if you truly don't want it, remove from feature list below
+    # Use income_class if available
     use_income = ("income_class" in hh_s.columns) and ("income_class" in hh_p.columns)
 
     # categorical + numeric feature lists
