@@ -23,14 +23,14 @@ def execute(context):
     # CONFIG: model type + calibration switch
     # -------------------------------------------------------------------
     INCOME_MODEL = "catboost"          # "rf" or "gbm" r "catboost"
-    USE_CALIBRATION = False       # <--- set to False to turn calibration OFF
+    USE_CALIBRATION = False            # set to False to turn calibration off
 
     # -------------------------------------------------------------------
     # 0. LOAD DATA
     # -------------------------------------------------------------------
     survey_df = context.stage("data.microcensus.21.persons")
     pop_df = context.stage("synthesis.population.models.employment")
-    survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income
+    survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income (imputation is used in mode-choice modules)
 
     # Map population job_position to survey coding
     mapping_pop_to_survey = {
@@ -80,7 +80,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 2. PREP POP: PICK ONE RANDOM REPRESENTATIVE PER HOUSEHOLD (age >= 6)
     # -------------------------------------------------------------------
-    REP_MIN_AGE = 18  # you can try 15 or 18 as well
+    REP_MIN_AGE = 18
 
     pop_eligible = pop_df[pop_df['age'] >= REP_MIN_AGE].copy()
     rng = np.random.default_rng(12345)

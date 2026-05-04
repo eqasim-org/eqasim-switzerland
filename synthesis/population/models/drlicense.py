@@ -32,15 +32,13 @@ def execute(context):
     # -------------------------------------------------------------------
     DL_MODEL = "catboost"         # "rf" or "gbm" or "catboost"
     SEED_DL  = 2026
-    DIAG_CANTON_ID = "25"    # default canton selection for diagnostics (string after preprocessing)
+    DIAG_CANTON_ID = "25"    # default canton selection for diagnostics
 
     # -------------------------------------------------------------------
     # 0. LOAD DATA
     # -------------------------------------------------------------------
     survey_df = context.stage("data.microcensus.21.persons")
     pop_df    = context.stage("synthesis.population.models.students")
-
-    #survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income
 
     for df in (survey_df, pop_df):
         df["N_children_under_18"] = pd.to_numeric(df["N_children_under_18"], errors="coerce")
@@ -87,7 +85,7 @@ def execute(context):
 
     a_yes = survey_df["driving_license"] == True
     a_no  = survey_df["driving_license"] == False
-
+    # in the current implementation we ignore learning driving licenses
     survey_df["dl_has_or_learning"] = pd.NA
     survey_df.loc[a_yes, "dl_has_or_learning"] = 1
     survey_df.loc[a_no,  "dl_has_or_learning"] = 0
@@ -227,7 +225,6 @@ def execute(context):
     #    - municipality_type  
     #    - N_children_under_18 (exact)
     #
-    # IMPORTANT: Comparisons are done on the SAME universe: age >= 18
     # -------------------------------------------------------------------
     print("\n================== DIAGNOSTICS (Survey vs Modeled Pop) ==================")
 
@@ -391,7 +388,6 @@ def execute(context):
 
     # -------------------------
     # N_CHILDREN_UNDER_18 exact values (overall + canton)
-    # (sorting is numeric where possible, with 'Missing' last)
     # -------------------------
     child_comp_all = compare_pct("N_children_under_18_exact", canton_id=None)
     # nicer ordering: numeric ascending then "Missing"
