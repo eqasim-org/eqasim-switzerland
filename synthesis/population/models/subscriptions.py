@@ -153,19 +153,18 @@ def execute(context):
 
     # split ages into 6-15 and 16+
     AGE_SPLIT = 16
-    SEED_PT_YOUTH = 20261   # separate seed so draws are independent (optional)
+    SEED_PT_YOUTH = 20261
 
     # Survey columns (per your assumption)
     SURVEY_TARGET_COL = "subscription"        # values 0..4
     SURVEY_WEIGHT_COL = "person_weight"
 
     # Survey car ownership proxy (so survey and pop align on a "car ownership class" feature)
-    SURVEY_CARCOUNT_COL = "number_of_cars_class"   # if present; used only to derive HH_CAR_OWN_class in survey
+    SURVEY_CARCOUNT_COL = "number_of_cars_class"
 
     # Population car ownership variable
     POP_CAR_OWN_COL = "number_of_cars_class"
 
-    # If your survey commute_home_distance is in meters set True (else assume km)
     SURVEY_COMMUTE_IN_METERS = True
 
     COMMUTE_DIAG_THRESHOLD_KM = 0
@@ -174,7 +173,7 @@ def execute(context):
     # 0. LOAD DATA
     # -------------------------------------------------------------------
     survey_df = _as_df(context.stage("data.microcensus.persons")).copy()
-    # only use those interviewed on a workday, because those on teh weekend do not have commmute information
+    # only use those interviewed on a workday, because those on the weekend do not have commute information
     survey_df = survey_df[survey_df["workday"]]
     # booleans (make sure they're boolean and missing -> False)
     cols = [
@@ -414,7 +413,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 3. CAR OWNERSHIP FEATURE (align survey + pop as HH_CAR_OWN_class)
     # -------------------------------------------------------------------
-    # Survey: derive HH_CAR_OWN_class from number_of_cars_class if available
+    # Survey: derive HH_CAR_OWN_class from number_of_cars_class
     if SURVEY_CARCOUNT_COL in survey_df.columns:
         survey_df[SURVEY_CARCOUNT_COL] = pd.to_numeric(survey_df[SURVEY_CARCOUNT_COL], errors="coerce")
         # clip to 0..3 for "3+"
@@ -504,7 +503,6 @@ def execute(context):
         df["age_bin_16plus"] = pd.cut(df["age"], bins=age_bins_16p, labels=age_labels_16p, right=False)
         df["age_bin_16plus"] = df["age_bin_16plus"].astype(str).fillna("Missing")
 
-    # common household-ish features that may exist in survey already; if missing, fill later
     if "N_children_under_18" in survey_df.columns:
         survey_df["presence_of_children_under_18"] = (pd.to_numeric(survey_df["N_children_under_18"], errors="coerce").fillna(0) > 0).astype(int)
     else:
@@ -520,7 +518,6 @@ def execute(context):
         "employment_status",
         "HH_CAR_OWN_class",
         "car_availability",
-        #"commute_class",   # <--- NEW
     ]
 
     candidate_num = [
@@ -694,7 +691,7 @@ def execute(context):
     pop_ycol = "PT_SUB_draw" if USE_DRAW_DIAG else "PT_SUB_hat"
     classes_sorted = [0, 1, 2, 3, 4]
 
-    # add a diagnostics age_group (mirrors your earlier style)
+    # add a diagnostics age_group
     diag_age_bins = [0, 6, 16, 26, 45, 60, 71, 81, 200]
     diag_age_labels = ["0-5", "6-15", "16-25", "26-44", "45-59", "60-70", "71-80", "81+"]
 
@@ -818,14 +815,6 @@ def execute(context):
             print(f"\n[{g.upper()} | canton_id={DIAG_CANTON_ID}] survey vs pop (% by class)")
             print(compare_multiclass(g, canton_id=DIAG_CANTON_ID, order=order).to_string(index=False))
 
-    print("\n==========================================================================================")
-
-    # =========================================================
-    # ADD THIS DIAGNOSTIC BLOCK near the bottom of execute()
-    # Put it AFTER your existing diagnostics loop
-    # (i.e., after the for g, order in diag_groups loop)
-    # and BEFORE keep_columns / return pop_df
-    # =========================================================
     print("\n================== COMMUTE DIAGNOSTIC (WORK ONLY | subscription==1) ==================")
 
     pop_sub_col = "PT_SUB_draw" if USE_DRAW_DIAG else "PT_SUB_hat"

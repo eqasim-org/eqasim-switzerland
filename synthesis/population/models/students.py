@@ -6,30 +6,12 @@ from joblib import Parallel, delayed
 from catboost import CatBoostClassifier
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
+
 def configure(context):
     context.config("data_path")
     context.stage("synthesis.population.models.income")
     context.stage("data.structural_survey.structural_survey")
-def plot_weighted_student_share_by_age(survey_df, survey_weight_col="weight"):
-        def weighted_mean(x, w):
-            return np.average(x, weights=w) if len(x) > 0 else np.nan
 
-        age_profile = (
-            survey_df
-            .groupby("age")
-            .apply(lambda g: weighted_mean(g["is_student"], g[survey_weight_col]))
-            .reset_index(name="share_student")
-            .sort_values("age")
-        )
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(age_profile["age"], age_profile["share_student"], marker="o")
-        plt.xlabel("Age")
-        plt.ylabel("Weighted share of students")
-        plt.title("Weighted share of students by age in survey data")
-        plt.grid(alpha=0.3)
-        plt.tight_layout()
-        plt.show()
 def execute(context):
 
     # =========================================================
@@ -59,7 +41,6 @@ def execute(context):
     survey_df['job_position'] = survey_df['job_position'].astype('int64')
     survey_df['is_student']   = survey_df['is_student'].astype('int64')
     survey_df[SURVEY_WEIGHT_COL] = survey_df[SURVEY_WEIGHT_COL].astype(float)
-    #plot_weighted_student_share_by_age(survey_df, survey_weight_col=SURVEY_WEIGHT_COL)
     survey_df = survey_df.dropna(subset=[
         'age', 'sex', 'home_municipality_id', 'district_id', 'canton_id',
         'employed', 'job_position', 'is_student', 'municipality_type',
