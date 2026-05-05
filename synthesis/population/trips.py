@@ -45,7 +45,7 @@ def execute(context):
 
     df_trips.loc[:, "travel_time"] = df_trips.loc[:, "arrival_time"] - df_trips.loc[:, "departure_time"]
 
-    df_trips = df_trips[["person_id", "trip_id",
+    df_trips = df_trips[["person_id", "mz_person_id", "trip_id",
                          "departure_time", "arrival_time",
                          "travel_time", "mode",
                          "preceding_purpose", "following_purpose"]].sort_values(by=["person_id", "trip_id"])
@@ -79,7 +79,7 @@ def execute(context):
     df_trips["trip_index"] = np.hstack([np.arange(count) for count in df_count["count"].values])
 
     return df_trips[[
-        "person_id", "trip_index",
+        "person_id", "mz_person_id", "trip_id", "trip_index",
         "departure_time", "arrival_time",
         "preceding_purpose",
         "following_purpose",
