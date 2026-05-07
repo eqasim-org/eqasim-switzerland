@@ -1,23 +1,16 @@
 import os
 import logging
-import numpy as np
-import torch
-import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import QuantileTransformer, FunctionTransformer
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
 
-from .NNModel import MNLModel, train_with_mask, MediumLevel1Wrapper
-from .hierarchical_model_utils import (
-    SECONDARY_ACTIVITIES,
-    build_hierarchical_numerical_batch_numba,
-    get_h3_stage_outputs,
-    build_level1_children_by_level0,
-    build_level1_candidate_attributes_by_level0,
-    make_purpose_one_hot,
-    sanitize_work_coordinates,
-)
+import joblib
+import numpy as np
+import pandas as pd
+import torch
+import matplotlib.pyplot as plt
+
+from .hierarchical_model_utils import SECONDARY_ACTIVITIES, build_level1_children_by_level0, build_level1_candidate_attributes_by_level0, sanitize_work_coordinates, build_hierarchical_candidate_batch_numba
+from .two_input_features import CANDIDATE_FEATURES, fit_candidate_tensor, fit_person_trip_matrix
+from .two_input_nn import TwoInputChoiceModel, train_two_input_with_mask
+from .two_input_wrappers import MediumLevel1TwoInputWrapper
 
 logger = logging.getLogger("synpp: medium_model")
 
@@ -27,6 +20,7 @@ MODEL_NAME = "medium_model.pt"
 def configure(context):
     context.stage("synthesis.population.spatial.secondary.locations_v2.h3")
     context.stage("synthesis.population.spatial.secondary.locations_v2.mz_chains")
+    context.stage("synthesis.population.spatial.secondary.locations_v2.coarse_model")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
     context.stage("data.constants")
@@ -36,35 +30,33 @@ def configure(context):
     context.config("overwrite_medium_model_if_exists", True)
     context.config("medium_model_batch_size", 256)
     context.config("medium_model_epochs", 40)
+    context.config("medium_model_learning_rate", 1e-2)
     context.config("medium_model_torch_num_threads", 16)
     context.config("random_seed")
 
 
 def execute(context):
-    logger.info("Training medium model for level1-within-level0 secondary location choice...")
+    logger.info("Training medium model (two-input) for level1-within-level0 secondary location choice...")
 
     overwrite_model = context.config("overwrite_medium_model_if_exists")
     model_path = os.path.join(context.working_directory, MODEL_NAME)
-    if os.path.exists(model_path) and not overwrite_model:
+    candidate_scaler_path = os.path.join(context.working_directory, "medium_candidate_scaler.sklearn.pkl")
+
+    if (os.path.exists(model_path) and os.path.exists(candidate_scaler_path)) and not overwrite_model:
         logger.info("Model %s already exists.", MODEL_NAME)
-        return model_path
+        return model_path, candidate_scaler_path
 
     logger.info("\t Loading data...")
     mz_persons = context.stage("data.microcensus.persons")[[
         "person_id", "age", "sex", "car_availability", "employed", "income_class", "home_x", "home_y", "work_x", "work_y", "weekend", "person_weight"
     ]]
-    c = context.stage("data.constants")
-    mz_persons["car_availability"] = (mz_persons["car_availability"] != c.CAR_AVAILABILITY_NEVER)
+    constants = context.stage("data.constants")
+    mz_persons["car_availability"] = (mz_persons["car_availability"] != constants.CAR_AVAILABILITY_NEVER)
 
     mz_trips, _ = context.stage("data.microcensus.trips")
     mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary.locations_v2.mz_chains")[[
-        "person_id",
-        "trip_id",
-        "daily_longest_distance_from_home",
-        "daily_crowfly_total",
-        "crowfly_consumed_before_trip",
-        "trip_position_class",
+        "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class"
     ]]
     mz_trips = mz_trips.merge(mz_chain_trips, on=["person_id", "trip_id"], how="left")
 
@@ -72,7 +64,7 @@ def execute(context):
     mz_trips = mz_trips[~mz_trips["person_id"].isin(weekend_persons)].reset_index(drop=True)
     mz_persons = mz_persons[~mz_persons["person_id"].isin(weekend_persons)].drop(columns=["weekend"]).reset_index(drop=True)
 
-    h3_data, h3_geo, h3_tree = get_h3_stage_outputs(context)
+    h3_data, h3_geo, h3_tree = context.stage("synthesis.population.spatial.secondary.locations_v2.h3")
     trips_h3 = h3_data["microcensus_trips"][["person_id", "trip_id", "destination_level_0", "destination_level_1"]]
     h3_geo_level1 = h3_geo["level_1"]
 
@@ -80,22 +72,10 @@ def execute(context):
         raise RuntimeError("Missing outside_fraction in H3 level_1 geometry. Run h3 stage with outside_fraction enabled.")
 
     required_h3_cols = [
-        "centroid",
-        "outside_fraction",
-        "num_statent",
-        "employees",
-        "urban_core",
-        "urban",
-        "education",
-        "shop",
-        "leisure",
-        "ovgk_share_a",
-        "ovgk_share_b",
-        "ovgk_share_c",
-        "ovgk_share_d",
-        "ovgk_share_none",
+        "centroid", "outside_fraction", "num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure",
+        "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none",
     ]
-    missing_h3_cols = [c for c in required_h3_cols if c not in h3_geo_level1.columns]
+    missing_h3_cols = [col for col in required_h3_cols if col not in h3_geo_level1.columns]
     if missing_h3_cols:
         raise RuntimeError("Missing required destination-derived H3 columns in h3 stage: " + ", ".join(missing_h3_cols))
 
@@ -124,46 +104,33 @@ def execute(context):
     if len(children_by_level0) == 0:
         raise RuntimeError("H3 hierarchy tree has no valid level1 children with centroids. Cannot train medium model.")
 
-    level1_candidate_attributes_by_level0 = build_level1_candidate_attributes_by_level0(
-        children_by_level0,
-        centroid_x_by_l1,
-        centroid_y_by_l1,
-        statent_count,
-        employees_count,
-        urban_core_count,
-        urban_count,
-        education_count,
-        shop_count,
-        leisure_count,
-        ovgk_share_a_by_l1,
-        ovgk_share_b_by_l1,
-        ovgk_share_c_by_l1,
-        ovgk_share_d_by_l1,
-        ovgk_share_none_by_l1,
-        outside_fraction_by_l1,
-    )
+    level1_candidate_attributes_by_level0 = build_level1_candidate_attributes_by_level0(children_by_level0, centroid_x_by_l1, centroid_y_by_l1, statent_count, employees_count, 
+                                                             urban_core_count, urban_count, education_count, shop_count, leisure_count, ovgk_share_a_by_l1, ovgk_share_b_by_l1, 
+                                                             ovgk_share_c_by_l1, ovgk_share_d_by_l1, ovgk_share_none_by_l1, outside_fraction_by_l1)
 
     logger.info("\t Preparing microcensus training set...")
     df = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
     df = df.merge(mz_persons, on="person_id", how="left")
     df = df[df["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=["destination_level_0", "destination_level_1"]).reset_index(drop=True)
 
+    # Here we check that there are enough valid samples for training after filtering by the level0-level1 hierarchy, and we also determine the maximum number of level1 candidates per level0 to properly size the candidate tensors.
     valid_rows = []
-    for i, row in df.iterrows():
+    for idx, row in df.iterrows():
         children = children_by_level0.get(row["destination_level_0"], [])
         if len(children) < 2:
             continue
         if row["destination_level_1"] not in children:
             continue
-        valid_rows.append(i)
+        valid_rows.append(idx)
 
     if len(valid_rows) == 0:
         raise RuntimeError("No valid samples for medium model after filtering by level0-level1 hierarchy.")
     df = df.iloc[valid_rows].reset_index(drop=True)
 
-    max_children = max(len(children_by_level0[l0]) for l0 in df["destination_level_0"].unique())
+    max_children = max(len(children_by_level0[level0]) for level0 in df["destination_level_0"].unique())
     n_samples = len(df)
 
+    # here we build the candidate tensors with all features, even those not used in the model, because we want to fit the scaler on all features and then only select the ones used in the model in the wrapper. This is to ensure that the scaler is fitted on all available information and can be reused if we want to train a different model with more features without refitting the scaler.
     cand_x = np.zeros((n_samples, max_children), dtype=np.float64)
     cand_y = np.zeros((n_samples, max_children), dtype=np.float64)
     cand_statent = np.zeros((n_samples, max_children), dtype=np.float64)
@@ -185,30 +152,30 @@ def execute(context):
 
     with context.progress(total=n_samples, label="Medium model: building level1 choice sets") as progress:
         for i, row in df.iterrows():
-            l0 = row["destination_level_0"]
-            chosen_l1 = row["destination_level_1"]
-            l0_attributes = level1_candidate_attributes_by_level0[l0]
-            children = l0_attributes["children"]
+            level0 = row["destination_level_0"]
+            chosen_level1 = row["destination_level_1"]
+            attrs = level1_candidate_attributes_by_level0[level0]
+            children = attrs["children"]
+            n_children = len(children)
 
-            valid_mask[i, :len(children)] = True
-            for j in range(len(children)):
-                cand_x[i, j] = l0_attributes["x"][j]
-                cand_y[i, j] = l0_attributes["y"][j]
-                cand_statent[i, j] = l0_attributes["num_statent"][j]
-                cand_employees[i, j] = l0_attributes["employees"][j]
-                cand_urban_core[i, j] = l0_attributes["urban_core"][j]
-                cand_urban[i, j] = l0_attributes["urban"][j]
-                cand_education[i, j] = l0_attributes["education"][j]
-                cand_shop[i, j] = l0_attributes["shop"][j]
-                cand_leisure[i, j] = l0_attributes["leisure"][j]
-                cand_ovgk_share_a[i, j] = l0_attributes["ovgk_share_a"][j]
-                cand_ovgk_share_b[i, j] = l0_attributes["ovgk_share_b"][j]
-                cand_ovgk_share_c[i, j] = l0_attributes["ovgk_share_c"][j]
-                cand_ovgk_share_d[i, j] = l0_attributes["ovgk_share_d"][j]
-                cand_ovgk_share_none[i, j] = l0_attributes["ovgk_share_none"][j]
-                cand_outside_fraction[i, j] = l0_attributes["outside_fraction"][j]
+            valid_mask[i, :n_children] = True
+            cand_x[i, :n_children] = attrs["x"]
+            cand_y[i, :n_children] = attrs["y"]
+            cand_statent[i, :n_children] = attrs["num_statent"]
+            cand_employees[i, :n_children] = attrs["employees"]
+            cand_urban_core[i, :n_children] = attrs["urban_core"]
+            cand_urban[i, :n_children] = attrs["urban"]
+            cand_education[i, :n_children] = attrs["education"]
+            cand_shop[i, :n_children] = attrs["shop"]
+            cand_leisure[i, :n_children] = attrs["leisure"]
+            cand_ovgk_share_a[i, :n_children] = attrs["ovgk_share_a"]
+            cand_ovgk_share_b[i, :n_children] = attrs["ovgk_share_b"]
+            cand_ovgk_share_c[i, :n_children] = attrs["ovgk_share_c"]
+            cand_ovgk_share_d[i, :n_children] = attrs["ovgk_share_d"]
+            cand_ovgk_share_none[i, :n_children] = attrs["ovgk_share_none"]
+            cand_outside_fraction[i, :n_children] = attrs["outside_fraction"]
 
-            y[i] = children.index(chosen_l1)
+            y[i] = attrs["index_by_child"][chosen_level1]
             progress.update()
 
     home_x = df["home_x"].to_numpy(dtype=np.float64)
@@ -218,160 +185,82 @@ def execute(context):
     has_work, work_x, work_y = sanitize_work_coordinates(work_x, work_y)
     origin_x = df["origin_x"].to_numpy(dtype=np.float64)
     origin_y = df["origin_y"].to_numpy(dtype=np.float64)
+
     age = df["age"].to_numpy(dtype=np.float64)
-    daily_longest_distance_from_home = df["daily_longest_distance_from_home"].to_numpy(dtype=np.float64)
-    daily_longest_distance_from_home = np.where(np.isfinite(daily_longest_distance_from_home) & (daily_longest_distance_from_home >= 0.0), daily_longest_distance_from_home, 0.0)
-    daily_crowfly_total = df["daily_crowfly_total"].to_numpy(dtype=np.float64)
-    daily_crowfly_total = np.where(np.isfinite(daily_crowfly_total) & (daily_crowfly_total >= 0.0), daily_crowfly_total, 0.0)
-    crowfly_consumed_before_trip = df["crowfly_consumed_before_trip"].to_numpy(dtype=np.float64)
-    crowfly_consumed_before_trip = np.where(np.isfinite(crowfly_consumed_before_trip) & (crowfly_consumed_before_trip >= 0.0), crowfly_consumed_before_trip, 0.0)
-    trip_position_class = df["trip_position_class"].to_numpy(dtype=np.float64)
-    trip_position_class = np.where(np.isfinite(trip_position_class), trip_position_class, 2.0)
+    income_class = df["income_class"].to_numpy(dtype=np.float64)
+    daily_longest = df["daily_longest_distance_from_home"].to_numpy(dtype=np.float64)
+    daily_longest = np.where(np.isfinite(daily_longest) & (daily_longest >= 0.0), daily_longest, 0.0)
+    daily_total = df["daily_crowfly_total"].to_numpy(dtype=np.float64)
+    daily_total = np.where(np.isfinite(daily_total) & (daily_total >= 0.0), daily_total, 0.0)
+    consumed_before = df["crowfly_consumed_before_trip"].to_numpy(dtype=np.float64)
+    consumed_before = np.where(np.isfinite(consumed_before) & (consumed_before >= 0.0), consumed_before, 0.0)
+    trip_position = df["trip_position_class"].to_numpy(dtype=np.float64)
+    trip_position = np.where(np.isfinite(trip_position), trip_position, 2.0)
     sex = df["sex"].to_numpy(dtype=np.float32)
     employed = df["employed"].to_numpy(dtype=np.float32)
     car_availability = df["car_availability"].to_numpy(dtype=np.float32)
-    income_class = df["income_class"].to_numpy(dtype=np.float32)
 
-    purpose_categories = [str(p) for p in SECONDARY_ACTIVITIES]
-    purpose_one_hot = make_purpose_one_hot(df["purpose"], purpose_categories)
+    ########### Load scalers from coarse model ###########
+    _, person_scaler_path, _ = context.stage("synthesis.population.spatial.secondary.locations_v2.coarse_model")
+    person_scaler = joblib.load(person_scaler_path)
 
-    logger.info("\t Computing medium-model numerical features with Numba...")
-    full_numerical = build_hierarchical_numerical_batch_numba(
-        home_x,
-        home_y,
-        work_x,
-        work_y,
-        has_work,
-        origin_x,
-        origin_y,
-        age,
-        daily_longest_distance_from_home,
-        daily_crowfly_total,
-        crowfly_consumed_before_trip,
-        trip_position_class,
-        income_class,
-        cand_x,
-        cand_y,
-        cand_statent,
-        cand_employees,
-        cand_urban_core,
-        cand_urban,
-        cand_education,
-        cand_shop,
-        cand_leisure,
-        cand_ovgk_share_a,
-        cand_ovgk_share_b,
-        cand_ovgk_share_c,
-        cand_ovgk_share_d,
-        cand_ovgk_share_none,
-        cand_outside_fraction,
-        valid_mask,
-    )
+    ########### Building tensors and fitting scalers ###########
+    logger.info("\t Building person-trip matrix...")
+    purpose_categories = [str(purpose) for purpose in SECONDARY_ACTIVITIES]
+    person_trip_matrix, person_scaler, person_trip_cols = fit_person_trip_matrix(age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
+                                                                                daily_longest=daily_longest, daily_total=daily_total, consumed_before=consumed_before, 
+                                                                                trip_position=trip_position, purpose_series=df["purpose"], purpose_categories=purpose_categories, 
+                                                                                person_scaler = person_scaler)
 
-    numerical = [
-        "dist_home", "dist_work", "dist_last", "age",
-        "num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure",
-        "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none",
-        "outside_fraction",
-        "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip",
-        "trip_position_class", "income_class",
-    ]
-    distance_cols = [numerical.index(col) for col in [
-        "dist_home", "dist_work", "dist_last",
-        "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip",
-    ]]
-    count_cols = [numerical.index(col) for col in ["num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure"]]
-    positive_cols = [numerical.index(col) for col in ["age", "income_class"]]
-    passthrough_cols = [numerical.index(col) for col in [
-        "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none", "outside_fraction", "trip_position_class"
-    ]]
+    logger.info("\t Computing candidate-hex features with Numba...")
+    candidate_tensor = build_hierarchical_candidate_batch_numba(home_x, home_y, work_x, work_y, has_work, origin_x, origin_y, cand_x, cand_y,
+        cand_statent, cand_employees, cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_ovgk_share_a, cand_ovgk_share_b,
+        cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask)
+    
+    candidate_tensor, candidate_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)
 
-    scaler = ColumnTransformer([
-        ("dist", Pipeline([
-            ("log1p", FunctionTransformer(np.log1p, validate=False)),
-            ("scale", QuantileTransformer(output_distribution="uniform")),
-        ]), distance_cols),
-        ("count", QuantileTransformer(output_distribution="normal"), count_cols),
-        ("positive", QuantileTransformer(output_distribution="uniform"), positive_cols),
-        ("passthrough", "passthrough", passthrough_cols),
-    ])
-
-    scaler.fit(full_numerical.reshape(-1, len(numerical))[valid_mask.reshape(-1)])
-
-    scaled_flat = scaler.transform(full_numerical.reshape(-1, len(numerical)))
-    scaled_numerical = scaled_flat.reshape(n_samples, max_children, len(numerical)).astype(np.float32)
-
-    purpose_features = [f"purpose_{p}" for p in purpose_categories]
-    features = numerical + ["sex", "employed", "car_availability"] + purpose_features
-    X = np.zeros((n_samples, max_children, len(features)), dtype=np.float32)
-    X[:, :, :len(numerical)] = scaled_numerical
-    X[:, :, len(numerical)] = sex[:, None]
-    X[:, :, len(numerical) + 1] = employed[:, None]
-    X[:, :, len(numerical) + 2] = car_availability[:, None]
-    X[:, :, len(numerical) + 3:] = np.broadcast_to(purpose_one_hot[:, None, :], (n_samples, max_children, purpose_one_hot.shape[1]))
-    X[~valid_mask] = 0.0
-
-    logger.info("\t Training medium model...")
-    seed = context.config("random_seed")
+    ############ Training the model ###########
+    logger.info("\t Training medium two-input model...")
+    seed = int(context.config("random_seed"))
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    model = MNLModel(input_dim=len(features), num_h3=max_children)
-    train_with_mask(
-        model=model,
-        X=X,
-        y=y,
-        valid_mask=valid_mask,
-        epochs=int(context.config("medium_model_epochs")),
-        batch_size=int(context.config("medium_model_batch_size")),
-        lr=1e-2,
-        weight_decay=1e-4,
-        num_threads=int(context.config("medium_model_torch_num_threads")),
-        logger_instance=logger,
-        weights=weights,
-    )
+    model = TwoInputChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2],
+                                person_hidden_dim=32, hidden_dims=(32, 32), dropout_rate=0.1)
+    train_two_input_with_mask(model=model, person_x=person_trip_matrix, candidate_x=candidate_tensor, y=y, valid_mask=valid_mask, weight_decay=1e-3, logger_instance=logger, weights=weights,
+                              epochs=int(context.config("medium_model_epochs")),
+                              batch_size=int(context.config("medium_model_batch_size")),
+                              lr=float(context.config("medium_model_learning_rate")),        
+                              num_threads=int(context.config("medium_model_torch_num_threads")))
 
-    wrapper = MediumLevel1Wrapper(
-        model=model,
-        scaler=scaler,
-        numerical_cols=numerical,
-        features=features,
-        children_by_level0=children_by_level0,
-        level1_candidate_attributes_by_level0=level1_candidate_attributes_by_level0,
-        purpose_categories=purpose_categories,
-    )
+    ########## Building wrapper and saving model ##########
+    wrapper = MediumLevel1TwoInputWrapper(model=model, person_scaler=person_scaler, candidate_scaler=candidate_scaler, person_trip_cols=person_trip_cols,
+        candidate_cols=CANDIDATE_FEATURES, children_by_level0=children_by_level0, level1_candidate_attributes_by_level0=level1_candidate_attributes_by_level0,
+        purpose_categories=purpose_categories)
     wrapper.save(model_path)
+    joblib.dump(candidate_scaler, candidate_scaler_path)
 
-    h3_geo_counts = plot_analysis(
-        context=context,
-        wrapper=wrapper,
-        X=X,
-        valid_mask=valid_mask,
-        df=df,
-        children_by_level0=children_by_level0,
-        h3_geo_level1=h3_geo_level1,
-        centroid_x_by_l1=centroid_x_by_l1,
-        centroid_y_by_l1=centroid_y_by_l1,
-    )
+    ########### Analysis and plots ##########
+    _ = plot_analysis(context=context, wrapper=wrapper, person_trip_matrix=person_trip_matrix, candidate_tensor=candidate_tensor, valid_mask=valid_mask, df=df, 
+                                  children_by_level0=children_by_level0, h3_geo_level1=h3_geo_level1, centroid_x_by_l1=centroid_x_by_l1, centroid_y_by_l1=centroid_y_by_l1)
 
     logger.info("Medium model saved to %s", model_path)
-    return wrapper, X, features, model_path, h3_geo_counts
+    return model_path, candidate_scaler_path
 
 
-def plot_analysis(context, wrapper, X, valid_mask, df, children_by_level0, h3_geo_level1, centroid_x_by_l1, centroid_y_by_l1):
+def plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, valid_mask, df, children_by_level0, h3_geo_level1, centroid_x_by_l1, centroid_y_by_l1):
     logger.info("Predicting on training data and plotting level1 counts...")
-    pred_idx = wrapper.predict_from_X(X, valid_mask, max_utility=False)
+    pred_idx = wrapper.predict_from_inputs(person_trip_matrix, candidate_tensor, valid_mask, rng=None, return_probabilities=False)
 
     predicted_level1 = []
-    for i, l0 in enumerate(df["destination_level_0"].to_numpy()):
-        children = children_by_level0[l0]
+    for i, level0 in enumerate(df["destination_level_0"].to_numpy()):
+        children = children_by_level0[level0]
         predicted_level1.append(children[int(pred_idx[i])])
 
     real_level1 = df["destination_level_1"].astype(str)
     real_counts = real_level1.value_counts().rename("real_count")
     pred_counts = pd.Series(predicted_level1).value_counts().rename("pred_count")
     counts_df = pd.DataFrame({"real_count": real_counts, "pred_count": pred_counts}).fillna(0)
-
     h3_geo_counts = h3_geo_level1.set_index("h3_index").join(counts_df, how="left").fillna(0)
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
@@ -382,33 +271,29 @@ def plot_analysis(context, wrapper, X, valid_mask, df, children_by_level0, h3_ge
     plt.tight_layout()
     plot_path = os.path.join(context.path(), "medium_level1_counts_comparison.png")
     plt.savefig(plot_path, dpi=200, bbox_inches="tight")
-    logger.info("Plot saved to %s", plot_path)
     plt.close(fig)
 
     logger.info("Plotting distance distributions for level1...")
-    real_dist_home = []
-    pred_dist_home = []
-    real_dist_work = []
-    pred_dist_work = []
-
     home_x = df["home_x"].to_numpy(dtype=np.float64)
     home_y = df["home_y"].to_numpy(dtype=np.float64)
     work_x = df["work_x"].to_numpy(dtype=np.float64)
     work_y = df["work_y"].to_numpy(dtype=np.float64)
     has_work = np.isfinite(work_x) & np.isfinite(work_y)
 
+    real_dist_home = []
+    pred_dist_home = []
+    real_dist_work = []
+    pred_dist_work = []
+
     real_level1_arr = df["destination_level_1"].astype(str).to_numpy()
     pred_level1_arr = np.asarray(predicted_level1, dtype=str)
-
     for i in range(len(df)):
         real_h3 = real_level1_arr[i]
         pred_h3 = pred_level1_arr[i]
-
         real_cx = centroid_x_by_l1.get(real_h3)
         real_cy = centroid_y_by_l1.get(real_h3)
         pred_cx = centroid_x_by_l1.get(pred_h3)
         pred_cy = centroid_y_by_l1.get(pred_h3)
-
         if real_cx is None or real_cy is None or pred_cx is None or pred_cy is None:
             continue
 
@@ -420,11 +305,11 @@ def plot_analysis(context, wrapper, X, valid_mask, df, children_by_level0, h3_ge
             pred_dist_work.append(np.sqrt((pred_cx - work_x[i]) ** 2 + (pred_cy - work_y[i]) ** 2))
 
     fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-    THRESHOLD = 80000  # 80 km
+    threshold = 80000
     real_dist_home = np.array(real_dist_home)
     pred_dist_home = np.array(pred_dist_home)
-    real_dist_home = real_dist_home[real_dist_home <= THRESHOLD]
-    pred_dist_home = pred_dist_home[pred_dist_home <= THRESHOLD]
+    real_dist_home = real_dist_home[real_dist_home <= threshold]
+    pred_dist_home = pred_dist_home[pred_dist_home <= threshold]
 
     axes[0].hist(real_dist_home, bins=50, alpha=0.4, color="black", linewidth=2, label="Real", density=True, histtype="step")
     axes[0].hist(pred_dist_home, bins=50, alpha=0.4, color="red", linewidth=1, label="Predicted", density=True, histtype="step", linestyle="dashed")
@@ -436,9 +321,8 @@ def plot_analysis(context, wrapper, X, valid_mask, df, children_by_level0, h3_ge
     if len(real_dist_work) > 0:
         real_dist_work = np.array(real_dist_work)
         pred_dist_work = np.array(pred_dist_work)
-        real_dist_work = real_dist_work[real_dist_work <= THRESHOLD]
-        pred_dist_work = pred_dist_work[pred_dist_work <= THRESHOLD]
-
+        real_dist_work = real_dist_work[real_dist_work <= threshold]
+        pred_dist_work = pred_dist_work[pred_dist_work <= threshold]
         axes[1].hist(real_dist_work, bins=50, alpha=0.4, color="black", linewidth=2, label="Real", density=True, histtype="step")
         axes[1].hist(pred_dist_work, bins=50, alpha=0.4, color="red", linewidth=1, label="Predicted", density=True, histtype="step", linestyle="dashed")
         axes[1].legend()
@@ -452,7 +336,5 @@ def plot_analysis(context, wrapper, X, valid_mask, df, children_by_level0, h3_ge
     plt.tight_layout()
     dist_plot_path = os.path.join(context.path(), "medium_distance_distributions.png")
     plt.savefig(dist_plot_path, dpi=200, bbox_inches="tight")
-    logger.info("Distance distribution plot saved to %s", dist_plot_path)
     plt.close(fig)
-
     return h3_geo_counts

@@ -45,9 +45,9 @@ def execute(context):
     )
 
     # Normalized trip progression within person-day in (0, 1].
-    trip_progress = trips_sorted.groupby("person_id").cumcount() + 1
+    trip_progress = trips_sorted.groupby("person_id").cumcount()
     trips_per_person = trips_sorted.groupby("person_id")["trip_id"].transform("size")
-    trips_sorted["trip_position_class"] = trip_progress / trips_per_person
+    trips_sorted["trip_position_class"] = trip_progress / np.maximum(trips_per_person-1, 1)
 
 
     return trips_sorted[["person_id", "trip_id", 

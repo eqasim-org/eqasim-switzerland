@@ -17,51 +17,20 @@ It also merges the unique hexagons across all datasets for each resolution level
 hexagonal geometries that can be used for further analysis or visualization.
 """
 
-
-
 H3_LEVELS = [5, 7, 9]
-OVGK_CATEGORIES = ["A", "B", "C", "D", "none"]
-H3_DEST_FEATURE_COLUMNS = [
-    "num_statent",
-    "employees",
-    "urban_core",
-    "urban",
-    "education",
-    "shop",
-    "leisure",
-    "ovgk_share_a",
-    "ovgk_share_b",
-    "ovgk_share_c",
-    "ovgk_share_d",
-    "ovgk_share_none",
-]
+OVGK_CATEGORIES = ['B', 'A', 'C', 'None', 'D']
+H3_DEST_FEATURE_COLUMNS = ["num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure", "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none"]
 
 
-def _aggregate_destination_features_by_level(destinations_with_levels, level_col):
-    cols = [level_col, "destination_id", "number_employees", "ovgk", "offers_education_secondary", "offers_shop", "offers_leisure", "municipality_type"]
-    available_cols = [c for c in cols if c in destinations_with_levels.columns]
-    df = destinations_with_levels[available_cols].copy()
+def _aggregate_destination_features_by_level(destinations_with_levels, level_col, all_hex):
+    assert level_col in destinations_with_levels.columns, f"Expected level column {level_col} not found in destinations_with_levels"
+    assert destinations_with_levels[level_col].notna().all(), f"Found NaNs in level column {level_col} of destinations_with_levels, please check the data preparation steps."
+    assert set(destinations_with_levels['ovgk'].unique())==set(OVGK_CATEGORIES), f"Unexpected OVGK categories found in data: {set(destinations_with_levels['ovgk'].unique())}. Expected categories: {set(OVGK_CATEGORIES)}"
 
-    if level_col not in df.columns:
-        return pd.DataFrame(columns=["h3_index"] + H3_DEST_FEATURE_COLUMNS)
-
-    df = df.dropna(subset=[level_col]).copy()
-    if len(df) == 0:
-        return pd.DataFrame(columns=["h3_index"] + H3_DEST_FEATURE_COLUMNS)
-
-    if "number_employees" not in df.columns:
-        df["number_employees"] = 0.0
-    if "ovgk" not in df.columns:
-        df["ovgk"] = "none"
-    if "offers_education_secondary" not in df.columns:
-        df["offers_education_secondary"] = False
-    if "offers_shop" not in df.columns:
-        df["offers_shop"] = False
-    if "offers_leisure" not in df.columns:
-        df["offers_leisure"] = False
+    cols = [level_col, "destination_id", "number_employees", "ovgk", "offers_education_secondary", "offers_shop", "offers_leisure", "municipality_type"]    
+    df = destinations_with_levels[cols].copy()    
 
     grouped = df.groupby(level_col)
-
     out = pd.DataFrame({"h3_index": grouped.size().index.astype(str)})
     out = out.set_index("h3_index")
     out["num_statent"] = grouped.size().astype(float)
@@ -69,26 +38,19 @@ def _aggregate_destination_features_by_level(destinations_with_levels, level_col
     out["education"] = grouped["offers_education_secondary"].sum(min_count=1).fillna(0.0).astype(float)
     out["shop"] = grouped["offers_shop"].sum(min_count=1).fillna(0.0).astype(float)
     out["leisure"] = grouped["offers_leisure"].sum(min_count=1).fillna(0.0).astype(float)
+    out["urban_core"] = grouped["municipality_type"].apply(lambda x: (x == "urbancore").sum()).astype(float)
+    out["urban"] = grouped["municipality_type"].apply(lambda x: (x == "urban").sum()).astype(float)    
 
-    if "municipality_type" in df.columns:
-        muni = df[[level_col, "municipality_type"]].copy()
-        muni["municipality_type"] = muni["municipality_type"].astype(str).str.lower().fillna("")
-        out["urban_core"] = muni[muni["municipality_type"].str.contains("core")].groupby(level_col).size().reindex(out.index, fill_value=0).astype(float)
-        out["urban"] = muni[muni["municipality_type"].str.contains("urban")].groupby(level_col).size().reindex(out.index, fill_value=0).astype(float)
-    else:
-        out["urban_core"] = 0.0
-        out["urban"] = 0.0
-
-    ovgk = df[[level_col, "ovgk"]].copy()
-    ovgk_counts = ovgk.groupby([level_col, "ovgk"]).size().unstack(fill_value=0)
     for category in OVGK_CATEGORIES:
         col = f"ovgk_share_{category.lower()}"
-        num = ovgk_counts[category] if category in ovgk_counts.columns else 0.0
-        out[col] = (num / out["num_statent"]).astype(float)
+        out[col] = grouped["ovgk"].apply(lambda x: (x == category).sum() / len(x) if len(x) > 0 else 0.0).astype(float)
 
-    for col in H3_DEST_FEATURE_COLUMNS:
-        if col not in out.columns:
-            out[col] = 0.0
+    # Ensure all hexagons are represented
+    missing_hex = set(all_hex) - set(out.index)
+    if missing_hex:
+        logger.info(f"\t\t\t Adding {len(missing_hex)} missing hexagons to feature dataframe")
+        missing_df = pd.DataFrame(0.0, index=pd.Index(list(missing_hex), name='h3_index'), columns=out.columns)
+        out = pd.concat([out, missing_df], ignore_index=False)
 
     return out.reset_index()
 
@@ -195,16 +157,16 @@ def execute(context):
     # Destination/company data (exclude non-offering rows such as remote work locations)
     logger.info("H3: \t Processing destination companies data...")
     destinations = context.stage("synthesis.population.destinations").copy()
-    offer_cols = [f"offers_{p}" for p in ["shop", "leisure", "other", "work_secondary", "education_secondary", "home_secondary"] if f"offers_{p}" in destinations.columns]
-    if len(offer_cols) == 0:
-        raise RuntimeError("No offers_* columns found in synthesis.population.destinations")
+    offer_cols = [f"offers_{p}" for p in ["shop", "leisure", "other", "work_secondary", "education_secondary", "home_secondary"] if f"offers_{p}" in destinations.columns]    
+    assert len(offer_cols) > 0, "No offers_* columns found in synthesis.population.destinations"
+    assert destinations[offer_cols].isna().sum().sum() == 0, "Found NaNs in offers_* columns of destinations data, please check the data preparation steps."
 
-    destinations = destinations[destinations[offer_cols].fillna(False).any(axis=1)].reset_index(drop=True)
+    # keep only rows that have at least one offer (this filter would remove remote work locations for example)
+    destinations = destinations[destinations[offer_cols].any(axis=1)].reset_index(drop=True)
+
     destinations_attrs_cols = ["destination_id", "number_employees", "ovgk", "municipality_type"] + offer_cols
-    destinations_attrs_cols = [c for c in destinations_attrs_cols if c in destinations.columns]
     destinations_attributes = destinations[destinations_attrs_cols].copy()
-
-    destinations = gpd.GeoDataFrame(destinations[["destination_id", "geometry"]], geometry="geometry", crs=getattr(destinations, "crs", None) or "EPSG:2056")
+    destinations = gpd.GeoDataFrame(destinations[["destination_id", "geometry"]], geometry="geometry", crs=destinations.crs)
 
     destinations_levels, destinations_unique_hex = to_geo_levels_parallel(destinations, geometry_col="geometry")
     destinations_levels = destinations[["destination_id"]].join(destinations_levels)
@@ -264,30 +226,33 @@ def execute(context):
     del mz_persons
 
     # synthetic population
-    logger.info("H3: \t Processing synthetic population data...")
-    df_work, df_education = context.stage("synthesis.population.spatial.primary.locations")
-    df_homes = context.stage("synthesis.population.spatial.home.locations")
-    df_work = gpd.GeoDataFrame(df_work, geometry=gpd.points_from_xy(df_work["geometry"].x, df_work["geometry"].y), crs="EPSG:2056")
-    df_education = gpd.GeoDataFrame(df_education, geometry=gpd.points_from_xy(df_education["geometry"].x, df_education["geometry"].y), crs="EPSG:2056")
-    df_homes = gpd.GeoDataFrame(df_homes, geometry="geometry", crs="EPSG:2056")
-    work_levels, work_unique_hex = to_geo_levels_parallel(df_work, geometry_col="geometry")
-    education_levels, education_unique_hex = to_geo_levels_parallel(df_education, geometry_col="geometry")
-    home_levels, home_unique_hex = to_geo_levels_parallel(df_homes, geometry_col="geometry")
-    data_collections["synthetic_population_work"] = work_levels
-    data_collections["synthetic_population_education"] = education_levels
-    data_collections["synthetic_population_home"] = home_levels
-    level_unique_hex_list.extend([work_unique_hex, education_unique_hex, home_unique_hex])
-    del df_work, df_education, df_homes
+    # logger.info("H3: \t Processing synthetic population data...")
+    # df_work, df_education = context.stage("synthesis.population.spatial.primary.locations")
+    # df_homes = context.stage("synthesis.population.spatial.home.locations")
+    # df_work = gpd.GeoDataFrame(df_work, geometry=gpd.points_from_xy(df_work["geometry"].x, df_work["geometry"].y), crs="EPSG:2056")
+    # df_education = gpd.GeoDataFrame(df_education, geometry=gpd.points_from_xy(df_education["geometry"].x, df_education["geometry"].y), crs="EPSG:2056")
+    # df_homes = gpd.GeoDataFrame(df_homes, geometry="geometry", crs="EPSG:2056")
+    # work_levels, work_unique_hex = to_geo_levels_parallel(df_work, geometry_col="geometry")
+    # education_levels, education_unique_hex = to_geo_levels_parallel(df_education, geometry_col="geometry")
+    # home_levels, home_unique_hex = to_geo_levels_parallel(df_homes, geometry_col="geometry")
+    # data_collections["synthetic_population_work"] = work_levels
+    # data_collections["synthetic_population_education"] = education_levels
+    # data_collections["synthetic_population_home"] = home_levels
+    # level_unique_hex_list.extend([work_unique_hex, education_unique_hex, home_unique_hex])
+    # del df_work, df_education, df_homes
 
     # Merge level geometries across all datasets
     logger.info("H3: \t Merging level geometries across all datasets...")
     swiss_border = context.stage("data.spatial.swiss_border").to_crs("EPSG:2056").unary_union
     merged_level_geoms = {}
-    for i in range(len(H3_LEVELS)):
+    for i in range(len(H3_LEVELS)):        
         all_hex = set()
         for level_unique_hex in level_unique_hex_list:
             if f'level_{i}' in level_unique_hex:
                 all_hex.update(level_unique_hex[f'level_{i}'])
+        
+        logger.info(f"\t\t Processing level {H3_LEVELS[i]} with {len(all_hex)} unique hexagons...")
+
         polygons = [Polygon([(lng, lat) for lat, lng in h3.cell_to_boundary(h)]) for h in all_hex]
         merged_gdf = gpd.GeoDataFrame({"h3_index": list(all_hex)}, geometry=polygons, crs="EPSG:4326")
         # We need to merge to EPSG:2056 for compatibility with our pipeline later on
@@ -300,12 +265,11 @@ def execute(context):
 
         # Attach destination-derived H3 features so downstream models can consume one centralized source.
         level_col = f"level_{i}"
-        feature_df = _aggregate_destination_features_by_level(destinations_with_levels, level_col)
+        feature_df = _aggregate_destination_features_by_level(destinations_with_levels, level_col, all_hex)
         merged_gdf = merged_gdf.merge(feature_df, on="h3_index", how="left")
-        for col in H3_DEST_FEATURE_COLUMNS:
-            if col not in merged_gdf.columns:
-                merged_gdf[col] = 0.0
-        merged_gdf[H3_DEST_FEATURE_COLUMNS] = merged_gdf[H3_DEST_FEATURE_COLUMNS].fillna(0.0)
+        assert all(col in merged_gdf.columns for col in H3_DEST_FEATURE_COLUMNS), f"Missing expected destination feature columns in merged_gdf for level {i}. Expected at least: {H3_DEST_FEATURE_COLUMNS}, but got {merged_gdf.columns.tolist()}"
+        assert merged_gdf[H3_DEST_FEATURE_COLUMNS].isna().sum().sum() == 0, f"Found NaNs in destination feature columns of merged_gdf for level {i}, please check the merging process. Columns with NaNs: {merged_gdf[H3_DEST_FEATURE_COLUMNS].isna().sum()}"
+        merged_gdf[H3_DEST_FEATURE_COLUMNS] = merged_gdf[H3_DEST_FEATURE_COLUMNS]
 
         merged_level_geoms[level_col] = merged_gdf
 
