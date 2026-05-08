@@ -46,23 +46,17 @@ class TwoInputChoiceModel(nn.Module):
         self.mask_layer = nn.Linear(self.hidden_dims[-1], 1)
         self.utility_head = nn.Linear(self.hidden_dims[-1], 1)
 
-    def forward(self, person_x, candidate_x):#, static_x=None):
-        if person_x.ndim == 1:
-            person_x = person_x.unsqueeze(0)
-        if candidate_x.ndim == 2:
-            candidate_x = candidate_x.unsqueeze(0)
-
-        # if static_x is not None:
-        #     if static_x.ndim == 2:
-        #         static_x = static_x.unsqueeze(0)
-        #     if static_x.shape[0] != candidate_x.shape[0] or static_x.shape[1] != candidate_x.shape[1]:
-        #         raise RuntimeError(
-        #             "TwoInputChoiceModel expected static_x batch/candidate dimensions to match candidate_x. "
-        #             f"Got static_x {tuple(static_x.shape)} and candidate_x {tuple(candidate_x.shape)}."
-        #         )
-        #     # Keep candidate feature contract as [dynamic, static].
-        #     candidate_x = torch.cat([candidate_x, static_x], dim=-1)
-
+    def forward(self, person_static, person_dynamic, candidate_static, candidate_dynamic):
+        if person_static.ndim == 1:   person_static   = person_static.unsqueeze(0)
+        if person_dynamic.ndim == 1:  person_dynamic  = person_dynamic.unsqueeze(0)
+        if candidate_static.ndim == 2:  candidate_static  = candidate_static.unsqueeze(0)
+        if candidate_dynamic.ndim == 2: candidate_dynamic = candidate_dynamic.unsqueeze(0)
+        # Reconstruct combined tensors preserving the [dynamic|static] training layout.
+        # candidate_static may be [1, N, C] (broadcast) — expand to match dynamic's batch dim.
+        if candidate_static.shape[0] == 1 and candidate_dynamic.shape[0] > 1:
+            candidate_static = candidate_static.expand(candidate_dynamic.shape[0], -1, -1)
+        person_x    = torch.cat([person_static, person_dynamic], dim=-1)          # [B, person_input_dim]
+        candidate_x = torch.cat([candidate_dynamic, candidate_static], dim=-1)    # [B, N, candidate_input_dim]
         if candidate_x.shape[-1] != self.candidate_input_dim:
             raise RuntimeError(
                 "TwoInputChoiceModel expected candidate feature width "
@@ -91,7 +85,7 @@ class TwoInputChoiceModel(nn.Module):
         return utilities
 
 
-def train_two_input_with_mask(model, person_x, candidate_x, y, valid_mask, epochs=50, batch_size=256, lr=1e-3, weight_decay=2e-3, num_threads=None, logger_instance=None, weights=None, grad_clip=5.0, lr_step_size=10, lr_gamma=0.5):
+def train_two_input_with_mask(model, person_static_x, person_dynamic_x, candidate_static_x, candidate_dynamic_x, y, valid_mask, epochs=50, batch_size=256, lr=1e-3, weight_decay=2e-3, num_threads=None, logger_instance=None, weights=None, grad_clip=5.0, lr_step_size=10, lr_gamma=0.5):
     lr_step_size = int(np.clip(lr_step_size, max(1, epochs // 6), max(1, epochs // 3)))
     if num_threads is not None:
         torch.set_num_threads(max(1, int(num_threads)))
@@ -99,13 +93,15 @@ def train_two_input_with_mask(model, person_x, candidate_x, y, valid_mask, epoch
     device = model.device
     model.to(device)
 
-    person_tensor = torch.as_tensor(person_x, dtype=torch.float32, device=device)
-    candidate_tensor = torch.as_tensor(candidate_x, dtype=torch.float32, device=device)
+    person_static_tensor   = torch.as_tensor(person_static_x,   dtype=torch.float32, device=device)
+    person_dynamic_tensor  = torch.as_tensor(person_dynamic_x,  dtype=torch.float32, device=device)
+    candidate_static_tensor  = torch.as_tensor(candidate_static_x,  dtype=torch.float32, device=device)
+    candidate_dynamic_tensor = torch.as_tensor(candidate_dynamic_x, dtype=torch.float32, device=device)
     y_tensor = torch.as_tensor(y, dtype=torch.long, device=device)
     mask_tensor = torch.as_tensor(valid_mask, dtype=torch.bool, device=device)
-    weights_tensor = torch.as_tensor(weights, dtype=torch.float32, device=device) if weights is not None else torch.ones(len(person_x), device=device)
+    weights_tensor = torch.as_tensor(weights, dtype=torch.float32, device=device) if weights is not None else torch.ones(person_static_tensor.shape[0], device=device)
 
-    n_samples = person_tensor.shape[0]
+    n_samples = person_static_tensor.shape[0]
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
 
@@ -124,14 +120,16 @@ def train_two_input_with_mask(model, person_x, candidate_x, y, valid_mask, epoch
             end = min(start + int(batch_size), n_samples)
             idx = permutation[start:end]
 
-            batch_person = person_tensor[idx]
-            batch_candidate = candidate_tensor[idx]
+            batch_person_static   = person_static_tensor[idx]
+            batch_person_dynamic  = person_dynamic_tensor[idx]
+            batch_candidate_static  = candidate_static_tensor if candidate_static_tensor.shape[0] == 1 else candidate_static_tensor[idx]
+            batch_candidate_dynamic = candidate_dynamic_tensor[idx]
             batch_y = y_tensor[idx]
             batch_mask = mask_tensor[idx]
             batch_w = weights_tensor[idx]
 
             optimizer.zero_grad(set_to_none=True)
-            utilities = model(batch_person, batch_candidate)
+            utilities = model(batch_person_static, batch_person_dynamic, batch_candidate_static, batch_candidate_dynamic)
             utilities = utilities.masked_fill(~batch_mask, -1e9)
 
             loss_per_sample = F.cross_entropy(utilities, batch_y, reduction="none")
@@ -151,31 +149,17 @@ def train_two_input_with_mask(model, person_x, candidate_x, y, valid_mask, epoch
         scheduler.step()
 
 
-# def predict_two_input_proba(model, person_x, candidate_x, valid_mask=None, static_x=None):
-#     device = next(model.parameters()).device
-#     person_tensor = torch.as_tensor(person_x, dtype=torch.float32, device=device)
-#     candidate_tensor = torch.as_tensor(candidate_x, dtype=torch.float32, device=device)
-#     static_tensor = None if static_x is None else torch.as_tensor(static_x, dtype=torch.float32, device=device)
-
-#     model.eval()
-#     with torch.inference_mode():
-#         utilities = model(person_tensor, candidate_tensor, static_x=static_tensor)
-#         if valid_mask is not None:
-#             mask_tensor = torch.as_tensor(valid_mask, dtype=torch.bool, device=device)
-#             utilities = utilities.masked_fill(~mask_tensor, -1e9)
-#         probs = torch.softmax(utilities - utilities.max(dim=1, keepdim=True).values, dim=1)
-#     return probs.cpu().numpy()
-
-def predict_two_input_proba(model, person_tensor, candidate_tensor, valid_mask_tensor=None,static_tensor=None):
-    with torch.inference_mode():        
-        person_tensor = torch.as_tensor(person_tensor, dtype=torch.float32, device=model.device)
-        candidate_tensor = torch.as_tensor(candidate_tensor, dtype=torch.float32, device=model.device)
-        utilities = model(person_tensor,candidate_tensor)
-
+def predict_two_input_proba(model, person_static, person_dynamic, candidate_static, candidate_dynamic, valid_mask_tensor=None):
+    with torch.inference_mode():
+        dev = model.device
+        ps = torch.as_tensor(person_static,   dtype=torch.float32, device=dev)
+        pd = torch.as_tensor(person_dynamic,  dtype=torch.float32, device=dev)
+        cs = torch.as_tensor(candidate_static,  dtype=torch.float32, device=dev)
+        cd = torch.as_tensor(candidate_dynamic, dtype=torch.float32, device=dev)
+        utilities = model(ps, pd, cs, cd)
         if valid_mask_tensor is not None:
-            valid_mask_tensor = torch.as_tensor(valid_mask_tensor, dtype=torch.bool, device=model.device)
+            valid_mask_tensor = torch.as_tensor(valid_mask_tensor, dtype=torch.bool, device=dev)
             if valid_mask_tensor.ndim == 1:
                 valid_mask_tensor = valid_mask_tensor.unsqueeze(0).expand(utilities.shape[0], -1)
             utilities.masked_fill_(~valid_mask_tensor, -1e9)
-
         return torch.softmax(utilities, dim=1)

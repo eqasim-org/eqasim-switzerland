@@ -9,7 +9,7 @@ import joblib
 
 from .h3 import within_ch
 from .hierarchical_model_utils import SECONDARY_ACTIVITIES, build_coarse_candidate_batch_numba
-from .two_input_features import CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, fit_candidate_tensor, fit_person_trip_matrix
+from .two_input_features import CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, fit_candidate_tensor, fit_person_trip_matrix
 from .two_input_nn import TwoInputChoiceModel, train_two_input_with_mask
 from .two_input_wrappers import CoarseLevel0TwoInputWrapper
 
@@ -39,13 +39,13 @@ def execute(context):
     logger.info("Training coarse model (two-input) for secondary location choice...")
     overwrite_model = context.config("overwrite_coarse_model_if_exists")
     model_path = os.path.join(context.working_directory, MODEL_NAME)
-    person_scaler_path = os.path.join(context.working_directory, "person_scaler.sklearn.pkl")
-    candidate_scaler_path = os.path.join(context.working_directory, "coarse_candidate_scaler.sklearn.pkl")
+    person_static_scaler_path  = os.path.join(context.working_directory, "person_static_scaler.sklearn.pkl")
+    person_dynamic_scaler_path = os.path.join(context.working_directory, "person_dynamic_scaler.sklearn.pkl")
 
-    model_and_scalers_exist = os.path.exists(model_path) and os.path.exists(person_scaler_path) and os.path.exists(candidate_scaler_path)
+    model_and_scalers_exist = os.path.exists(model_path) and os.path.exists(person_static_scaler_path) and os.path.exists(person_dynamic_scaler_path)
     if model_and_scalers_exist and not overwrite_model:
         logger.info("Model %s already exists.", MODEL_NAME)
-        return model_path, person_scaler_path, candidate_scaler_path
+        return model_path, person_static_scaler_path, person_dynamic_scaler_path
 
     logger.info("\t Loading data...")
     mz_persons = context.stage("data.microcensus.persons")[[
@@ -151,7 +151,7 @@ def execute(context):
     ################ Building tensors and fitting scalers ################
     logger.info("\t Building person-trip matrix...")
     purpose_categories = [str(p) for p in SECONDARY_ACTIVITIES]
-    person_trip_matrix, person_scaler, person_trip_cols = fit_person_trip_matrix(age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
+    person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
                                                                                  daily_longest=daily_longest, daily_total=daily_total, consumed_before=consumed_before, 
                                                                                  trip_position=trip_position, purpose_series=df_trips["purpose"], purpose_categories=purpose_categories)
 
@@ -160,7 +160,7 @@ def execute(context):
                                                           urban_core_per_h3, urban_per_h3, education_per_h3, shop_per_h3, leisure_per_h3, ovgk_share_a_per_h3, ovgk_share_b_per_h3, 
                                                           ovgk_share_c_per_h3, ovgk_share_d_per_h3, ovgk_share_none_per_h3, outside_fraction)
     valid_mask = np.ones((n_trips, num_h3), dtype=bool)
-    candidate_tensor, candidate_scaler = fit_candidate_tensor(candidate_tensor, valid_mask, random_state=int(context.config("random_seed")))
+    candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask, random_state=int(context.config("random_seed")))
 
     ################ Training the models ################
     logger.info("\t Training coarse two-input model...")
@@ -168,12 +168,16 @@ def execute(context):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    model = TwoInputChoiceModel( person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dims=(64, 32), dropout_rate=0.1)
-    train_two_input_with_mask(model=model, person_x=person_trip_matrix, candidate_x=candidate_tensor, y=y, valid_mask=valid_mask, logger_instance=logger, weights=weights,
-                              epochs=int(context.config("coarse_model_epochs")), 
-                              batch_size=int(context.config("coarse_model_batch_size")), 
+    candidate_static_x  = candidate_tensor[0:1, :, N_CANDIDATE_DYNAMIC:]  # [1, num_h3, 13] — static cols are identical for all rows; broadcast avoids redundant storage
+    candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]    # [n_trips, num_h3, 3] — per-trip distances
+
+    model = TwoInputChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dims=(64, 32), dropout_rate=0.1)
+    train_two_input_with_mask(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
+                              y=y, valid_mask=valid_mask, logger_instance=logger, weights=weights,
+                              epochs=int(context.config("coarse_model_epochs")),
+                              batch_size=int(context.config("coarse_model_batch_size")),
                               lr=float(context.config("coarse_model_learning_rate")),
-                              weight_decay=1e-3, 
+                              weight_decay=1e-3,
                               num_threads=int(context.config("coarse_model_torch_num_threads")))
 
     ########## Building wrapper and saving model ##########
@@ -194,22 +198,24 @@ def execute(context):
     }
     static_candidate_features = np.column_stack([static_feature_map[name] for name in STATIC_CANDIDATE_FEATURES]).astype(np.float64)
 
-    wrapper = CoarseLevel0TwoInputWrapper(model=model, person_scaler=person_scaler, candidate_scaler=candidate_scaler, person_trip_cols=person_trip_cols,
-                                          candidate_cols=CANDIDATE_FEATURES, all_h3=all_h3, centroid_x=centroid_x, centroid_y=centroid_y, static_candidate_features=static_candidate_features, 
-                                          purpose_categories=purpose_categories)
+    wrapper = CoarseLevel0TwoInputWrapper(model=model, person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler,
+                                          candidate_static_scaler=candidate_static_scaler, candidate_dynamic_scaler=candidate_dynamic_scaler,
+                                          person_trip_cols=person_trip_cols, candidate_cols=CANDIDATE_FEATURES,
+                                          all_h3=all_h3, centroid_x=centroid_x, centroid_y=centroid_y,
+                                          static_candidate_features=static_candidate_features, purpose_categories=purpose_categories)
     wrapper.save(model_path)
-    
-    joblib.dump(person_scaler, person_scaler_path)
-    joblib.dump(candidate_scaler, candidate_scaler_path)
-    ########## analysis and plots ##########    
+
+    joblib.dump(person_static_scaler,  person_static_scaler_path)
+    joblib.dump(person_dynamic_scaler, person_dynamic_scaler_path)
+    ########## analysis and plots ##########
     _ = plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, y, all_h3, h3_geo_level0, centroid_x, centroid_y, home_x, home_y, origin_x, origin_y, h3_to_index, n_trips)
 
-    return model_path, person_scaler_path, candidate_scaler_path
+    return model_path, person_static_scaler_path, person_dynamic_scaler_path
 
 
 def plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, y, all_h3, h3_geo, centroid_x, centroid_y, home_x, home_y, origin_x, origin_y, h3_to_index, n_trips):
     logger.info("Predicting on training data and plotting...")
-    pred_idx = wrapper.predict_from_inputs(person_trip_matrix, candidate_tensor, rng=np.random)
+    pred_idx = wrapper.predict_from_inputs(person_trip_matrix, candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:], candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC], rng=np.random)
     predicted_h3 = [all_h3[int(i)] for i in pred_idx]
 
     real_h3_list = [all_h3[i] for i in y]

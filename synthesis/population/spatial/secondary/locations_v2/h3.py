@@ -2,10 +2,8 @@ import pandas as pd
 import geopandas as gpd
 import h3
 from shapely.geometry import Polygon
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
 import numpy as np
-import os
 from shapely import vectorized
 
 logger = logging.getLogger("synpp")
@@ -87,48 +85,43 @@ def build_h3_tree(merged_level_geoms):
 
     return tree
 
-def to_h3(df:gpd.GeoDataFrame, resolution:int=7, geometry_col:str='geometry') -> tuple:
-   
-    # Create a copy of the input DataFrame to avoid modifying the original
-    df_copy = df[[geometry_col]].copy()
+def to_geo_levels(df: gpd.GeoDataFrame, geometry_col: str = 'geometry', levels=H3_LEVELS) -> tuple[gpd.GeoDataFrame, dict]:
+    """
+    Convert point geometries to H3 indices at multiple resolutions.
 
-    # check that geometries are points
-    if not all(df_copy.geometry.geom_type == 'Point'):
-        raise ValueError("All geometries must be of type 'Point' to convert to H3.")
-
-    # convert to WGS84 coordinate system if not already in that CRS
-    if df_copy.crs is not None and df_copy.crs.to_string() != 'EPSG:4326':
-        df_copy = df_copy.to_crs(epsg=4326)
-    
-    # Calculate H3 index for each row
-    df_copy['h3_index'] = df_copy.geometry.apply(lambda geom: h3.latlng_to_cell(geom.y, geom.x, resolution))
-    
-    # Get unique hex indices
-    unique_hex = set(df_copy['h3_index'].unique())
-
-    return df_copy['h3_index'].values, unique_hex
-
-def compute_level(level, df, geom_col):
-    indices, unique_hex = to_h3(df, resolution=level, geometry_col=geom_col)
-    return level, indices, unique_hex
-    
-def to_geo_levels_parallel(df: gpd.GeoDataFrame, geometry_col: str = 'geometry', levels=H3_LEVELS) -> tuple[gpd.GeoDataFrame, dict]:
+    Only the finest resolution is computed directly from geo coordinates via latlng_to_cell.
+    All coarser levels are then derived using cell_to_parent, which guarantees strict H3
+    hierarchy consistency: the same latlng_to_cell call cannot land a point in two different
+    parent chains at different resolutions.
+    """
     df_copy = df[[geometry_col]].copy()
     level_cols = [f'level_{i}' for i in range(len(levels))]
     df_copy[level_cols] = None
     level_unique_hex = {}
 
     # do not process infinities, nans, or nulls
-    sel = (df_copy[geometry_col].x.notnull() & (~df_copy[geometry_col].x.isin([np.inf, -np.inf])))
-    
-    # Run in parallel
-    with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(compute_level, level, df_copy[sel], geometry_col) for level in levels]
-        for future in as_completed(futures):
-            level, indices, unique_hex = future.result()
-            col = f'level_{levels.index(level)}'
-            df_copy.loc[sel, col] = indices
-            level_unique_hex[col] = unique_hex
+    sel = df_copy[geometry_col].x.notnull() & (~df_copy[geometry_col].x.isin([np.inf, -np.inf]))
+
+    # convert to WGS84 once — a single shared conversion avoids cross-resolution floating-point drift
+    if df_copy.crs is not None and df_copy.crs.to_string() != 'EPSG:4326':
+        df_copy = df_copy.to_crs(epsg=4326)
+
+    # Compute the finest level directly from coordinates
+    finest_idx = len(levels) - 1
+    finest_col = f'level_{finest_idx}'
+    finest_res = levels[finest_idx]
+    df_copy.loc[sel, finest_col] = df_copy.loc[sel, geometry_col].apply(
+        lambda geom: h3.latlng_to_cell(geom.y, geom.x, finest_res)
+    )
+    level_unique_hex[finest_col] = set(df_copy.loc[sel, finest_col].dropna().unique())
+
+    # Derive all coarser levels as parents of the finest level — guaranteed consistent by H3
+    for i, res in enumerate(levels[:-1]):
+        col = f'level_{i}'
+        df_copy.loc[sel, col] = df_copy.loc[sel, finest_col].apply(
+            lambda l: h3.cell_to_parent(l, res) if pd.notna(l) else None
+        )
+        level_unique_hex[col] = set(df_copy.loc[sel, col].dropna().unique())
 
     return (df_copy[level_cols], level_unique_hex)
 
@@ -168,7 +161,7 @@ def execute(context):
     destinations_attributes = destinations[destinations_attrs_cols].copy()
     destinations = gpd.GeoDataFrame(destinations[["destination_id", "geometry"]], geometry="geometry", crs=destinations.crs)
 
-    destinations_levels, destinations_unique_hex = to_geo_levels_parallel(destinations, geometry_col="geometry")
+    destinations_levels, destinations_unique_hex = to_geo_levels(destinations, geometry_col="geometry")
     destinations_levels = destinations[["destination_id"]].join(destinations_levels)
     data_collections["destinations"] = destinations_levels
 
@@ -185,15 +178,15 @@ def execute(context):
     mz_trips = mz_trips[inside_ch].reset_index(drop=True)
     mz_trips["origin_geometry"] = gpd.points_from_xy(mz_trips.origin_x, mz_trips.origin_y)
     mz_trips["destination_geometry"] = gpd.points_from_xy(mz_trips.destination_x, mz_trips.destination_y)
-    mz_trips_origin_levels, mz_trips_origin_unique_hex = to_geo_levels_parallel(gpd.GeoDataFrame(mz_trips, 
-                                                                                                  geometry="origin_geometry", 
-                                                                                                  crs="EPSG:2056"), 
-                                                                                 geometry_col="origin_geometry")
+    mz_trips_origin_levels, mz_trips_origin_unique_hex = to_geo_levels(gpd.GeoDataFrame(mz_trips, 
+                                                                                          geometry="origin_geometry", 
+                                                                                          crs="EPSG:2056"), 
+                                                                         geometry_col="origin_geometry")
     mz_trips_origin_levels.columns = ["origin_"+col for col in mz_trips_origin_levels.columns]
-    mz_trips_destination_levels, mz_trips_destination_unique_hex = to_geo_levels_parallel(gpd.GeoDataFrame(mz_trips, 
-                                                                                                            geometry="destination_geometry", 
-                                                                                                            crs="EPSG:2056"), 
-                                                                                          geometry_col="destination_geometry")
+    mz_trips_destination_levels, mz_trips_destination_unique_hex = to_geo_levels(gpd.GeoDataFrame(mz_trips, 
+                                                                                                    geometry="destination_geometry", 
+                                                                                                    crs="EPSG:2056"), 
+                                                                                   geometry_col="destination_geometry")
     mz_trips_destination_levels.columns = ["destination_"+col for col in mz_trips_destination_levels.columns]
 
     mz_trips_levels = mz_trips[["person_id","trip_id"]].join(mz_trips_origin_levels).join(mz_trips_destination_levels)
@@ -211,15 +204,15 @@ def execute(context):
     mz_persons["home_geometry"] = gpd.points_from_xy(mz_persons.home_x, mz_persons.home_y)
     mz_persons["work_geometry"] = gpd.points_from_xy(mz_persons.work_x, mz_persons.work_y)
 
-    mz_persons_home_levels, mz_persons_home_unique_hex = to_geo_levels_parallel(gpd.GeoDataFrame(mz_persons, 
-                                                                                                 geometry="home_geometry", 
-                                                                                                 crs="EPSG:2056"),
-                                                                                geometry_col="home_geometry")
+    mz_persons_home_levels, mz_persons_home_unique_hex = to_geo_levels(gpd.GeoDataFrame(mz_persons, 
+                                                                                         geometry="home_geometry", 
+                                                                                         crs="EPSG:2056"),
+                                                                        geometry_col="home_geometry")
     mz_persons_home_levels.columns = ["home_"+col for col in mz_persons_home_levels.columns]
-    mz_persons_work_levels, mz_persons_work_unique_hex = to_geo_levels_parallel(gpd.GeoDataFrame(mz_persons, 
-                                                                                                 geometry="work_geometry", 
-                                                                                                 crs="EPSG:2056"),
-                                                                                geometry_col="work_geometry")
+    mz_persons_work_levels, mz_persons_work_unique_hex = to_geo_levels(gpd.GeoDataFrame(mz_persons, 
+                                                                                         geometry="work_geometry", 
+                                                                                         crs="EPSG:2056"),
+                                                                        geometry_col="work_geometry")
     mz_persons_work_levels.columns = ["work_"+col for col in mz_persons_work_levels.columns]
     data_collections["microcensus_persons"] = mz_persons[["person_id"]].join(mz_persons_home_levels).join(mz_persons_work_levels)
     level_unique_hex_list.extend([mz_persons_home_unique_hex, mz_persons_work_unique_hex])
@@ -272,6 +265,27 @@ def execute(context):
         merged_gdf[H3_DEST_FEATURE_COLUMNS] = merged_gdf[H3_DEST_FEATURE_COLUMNS]
 
         merged_level_geoms[level_col] = merged_gdf
+
+    # Filter hexagons to only keep those with companies (num_statent > 0).
+    logger.info("H3: \t Filtering hexagons to only keep those with companies (num_statent > 0)...")
+    valid_level2 = set(merged_level_geoms["level_2"].loc[merged_level_geoms["level_2"]["num_statent"] > 0, "h3_index"])
+    valid_level1 = set(merged_level_geoms["level_1"].loc[merged_level_geoms["level_1"]["num_statent"] > 0, "h3_index"])
+    valid_level0 = set(merged_level_geoms["level_0"].loc[merged_level_geoms["level_0"]["num_statent"] > 0, "h3_index"])
+    logger.info(f"H3: \t\t Valid level_2 hexagons with companies: {len(valid_level2)}")
+    logger.info(f"H3: \t\t Valid level_1 hexagons with companies: {len(valid_level1)}")
+    logger.info(f"H3: \t\t Valid level_0 hexagons with companies: {len(valid_level0)}")
+
+    merged_level_geoms["level_2"] = merged_level_geoms["level_2"][merged_level_geoms["level_2"]["h3_index"].isin(valid_level2)].reset_index(drop=True)
+    merged_level_geoms["level_1"] = merged_level_geoms["level_1"][merged_level_geoms["level_1"]["h3_index"].isin(valid_level1)].reset_index(drop=True)
+    merged_level_geoms["level_0"] = merged_level_geoms["level_0"][merged_level_geoms["level_0"]["h3_index"].isin(valid_level0)].reset_index(drop=True)
+
+    # Filter MZ trips to only those whose destination falls in a company-having level_2 hexagon.
+    mz_trips_levels = data_collections["microcensus_trips"]
+    n_before = len(mz_trips_levels)
+    mz_trips_levels = mz_trips_levels[mz_trips_levels["destination_level_2"].isin(valid_level2)].reset_index(drop=True)
+    n_after = len(mz_trips_levels)
+    logger.info(f"H3: \t\t MZ trips filtered from {n_before} to {n_after} (dropped {n_before - n_after} trips to hexagons without companies)")
+    data_collections["microcensus_trips"] = mz_trips_levels
 
     h3_tree = build_h3_tree(merged_level_geoms)
 

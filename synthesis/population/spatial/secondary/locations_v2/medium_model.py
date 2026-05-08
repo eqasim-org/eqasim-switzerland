@@ -8,7 +8,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from .hierarchical_model_utils import SECONDARY_ACTIVITIES, build_level1_children_by_level0, build_level1_candidate_attributes_by_level0, sanitize_work_coordinates, build_hierarchical_candidate_batch_numba
-from .two_input_features import CANDIDATE_FEATURES, fit_candidate_tensor, fit_person_trip_matrix
+from .two_input_features import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, fit_candidate_tensor, fit_person_trip_matrix
 from .two_input_nn import TwoInputChoiceModel, train_two_input_with_mask
 from .two_input_wrappers import MediumLevel1TwoInputWrapper
 
@@ -40,11 +40,10 @@ def execute(context):
 
     overwrite_model = context.config("overwrite_medium_model_if_exists")
     model_path = os.path.join(context.working_directory, MODEL_NAME)
-    candidate_scaler_path = os.path.join(context.working_directory, "medium_candidate_scaler.sklearn.pkl")
 
-    if (os.path.exists(model_path) and os.path.exists(candidate_scaler_path)) and not overwrite_model:
+    if os.path.exists(model_path) and not overwrite_model:
         logger.info("Model %s already exists.", MODEL_NAME)
-        return model_path, candidate_scaler_path
+        return (model_path,)
 
     logger.info("\t Loading data...")
     mz_persons = context.stage("data.microcensus.persons")[[
@@ -200,24 +199,25 @@ def execute(context):
     employed = df["employed"].to_numpy(dtype=np.float32)
     car_availability = df["car_availability"].to_numpy(dtype=np.float32)
 
-    ########### Load scalers from coarse model ###########
-    _, person_scaler_path, _ = context.stage("synthesis.population.spatial.secondary.locations_v2.coarse_model")
-    person_scaler = joblib.load(person_scaler_path)
+    _, person_static_scaler_path, person_dynamic_scaler_path = context.stage("synthesis.population.spatial.secondary.locations_v2.coarse_model")
+    person_static_scaler  = joblib.load(person_static_scaler_path)
+    person_dynamic_scaler = joblib.load(person_dynamic_scaler_path)
 
     ########### Building tensors and fitting scalers ###########
     logger.info("\t Building person-trip matrix...")
     purpose_categories = [str(purpose) for purpose in SECONDARY_ACTIVITIES]
-    person_trip_matrix, person_scaler, person_trip_cols = fit_person_trip_matrix(age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
-                                                                                daily_longest=daily_longest, daily_total=daily_total, consumed_before=consumed_before, 
-                                                                                trip_position=trip_position, purpose_series=df["purpose"], purpose_categories=purpose_categories, 
-                                                                                person_scaler = person_scaler)
+    person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(
+        age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
+        daily_longest=daily_longest, daily_total=daily_total, consumed_before=consumed_before,
+        trip_position=trip_position, purpose_series=df["purpose"], purpose_categories=purpose_categories,
+        person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler)
 
     logger.info("\t Computing candidate-hex features with Numba...")
     candidate_tensor = build_hierarchical_candidate_batch_numba(home_x, home_y, work_x, work_y, has_work, origin_x, origin_y, cand_x, cand_y,
         cand_statent, cand_employees, cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_ovgk_share_a, cand_ovgk_share_b,
         cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask)
     
-    candidate_tensor, candidate_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)
+    candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)
 
     ############ Training the model ###########
     logger.info("\t Training medium two-input model...")
@@ -225,32 +225,37 @@ def execute(context):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    candidate_static_x  = candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:]
+    candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]
+
     model = TwoInputChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2],
                                 person_hidden_dim=32, hidden_dims=(32, 32), dropout_rate=0.1)
-    train_two_input_with_mask(model=model, person_x=person_trip_matrix, candidate_x=candidate_tensor, y=y, valid_mask=valid_mask, weight_decay=1e-3, logger_instance=logger, weights=weights,
+    train_two_input_with_mask(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
+                              y=y, valid_mask=valid_mask, weight_decay=1e-3, logger_instance=logger, weights=weights,
                               epochs=int(context.config("medium_model_epochs")),
                               batch_size=int(context.config("medium_model_batch_size")),
-                              lr=float(context.config("medium_model_learning_rate")),        
+                              lr=float(context.config("medium_model_learning_rate")),
                               num_threads=int(context.config("medium_model_torch_num_threads")))
 
     ########## Building wrapper and saving model ##########
-    wrapper = MediumLevel1TwoInputWrapper(model=model, person_scaler=person_scaler, candidate_scaler=candidate_scaler, person_trip_cols=person_trip_cols,
-        candidate_cols=CANDIDATE_FEATURES, children_by_level0=children_by_level0, level1_candidate_attributes_by_level0=level1_candidate_attributes_by_level0,
+    wrapper = MediumLevel1TwoInputWrapper(model=model, person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler,
+        candidate_static_scaler=candidate_static_scaler, candidate_dynamic_scaler=candidate_dynamic_scaler,
+        person_trip_cols=person_trip_cols, candidate_cols=CANDIDATE_FEATURES,
+        children_by_level0=children_by_level0, level1_candidate_attributes_by_level0=level1_candidate_attributes_by_level0,
         purpose_categories=purpose_categories)
     wrapper.save(model_path)
-    joblib.dump(candidate_scaler, candidate_scaler_path)
 
     ########### Analysis and plots ##########
-    _ = plot_analysis(context=context, wrapper=wrapper, person_trip_matrix=person_trip_matrix, candidate_tensor=candidate_tensor, valid_mask=valid_mask, df=df, 
-                                  children_by_level0=children_by_level0, h3_geo_level1=h3_geo_level1, centroid_x_by_l1=centroid_x_by_l1, centroid_y_by_l1=centroid_y_by_l1)
+    _ = plot_analysis(context=context, wrapper=wrapper, person_trip_matrix=person_trip_matrix, candidate_tensor=candidate_tensor, valid_mask=valid_mask, df=df,
+                      children_by_level0=children_by_level0, h3_geo_level1=h3_geo_level1, centroid_x_by_l1=centroid_x_by_l1, centroid_y_by_l1=centroid_y_by_l1)
 
     logger.info("Medium model saved to %s", model_path)
-    return model_path, candidate_scaler_path
+    return (model_path,)
 
 
 def plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, valid_mask, df, children_by_level0, h3_geo_level1, centroid_x_by_l1, centroid_y_by_l1):
     logger.info("Predicting on training data and plotting level1 counts...")
-    pred_idx = wrapper.predict_from_inputs(person_trip_matrix, candidate_tensor, valid_mask, rng=None, return_probabilities=False)
+    pred_idx = wrapper.predict_from_inputs(person_trip_matrix, candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:], candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC], valid_mask, rng=None, return_probabilities=False)
 
     predicted_level1 = []
     for i, level0 in enumerate(df["destination_level_0"].to_numpy()):

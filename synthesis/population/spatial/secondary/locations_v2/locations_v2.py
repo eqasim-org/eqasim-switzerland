@@ -61,10 +61,10 @@ def _init_locations_v2_worker(wrapper, worker_torch_threads, enable_mkldnn,
         torch.set_num_threads(int(worker_torch_threads))
         torch.set_num_interop_threads(int(worker_torch_threads))
 
-    if not wrapper._optimized and enable_compile:
-        wrapper.optimize_wrapper(enable_compile=enable_compile, compile_mode=compile_mode)
+    # torch.compile artifacts do not survive pickling — each worker must compile its own copy.
+    if enable_compile:
+        wrapper.optimize_wrapper(enable_compile=True, compile_mode=compile_mode)
 
-    # If the wrappers are provided, we use them, they are already compiled and optimized in the execute (the main)        
     _WORKER_STATE["wrapper"] = wrapper
     _WORKER_PROGRESS_QUEUE = progress_queue
     _WORKER_PROGRESS_FLUSH_EVERY = max(1, int(progress_flush_every))
@@ -278,26 +278,48 @@ def execute(context):
     else:
         mp_context = get_platform_mp_context()
         progress_queue = mp_context.Queue()
+        base_seed = int(context.config("random_seed"))
+        # Keep at most 2× num_processes tasks in-flight to bound memory usage while ensuring
+        # all workers stay busy. Slots are refilled one-for-one as completions come in.
+        max_inflight = num_processes * 2
+        chunk_queue = list(enumerate(chunk_ids))   # [(chunk_idx, chunk_id), ...]
+        submit_cursor = 0
 
         with context.progress(label="Assigning secondary locations with locations_v2", total=len(unique_persons)) as progress:
-            with ProcessPoolExecutor(max_workers=num_processes, mp_context=mp_context, initializer=_init_locations_v2_worker,
-                                     initargs=(wrapper, worker_torch_threads, True, 
-                                            True, "max-autotune", progress_queue, progress_flush_persons)) as executor:
-                futures = {}
-                base_seed = int(context.config("random_seed"))
-                for chunk_idx, chunk_id in enumerate(chunk_ids):
-                    trips_chunk = trips_by_chunk[chunk_id]
-                    meta_chunk = meta_by_chunk.get(chunk_id, empty_meta_chunk)
-                    futures[executor.submit(_assign_person_chunk, trips_chunk, meta_chunk, base_seed + chunk_idx)] = chunk_id
+            with ProcessPoolExecutor(
+                max_workers=num_processes,
+                mp_context=mp_context,
+                initializer=_init_locations_v2_worker,
+                initargs=(wrapper, worker_torch_threads, True, True, "max-autotune", progress_queue, progress_flush_persons),
+            ) as executor:
+                pending = {}  # future -> chunk_id
 
-                remaining = set(futures.keys())
-                while remaining:
+                # seed the pipeline
+                while submit_cursor < len(chunk_queue) and len(pending) < max_inflight:
+                    chunk_idx, chunk_id = chunk_queue[submit_cursor]
+                    submit_cursor += 1
+                    pending[executor.submit(_assign_person_chunk,
+                                            trips_by_chunk[chunk_id],
+                                            meta_by_chunk.get(chunk_id, empty_meta_chunk),
+                                            base_seed + chunk_idx)] = chunk_id
+
+                while pending:
                     _drain_progress_queue(progress, progress_queue)
-                    done, remaining = wait(remaining, timeout=0.2, return_when=FIRST_COMPLETED)
+                    done, _ = wait(list(pending.keys()), timeout=0.1, return_when=FIRST_COMPLETED)
                     for future in done:
+                        chunk_id = pending.pop(future)
                         recs, conv = future.result()
                         locations_records.extend(recs)
                         convergence_records.extend(conv)
+                        # refill the freed slot immediately so workers stay busy
+                        if submit_cursor < len(chunk_queue):
+                            next_idx, next_chunk_id = chunk_queue[submit_cursor]
+                            submit_cursor += 1
+                            pending[executor.submit(_assign_person_chunk,
+                                                    trips_by_chunk[next_chunk_id],
+                                                    meta_by_chunk.get(next_chunk_id, empty_meta_chunk),
+                                                    base_seed + next_idx)] = next_chunk_id
+                    _drain_progress_queue(progress, progress_queue)
 
                 _drain_progress_queue(progress, progress_queue)
 

@@ -103,14 +103,12 @@ def _prepare_destination_level2_index(context, h3_data):
 
 
 def _reverse_tree(h3_tree):
-    reverse = {}
-    r_set = reverse.__setitem__
-    for grandparent, parents in h3_tree.items():
-        for parent, children in parents.items():
-            gp_parent = (parent, grandparent)
-            for child in children:
-                r_set(child, gp_parent)
-    return reverse
+    l1_to_siblings = {}
+    for l1_dict in h3_tree.values():
+        l1_list = list(l1_dict.keys())
+        for l1 in l1_list:
+            l1_to_siblings[l1] = [s for s in l1_list if s != l1]
+    return l1_to_siblings
 
 
 
