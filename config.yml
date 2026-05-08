@@ -8,6 +8,7 @@ output_path: /cache
 run:
     - synthesis.output
     - matsim.simulation.run
+    - analysis.webmap_export
 
 # These are configuration options that we use in the pipeline
 config:
@@ -49,3 +50,5 @@ config:
 
     # specifies if we want to use VDF as the traffic model, default is false
     use_vdf: false
+
+    webmap_export: both
