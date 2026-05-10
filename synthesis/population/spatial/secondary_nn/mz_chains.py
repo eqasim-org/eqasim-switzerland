@@ -38,6 +38,10 @@ def execute(context):
         trips_sorted.groupby("person_id")["trip_destination_distance_from_home"].transform("max")
     )
 
+    trips_sorted["daily_longest_distance_from_work"] = (
+        trips_sorted.groupby("person_id")["trip_destination_distance_from_work"].transform("max")
+    )
+
     trips_sorted["daily_crowfly_total"] = trips_sorted.groupby("person_id")["crowfly_distance"].transform("sum")
 
     trips_sorted["crowfly_consumed_before_trip"] = (
@@ -49,8 +53,12 @@ def execute(context):
     trips_per_person = trips_sorted.groupby("person_id")["trip_id"].transform("size")
     trips_sorted["trip_position_class"] = trip_progress / np.maximum(trips_per_person-1, 1)
 
+    # Normalize trip departure times to [0, 1] within person-day.
+    min_departure = 0.0
+    max_departure = 3600.0 * 24.0
+    trips_sorted["departure_time_normalized"] = (trips_sorted["departure_time"] % max_departure - min_departure) / (max_departure - min_departure)
 
     return trips_sorted[["person_id", "trip_id", 
                          "trip_destination_distance_from_home", "trip_destination_distance_from_work", 
-                         "daily_longest_distance_from_home", "daily_crowfly_total", 
-                         "crowfly_consumed_before_trip", "trip_position_class"]]
+                         "daily_longest_distance_from_home", "daily_longest_distance_from_work", "daily_crowfly_total", 
+                         "crowfly_consumed_before_trip", "trip_position_class","departure_time_normalized"]]

@@ -148,6 +148,8 @@ def _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_w
             'daily_crowfly_total': first["daily_crowfly_total"],
             'crowfly_consumed_before_trip': 0.0,
             'trip_position_class': 0.0,
+            'daily_longest_distance_from_work': first["daily_longest_distance_from_work"],
+            'departure_time_normalized': first["departure_time_normalized"],
         }
 
         # Faster than concat for single row prepend

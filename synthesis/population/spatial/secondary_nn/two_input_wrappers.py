@@ -1,9 +1,9 @@
 import numpy as np
-from synthesis.population.spatial.secondary.locations_v2.locations_v2_helpers import _prepare_destination_level2_index, _reverse_tree
+from .locations_v2_helpers import _prepare_destination_level2_index, _reverse_tree
 import torch
 from shapely.geometry import Point
 import logging
-from .two_input_features import (CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, DYNAMIC_CANDIDATE_FEATURES, N_PERSON_STATIC, N_CANDIDATE_DYNAMIC, transform_candidate_static_matrix, transform_candidate_dynamic_matrix, transform_person_static_vector, transform_person_dynamic_vector, transform_person_trip_vector)
+from .two_input_features import (CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, DYNAMIC_CANDIDATE_FEATURES, N_PERSON_STATIC, N_CANDIDATE_DYNAMIC, ORIGIN_PURPOSE_REMAP, transform_candidate_static_matrix, transform_candidate_dynamic_matrix, transform_person_static_vector, transform_person_dynamic_vector, transform_person_trip_vector)
 from .two_input_nn import TwoInputChoiceModel, predict_two_input_proba
 from .hierarchical_model_utils import build_dynamic_vector
 
@@ -221,18 +221,26 @@ class CoarseLevel0TwoInputWrapper:
         return build_dynamic_vector(hx=home_x, hy=home_y, wx=work_x, wy=work_y, ox=origin_x, oy=origin_y, centroid_x=self.centroid_x, centroid_y=self.centroid_y, has_work=has_work)
 
     def predict_level0(self, home_x, home_y, work_x, work_y, origin_x, origin_y, age, sex, employed, car_availability, income_class, 
-                       daily_longest_distance_from_home, daily_crowfly_total, crowfly_consumed_before_trip, trip_position_class, purpose, 
+                       daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work,
+                       crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, purpose, origin_purpose,
                        candidate_mask=None, rng=None):
         safe_daily_longest = float(daily_longest_distance_from_home) if np.isfinite(daily_longest_distance_from_home) and float(daily_longest_distance_from_home) >= 0.0 else 0.0
         safe_daily_total = float(daily_crowfly_total) if np.isfinite(daily_crowfly_total) and float(daily_crowfly_total) >= 0.0 else 0.0
+        safe_daily_longest_work = float(daily_longest_distance_from_work) if np.isfinite(daily_longest_distance_from_work) and float(daily_longest_distance_from_work) >= 0.0 else 0.0
         safe_consumed = float(crowfly_consumed_before_trip) if np.isfinite(crowfly_consumed_before_trip) and float(crowfly_consumed_before_trip) >= 0.0 else 0.0
         safe_trip_position = float(trip_position_class) if np.isfinite(trip_position_class) else 2.0
+        safe_departure_time = float(departure_time_normalized) if np.isfinite(departure_time_normalized) else 0.5
 
         purpose_idx = self.purpose_categories.index(str(purpose)) if str(purpose) in self.purpose_categories else 0
         purpose_hot = np.eye(len(self.purpose_categories), dtype=np.float32)[purpose_idx]
+        remapped_origin = ORIGIN_PURPOSE_REMAP.get(str(origin_purpose), str(origin_purpose))
+        origin_purpose_idx = self.purpose_categories.index(remapped_origin) if remapped_origin in self.purpose_categories else -1
+        origin_purpose_hot = np.eye(len(self.purpose_categories), dtype=np.float32)[origin_purpose_idx] if origin_purpose_idx >= 0 else np.zeros(len(self.purpose_categories), dtype=np.float32)
         person = transform_person_trip_vector(age=age, income_class=income_class, daily_longest=safe_daily_longest, daily_total=safe_daily_total,
-            sex=sex, employed=employed, car_availability=car_availability, consumed_before=safe_consumed, trip_position=safe_trip_position,
-            purpose_hot=purpose_hot, static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler)
+            daily_longest_work=safe_daily_longest_work, sex=sex, employed=employed, car_availability=car_availability,
+            consumed_before=safe_consumed, trip_position=safe_trip_position, departure_time=safe_departure_time,
+            purpose_hot=purpose_hot, origin_purpose_hot=origin_purpose_hot,
+            static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler)
         has_work = np.isfinite(work_x) and np.isfinite(work_y)
         candidate_dynamic        = self._build_candidate_dynamic(home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
         candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.candidate_dynamic_scaler)[None, :, :]
@@ -479,7 +487,7 @@ class DetailedLevel2TwoInputWrapper:
         return build_dynamic_vector(hx=home_x, hy=home_y, wx=work_x, wy=work_y, ox=origin_x, oy=origin_y,
                                     centroid_x=attrs["x"], centroid_y=attrs["y"], has_work=has_work)
 
-    def predict_level2(self, level0_h3, level1_h3, home_x, home_y, work_x, work_y, origin_x, origin_y, age, daily_longest_distance_from_home, daily_crowfly_total, crowfly_consumed_before_trip, trip_position_class, sex, employed, car_availability, income_class, purpose, max_utility=False, rng=None, **kwargs):
+    def predict_level2(self, level0_h3, level1_h3, home_x, home_y, work_x, work_y, origin_x, origin_y, age, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work, crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, sex, employed, car_availability, income_class, purpose, origin_purpose, max_utility=False, rng=None, **kwargs):
         key = (level0_h3, level1_h3)
         attrs = self.level2_candidate_attributes_by_level1.get(key)
         if attrs is None:
@@ -492,14 +500,21 @@ class DetailedLevel2TwoInputWrapper:
 
         safe_daily_longest = float(daily_longest_distance_from_home) if np.isfinite(daily_longest_distance_from_home) and float(daily_longest_distance_from_home) >= 0.0 else 0.0
         safe_daily_total = float(daily_crowfly_total) if np.isfinite(daily_crowfly_total) and float(daily_crowfly_total) >= 0.0 else 0.0
+        safe_daily_longest_work = float(daily_longest_distance_from_work) if np.isfinite(daily_longest_distance_from_work) and float(daily_longest_distance_from_work) >= 0.0 else 0.0
         safe_consumed = float(crowfly_consumed_before_trip) if np.isfinite(crowfly_consumed_before_trip) and float(crowfly_consumed_before_trip) >= 0.0 else 0.0
         safe_trip_position = float(trip_position_class) if np.isfinite(trip_position_class) else 2.0
+        safe_departure_time = float(departure_time_normalized) if np.isfinite(departure_time_normalized) else 0.5
 
         purpose_idx = self.purpose_categories.index(str(purpose)) if str(purpose) in self.purpose_categories else 0
         purpose_hot = np.eye(len(self.purpose_categories), dtype=np.float32)[purpose_idx]
+        remapped_origin = ORIGIN_PURPOSE_REMAP.get(str(origin_purpose), str(origin_purpose))
+        origin_purpose_idx = self.purpose_categories.index(remapped_origin) if remapped_origin in self.purpose_categories else -1
+        origin_purpose_hot = np.eye(len(self.purpose_categories), dtype=np.float32)[origin_purpose_idx] if origin_purpose_idx >= 0 else np.zeros(len(self.purpose_categories), dtype=np.float32)
         person = transform_person_trip_vector(age=age, income_class=income_class, daily_longest=safe_daily_longest, daily_total=safe_daily_total,
-            sex=sex, employed=employed, car_availability=car_availability, consumed_before=safe_consumed, trip_position=safe_trip_position,
-            purpose_hot=purpose_hot, static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler)
+            daily_longest_work=safe_daily_longest_work, sex=sex, employed=employed, car_availability=car_availability,
+            consumed_before=safe_consumed, trip_position=safe_trip_position, departure_time=safe_departure_time,
+            purpose_hot=purpose_hot, origin_purpose_hot=origin_purpose_hot,
+            static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler)
         has_work = np.isfinite(work_x) and np.isfinite(work_y)
         candidate_dynamic        = self._build_candidate_dynamic(attrs, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
         candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.candidate_dynamic_scaler)[None, :, :]
@@ -569,15 +584,15 @@ class LocationChoiceModelWrapper:
 
     @classmethod
     def build(cls, context, map_location=None, optimize=True):
-        coarse_model_path, _, _ = context.stage("synthesis.population.spatial.secondary.locations_v2.coarse_model")
-        medium_model_path = context.stage("synthesis.population.spatial.secondary.locations_v2.medium_model")[0]
-        detailed_model_path = context.stage("synthesis.population.spatial.secondary.locations_v2.detailed_model")[0]
+        coarse_model_path, _, _ = context.stage("synthesis.population.spatial.secondary_nn.coarse_model")
+        medium_model_path = context.stage("synthesis.population.spatial.secondary_nn.medium_model")[0]
+        detailed_model_path = context.stage("synthesis.population.spatial.secondary_nn.detailed_model")[0]
         obj = cls.load(coarse_path=coarse_model_path, medium_path=medium_model_path, detailed_path=detailed_model_path, map_location=map_location, optimize=optimize)
         obj.build_candidates_and_trees(context)
         return obj
     
     def build_candidates_and_trees(self, context):
-        h3_data, h3_geo, h3_tree = context.stage("synthesis.population.spatial.secondary.locations_v2.h3")
+        h3_data, h3_geo, h3_tree = context.stage("synthesis.population.spatial.secondary_nn.h3")
         self.destination_index, self.destination_fallback = _prepare_destination_level2_index(context, h3_data)
         self.l1_siblings = _reverse_tree(h3_tree)  # {level1: [sibling_level1s]} — built once for O(1) fallback widening
 
@@ -684,15 +699,18 @@ class LocationChoiceModelWrapper:
             "Destination pools / sibling map are not initialized. Call build_candidates_and_trees(context) before predict()."
         )
 
-    def _get_cached_person_static(self, person_id, age, income_class, daily_longest, daily_total, sex, employed, car_availability):
+    def _get_cached_person_static(self, person_id, age, income_class, daily_longest, daily_total, daily_longest_work, sex, employed, car_availability):
         if person_id != self._last_person_id:
-            self._last_person_static = transform_person_static_vector(age, income_class, daily_longest, daily_total, sex, employed, car_availability, self.c.person_static_scaler)
+            self._last_person_static = transform_person_static_vector(age, income_class, daily_longest, daily_total, daily_longest_work, sex, employed, car_availability, self.c.person_static_scaler)
             self._last_person_id = person_id
         return self._last_person_static
 
-    def _build_person_dynamic(self, consumed_before, trip_position, purpose):
-        purpose_hot = self._purpose_identity[self._purpose_index[purpose]]
-        return transform_person_dynamic_vector(consumed_before, trip_position, purpose_hot, self.c.person_dynamic_scaler)
+    def _build_person_dynamic(self, consumed_before, trip_position, departure_time, purpose, origin_purpose):
+        purpose_hot = self._purpose_identity[self._purpose_index.get(purpose, 0)]
+        remapped_origin = ORIGIN_PURPOSE_REMAP.get(str(origin_purpose), str(origin_purpose))
+        origin_idx = self._purpose_index.get(remapped_origin, -1)
+        origin_purpose_hot = self._purpose_identity[origin_idx] if origin_idx >= 0 else np.zeros(len(self._purpose_categories), dtype=np.float32)
+        return transform_person_dynamic_vector(consumed_before, trip_position, departure_time, purpose_hot, origin_purpose_hot, self.c.person_dynamic_scaler)
 
     def _predict_level0_from_person(self, person_matrix, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work, rng, purpose):
         candidate_dynamic        = self.c._build_candidate_dynamic(home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
@@ -734,10 +752,11 @@ class LocationChoiceModelWrapper:
 
     ##################### Main prediction method that runs the full three-level prediction process #####################
 
-    def predict(self, person_id, home_x, home_y, work_x, work_y, origin_x, origin_y, age, daily_longest_distance_from_home, daily_crowfly_total, crowfly_consumed_before_trip,
-                trip_position_class, sex, employed, car_availability, income_class, purpose, has_work, has_education, rng):
-        person_static  = self._get_cached_person_static(person_id, age, income_class, daily_longest_distance_from_home, daily_crowfly_total, sex, employed, car_availability)
-        person_dynamic = self._build_person_dynamic(crowfly_consumed_before_trip, trip_position_class, purpose)
+    def predict(self, person_id, home_x, home_y, work_x, work_y, origin_x, origin_y, age, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work,
+                crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, sex, employed, car_availability, income_class, purpose, origin_purpose,
+                has_work, has_education, rng):
+        person_static  = self._get_cached_person_static(person_id, age, income_class, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work, sex, employed, car_availability)
+        person_dynamic = self._build_person_dynamic(crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, purpose, origin_purpose)
         person_matrix  = np.concatenate([person_static, person_dynamic], axis=1)
         level0_h3 = self._predict_level0_from_person(person_matrix, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=origin_x, origin_y=origin_y, 
                                                      has_work=has_work, rng=rng, purpose=purpose)

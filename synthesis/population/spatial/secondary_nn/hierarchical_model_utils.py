@@ -3,6 +3,7 @@ from numba import njit, prange
 
 SECONDARY_ACTIVITIES = ["other", "shop", "leisure", "work_secondary", "home_secondary", "education_secondary"]
 PRIMARY_ACTIVITIES = ["home", "work", "education"]
+ALL_ACTIVITIES = SECONDARY_ACTIVITIES + PRIMARY_ACTIVITIES
 
 @njit(parallel=True, fastmath=True)
 def build_hierarchical_candidate_batch_numba(hx, hy, wx, wy, has_work, ox, oy, cand_x, cand_y, cand_statent, cand_employees, cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_ovgk_share_a, cand_ovgk_share_b, cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask):

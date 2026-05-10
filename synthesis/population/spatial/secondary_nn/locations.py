@@ -101,6 +101,9 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
         trip_index_arr = grp["trip_index"].to_numpy()
         daily_longest_arr = grp["daily_longest_distance_from_home"].to_numpy()
         daily_total_arr = grp["daily_crowfly_total"].to_numpy()
+        daily_longest_work_arr = grp["daily_longest_distance_from_work"].to_numpy()
+        departure_time_arr = grp["departure_time_normalized"].to_numpy()
+        preceding_purpose_arr = grp["preceding_purpose"].to_numpy()
         consumed_fore_trip_start = 0.0
         trip_pos = 0.0
         trip_pos_inc = 1/max(1, person_trip_count - 1)
@@ -117,12 +120,17 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
                 next_x, next_y = edu_x, edu_y
             elif following_purpose in SECONDARY_SET:
                 chain_daily_longest = daily_longest_arr[local_idx]
-                chain_daily_total = daily_total_arr[local_idx]                                
+                chain_daily_total = daily_total_arr[local_idx]
+                chain_daily_longest_work = daily_longest_work_arr[local_idx]
+                departure_time = departure_time_arr[local_idx]
+                origin_purpose = preceding_purpose_arr[local_idx]
                 # Predict first level coarse H3 cell
                 destination_id, geom = wrapper.predict(person_id=person_id, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=current_x, origin_y=current_y, 
                                                        age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class, 
                                                        daily_longest_distance_from_home=chain_daily_longest, daily_crowfly_total=chain_daily_total,
-                                                       crowfly_consumed_before_trip=consumed_fore_trip_start, trip_position_class=trip_pos, 
+                                                       daily_longest_distance_from_work=chain_daily_longest_work,
+                                                       crowfly_consumed_before_trip=consumed_fore_trip_start, trip_position_class=trip_pos,
+                                                       departure_time_normalized=departure_time, origin_purpose=origin_purpose,
                                                        purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng)
 
                 # sample a destination point within the predicted level 2 cell                 
@@ -168,11 +176,11 @@ def configure(context):
     context.stage("synthesis.population.spatial.primary.locations")
     context.stage("synthesis.population.destinations")
 
-    context.stage("synthesis.population.spatial.secondary.locations_v2.h3")
-    context.stage("synthesis.population.spatial.secondary.locations_v2.mz_chains")
-    context.stage("synthesis.population.spatial.secondary.locations_v2.coarse_model")
-    context.stage("synthesis.population.spatial.secondary.locations_v2.medium_model")
-    context.stage("synthesis.population.spatial.secondary.locations_v2.detailed_model")
+    context.stage("synthesis.population.spatial.secondary_nn.h3")
+    context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
+    context.stage("synthesis.population.spatial.secondary_nn.coarse_model")
+    context.stage("synthesis.population.spatial.secondary_nn.medium_model")
+    context.stage("synthesis.population.spatial.secondary_nn.detailed_model")
 
     context.config("random_seed")
     context.config("locations_v2_num_processes", 8)
@@ -191,7 +199,7 @@ def execute(context):
     wrapper = LocationChoiceModelWrapper.build(context, optimize=True)    
     wrapper.assert_ready_for_prediction()
 
-    ########## Loading H3 data ##########
+    ########## Loading population data ##########
     logger.info("\t Loading population data")    
     df_primary = _prepare_primary_locations(context)
     df_person = _prepare_person_attributes(context)
@@ -213,14 +221,19 @@ def execute(context):
     
     df_meta = df_meta[["person_id", "home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", 
                        "sex", "employed", "income_class", "car_availability","has_work", "has_education"]]
+    
+    # remove nans from meta data, they can provoke an error or loss of performance with numba
+    df_meta.loc[~df_meta["has_work"], ["work_x","work_y"]] = 0.0
+    df_meta.loc[~df_meta["has_education"], ["edu_x","edu_y"]] = 0.0    
 
     # get the trips and enrich them
     df_trips = context.stage("synthesis.population.trips").copy()
     if "mz_person_id" not in df_trips.columns or "trip_id" not in df_trips.columns:
         raise RuntimeError("synthesis.population.trips must provide mz_person_id and trip_id for mz_chains feature lookup")
 
-    mz_chains = context.stage("synthesis.population.spatial.secondary.locations_v2.mz_chains")[["person_id", "trip_id", "daily_longest_distance_from_home",
-                                    "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class"]].rename(columns={"person_id": "mz_person_id"})
+    mz_chains = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[["person_id", "trip_id", "daily_longest_distance_from_home",
+                                    "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
+                                    "departure_time_normalized", "daily_longest_distance_from_work"]].rename(columns={"person_id": "mz_person_id"})
 
     df_trips = df_trips.merge(mz_chains, how="left", on=["mz_person_id", "trip_id"])
     df_trips = df_trips.sort_values(by=["person_id", "trip_id"]).reset_index(drop=True)
@@ -245,11 +258,16 @@ def execute(context):
     # ensure these distances are not infinite or NaN, as that would break the models; we can set them to 0 since the models will learn to ignore them when the corresponding features are missing
     df_trips["daily_longest_distance_from_home"] = df_trips["daily_longest_distance_from_home"].replace([np.inf, -np.inf], np.nan).fillna(df_trips["daily_longest_distance_from_home"].median())
     df_trips["daily_crowfly_total"] = df_trips["daily_crowfly_total"].replace([np.inf, -np.inf], np.nan).fillna(df_trips["daily_crowfly_total"].median())
+    df_trips["daily_longest_distance_from_work"] = df_trips["daily_longest_distance_from_work"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df_trips["crowfly_consumed_before_trip"] = df_trips["crowfly_consumed_before_trip"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    df_trips["departure_time_normalized"] = df_trips["departure_time_normalized"].replace([np.inf, -np.inf], np.nan).fillna(0.5)
 
     # ensure cols are in the right type for the models
+    assert df_meta.isna().sum().sum()==0, "Meta data contains NaNs"
+    assert df_trips.isna().sum().sum()==0, "trips data contains NaNs"
     df_trips = df_trips.astype({"person_id": "int64", "preceding_purpose": str, "following_purpose": str, "trip_index": int, "daily_longest_distance_from_home": float, 
-                                "daily_crowfly_total": float, "crowfly_consumed_before_trip": float, "trip_position_class": float})
+                                "daily_crowfly_total": float, "daily_longest_distance_from_work": float, "crowfly_consumed_before_trip": float,
+                                "trip_position_class": float, "departure_time_normalized": float})
     df_meta = df_meta.astype({"person_id": "int64", "home_x": float, "home_y": float, "work_x": float, "work_y": float, "edu_x": float, "edu_y": float, "age": float, "sex": float, 
                               "employed": float, "income_class": float, "car_availability": float, "has_work": bool, "has_education": bool, "_chunk_id": int})
 

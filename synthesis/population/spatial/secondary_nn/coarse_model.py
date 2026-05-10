@@ -19,8 +19,8 @@ MODEL_NAME = "coarse_model.pt"
 
 
 def configure(context):
-    context.stage("synthesis.population.spatial.secondary.locations_v2.h3")
-    context.stage("synthesis.population.spatial.secondary.locations_v2.mz_chains")
+    context.stage("synthesis.population.spatial.secondary_nn.h3")
+    context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
     context.stage("data.constants")
@@ -55,9 +55,10 @@ def execute(context):
     mz_persons["car_availability"] = (mz_persons["car_availability"] != constants.CAR_AVAILABILITY_NEVER)
 
     mz_trips, _ = context.stage("data.microcensus.trips")
-    mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "purpose"]]
-    mz_chain_trips = context.stage("synthesis.population.spatial.secondary.locations_v2.mz_chains")[[
-        "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class"
+    mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "origin_purpose", "purpose"]]
+    mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
+        "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", 
+        "trip_position_class", "departure_time_normalized", "daily_longest_distance_from_work"
     ]]
     mz_trips = mz_trips.merge(mz_chain_trips, on=["person_id", "trip_id"], how="left")
 
@@ -68,7 +69,7 @@ def execute(context):
     inside_ch = within_ch(context, mz_trips, cols1=["origin_x", "origin_y"], cols2=["destination_x", "destination_y"])
     mz_trips = mz_trips[inside_ch].reset_index(drop=True)
 
-    h3_data, h3_geo, _ = context.stage("synthesis.population.spatial.secondary.locations_v2.h3")
+    h3_data, h3_geo, _ = context.stage("synthesis.population.spatial.secondary_nn.h3")
     trips_h3 = h3_data["microcensus_trips"][["person_id", "trip_id", "destination_level_0"]]
     h3_geo_level0 = h3_geo["level_0"]
 
@@ -104,8 +105,9 @@ def execute(context):
 
     person_cols = ["person_id", "age", "sex", "employed", "car_availability", "income_class", "home_x", "home_y", "work_x", "work_y"]
     trip_cols = [
-        "person_id", "trip_id", "origin_x", "origin_y", "destination_level_0", "purpose",
+        "person_id", "trip_id", "origin_x", "origin_y", "destination_level_0", "purpose","origin_purpose",
         "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
+        "departure_time_normalized", "daily_longest_distance_from_work"
     ]
     df_trips = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
     df_trips = df_trips[df_trips["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=["destination_level_0"])
@@ -147,13 +149,19 @@ def execute(context):
     sex = df_trips["sex"].to_numpy(dtype=np.float32)
     employed = df_trips["employed"].to_numpy(dtype=np.float32)
     car_availability = df_trips["car_availability"].to_numpy(dtype=np.float32)
+    daily_longest_work = df_trips["daily_longest_distance_from_work"].to_numpy(dtype=np.float64)
+    daily_longest_work = np.where(np.isfinite(daily_longest_work) & (daily_longest_work >= 0.0), daily_longest_work, 0.0)
+    departure_time = df_trips["departure_time_normalized"].to_numpy(dtype=np.float64)
+    departure_time = np.where(np.isfinite(departure_time), departure_time, 0.5)
 
     ################ Building tensors and fitting scalers ################
     logger.info("\t Building person-trip matrix...")
     purpose_categories = [str(p) for p in SECONDARY_ACTIVITIES]
     person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
-                                                                                 daily_longest=daily_longest, daily_total=daily_total, consumed_before=consumed_before, 
-                                                                                 trip_position=trip_position, purpose_series=df_trips["purpose"], purpose_categories=purpose_categories)
+                                                                                 daily_longest=daily_longest, daily_total=daily_total, daily_longest_work=daily_longest_work,
+                                                                                 consumed_before=consumed_before, trip_position=trip_position, departure_time=departure_time,
+                                                                                 purpose_series=df_trips["purpose"], origin_purpose_series=df_trips["origin_purpose"],
+                                                                                 purpose_categories=purpose_categories)
 
     logger.info("\t Building candidate tensor with Numba...")
     candidate_tensor = build_coarse_candidate_batch_numba(home_x, home_y, work_x, work_y, has_work, origin_x, origin_y, centroid_x, centroid_y, statent_per_h3, employees_per_h3,
