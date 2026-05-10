@@ -1,9 +1,14 @@
 import numpy as np
 from numba import njit, prange
+from .feature_encoding import ORIGIN_PURPOSE_REMAP
 
 SECONDARY_ACTIVITIES = ["other", "shop", "leisure", "work_secondary", "home_secondary", "education_secondary"]
 PRIMARY_ACTIVITIES = ["home", "work", "education"]
 ALL_ACTIVITIES = SECONDARY_ACTIVITIES + PRIMARY_ACTIVITIES
+
+ORIGIN_PURPOSE_REMAP = {"home": "home_secondary", "work": "work_secondary", "education": "education_secondary"}
+PURPOSES_INDEX = {purpose: idx for idx, purpose in enumerate(SECONDARY_ACTIVITIES)}
+PURPOSES_IDENTITY = np.eye(len(ALL_ACTIVITIES), dtype=np.float32)
 
 @njit(parallel=True, fastmath=True)
 def build_hierarchical_candidate_batch_numba(hx, hy, wx, wy, has_work, ox, oy, cand_x, cand_y, cand_statent, cand_employees, cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_ovgk_share_a, cand_ovgk_share_b, cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask):
@@ -226,3 +231,9 @@ def build_dynamic_vector(hx, hy, wx, wy, ox, oy, centroid_x, centroid_y, has_wor
 
 # Basic sanity check for the build_dynamic_vector function
 _ = build_dynamic_vector(12.5, 45.0, 8.0, 40.0, 10.0, 42.0, np.array([11.0, 13.0], dtype=np.float64), np.array([44.0, 46.0], dtype=np.float64), True)
+
+
+def encode_purpose(purpose):
+    remapped_purpose = ORIGIN_PURPOSE_REMAP.get(purpose, purpose)
+    purpose_index = PURPOSES_INDEX[remapped_purpose]
+    return PURPOSES_IDENTITY[purpose_index]

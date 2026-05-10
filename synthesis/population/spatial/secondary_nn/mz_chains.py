@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-
+from .hierarchical_utils import encode_purpose
 
 def configure(context):
     context.stage("data.microcensus.persons")
@@ -58,7 +58,24 @@ def execute(context):
     max_departure = 3600.0 * 24.0
     trips_sorted["departure_time_normalized"] = (trips_sorted["departure_time"] % max_departure - min_departure) / (max_departure - min_departure)
 
+    # Adding activity duration (we assume the last activity duration is 8h, which is a reasonable assumption for a night activity)
+    trips_sorted["activity_duration"] = trips_sorted["departure_time"].shift(-1) - trips_sorted["arrival_time"]
+    sel = trips_sorted["person_id"].shift(-1) != trips_sorted["person_id"]
+    trips_sorted.loc[sel, "activity_duration"] = 3600.0 * 8.0
+
+    trips_sorted["activity_duration_h"] = trips_sorted["activity_duration"].clip(0.0, 3600.0 * 16.0)/3600.0
+    # Adding activity chain as sum of one hot encoded purposes
+    
+    def build_activity_chain(group):
+        sequence = [group.iloc[0]["origin_purpose"]] + group["purpose"].tolist()
+        vectors = [encode_purpose(p) for p in sequence]
+        return np.sum(vectors, axis=0)
+
+    trips_sorted["activity_chain"] = trips_sorted.groupby("person_id").apply(build_activity_chain)
+    
+
     return trips_sorted[["person_id", "trip_id", 
                          "trip_destination_distance_from_home", "trip_destination_distance_from_work", 
                          "daily_longest_distance_from_home", "daily_longest_distance_from_work", "daily_crowfly_total", 
-                         "crowfly_consumed_before_trip", "trip_position_class","departure_time_normalized"]]
+                         "crowfly_consumed_before_trip", "trip_position_class","departure_time_normalized", "activity_duration_h",
+                         "activity_chain"]]

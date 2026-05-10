@@ -5,9 +5,9 @@ import pandas as pd
 import geopandas as gpd
 import h3
 from numba import njit, prange
-from .hierarchical_model_utils import SECONDARY_ACTIVITIES, PRIMARY_ACTIVITIES
+from .hierarchical_utils import SECONDARY_ACTIVITIES, PRIMARY_ACTIVITIES
 
-logger = logging.getLogger("synpp: locations_v2")
+logger = logging.getLogger("synpp: location_helpers")
 
 
 SECONDARY_SET = set(SECONDARY_ACTIVITIES)

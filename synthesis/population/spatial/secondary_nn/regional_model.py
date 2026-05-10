@@ -8,14 +8,14 @@ import matplotlib.pyplot as plt
 import joblib
 
 from .h3 import within_ch
-from .hierarchical_model_utils import SECONDARY_ACTIVITIES, build_coarse_candidate_batch_numba
-from .two_input_features import CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, fit_candidate_tensor, fit_person_trip_matrix
-from .two_input_nn import TwoInputChoiceModel, train_two_input_with_mask
-from .two_input_wrappers import CoarseLevel0TwoInputWrapper
+from .hierarchical_utils import SECONDARY_ACTIVITIES, build_coarse_candidate_batch_numba
+from .feature_encoding import CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, fit_candidate_tensor, fit_person_trip_matrix
+from .choice_model import NeuralChoiceModel, train_choice_model
+from .model_wrappers import RegionalChoiceWrapper
 
-logger = logging.getLogger("synpp: coarse_model")
+logger = logging.getLogger("synpp: regional_model")
 
-MODEL_NAME = "coarse_model.pt"
+MODEL_NAME = "regional_model.pt"
 
 
 def configure(context):
@@ -27,17 +27,17 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("synthesis.population.destinations")
 
-    context.config("overwrite_coarse_model_if_exists", True)
-    context.config("coarse_model_epochs", 30)
-    context.config("coarse_model_batch_size", 512)
-    context.config("coarse_model_learning_rate", 2e-2)
-    context.config("coarse_model_torch_num_threads", 16)
+    context.config("overwrite_regional_model_if_exists", True)
+    context.config("regional_model_epochs", 30)
+    context.config("regional_model_batch_size", 512)
+    context.config("regional_model_learning_rate", 2e-2)
+    context.config("regional_model_torch_num_threads", 16)
     context.config("random_seed")
 
 
 def execute(context):
-    logger.info("Training coarse model (two-input) for secondary location choice...")
-    overwrite_model = context.config("overwrite_coarse_model_if_exists")
+    logger.info("Training regional model (neural choice) for secondary location choice...")
+    overwrite_model = context.config("overwrite_regional_model_if_exists")
     model_path = os.path.join(context.working_directory, MODEL_NAME)
     person_static_scaler_path  = os.path.join(context.working_directory, "person_static_scaler.sklearn.pkl")
     person_dynamic_scaler_path = os.path.join(context.working_directory, "person_dynamic_scaler.sklearn.pkl")
@@ -157,7 +157,8 @@ def execute(context):
     ################ Building tensors and fitting scalers ################
     logger.info("\t Building person-trip matrix...")
     purpose_categories = [str(p) for p in SECONDARY_ACTIVITIES]
-    person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
+    person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(age=age, sex=sex, 
+                                                                                 employed=employed, car_availability=car_availability, income_class=income_class,
                                                                                  daily_longest=daily_longest, daily_total=daily_total, daily_longest_work=daily_longest_work,
                                                                                  consumed_before=consumed_before, trip_position=trip_position, departure_time=departure_time,
                                                                                  purpose_series=df_trips["purpose"], origin_purpose_series=df_trips["origin_purpose"],
@@ -179,14 +180,14 @@ def execute(context):
     candidate_static_x  = candidate_tensor[0:1, :, N_CANDIDATE_DYNAMIC:]  # [1, num_h3, 13] — static cols are identical for all rows; broadcast avoids redundant storage
     candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]    # [n_trips, num_h3, 3] — per-trip distances
 
-    model = TwoInputChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dims=(64, 32), dropout_rate=0.1)
-    train_two_input_with_mask(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
+    model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dims=(64, 32), dropout_rate=0.1)
+    train_choice_model(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
                               y=y, valid_mask=valid_mask, logger_instance=logger, weights=weights,
-                              epochs=int(context.config("coarse_model_epochs")),
-                              batch_size=int(context.config("coarse_model_batch_size")),
-                              lr=float(context.config("coarse_model_learning_rate")),
+                              epochs=int(context.config("regional_model_epochs")),
+                              batch_size=int(context.config("regional_model_batch_size")),
+                              lr=float(context.config("regional_model_learning_rate")),
                               weight_decay=1e-3,
-                              num_threads=int(context.config("coarse_model_torch_num_threads")))
+                              num_threads=int(context.config("regional_model_torch_num_threads")))
 
     ########## Building wrapper and saving model ##########
     static_feature_map = {
@@ -206,7 +207,7 @@ def execute(context):
     }
     static_candidate_features = np.column_stack([static_feature_map[name] for name in STATIC_CANDIDATE_FEATURES]).astype(np.float64)
 
-    wrapper = CoarseLevel0TwoInputWrapper(model=model, person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler,
+    wrapper = RegionalChoiceWrapper(model=model, person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler,
                                           candidate_static_scaler=candidate_static_scaler, candidate_dynamic_scaler=candidate_dynamic_scaler,
                                           person_trip_cols=person_trip_cols, candidate_cols=CANDIDATE_FEATURES,
                                           all_h3=all_h3, centroid_x=centroid_x, centroid_y=centroid_y,

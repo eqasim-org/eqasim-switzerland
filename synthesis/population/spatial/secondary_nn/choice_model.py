@@ -7,10 +7,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-logger = logging.getLogger("synpp: two_input_nn")
+logger = logging.getLogger("synpp: choice_model")
 
 
-class TwoInputChoiceModel(nn.Module):
+class NeuralChoiceModel(nn.Module):
     def __init__(self, person_input_dim, candidate_input_dim, person_hidden_dim=32, hidden_dims=(64, 32), dropout_rate=0.1, mask_threshold=1e-3):
         super().__init__()
         self.person_input_dim = int(person_input_dim)
@@ -22,7 +22,7 @@ class TwoInputChoiceModel(nn.Module):
         self.device = torch.device("cpu")
 
         if len(self.hidden_dims) == 0:
-            raise ValueError("TwoInputChoiceModel requires at least one hidden layer")
+            raise ValueError("NeuralChoiceModel requires at least one hidden layer")
 
         self.person_tower = nn.Sequential(
             nn.Linear(self.person_input_dim, self.person_hidden_dim),
@@ -59,7 +59,7 @@ class TwoInputChoiceModel(nn.Module):
         candidate_x = torch.cat([candidate_dynamic, candidate_static], dim=-1)    # [B, N, candidate_input_dim]
         if candidate_x.shape[-1] != self.candidate_input_dim:
             raise RuntimeError(
-                "TwoInputChoiceModel expected candidate feature width "
+                "NeuralChoiceModel expected candidate feature width "
                 f"{self.candidate_input_dim}, got {candidate_x.shape[-1]}. "
                 "Check candidate_input_dim at model construction."
             )
@@ -85,7 +85,7 @@ class TwoInputChoiceModel(nn.Module):
         return utilities
 
 
-def train_two_input_with_mask(model, person_static_x, person_dynamic_x, candidate_static_x, candidate_dynamic_x, y, valid_mask, epochs=50, batch_size=256, lr=1e-3, weight_decay=2e-3, num_threads=None, logger_instance=None, weights=None, grad_clip=5.0, lr_step_size=10, lr_gamma=0.5):
+def train_choice_model(model, person_static_x, person_dynamic_x, candidate_static_x, candidate_dynamic_x, y, valid_mask, epochs=50, batch_size=256, lr=1e-3, weight_decay=2e-3, num_threads=None, logger_instance=None, weights=None, grad_clip=5.0, lr_step_size=10, lr_gamma=0.5):
     lr_step_size = int(np.clip(lr_step_size, max(1, epochs // 6), max(1, epochs // 3)))
     if num_threads is not None:
         torch.set_num_threads(max(1, int(num_threads)))
@@ -106,7 +106,7 @@ def train_two_input_with_mask(model, person_static_x, person_dynamic_x, candidat
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
 
     local_logger = logger_instance or logger
-    local_logger.info("\tStarting two-input training")
+    local_logger.info("\tStarting training")
     t0 = time.time()
 
     for epoch in range(int(epochs)):
@@ -149,7 +149,7 @@ def train_two_input_with_mask(model, person_static_x, person_dynamic_x, candidat
         scheduler.step()
 
 
-def predict_two_input_proba(model, person_static, person_dynamic, candidate_static, candidate_dynamic, valid_mask_tensor=None):
+def predict_choice_proba(model, person_static, person_dynamic, candidate_static, candidate_dynamic, valid_mask_tensor=None):
     with torch.inference_mode():
         dev = model.device
         ps = torch.as_tensor(person_static,   dtype=torch.float32, device=dev)

@@ -8,8 +8,8 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from multiprocessing import get_context
 import torch
 
-from .locations_v2_helpers import (_prepare_primary_locations, _prepare_person_attributes, _euclidean, SECONDARY_SET, _get_first_location)
-from .two_input_wrappers import LocationChoiceModelWrapper
+from .location_helpers import (_prepare_primary_locations, _prepare_person_attributes, _euclidean, SECONDARY_SET, _get_first_location)
+from .model_wrappers import HierarchicalLocationChoiceModel
 
 logger = logging.getLogger("synpp")
 
@@ -50,7 +50,7 @@ def _drain_progress_queue(progress, progress_queue):
         progress.update(drained)
     return drained
 
-def _init_locations_v2_worker(wrapper, worker_torch_threads, enable_mkldnn, 
+def _init_location_worker(wrapper, worker_torch_threads, enable_mkldnn, 
                               enable_compile, compile_mode, progress_queue, progress_flush_every):  
     global _WORKER_PROGRESS_QUEUE
     global _WORKER_PROGRESS_FLUSH_EVERY
@@ -142,8 +142,10 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
             else:
                 raise ValueError(f"Unexpected following purpose {following_purpose} for person_id {person_id} trip_index {trip_index}")                       
             
-            trip_pos += trip_pos_inc
-            consumed_fore_trip_start += _euclidean(current_x, current_y, next_x, next_y)
+            if not (added_a_trip and local_idx==0):
+                # if the first trip was added as a synthetic primary trip, we don't want to advance the position in the day or the consumed distance, since that trip doesn't really exist and shouldn't affect the features of the subsequent trips; for all other trips, including the first one if it was not added synthetically, we do want to advance these features as usual
+                trip_pos += trip_pos_inc
+                consumed_fore_trip_start += _euclidean(current_x, current_y, next_x, next_y)
             current_x, current_y = next_x, next_y
 
         if _WORKER_PROGRESS_QUEUE is not None:
@@ -178,25 +180,25 @@ def configure(context):
 
     context.stage("synthesis.population.spatial.secondary_nn.h3")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
-    context.stage("synthesis.population.spatial.secondary_nn.coarse_model")
-    context.stage("synthesis.population.spatial.secondary_nn.medium_model")
-    context.stage("synthesis.population.spatial.secondary_nn.detailed_model")
+    context.stage("synthesis.population.spatial.secondary_nn.regional_model")
+    context.stage("synthesis.population.spatial.secondary_nn.subregional_model")
+    context.stage("synthesis.population.spatial.secondary_nn.local_model")
 
     context.config("random_seed")
-    context.config("locations_v2_num_processes", 8)
-    context.config("locations_v2_chunk_size_persons", 10000)
-    context.config("locations_v2_worker_torch_threads", 2)
-    context.config("locations_v2_progress_flush_persons", 100)
+    context.config("secondary_nn_num_processes", 8)
+    context.config("secondary_nn_chunk_size_persons", 10000)
+    context.config("secondary_nn_worker_torch_threads", 2)
+    context.config("secondary_nn_progress_flush_persons", 100)
 
 def execute(context):
-    logger.info("Starting locations_v2 execution")
+    logger.info("Starting secondary_nn location assignment")
     constants = context.stage("data.constants")
     crs = constants.LV95    
     torch.backends.mkldnn.enabled = True
     
     ########## Loading NN models ##########
     logger.info("\t Loading the models")
-    wrapper = LocationChoiceModelWrapper.build(context, optimize=True)    
+    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=True)    
     wrapper.assert_ready_for_prediction()
 
     ########## Loading population data ##########
@@ -239,11 +241,11 @@ def execute(context):
     df_trips = df_trips.sort_values(by=["person_id", "trip_id"]).reset_index(drop=True)
 
     # chunk by person_id to ensure all trips of a person are processed together, and to enable efficient parallelization without shared state
-    logger.info("Assigning secondary locations with locations_v2")
-    num_processes = int(context.config("locations_v2_num_processes"))
-    chunk_size_persons = max(1, int(context.config("locations_v2_chunk_size_persons")))
-    worker_torch_threads = int(context.config("locations_v2_worker_torch_threads"))
-    progress_flush_persons = max(1, int(context.config("locations_v2_progress_flush_persons")))
+    logger.info("Assigning secondary locations with secondary_nn")
+    num_processes = int(context.config("secondary_nn_num_processes"))
+    chunk_size_persons = max(1, int(context.config("secondary_nn_chunk_size_persons")))
+    worker_torch_threads = int(context.config("secondary_nn_worker_torch_threads"))
+    progress_flush_persons = max(1, int(context.config("secondary_nn_progress_flush_persons")))
 
     unique_persons = df_trips["person_id"].unique()
     person_chunk_ids = (np.arange(len(unique_persons), dtype=np.int32) // chunk_size_persons)
@@ -307,7 +309,7 @@ def execute(context):
             with ProcessPoolExecutor(
                 max_workers=num_processes,
                 mp_context=mp_context,
-                initializer=_init_locations_v2_worker,
+                initializer=_init_location_worker,
                 initargs=(wrapper, worker_torch_threads, True, True, "max-autotune", progress_queue, progress_flush_persons),
             ) as executor:
                 pending = {}  # future -> chunk_id
@@ -344,19 +346,15 @@ def execute(context):
         progress_queue.close()
         progress_queue.join_thread()
 
-    if len(locations_records) == 0:
-        df_locations = gpd.GeoDataFrame(
-            pd.DataFrame(columns=["person_id", "trip_index", "destination_id"]),
-            geometry=gpd.GeoSeries([], crs=crs),
-            crs=crs,
-        )
-    else:
-        df_locations = pd.DataFrame.from_records(
-            locations_records,
-            columns=["person_id", "trip_index", "destination_id", "geometry"],
-        )
-        df_locations = gpd.GeoDataFrame(df_locations, geometry="geometry", crs=crs)
-        df_locations = df_locations.sort_values(by=["person_id", "trip_index"]).reset_index(drop=True)
+    # Build the dataframe and geodataframe for the assigned locations
+    df_locations = pd.DataFrame.from_records(
+        locations_records,
+        columns=["person_id", "trip_index", "destination_id", "geometry"],
+    )
+    df_locations = gpd.GeoDataFrame(df_locations, geometry="geometry", crs=crs)
+    df_locations = df_locations.sort_values(by=["person_id", "trip_index"]).reset_index(drop=True)
+    # adjust the trip index for compatibility with the rda stage
+    df_locations["trip_index"] = df_locations["trip_index"].astype(int) + 1 
 
     if len(convergence_records) == 0:
         df_convergence = pd.DataFrame(columns=["valid", "size"])

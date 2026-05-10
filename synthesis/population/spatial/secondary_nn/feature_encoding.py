@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.preprocessing import QuantileTransformer
+from .hierarchical_utils import ORIGIN_PURPOSE_REMAP
 
 PERSON_STATIC_NUMERIC_FEATURES = ["age", "income_class", "daily_longest_distance_from_home", "daily_crowfly_total", "daily_longest_distance_from_work"]
 PERSON_STATIC_BINARY_FEATURES  = ["sex", "employed", "car_availability"]
@@ -10,7 +11,6 @@ PERSON_TRIP_NUMERIC_FEATURES = PERSON_STATIC_NUMERIC_FEATURES + PERSON_DYNAMIC_F
 PERSON_TRIP_BINARY_FEATURES  = PERSON_STATIC_BINARY_FEATURES
 N_PERSON_STATIC = len(PERSON_STATIC_FEATURES)       # = 8; split index: person_vector[:N_PERSON_STATIC] is static
 # Remap raw trip origin_purpose labels to the same vocabulary as purpose (SECONDARY_ACTIVITIES).
-ORIGIN_PURPOSE_REMAP = {"home": "home_secondary", "work": "work_secondary", "education": "education_secondary"}
 STATIC_CANDIDATE_FEATURES = ["num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure",
                              "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none",
                              "outside_fraction"]

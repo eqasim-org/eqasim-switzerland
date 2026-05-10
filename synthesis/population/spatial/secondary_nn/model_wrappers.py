@@ -1,11 +1,14 @@
 import numpy as np
-from .locations_v2_helpers import _prepare_destination_level2_index, _reverse_tree
+from .location_helpers import _prepare_destination_level2_index, _reverse_tree
 import torch
 from shapely.geometry import Point
 import logging
-from .two_input_features import (CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, DYNAMIC_CANDIDATE_FEATURES, N_PERSON_STATIC, N_CANDIDATE_DYNAMIC, ORIGIN_PURPOSE_REMAP, transform_candidate_static_matrix, transform_candidate_dynamic_matrix, transform_person_static_vector, transform_person_dynamic_vector, transform_person_trip_vector)
-from .two_input_nn import TwoInputChoiceModel, predict_two_input_proba
-from .hierarchical_model_utils import build_dynamic_vector
+from .feature_encoding import (CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, DYNAMIC_CANDIDATE_FEATURES, N_PERSON_STATIC, 
+                               transform_candidate_static_matrix, transform_candidate_dynamic_matrix, transform_person_static_vector, 
+                               transform_person_dynamic_vector, transform_person_trip_vector)
+
+from .choice_model import NeuralChoiceModel, predict_choice_proba
+from .hierarchical_utils import build_dynamic_vector, ORIGIN_PURPOSE_REMAP
 
 def _torch_load_checkpoint(path, map_location=None):
     try:
@@ -122,7 +125,7 @@ def _freeze_candidate_attr_map(attr_map, max_candidates=None, candidate_static_s
     return frozen
 
 
-class CoarseLevel0TwoInputWrapper:
+class RegionalChoiceWrapper:
     def __init__(self, model, person_static_scaler, person_dynamic_scaler, candidate_static_scaler, candidate_dynamic_scaler, person_trip_cols, candidate_cols, all_h3, centroid_x, centroid_y, static_candidate_features, purpose_categories):
         self.model = model
         self.person_static_scaler    = person_static_scaler
@@ -176,7 +179,7 @@ class CoarseLevel0TwoInputWrapper:
     def load(cls, path, map_location=None):
         state = _torch_load_checkpoint(path, map_location=map_location)
         cfg = state["model_config"]
-        model = TwoInputChoiceModel(
+        model = NeuralChoiceModel(
             person_input_dim=cfg["person_input_dim"],
             candidate_input_dim=cfg["candidate_input_dim"],
             person_hidden_dim=cfg["person_hidden_dim"],
@@ -209,7 +212,7 @@ class CoarseLevel0TwoInputWrapper:
             cand_mask = candidate_mask
         p_static  = person_matrix[:, :N_PERSON_STATIC]
         p_dynamic = person_matrix[:, N_PERSON_STATIC:]
-        probs = predict_two_input_proba(self.model, p_static, p_dynamic, candidate_static, candidate_dynamic, cand_mask)
+        probs = predict_choice_proba(self.model, p_static, p_dynamic, candidate_static, candidate_dynamic, cand_mask)
         probs = probs.cpu().numpy()
         chooser = np.random.choice if rng is None else rng.choice
         indices = np.array([chooser(probs.shape[1], p=probs[i]) for i in range(probs.shape[0])], dtype=np.int64)
@@ -260,7 +263,7 @@ class CoarseLevel0TwoInputWrapper:
 
 
 
-class MediumLevel1TwoInputWrapper:
+class DistrictChoiceWrapper:
     def __init__(self, model, person_static_scaler, person_dynamic_scaler, candidate_static_scaler, candidate_dynamic_scaler, person_trip_cols, candidate_cols, children_by_level0, level1_candidate_attributes_by_level0, purpose_categories):
         self.model = model
         self.person_static_scaler    = person_static_scaler
@@ -317,7 +320,7 @@ class MediumLevel1TwoInputWrapper:
     def load(cls, path, map_location=None):
         state = _torch_load_checkpoint(path, map_location=map_location)
         cfg = state["model_config"]
-        model = TwoInputChoiceModel(
+        model = NeuralChoiceModel(
             person_input_dim=cfg["person_input_dim"],
             candidate_input_dim=cfg["candidate_input_dim"],
             person_hidden_dim=cfg["person_hidden_dim"],
@@ -355,7 +358,7 @@ class MediumLevel1TwoInputWrapper:
             cand_mask = valid_mask
         p_static  = person_matrix[:, :N_PERSON_STATIC]
         p_dynamic = person_matrix[:, N_PERSON_STATIC:]
-        probs = predict_two_input_proba(self.model, p_static, p_dynamic, candidate_static, candidate_dynamic, cand_mask)
+        probs = predict_choice_proba(self.model, p_static, p_dynamic, candidate_static, candidate_dynamic, cand_mask)
         probs = probs.cpu().numpy()
         chooser = np.random.choice if rng is None else rng.choice
         indices = np.array([chooser(probs.shape[1], p=probs[i]) for i in range(probs.shape[0])], dtype=np.int64)
@@ -382,7 +385,7 @@ class MediumLevel1TwoInputWrapper:
 
 
 
-class DetailedLevel2TwoInputWrapper:
+class LocalChoiceWrapper:
     def __init__(self, model, person_static_scaler, person_dynamic_scaler, candidate_static_scaler, candidate_dynamic_scaler, person_trip_cols, candidate_cols, children_by_level1, level2_candidate_attributes_by_level1, purpose_categories):
         self.model = model
         self.person_static_scaler    = person_static_scaler
@@ -436,7 +439,7 @@ class DetailedLevel2TwoInputWrapper:
     def load(cls, path, map_location=None):
         state = _torch_load_checkpoint(path, map_location=map_location)
         cfg = state["model_config"]
-        model = TwoInputChoiceModel(
+        model = NeuralChoiceModel(
             person_input_dim=cfg["person_input_dim"],
             candidate_input_dim=cfg["candidate_input_dim"],
             person_hidden_dim=cfg["person_hidden_dim"],
@@ -475,7 +478,7 @@ class DetailedLevel2TwoInputWrapper:
             cand_mask = valid_mask
         p_static  = person_matrix[:, :N_PERSON_STATIC]
         p_dynamic = person_matrix[:, N_PERSON_STATIC:]
-        probs = predict_two_input_proba(self.model, p_static, p_dynamic, candidate_static, candidate_dynamic, cand_mask)
+        probs = predict_choice_proba(self.model, p_static, p_dynamic, candidate_static, candidate_dynamic, cand_mask)
         probs = probs.cpu().numpy()
         chooser = np.random.choice if rng is None else rng.choice
         indices = np.array([chooser(probs.shape[1], p=probs[i]) for i in range(probs.shape[0])], dtype=np.int64)
@@ -548,10 +551,10 @@ class DetailedLevel2TwoInputWrapper:
 
 
 
-class LocationChoiceModelWrapper:
-    logger: logging.Logger = logging.getLogger("synpp: LocationChoiceModelWrapper")
+class HierarchicalLocationChoiceModel:
+    logger: logging.Logger = logging.getLogger("synpp: HierarchicalLocationChoiceModel")
 
-    def __init__(self, coarse_wrapper:CoarseLevel0TwoInputWrapper, medium_wrapper:MediumLevel1TwoInputWrapper, detailed_wrapper:DetailedLevel2TwoInputWrapper, optimize=True):        
+    def __init__(self, coarse_wrapper:RegionalChoiceWrapper, medium_wrapper:DistrictChoiceWrapper, detailed_wrapper:LocalChoiceWrapper, optimize=True):        
         self.wrappers = dict(coarse=coarse_wrapper, medium=medium_wrapper, detailed=detailed_wrapper)        
         self.same_person_scaler = self.check_if_similar_person_scalers()
         self.build_internal_state()
@@ -577,17 +580,17 @@ class LocationChoiceModelWrapper:
     @classmethod
     def load(cls, coarse_path:str, medium_path:str, detailed_path:str, map_location=None, optimize=True):
         cls.log("Loading models")
-        coarse_wrapper = CoarseLevel0TwoInputWrapper.load(coarse_path, map_location=map_location)
-        medium_wrapper = MediumLevel1TwoInputWrapper.load(medium_path, map_location=map_location)
-        detailed_wrapper = DetailedLevel2TwoInputWrapper.load(detailed_path, map_location=map_location)
+        coarse_wrapper = RegionalChoiceWrapper.load(coarse_path, map_location=map_location)
+        medium_wrapper = DistrictChoiceWrapper.load(medium_path, map_location=map_location)
+        detailed_wrapper = LocalChoiceWrapper.load(detailed_path, map_location=map_location)
         return cls(coarse_wrapper=coarse_wrapper, medium_wrapper=medium_wrapper, detailed_wrapper=detailed_wrapper, optimize=optimize)
 
     @classmethod
     def build(cls, context, map_location=None, optimize=True):
-        coarse_model_path, _, _ = context.stage("synthesis.population.spatial.secondary_nn.coarse_model")
-        medium_model_path = context.stage("synthesis.population.spatial.secondary_nn.medium_model")[0]
-        detailed_model_path = context.stage("synthesis.population.spatial.secondary_nn.detailed_model")[0]
-        obj = cls.load(coarse_path=coarse_model_path, medium_path=medium_model_path, detailed_path=detailed_model_path, map_location=map_location, optimize=optimize)
+        regional_model_path, _, _ = context.stage("synthesis.population.spatial.secondary_nn.regional_model")
+        subregional_model_path = context.stage("synthesis.population.spatial.secondary_nn.subregional_model")[0]
+        local_model_path = context.stage("synthesis.population.spatial.secondary_nn.local_model")[0]
+        obj = cls.load(coarse_path=regional_model_path, medium_path=subregional_model_path, detailed_path=local_model_path, map_location=map_location, optimize=optimize)
         obj.build_candidates_and_trees(context)
         return obj
     
@@ -649,7 +652,7 @@ class LocationChoiceModelWrapper:
             "Candidate feature columns differ across wrapper levels."
         )
         assert self.c.candidate_cols == list(CANDIDATE_FEATURES), (
-            "Candidate feature columns do not match two_input_features.CANDIDATE_FEATURES"
+            "Candidate feature columns do not match feature_encoding.CANDIDATE_FEATURES"
         )
         assert self.c.person_trip_cols == self.m.person_trip_cols == self.d.person_trip_cols, (
             "Person feature columns differ across wrapper levels."
