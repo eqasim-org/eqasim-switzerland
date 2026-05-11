@@ -104,6 +104,27 @@ def validate_full(db, source_type: str) -> None:
             f"trip_grid_origin_500m trips sum {trip_grid_sum} differs >1% from trips {n_trips}"
         )
 
+    _validate_grid_consistency(db)
+
+
+def _validate_grid_consistency(db) -> None:
+    """Every 500m demo-grid cell must have at least one overlapping 100m
+    subcell. A mismatch indicates the cell_id encoding is inconsistent with
+    the cell_geom decoder (e.g. CAST-rounding vs FLOOR).
+    """
+    n_broken = db.execute("""
+        SELECT COUNT(*) FROM demo_grid_500m g500
+        WHERE NOT EXISTS (
+            SELECT 1 FROM demo_grid_100m g100
+            WHERE ST_Intersects(g100.cell_geom, g500.cell_geom)
+        )
+    """).fetchone()[0]
+    if n_broken > 0:
+        raise AssertionError(
+            f"{n_broken} 500m cells have no overlapping 100m subcell "
+            f"— grid encoding inconsistent"
+        )
+
 
 def validate(db, source_type: str, full: bool = False) -> None:
     if full:

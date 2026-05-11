@@ -34,11 +34,15 @@ def _bbox_clause(point_col: str) -> str:
 def _cell_id_expr(x_expr: str, y_expr: str, resolution_m: int) -> str:
     """SQL fragment that computes cell_id from (x, y) coordinates.
 
-    Coordinates must already be inside the CH bbox (callers add WHERE clauses
-    via _bbox_clause); the cast to UBIGINT will fail otherwise.
+    Uses FLOOR to match the cell_geom decoder, which assumes cell_id encodes
+    the lower-left corner of the cell. ``CAST(DOUBLE AS UBIGINT)`` in DuckDB
+    rounds (half-up) rather than truncating, so without explicit FLOOR a
+    person at e.g. x=2506401 with resolution=500 would be packed into cell
+    col=213 (rounded) while the decoded bbox claims col=212 — leading to
+    geographically inconsistent cells across resolutions.
     """
-    col = f"CAST(({x_expr} - {XMIN}) / {resolution_m} AS UBIGINT)"
-    row = f"CAST(({y_expr} - {YMIN}) / {resolution_m} AS UBIGINT)"
+    col = f"CAST(FLOOR(({x_expr} - {XMIN}) / {resolution_m}) AS UBIGINT)"
+    row = f"CAST(FLOOR(({y_expr} - {YMIN}) / {resolution_m}) AS UBIGINT)"
     return f"(({row} << 24) | {col})"
 
 
