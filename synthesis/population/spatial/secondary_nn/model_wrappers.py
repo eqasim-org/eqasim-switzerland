@@ -42,9 +42,14 @@ def _freeze_candidate_attr_map(attr_map, max_candidates=None, candidate_static_s
         x = _to_float_array(attrs["x"])
         y = _to_float_array(attrs["y"])
         # Build static feature matrix in STATIC_CANDIDATE_FEATURES order (scaled block first, passthrough block after).
-        static_features = np.column_stack([
-            _to_float_array(attrs[name]) for name in STATIC_CANDIDATE_FEATURES
-        ]).astype(np.float64)  # [N, 17]
+        # If attrs is already frozen (loaded from a checkpoint) it already has a "static_features" matrix; reuse it
+        # directly to avoid a KeyError on the individual per-feature keys that are no longer stored.
+        if "static_features" in attrs:
+            static_features = np.asarray(attrs["static_features"], dtype=np.float64)
+        else:
+            static_features = np.column_stack([
+                _to_float_array(attrs[name]) for name in STATIC_CANDIDATE_FEATURES
+            ]).astype(np.float64)  # [N, 17]
 
         # Pad to max_candidates so every call produces the same tensor shape — prevents
         # torch.compile from recompiling on each new candidate-set size.  Padded rows
