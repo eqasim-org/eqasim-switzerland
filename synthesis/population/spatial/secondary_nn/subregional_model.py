@@ -8,7 +8,7 @@ import torch
 import matplotlib.pyplot as plt
 
 from .hierarchical_utils import SECONDARY_ACTIVITIES, build_level1_children_by_level0, build_level1_candidate_attributes_by_level0, sanitize_work_coordinates, build_hierarchical_candidate_batch_numba
-from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, fit_candidate_tensor, fit_person_trip_matrix
+from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import DistrictChoiceWrapper
 
@@ -25,14 +25,15 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.constants")
     context.stage("data.spatial.swiss_border")
-    context.stage("synthesis.population.destinations")
 
+    context.config("threads")
+    context.config("random_seed")
+
+    # training params
     context.config("overwrite_subregional_model_if_exists", True)
     context.config("subregional_model_batch_size", 256)
     context.config("subregional_model_epochs", 40)
     context.config("subregional_model_learning_rate", 1e-2)
-    context.config("subregional_model_torch_num_threads", 16)
-    context.config("random_seed")
 
 
 def execute(context):
@@ -56,7 +57,8 @@ def execute(context):
     mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "purpose", "origin_purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
         "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
-        "departure_time_normalized", "daily_longest_distance_from_work"
+        "departure_time_normalized", "daily_longest_distance_from_work",
+        "activity_duration_h", "activity_chain"
     ]]
     mz_trips = mz_trips.merge(mz_chain_trips, on=["person_id", "trip_id"], how="left")
 
@@ -73,6 +75,7 @@ def execute(context):
 
     required_h3_cols = [
         "centroid", "outside_fraction", "num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure",
+        "sport", "gastronomy", "accommodation", "cultural",
         "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none",
     ]
     missing_h3_cols = [col for col in required_h3_cols if col not in h3_geo_level1.columns]
@@ -91,6 +94,10 @@ def execute(context):
     education_count = h3_level1_indexed["education"].to_dict()
     shop_count = h3_level1_indexed["shop"].to_dict()
     leisure_count = h3_level1_indexed["leisure"].to_dict()
+    sport_count = h3_level1_indexed["sport"].to_dict()
+    gastronomy_count = h3_level1_indexed["gastronomy"].to_dict()
+    accommodation_count = h3_level1_indexed["accommodation"].to_dict()
+    cultural_count = h3_level1_indexed["cultural"].to_dict()
     ovgk_share_a_by_l1 = h3_level1_indexed["ovgk_share_a"].to_dict()
     ovgk_share_b_by_l1 = h3_level1_indexed["ovgk_share_b"].to_dict()
     ovgk_share_c_by_l1 = h3_level1_indexed["ovgk_share_c"].to_dict()
@@ -105,7 +112,8 @@ def execute(context):
         raise RuntimeError("H3 hierarchy tree has no valid level1 children with centroids. Cannot train medium model.")
 
     level1_candidate_attributes_by_level0 = build_level1_candidate_attributes_by_level0(children_by_level0, centroid_x_by_l1, centroid_y_by_l1, statent_count, employees_count, 
-                                                             urban_core_count, urban_count, education_count, shop_count, leisure_count, ovgk_share_a_by_l1, ovgk_share_b_by_l1, 
+                                                             urban_core_count, urban_count, education_count, shop_count, leisure_count, sport_count, gastronomy_count,
+                                                             accommodation_count, cultural_count, ovgk_share_a_by_l1, ovgk_share_b_by_l1,
                                                              ovgk_share_c_by_l1, ovgk_share_d_by_l1, ovgk_share_none_by_l1, outside_fraction_by_l1)
 
     logger.info("\t Preparing microcensus training set...")
@@ -140,6 +148,10 @@ def execute(context):
     cand_education = np.zeros((n_samples, max_children), dtype=np.float64)
     cand_shop = np.zeros((n_samples, max_children), dtype=np.float64)
     cand_leisure = np.zeros((n_samples, max_children), dtype=np.float64)
+    cand_sport = np.zeros((n_samples, max_children), dtype=np.float64)
+    cand_gastronomy = np.zeros((n_samples, max_children), dtype=np.float64)
+    cand_accommodation = np.zeros((n_samples, max_children), dtype=np.float64)
+    cand_cultural = np.zeros((n_samples, max_children), dtype=np.float64)
     cand_ovgk_share_a = np.zeros((n_samples, max_children), dtype=np.float64)
     cand_ovgk_share_b = np.zeros((n_samples, max_children), dtype=np.float64)
     cand_ovgk_share_c = np.zeros((n_samples, max_children), dtype=np.float64)
@@ -168,6 +180,10 @@ def execute(context):
             cand_education[i, :n_children] = attrs["education"]
             cand_shop[i, :n_children] = attrs["shop"]
             cand_leisure[i, :n_children] = attrs["leisure"]
+            cand_sport[i, :n_children] = attrs["sport"]
+            cand_gastronomy[i, :n_children] = attrs["gastronomy"]
+            cand_accommodation[i, :n_children] = attrs["accommodation"]
+            cand_cultural[i, :n_children] = attrs["cultural"]
             cand_ovgk_share_a[i, :n_children] = attrs["ovgk_share_a"]
             cand_ovgk_share_b[i, :n_children] = attrs["ovgk_share_b"]
             cand_ovgk_share_c[i, :n_children] = attrs["ovgk_share_c"]
@@ -203,6 +219,10 @@ def execute(context):
     daily_longest_work = np.where(np.isfinite(daily_longest_work) & (daily_longest_work >= 0.0), daily_longest_work, 0.0)
     departure_time = df["departure_time_normalized"].to_numpy(dtype=np.float64)
     departure_time = np.where(np.isfinite(departure_time), departure_time, 0.5)
+    activity_duration_h = df["activity_duration_h"].to_numpy(dtype=np.float64)
+    activity_duration_h = np.where(np.isfinite(activity_duration_h) & (activity_duration_h >= 0.0), activity_duration_h, 0.0)
+    activity_chain_matrix = np.stack([np.asarray(v, dtype=np.float64)[:ACTIVITY_CHAIN_N] if isinstance(v, np.ndarray) else np.zeros(ACTIVITY_CHAIN_N, dtype=np.float64) for v in df["activity_chain"].to_numpy()])
+    activity_chain_matrix = np.where(np.isfinite(activity_chain_matrix) & (activity_chain_matrix >= 0.0), activity_chain_matrix, 0.0)
 
     _, person_static_scaler_path, person_dynamic_scaler_path = context.stage("synthesis.population.spatial.secondary_nn.regional_model")
     person_static_scaler  = joblib.load(person_static_scaler_path)
@@ -214,14 +234,17 @@ def execute(context):
     person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(
         age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
         daily_longest=daily_longest, daily_total=daily_total, daily_longest_work=daily_longest_work,
+        activity_chain_matrix=activity_chain_matrix,
         consumed_before=consumed_before, trip_position=trip_position, departure_time=departure_time,
+        activity_duration_h=activity_duration_h,
         purpose_series=df["purpose"], origin_purpose_series=df["origin_purpose"],
         purpose_categories=purpose_categories,
         person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler)
 
     logger.info("\t Computing candidate-hex features with Numba...")
     candidate_tensor = build_hierarchical_candidate_batch_numba(home_x, home_y, work_x, work_y, has_work, origin_x, origin_y, cand_x, cand_y,
-        cand_statent, cand_employees, cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_ovgk_share_a, cand_ovgk_share_b,
+        cand_statent, cand_employees, cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_sport, cand_gastronomy,
+        cand_accommodation, cand_cultural, cand_ovgk_share_a, cand_ovgk_share_b,
         cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask)
     
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)
@@ -235,14 +258,13 @@ def execute(context):
     candidate_static_x  = candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:]
     candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]
 
-    model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2],
-                                person_hidden_dim=32, hidden_dims=(32, 32), dropout_rate=0.1)
+    model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dim=32)
     train_choice_model(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
                               y=y, valid_mask=valid_mask, weight_decay=1e-3, logger_instance=logger, weights=weights,
                               epochs=int(context.config("subregional_model_epochs")),
                               batch_size=int(context.config("subregional_model_batch_size")),
                               lr=float(context.config("subregional_model_learning_rate")),
-                              num_threads=int(context.config("subregional_model_torch_num_threads")))
+                              num_threads=int(context.config("threads")))
 
     ########## Building wrapper and saving model ##########
     wrapper = DistrictChoiceWrapper(model=model, person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler,

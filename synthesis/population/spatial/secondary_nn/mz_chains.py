@@ -71,7 +71,8 @@ def execute(context):
         vectors = [encode_purpose(p) for p in sequence]
         return np.sum(vectors, axis=0)
 
-    trips_sorted["activity_chain"] = trips_sorted.groupby("person_id").apply(build_activity_chain)
+    _chain_series = trips_sorted.groupby("person_id", sort=False).apply(build_activity_chain)
+    trips_sorted["activity_chain"] = trips_sorted["person_id"].map(_chain_series)
     
 
     return trips_sorted[["person_id", "trip_id", 

@@ -17,38 +17,85 @@ hexagonal geometries that can be used for further analysis or visualization.
 
 H3_LEVELS = [5, 7, 9]
 OVGK_CATEGORIES = ['B', 'A', 'C', 'None', 'D']
-H3_DEST_FEATURE_COLUMNS = ["num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure", "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none"]
-
+H3_DEST_FEATURE_COLUMNS = ["num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure", "sport", "gastronomy", "accommodation", "cultural", "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none"]
 
 def _aggregate_destination_features_by_level(destinations_with_levels, level_col, all_hex):
-    assert level_col in destinations_with_levels.columns, f"Expected level column {level_col} not found in destinations_with_levels"
-    assert destinations_with_levels[level_col].notna().all(), f"Found NaNs in level column {level_col} of destinations_with_levels, please check the data preparation steps."
-    assert set(destinations_with_levels['ovgk'].unique())==set(OVGK_CATEGORIES), f"Unexpected OVGK categories found in data: {set(destinations_with_levels['ovgk'].unique())}. Expected categories: {set(OVGK_CATEGORIES)}"
+    assert level_col in destinations_with_levels.columns
+    assert destinations_with_levels[level_col].notna().all()
+    assert set(destinations_with_levels["ovgk"].unique()) == set(OVGK_CATEGORIES)
 
-    cols = [level_col, "destination_id", "number_employees", "ovgk", "offers_education_secondary", "offers_shop", "offers_leisure", "municipality_type"]    
-    df = destinations_with_levels[cols].copy()    
+    cols = [level_col, "destination_id", "number_employees", "ovgk", "offers_education_secondary", "offers_shop", "offers_leisure", 
+            "offers_sport", "offers_gastronomy", "offers_accommodation", "offers_cultural", "municipality_type"] 
+    df = destinations_with_levels[cols].copy()
 
-    grouped = df.groupby(level_col)
-    out = pd.DataFrame({"h3_index": grouped.size().index.astype(str)})
-    out = out.set_index("h3_index")
-    out["num_statent"] = grouped.size().astype(float)
-    out["employees"] = grouped["number_employees"].sum(min_count=1).fillna(0.0).astype(float)
-    out["education"] = grouped["offers_education_secondary"].sum(min_count=1).fillna(0.0).astype(float)
-    out["shop"] = grouped["offers_shop"].sum(min_count=1).fillna(0.0).astype(float)
-    out["leisure"] = grouped["offers_leisure"].sum(min_count=1).fillna(0.0).astype(float)
-    out["urban_core"] = grouped["municipality_type"].apply(lambda x: (x == "urbancore").sum()).astype(float)
-    out["urban"] = grouped["municipality_type"].apply(lambda x: (x == "urban").sum()).astype(float)    
+    # municipality_type indicators
+    df["urban_core"] = (df["municipality_type"] == "urbancore").astype(np.float32)
+    df["urban"] = (df["municipality_type"] == "urban").astype(np.float32)
 
-    for category in OVGK_CATEGORIES:
-        col = f"ovgk_share_{category.lower()}"
-        out[col] = grouped["ovgk"].apply(lambda x: (x == category).sum() / len(x) if len(x) > 0 else 0.0).astype(float)
+    # OVGK shares
+    ovgk_dummies = pd.get_dummies(df["ovgk"], prefix="ovgk_share", dtype=np.float32)
 
-    # Ensure all hexagons are represented
-    missing_hex = set(all_hex) - set(out.index)
-    if missing_hex:
-        logger.info(f"\t\t\t Adding {len(missing_hex)} missing hexagons to feature dataframe")
-        missing_df = pd.DataFrame(0.0, index=pd.Index(list(missing_hex), name='h3_index'), columns=out.columns)
-        out = pd.concat([out, missing_df], ignore_index=False)
+    # ensure all expected categories exist
+    expected_cols = [f"ovgk_share_{c.lower()}" for c in OVGK_CATEGORIES]
+    ovgk_dummies.columns = [c.lower() for c in ovgk_dummies.columns]
+    assert all(col in ovgk_dummies.columns for col in expected_cols), f"Missing expected OVGK category columns after get_dummies. Expected: {expected_cols}, but got: {ovgk_dummies.columns.tolist()}"
+    df = pd.concat([df, ovgk_dummies[expected_cols]], axis=1)
+
+    # ------------------------------------------------------------
+    # Single aggregation
+    # ------------------------------------------------------------
+
+    agg_cols = {
+        "number_employees": "sum",
+        "offers_education_secondary": "sum",
+        "offers_shop": "sum",
+        "offers_leisure": "sum",
+        "offers_sport": "sum",
+        "offers_gastronomy": "sum",
+        "offers_accommodation": "sum",
+        "offers_cultural": "sum",
+        "urban_core": "mean",
+        "urban": "mean",
+        **{c: "mean" for c in expected_cols},
+    }
+
+    out = (
+        df.groupby(level_col, sort=False)
+        .agg(
+            num_statent=("number_employees", "size"),
+            employees=("number_employees", "sum"),
+            education=("offers_education_secondary", "sum"),
+            shop=("offers_shop", "sum"),
+            leisure=("offers_leisure", "sum"),
+            sport=("offers_sport", "sum"),
+            gastronomy=("offers_gastronomy", "sum"),
+            accommodation=("offers_accommodation", "sum"),
+            cultural=("offers_cultural", "sum"),
+            urban_core=("urban_core", "mean"),
+            urban=("urban", "mean"),
+            ovgk_share_a=("ovgk_share_a", "mean"),
+            ovgk_share_b=("ovgk_share_b", "mean"),
+            ovgk_share_c=("ovgk_share_c", "mean"),
+            ovgk_share_d=("ovgk_share_d", "mean"),
+            ovgk_share_none=("ovgk_share_none", "mean"),            
+        )
+        .rename(
+            columns={
+                "number_employees": "employees",
+                "offers_education_secondary": "education",
+                "offers_shop": "shop",
+                "offers_leisure": "leisure",
+                "offers_sport": "sport",
+                "offers_gastronomy": "gastronomy",
+                "offers_accommodation": "accommodation",
+                "offers_cultural": "cultural",
+            }
+        )
+    )
+
+    out.index = out.index.astype(str)
+    out.index.name = "h3_index"
+    out = out.reindex(all_hex, fill_value=0.0)
 
     return out.reset_index()
 
@@ -135,11 +182,11 @@ def within_ch(context, df, cols1=["origin_x", "origin_y"], cols2=None):
     return inside_ch
 
 def configure(context):
-    context.stage("synthesis.population.destinations")
+    # context.stage("synthesis.population.destinations") # maybe it should be this one instead of destinations_statent?
+    context.stage("data.statent.statent")
+    context.stage("synthesis.population.destinations_statent")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
-    context.stage("synthesis.population.spatial.primary.locations")
-    context.stage("synthesis.population.spatial.home.locations")
     context.stage("data.spatial.swiss_border")
 
 def execute(context):
@@ -149,12 +196,24 @@ def execute(context):
     
     # Destination/company data (exclude non-offering rows such as remote work locations)
     logger.info("H3: \t Processing destination companies data...")
-    destinations = context.stage("synthesis.population.destinations").copy()
+    destinations = context.stage("synthesis.population.destinations_statent").copy()
     offer_cols = [f"offers_{p}" for p in ["shop", "leisure", "other", "work_secondary", "education_secondary", "home_secondary"] if f"offers_{p}" in destinations.columns]    
-    assert len(offer_cols) > 0, "No offers_* columns found in synthesis.population.destinations"
+    assert len(offer_cols) > 0, "No offers_* columns found in synthesis.population.destinations_statent"
     assert destinations[offer_cols].isna().sum().sum() == 0, "Found NaNs in offers_* columns of destinations data, please check the data preparation steps."
 
+    # enrich destinations
+    df_statent = context.stage("data.statent.statent")[["enterprise_id", "noga"]]
+    df_statent.columns = ["destination_id", "noga"]
+    df_statent["offers_cultural"] = df_statent["noga"].str.startswith("912") | df_statent["noga"].str.startswith("914")
+    df_statent["offers_sport"] = df_statent["noga"].str.startswith("93")
+    df_statent["offers_gastronomy"] = df_statent["noga"].str.startswith("56")
+    df_statent["offers_accommodation"] = df_statent["noga"].str.startswith("55")
+    additional_offers = ["offers_cultural", "offers_sport", "offers_gastronomy", "offers_accommodation"]
+    destinations = destinations.merge(df_statent[["destination_id"] + additional_offers], on="destination_id", how="left")
+    destinations[additional_offers] = destinations[additional_offers].fillna(0)
+
     # keep only rows that have at least one offer (this filter would remove remote work locations for example)
+    offer_cols = offer_cols + additional_offers
     destinations = destinations[destinations[offer_cols].any(axis=1)].reset_index(drop=True)
 
     destinations_attrs_cols = ["destination_id", "number_employees", "ovgk", "municipality_type"] + offer_cols

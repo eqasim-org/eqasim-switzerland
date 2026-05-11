@@ -1,6 +1,5 @@
 import numpy as np
 from numba import njit, prange
-from .feature_encoding import ORIGIN_PURPOSE_REMAP
 
 SECONDARY_ACTIVITIES = ["other", "shop", "leisure", "work_secondary", "home_secondary", "education_secondary"]
 PRIMARY_ACTIVITIES = ["home", "work", "education"]
@@ -11,9 +10,9 @@ PURPOSES_INDEX = {purpose: idx for idx, purpose in enumerate(SECONDARY_ACTIVITIE
 PURPOSES_IDENTITY = np.eye(len(ALL_ACTIVITIES), dtype=np.float32)
 
 @njit(parallel=True, fastmath=True)
-def build_hierarchical_candidate_batch_numba(hx, hy, wx, wy, has_work, ox, oy, cand_x, cand_y, cand_statent, cand_employees, cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_ovgk_share_a, cand_ovgk_share_b, cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask):
+def build_hierarchical_candidate_batch_numba(hx, hy, wx, wy, has_work, ox, oy, cand_x, cand_y, cand_statent, cand_employees, cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_sport, cand_gastronomy, cand_accommodation, cand_cultural, cand_ovgk_share_a, cand_ovgk_share_b, cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask):
     n, max_children = cand_x.shape
-    out = np.zeros((n, max_children, 16), dtype=np.float64)
+    out = np.zeros((n, max_children, 20), dtype=np.float64)
 
     for i in prange(n):
         valid_work = has_work[i]
@@ -40,26 +39,30 @@ def build_hierarchical_candidate_batch_numba(hx, hy, wx, wy, has_work, ox, oy, c
             out[i, j, 2] = np.sqrt(dx_last * dx_last + dy_last * dy_last)
             out[i, j, 3] = cand_statent[i, j]
             out[i, j, 4] = cand_employees[i, j]
-            out[i, j, 5] = cand_urban_core[i, j]
-            out[i, j, 6] = cand_urban[i, j]
-            out[i, j, 7] = cand_education[i, j]
-            out[i, j, 8] = cand_shop[i, j]
-            out[i, j, 9] = cand_leisure[i, j]
-            out[i, j, 10] = cand_ovgk_share_a[i, j]
-            out[i, j, 11] = cand_ovgk_share_b[i, j]
-            out[i, j, 12] = cand_ovgk_share_c[i, j]
-            out[i, j, 13] = cand_ovgk_share_d[i, j]
-            out[i, j, 14] = cand_ovgk_share_none[i, j]
-            out[i, j, 15] = cand_outside_fraction[i, j]
+            out[i, j, 5] = cand_education[i, j]
+            out[i, j, 6] = cand_shop[i, j]
+            out[i, j, 7] = cand_leisure[i, j]
+            out[i, j, 8] = cand_sport[i, j]
+            out[i, j, 9] = cand_gastronomy[i, j]
+            out[i, j, 10] = cand_accommodation[i, j]
+            out[i, j, 11] = cand_cultural[i, j]
+            out[i, j, 12] = cand_urban_core[i, j]
+            out[i, j, 13] = cand_urban[i, j]
+            out[i, j, 14] = cand_ovgk_share_a[i, j]
+            out[i, j, 15] = cand_ovgk_share_b[i, j]
+            out[i, j, 16] = cand_ovgk_share_c[i, j]
+            out[i, j, 17] = cand_ovgk_share_d[i, j]
+            out[i, j, 18] = cand_ovgk_share_none[i, j]
+            out[i, j, 19] = cand_outside_fraction[i, j]
 
     return out
 
 
 @njit(parallel=True, fastmath=True)
-def build_coarse_candidate_batch_numba(hx, hy, wx, wy, has_work, ox, oy, centroid_x, centroid_y, statent_per_h3, employees_per_h3, urban_core_per_h3, urban_per_h3, education_per_h3, shop_per_h3, leisure_per_h3, ovgk_share_a_per_h3, ovgk_share_b_per_h3, ovgk_share_c_per_h3, ovgk_share_d_per_h3, ovgk_share_none_per_h3, outside_fraction):
+def build_coarse_candidate_batch_numba(hx, hy, wx, wy, has_work, ox, oy, centroid_x, centroid_y, statent_per_h3, employees_per_h3, urban_core_per_h3, urban_per_h3, education_per_h3, shop_per_h3, leisure_per_h3, sport_per_h3, gastronomy_per_h3, accommodation_per_h3, cultural_per_h3, ovgk_share_a_per_h3, ovgk_share_b_per_h3, ovgk_share_c_per_h3, ovgk_share_d_per_h3, ovgk_share_none_per_h3, outside_fraction):
     n = hx.shape[0]
     num_h3 = centroid_x.shape[0]
-    out = np.zeros((n, num_h3, 16), dtype=np.float64)
+    out = np.zeros((n, num_h3, 20), dtype=np.float64)
 
     for i in prange(n):
         valid_work = has_work[i]
@@ -83,17 +86,21 @@ def build_coarse_candidate_batch_numba(hx, hy, wx, wy, has_work, ox, oy, centroi
             out[i, j, 2] = np.sqrt(dx_last * dx_last + dy_last * dy_last)
             out[i, j, 3] = statent_per_h3[j]
             out[i, j, 4] = employees_per_h3[j]
-            out[i, j, 5] = urban_core_per_h3[j]
-            out[i, j, 6] = urban_per_h3[j]
-            out[i, j, 7] = education_per_h3[j]
-            out[i, j, 8] = shop_per_h3[j]
-            out[i, j, 9] = leisure_per_h3[j]
-            out[i, j, 10] = ovgk_share_a_per_h3[j]
-            out[i, j, 11] = ovgk_share_b_per_h3[j]
-            out[i, j, 12] = ovgk_share_c_per_h3[j]
-            out[i, j, 13] = ovgk_share_d_per_h3[j]
-            out[i, j, 14] = ovgk_share_none_per_h3[j]
-            out[i, j, 15] = outside_fraction[j]
+            out[i, j, 5] = education_per_h3[j]
+            out[i, j, 6] = shop_per_h3[j]
+            out[i, j, 7] = leisure_per_h3[j]
+            out[i, j, 8] = sport_per_h3[j]
+            out[i, j, 9] = gastronomy_per_h3[j]
+            out[i, j, 10] = accommodation_per_h3[j]
+            out[i, j, 11] = cultural_per_h3[j]
+            out[i, j, 12] = urban_core_per_h3[j]
+            out[i, j, 13] = urban_per_h3[j]
+            out[i, j, 14] = ovgk_share_a_per_h3[j]
+            out[i, j, 15] = ovgk_share_b_per_h3[j]
+            out[i, j, 16] = ovgk_share_c_per_h3[j]
+            out[i, j, 17] = ovgk_share_d_per_h3[j]
+            out[i, j, 18] = ovgk_share_none_per_h3[j]
+            out[i, j, 19] = outside_fraction[j]
 
     return out
 
@@ -103,7 +110,7 @@ def build_level1_children_by_level0(h3_tree, centroid_x_by_l1, centroid_y_by_l1)
     return {l0: values for l0, values in children.items() if len(values) > 0}
 
 
-def build_level1_candidate_attributes_by_level0(children_by_level0, centroid_x_by_l1, centroid_y_by_l1, statent_count, employees_count, urban_core_count, urban_count, education_count, shop_count, leisure_count, ovgk_share_a_by_l1, ovgk_share_b_by_l1, ovgk_share_c_by_l1, ovgk_share_d_by_l1, ovgk_share_none_by_l1, outside_fraction_by_l1):
+def build_level1_candidate_attributes_by_level0(children_by_level0, centroid_x_by_l1, centroid_y_by_l1, statent_count, employees_count, urban_core_count, urban_count, education_count, shop_count, leisure_count, sport_count, gastronomy_count, accommodation_count, cultural_count, ovgk_share_a_by_l1, ovgk_share_b_by_l1, ovgk_share_c_by_l1, ovgk_share_d_by_l1, ovgk_share_none_by_l1, outside_fraction_by_l1):
     candidate_attributes = {}
     for l0, children in children_by_level0.items():
         x = np.array([float(centroid_x_by_l1[c]) for c in children], dtype=np.float64)
@@ -115,6 +122,10 @@ def build_level1_candidate_attributes_by_level0(children_by_level0, centroid_x_b
         education = np.array([float(education_count.get(c, 0.0)) for c in children], dtype=np.float64)
         shop = np.array([float(shop_count.get(c, 0.0)) for c in children], dtype=np.float64)
         leisure = np.array([float(leisure_count.get(c, 0.0)) for c in children], dtype=np.float64)
+        sport = np.array([float(sport_count.get(c, 0.0)) for c in children], dtype=np.float64)
+        gastronomy = np.array([float(gastronomy_count.get(c, 0.0)) for c in children], dtype=np.float64)
+        accommodation = np.array([float(accommodation_count.get(c, 0.0)) for c in children], dtype=np.float64)
+        cultural = np.array([float(cultural_count.get(c, 0.0)) for c in children], dtype=np.float64)
         ovgk_share_a = np.array([float(ovgk_share_a_by_l1.get(c, 0.0)) for c in children], dtype=np.float64)
         ovgk_share_b = np.array([float(ovgk_share_b_by_l1.get(c, 0.0)) for c in children], dtype=np.float64)
         ovgk_share_c = np.array([float(ovgk_share_c_by_l1.get(c, 0.0)) for c in children], dtype=np.float64)
@@ -134,6 +145,10 @@ def build_level1_candidate_attributes_by_level0(children_by_level0, centroid_x_b
             "education": education,
             "shop": shop,
             "leisure": leisure,
+            "sport": sport,
+            "gastronomy": gastronomy,
+            "accommodation": accommodation,
+            "cultural": cultural,
             "ovgk_share_a": ovgk_share_a,
             "ovgk_share_b": ovgk_share_b,
             "ovgk_share_c": ovgk_share_c,
@@ -154,7 +169,7 @@ def build_level2_children_by_level1(h3_tree, centroid_x_by_l2, centroid_y_by_l2)
     return children
 
 
-def build_level2_candidate_attributes_by_level1(children_by_level1, centroid_x_by_l2, centroid_y_by_l2, statent_count, employees_count, urban_core_count, urban_count, education_count, shop_count, leisure_count, ovgk_share_a_by_l2, ovgk_share_b_by_l2, ovgk_share_c_by_l2, ovgk_share_d_by_l2, ovgk_share_none_by_l2, outside_fraction_by_l2):
+def build_level2_candidate_attributes_by_level1(children_by_level1, centroid_x_by_l2, centroid_y_by_l2, statent_count, employees_count, urban_core_count, urban_count, education_count, shop_count, leisure_count, sport_count, gastronomy_count, accommodation_count, cultural_count, ovgk_share_a_by_l2, ovgk_share_b_by_l2, ovgk_share_c_by_l2, ovgk_share_d_by_l2, ovgk_share_none_by_l2, outside_fraction_by_l2):
     candidate_attributes = {}
     for key, children in children_by_level1.items():
         x = np.array([float(centroid_x_by_l2[c]) for c in children], dtype=np.float64)
@@ -166,6 +181,10 @@ def build_level2_candidate_attributes_by_level1(children_by_level1, centroid_x_b
         education = np.array([float(education_count.get(c, 0.0)) for c in children], dtype=np.float64)
         shop = np.array([float(shop_count.get(c, 0.0)) for c in children], dtype=np.float64)
         leisure = np.array([float(leisure_count.get(c, 0.0)) for c in children], dtype=np.float64)
+        sport = np.array([float(sport_count.get(c, 0.0)) for c in children], dtype=np.float64)
+        gastronomy = np.array([float(gastronomy_count.get(c, 0.0)) for c in children], dtype=np.float64)
+        accommodation = np.array([float(accommodation_count.get(c, 0.0)) for c in children], dtype=np.float64)
+        cultural = np.array([float(cultural_count.get(c, 0.0)) for c in children], dtype=np.float64)
         ovgk_share_a = np.array([float(ovgk_share_a_by_l2.get(c, 0.0)) for c in children], dtype=np.float64)
         ovgk_share_b = np.array([float(ovgk_share_b_by_l2.get(c, 0.0)) for c in children], dtype=np.float64)
         ovgk_share_c = np.array([float(ovgk_share_c_by_l2.get(c, 0.0)) for c in children], dtype=np.float64)
@@ -185,6 +204,10 @@ def build_level2_candidate_attributes_by_level1(children_by_level1, centroid_x_b
             "education": education,
             "shop": shop,
             "leisure": leisure,
+            "sport": sport,
+            "gastronomy": gastronomy,
+            "accommodation": accommodation,
+            "cultural": cultural,
             "ovgk_share_a": ovgk_share_a,
             "ovgk_share_b": ovgk_share_b,
             "ovgk_share_c": ovgk_share_c,

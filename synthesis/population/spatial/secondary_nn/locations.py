@@ -16,6 +16,7 @@ logger = logging.getLogger("synpp")
 _WORKER_STATE = {}
 _WORKER_PROGRESS_QUEUE = None
 _WORKER_PROGRESS_FLUSH_EVERY = 100
+_CHUNCK_SIZE_PERSONS = 10000
 
 def get_platform_mp_context():
     """
@@ -99,11 +100,15 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
         person_trip_count = len(grp)        
         following_purpose_arr = grp["following_purpose"].to_numpy()
         trip_index_arr = grp["trip_index"].to_numpy()
-        daily_longest_arr = grp["daily_longest_distance_from_home"].to_numpy()
-        daily_total_arr = grp["daily_crowfly_total"].to_numpy()
-        daily_longest_work_arr = grp["daily_longest_distance_from_work"].to_numpy()
         departure_time_arr = grp["departure_time_normalized"].to_numpy()
         preceding_purpose_arr = grp["preceding_purpose"].to_numpy()
+        activity_duration_arr = grp["activity_duration_h"].to_numpy()
+        
+        chain_daily_longest = grp["daily_longest_distance_from_home"].iloc[0]  # static per person; same value for all trips
+        chain_daily_total = grp["daily_crowfly_total"].iloc[0]  # static per person; same value for all trips
+        chain_daily_longest_work = grp["daily_longest_distance_from_work"].iloc[0]  # static per person; same value for all trips
+        activity_chain_vector = grp["activity_chain"].iloc[0]  # static per person; same array for all trips
+
         consumed_fore_trip_start = 0.0
         trip_pos = 0.0
         trip_pos_inc = 1/max(1, person_trip_count - 1)
@@ -118,10 +123,7 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
                 next_x, next_y = work_x, work_y
             elif following_purpose == "education" and has_education:
                 next_x, next_y = edu_x, edu_y
-            elif following_purpose in SECONDARY_SET:
-                chain_daily_longest = daily_longest_arr[local_idx]
-                chain_daily_total = daily_total_arr[local_idx]
-                chain_daily_longest_work = daily_longest_work_arr[local_idx]
+            elif following_purpose in SECONDARY_SET:                                
                 departure_time = departure_time_arr[local_idx]
                 origin_purpose = preceding_purpose_arr[local_idx]
                 # Predict first level coarse H3 cell
@@ -130,7 +132,10 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
                                                        daily_longest_distance_from_home=chain_daily_longest, daily_crowfly_total=chain_daily_total,
                                                        daily_longest_distance_from_work=chain_daily_longest_work,
                                                        crowfly_consumed_before_trip=consumed_fore_trip_start, trip_position_class=trip_pos,
-                                                       departure_time_normalized=departure_time, origin_purpose=origin_purpose,
+                                                       departure_time_normalized=departure_time,
+                                                       activity_duration_h=float(activity_duration_arr[local_idx]),
+                                                       activity_chain_vector=activity_chain_vector,
+                                                       origin_purpose=origin_purpose,
                                                        purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng)
 
                 # sample a destination point within the predicted level 2 cell                 
@@ -168,8 +173,6 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
 
 
 
-
-
 def configure(context):
     context.stage("data.constants")
     context.stage("synthesis.population.trips")
@@ -185,10 +188,7 @@ def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.local_model")
 
     context.config("random_seed")
-    context.config("secondary_nn_num_processes", 8)
-    context.config("secondary_nn_chunk_size_persons", 10000)
-    context.config("secondary_nn_worker_torch_threads", 2)
-    context.config("secondary_nn_progress_flush_persons", 100)
+    context.config("threads")
 
 def execute(context):
     logger.info("Starting secondary_nn location assignment")
@@ -235,17 +235,18 @@ def execute(context):
 
     mz_chains = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[["person_id", "trip_id", "daily_longest_distance_from_home",
                                     "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
-                                    "departure_time_normalized", "daily_longest_distance_from_work"]].rename(columns={"person_id": "mz_person_id"})
+                                    "departure_time_normalized", "daily_longest_distance_from_work",
+                                    "activity_duration_h", "activity_chain"]].rename(columns={"person_id": "mz_person_id"})
 
     df_trips = df_trips.merge(mz_chains, how="left", on=["mz_person_id", "trip_id"])
     df_trips = df_trips.sort_values(by=["person_id", "trip_id"]).reset_index(drop=True)
 
     # chunk by person_id to ensure all trips of a person are processed together, and to enable efficient parallelization without shared state
     logger.info("Assigning secondary locations with secondary_nn")
-    num_processes = int(context.config("secondary_nn_num_processes"))
-    chunk_size_persons = max(1, int(context.config("secondary_nn_chunk_size_persons")))
-    worker_torch_threads = int(context.config("secondary_nn_worker_torch_threads"))
-    progress_flush_persons = max(1, int(context.config("secondary_nn_progress_flush_persons")))
+    worker_torch_threads = 2
+    num_processes = int(context.config("threads")/worker_torch_threads)    
+    chunk_size_persons = max(1, int(_CHUNCK_SIZE_PERSONS))    
+    progress_flush_persons = max(1, int(_WORKER_PROGRESS_FLUSH_EVERY))
 
     unique_persons = df_trips["person_id"].unique()
     person_chunk_ids = (np.arange(len(unique_persons), dtype=np.int32) // chunk_size_persons)
@@ -263,13 +264,15 @@ def execute(context):
     df_trips["daily_longest_distance_from_work"] = df_trips["daily_longest_distance_from_work"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df_trips["crowfly_consumed_before_trip"] = df_trips["crowfly_consumed_before_trip"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df_trips["departure_time_normalized"] = df_trips["departure_time_normalized"].replace([np.inf, -np.inf], np.nan).fillna(0.5)
+    df_trips["activity_duration_h"] = df_trips["activity_duration_h"].replace([np.inf, -np.inf], np.nan).fillna(0.0)    
+    df_trips["activity_chain"] = df_trips["activity_chain"].apply(lambda v: v.astype(np.float32))
 
     # ensure cols are in the right type for the models
     assert df_meta.isna().sum().sum()==0, "Meta data contains NaNs"
-    assert df_trips.isna().sum().sum()==0, "trips data contains NaNs"
+    assert df_trips.drop(columns=["activity_chain"]).isna().sum().sum()==0, "trips data (excluding object columns) contains NaNs"
     df_trips = df_trips.astype({"person_id": "int64", "preceding_purpose": str, "following_purpose": str, "trip_index": int, "daily_longest_distance_from_home": float, 
                                 "daily_crowfly_total": float, "daily_longest_distance_from_work": float, "crowfly_consumed_before_trip": float,
-                                "trip_position_class": float, "departure_time_normalized": float})
+                                "trip_position_class": float, "departure_time_normalized": float, "activity_duration_h": float})
     df_meta = df_meta.astype({"person_id": "int64", "home_x": float, "home_y": float, "work_x": float, "work_y": float, "edu_x": float, "edu_y": float, "age": float, "sex": float, 
                               "employed": float, "income_class": float, "car_availability": float, "has_work": bool, "has_education": bool, "_chunk_id": int})
 

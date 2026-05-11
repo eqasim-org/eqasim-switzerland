@@ -24,8 +24,13 @@ def execute(context):
     df.loc[:, "offers_education_secondary"] = df["noga"].str.startswith("85")
 
     # 90 = arts, entertainment, leisure; 56 = gastronomy
-    df.loc[:, "offers_leisure"] = df["noga"].str.startswith("90") | df[
-        "noga"].str.startswith("56")
+    df.loc[:, "offers_leisure"] = (df["noga"].str.startswith("90") | 
+                                   df["noga"].str.startswith("56") |
+                                   df["noga"].str.startswith("912")| # 912 = museum, collection, historical site and monument
+                                   df["noga"].str.startswith("914")| # 914 = Botanical and zoological garden and nature reserve activities
+                                   df["noga"].str.startswith("93")|  # 932 = sport activities
+                                   df["noga"].str.startswith("92")   # 92 = Gambling and betting activities
+                                    )
 
     # 47 = retail
     df.loc[:, "offers_shop"] = df["noga"].str.startswith("47")

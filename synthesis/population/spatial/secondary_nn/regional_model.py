@@ -9,7 +9,7 @@ import joblib
 
 from .h3 import within_ch
 from .hierarchical_utils import SECONDARY_ACTIVITIES, build_coarse_candidate_batch_numba
-from .feature_encoding import CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, fit_candidate_tensor, fit_person_trip_matrix
+from .feature_encoding import CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import RegionalChoiceWrapper
 
@@ -25,14 +25,15 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.constants")
     context.stage("data.spatial.swiss_border")
-    context.stage("synthesis.population.destinations")
+    
+    context.config("threads")
+    context.config("random_seed")
 
+    # training params
     context.config("overwrite_regional_model_if_exists", True)
     context.config("regional_model_epochs", 30)
     context.config("regional_model_batch_size", 512)
-    context.config("regional_model_learning_rate", 2e-2)
-    context.config("regional_model_torch_num_threads", 16)
-    context.config("random_seed")
+    context.config("regional_model_learning_rate", 2e-3) 
 
 
 def execute(context):
@@ -58,7 +59,8 @@ def execute(context):
     mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "origin_purpose", "purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
         "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", 
-        "trip_position_class", "departure_time_normalized", "daily_longest_distance_from_work"
+        "trip_position_class", "departure_time_normalized", "daily_longest_distance_from_work",
+        "activity_duration_h", "activity_chain"
     ]]
     mz_trips = mz_trips.merge(mz_chain_trips, on=["person_id", "trip_id"], how="left")
 
@@ -74,8 +76,8 @@ def execute(context):
     h3_geo_level0 = h3_geo["level_0"]
 
     required_h3_cols = [
-        "centroid", "outside_fraction", "num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure",
-        "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none",
+        "centroid", "outside_fraction", "num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure", "sport", 
+        "gastronomy", "accommodation", "cultural", "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none",
     ]
     missing_h3_cols = [col for col in required_h3_cols if col not in h3_geo_level0.columns]
     if missing_h3_cols:
@@ -97,6 +99,10 @@ def execute(context):
     education_per_h3 = h3_indexed["education"].to_numpy(dtype=np.float64)
     shop_per_h3 = h3_indexed["shop"].to_numpy(dtype=np.float64)
     leisure_per_h3 = h3_indexed["leisure"].to_numpy(dtype=np.float64)
+    sport_per_h3 = h3_indexed["sport"].to_numpy(dtype=np.float64)
+    gastronomy_per_h3 = h3_indexed["gastronomy"].to_numpy(dtype=np.float64)
+    accommodation_per_h3 = h3_indexed["accommodation"].to_numpy(dtype=np.float64)
+    cultural_per_h3 = h3_indexed["cultural"].to_numpy(dtype=np.float64)
     ovgk_share_a_per_h3 = h3_indexed["ovgk_share_a"].to_numpy(dtype=np.float64)
     ovgk_share_b_per_h3 = h3_indexed["ovgk_share_b"].to_numpy(dtype=np.float64)
     ovgk_share_c_per_h3 = h3_indexed["ovgk_share_c"].to_numpy(dtype=np.float64)
@@ -107,7 +113,8 @@ def execute(context):
     trip_cols = [
         "person_id", "trip_id", "origin_x", "origin_y", "destination_level_0", "purpose","origin_purpose",
         "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
-        "departure_time_normalized", "daily_longest_distance_from_work"
+        "departure_time_normalized", "daily_longest_distance_from_work",
+        "activity_duration_h", "activity_chain"
     ]
     df_trips = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
     df_trips = df_trips[df_trips["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=["destination_level_0"])
@@ -153,6 +160,10 @@ def execute(context):
     daily_longest_work = np.where(np.isfinite(daily_longest_work) & (daily_longest_work >= 0.0), daily_longest_work, 0.0)
     departure_time = df_trips["departure_time_normalized"].to_numpy(dtype=np.float64)
     departure_time = np.where(np.isfinite(departure_time), departure_time, 0.5)
+    activity_duration_h = df_trips["activity_duration_h"].to_numpy(dtype=np.float64)
+    activity_duration_h = np.where(np.isfinite(activity_duration_h) & (activity_duration_h >= 0.0), activity_duration_h, 0.0)
+    activity_chain_matrix = np.stack([np.asarray(v, dtype=np.float64)[:ACTIVITY_CHAIN_N] if isinstance(v, np.ndarray) else np.zeros(ACTIVITY_CHAIN_N, dtype=np.float64) for v in df_trips["activity_chain"].to_numpy()])
+    activity_chain_matrix = np.where(np.isfinite(activity_chain_matrix) & (activity_chain_matrix >= 0.0), activity_chain_matrix, 0.0)
 
     ################ Building tensors and fitting scalers ################
     logger.info("\t Building person-trip matrix...")
@@ -160,13 +171,16 @@ def execute(context):
     person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(age=age, sex=sex, 
                                                                                  employed=employed, car_availability=car_availability, income_class=income_class,
                                                                                  daily_longest=daily_longest, daily_total=daily_total, daily_longest_work=daily_longest_work,
+                                                                                 activity_chain_matrix=activity_chain_matrix,
                                                                                  consumed_before=consumed_before, trip_position=trip_position, departure_time=departure_time,
+                                                                                 activity_duration_h=activity_duration_h,
                                                                                  purpose_series=df_trips["purpose"], origin_purpose_series=df_trips["origin_purpose"],
                                                                                  purpose_categories=purpose_categories)
 
     logger.info("\t Building candidate tensor with Numba...")
     candidate_tensor = build_coarse_candidate_batch_numba(home_x, home_y, work_x, work_y, has_work, origin_x, origin_y, centroid_x, centroid_y, statent_per_h3, employees_per_h3,
-                                                          urban_core_per_h3, urban_per_h3, education_per_h3, shop_per_h3, leisure_per_h3, ovgk_share_a_per_h3, ovgk_share_b_per_h3, 
+                                                          urban_core_per_h3, urban_per_h3, education_per_h3, shop_per_h3, leisure_per_h3, sport_per_h3, gastronomy_per_h3,
+                                                          accommodation_per_h3, cultural_per_h3, ovgk_share_a_per_h3, ovgk_share_b_per_h3,
                                                           ovgk_share_c_per_h3, ovgk_share_d_per_h3, ovgk_share_none_per_h3, outside_fraction)
     valid_mask = np.ones((n_trips, num_h3), dtype=bool)
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask, random_state=int(context.config("random_seed")))
@@ -180,14 +194,14 @@ def execute(context):
     candidate_static_x  = candidate_tensor[0:1, :, N_CANDIDATE_DYNAMIC:]  # [1, num_h3, 13] — static cols are identical for all rows; broadcast avoids redundant storage
     candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]    # [n_trips, num_h3, 3] — per-trip distances
 
-    model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dims=(64, 32), dropout_rate=0.1)
+    model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dim=64)
     train_choice_model(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
                               y=y, valid_mask=valid_mask, logger_instance=logger, weights=weights,
                               epochs=int(context.config("regional_model_epochs")),
                               batch_size=int(context.config("regional_model_batch_size")),
                               lr=float(context.config("regional_model_learning_rate")),
                               weight_decay=1e-3,
-                              num_threads=int(context.config("regional_model_torch_num_threads")))
+                              num_threads=int(context.config("threads")))
 
     ########## Building wrapper and saving model ##########
     static_feature_map = {
@@ -198,6 +212,10 @@ def execute(context):
         "education": education_per_h3,
         "shop": shop_per_h3,
         "leisure": leisure_per_h3,
+        "sport": sport_per_h3,
+        "gastronomy": gastronomy_per_h3,
+        "accommodation": accommodation_per_h3,
+        "cultural": cultural_per_h3,
         "ovgk_share_a": ovgk_share_a_per_h3,
         "ovgk_share_b": ovgk_share_b_per_h3,
         "ovgk_share_c": ovgk_share_c_per_h3,

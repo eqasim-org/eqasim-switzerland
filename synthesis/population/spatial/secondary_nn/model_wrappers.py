@@ -41,63 +41,21 @@ def _freeze_candidate_attr_map(attr_map, max_candidates=None, candidate_static_s
     for key, attrs in attr_map.items():
         x = _to_float_array(attrs["x"])
         y = _to_float_array(attrs["y"])
-        num_statent = _to_float_array(attrs["num_statent"])
-        employees = _to_float_array(attrs["employees"])
-        urban_core = _to_float_array(attrs["urban_core"])
-        urban = _to_float_array(attrs["urban"])
-        education = _to_float_array(attrs["education"])
-        shop = _to_float_array(attrs["shop"])
-        leisure = _to_float_array(attrs["leisure"])
-        ovgk_share_a = _to_float_array(attrs["ovgk_share_a"])
-        ovgk_share_b = _to_float_array(attrs["ovgk_share_b"])
-        ovgk_share_c = _to_float_array(attrs["ovgk_share_c"])
-        ovgk_share_d = _to_float_array(attrs["ovgk_share_d"])
-        ovgk_share_none = _to_float_array(attrs["ovgk_share_none"])
-        outside_fraction = _to_float_array(attrs["outside_fraction"])
-        static_feature_map = {
-            "num_statent": num_statent,
-            "employees": employees,
-            "urban_core": urban_core,
-            "urban": urban,
-            "education": education,
-            "shop": shop,
-            "leisure": leisure,
-            "ovgk_share_a": ovgk_share_a,
-            "ovgk_share_b": ovgk_share_b,
-            "ovgk_share_c": ovgk_share_c,
-            "ovgk_share_d": ovgk_share_d,
-            "ovgk_share_none": ovgk_share_none,
-            "outside_fraction": outside_fraction,
-        }
-        static_features = np.column_stack([static_feature_map[name] for name in STATIC_CANDIDATE_FEATURES]).astype(np.float64)
+        # Build static feature matrix in STATIC_CANDIDATE_FEATURES order (scaled block first, passthrough block after).
+        static_features = np.column_stack([
+            _to_float_array(attrs[name]) for name in STATIC_CANDIDATE_FEATURES
+        ]).astype(np.float64)  # [N, 17]
 
-        # Pad to max_candidates so every call produces the same tensor shape.
-        # 'pad' is the number of rows to append.  If the arrays were already
-        # padded on a previous freeze (e.g. after save/load), current length
-        # already equals max_candidates and pad == 0 — idempotent.
+        # Pad to max_candidates so every call produces the same tensor shape — prevents
+        # torch.compile from recompiling on each new candidate-set size.  Padded rows
+        # carry zeros, so amenity masks (num_statent > 0, etc.) are False for them.
         n_children = len(attrs["children"])  # true (unpadded) candidate count
         pad = max(0, (max_candidates - len(x))) if max_candidates is not None else 0
         if pad > 0:
             z1d = np.zeros(pad, dtype=np.float64)
             x = np.concatenate([x, z1d])
             y = np.concatenate([y, z1d])
-            for name in static_feature_map:
-                static_feature_map[name] = np.concatenate([static_feature_map[name], z1d])
             static_features = np.vstack([static_features, np.zeros((pad, static_features.shape[1]), dtype=np.float64)])
-            # refresh local references after padding
-            num_statent = static_feature_map["num_statent"]
-            employees = static_feature_map["employees"]
-            urban_core = static_feature_map["urban_core"]
-            urban = static_feature_map["urban"]
-            education = static_feature_map["education"]
-            shop = static_feature_map["shop"]
-            leisure = static_feature_map["leisure"]
-            ovgk_share_a = static_feature_map["ovgk_share_a"]
-            ovgk_share_b = static_feature_map["ovgk_share_b"]
-            ovgk_share_c = static_feature_map["ovgk_share_c"]
-            ovgk_share_d = static_feature_map["ovgk_share_d"]
-            ovgk_share_none = static_feature_map["ovgk_share_none"]
-            outside_fraction = static_feature_map["outside_fraction"]
 
         _ss = transform_candidate_static_matrix(static_features, candidate_static_scaler).astype(np.float32) if candidate_static_scaler is not None else static_features.astype(np.float32)
         frozen[key] = {
@@ -105,28 +63,17 @@ def _freeze_candidate_attr_map(attr_map, max_candidates=None, candidate_static_s
             "n_children": n_children,
             "x": x,
             "y": y,
-            "num_statent": num_statent,
-            "employees": employees,
-            "urban_core": urban_core,
-            "urban": urban,
-            "education": education,
-            "shop": shop,
-            "leisure": leisure,
-            "ovgk_share_a": ovgk_share_a,
-            "ovgk_share_b": ovgk_share_b,
-            "ovgk_share_c": ovgk_share_c,
-            "ovgk_share_d": ovgk_share_d,
-            "ovgk_share_none": ovgk_share_none,
-            "outside_fraction": outside_fraction,
+            # Unscaled matrix kept so the torch tensor can always be rebuilt (e.g. after
+            # loading a checkpoint without a GPU) via transform_candidate_static_matrix.
             "static_features": static_features,
-            "scaled_static_features": _ss,
             "scaled_static_features_torch": torch.tensor(_ss, dtype=torch.float32).unsqueeze(0),
         }
     return frozen
 
 
 class RegionalChoiceWrapper:
-    def __init__(self, model, person_static_scaler, person_dynamic_scaler, candidate_static_scaler, candidate_dynamic_scaler, person_trip_cols, candidate_cols, all_h3, centroid_x, centroid_y, static_candidate_features, purpose_categories):
+    def __init__(self, model, person_static_scaler, person_dynamic_scaler, candidate_static_scaler, candidate_dynamic_scaler, 
+                 person_trip_cols, candidate_cols, all_h3, centroid_x, centroid_y, static_candidate_features, purpose_categories):
         self.model = model
         self.person_static_scaler    = person_static_scaler
         self.person_dynamic_scaler   = person_dynamic_scaler
@@ -157,7 +104,7 @@ class RegionalChoiceWrapper:
                     "person_input_dim": self.model.person_input_dim,
                     "candidate_input_dim": self.model.candidate_input_dim,
                     "person_hidden_dim": self.model.person_hidden_dim,
-                    "hidden_dims": self.model.hidden_dims,
+                    "hidden_dim": self.model.hidden_dim,
                     "dropout_rate": self.model.dropout_rate,
                 },
                 "person_static_scaler":    self.person_static_scaler,
@@ -183,7 +130,7 @@ class RegionalChoiceWrapper:
             person_input_dim=cfg["person_input_dim"],
             candidate_input_dim=cfg["candidate_input_dim"],
             person_hidden_dim=cfg["person_hidden_dim"],
-            hidden_dims=tuple(cfg["hidden_dims"]),
+            hidden_dim=cfg["hidden_dim"],
             dropout_rate=cfg["dropout_rate"],
         )
         model.load_state_dict(state["model_state"])
@@ -264,7 +211,8 @@ class RegionalChoiceWrapper:
 
 
 class DistrictChoiceWrapper:
-    def __init__(self, model, person_static_scaler, person_dynamic_scaler, candidate_static_scaler, candidate_dynamic_scaler, person_trip_cols, candidate_cols, children_by_level0, level1_candidate_attributes_by_level0, purpose_categories):
+    def __init__(self, model, person_static_scaler, person_dynamic_scaler, candidate_static_scaler, candidate_dynamic_scaler, person_trip_cols, candidate_cols, 
+                 children_by_level0, level1_candidate_attributes_by_level0, purpose_categories):
         self.model = model
         self.person_static_scaler    = person_static_scaler
         self.person_dynamic_scaler   = person_dynamic_scaler
@@ -300,7 +248,7 @@ class DistrictChoiceWrapper:
                     "person_input_dim": self.model.person_input_dim,
                     "candidate_input_dim": self.model.candidate_input_dim,
                     "person_hidden_dim": self.model.person_hidden_dim,
-                    "hidden_dims": self.model.hidden_dims,
+                    "hidden_dim": self.model.hidden_dim,
                     "dropout_rate": self.model.dropout_rate,
                 },
                 "person_static_scaler":    self.person_static_scaler,
@@ -324,7 +272,7 @@ class DistrictChoiceWrapper:
             person_input_dim=cfg["person_input_dim"],
             candidate_input_dim=cfg["candidate_input_dim"],
             person_hidden_dim=cfg["person_hidden_dim"],
-            hidden_dims=tuple(cfg["hidden_dims"]),
+            hidden_dim=cfg["hidden_dim"],
             dropout_rate=cfg["dropout_rate"],
         )
         model.load_state_dict(state["model_state"])
@@ -370,16 +318,17 @@ class DistrictChoiceWrapper:
         return build_dynamic_vector(hx=home_x, hy=home_y, wx=work_x, wy=work_y, ox=origin_x, oy=origin_y,
                                     centroid_x=attrs["x"], centroid_y=attrs["y"], has_work=has_work)
 
-    def build_mask(self):                
+    def build_mask(self):
+        _si = {name: i for i, name in enumerate(STATIC_CANDIDATE_FEATURES)}
         masks = dict()
         for level0_h3, attrs in self.level1_candidate_attributes_by_level0.items():
-            masks[level0_h3] = dict() 
-            masks[level0_h3]["statent"] = attrs["num_statent"] > 0.0
-            # masks[level0_h3]["employees"] = self.static_candidate_features[:, static_pos["employees"]] > 0.0
-            masks[level0_h3]["shop"] = attrs["shop"] > 0.0
-            masks[level0_h3]["leisure"] = attrs["leisure"] > 0.0
-            masks[level0_h3]["education_secondary"] = attrs["education"] > 0.0
-            # masks[level0_h3]["pt_access"] = attrs["ovgk_share_none"] < 0.999
+            sf = attrs["static_features"]
+            masks[level0_h3] = {
+                "statent":             sf[:, _si["num_statent"]] > 0.0,
+                "shop":                sf[:, _si["shop"]]        > 0.0,
+                "leisure":             sf[:, _si["leisure"]]     > 0.0,
+                "education_secondary": sf[:, _si["education"]]   > 0.0,
+            }
         return masks
 
 
@@ -419,7 +368,7 @@ class LocalChoiceWrapper:
                     "person_input_dim": self.model.person_input_dim,
                     "candidate_input_dim": self.model.candidate_input_dim,
                     "person_hidden_dim": self.model.person_hidden_dim,
-                    "hidden_dims": self.model.hidden_dims,
+                    "hidden_dim": self.model.hidden_dim,
                     "dropout_rate": self.model.dropout_rate,
                 },
                 "person_static_scaler":    self.person_static_scaler,
@@ -443,7 +392,7 @@ class LocalChoiceWrapper:
             person_input_dim=cfg["person_input_dim"],
             candidate_input_dim=cfg["candidate_input_dim"],
             person_hidden_dim=cfg["person_hidden_dim"],
-            hidden_dims=tuple(cfg["hidden_dims"]),
+            hidden_dim=cfg["hidden_dim"],
             dropout_rate=cfg["dropout_rate"],
         )
         model.load_state_dict(state["model_state"])
@@ -525,7 +474,7 @@ class LocalChoiceWrapper:
 
         _, probs = self.predict_from_inputs(person, candidate_static_scaled, candidate_dynamic_scaled, rng=rng, return_probabilities=True)
         probs = probs[0, :n_children]
-        company_mask = np.asarray(attrs["num_statent"], dtype=np.float64)[:n_children] > 0.0
+        company_mask = attrs["static_features"][:n_children, STATIC_CANDIDATE_FEATURES.index("num_statent")] > 0.0
         if not np.any(company_mask):
             raise RuntimeError(f"No level2 candidates with num_statent > 0 for key {key}")
 
@@ -538,14 +487,17 @@ class LocalChoiceWrapper:
         chosen_idx = int(np.random.choice(n_children, p=probs)) if rng is None else int(rng.choice(n_children, p=probs))
         return {"level2_h3": children[chosen_idx], "choice_index": chosen_idx, "candidates": children, "probabilities": probs}
 
-    def build_mask(self):                
+    def build_mask(self):
+        _si = {name: i for i, name in enumerate(STATIC_CANDIDATE_FEATURES)}
         masks = dict()
         for key, attrs in self.level2_candidate_attributes_by_level1.items():
-            masks[key] = dict() 
-            masks[key]["statent"] = attrs["num_statent"] > 0.0
-            masks[key]["shop"] = attrs["shop"] > 0.0
-            masks[key]["leisure"] = attrs["leisure"] > 0.0
-            masks[key]["education_secondary"] = attrs["education"] > 0.0
+            sf = attrs["static_features"]
+            masks[key] = {
+                "statent":             sf[:, _si["num_statent"]] > 0.0,
+                "shop":                sf[:, _si["shop"]]        > 0.0,
+                "leisure":             sf[:, _si["leisure"]]     > 0.0,
+                "education_secondary": sf[:, _si["education"]]   > 0.0,
+            }
         return masks
 
 
@@ -596,7 +548,8 @@ class HierarchicalLocationChoiceModel:
     
     def build_candidates_and_trees(self, context):
         h3_data, h3_geo, h3_tree = context.stage("synthesis.population.spatial.secondary_nn.h3")
-        self.destination_index, self.destination_fallback = _prepare_destination_level2_index(context, h3_data)
+        (self.destination_index, self.destination_fallback, self.car_available_probabilities, 
+            self.no_car_available_probabilities) = _prepare_destination_level2_index(context, h3_data, h3_geo)
         self.l1_siblings = _reverse_tree(h3_tree)  # {level1: [sibling_level1s]} — built once for O(1) fallback widening
 
     @classmethod
@@ -702,18 +655,18 @@ class HierarchicalLocationChoiceModel:
             "Destination pools / sibling map are not initialized. Call build_candidates_and_trees(context) before predict()."
         )
 
-    def _get_cached_person_static(self, person_id, age, income_class, daily_longest, daily_total, daily_longest_work, sex, employed, car_availability):
+    def _get_cached_person_static(self, person_id, age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability):
         if person_id != self._last_person_id:
-            self._last_person_static = transform_person_static_vector(age, income_class, daily_longest, daily_total, daily_longest_work, sex, employed, car_availability, self.c.person_static_scaler)
+            self._last_person_static = transform_person_static_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, self.c.person_static_scaler)
             self._last_person_id = person_id
         return self._last_person_static
 
-    def _build_person_dynamic(self, consumed_before, trip_position, departure_time, purpose, origin_purpose):
-        purpose_hot = self._purpose_identity[self._purpose_index.get(purpose, 0)]
-        remapped_origin = ORIGIN_PURPOSE_REMAP.get(str(origin_purpose), str(origin_purpose))
-        origin_idx = self._purpose_index.get(remapped_origin, -1)
-        origin_purpose_hot = self._purpose_identity[origin_idx] if origin_idx >= 0 else np.zeros(len(self._purpose_categories), dtype=np.float32)
-        return transform_person_dynamic_vector(consumed_before, trip_position, departure_time, purpose_hot, origin_purpose_hot, self.c.person_dynamic_scaler)
+    def _build_person_dynamic(self, consumed_before, trip_position, departure_time, activity_duration_h, purpose, origin_purpose):
+        purpose_hot = self._purpose_identity[self._purpose_index[purpose]]
+        remapped_origin = ORIGIN_PURPOSE_REMAP.get(origin_purpose, origin_purpose)
+        origin_idx = self._purpose_index[remapped_origin]
+        origin_purpose_hot = self._purpose_identity[origin_idx]
+        return transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, purpose_hot, origin_purpose_hot, self.c.person_dynamic_scaler)
 
     def _predict_level0_from_person(self, person_matrix, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work, rng, purpose):
         candidate_dynamic        = self.c._build_candidate_dynamic(home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
@@ -756,10 +709,10 @@ class HierarchicalLocationChoiceModel:
     ##################### Main prediction method that runs the full three-level prediction process #####################
 
     def predict(self, person_id, home_x, home_y, work_x, work_y, origin_x, origin_y, age, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work,
-                crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, sex, employed, car_availability, income_class, purpose, origin_purpose,
+                crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, activity_chain_vector, sex, employed, car_availability, income_class, purpose, origin_purpose,
                 has_work, has_education, rng):
-        person_static  = self._get_cached_person_static(person_id, age, income_class, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work, sex, employed, car_availability)
-        person_dynamic = self._build_person_dynamic(crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, purpose, origin_purpose)
+        person_static  = self._get_cached_person_static(person_id, age, income_class, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work, activity_chain_vector, sex, employed, car_availability)
+        person_dynamic = self._build_person_dynamic(crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, purpose, origin_purpose)
         person_matrix  = np.concatenate([person_static, person_dynamic], axis=1)
         level0_h3 = self._predict_level0_from_person(person_matrix, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=origin_x, origin_y=origin_y, 
                                                      has_work=has_work, rng=rng, purpose=purpose)
@@ -772,25 +725,31 @@ class HierarchicalLocationChoiceModel:
 
 
     def sample_company_in_l2(self, purpose, level1_h3, level2_h3, rng, car_availability=None, home_x=None, home_y=None):
+        probabilities = self.car_available_probabilities if car_availability else self.no_car_available_probabilities
 
         purpose_index = self.destination_index.get(purpose)
+        purpose_prob = probabilities.get(purpose)
         if purpose_index is not None:
             pool = purpose_index.get(level2_h3)
             if pool:
-                return pool[rng.randint(len(pool))]
+                prob = purpose_prob.get(level2_h3)
+                return pool[int(rng.choice(len(pool), p=prob))]
 
         purpose_fallback = self.destination_fallback.get(purpose)
         if purpose_fallback is not None:
             pool = purpose_fallback.get(level1_h3)
             if pool:
-                return pool[rng.randint(len(pool))]
+                prob = purpose_prob.get(level1_h3)
+                return pool[int(rng.choice(len(pool), p=prob))]
 
         other_fallback = self.destination_fallback.get('other')
+        other_prob = probabilities.get('other')
         if other_fallback is not None:
             pool = other_fallback.get(level1_h3)
             if pool:
                 self.log(f"Using fallback pool for level1_h3 '{level1_h3}' and purpose '{purpose}' with {len(pool)} candidates", level=logging.WARNING)
-                return pool[rng.randint(len(pool))]
+                prob = other_prob.get(level1_h3)
+                return pool[int(rng.choice(len(pool), p=prob))]
 
         # All local fallbacks exhausted — widen to sibling level1 cells (O(1) parent lookup, pre-built at init).
         sibling_l1s = self.l1_siblings.get(level1_h3)
@@ -800,21 +759,17 @@ class HierarchicalLocationChoiceModel:
                 if purpose_fallback is not None:
                     pool = purpose_fallback.get(sib_l1)
                     if pool:
+                        prob = purpose_prob.get(sib_l1)
                         self.log(f"Widened to sibling level1 '{sib_l1}' for purpose '{purpose}' (original level1 '{level1_h3}' had no destinations)", level=logging.WARNING)
-                        return pool[rng.randint(len(pool))]
+                        return pool[int(rng.choice(len(pool), p=prob))]
                 if other_fallback is not None:
                     pool = other_fallback.get(sib_l1)
                     if pool:
+                        prob = other_prob.get(sib_l1)
                         self.log(f"Widened to sibling level1 '{sib_l1}' (other fallback) for purpose '{purpose}' (original level1 '{level1_h3}' had no destinations)", level=logging.WARNING)
-                        return pool[rng.randint(len(pool))]
+                        return pool[int(rng.choice(len(pool), p=prob))]
         
-        # raise RuntimeError(
-        #     f"No candidates in destination pool for purpose '{purpose}', "
-        #     f"level1_h3 '{level1_h3}', level2_h3 '{level2_h3}'"
-        # )
-        self.log(
+        raise RuntimeError(
             f"No candidates in destination pool for purpose '{purpose}', "
-            f"level1_h3 '{level1_h3}', level2_h3 '{level2_h3}' after exhausting fallbacks. Returning None.",
-            level=logging.ERROR
+            f"level1_h3 '{level1_h3}', level2_h3 '{level2_h3}'"
         )
-        return "no_id", Point(home_x, home_y)

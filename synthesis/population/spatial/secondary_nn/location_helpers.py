@@ -63,7 +63,7 @@ def _build_level_attributes(h3_data, h3_geo_level0, all_h3):
 
     # check for nans
     cols = ["num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure",
-            "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none", "outside_fraction"]
+            "sport", "gastronomy", "accommodation", "cultural", "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none", "outside_fraction"]
     assert df[cols].isna().sum().sum() == 0, "Found NaNs in coarse attributes, please check the data preparation steps."
 
     # build dict
@@ -72,34 +72,66 @@ def _build_level_attributes(h3_data, h3_geo_level0, all_h3):
     return attrs
 
 
-def _prepare_destination_level2_index(context, h3_data):
+def build_probability(num_employees, ovgk_none, car_available, alpha=0.7):
+    weight = np.asarray(num_employees) ** alpha
+    if not car_available:
+        weight[ovgk_none] *= 0.01  # penalize locations with no OVGK if no car available
+    total_weight = weight.sum()
+    return weight / total_weight if total_weight > 0 else np.ones_like(weight) / len(weight)
+
+
+
+def _prepare_destination_level2_index(context, h3_data, h3_geo):
     df_dest = h3_data["destinations"][["destination_id", "level_1", "level_2"]]
-    df_dest_attributes = context.stage("synthesis.population.destinations")
+    
+    offer_cols = [f"offers_{p}" for p in SECONDARY_ACTIVITIES]
+    df_dest_attributes = context.stage("synthesis.population.destinations")[["destination_id", "number_employees", "ovgk", "geometry", *offer_cols]]
     df_dest = df_dest.merge(df_dest_attributes, on="destination_id", how="left")
 
-    # Validate columns
-    missing = [f"offers_{p}" for p in SECONDARY_ACTIVITIES if f"offers_{p}" not in df_dest.columns]
+    # Validate columns    
+    missing = [c for c in offer_cols if c not in df_dest.columns]
     if missing:
         raise RuntimeError(f"Missing columns in destinations data: {missing}")
 
+    # Reusable full-frame arrays (boolean/numeric only — indexed with boolean mask below).
+    no_ovgk = (df_dest["ovgk"].to_numpy() == "None")
+    employees = df_dest["number_employees"].to_numpy()
+    dest_ids = df_dest["destination_id"].to_numpy()
+    geoms = df_dest["geometry"].values
+
+    # Convert offer columns once
+    offer_masks = {purpose: df_dest[f"offers_{purpose}"].fillna(False).to_numpy(dtype=bool) for purpose in SECONDARY_ACTIVITIES}
+
     index = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
     fallback = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
+    car_available_probabilities = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
+    no_car_available_probabilities = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
 
     for purpose in SECONDARY_ACTIVITIES:
-        col = f"offers_{purpose}"
-        sub = df_dest[df_dest[col].fillna(False).astype(bool)]
+        mask = offer_masks[purpose]
+        sub = df_dest.loc[mask].reset_index(drop=True)
+        sub_no_ovgk = no_ovgk[mask]
+        sub_employees = employees[mask]
+        sub_dest_ids = dest_ids[mask]
+        sub_geoms = geoms[mask]
 
-        # Build both indices in one pass
-        for row in sub.itertuples(index=False):
-            entry = (row.destination_id, row.geometry)
+        # ---- level_2 ----
+        for level_2, idx in sub.groupby("level_2").indices.items():
+            index[purpose][level_2] = list(zip(sub_dest_ids[idx], sub_geoms[idx]))
+            emp = sub_employees[idx]
+            nov = sub_no_ovgk[idx]
+            car_available_probabilities[purpose][level_2] = build_probability(emp, nov, car_available=True)
+            no_car_available_probabilities[purpose][level_2] = build_probability(emp, nov, car_available=False)
 
-            # level 2
-            index[purpose].setdefault(row.level_2, []).append(entry)
+        # ---- level_1 ----
+        for level_1, idx in sub.groupby("level_1").indices.items():
+            fallback[purpose][level_1] = list(zip(sub_dest_ids[idx], sub_geoms[idx]))
+            emp = sub_employees[idx]
+            nov = sub_no_ovgk[idx]
+            car_available_probabilities[purpose][level_1] = build_probability(emp, nov, car_available=True)
+            no_car_available_probabilities[purpose][level_1] = build_probability(emp, nov, car_available=False)
 
-            # level 1 (fallback)
-            fallback[purpose].setdefault(row.level_1, []).append(entry)
-
-    return index, fallback
+    return (index, fallback, car_available_probabilities, no_car_available_probabilities)
 
 
 def _reverse_tree(h3_tree):
@@ -149,7 +181,9 @@ def _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_w
             'crowfly_consumed_before_trip': 0.0,
             'trip_position_class': 0.0,
             'daily_longest_distance_from_work': first["daily_longest_distance_from_work"],
-            'departure_time_normalized': first["departure_time_normalized"],
+            'departure_time_normalized': max(0, first["departure_time_normalized"]-8.0/24.0),
+            "activity_duration_h": 8.0,  # assume 8h duration for the first activity, consistent with mz_chains.py
+            "activity_chain": first["activity_chain"]
         }
 
         # Faster than concat for single row prepend

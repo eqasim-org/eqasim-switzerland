@@ -9,42 +9,51 @@ import torch.optim as optim
 
 logger = logging.getLogger("synpp: choice_model")
 
+class ResidualBlock(nn.Module):
+    def __init__(self, dim_in, dim_out, dropout_rate=0.1):
+        super().__init__()
+        self.layer1 = nn.Sequential(
+            nn.Linear(dim_in, dim_out),
+            nn.LayerNorm(dim_out),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity()
+        )
+        self.layer2 = nn.Sequential(
+            nn.Linear(dim_out, dim_out),
+            nn.LayerNorm(dim_out)
+        )
+        self.act = nn.ReLU()
+
+    def forward(self, x):
+        x1 = self.layer1(x)
+        x2 = self.layer2(x1)
+        return self.act(x1 + x2)
+    
 
 class NeuralChoiceModel(nn.Module):
-    def __init__(self, person_input_dim, candidate_input_dim, person_hidden_dim=32, hidden_dims=(64, 32), dropout_rate=0.1, mask_threshold=1e-3):
+    def __init__(self, person_input_dim, candidate_input_dim, person_hidden_dim=32, hidden_dim=64, dropout_rate=0.1, mask_threshold=1e-4):
         super().__init__()
         self.person_input_dim = int(person_input_dim)
         self.candidate_input_dim = int(candidate_input_dim)
         self.person_hidden_dim = int(person_hidden_dim)
-        self.hidden_dims = tuple(hidden_dims)
+        self.hidden_dim = int(hidden_dim)
         self.dropout_rate = float(dropout_rate)
         self.mask_threshold = float(mask_threshold)
         self.device = torch.device("cpu")
 
-        if len(self.hidden_dims) == 0:
-            raise ValueError("NeuralChoiceModel requires at least one hidden layer")
-
-        self.person_tower = nn.Sequential(
-            nn.Linear(self.person_input_dim, self.person_hidden_dim),
-            nn.LayerNorm(self.person_hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(self.dropout_rate) if self.dropout_rate > 0.0 else nn.Identity(),
-        )
-
-        utility_layers = []
-        prev_dim = self.candidate_input_dim + self.person_hidden_dim
-        for i, hidden_dim in enumerate(self.hidden_dims):
-            utility_layers.append(nn.Linear(prev_dim, hidden_dim))
-            utility_layers.append(nn.LayerNorm(hidden_dim))
-            utility_layers.append(nn.ReLU())
-            if i == 0 and self.dropout_rate > 0.0:
-                utility_layers.append(nn.Dropout(self.dropout_rate))
-            prev_dim = hidden_dim
-        self.utility_tower = nn.Sequential(*utility_layers)
+        self.person_tower = ResidualBlock(person_input_dim, person_hidden_dim, dropout_rate=dropout_rate)
+        self.utility_tower = ResidualBlock(person_hidden_dim + candidate_input_dim, hidden_dim, dropout_rate=dropout_rate)
 
         # Small mask head from the last hidden dimension: predicts candidate plausibility.
-        self.mask_layer = nn.Linear(self.hidden_dims[-1], 1)
-        self.utility_head = nn.Linear(self.hidden_dims[-1], 1)
+        self.mask_layer = nn.Linear(hidden_dim, 1)
+        self.utility_head = nn.Linear(hidden_dim, 1)
+        self._init_weights()
+    
+    def _init_weights(self):
+        nn.init.constant_(self.mask_layer.bias, 3.0)
+        nn.init.normal_(self.mask_layer.weight, std=0.01)
+        nn.init.normal_(self.utility_head.weight, std=0.05)
+        nn.init.zeros_(self.utility_head.bias)
 
     def forward(self, person_static, person_dynamic, candidate_static, candidate_dynamic):
         if person_static.ndim == 1:   person_static   = person_static.unsqueeze(0)
@@ -77,11 +86,14 @@ class NeuralChoiceModel(nn.Module):
         mask_logits = self.mask_layer(hidden).reshape(batch_size, n_candidates)
         mask_prob = torch.sigmoid(mask_logits)
 
-        # Soft penalty in utility space; low-probability candidates are strongly down-weighted.
+        # Soft penalty in utility space; low-probability candidates are down-weighted.
+        # Keep this always-on so the mask head can still shape utilities during training.
         utilities = base_utilities + torch.log(mask_prob.clamp_min(1e-8))
 
-        # Hard mask for highly implausible candidates (numerical -inf equivalent for softmax).
-        utilities = utilities.masked_fill(mask_prob < self.mask_threshold, -1e9)
+        # Apply internal hard mask only at inference time
+        if not self.training:
+            utilities = utilities.masked_fill(mask_prob < self.mask_threshold, -1e9)
+
         return utilities
 
 
