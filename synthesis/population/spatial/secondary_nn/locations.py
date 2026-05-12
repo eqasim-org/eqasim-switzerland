@@ -198,7 +198,7 @@ def execute(context):
     
     ########## Loading NN models ##########
     logger.info("\t Loading the models")
-    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=True)    
+    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=False)    
     wrapper.assert_ready_for_prediction()
 
     ########## Loading population data ##########
@@ -284,11 +284,12 @@ def execute(context):
     locations_records = []
     convergence_records = []
     
-    ########### HERE WE DECIDE WHETHER TO USE MULTIPROCESSING OR NOT BASED ON THE CONFIGURATION ###########
+    ########### HERE WE DECIDE WHETHER TO USE MULTIPROCESSING OR NOT BASED ON THE CONFIGURATION ###########    
     if num_processes <= 1:
         base_seed = int(context.config("random_seed"))
         _WORKER_STATE.clear()
-        _WORKER_STATE["wrapper"] = wrapper
+        init_args = (wrapper, worker_torch_threads, True, True, "max-autotune", None, progress_flush_persons)
+        _init_location_worker(*init_args) 
 
         with context.progress(label="Assigning secondary locations with locations_v2", total=len(unique_persons)) as progress:
             for chunk_idx, chunk_id in enumerate(chunk_ids):
@@ -307,14 +308,11 @@ def execute(context):
         max_inflight = num_processes * 2
         chunk_queue = list(enumerate(chunk_ids))   # [(chunk_idx, chunk_id), ...]
         submit_cursor = 0
+        init_args = (wrapper, worker_torch_threads, True, True, "max-autotune", progress_queue, progress_flush_persons)
 
         with context.progress(label="Assigning secondary locations with locations_v2", total=len(unique_persons)) as progress:
-            with ProcessPoolExecutor(
-                max_workers=num_processes,
-                mp_context=mp_context,
-                initializer=_init_location_worker,
-                initargs=(wrapper, worker_torch_threads, True, True, "max-autotune", progress_queue, progress_flush_persons),
-            ) as executor:
+            with ProcessPoolExecutor(max_workers=num_processes, mp_context=mp_context, initializer=_init_location_worker,
+                initargs=init_args) as executor:
                 pending = {}  # future -> chunk_id
 
                 # seed the pipeline
