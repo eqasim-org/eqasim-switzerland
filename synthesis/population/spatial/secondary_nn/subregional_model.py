@@ -260,11 +260,12 @@ def execute(context):
 
     model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dim=32)
     train_choice_model(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
-                              y=y, valid_mask=valid_mask, weight_decay=1e-3, logger_instance=logger, weights=weights,
+                              y=y, valid_mask=valid_mask, logger_instance=logger, weights=weights,
                               epochs=int(context.config("subregional_model_epochs")),
                               batch_size=int(context.config("subregional_model_batch_size")),
                               lr=float(context.config("subregional_model_learning_rate")),
-                              num_threads=int(context.config("threads")))
+                              num_threads=int(context.config("threads")),
+                              path=context.path())
 
     ########## Building wrapper and saving model ##########
     wrapper = DistrictChoiceWrapper(model=model, person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler,

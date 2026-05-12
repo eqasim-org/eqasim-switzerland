@@ -261,8 +261,8 @@ def execute(context):
         epochs=int(context.config("local_model_epochs")),
         batch_size=int(context.config("local_model_batch_size")),
         lr=float(context.config("local_model_learning_rate")),
-        weight_decay=1e-3,
-        num_threads=int(context.config("threads")))
+        num_threads=int(context.config("threads")),
+        path = context.path())
 
     ########## Building wrapper and saving model ##########
     wrapper = LocalChoiceWrapper(model=model, person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler,

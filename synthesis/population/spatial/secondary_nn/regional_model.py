@@ -200,8 +200,8 @@ def execute(context):
                               epochs=int(context.config("regional_model_epochs")),
                               batch_size=int(context.config("regional_model_batch_size")),
                               lr=float(context.config("regional_model_learning_rate")),
-                              weight_decay=1e-3,
-                              num_threads=int(context.config("threads")))
+                              num_threads=int(context.config("threads")),
+                              path=context.path())
 
     ########## Building wrapper and saving model ##########
     static_feature_map = {
