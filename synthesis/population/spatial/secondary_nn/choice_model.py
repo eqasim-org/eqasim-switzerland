@@ -10,24 +10,31 @@ import torch.optim as optim
 logger = logging.getLogger("synpp: choice_model")
 
 class ResidualBlock(nn.Module):
-    def __init__(self, dim_in, dim_out, dropout_rate=0.1):
+    def __init__(self, dim_in, dim_out, dropout_rate=0.1, apply_residual=True):
         super().__init__()
+        self.apply_residual = apply_residual
         self.layer1 = nn.Sequential(
             nn.Linear(dim_in, dim_out),
             nn.LayerNorm(dim_out),
-            nn.ReLU(),
+            nn.SiLU(),
             nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity()
         )
         self.layer2 = nn.Sequential(
             nn.Linear(dim_out, dim_out),
             nn.LayerNorm(dim_out)
         )
-        self.act = nn.ReLU()
+        if apply_residual:
+            self.act = nn.SiLU()
+        else:
+            self.act = nn.ReLU()
 
     def forward(self, x):
         x1 = self.layer1(x)
         x2 = self.layer2(x1)
-        return self.act(x1 + x2)
+        if self.apply_residual:
+            return self.act(x1 + x2)
+        else:
+            return self.act(x2)
     
 
 class NeuralChoiceModel(nn.Module):
@@ -39,10 +46,11 @@ class NeuralChoiceModel(nn.Module):
         self.hidden_dim = int(hidden_dim)
         self.dropout_rate = float(dropout_rate)
         self.mask_threshold = float(mask_threshold)
-        self.device = torch.device("cpu")
+        self._device = torch.device("cpu")
 
         self.person_tower = ResidualBlock(person_input_dim, person_hidden_dim, dropout_rate=dropout_rate)
-        self.utility_tower = ResidualBlock(person_hidden_dim + candidate_input_dim, hidden_dim, dropout_rate=dropout_rate)
+        self.utility_tower = ResidualBlock(person_hidden_dim + candidate_input_dim, hidden_dim, 
+                                           dropout_rate=dropout_rate, apply_residual=False)
 
         # Small mask head from the last hidden dimension: predicts candidate plausibility.
         self.mask_layer = nn.Linear(hidden_dim, 1)
@@ -52,7 +60,7 @@ class NeuralChoiceModel(nn.Module):
     def _init_weights(self):
         nn.init.constant_(self.mask_layer.bias, 3.0)
         nn.init.normal_(self.mask_layer.weight, std=0.01)
-        nn.init.normal_(self.utility_head.weight, std=0.05)
+        nn.init.normal_(self.utility_head.weight, std=0.1)
         nn.init.zeros_(self.utility_head.bias)
 
     def forward(self, person_static, person_dynamic, candidate_static, candidate_dynamic):
@@ -90,10 +98,6 @@ class NeuralChoiceModel(nn.Module):
         # Keep this always-on so the mask head can still shape utilities during training.
         utilities = base_utilities + torch.log(mask_prob.clamp_min(1e-8))
 
-        # Apply internal hard mask only at inference time
-        if not self.training:
-            utilities = utilities.masked_fill(mask_prob < self.mask_threshold, -1e9)
-
         return utilities
 
 
@@ -102,7 +106,7 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
     if num_threads is not None:
         torch.set_num_threads(max(1, int(num_threads)))
     
-    device = model.device
+    device = model._device
     model.to(device)
 
     person_static_tensor   = torch.as_tensor(person_static_x,   dtype=torch.float32, device=device)
@@ -163,7 +167,7 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
 
 def predict_choice_proba(model, person_static, person_dynamic, candidate_static, candidate_dynamic, valid_mask_tensor=None):
     with torch.inference_mode():
-        dev = model.device
+        dev = model._device
         ps = torch.as_tensor(person_static,   dtype=torch.float32, device=dev)
         pd = torch.as_tensor(person_dynamic,  dtype=torch.float32, device=dev)
         cs = torch.as_tensor(candidate_static,  dtype=torch.float32, device=dev)

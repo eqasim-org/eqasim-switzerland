@@ -91,8 +91,8 @@ class RegionalChoiceWrapper:
         self.centroid_y = np.asarray(centroid_y, dtype=np.float64)
         self.static_candidate_features = np.asarray(static_candidate_features, dtype=np.float32)
         # Pre-scale static features once at init — avoids per-trip scaler.transform() calls.
-        self.scaled_static_candidate_features = transform_candidate_static_matrix(self.static_candidate_features, self.candidate_static_scaler).astype(np.float32)
-        self.scaled_static_features_torch = torch.tensor(self.scaled_static_candidate_features, dtype=torch.float32).unsqueeze(0)  # [1, N, 13]
+        scaled_static_candidate_features = transform_candidate_static_matrix(self.static_candidate_features, self.candidate_static_scaler).astype(np.float32)
+        self.scaled_static_features_torch = torch.tensor(scaled_static_candidate_features, dtype=torch.float32).unsqueeze(0)  # [1, N, 13]
         self.static_feature_indices, self.dynamic_feature_indices = _candidate_column_indices(self.candidate_cols)
         assert self.static_candidate_features.ndim == 2, "coarse static_candidate_features must be 2D"
         assert self.static_candidate_features.shape[1] == len(self.static_feature_indices), (
@@ -216,6 +216,8 @@ class RegionalChoiceWrapper:
 
 
 class DistrictChoiceWrapper:
+    logger: logging.Logger = logging.getLogger("synpp: HierarchicalLocationChoiceModel")
+
     def __init__(self, model, person_static_scaler, person_dynamic_scaler, candidate_static_scaler, candidate_dynamic_scaler, person_trip_cols, candidate_cols, 
                  children_by_level0, level1_candidate_attributes_by_level0, purpose_categories):
         self.model = model
@@ -302,6 +304,7 @@ class DistrictChoiceWrapper:
                 raise ValueError("level0_h3 must be provided when using internal_mask")
             level_cand_mask = self.mask.get(level0_h3)
             if level_cand_mask is None:
+                self.logger.warning(f"No candidate mask found for level0_h3 '{level0_h3}'; no internal mask will be applied")
                 cand_mask = None
             else:
                 cand_mask = level_cand_mask.get(purpose)

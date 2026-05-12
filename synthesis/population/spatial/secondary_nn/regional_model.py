@@ -31,9 +31,9 @@ def configure(context):
 
     # training params
     context.config("overwrite_regional_model_if_exists", True)
-    context.config("regional_model_epochs", 30)
+    context.config("regional_model_epochs", 50)
     context.config("regional_model_batch_size", 512)
-    context.config("regional_model_learning_rate", 2e-3) 
+    context.config("regional_model_learning_rate", 4e-3) 
 
 
 def execute(context):
