@@ -566,7 +566,7 @@ class HierarchicalLocationChoiceModel:
 
     def optimize_wrapper(self, enable_compile=True, compile_mode="max-autotune"):
         for key in self.wrappers:
-            self.wrappers[key] = self._optimize_wrapper(self.wrappers[key], enable_compile=enable_compile)
+            self.wrappers[key] = self._optimize_wrapper(self.wrappers[key], enable_compile=enable_compile, compile_mode=compile_mode)
         self._optimized = True
 
     def _optimize_wrapper(self, wrapper, enable_compile=True, compile_mode="max-autotune"):
