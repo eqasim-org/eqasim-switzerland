@@ -273,9 +273,9 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
 
     assert len(df_target) == len(df_assignment)
 
-    context.set_info("matched_counts", {
-        count: np.count_nonzero(levels >= count) for count in range(len(columns) + 1)
-    })
+    #context.set_info("matched_counts", {
+    #    count: np.count_nonzero(levels >= count) for count in range(len(columns) + 1)
+    #})
 
     for count in range(len(columns) + 1):
         print("%d matched levels:" % count, np.count_nonzero(levels >= count),

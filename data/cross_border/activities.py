@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+from shapely.geometry import LineString
 
 def configure(context):
     context.config("random_seed")
+    context.config("output_path")
 
     context.stage("data.cross_border.destinations")
     context.stage("data.microcensus.trips")
@@ -14,7 +16,8 @@ def execute(context):
 
     population = df[["cross_border_person_id", "label", "mz_person_id",
                      "origin_x", "origin_y", 
-                     "destination_x", "destination_y", "destination_id"]]
+                     "destination_x", "destination_y", "destination_id",
+                     "interview_place", "interview_point_id", "interview_geometry_point"]]
     
     mz_trips   = mz_trips[["person_id", "trip_id", 
                            "departure_time", "arrival_time", 
@@ -124,5 +127,151 @@ def execute(context):
                                    "purpose", "is_last",
                                    "geometry", "destination_id", "following_mode"
                                    ]]
+    
+    # ── 0. Sort ────────────────────────────────────────────────────────────────────
+    df_activities = df_activities.sort_values(["person_id", "activity_index"]).reset_index(drop=True)
+
+    # ── 1. Compute trip durations ──────────────────────────────────────────────────
+    df_activities["next_start_time"] = df_activities.groupby("person_id")["start_time"].shift(-1)
+    df_activities["trip_duration"]   = df_activities["next_start_time"] - df_activities["end_time"]
+
+    # ── 2. Extract nth activities per person ───────────────────────────────────────
+    def nth_activity(df, n):
+        return (
+            df.groupby("person_id")
+            .nth(n)
+            .reset_index()[["person_id", "geometry", "end_time", "trip_duration", "following_mode"]]
+        )
+
+    act1 = nth_activity(df_activities, 0).rename(columns={"geometry": "geom_1", "end_time": "end_time_1", "trip_duration": "trip_duration_12"})
+    act2 = nth_activity(df_activities, 1).rename(columns={"geometry": "geom_2", "end_time": "end_time_2", "trip_duration": "trip_duration_23"})
+    act3 = nth_activity(df_activities, 2).rename(columns={"geometry": "geom_3"})
+
+    # ── 3. Helper: compute fake activity timing ────────────────────────────────────
+    def compute_fake_activity(fake_df, geom_before, geom_after, end_time_col, trip_duration_col):
+        """
+        Interpolates the start_time of a fake activity between two real activities
+        based on the ratio of distances.
+        
+        fake_df         : dataframe of fake activities, must have a 'geometry' column (border point)
+        geom_before     : column name for the geometry of the activity before
+        geom_after      : column name for the geometry of the activity after
+        end_time_col    : column name for end_time of the activity before
+        trip_duration_col: column name for the trip duration between the two real activities
+        """
+        df = fake_df.copy()
+        
+        df["dist_before"] = df.apply(lambda r: r[geom_before].distance(r["geometry"]), axis=1)
+        df["dist_after"]  = df.apply(lambda r: r[geom_after].distance(r["geometry"]),  axis=1)
+        df["ratio"]       = df["dist_before"] / (df["dist_before"] + df["dist_after"])
+        
+        df["start_time"]  = df[end_time_col] + df[trip_duration_col] * df["ratio"]
+        df["end_time"]    = df["start_time"] + df["duration"]
+        
+        return df.drop(columns=["dist_before", "dist_after", "ratio", geom_before, geom_after,
+                                end_time_col, trip_duration_col])
+
+    # ── 4. Build fake activities at index 1.5 (all persons with mode car) ───────────────────────
+    car_users      = (df_activities["following_mode"] == "car") | (df_activities["following_mode"] == "car_passenger")
+    car_users      = df_activities[car_users]["person_id"].values.tolist()
+    mask_car_users = population["cross_border_person_id"].isin(car_users)
+
+    activities1point5 = (
+        population[mask_car_users].copy()
+        .rename(columns={"cross_border_person_id": "person_id", "interview_geometry_point": "geometry"})
+    )
+    activities1point5["activity_index"] = 1.5
+    activities1point5["duration"]       = 1
+    activities1point5["is_last"]        = False
+    activities1point5["destination_id"] = -1
+
+    activities1point5 = activities1point5.merge(act1[["person_id", "geom_1", "end_time_1", "trip_duration_12", "following_mode"]], on="person_id", how="left")
+    activities1point5 = activities1point5.merge(act2[["person_id", "geom_2"]], on="person_id", how="left")
+
+    activities1point5 = compute_fake_activity(
+        activities1point5,
+        geom_before="geom_1", geom_after="geom_2",
+        end_time_col="end_time_1", trip_duration_col="trip_duration_12"
+    )
+
+    # ── 5. Build fake activities at index 2.5 (only persons with 3+ activities) ───
+    persons_with_3_acts = df_activities.groupby("person_id").size()
+    persons_with_3_acts = persons_with_3_acts[persons_with_3_acts >= 3].index
+
+    activities2point5 = (
+        population[population["cross_border_person_id"].isin(persons_with_3_acts) & mask_car_users]
+        .copy()
+        .rename(columns={"cross_border_person_id": "person_id", "interview_geometry_point": "geometry"})
+    )
+    activities2point5["activity_index"] = 2.5
+    activities2point5["duration"]       = 1
+    activities2point5["is_last"]        = False
+    activities2point5["destination_id"] = -1
+
+    activities2point5 = activities2point5.merge(act2[["person_id", "geom_2", "end_time_2", "trip_duration_23", "following_mode"]], on="person_id", how="left")
+    activities2point5 = activities2point5.merge(act3[["person_id", "geom_3"]], on="person_id", how="left")
+
+    activities2point5 = compute_fake_activity(
+        activities2point5,
+        geom_before="geom_2", geom_after="geom_3",
+        end_time_col="end_time_2", trip_duration_col="trip_duration_23"
+    )
+
+    # ── 6. Combine and re-sort ─────────────────────────────────────────────────────
+    df_activities = df_activities.drop(columns=["next_start_time", "trip_duration"])
+
+    df_activities = (
+        pd.concat([df_activities, activities1point5, activities2point5])
+        .sort_values(["person_id", "activity_index"])
+        .reset_index(drop=True)
+    )
+
+    # ── 7. Fix is_last ─────────────────────────────────────────────────────────────
+    df_activities["is_last"] = (
+        df_activities["activity_index"] == df_activities.groupby("person_id")["activity_index"].transform("max")
+    )
+
+    df_activities["activity_index"] = df_activities.groupby("person_id").cumcount() + 1
+
+    df_activities = df_activities[["person_id", "activity_index", "label",
+                                   "start_time", "end_time", "duration",
+                                   "purpose", "is_last",
+                                   "geometry", "destination_id", "following_mode"
+                                   ]]
+    
+    df_sorted = df_activities.sort_values(["person_id", "activity_index"])
+
+    # Shift to get origin and destination activity side by side
+    trips = pd.DataFrame({
+        "person_id"       : df_sorted["person_id"],
+        "trip_index"      : df_sorted["activity_index"],
+        "origin_id"       : df_sorted["destination_id"],
+        "departure_time"  : df_sorted["end_time"],
+        "geom_origin"     : df_sorted["geometry"].values,
+        "mode"            : df_sorted["following_mode"],
+        "geom_destination": df_sorted.groupby("person_id")["geometry"].shift(-1).values,
+        "destination_id"  : df_sorted.groupby("person_id")["destination_id"].shift(-1).values,
+        "arrival_time"    : df_sorted.groupby("person_id")["start_time"].shift(-1).values,
+    })
+
+    # Drop last activity of each person (no outgoing trip)
+    trips = trips[trips["mode"].notna()].copy()
+
+    # Compute trip duration
+    trips["trip_duration"] = trips["arrival_time"] - trips["departure_time"]
+
+    # Build LineString geometry
+    trips["geometry"] = trips.apply(
+        lambda r: LineString([r["geom_origin"], r["geom_destination"]]), axis=1
+    )
+
+    # Drop helper columns and convert to GeoDataFrame
+    trips = trips.drop(columns=["geom_origin", "geom_destination"])
+    trips = gpd.GeoDataFrame(trips, geometry="geometry", crs = "EPSG:2056")
+
+    # Reindex trip index as integer
+    trips["trip_index"] = trips.groupby("person_id").cumcount() + 1
+
+    #trips.to_file(f"{context.config("output_path")}/trips_crossborder.shp")
 
     return df_activities

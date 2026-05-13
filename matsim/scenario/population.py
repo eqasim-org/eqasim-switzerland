@@ -17,8 +17,10 @@ def _require_cols(df, cols, df_name):
     if missing:
         raise KeyError(f"{df_name} is missing required columns: {missing}")
 
+
 def _na_to_none(x):
     return None if pd.isna(x) else x
+
 
 def configure(context):
     context.stage("synthesis.population.models.subscriptions")
@@ -26,8 +28,8 @@ def configure(context):
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.spatial.locations")
     context.stage("data.spatial.cantons")
-    context.config("use_freight", default=False)
-    context.config("use_lcv", default=False)
+    context.config("use_freight", default = False)
+    context.config("use_lcv", default = False)
     context.stage("synthesis.freight.trips")
     context.stage("synthesis.lcv.trips")
 
@@ -43,9 +45,11 @@ def configure(context):
     if context.config("include_external_population"):
         context.stage("data.external_population.read_outputs")
 
+
 VEHICLE_FIELDS = [
     "mode", "vehicle_id", "owner_id"
 ]
+
 
 class PersonWriter:
     def __init__(self, person):
@@ -209,10 +213,12 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
                  "household_id", "is_car_passenger", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
                  "income_class", "person_type",
-                 "bike_availability",]
+                 "bike_availability"]
+
 
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
                    "geometry", "destination_id", "following_mode", "municipality_type","municipality_id"]
+
 
 PERSONS_DTYPES = {
         "person_id": int,
@@ -236,13 +242,14 @@ PERSONS_DTYPES = {
         "person_type": str,
     }
 
+
 def execute(context):
-    cache_path    = context.path()
-    df_persons    = context.stage("synthesis.population.models.subscriptions")
-    df_activities = context.stage("synthesis.population.activities")
-    df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]    
+    cache_path           = context.path()
+    df_persons           = context.stage("synthesis.population.models.subscriptions")
+    df_activities        = context.stage("synthesis.population.activities")
+    df_vehicles          = context.stage("synthesis.vehicles.vehicles")[1]    
     df_municipality_type = context.stage("data.spatial.municipality_types")
-    df_municipalities,_ = context.stage("data.spatial.municipalities")
+    df_municipalities,_  = context.stage("data.spatial.municipalities")
 
     # Attach following modes to activities
     df_trips         = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
@@ -255,9 +262,9 @@ def execute(context):
 
     # Attach municipality to activities (TODO: Maybe this can be done in previous stages by keeping track of municipality id)
     df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_type","municipality_id", "geometry"]]
-    df_activities = gpd.GeoDataFrame(df_activities, geometry="geometry", crs="EPSG:2056")
+    df_activities     = gpd.GeoDataFrame(df_activities, geometry="geometry", crs="EPSG:2056")
     assert df_activities.crs == df_municipalities.crs
-    df_activities = gpd.sjoin_nearest(df_activities, df_municipalities, how="left").drop(columns=["index_right"]) # way faster than sjoin   
+    df_activities     = gpd.sjoin_nearest(df_activities, df_municipalities, how="left").drop(columns=["index_right"]) # way faster than sjoin   
 
     # Replace the primary-secondary purposes with normal ones
     # Now that the secondary locations are assigned, no need to continue working with these purposes
@@ -290,12 +297,12 @@ def execute(context):
         external_activities = context.stage("data.external_population.read_outputs")[1].copy()
         external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
 
-        external_persons["person_type"] = "external"
+        external_persons["person_type"]       = "external"
         external_persons["pt_subscription"]   = 0
         external_persons["bike_availability"] = 0
         external_persons["car_availability"]  = 1
 
-        external_persons.loc[external_persons["sex"]=="male", "sex"] = 0
+        external_persons.loc[external_persons["sex"]=="male", "sex"]   = 0
         external_persons.loc[external_persons["sex"]=="female", "sex"] = 1
         external_persons["sex"] = external_persons["sex"].astype(int)
 
@@ -332,39 +339,41 @@ def execute(context):
         cross_border_activities = cross_border_activities.sort_values(by=["person_id", "activity_index"])
         cross_border_vehicles   = cross_border_vehicles.sort_values(by=["owner_id"])
 
-        id_person_max = np.max(df_persons["person_id"].values)
-        N_px          = id_person_max + 1
+        # Removed ID processing here as it should be taken care of in data.cross_border.generate_cross_border_traffic
+        #id_person_max = np.max(df_persons["person_id"].values)
+        #N_px          = id_person_max + 1
 
-        cross_border_persons["new_person_id"]    = range(N_px, N_px + len(cross_border_persons), 1)
+        #cross_border_persons["new_person_id"]    = range(N_px, N_px + len(cross_border_persons), 1)
 
-        id_map = cross_border_persons.set_index("person_id")["new_person_id"]
-        cross_border_activities["person_id"] = cross_border_activities["person_id"].map(id_map).fillna(cross_border_activities["person_id"])
+        #id_map = cross_border_persons.set_index("person_id")["new_person_id"]
+        #cross_border_activities["person_id"] = cross_border_activities["person_id"].map(id_map).fillna(cross_border_activities["person_id"])
 
-        cross_border_persons["person_id"]    = cross_border_persons["new_person_id"].values
+        #cross_border_persons["person_id"]    = cross_border_persons["new_person_id"].values
 
-        id_hhl_max     = np.max(df_persons["household_id"].values)
-        N_hhl              = id_hhl_max + 1
-        cross_border_persons["household_id"] = range(N_hhl, N_hhl + len(cross_border_persons), 1)
+        #id_hhl_max     = np.max(df_persons["household_id"].values)
+        #N_hhl          = id_hhl_max + 1
 
-        del cross_border_persons["new_person_id"]
+        #cross_border_persons["household_id"] = range(N_hhl, N_hhl + len(cross_border_persons), 1)
+
+        #del cross_border_persons["new_person_id"]
 
         cross_border_activities["purpose"] = cross_border_activities["purpose"].replace({"home_secondary":"other",
                                                                  "work_secondary": "work",
                                                                  "education_secondary":"education"})
         
         cross_border_activities["municipality_type"] = 0
-        cross_border_activities["municipality_id"] = 0
+        cross_border_activities["municipality_id"]   = 0
         
-        cross_border_vehicles["person_id"]    = cross_border_vehicles["vehicle_id"].str.split(":").str[0]
-        cross_border_vehicles["vehicle_type"] = cross_border_vehicles["vehicle_id"].str.split(":").str[1]
-        cross_border_vehicles["person_id"]    = cross_border_vehicles["person_id"].map(id_map).fillna(cross_border_vehicles["person_id"])
-        cross_border_vehicles["vehicle_id"]   = cross_border_vehicles["person_id"].astype(str) + ":" + cross_border_vehicles["vehicle_type"]
-        cross_border_vehicles["owner_id"]     = cross_border_vehicles["person_id"].values
-        del cross_border_vehicles["person_id"]
-        del cross_border_vehicles["vehicle_type"]
+        #cross_border_vehicles["person_id"]    = cross_border_vehicles["vehicle_id"].str.split(":").str[0]
+        #cross_border_vehicles["vehicle_type"] = cross_border_vehicles["vehicle_id"].str.split(":").str[1]
+        #cross_border_vehicles["person_id"]    = cross_border_vehicles["person_id"].map(id_map).fillna(cross_border_vehicles["person_id"])
+        #cross_border_vehicles["vehicle_id"]   = cross_border_vehicles["person_id"].astype(str) + ":" + cross_border_vehicles["vehicle_type"]
+        #cross_border_vehicles["owner_id"]     = cross_border_vehicles["person_id"].values
+        
+        #del cross_border_vehicles["person_id"]
+        #del cross_border_vehicles["vehicle_type"]
 
-        logger.warning("Make sure to correct cross border population beforehand")
-        cross_border_persons["person_type"] = "crossborder"
+        cross_border_persons["person_type"]       = "crossborder"
         cross_border_persons["pt_subscription"]   = 0
         cross_border_persons["bike_availability"] = 0
         cross_border_persons["car_availability"]  = 1
@@ -374,7 +383,6 @@ def execute(context):
         df_vehicles   = pd.concat([df_vehicles, cross_border_vehicles])
 
         df_persons["mz_person_id"] = df_persons["mz_person_id"].astype(int)
-        # df_persons["mz_head_id"]   = df_persons["mz_head_id"].astype(int)
         df_persons["home_x"]       = df_persons["home_x"].astype(int)
         df_persons["home_y"]       = df_persons["home_y"].astype(int)
 

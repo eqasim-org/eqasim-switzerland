@@ -191,7 +191,6 @@ def compute_stop_category(gtfs_path, date):
 
     stops["stop_cat"] = stops.apply(lambda r : interval_and_mode_to_stopcat(r["stop_cat_mode"], r["interval_min"]), axis = 1)
     
-    print(stops[stops["stop_name"].str.contains("Zürich, Chaletweg")])
 
     return stops
 

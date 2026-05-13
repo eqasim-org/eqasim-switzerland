@@ -53,7 +53,7 @@ def execute(context):
                         origin_id = od_pdf_matrices[vehicle_type].index[origin_index]
                         destination_id = od_pdf_matrices[vehicle_type].columns[destination_index]
 
-                        trips = np.repeat(np.array([[origin_id, destination_id, vehicle_type]], dtype=np.object),
+                        trips = np.repeat(np.array([[origin_id, destination_id, vehicle_type]], dtype=object),
                                           number_of_trips, axis=0)
 
                         trips_frames.append(pd.DataFrame(columns=["origin_id", "destination_id", "vehicle_type"],

@@ -5,12 +5,14 @@ import geopandas as gpd
 import random
 from pathlib import Path
 
+
 def configure(context):
     context.config("data_path")
     context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.swiss_border")
+    context.stage("data.cross_border.interview_places")
 
     context.config("cross_border_countries", default = "All")
     context.config("cross_border_exclude_shapefiles", default=None)
@@ -115,11 +117,12 @@ def process_from_to_trips(df_trips, context):
 
     # 1. Remove "through" trips that were not classified properly
     trips    = df_trips[(df_trips["origin_country"]=="CH") | (df_trips["destination_country"]=="CH")].copy()
-    trips_od = trips[["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers"]].copy()
+    trips_od = trips[["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
+        "interview_place", "interview_point_id", "interview_geometry_point"]].copy()
 
     # 2. Remove trips with missing information on start or end point
-    mask_missing_start = (trips_od["start_x"].str.strip() == "") # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
-    mask_missing_end   = (trips_od["end_x"].str.strip() == "")   # Same with destinations
+    mask_missing_start = pd.to_numeric(trips_od["start_x"], errors="coerce").isna() # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
+    mask_missing_end   = pd.to_numeric(trips_od["end_x"], errors="coerce").isna()   # Same with destinations
     
      # This removes 1.49% of the records
     df = trips_od[~(mask_missing_start) & ~(mask_missing_end)].copy()
@@ -166,18 +169,20 @@ def process_from_to_trips(df_trips, context):
     df = df[["cross_border_person_id", "label",
         "origin_x", "origin_y", "destination_x", "destination_y",
         "residence_x", "residence_y",
-        "trip_mode", "trip_purpose"]]
+        "trip_mode", "trip_purpose",
+        "interview_place", "interview_point_id", "interview_geometry_point"]]
     
     return df
 
 
 def process_through_trips(through_trips, N, context):
     through_od = through_trips[
-        ["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers"]
+        ["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
+        "interview_place", "interview_point_id", "interview_geometry_point"]
     ]
 
-    mask_missing_start = (through_od["start_x"].str.strip() == "") # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
-    mask_missing_end   = (through_od["end_x"].str.strip() == "")    
+    mask_missing_start = pd.to_numeric(through_od["start_x"], errors="coerce").isna()  # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
+    mask_missing_end   = pd.to_numeric(through_od["end_x"], errors="coerce").isna()
 
     df = through_od[~(mask_missing_start) & ~(mask_missing_end)].copy() # This removes 9% / 11.3% of the records (unweighted/weighted)
 
@@ -208,7 +213,8 @@ def process_through_trips(through_trips, N, context):
     df = df[["cross_border_person_id", "label",
         "origin_x", "origin_y", "destination_x", "destination_y",
         "residence_x", "residence_y",
-        "trip_mode", "trip_purpose"]]
+        "trip_mode", "trip_purpose",
+        "interview_place", "interview_point_id", "interview_geometry_point"]]
 
     return df
 
@@ -216,7 +222,7 @@ def process_through_trips(through_trips, N, context):
 def read_2021_data(context):
     # Load data
     # We are using the 2021 release because the 2015 one doesn't provide reliable destination coordinates.
-    # Obviously there are some covid-related biases but this is the best we currently have.
+
     data_path = context.config("data_path")
     data_path = f"{data_path}/crossborder/AuGQPV_2021/AGQPV21_finale_Auswertungsdatenbank.csv"
 
@@ -234,7 +240,7 @@ def read_2021_data(context):
                   "start_y", "start_x", "end_y", "end_x", 
                   "trip_purpose", "nb_nights", "country1", "country2", "country3",
                   "train_type", "direction_crossing", "direction_alps", "travel_cat", "weight", "weight_vehicles"]
-
+    
     # Process the columns
     # 1. Rename countries
     swiss_neighbors = ["CH", "FR", "DE", "IT", "AT", "LI"]
@@ -336,13 +342,40 @@ def read_2021_data(context):
     residents_ch_mask = borders["residence_country"] == "CH"
     borders = borders[~ residents_ch_mask].copy()
 
+    for col in ["start_x", "start_y", "end_x", "end_y"]:
+        borders[col] = pd.to_numeric(borders[col].str.strip(), errors="coerce")
+
+    borders = borders[borders["start_x"].notna() & borders["start_y"].notna()]
+    borders = borders[borders["end_x"].notna() & borders["end_y"].notna()]
+
+    # 14. Match to an interview point    
+    borders.loc[borders["interview_place"] == "Vallorbe (544)", "interview_place"] = "Gruppe O: VD/NE -> F. Dép. Jura. Doubs"
+
+    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance"]]
+    points["interview_point_id"] = points["border_crossing_point_id"]
+
+    grouped_points = {k: v for k, v in points.groupby("interview_place")}
+
+    def sample_point(row):
+        candidates = grouped_points.get(row["interview_place"])
+        if candidates is not None and "importance" in candidates.columns:
+            sampled = candidates.sample(n=1, weights=candidates["importance"])
+            return sampled.iloc[0][["geometry", "importance", "interview_point_id"]]
+        
+        # Fall back to closest point based on origin coordinates
+        print(row["interview_place"])
+        origin    = Point(row["start_x"], row["start_y"])
+        distances = points["geometry"].apply(lambda geom: origin.distance(geom))
+        closest   = points.loc[distances.idxmin()]
+        return closest[["geometry", "importance", "interview_point_id"]]
+
+    result = borders[borders["trip_mode"] == "car"][["interview_place", "start_x", "start_y"]].apply(sample_point, axis=1)
+    borders[["interview_geometry_point", "candidate_label", "interview_point_id"]] = result
+
     return borders
 
 
 def read_2015_data(context):
-    # Load data
-    # We are using the 2021 release because the 2015 one doesn't provide reliable destination coordinates.
-    # Obviously there are some covid-related biases but this is the best we currently have.
     data_path = context.config("data_path")
     data_path = f"{data_path}/crossborder/AuGQPV_2015/Finale_Auswertungsdatenbank_AGQPV2015_V2.csv"
 
@@ -471,9 +504,6 @@ def execute(context):
         how="left"
     )
 
-    #missing = borders["scaling_factor"].isna().sum()
-    #print(f"Rows without scaling factor: {missing}")
-
     borders["weight"] = (
         borders["weight"] *
         borders["scaling_factor"]
@@ -484,8 +514,7 @@ def execute(context):
         borders["scaling_factor"]
     )
 
-
-    # 14. Selector by origin country
+    # Selector by origin country
     allowed_countries  = ["FR", "DE", "AT", "LI", "IT"]
     selected_countries = context.config("cross_border_countries")
 
@@ -509,7 +538,7 @@ def execute(context):
         else:
             raise TypeError("cross_border_countries must be a list, string, or 'All'.")
 
-    # 15. Now process the trips
+    # Now process the trips
     trips = borders[borders["travel_cat"].isin(["From CH", "To CH"])]   
     from_to_trips = process_from_to_trips(trips, context)
 
@@ -518,7 +547,7 @@ def execute(context):
 
     df = pd.concat([from_to_trips, through_trips])
         
-    # 16. Remove trips starting in the spatial file to be excluded
+    # Remove trips starting in the spatial file to be excluded
     exclude_file = context.config("cross_border_exclude_shapefiles")
 
     if not exclude_file is None:
@@ -550,9 +579,10 @@ def execute(context):
         df["exclude"]    = is_within_region.values
 
         excluded_ids = df.loc[df["exclude"], "cross_border_person_id"].unique()
-        df = df[~df["cross_border_person_id"].isin(excluded_ids)].copy()
+        df = df[~df["cross_border_person_id"].isin(excluded_ids)].copy()  
 
-    print(len(df))
-             
+    del df["exclude"]     
+
+    print(df.columns)
 
     return df

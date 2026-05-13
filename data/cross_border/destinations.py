@@ -13,8 +13,8 @@ def configure(context):
 def execute(context):
     df_all = context.stage("data.cross_border.match_activity_chain")
 
-    df_through = df_all[df_all["label"]=="Through"]
-    df         = df_all[df_all["label"]=="From-To"]
+    df_through = df_all[df_all["label"] == "Through"]
+    df         = df_all[df_all["label"] == "From-To"]
 
     destinations = gpd.GeoSeries.from_xy(df["destination_x"], df["destination_y"])
     destinations = gpd.GeoDataFrame(geometry = destinations, crs = "EPSG:2056")
@@ -86,7 +86,8 @@ def execute(context):
     df = df[["cross_border_person_id", "mz_person_id", "label",
              "residence_x", "residence_y", 
              "trip_mode", "trip_purpose", "destination_id",
-             "origin_x", "origin_y", "destination_x", "destination_y"]]
+             "origin_x", "origin_y", "destination_x", "destination_y",
+             "interview_place", "interview_point_id", "interview_geometry_point"]]
     
     for col in ["mz_person_id", "residence_x", "residence_y", "destination_id",
              "origin_x", "origin_y", "destination_x", "destination_y"]:

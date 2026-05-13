@@ -112,7 +112,7 @@ def execute(context):
 
     persons = persons[persons["person_id"].isin(valid_ids)]
 
-    acts["destination_id"]    = acts["location_id"].str.split("_").str[-1].astype(int)
+    acts["destination_id"]    = acts["location_id"].astype(str).str.split("_").str[-1].astype(int)
     acts["municipality_id"]   = 0
     acts["municipality_type"] = 0
 
@@ -137,7 +137,7 @@ def execute(context):
 
     # 2. Destination id
 
-    homes = acts[acts["purpose"]=="home"]
+    homes = acts[acts["purpose"] == "home"]
 
     homes["destination_id"] = ["home" + str(person_id) for person_id in homes["person_id"].values.tolist()]
 
@@ -162,7 +162,7 @@ def execute(context):
         lambda r: Point(r["destination_x"], r["destination_y"]), axis=1
     )
 
-    acts.to_csv("/cluster/project/cmdp/asallard/theacts.csv", index=False)
+    #acts.to_csv("/cluster/project/cmdp/asallard/theacts.csv", index=False)
 
     # Fix missing vehicles
     modes = ["car", "car_passenger", "bike"]
