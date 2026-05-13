@@ -19,7 +19,7 @@ def configure(context):
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 20000) 
-    context.config("add_traffic_lights", False) 
+    context.config("add_traffic_lights", True) 
 
 CAR_ROAD_TAGS = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary','unclassified', 'residential', 'motorway_link', 
                  'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link', 'living_street'}

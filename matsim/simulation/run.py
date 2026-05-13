@@ -43,7 +43,7 @@ def configure(context):
         context.stage("analysis.travel_times.APIs.target")
 
     context.config("correct_links_capacity", False)
-    context.config("minimum_speed", 1.5)
+    context.config("minimum_speed", 1.0)
 
     context.config("useScheduleBasedTransport", default=True)
     context.config("preventwaitingtoentertraffic", default = "no")
