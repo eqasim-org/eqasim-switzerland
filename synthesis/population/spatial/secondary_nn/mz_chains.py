@@ -20,6 +20,11 @@ def execute(context):
         + (trips_sorted["destination_y"] - trips_sorted["home_y"]) ** 2
     )
 
+    trips_sorted["trip_origin_distance_from_home"] = np.sqrt(
+        (trips_sorted["origin_x"] - trips_sorted["home_x"]) ** 2
+        + (trips_sorted["origin_y"] - trips_sorted["home_y"]) ** 2
+    )
+
     trips_sorted["trip_destination_distance_from_work"] = 0.0
     has_work_location = trips_sorted["work_x"].notna() & trips_sorted["work_y"].notna() & ~trips_sorted["work_x"].isin([np.inf, -np.inf]) & ~trips_sorted["work_y"].isin([np.inf, -np.inf])
     trips_sorted.loc[has_work_location, "trip_destination_distance_from_work"] = np.sqrt(
@@ -64,8 +69,8 @@ def execute(context):
     trips_sorted.loc[sel, "activity_duration"] = 3600.0 * 8.0
 
     trips_sorted["activity_duration_h"] = trips_sorted["activity_duration"].clip(0.0, 3600.0 * 16.0)/3600.0
-    # Adding activity chain as sum of one hot encoded purposes
     
+    # Adding activity chain as sum of one hot encoded purposes    
     def build_activity_chain(group):
         sequence = [group.iloc[0]["origin_purpose"]] + group["purpose"].tolist()
         vectors = [encode_purpose(p) for p in sequence]
@@ -74,9 +79,11 @@ def execute(context):
     _chain_series = trips_sorted.groupby("person_id", sort=False).apply(build_activity_chain)
     trips_sorted["activity_chain"] = trips_sorted["person_id"].map(_chain_series)
     
+    # target distances
+    trips_sorted["target_distance"] = trips_sorted["crowfly_distance"]
 
     return trips_sorted[["person_id", "trip_id", 
                          "trip_destination_distance_from_home", "trip_destination_distance_from_work", 
                          "daily_longest_distance_from_home", "daily_longest_distance_from_work", "daily_crowfly_total", 
                          "crowfly_consumed_before_trip", "trip_position_class","departure_time_normalized", "activity_duration_h",
-                         "activity_chain"]]
+                         "activity_chain", "trip_origin_distance_from_home", "target_distance"]]

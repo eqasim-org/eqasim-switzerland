@@ -6,7 +6,7 @@ ACTIVITY_CHAIN_N                = len(SECONDARY_ACTIVITIES)  # = 6; first 6 dims
 PERSON_STATIC_NUMERIC_FEATURES  = ["age", "income_class", "daily_longest_distance_from_home", "daily_crowfly_total", "daily_longest_distance_from_work"] + [f"activity_chain_{a}" for a in SECONDARY_ACTIVITIES]
 PERSON_STATIC_BINARY_FEATURES   = ["sex", "employed", "car_availability"]
 PERSON_STATIC_FEATURES          = PERSON_STATIC_NUMERIC_FEATURES + PERSON_STATIC_BINARY_FEATURES   # 14 dims; numeric scaled, binary pass-through
-PERSON_DYNAMIC_FEATURES         = ["crowfly_consumed_before_trip", "trip_position_class", "departure_time_normalized", "activity_duration_h"]  # 4 scaled dims + purpose one-hot + origin_purpose one-hot appended at build time
+PERSON_DYNAMIC_FEATURES         = ["crowfly_consumed_before_trip", "trip_position_class", "departure_time_normalized", "activity_duration_h", "target_distance"]  # 5 scaled dims + purpose one-hot + origin_purpose one-hot appended at build time
 # Legacy aliases so any code still referencing the old names keeps compiling.
 PERSON_TRIP_NUMERIC_FEATURES = PERSON_STATIC_NUMERIC_FEATURES + PERSON_DYNAMIC_FEATURES
 PERSON_TRIP_BINARY_FEATURES  = PERSON_STATIC_BINARY_FEATURES
@@ -37,8 +37,8 @@ def _make_quantile_transformer(n_rows):
     return QuantileTransformer(output_distribution="uniform", n_quantiles=n_quantiles)
 
 
-def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_matrix, 
-                           consumed_before, trip_position, departure_time, activity_duration_h, purpose_series, origin_purpose_series, purpose_categories, 
+def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_matrix,
+                           consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_series, origin_purpose_series, purpose_categories,
                            person_static_scaler=None, person_dynamic_scaler=None):
     age = np.asarray(age, dtype=np.float64); income_class = np.asarray(income_class, dtype=np.float64)
     daily_longest = np.asarray(daily_longest, dtype=np.float64); daily_total = np.asarray(daily_total, dtype=np.float64)
@@ -47,8 +47,9 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
     consumed_before = np.asarray(consumed_before, dtype=np.float64); trip_position = np.asarray(trip_position, dtype=np.float64)
     departure_time = np.asarray(departure_time, dtype=np.float64)
     activity_duration_h = np.asarray(activity_duration_h, dtype=np.float64)
+    target_distance = np.asarray(target_distance, dtype=np.float64)
     static_numeric  = np.column_stack([age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_matrix]).astype(np.float64)  # [N, 11]
-    dynamic_numeric = np.column_stack([consumed_before, trip_position, departure_time, activity_duration_h]).astype(np.float64)                       # [N, 4]
+    dynamic_numeric = np.column_stack([consumed_before, trip_position, departure_time, activity_duration_h, target_distance]).astype(np.float64)                      # [N, 5]
     if static_numeric.shape[0] > 1:
         if person_static_scaler is None:
             person_static_scaler  = _make_quantile_transformer(static_numeric.shape[0])
@@ -76,8 +77,8 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
     origin_purpose_one_hot[valid_origin] = np.eye(len(purpose_categories), dtype=np.float32)[origin_idx[valid_origin]]
     binary = np.column_stack([np.asarray(sex, dtype=np.float32), np.asarray(employed, dtype=np.float32), np.asarray(car_availability, dtype=np.float32)]).astype(np.float32)
     static_matrix  = np.concatenate([static_scaled, binary],                                          axis=1).astype(np.float32)  # [N, 14]
-    dynamic_matrix = np.concatenate([dynamic_scaled, purpose_one_hot, origin_purpose_one_hot],         axis=1).astype(np.float32)  # [N, 4+2P]
-    full_matrix    = np.concatenate([static_matrix,  dynamic_matrix],                                  axis=1).astype(np.float32)  # [N, 14+4+2P]
+    dynamic_matrix = np.concatenate([dynamic_scaled, purpose_one_hot, origin_purpose_one_hot],         axis=1).astype(np.float32)  # [N, 5+2P]
+    full_matrix    = np.concatenate([static_matrix,  dynamic_matrix],                                  axis=1).astype(np.float32)  # [N, 14+5+2P]
     feature_names  = PERSON_STATIC_FEATURES + PERSON_DYNAMIC_FEATURES + [f"purpose_{p}" for p in purpose_categories] + [f"origin_purpose_{p}" for p in purpose_categories]
     return full_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, feature_names
 
@@ -90,17 +91,17 @@ def transform_person_static_vector(age, income_class, daily_longest, daily_total
     binary = np.array([[sex, employed, car_availability]], dtype=np.float32)
     return np.concatenate([numeric_scaled, binary], axis=1).astype(np.float32)  # [1, 14]
 
-def transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, purpose_hot, origin_purpose_hot, dynamic_scaler):
-    """Returns [1, 4+2P]: [scaled_consumed_before, scaled_trip_position, scaled_departure_time, scaled_activity_duration_h, purpose_one_hot, origin_purpose_one_hot]."""
-    numeric = np.array([[consumed_before, trip_position, departure_time, activity_duration_h]], dtype=np.float64)
+def transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler):
+    """Returns [1, 5+2P]: [scaled_consumed_before, scaled_trip_position, scaled_departure_time, scaled_activity_duration_h, scaled_target_distance, purpose_one_hot, origin_purpose_one_hot]."""
+    numeric = np.array([[consumed_before, trip_position, departure_time, activity_duration_h, target_distance]], dtype=np.float64)
     numeric_scaled = dynamic_scaler.transform(numeric).astype(np.float32)
-    return np.concatenate([numeric_scaled, [purpose_hot], [origin_purpose_hot]], axis=1).astype(np.float32)  # [1, 4+2P]
+    return np.concatenate([numeric_scaled, [purpose_hot], [origin_purpose_hot]], axis=1).astype(np.float32)  # [1, 5+2P]
 
-def transform_person_trip_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, consumed_before, trip_position, departure_time, activity_duration_h, purpose_hot, origin_purpose_hot, static_scaler, dynamic_scaler):
+def transform_person_trip_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, static_scaler, dynamic_scaler):
     """Combined convenience wrapper used by standalone predict_levelX analysis methods."""
     p_static  = transform_person_static_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, static_scaler)   # [1, 14]
-    p_dynamic = transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, purpose_hot, origin_purpose_hot, dynamic_scaler)  # [1, 4+2P]
-    return np.concatenate([p_static, p_dynamic], axis=1).astype(np.float32)  # [1, 18+2P]
+    p_dynamic = transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler)  # [1, 5+2P]
+    return np.concatenate([p_static, p_dynamic], axis=1).astype(np.float32)  # [1, 19+2P]
 
 
 def fit_candidate_tensor(candidate_tensor, valid_mask, max_fit_rows=1000000, random_state=123, candidate_static_scaler=None, candidate_dynamic_scaler=None):

@@ -103,6 +103,7 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
         departure_time_arr = grp["departure_time_normalized"].to_numpy()
         preceding_purpose_arr = grp["preceding_purpose"].to_numpy()
         activity_duration_arr = grp["activity_duration_h"].to_numpy()
+        target_distance_arr = grp["target_distance"].to_numpy()
         
         chain_daily_longest = grp["daily_longest_distance_from_home"].iloc[0]  # static per person; same value for all trips
         chain_daily_total = grp["daily_crowfly_total"].iloc[0]  # static per person; same value for all trips
@@ -126,6 +127,8 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
             elif following_purpose in SECONDARY_SET:                                
                 departure_time = departure_time_arr[local_idx]
                 origin_purpose = preceding_purpose_arr[local_idx]
+                activity_duration_h = activity_duration_arr[local_idx]
+                target_distance = target_distance_arr[local_idx]
                 # Predict first level coarse H3 cell
                 destination_id, geom = wrapper.predict(person_id=person_id, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=current_x, origin_y=current_y, 
                                                        age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class, 
@@ -133,7 +136,8 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
                                                        daily_longest_distance_from_work=chain_daily_longest_work,
                                                        crowfly_consumed_before_trip=consumed_fore_trip_start, trip_position_class=trip_pos,
                                                        departure_time_normalized=departure_time,
-                                                       activity_duration_h=float(activity_duration_arr[local_idx]),
+                                                       activity_duration_h=activity_duration_h,
+                                                       target_distance=target_distance,
                                                        activity_chain_vector=activity_chain_vector,
                                                        origin_purpose=origin_purpose,
                                                        purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng)
@@ -236,7 +240,7 @@ def execute(context):
     mz_chains = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[["person_id", "trip_id", "daily_longest_distance_from_home",
                                     "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
                                     "departure_time_normalized", "daily_longest_distance_from_work",
-                                    "activity_duration_h", "activity_chain"]].rename(columns={"person_id": "mz_person_id"})
+                                    "activity_duration_h", "target_distance", "trip_origin_distance_from_home", "activity_chain"]].rename(columns={"person_id": "mz_person_id"})
 
     df_trips = df_trips.merge(mz_chains, how="left", on=["mz_person_id", "trip_id"])
     df_trips = df_trips.sort_values(by=["person_id", "trip_id"]).reset_index(drop=True)
@@ -264,7 +268,9 @@ def execute(context):
     df_trips["daily_longest_distance_from_work"] = df_trips["daily_longest_distance_from_work"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df_trips["crowfly_consumed_before_trip"] = df_trips["crowfly_consumed_before_trip"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df_trips["departure_time_normalized"] = df_trips["departure_time_normalized"].replace([np.inf, -np.inf], np.nan).fillna(0.5)
-    df_trips["activity_duration_h"] = df_trips["activity_duration_h"].replace([np.inf, -np.inf], np.nan).fillna(0.0)    
+    df_trips["activity_duration_h"] = df_trips["activity_duration_h"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    df_trips["target_distance"] = df_trips["target_distance"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    df_trips["trip_origin_distance_from_home"] = df_trips["trip_origin_distance_from_home"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
     df_trips["activity_chain"] = df_trips["activity_chain"].apply(lambda v: v.astype(np.float32))
 
     # ensure cols are in the right type for the models
@@ -272,7 +278,8 @@ def execute(context):
     assert df_trips.drop(columns=["activity_chain"]).isna().sum().sum()==0, "trips data (excluding object columns) contains NaNs"
     df_trips = df_trips.astype({"person_id": "int64", "preceding_purpose": str, "following_purpose": str, "trip_index": int, "daily_longest_distance_from_home": float, 
                                 "daily_crowfly_total": float, "daily_longest_distance_from_work": float, "crowfly_consumed_before_trip": float,
-                                "trip_position_class": float, "departure_time_normalized": float, "activity_duration_h": float})
+                                "trip_position_class": float, "departure_time_normalized": float, "activity_duration_h": float,
+                                "target_distance": float, "trip_origin_distance_from_home": float})
     df_meta = df_meta.astype({"person_id": "int64", "home_x": float, "home_y": float, "work_x": float, "work_y": float, "edu_x": float, "edu_y": float, "age": float, "sex": float, 
                               "employed": float, "income_class": float, "car_availability": float, "has_work": bool, "has_education": bool, "_chunk_id": int})
 

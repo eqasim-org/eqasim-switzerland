@@ -60,7 +60,7 @@ def execute(context):
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
         "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", 
         "trip_position_class", "departure_time_normalized", "daily_longest_distance_from_work",
-        "activity_duration_h", "activity_chain"
+        "activity_duration_h", "target_distance", "activity_chain"
     ]]
     mz_trips = mz_trips.merge(mz_chain_trips, on=["person_id", "trip_id"], how="left")
 
@@ -114,7 +114,7 @@ def execute(context):
         "person_id", "trip_id", "origin_x", "origin_y", "destination_level_0", "purpose","origin_purpose",
         "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
         "departure_time_normalized", "daily_longest_distance_from_work",
-        "activity_duration_h", "activity_chain"
+        "activity_duration_h", "target_distance", "activity_chain"
     ]
     df_trips = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
     df_trips = df_trips[df_trips["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=["destination_level_0"])
@@ -162,6 +162,8 @@ def execute(context):
     departure_time = np.where(np.isfinite(departure_time), departure_time, 0.5)
     activity_duration_h = df_trips["activity_duration_h"].to_numpy(dtype=np.float64)
     activity_duration_h = np.where(np.isfinite(activity_duration_h) & (activity_duration_h >= 0.0), activity_duration_h, 0.0)
+    target_distance = df_trips["target_distance"].to_numpy(dtype=np.float64)
+    target_distance = np.where(np.isfinite(target_distance) & (target_distance >= 0.0), target_distance, 0.0)
     activity_chain_matrix = np.stack([np.asarray(v, dtype=np.float64)[:ACTIVITY_CHAIN_N] if isinstance(v, np.ndarray) else np.zeros(ACTIVITY_CHAIN_N, dtype=np.float64) for v in df_trips["activity_chain"].to_numpy()])
     activity_chain_matrix = np.where(np.isfinite(activity_chain_matrix) & (activity_chain_matrix >= 0.0), activity_chain_matrix, 0.0)
 
@@ -173,7 +175,7 @@ def execute(context):
                                                                                  daily_longest=daily_longest, daily_total=daily_total, daily_longest_work=daily_longest_work,
                                                                                  activity_chain_matrix=activity_chain_matrix,
                                                                                  consumed_before=consumed_before, trip_position=trip_position, departure_time=departure_time,
-                                                                                 activity_duration_h=activity_duration_h,
+                                                                                 activity_duration_h=activity_duration_h, target_distance=target_distance,
                                                                                  purpose_series=df_trips["purpose"], origin_purpose_series=df_trips["origin_purpose"],
                                                                                  purpose_categories=purpose_categories)
 

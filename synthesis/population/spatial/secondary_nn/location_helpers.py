@@ -152,16 +152,8 @@ def _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_w
     added_a_trip = False
 
     if first_preceding not in PRIMARY_SET:
-        # Find first primary WITHOUT full .isin()
-        first_primary = None
-        for val in grp["preceding_purpose"].values:
-            if val in PRIMARY_SET:
-                first_primary = val
-                break
-
-        if first_primary is None:
-            # logger.warning(f"Person {first['person_id']} has no primary activity, defaulting to home.")
-            first_primary = "home"
+        # For synthetic prepend, always assume the person starts from home.
+        first_primary = "home"
 
         added_a_trip = True
 
@@ -183,6 +175,7 @@ def _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_w
             'daily_longest_distance_from_work': first["daily_longest_distance_from_work"],
             'departure_time_normalized': max(0, first["departure_time_normalized"]-8.0/24.0),
             "activity_duration_h": 8.0,  # assume 8h duration for the first activity, consistent with mz_chains.py
+            "target_distance": first["trip_origin_distance_from_home"],
             "activity_chain": first["activity_chain"]
         }
 

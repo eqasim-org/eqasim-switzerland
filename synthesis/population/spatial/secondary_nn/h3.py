@@ -5,7 +5,6 @@ from shapely.geometry import Polygon
 import logging
 import numpy as np
 from shapely import vectorized
-
 logger = logging.getLogger("synpp")
 
 """
@@ -41,57 +40,24 @@ def _aggregate_destination_features_by_level(destinations_with_levels, level_col
     assert all(col in ovgk_dummies.columns for col in expected_cols), f"Missing expected OVGK category columns after get_dummies. Expected: {expected_cols}, but got: {ovgk_dummies.columns.tolist()}"
     df = pd.concat([df, ovgk_dummies[expected_cols]], axis=1)
 
-    # ------------------------------------------------------------
-    # Single aggregation
-    # ------------------------------------------------------------
-
-    agg_cols = {
-        "number_employees": "sum",
-        "offers_education_secondary": "sum",
-        "offers_shop": "sum",
-        "offers_leisure": "sum",
-        "offers_sport": "sum",
-        "offers_gastronomy": "sum",
-        "offers_accommodation": "sum",
-        "offers_cultural": "sum",
-        "urban_core": "mean",
-        "urban": "mean",
-        **{c: "mean" for c in expected_cols},
-    }
-
-    out = (
-        df.groupby(level_col, sort=False)
-        .agg(
-            num_statent=("number_employees", "size"),
-            employees=("number_employees", "sum"),
-            education=("offers_education_secondary", "sum"),
-            shop=("offers_shop", "sum"),
-            leisure=("offers_leisure", "sum"),
-            sport=("offers_sport", "sum"),
-            gastronomy=("offers_gastronomy", "sum"),
-            accommodation=("offers_accommodation", "sum"),
-            cultural=("offers_cultural", "sum"),
-            urban_core=("urban_core", "mean"),
-            urban=("urban", "mean"),
-            ovgk_share_a=("ovgk_share_a", "mean"),
-            ovgk_share_b=("ovgk_share_b", "mean"),
-            ovgk_share_c=("ovgk_share_c", "mean"),
-            ovgk_share_d=("ovgk_share_d", "mean"),
-            ovgk_share_none=("ovgk_share_none", "mean"),            
-        )
-        .rename(
-            columns={
-                "number_employees": "employees",
-                "offers_education_secondary": "education",
-                "offers_shop": "shop",
-                "offers_leisure": "leisure",
-                "offers_sport": "sport",
-                "offers_gastronomy": "gastronomy",
-                "offers_accommodation": "accommodation",
-                "offers_cultural": "cultural",
-            }
-        )
-    )
+    out = df.groupby(level_col, sort=False).agg(
+                        num_statent=("number_employees", "size"),
+                        employees=("number_employees", "sum"),
+                        education=("offers_education_secondary", "sum"),
+                        shop=("offers_shop", "sum"),
+                        leisure=("offers_leisure", "sum"),
+                        sport=("offers_sport", "sum"),
+                        gastronomy=("offers_gastronomy", "sum"),
+                        accommodation=("offers_accommodation", "sum"),
+                        cultural=("offers_cultural", "sum"),
+                        urban_core=("urban_core", "mean"),
+                        urban=("urban", "mean"),
+                        ovgk_share_a=("ovgk_share_a", "mean"),
+                        ovgk_share_b=("ovgk_share_b", "mean"),
+                        ovgk_share_c=("ovgk_share_c", "mean"),
+                        ovgk_share_d=("ovgk_share_d", "mean"),
+                        ovgk_share_none=("ovgk_share_none", "mean"),            
+                        )
 
     out.index = out.index.astype(str)
     out.index.name = "h3_index"
