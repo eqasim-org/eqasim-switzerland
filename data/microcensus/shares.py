@@ -16,6 +16,10 @@ def configure(context):
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.swiss_border")
 
+    context.config("include_external_population")
+    if context.config("include_external_population"):
+        context.stage("data.external_population.hts_trips.trips")
+
 
 def merge_same_trips(context, df):
     """Merge consecutive legs that represent the same trip for a person.
@@ -130,39 +134,56 @@ def execute(context):
     df_cantons = context.stage("data.spatial.cantons")[["canton_id","canton_name_en"]].copy()
     df_cantons = df_cantons.rename(columns={"canton_name_en": "canton_name"})
     
-    df_cantons["canton_id"] = df_cantons["canton_id"].astype(int)
+    df_cantons["canton_id"]  = df_cantons["canton_id"].astype(int)
     final_trips["canton_id"] = final_trips["canton_id"].astype(int)
 
-    final_trips = pd.merge(final_trips, df_cantons, on="canton_id",  how="left")
+    final_trips = pd.merge(final_trips, df_cantons, on = "canton_id",  how = "left")
     assert final_trips.canton_name.notnull().all(), "Not all persons have a canton name assigned. Check the canton data."
 
     # Compute global modal split shares
-    total_weighted_trips = final_trips['person_weight'].sum()
-    global_mode_weights = (
-        final_trips.groupby('mode')['person_weight']
+    total_weighted_trips = final_trips["person_weight"].sum()
+    global_mode_weights  = (
+        final_trips.groupby("mode")["person_weight"]
         .sum()
-        .reset_index(name='total_weight')
+        .reset_index(name = "total_weight")
     )
-    global_mode_weights['mode_share'] = (global_mode_weights['total_weight'] / total_weighted_trips).round(4)
+    global_mode_weights["mode_share"] = (global_mode_weights["total_weight"] / total_weighted_trips).round(4)
     global_modal_shares = global_mode_weights[["mode", "mode_share"]]
 
     # Compute cantonal modal split shares
     cantonal_modal_shares = (
         final_trips
-        .groupby(["canton_name", "mode"], observed=False)["person_weight"]
+        .groupby(["canton_name", "mode"], observed = False)["person_weight"]
         .sum()
-        .groupby(level="canton_name", observed=False)
+        .groupby(level = "canton_name", observed=False)
         .transform(lambda x: x / x.sum())
         .rename("mode_share")
         .reset_index()
-        .pivot(index='canton_name', columns="mode", values="mode_share")
+        .pivot(index = "canton_name", columns = "mode", values = "mode_share")
         .fillna(0)
         .round(3)
-        .sort_values(by='canton_name')
+        .sort_values(by = "canton_name")
     )
 
+    if context.config("include_external_population"):
+        fr_trips       = context.stage("data.external_population.hts_trips.trips")
+        mode_shares_fr = fr_trips.groupby("mode", as_index = False)["trip_weight"].sum() 
+
+        mode_shares_fr["trip_weight"] = (mode_shares_fr["trip_weight"] / fr_trips["trip_weight"].sum()).round(3)
+        mode_shares_fr = mode_shares_fr.rename(columns = {"trip_weight": "fr"})
+        mode_shares_fr = mode_shares_fr.T
+
+        mode_shares_fr.columns = mode_shares_fr.iloc[0]
+        mode_shares_fr = mode_shares_fr.drop("mode")
+
+        print(mode_shares_fr)
+
+    cantonal_modal_shares = pd.concat([cantonal_modal_shares, mode_shares_fr])
+
+    print(cantonal_modal_shares)
+
     # Define output file paths
-    global_shares_output_path = os.path.join(context.path(), "globalModeShares.csv")
+    global_shares_output_path   = os.path.join(context.path(), "globalModeShares.csv")
     cantonal_shares_output_path = os.path.join(context.path(), "cantonalModeShares.csv")
 
     # Save global modal shares
