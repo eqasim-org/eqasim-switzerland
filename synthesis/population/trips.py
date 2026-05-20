@@ -11,6 +11,8 @@ def configure(context):
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
     
+    context.stage("synthesis.population.spatial.primary.work.work_remotly")
+
     context.config("random_seed")
 
 def execute(context):
@@ -77,6 +79,12 @@ def execute(context):
     df_trips = df_trips.sort_values(by=["person_id", "trip_id"])
     df_count = df_trips.groupby("person_id").size().reset_index(name="count")
     df_trips["trip_index"] = np.hstack([np.arange(count) for count in df_count["count"].values])
+
+    # Define remote_walk as main mode to go to work for agents working from home
+    remote_agents = context.stage("synthesis.population.spatial.primary.work.work_remotly")
+    remote_agents = set(remote_agents["person_id"].values)
+    f = (df_trips["following_purpose"] == "work") & (df_trips["person_id"].isin(remote_agents))
+    df_trips.loc[f, "mode"] = "remote_walk"
 
     return df_trips[[
         "person_id", "mz_person_id", "trip_id", "trip_index",
