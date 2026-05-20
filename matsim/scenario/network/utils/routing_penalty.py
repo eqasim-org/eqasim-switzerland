@@ -82,7 +82,7 @@ class RoutingPenaltyProvider:
         return "normal"
 
     def load_polygone(self):
-        poly_path = self.context.stage("calibration.road_regions.regions")
+        poly_path = self.context.stage("calibration.road_regions.penalty_calibration")
         gdf = gpd.read_file(poly_path)
         unioned = gdf.unary_union
         return unioned

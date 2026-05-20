@@ -50,7 +50,7 @@ class writer:
         params_dict = {self.rename(k): float(v) for k, v in self.params.items()}
         
         # adjust long distance cp
-        params_dict["cp.betaVeryLongDistance_u"] = min(params_dict.get("cp.betaVeryLongDistance_u", 0.0) * 3, 0.0)
+        params_dict["cp.betaVeryLongDistance_u"] = min(params_dict.get("cp.betaVeryLongDistance_u", 0.0) * 2, 0.0)
         params_dict["cp.betaDistance_u_km"] = min(params_dict.get("cp.betaDistance_u_km", 0.0) * 3, 0.0)
 
         # interactions reference values

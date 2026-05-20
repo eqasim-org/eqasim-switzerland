@@ -20,7 +20,8 @@ def configure(context):
     context.stage("calibration.pt_routing.pt_routing_parameters")
         
     context.stage("data.microcensus.shares")
-    
+    context.stage("dmc.params")
+
     context.config("input_downsampling")
     context.config("threads")
     context.config("random_seed")
@@ -72,7 +73,13 @@ def execute(context):
     shutil.copyfile(cantonal_shares_path, 
                     "%s/%scantonal_mode_shares.csv" % (context.path(), context.config("output_prefix")))
     
-    
+    # copy the mode choice params
+    mode_params_path, cost_params_path = context.stage("dmc.params")
+    mode_parameters_path = "%s/dmc_parameters.yml" % context.path()
+    cost_parameters_path = "%s/cost_parameters.yml" % context.path()
+    shutil.copy(mode_params_path, mode_parameters_path)
+    shutil.copy(cost_params_path, cost_parameters_path)
+
     # Some files we send through several preparation scripts
     
     # Run preparation

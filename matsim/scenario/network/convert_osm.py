@@ -13,6 +13,7 @@ def configure(context):
     context.stage("data.spatial.municipality_types") # used in speed correction
     context.stage("data.spatial.municipalities") # used in speed correction
     context.stage("data.spatial.swiss_border") # used in speed correction
+    context.stage("calibration.road_regions.penalty_calibration")
 
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")

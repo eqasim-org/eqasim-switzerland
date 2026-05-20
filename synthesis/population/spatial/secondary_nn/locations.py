@@ -18,165 +18,6 @@ _WORKER_PROGRESS_QUEUE = None
 _WORKER_PROGRESS_FLUSH_EVERY = 100
 _CHUNCK_SIZE_PERSONS = 10000
 
-def get_platform_mp_context():
-    """
-    Get the appropriate multiprocessing context for the current platform.
-    On Windows, 'spawn' is required. On Unix-like systems, 'fork' is typically preferred for performance,
-    but 'spawn' can be used if there are issues with 'fork' (e.g., with certain libraries).
-    """
-    import platform
-    if platform.system() == "Windows":
-        return get_context("spawn")
-    elif platform.system() == "Darwin":
-        return get_context("fork")
-    else:  # Linux and other Unix-like systems
-        return get_context("fork")
-    
-def _drain_progress_queue(progress, progress_queue):
-    if progress_queue is None:
-        return 0
-
-    drained = 0
-    while True:
-        try:
-            inc = progress_queue.get_nowait()
-        except queue.Empty:
-            break
-
-        if inc is None:
-            continue
-        drained += int(inc)
-
-    if drained > 0:
-        progress.update(drained)
-    return drained
-
-def _init_location_worker(wrapper, worker_torch_threads, enable_mkldnn, 
-                              enable_compile, compile_mode, progress_queue, progress_flush_every):  
-    global _WORKER_PROGRESS_QUEUE
-    global _WORKER_PROGRESS_FLUSH_EVERY
-
-    torch.backends.mkldnn.enabled = bool(enable_mkldnn)
-
-    if worker_torch_threads is not None and int(worker_torch_threads) > 0:
-        torch.set_num_threads(int(worker_torch_threads))
-        torch.set_num_interop_threads(int(worker_torch_threads))
-
-    # torch.compile artifacts do not survive pickling — each worker must compile its own copy.
-    if enable_compile:
-        wrapper.optimize_wrapper(enable_compile=True, compile_mode=compile_mode)
-
-    _WORKER_STATE["wrapper"] = wrapper
-    _WORKER_PROGRESS_QUEUE = progress_queue
-    _WORKER_PROGRESS_FLUSH_EVERY = max(1, int(progress_flush_every))
-
-def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
-    wrapper = _WORKER_STATE.get("wrapper")
-
-    rng = np.random.RandomState(seed)
-    locations_records = []
-    convergence_records = []
-
-    if len(df_trips_chunk) == 0 or len(df_meta_chunk) == 0:
-        return locations_records, convergence_records
-    
-    meta_cols = ["home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", "sex", "employed", "income_class", "car_availability", "has_work", "has_education"]
-    meta_lookup = df_meta_chunk.set_index("person_id")[meta_cols].to_dict("index")
-    person_groups = df_trips_chunk.groupby("person_id", sort=False)
-    pending_progress = 0
-
-    for person_id, grp in person_groups:
-        info = meta_lookup.get(person_id)
-        if info is None:
-            continue
-
-        home_x, home_y, work_x, work_y, edu_x, edu_y = info["home_x"], info["home_y"], info["work_x"], info["work_y"], info["edu_x"], info["edu_y"]
-        has_work, has_education = info["has_work"], info["has_education"]        
-        age, sex, employed, income_class, car_availability = info["age"], info["sex"], info["employed"], info["income_class"], info["car_availability"]
-        
-        # This not only get the current coords, but also add a trip from primary location if the first trip is not from primary
-        grp, (current_x, current_y), added_a_trip = _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_work, has_education)
-        
-        person_trip_count = len(grp)        
-        following_purpose_arr = grp["following_purpose"].to_numpy()
-        trip_index_arr = grp["trip_index"].to_numpy()
-        departure_time_arr = grp["departure_time_normalized"].to_numpy()
-        preceding_purpose_arr = grp["preceding_purpose"].to_numpy()
-        activity_duration_arr = grp["activity_duration_h"].to_numpy()
-        target_distance_arr = grp["target_distance"].to_numpy()
-        
-        chain_daily_longest = grp["daily_longest_distance_from_home"].iloc[0]  # static per person; same value for all trips
-        chain_daily_total = grp["daily_crowfly_total"].iloc[0]  # static per person; same value for all trips
-        chain_daily_longest_work = grp["daily_longest_distance_from_work"].iloc[0]  # static per person; same value for all trips
-        activity_chain_vector = grp["activity_chain"].iloc[0]  # static per person; same array for all trips
-
-        consumed_fore_trip_start = 0.0
-        trip_pos = 0.0
-        trip_pos_inc = 1/max(1, person_trip_count - 1)
-
-        for local_idx in range(person_trip_count):
-            following_purpose = following_purpose_arr[local_idx]
-            trip_index = trip_index_arr[local_idx]
-
-            if following_purpose == "home":
-                next_x, next_y = home_x, home_y
-            elif following_purpose == "work" and has_work:
-                next_x, next_y = work_x, work_y
-            elif following_purpose == "education" and has_education:
-                next_x, next_y = edu_x, edu_y
-            elif following_purpose in SECONDARY_SET:                                
-                departure_time = departure_time_arr[local_idx]
-                origin_purpose = preceding_purpose_arr[local_idx]
-                activity_duration_h = activity_duration_arr[local_idx]
-                target_distance = target_distance_arr[local_idx]
-                # Predict first level coarse H3 cell
-                destination_id, geom = wrapper.predict(person_id=person_id, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=current_x, origin_y=current_y, 
-                                                       age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class, 
-                                                       daily_longest_distance_from_home=chain_daily_longest, daily_crowfly_total=chain_daily_total,
-                                                       daily_longest_distance_from_work=chain_daily_longest_work,
-                                                       crowfly_consumed_before_trip=consumed_fore_trip_start, trip_position_class=trip_pos,
-                                                       departure_time_normalized=departure_time,
-                                                       activity_duration_h=activity_duration_h,
-                                                       target_distance=target_distance,
-                                                       activity_chain_vector=activity_chain_vector,
-                                                       origin_purpose=origin_purpose,
-                                                       purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng)
-
-                # sample a destination point within the predicted level 2 cell                 
-
-                # get coords and append to the list
-                next_x, next_y = float(geom.x), float(geom.y)
-                locations_records.append((person_id, trip_index, destination_id, geom))
-                convergence_records.append((True, 1))
-            else:
-                raise ValueError(f"Unexpected following purpose {following_purpose} for person_id {person_id} trip_index {trip_index}")                       
-            
-            if not (added_a_trip and local_idx==0):
-                # if the first trip was added as a synthetic primary trip, we don't want to advance the position in the day or the consumed distance, since that trip doesn't really exist and shouldn't affect the features of the subsequent trips; for all other trips, including the first one if it was not added synthetically, we do want to advance these features as usual
-                trip_pos += trip_pos_inc
-                consumed_fore_trip_start += _euclidean(current_x, current_y, next_x, next_y)
-            current_x, current_y = next_x, next_y
-
-        if _WORKER_PROGRESS_QUEUE is not None:
-            pending_progress += 1
-            if pending_progress >= _WORKER_PROGRESS_FLUSH_EVERY:
-                _WORKER_PROGRESS_QUEUE.put(pending_progress)
-                pending_progress = 0
-
-    if _WORKER_PROGRESS_QUEUE is not None and pending_progress > 0:
-        _WORKER_PROGRESS_QUEUE.put(pending_progress)
-
-    return locations_records, convergence_records
-
-
-
-
-
-
-
-
-
-
 def configure(context):
     context.stage("data.constants")
     context.stage("synthesis.population.trips")
@@ -371,4 +212,180 @@ def execute(context):
 
     logger.info("locations_v2 success rate: %f", df_convergence["valid"].mean() if len(df_convergence) else 0.0)
     return df_locations, df_convergence
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+######################################################################
+def get_platform_mp_context():
+    """
+    Get the appropriate multiprocessing context for the current platform.
+    On Windows, 'spawn' is required. On Unix-like systems, 'fork' is typically preferred for performance,
+    but 'spawn' can be used if there are issues with 'fork' (e.g., with certain libraries).
+    """
+    import platform
+    if platform.system() == "Windows":
+        return get_context("spawn")
+    elif platform.system() == "Darwin":
+        return get_context("fork")
+    else:  # Linux and other Unix-like systems
+        return get_context("fork")
+    
+def _drain_progress_queue(progress, progress_queue):
+    if progress_queue is None:
+        return 0
+
+    drained = 0
+    while True:
+        try:
+            inc = progress_queue.get_nowait()
+        except queue.Empty:
+            break
+
+        if inc is None:
+            continue
+        drained += int(inc)
+
+    if drained > 0:
+        progress.update(drained)
+    return drained
+
+def _init_location_worker(wrapper, worker_torch_threads, enable_mkldnn, 
+                              enable_compile, compile_mode, progress_queue, progress_flush_every):  
+    global _WORKER_PROGRESS_QUEUE
+    global _WORKER_PROGRESS_FLUSH_EVERY
+
+    torch.backends.mkldnn.enabled = bool(enable_mkldnn)
+
+    if worker_torch_threads is not None and int(worker_torch_threads) > 0:
+        torch.set_num_threads(int(worker_torch_threads))
+        torch.set_num_interop_threads(int(worker_torch_threads))
+
+    # torch.compile artifacts do not survive pickling — each worker must compile its own copy.
+    if enable_compile:
+        wrapper.optimize_wrapper(enable_compile=True, compile_mode=compile_mode)
+
+    _WORKER_STATE["wrapper"] = wrapper
+    _WORKER_PROGRESS_QUEUE = progress_queue
+    _WORKER_PROGRESS_FLUSH_EVERY = max(1, int(progress_flush_every))
+
+def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
+    wrapper = _WORKER_STATE.get("wrapper")
+
+    rng = np.random.RandomState(seed)
+    locations_records = []
+    convergence_records = []
+
+    if len(df_trips_chunk) == 0 or len(df_meta_chunk) == 0:
+        return locations_records, convergence_records
+    
+    meta_cols = ["home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", "sex", "employed", "income_class", "car_availability", "has_work", "has_education"]
+    meta_lookup = df_meta_chunk.set_index("person_id")[meta_cols].to_dict("index")
+    person_groups = df_trips_chunk.groupby("person_id", sort=False)
+    pending_progress = 0
+
+    for person_id, grp in person_groups:
+        info = meta_lookup.get(person_id)
+        if info is None:
+            continue
+
+        home_x, home_y, work_x, work_y, edu_x, edu_y = info["home_x"], info["home_y"], info["work_x"], info["work_y"], info["edu_x"], info["edu_y"]
+        has_work, has_education = info["has_work"], info["has_education"]        
+        age, sex, employed, income_class, car_availability = info["age"], info["sex"], info["employed"], info["income_class"], info["car_availability"]
+        
+        # This not only get the current coords, but also add a trip from primary location if the first trip is not from primary
+        grp, (current_x, current_y), added_a_trip = _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_work, has_education)
+        
+        person_trip_count = len(grp)        
+        following_purpose_arr = grp["following_purpose"].to_numpy()
+        trip_index_arr = grp["trip_index"].to_numpy()
+        departure_time_arr = grp["departure_time_normalized"].to_numpy()
+        preceding_purpose_arr = grp["preceding_purpose"].to_numpy()
+        activity_duration_arr = grp["activity_duration_h"].to_numpy()
+        target_distance_arr = grp["target_distance"].to_numpy()
+        
+        chain_daily_longest = grp["daily_longest_distance_from_home"].iloc[0]  # static per person; same value for all trips
+        chain_daily_total = grp["daily_crowfly_total"].iloc[0]  # static per person; same value for all trips
+        chain_daily_longest_work = grp["daily_longest_distance_from_work"].iloc[0]  # static per person; same value for all trips
+        activity_chain_vector = grp["activity_chain"].iloc[0]  # static per person; same array for all trips
+
+        consumed_fore_trip_start = 0.0
+        trip_pos = 0.0
+        trip_pos_inc = 1/max(1, person_trip_count - 1)
+
+        for local_idx in range(person_trip_count):
+            following_purpose = following_purpose_arr[local_idx]
+            trip_index = trip_index_arr[local_idx]
+
+            if following_purpose == "home":
+                next_x, next_y = home_x, home_y
+            elif following_purpose == "work" and has_work:
+                next_x, next_y = work_x, work_y
+            elif following_purpose == "education" and has_education:
+                next_x, next_y = edu_x, edu_y
+            elif following_purpose in SECONDARY_SET:                                
+                departure_time = departure_time_arr[local_idx]
+                origin_purpose = preceding_purpose_arr[local_idx]
+                activity_duration_h = activity_duration_arr[local_idx]
+                target_distance = target_distance_arr[local_idx]
+                # Predict first level coarse H3 cell
+                destination_id, geom = wrapper.predict(person_id=person_id, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=current_x, origin_y=current_y, 
+                                                       age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class, 
+                                                       daily_longest_distance_from_home=chain_daily_longest, daily_crowfly_total=chain_daily_total,
+                                                       daily_longest_distance_from_work=chain_daily_longest_work,
+                                                       crowfly_consumed_before_trip=consumed_fore_trip_start, trip_position_class=trip_pos,
+                                                       departure_time_normalized=departure_time,
+                                                       activity_duration_h=activity_duration_h,
+                                                       target_distance=target_distance,
+                                                       activity_chain_vector=activity_chain_vector,
+                                                       origin_purpose=origin_purpose,
+                                                       purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng)
+
+                # sample a destination point within the predicted level 2 cell                 
+
+                # get coords and append to the list
+                next_x, next_y = float(geom.x), float(geom.y)
+                locations_records.append((person_id, trip_index, destination_id, geom))
+                convergence_records.append((True, 1))
+            else:
+                raise ValueError(f"Unexpected following purpose {following_purpose} for person_id {person_id} trip_index {trip_index}")                       
+            
+            if not (added_a_trip and local_idx==0):
+                # if the first trip was added as a synthetic primary trip, we don't want to advance the position in the day or the consumed distance, since that trip doesn't really exist and shouldn't affect the features of the subsequent trips; for all other trips, including the first one if it was not added synthetically, we do want to advance these features as usual
+                trip_pos += trip_pos_inc
+                consumed_fore_trip_start += _euclidean(current_x, current_y, next_x, next_y)
+            current_x, current_y = next_x, next_y
+
+        if _WORKER_PROGRESS_QUEUE is not None:
+            pending_progress += 1
+            if pending_progress >= _WORKER_PROGRESS_FLUSH_EVERY:
+                _WORKER_PROGRESS_QUEUE.put(pending_progress)
+                pending_progress = 0
+
+    if _WORKER_PROGRESS_QUEUE is not None and pending_progress > 0:
+        _WORKER_PROGRESS_QUEUE.put(pending_progress)
+
+    return locations_records, convergence_records
+
+
+
+
+
 

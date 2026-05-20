@@ -20,8 +20,7 @@ def configure(context):
     context.stage("data.spatial.cantons")
 
     if context.config("include_cross_border"):
-        context.stage("data.cross_border.generate_cross_border_traffic")
-        context.stage("synthesis.population.enriched")
+        context.stage("data.cross_border.generate_cross_border_traffic")        
 
     context.config("include_external_population", default = False)
     if context.config("include_external_population"):
