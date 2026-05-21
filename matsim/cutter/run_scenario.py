@@ -1,8 +1,9 @@
 import glob
-import os.path
-
+import os
+import logging
 import matsim.runtime.eqasim as eqasim
 
+logger = logging.getLogger("synpp:    Regional Model\t")
 
 def configure(context):
     context.stage("matsim.runtime.java")
@@ -18,14 +19,21 @@ def execute(context):
     # 1. get the regional scenario if exists
     regional_scenario = context.stage("matsim.cutter.scenario")
     if regional_scenario=="":
-        return ""
+        return ("","")
     assert os.path.exists(regional_scenario), "Regional scenario does not exist: %s" % regional_scenario
+    logger.info("Regional scenario found: %s" % regional_scenario)
 
-    # 2. config file
+    # 2. go to the regional scenario dir (this makes sure all paths are working)
+    cwd = os.getcwd()
+    os.chdir(regional_scenario)
+    logger.info("Changed working directory to regional scenario: %s" % os.getcwd())
+
+    # 3. config file
     config_file = "%s/%sconfig.xml" % (regional_scenario, context.config("extent_prefix") )
     assert os.path.exists(config_file), "Config file does not exist: %s" % config_file
+    logger.info("Config file found: %s" % config_file)
 
-    # 3. run the scenario in eqasim (we do not run any calibration, and all other files are already set in the config from the natioanl model)
+    # 4. run the scenario in eqasim (we do not run any calibration, and all other files are already set in the config from the natioanl model)
     dmc_param_path = "calibrated_dmc_parameters.yml" if os.path.exists("%s/calibrated_dmc_parameters.yml" % regional_scenario) else "dmc_parameters.yml"
     freespeed_special_region = "freespeed_special_region.yml" if os.path.exists("%s/freespeed_special_region.yml" % regional_scenario) else ""
     penalty_special_region = "penalties_special_region.yml" if os.path.exists("%s/penalties_special_region.yml" % regional_scenario) else ""
@@ -59,11 +67,9 @@ def execute(context):
             "--generateNetworkEvents", "true",
         ] + args)        
 
-    assert os.path.exists("%s/simulation_output/output_events.xml.gz" % regional_scenario)
+    simulation_path = "%s/simulation_output" % context.path()
+    assert os.path.exists(simulation_path), "Simulation output path does not exist: %s" % simulation_path
+    assert os.path.exists("%s/output_events.xml.gz" % simulation_path), "Output events file does not exist: %s" % ("%s/output_events.xml.gz" % simulation_path)
+    os.chdir(cwd)
 
-    # replace the config file (output_config contains all the parameters used in the simulation)
-    output_config_file = "%s/%s/config.xml" % (regional_scenario, "simulation_output", "output_config.xml")
-    assert os.path.exists(output_config_file), "Output config file does not exist: %s" % output_config_file
-    os.replace(output_config_file, config_file)
-
-    return context.path()
+    return simulation_path, regional_scenario
