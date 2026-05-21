@@ -89,18 +89,26 @@ def execute(context):
         calibrated_parameters_path = glob.glob("%s/*_parameters.yml" % new_path_to_results)
         if len(calibrated_parameters_path) > 0:            
             calibrated_parameters_path = max(calibrated_parameters_path, key=os.path.getctime)
-
-        shutil.copyfile(calibrated_parameters_path, 
-                        "%s/calibrated_dmc_parameters.yml" % target_path)
+            shutil.copyfile(calibrated_parameters_path, 
+                            "%s/calibrated_dmc_parameters.yml" % target_path)
         
     # copy contract information
     contracts_path = context.stage("contracts.contracts")
     shutil.copyfile(contracts_path, "%s/CONTRACTS.html" % target_path)
 
     # copy the regional model results too
-    regional_model_path = context.stage("matsim.cutter.run_scenario")
-    if len(regional_model_path) > 0 and context.config("extent_prefix") != "":
+    regional_model_results_path, regional_model_scenario_path = context.stage("matsim.cutter.run_scenario")
+    if len(regional_model_scenario_path) > 0 and context.config("extent_prefix") != "":
         target_regional_model_path = "%s/%s%s" % (target_path, context.config("extent_prefix"), context.config("simulation_directory"))
-        shutil.move(regional_model_path, target_regional_model_path)
+        shutil.move(regional_model_scenario_path, target_regional_model_path)
+
+        target_regional_results_path = "%s/%s%s/simulation_output" % (target_path, context.config("extent_prefix"), context.config("simulation_directory"))
+        shutil.move(regional_model_results_path, target_regional_results_path)
+
+        # replace the config file (output_config contains all the parameters used in the simulation)
+        config_file = "%s/%sconfig.xml" % (target_regional_model_path, context.config("extent_prefix") )
+        output_config_file = "%s/output_config.xml" %target_regional_results_path
+        assert os.path.exists(output_config_file), "Output config file does not exist: %s" % output_config_file
+        os.replace(output_config_file, config_file)
 
     return {}

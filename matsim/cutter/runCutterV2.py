@@ -113,8 +113,8 @@ def execute(context):
         calibrated_parameters_path = glob.glob("%s/%s/*_parameters.yml" % (context.path("matsim.simulation.run"), "simulation_output"))
         if len(calibrated_parameters_path) > 0:            
             calibrated_parameters_path = max(calibrated_parameters_path, key=os.path.getctime)
-        shutil.copyfile(calibrated_parameters_path, 
-                        "%s/calibrated_dmc_parameters.yml" % output_path)
+            shutil.copyfile(calibrated_parameters_path, 
+                            "%s/calibrated_dmc_parameters.yml" % output_path)
 
     # 2.mode shares
     global_shares_output_path, cantonal_shares_output_path = context.stage("data.microcensus.shares")
