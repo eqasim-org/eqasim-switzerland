@@ -1,5 +1,5 @@
 import os
-from .matching.network import Network
+from .matching.network import RoadNetwork
 import glob
 import subprocess
 import pandas as pd
@@ -17,7 +17,7 @@ import json
 
 logger = logging.getLogger("synpp")
 
-def filter_data(df, network):
+def filter_data(df, network, require_simulated=True):
     # Work on a copy
     df = df.copy()
 
@@ -42,10 +42,17 @@ def filter_data(df, network):
     # Compute vehicles per HOUR per LANE
     # divide by 24 to get per hour, then divide by number of lanes
     df['obs_vphpl'] = df['flow'] / 24.0 / df['permlanes']
-    df['sim_vphpl'] = df['simulated_flow'] / 24.0 / df['permlanes']
+    if require_simulated:
+        if 'simulated_flow' not in df.columns:
+            logger.info("\t Missing simulated_flow column while require_simulated=True.")
+            return None
+        df['sim_vphpl'] = df['simulated_flow'] / 24.0 / df['permlanes']
 
     # Drop rows with NaN vphpl
-    df = df[df['obs_vphpl'].notna() | df['sim_vphpl'].notna()].copy()
+    if require_simulated:
+        df = df[df['obs_vphpl'].notna() | df['sim_vphpl'].notna()].copy()
+    else:
+        df = df[df['obs_vphpl'].notna()].copy()
     if df.empty:
         logger.info("\t No valid vphpl values after computation.")
         return None
@@ -73,7 +80,8 @@ def filter_data(df, network):
         return group[(group[column] >= lower_bound) & (group[column] <= upper_bound)]
     
     df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'obs_vphpl')).reset_index(drop=True)
-    df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'sim_vphpl')).reset_index(drop=True)
+    if require_simulated:
+        df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'sim_vphpl')).reset_index(drop=True)
     len_after = len(df)
     logger.info(f"\t Filtered dataset: {len_after} records remaining (removed {len_before - len_after} records)")
     return df
@@ -227,9 +235,9 @@ def print_detailed_statistics(stats_dict):
 
 def create_comprehensive_plot(df, stats_dict, output_path=None):
     """Create a comprehensive scatter plot with statistics."""
-    print("\n" + "=" * 60)
-    print("CREATING COMPREHENSIVE PLOT")
-    print("=" * 60)
+    logger.info("\n" + "=" * 60)
+    logger.info("CREATING COMPREHENSIVE PLOT")
+    logger.info("=" * 60)
     
     # Clean data
     df_clean = df.dropna(subset=['flow', 'simulated_flow'])
@@ -353,6 +361,73 @@ Cities:
     # Display plot
     plt.close()
 
+def create_simple_scatter_plot(df, stats_dict, output_path=None):
+    """Create a simple scatter plot of observed vs simulated flows."""
+    logger.info("\n" + "=" * 60)
+    logger.info("CREATING SIMPLE SCATTER PLOT")
+    logger.info("=" * 60)
+    
+    # Clean data
+    df_clean = df.dropna(subset=['flow', 'simulated_flow'])
+    
+    # Set up the plot style
+    plt.style.use('default')
+    sns.set_palette("husl")
+    
+    # Create figure
+    fig, ax = plt.subplots(figsize=(8, 8))
+    
+    # Color by city with more vibrant colors
+    cities = df_clean['city'].unique()
+    colors = plt.cm.Set1(np.linspace(0, 1, len(cities)))
+    
+    for i, city in enumerate(cities):
+        city_data = df_clean[df_clean['city'] == city]
+        ax.scatter(city_data['flow'], city_data['simulated_flow'],
+                   alpha=0.6, s=50, label=city.capitalize(),
+                   color=colors[i], edgecolors="white")
+    
+    # Add perfect correlation line (1:1)
+    min_val = min(df_clean['flow'].min(), df_clean['simulated_flow'].min())
+    max_val = max(df_clean['flow'].max(), df_clean['simulated_flow'].max())
+    ax.plot([min_val, max_val], [min_val, max_val], 
+            'k--', alpha=0.8, linewidth=2, label='Perfect correlation (1:1)')
+    
+    # Add regression line (no intercept)
+    x_range = np.linspace(min_val, max_val, 100)
+    y_fit = stats_dict['slope'] * x_range
+    ax.plot(x_range, y_fit, 'r-', linewidth=2, alpha=0.5,
+            label=f'Fitted line (y = {stats_dict["slope"]:.3f}x)')
+    
+    ax.set_xlabel('Observed Flow (vehicles/day)', fontsize=12)
+    ax.set_ylabel('Simulated Flow (vehicles/day)', fontsize=12)
+    ax.set_title('Observed vs Simulated Traffic Flows', fontsize=14, fontweight='bold')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # Add R2 text
+    ax.text(0.02 * max_val, 0.6 * max_val, 
+            f"$R^2$ = {stats_dict['r2']:.3f}",
+            fontsize=14,
+            color='crimson',
+            bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3'))
+    
+    # Add GEH text
+    ax.text(0.7 * max_val, 0.02 * max_val, 
+            f"GEH ≤ 5: {stats_dict['geh']['within_5_pct']:.1f}%\nGEH ≤ 10: {stats_dict['geh']['within_10_pct']:.1f}%\nGEH ≤ 15: {stats_dict['geh']['within_15_pct']:.1f}%\nGEH ≤ 25: {stats_dict['geh']['within_25_pct']:.1f}%",
+            fontsize=14,
+            color='steelblue',
+            bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3'))
+    
+    # Save plot
+    if output_path is not None:
+        output_file = os.path.join(output_path, "simple_scatter_plot.png")
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        logger.info(f"✅ Simple scatter plot saved as: {output_file}")
+        
+    # Display plot
+    plt.close()
+
 def plot_by_road_cat(df, output_path=None, title=None):
     """
     Plot average observed and simulated flow by highway (road) category.
@@ -369,7 +444,7 @@ def plot_by_road_cat(df, output_path=None, title=None):
     df = df.copy()
 
     if 'highway' not in df.columns or df['highway'].isna().all():
-        print("❌ No highway information available after merge. Cannot produce highway-type plot.")
+        logger.info("❌ No highway information available after merge. Cannot produce highway-type plot.")
         return None
 
     # Filter out rows without highway
@@ -494,6 +569,25 @@ def get_average_flow_veh_h_by_category(df, output_path=None):
 
     plt.close()
 
+def save_as_target(network, df, path_to_output):
+    df = df[['link_id','obs_vphpl']]
+    df = df.explode("link_id")
+    df = df.rename(columns={"link_id":"linkId",
+                            "obs_vphpl":"count"})
+
+    # links that are duplicates of others, we give them the original link id
+    replicated_links = network.links[network.links.replicate_of.notna()][["link_id","replicate_of"]]
+    df = df.merge(replicated_links.rename(columns={"link_id":"linkId", "replicate_of":"original_linkId"}), on="linkId", how="left")
+    df["linkId"] = df["original_linkId"].fillna(df["linkId"])
+    df = df.drop(columns=["original_linkId"])
+    
+    # If multiple link ids, we average the counts
+    df = df.groupby("linkId", as_index=False)["count"].mean()
+
+    # save it as csv file
+    file_path = os.path.join(path_to_output, "target_flow.csv")
+    df.to_csv(file_path, index=False, sep=",")
+    logger.info(f"✅ Target flow saved to: {file_path}")
 
 
 

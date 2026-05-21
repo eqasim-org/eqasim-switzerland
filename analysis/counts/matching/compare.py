@@ -26,13 +26,34 @@ def execute(context):
     simulation_directory = context.config("simulation_directory")
     iterations_directory = os.path.join(output_path, output_id, simulation_directory, "ITERS")
     
-    # searching for link stats file
-    files = glob.glob(os.path.join(iterations_directory, "it.*", f"*.linkstats.txt.gz"))
+    # searching for link stats file 
+    linkstats_file = glob.glob(os.path.join(iterations_directory, "it.*", f"*.linkstats.txt.gz"))
+    counts_file = glob.glob(os.path.join(iterations_directory, "it.*", f"*.traffic_flow_daily_counts.csv"))
+    files = counts_file if counts_file else linkstats_file
+
     if not files:
-        raise FileNotFoundError(f"No link stats files found in {iterations_directory}")
+        raise FileNotFoundError(f"No counts nor link stats files found in {iterations_directory}")
     else:
-        # get the latest file (by modification time)
-        file = max(files, key=os.path.getmtime)
+        if files == counts_file:
+            logger.info(f"Found {len(files)} counts files for comparison. Considering the last 10 iterations.")
+            # Sort files by modification time and take the last 10
+            files = sorted(files, key=os.path.getmtime)[-10:]
+            logger.info(f"Using the following files for averaging: {files}")
+            
+            # Read and average the data
+            dfs = [pd.read_csv(file, sep=";", usecols=["linkId", "dailyCount"], dtype={"linkId": str, "dailyCount": float}) for file in files]
+            combined_df = pd.concat(dfs).groupby("linkId", as_index=False).mean()            
+            
+            # Save the averaged data to a temporary file for comparison
+            temp_file = files[-1].replace(".csv", "_averagedOverLast10Iterations.csv")
+            combined_df.to_csv(temp_file, index=False, sep=";")
+            logger.info(f"Averaged counts file saved to {temp_file}")
+            file = temp_file
+        else:
+            logger.info(f"Found {len(files)} linkstats files for comparison. Using the latest one.")
+            # Get the latest file (by modification time)
+            file = max(files, key=os.path.getmtime)
+            logger.info(f"\t Using file {file} for comparison.")
 
     # build the compare object and return it
     cmp = Compare(file)
@@ -59,23 +80,27 @@ class Compare:
 
     @staticmethod
     def read_link_stats(file_path: str, columns: Union[str, List[str]] = "HRS0-24avg") -> pd.DataFrame:
+        if "linkstats" in file_path:
+            if isinstance(columns, str):
+                columns = [columns]
 
-        if isinstance(columns, str):
-            columns = [columns]
+            dtype = {"LINK": str}
+            dtype.update({col: float for col in columns})
 
-        dtype = {"LINK": str}
-        dtype.update({col: float for col in columns})
+            logger.info("Reading link statistics from %s...", file_path)
+            df = pd.read_csv(file_path, sep="\t", usecols=["LINK", *columns], dtype=dtype)
 
-        logger.info("Reading link statistics from %s...", file_path)
-        df = pd.read_csv(file_path, sep="\t", usecols=["LINK", *columns], dtype=dtype)
+            column_renames = {"LINK": "link_id"}
+            if "HRS0-24avg" in df.columns:
+                column_renames["HRS0-24avg"] = "flow"
 
-        column_renames = {"LINK": "link_id"}
-        if "HRS0-24avg" in df.columns:
-            column_renames["HRS0-24avg"] = "flow"
-
-        df = df.rename(columns=column_renames)
-        logger.info("Link statistics successfully read.")
-        return df
+            df = df.rename(columns=column_renames)
+            logger.info("Link statistics successfully read.")
+            return df
+        else:
+            df = pd.read_csv(file_path, sep=";", usecols=["linkId","dailyCount"], dtype={"linkId":str,"dailyCount":float})
+            df = df.rename(columns={"linkId": "link_id", "dailyCount": "flow"})
+            return df
 
     def get_link_stats(self, file_path: Optional[str] = None) -> pd.DataFrame:
         if file_path:
@@ -86,52 +111,7 @@ class Compare:
             return self.read_link_stats(self.link_stats_file)
         else:
             raise ValueError("No link statistics file provided or loaded.")
-    
-    def compare_flow_total(self, counts, matched, network, file_path: Optional[str] = None, 
-                                 sample_size:float = None, get_average:bool=False):
         
-        df = self.get_link_stats(file_path).copy()
-        counts = counts.counts[['id','flow']].copy()
-                
-        # keep only interesting links
-        links = network.get_in_simulation_links(matched.link_id.unique())
-        df    = df[df.link_id.isin(links)]
-        
-        # get flows
-        logger.info("Comparing the simulated flow vs. counts ...")
-        data = []
-        matches = matched[["id","link_id","direction"]]         
-        for _id, group in matches.groupby("id"):
-            flow_row      = counts[counts["id"]==_id]
-            assert len(flow_row)==1, f"Found {len(flow_row)} rows for station {_id}"
-            flow_row = flow_row.iloc[0].to_dict()
-            
-            if get_average:
-                same_direction_links = network.get_in_simulation_links(group[group["direction"]=="same"].link_id)
-                opposite_direction_links = network.get_in_simulation_links(group[group["direction"]=="opposite"].link_id)
-                
-                dfi_same_direction = df[df.link_id.isin(same_direction_links)]
-                dfi_opposite_direction = df[df.link_id.isin(opposite_direction_links)]
-                flow_row["simulated_flow"] = dfi_same_direction.flow.mean()+dfi_opposite_direction.flow.mean()
-                
-            else:
-                links         = network.get_in_simulation_links(group.link_id)
-                dfi           = df[df.link_id.isin(links)]
-                assert len(dfi)<3, "Something is wrong here!"                            
-                flow_row["simulated_flow"] = int(dfi.flow.sum())
-            
-            data.append(flow_row)
-            
-        data = pd.DataFrame(data)
-        data["id"] = data["id"].astype(int)
-        
-        if sample_size is not None:
-            data["simulated_flow"] = data["simulated_flow"]*(1/sample_size)
-        
-        data["pdiff"] = ((data.simulated_flow-data.flow)/(data.flow)*100).astype(int)
-        return data
-         
-            
         
     def compare_flow_total_efficient(self, counts, matched, network, file_path: Optional[str] = None, 
                                            sample_size: float = None, get_average: bool = False,

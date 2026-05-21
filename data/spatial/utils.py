@@ -7,7 +7,9 @@ from sklearn.neighbors import KDTree
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, message=".*GeoDataFrame.swapaxes.*")
+import logging
 
+logger = logging.getLogger("synpp")
 
 def sample_coordinates(row, count, random_seed=0):
     samples = []
@@ -66,7 +68,7 @@ def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_d
     df_points = df_points[[point_id_field, "geometry"]]
     df_zones = df_zones[[zone_id_field, "geometry"]]
 
-    print("Imputing %d %s zones onto %d %s points by spatial join..." 
+    logger.info("Imputing %d %s zones onto %d %s points by spatial join..." 
           % (len(df_zones), zone_type, len(df_points), point_type))
     
     result = []
@@ -83,7 +85,7 @@ def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_d
     invalid_mask = pd.isnull(df_points[zone_id_field])
 
     if fix_by_distance and np.any(invalid_mask):
-        print("  Fixing %d points by centroid distance join..." % np.count_nonzero(invalid_mask))
+        logger.info("  Fixing %d points by centroid distance join..." % np.count_nonzero(invalid_mask))
         coordinates = np.vstack([df_zones["geometry"].centroid.x, df_zones["geometry"].centroid.y]).T
                 
         kd_tree = KDTree(coordinates)

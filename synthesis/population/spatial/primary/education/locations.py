@@ -3,6 +3,9 @@ from sklearn.neighbors import KDTree
 import pandas as pd
 import data.spatial.utils as spatial_utils
 import data.utils
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.statent.statent")
@@ -78,7 +81,7 @@ def execute(context):
         df_persons.loc[f_persons, "education_y"] = df_candidates.iloc[indices]["y"].values
         df_persons.loc[f_persons, "education_location_id"] = df_candidates.iloc[indices]["enterprise_id"].values
 
-        print("  %s (%d persons, %d locations)" % (type, np.count_nonzero(f_persons), len(df_candidates)))
+        logger.info("  %s (%d persons, %d locations)", type, np.count_nonzero(f_persons), len(df_candidates))
 
     df_persons = df_persons[["person_id",
                              "education_x", "education_y",

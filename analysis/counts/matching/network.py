@@ -14,30 +14,37 @@ logger = logging.getLogger("synpp")
 
 
 def configure(context):
-    # context.stage("matsim.output")
     context.config("output_path")
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")
     context.config("output_prefix", "switzerland_")
+    context.config("export_detailed_network", False)
+
 
 def execute(context):  
-    # this part ensure dependency (this stage run after matsim.output)
-    # _ = context.stage("matsim.output")      
-
     output_path = context.config("output_path")
     output_id   = context.config("output_id")
     simulation_directory = context.config("simulation_directory")
+    
     network_file = os.path.join(output_path, output_id, simulation_directory, "output_network.xml.gz")
-    network_geometry_file = os.path.join(output_path, output_id, 
-                                         "%sdetailed_network.csv" % context.config("output_prefix"))
+    network_geometry_file = None
+
+    if not os.path.exists(network_file):
+        network_file = os.path.join(output_path, output_id, context.config("output_prefix") + "network.xml.gz")
+        
+    if context.config("export_detailed_network"):
+        network_geometry_file = os.path.join(output_path, output_id,"%sdetailed_network.csv" % context.config("output_prefix"))
+            
+    assert os.path.exists(network_file), f"Network file not found at {network_file}"
+    logger.info("\t LOADING NETWORK FROM: %s" % network_file)
     
     # create the network object, overwrite is set to True to ensure that the latest network is loaded when this stage is run again
-    network = Network(network_file, network_geometry_file, overwrite=True, cache_dir= context.path())
+    network = RoadNetwork(network_file, network_geometry_file, overwrite=True, cache_dir= context.path())
 
     return network
 
 
-class Network:
+class RoadNetwork:
     def __init__(self, network_file: str, geometry_file: str=None, overwrite=True, cache_dir:str="cache"):
         self.network_file = network_file
         self.geometry_file = geometry_file
@@ -140,7 +147,7 @@ class Network:
                 .reset_index(name='attributes')
             net.links = net.links.merge(link_attrs, on="link_id", how="left")
             net.links.loc[net.links["attributes"].isna(), "attributes"] = None
-            
+        net.links = net.links[net.links["modes"].str.split(",").apply(lambda x: "car" in x)]
         net.links["highway"] = net.links.attributes.apply(
             lambda x: x["osm:way:highway"] if (isinstance(x,dict) and "osm:way:highway" in x) else np.nan
         )

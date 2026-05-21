@@ -1,17 +1,18 @@
 import pandas as pd
-
+import geopandas as gpd
 import data.spatial.utils as spatial_utils
 import data.spatial.ovgk
 
 def configure(context):
     context.stage("data.statent.statent")
     context.stage("data.spatial.ovgk")
-
+    context.stage("data.spatial.municipality_types")
+    context.stage("data.spatial.municipalities")
 
 def execute(context):
-    df = pd.DataFrame(context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga"]],
+    df = pd.DataFrame(context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga","number_employees"]],
                                     copy=True)
-    df.columns = ["destination_id", "destination_x", "destination_y", "noga"]
+    df.columns = ["destination_id", "destination_x", "destination_y", "noga", "number_employees"]
 
     df.loc[:, "offers_work"]  = True
     df.loc[:, "offers_other"] = True
@@ -23,8 +24,13 @@ def execute(context):
     df.loc[:, "offers_education_secondary"] = df["noga"].str.startswith("85")
 
     # 90 = arts, entertainment, leisure; 56 = gastronomy
-    df.loc[:, "offers_leisure"] = df["noga"].str.startswith("90") | df[
-        "noga"].str.startswith("56")
+    df.loc[:, "offers_leisure"] = (df["noga"].str.startswith("90") | 
+                                   df["noga"].str.startswith("56") |
+                                   df["noga"].str.startswith("912")| # 912 = museum, collection, historical site and monument
+                                   df["noga"].str.startswith("914")| # 914 = Botanical and zoological garden and nature reserve activities
+                                   df["noga"].str.startswith("93")|  # 932 = sport activities
+                                   df["noga"].str.startswith("92")   # 92 = Gambling and betting activities
+                                    )
 
     # 47 = retail
     df.loc[:, "offers_shop"] = df["noga"].str.startswith("47")
@@ -38,7 +44,16 @@ def execute(context):
     df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="facility")
     df = df.merge(df_spatial[["destination_id", "ovgk"]], how="left", on="destination_id")
 
-    return df[["destination_id", "destination_x", "destination_y",
+    # impute municipality types
+    df_municipality_type = context.stage("data.spatial.municipality_types")
+    df_municipalities,_ = context.stage("data.spatial.municipalities")
+    df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_type","municipality_id", "geometry"]]
+    assert df.crs == df_municipalities.crs
+    df = gpd.sjoin_nearest(df, df_municipalities, how="left").drop(columns=["index_right"])
+    
+
+    return df[["destination_id", "number_employees", "destination_x", "destination_y",
                "offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other",
-               "offers_work_secondary", "offers_education_secondary", "offers_home_secondary", "ovgk",
+               "offers_work_secondary", "offers_education_secondary", "offers_home_secondary",
+               "ovgk", "municipality_id", "municipality_type",
                "geometry"]]

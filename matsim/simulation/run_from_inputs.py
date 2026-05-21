@@ -1,6 +1,8 @@
 import os.path
 import shutil
 import matsim.runtime.eqasim as eqasim
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("matsim.runtime.java")
@@ -24,22 +26,22 @@ def execute(context):
     scheduleBasedPTconfig = "false"
     if context.config("useScheduleBasedTransport"):
         scheduleBasedPTconfig = "true"
-        print("Schedule-based PT: " + scheduleBasedPTconfig)
+        logger.info("Schedule-based PT: %s", scheduleBasedPTconfig)
 
     preventwaitingtoentertraffic = "n"
     if context.config("preventwaitingtoentertraffic"):
         preventwaitingtoentertraffic = "y"
-        print("Prevent waiting to enter traffic: " + preventwaitingtoentertraffic)
+        logger.info("Prevent waiting to enter traffic: %s", preventwaitingtoentertraffic)
 
     writeExperiencedPlans = "false"
     if context.config("writeexperiencedplans"):
         writeExperiencedPlans = "true"
-        print("Write experienced plans: " + writeExperiencedPlans)
+        logger.info("Write experienced plans: %s", writeExperiencedPlans)
 
     input_path  = context.config("simulation_inputs_path")
 
     output_path = os.path.join(context.path(), context.config("experiment_name"))
-    print(output_path)
+    logger.info("Output path: %s", output_path)
     os.makedirs(output_path, exist_ok=True)
 
     config = context.config("simulation_config_path")

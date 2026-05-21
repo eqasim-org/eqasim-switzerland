@@ -76,13 +76,11 @@ def process_gtfs_stops(gtfs_stops_path):
 
 
 def fix_line(line, page_number):
-    if "Oberdorf SO 264" in line:
-        #print("Fixing Oberdorf on page %d" % page_number)
+    if "Oberdorf SO 264" in line:        
         line = line.replace("Oberdorf SO 264", "Oberdorf SO 0264")
 
     for fix in MISSING_STATION_IDS:
-        if fix["page"] == page_number and line.endswith(fix["name"]):
-            #print("Fixing %s on page %d to id '%s'" % (fix["name"], fix["page"], fix["new_id"]))
+        if fix["page"] == page_number and line.endswith(fix["name"]):            
             line += " " + fix["new_id"]
 
     return line

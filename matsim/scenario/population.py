@@ -1,5 +1,7 @@
 import gzip
 import io
+import shutil
+import subprocess
 from shapely import wkt
 
 import numpy as np
@@ -34,8 +36,9 @@ def configure(context):
     context.stage("synthesis.lcv.trips")
 
     context.stage("synthesis.vehicles.vehicles")
-    context.stage("data.spatial.municipality_types")
-    context.stage("data.spatial.municipalities")
+    context.config("population_compresslevel", default=1)
+    context.config("population_use_pigz", default=True)
+    context.config("population_pigz_threads", default=8)
 
     context.config("include_cross_border", default = False)
     if context.config("include_cross_border"):
@@ -49,7 +52,12 @@ def configure(context):
 VEHICLE_FIELDS = [
     "mode", "vehicle_id", "owner_id"
 ]
-
+ACTIVITY_ATTRIBUTES_TO_SAVE = dict(municipalityType='municipality_type', 
+                                   municipalityId='municipality_id', 
+                                   employeeDensity='employee_density', 
+                                   companiesDensity='companies_density', 
+                                   populationDensity='population_density', 
+                                   ovgk='ovgk')
 
 class PersonWriter:
     def __init__(self, person):
@@ -63,7 +71,31 @@ class PersonWriter:
     def add_vehicles(self, vehicles):
         self.vehicles = vehicles
 
-    def write(self, writer):
+    def _write_single_activity(self, writer, activity, home_location):
+        geometry = activity.geometry
+        destination_id = activity.destination_id
+
+        location = (
+            home_location
+            if destination_id == -1
+            else writer.location(int(geometry.x), int(geometry.y), int(destination_id))
+        )
+
+        start_time = _na_to_none(activity.start_time)
+        end_time = _na_to_none(activity.end_time)
+
+        attributes = {
+            "municipalityType": activity.municipality_type,
+            "municipalityId": activity.municipality_id,
+            "employeeDensity": activity.employee_density,
+            "companiesDensity": activity.companies_density,
+            "populationDensity": activity.population_density,
+            "ovgk": activity.ovgk,
+        }
+
+        writer.add_activity(activity.purpose, location, start_time, end_time, attributes=attributes)
+
+    def write(self, writer, first_activity=None, activity_iterator=None):
         p = self.person
 
         writer.start_person(str(p.person_id))
@@ -115,29 +147,38 @@ class PersonWriter:
 
         home_location = writer.location(p.home_x, p.home_y, "home%s" % getattr(p, "household_id", 0))
 
-        for i in range(len(self.activities)):
-            a = self.activities[i]
-            geometry = a.geometry
-            destination_id = a.destination_id
+        written_activities = 0
 
-            location = (
-                home_location
-                if destination_id == -1
-                else writer.location(int(geometry.x), int(geometry.y), int(destination_id))
-            )
+        if first_activity is None:
+            for i in range(len(self.activities)):
+                a = self.activities[i]
+                self._write_single_activity(writer, a, home_location)
+                written_activities += 1
 
-            start_time = _na_to_none(a.start_time)
-            end_time   = _na_to_none(a.end_time)
+                if not a.is_last:
+                    next_a = self.activities[i + 1]
+                    writer.add_leg(a.following_mode, a.end_time, next_a.start_time - a.end_time)
+        else:
+            current_activity = first_activity
+            while True:
+                self._write_single_activity(writer, current_activity, home_location)
+                written_activities += 1
 
-            attributes = dict(municipalityType=a.municipality_type, municipalityId=a.municipality_id)
-            writer.add_activity(a.purpose, location, start_time, end_time, attributes=attributes)
+                if current_activity.is_last:
+                    break
 
-            if not a.is_last:
-                next_a = self.activities[i + 1]
-                writer.add_leg(a.following_mode, a.end_time, next_a.start_time - a.end_time)
+                next_activity = next(activity_iterator)
+                assert p.person_id == next_activity.person_id
+                writer.add_leg(
+                    current_activity.following_mode,
+                    current_activity.end_time,
+                    next_activity.start_time - current_activity.end_time,
+                )
+                current_activity = next_activity
 
         writer.end_plan()
         writer.end_person()
+        return written_activities
 
 
 
@@ -217,7 +258,8 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
 
 
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
-                   "geometry", "destination_id", "following_mode", "municipality_type","municipality_id"]
+                   "geometry", "destination_id", "following_mode", "municipality_type","municipality_id",
+                   'employee_density', 'companies_density', 'population_density','ovgk']
 
 
 PERSONS_DTYPES = {
@@ -244,12 +286,10 @@ PERSONS_DTYPES = {
 
 
 def execute(context):
-    cache_path           = context.path()
-    df_persons           = context.stage("synthesis.population.models.subscriptions")
-    df_activities        = context.stage("synthesis.population.activities")
-    df_vehicles          = context.stage("synthesis.vehicles.vehicles")[1]    
-    df_municipality_type = context.stage("data.spatial.municipality_types")
-    df_municipalities,_  = context.stage("data.spatial.municipalities")
+    cache_path    = context.path()
+    df_persons    = context.stage("synthesis.population.models.subscriptions")
+    df_activities = context.stage("synthesis.population.activities")
+    df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]    
 
     # Attach following modes to activities
     df_trips         = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
@@ -259,12 +299,6 @@ def execute(context):
     # Attach locations to activities
     df_locations  = context.stage("synthesis.population.spatial.locations")
     df_activities = pd.merge(df_activities, df_locations, on=["person_id", "activity_index"], how="left")
-
-    # Attach municipality to activities (TODO: Maybe this can be done in previous stages by keeping track of municipality id)
-    df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_type","municipality_id", "geometry"]]
-    df_activities     = gpd.GeoDataFrame(df_activities, geometry="geometry", crs="EPSG:2056")
-    assert df_activities.crs == df_municipalities.crs
-    df_activities     = gpd.sjoin_nearest(df_activities, df_municipalities, how="left").drop(columns=["index_right"]) # way faster than sjoin   
 
     # Replace the primary-secondary purposes with normal ones
     # Now that the secondary locations are assigned, no need to continue working with these purposes
@@ -297,7 +331,9 @@ def execute(context):
         external_activities = context.stage("data.external_population.read_outputs")[1].copy()
         external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
 
-        external_persons["person_type"]       = "external"
+        external_persons["person_type"] = "external"
+        for i in range(100):
+            logger.warning(f"All these are wrong and need to be corrected")
         external_persons["pt_subscription"]   = 0
         external_persons["bike_availability"] = 0
         external_persons["car_availability"]  = 1
@@ -316,6 +352,10 @@ def execute(context):
         external_activities["destination_x"]       = external_activities["destination_x"].astype(int)
         external_activities["destination_y"]       = external_activities["destination_y"].astype(int)
 
+        for col in ACTIVITY_ATTRIBUTES_TO_SAVE.values():
+            logger.warning(f"Column {col} does not exist in the external population activities. Filling it with default values (0).")
+            external_activities[col] = 0
+        
         external_vehicles = external_vehicles[VEHICLE_FIELDS]
 
         df_persons    = pd.concat([df_persons, external_persons])
@@ -360,9 +400,9 @@ def execute(context):
         cross_border_activities["purpose"] = cross_border_activities["purpose"].replace({"home_secondary":"other",
                                                                  "work_secondary": "work",
                                                                  "education_secondary":"education"})
-        
-        cross_border_activities["municipality_type"] = 0
-        cross_border_activities["municipality_id"]   = 0
+        for col in ACTIVITY_ATTRIBUTES_TO_SAVE.values():
+            if col not in cross_border_activities.columns:
+                cross_border_activities[col] = 0
         
         #cross_border_vehicles["person_id"]    = cross_border_vehicles["vehicle_id"].str.split(":").str[0]
         #cross_border_vehicles["vehicle_type"] = cross_border_vehicles["vehicle_id"].str.split(":").str[1]
@@ -394,7 +434,8 @@ def execute(context):
     
     df_persons    = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
-    df_vehicles   = df_vehicles[VEHICLE_FIELDS]  
+    df_vehicles   = df_vehicles[VEHICLE_FIELDS]
+    df_vehicles["owner_id"] = df_vehicles["owner_id"].astype(int)
 
     # correct types before saving the data    
     df_persons = df_persons.astype(PERSONS_DTYPES)
@@ -413,7 +454,8 @@ def execute(context):
     # Make sure the minimum required columns exist (order does NOT matter)
     _require_cols(df_persons, ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y"], "df_persons")
     _require_cols(df_activities, ["person_id", "activity_index", "start_time", "end_time", "purpose", "is_last",
-                                "geometry", "destination_id", "following_mode", "municipality_type", "municipality_id"], "df_activities")
+                                "geometry", "destination_id", "following_mode", "municipality_type", "municipality_id",
+                                "employee_density", "companies_density", "population_density"], "df_activities")
     _require_cols(df_vehicles, ["mode", "vehicle_id", "owner_id"], "df_vehicles")
 
     # Cast only the columns that exist (so removing/adding columns won't break)
@@ -425,8 +467,22 @@ def execute(context):
 
     number_of_written_persons    = 0
     number_of_written_activities = 0
+    logger.info("Starting to write population!!")
 
-    with gzip.open("%s/population.xml.gz" % cache_path, "wb+", compresslevel=1) as f:
+    population_xml_path = "%s/population.xml" % cache_path
+    population_gz_path = "%s/population.xml.gz" % cache_path
+    compresslevel = int(context.config("population_compresslevel"))
+
+    use_pigz = bool(context.config("population_use_pigz")) and shutil.which("pigz") is not None
+    if bool(context.config("population_use_pigz")) and not use_pigz:
+        logger.warning("population_use_pigz=True but pigz was not found in PATH. Falling back to Python gzip.")
+
+    output_path = population_xml_path if use_pigz else population_gz_path
+
+    open_fn = open if use_pigz else gzip.open
+    open_kwargs = {} if use_pigz else {"compresslevel": compresslevel}
+
+    with open_fn(output_path, "wb+", **open_kwargs) as f:
         with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:
             writer = matsim.writers.PopulationWriter(raw_writer)
             writer.start_population()
@@ -436,32 +492,26 @@ def execute(context):
                     while True:
                         person = next(person_iterator)
                         person_id = person.person_id
-                        is_last = False
-
                         person_writer = PersonWriter(person)
                         vehicles = []
 
-                        while not is_last:
-                            activity = next(activity_iterator)
-                            is_last = activity.is_last
-                            assert person.person_id == activity.person_id
+                        first_activity = next(activity_iterator)
+                        assert person.person_id == first_activity.person_id
 
-                            person_writer.add_activity(activity)
-                            number_of_written_activities += 1
-
-                        person_vehicles = df_vehicles[df_vehicles["owner_id"] == person_id]
-
-                        for vehicle in person_vehicles.itertuples(index=False, name="Vehicles"):
+                        # Consume vehicles in one pass (owner_id-sorted); avoids O(N_persons * N_vehicles) scans.
+                        while vehicle_iterator.has_next():
+                            vehicle = vehicle_iterator.next()
+                            if vehicle.owner_id != person_id:
+                                vehicle_iterator.previous()
+                                break
                             vehicles.append(vehicle)
 
-                            #if vehicle.owner_id != person_id:
-                            #    vehicle_iterator.previous()
-                            #    break
-                            #else:
-                            #    vehicles.append(vehicle)
-
                         person_writer.add_vehicles(vehicles)
-                        person_writer.write(writer)
+                        number_of_written_activities += person_writer.write(
+                            writer,
+                            first_activity=first_activity,
+                            activity_iterator=activity_iterator,
+                        )
                         number_of_written_persons += 1
                         progress.update()
                         
@@ -541,4 +591,16 @@ def execute(context):
 
             writer.end_population()
 
-    return "%s/population.xml.gz" % cache_path
+    if use_pigz:
+        pigz_threads = max(1, int(context.config("population_pigz_threads")))
+        logger.info("Compressing population.xml with pigz using %d threads ...", pigz_threads)
+        subprocess.run([
+            "pigz",
+            "-f",
+            "-p",
+            str(pigz_threads),
+            "-" + str(compresslevel),
+            population_xml_path,
+        ], check=True)
+
+    return population_gz_path

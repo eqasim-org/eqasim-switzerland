@@ -11,7 +11,7 @@ import pandas as pd
 import logging
 from shapely.geometry import LineString
 from .matcher_utils import MatcherUtils
-from .network import Network
+from .network import RoadNetwork
 from .counts import Counts
 from .utils.osm import Osm
 from .matching_functions import GeometryOrientation, GeometryDistanceMetrics
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class PointMatcher:
 
-    def match(self, network:Network, counts:Counts, osm:Osm=None,
+    def match(self, network:RoadNetwork, counts:Counts, osm:Osm=None,
               search_radius:float=10, by_highway_order:bool=False, 
               get_pairs:bool=True, **kwargs):
         
@@ -29,7 +29,7 @@ class PointMatcher:
         else:
             return self.match_points(network, counts, osm, search_radius, get_pairs, **kwargs)
     
-    def match_points_by_highway_order(self, network: Network, 
+    def match_points_by_highway_order(self, network: RoadNetwork, 
                                             counts: Counts, 
                                             osm:Osm = None,
                                             search_radius: float = 30,
@@ -84,7 +84,7 @@ class PointMatcher:
         return res[columns_to_keep]
     
     
-    def match_points(self, network: Network, 
+    def match_points(self, network: RoadNetwork, 
                            counts: Counts, 
                            osm:Osm = None,
                            search_radius: float = 10,

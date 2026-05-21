@@ -1,4 +1,7 @@
 import numpy as np
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -15,10 +18,10 @@ def execute(context):
     probability = context.config("input_downsampling")
 
     if probability < 1.0:
-        print("Downsampling - cross-border population (%f)" % probability)
+        logger.info(f"Downsampling - cross-border population ({probability})")
 
         person_ids = np.unique(df["cross_border_person_id"])
-        print("  Initial number of persons:", len(person_ids))
+        logger.info(f"  Initial number of persons: {len(person_ids)}")
 
         # Set up RNG
         random = np.random.RandomState(context.config("random_seed"))
@@ -26,7 +29,7 @@ def execute(context):
         # Perform sampling
         f = random.random_sample(size=(len(person_ids),)) < probability
         remaining_person_ids = person_ids[f]
-        print(f"  Sampled number of persons: {len(remaining_person_ids)}")
+        logger.info(f"  Sampled number of persons: {len(remaining_person_ids)}")
 
         df = df[df["cross_border_person_id"].isin(remaining_person_ids)]
 

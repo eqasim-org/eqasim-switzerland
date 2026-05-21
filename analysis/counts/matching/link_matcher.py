@@ -10,13 +10,13 @@ import geopandas as gpd
 import logging
 from .matcher_utils import MatcherUtils
 from .counts import Counts
-from .network import Network
+from .network import RoadNetwork
 import sys
 
 logger = logging.getLogger("synpp")
 
 class LinkMatcher:
-    def match(self, network: Network, counts: Counts, search_radius:float=30, **kwargs):
+    def match(self, network: RoadNetwork, counts: Counts, search_radius:float=30, **kwargs):
         # Start matching: Here I will not use a lopp because most the links have same importance I think
         logger.info("Matching counts (links) to MATSim network")
         logger.info("Using Links matcher: matching all links within 2m distance")

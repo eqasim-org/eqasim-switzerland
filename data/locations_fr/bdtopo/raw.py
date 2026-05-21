@@ -5,6 +5,9 @@ import geopandas as gpd
 import py7zr
 import glob
 import numpy as np
+import logging
+
+logger = logging.getLogger("synpp")
 
 """
 This stage loads the raw data from the French building registry (BD-TOPO).
@@ -32,7 +35,7 @@ def execute(context):
     known_ids = set()
 
     for source_path in source_paths:
-        print("Loading {}".format(source_path.split("/")[-1]))
+        logger.info("Loading {}".format(source_path.split("/")[-1]))
         geometry_path = None
 
         with py7zr.SevenZipFile(source_path) as archive:
@@ -40,10 +43,10 @@ def execute(context):
             internal_path = [path for path in archive.getnames() if path.endswith(".gpkg")]
             
             if len(internal_path) != 1:
-                print("  Skipping: No unambiguous geometry source found!")
+                logger.info("  Skipping: No unambiguous geometry source found!")
 
             else:
-                print("  Extracting ...")
+                logger.info("  Extracting ...")
                 archive.extract(context.path(), [internal_path[0]])
                 geometry_path = "{}/{}".format(context.path(), internal_path[0])
 
@@ -57,17 +60,17 @@ def execute(context):
             df_buildings["centroid"] = df_buildings["geometry"].centroid
             df_buildings = df_buildings.set_geometry("centroid")
 
-            print("  Filtering ...")
+            logger.info("  Filtering ...")
 
             initial_count = len(df_buildings)
             df_buildings  = df_buildings[df_buildings["housing"] > 0]
             final_count   = len(df_buildings)
-            print("    {}/{} filtered by dwellings".format(initial_count - final_count, initial_count))
+            logger.info("    {}/{} filtered by dwellings".format(initial_count - final_count, initial_count))
 
             initial_count = len(df_buildings)
             df_buildings  = df_buildings[~df_buildings["building_id"].isin(known_ids)]
             final_count   = len(df_buildings)
-            print("    {}/{} filtered duplicates".format(initial_count - final_count, initial_count))
+            logger.info("    {}/{} filtered duplicates".format(initial_count - final_count, initial_count))
 
             df_buildings["department_id"] = df_buildings["departement_id"]
             df_buildings = df_buildings.set_geometry("geometry")

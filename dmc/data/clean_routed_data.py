@@ -3,6 +3,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import logging
 import os
+import logging
+logger = logging.getLogger("synpp")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -77,7 +79,7 @@ def execute(context):
                 get_col = lambda x: x[x["sel_col"]] if x["sel_col"]!="noCol" else np.nan
                 filtered_df[col] = df[["sel_col",*all_alternatives]].apply(get_col, axis=1)
             else:
-                print(f"No alternatives found for {mode_new_cols}")
+                logger.warning("No alternatives found for %s", mode_new_cols)
 
     df = df.drop(columns="sel_col")
 

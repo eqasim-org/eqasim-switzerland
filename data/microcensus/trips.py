@@ -4,7 +4,9 @@ import pyproj
 
 import warnings
 from pandas.errors import SettingWithCopyWarning
+import logging
 
+logger = logging.getLogger("synpp")
 warnings.filterwarnings("ignore", category=SettingWithCopyWarning)
 
 def configure(context):
@@ -123,7 +125,7 @@ def execute(context):
         (df_mz_trips["mode"] == "unknown") | (df_mz_trips["purpose"] == "unknown")
     ]["person_id"])
 
-    print("  Removed %d persons with trips with unknown mode or unknown purpose" % len(unknown_ids))
+    logger.info("  Removed %d persons with trips with unknown mode or unknown purpose" % len(unknown_ids))
     df_mz_trips = df_mz_trips[~df_mz_trips["person_id"].isin(unknown_ids)]
 
     filterout_ids = unknown_ids
@@ -139,13 +141,13 @@ def execute(context):
     start_from_work        = df_start[df_start["origin_purpose"]=="work"]
     start_from_education   = df_start[df_start["origin_purpose"]=="education"]
     missing_origin_purpose = df_start[df_start["origin_purpose"].isna()]
-    print(f"  Assigned origin_purpose of initial trip to home to {len(start_from_home)} persons")
-    print(f"  Assigned origin_purpose of initial trip to work to {len(start_from_work)} persons")
-    print(f"  Assigned origin_purpose of initial trip to education to {len(start_from_education)} persons")
-    print(f"  Number of agents with missing initial purpose: {len(missing_origin_purpose)}")
+    logger.info(f"  Assigned origin_purpose of initial trip to home to {len(start_from_home)} persons")
+    logger.info(f"  Assigned origin_purpose of initial trip to work to {len(start_from_work)} persons")
+    logger.info(f"  Assigned origin_purpose of initial trip to education to {len(start_from_education)} persons")
+    logger.info(f"  Number of agents with missing initial purpose: {len(missing_origin_purpose)}")
 
     if len(missing_origin_purpose) > 0:
-        print(f"   Investigating stages for these {len(missing_origin_purpose)} agents.")
+        logger.info(f"   Investigating stages for these {len(missing_origin_purpose)} agents.")
         del missing_origin_purpose["origin_purpose"]
         df_mz_stages                = pd.read_csv("%s/microcensus/etappen.csv" % data_path, encoding = "latin1")
         df_mz_stages_origin         = df_mz_stages[["HHNR", "WEGNR", "ETNR", "f52950"]]
@@ -197,9 +199,9 @@ def execute(context):
         stages_origin_purpose = missing_origin_purpose.merge(df_mz_stages_origin[["person_id", "origin_purpose"]], on = "person_id", how = "left")
         vc = stages_origin_purpose['origin_purpose'].value_counts(dropna=False)
 
-        print("   Found distribution of origin purposes from the stages:")
+        logger.info("   Found distribution of origin purposes from the stages:")
         for value, count in vc.items():
-            print(f"     {value}: {count}")
+            logger.info(f"     {value}: {count}")
 
         df_start_purpose = pd.concat([start_from_home, start_from_work, start_from_education, stages_origin_purpose])
 
@@ -282,7 +284,7 @@ def execute(context):
     have_consecutive_work_or_edu                   = activity_chains[activity_chains["has_consecutive_work_or_edu"]]["person_id"].values
 
     if len(have_consecutive_work_or_edu) > 0:
-        print(f"INFO fixing consecutive work and education activities for {len(have_consecutive_work_or_edu)} agents.")
+        logger.info(f"INFO fixing consecutive work and education activities for {len(have_consecutive_work_or_edu)} agents.")
 
         def consecutive_work_or_edu_indices(chain):
             activities = chain.split("-")
@@ -395,7 +397,7 @@ def execute(context):
         assert len(list(activity_chains[activity_chains["activity_chain"].str.contains("work-work-")]["activity_chain"].unique())) == 0
         assert len(list(activity_chains[activity_chains["activity_chain"].str.contains("education-education-")]["activity_chain"].unique())) == 0
 
-        print("  done!")
+        logger.info("  done!")
 
     # Match observed trip coordinates with reported home coordinates for home trips.
     for col in ["origin_x", "origin_y", "destination_x", "destination_y", "home_x", "home_y"]:
@@ -424,8 +426,8 @@ def execute(context):
     # 1st case: one home location found, corresponds to reported home
     cond1  = (person_summary["home_location_count"] == 1) & (person_summary["has_home_match"])
     share1 = cond1.sum() / len(person_summary) * 100
-    print(f"  INFO for {round(share1, 2)}% of the agents, only one home location was found and it corresponds to the reported home location.")
-    print(f"    Nothing to do for them!")
+    logger.info(f"  INFO for {round(share1, 2)}% of the agents, only one home location was found and it corresponds to the reported home location.")
+    logger.info(f"    Nothing to do for them!")
 
     df_home_1stcase     = df_home_coordinates[(df_home_coordinates["home_location_count"]==1) & (df_home_coordinates["is_reported_home"])]
     df_home_1stcase_ids = df_home_1stcase["person_id"].values
@@ -434,8 +436,8 @@ def execute(context):
     # 2nd case: one home location found, does not correspond to the reported home
     cond2  = (person_summary["home_location_count"] == 1) & (~person_summary["has_home_match"])
     share2 = cond2.sum() / len(person_summary) * 100
-    print(f"  INFO for {round(share2, 2)}% of the agents, only one home location was found and it does not correspond to the reported home location.")
-    print(f"    Check the origin_purpose of the initial trip and adjust the purpose to home if needed.")
+    logger.info(f"  INFO for {round(share2, 2)}% of the agents, only one home location was found and it does not correspond to the reported home location.")
+    logger.info(f"    Check the origin_purpose of the initial trip and adjust the purpose to home if needed.")
 
     df_home_2ndcase     = df_home_coordinates[(df_home_coordinates["home_location_count"]==1) & (~df_home_coordinates["is_reported_home"])]
     df_home_2ndcase_ids = df_home_2ndcase["person_id"]
@@ -451,13 +453,13 @@ def execute(context):
             df_person.loc[df_person["trip_id"]==1, "origin_purpose"] = "home"
         df_new_list.append(df_person)
 
-    print(f"    INFO fixed origin purpose to home for {cpt} activity chains.")
+    logger.info(f"    INFO fixed origin purpose to home for {cpt} activity chains.")
 
     # 3rd case: multiple home locations found, one corresponds to the reported home.
     cond3  = (person_summary["home_location_count"] > 1) & (person_summary["has_home_match"])
     share3 = cond3.sum() / len(person_summary) * 100
-    print(f"  INFO for {round(share3, 2)}% of the agents, multiple home locations were found. One corresponds to the reported home location.")
-    print(f"    For these agents, create home_secondary activities.")
+    logger.info(f"  INFO for {round(share3, 2)}% of the agents, multiple home locations were found. One corresponds to the reported home location.")
+    logger.info(f"    For these agents, create home_secondary activities.")
 
     df_home_3rdcase     = person_summary[cond3]
     df_home_3rdcase_ids = df_home_3rdcase["person_id"]
@@ -497,8 +499,8 @@ def execute(context):
     # 0.09% of the cases
     cond4  = (person_summary["home_location_count"] > 1) & (~person_summary["has_home_match"])
     share4 = cond4.sum() / len(person_summary) * 100
-    print(f"  INFO for {round(share4, 2)}% of the agents, multiple home locations were found. None of them corresponds to the reported home location.")
-    print(f"    For these agents, create home_secondary activities after identifying the main home location.")
+    logger.info(f"  INFO for {round(share4, 2)}% of the agents, multiple home locations were found. None of them corresponds to the reported home location.")
+    logger.info(f"    For these agents, create home_secondary activities after identifying the main home location.")
 
     df_home_4thcase     = person_summary[cond4]
     df_home_4thcase_ids = df_home_4thcase["person_id"]
@@ -684,7 +686,7 @@ def execute(context):
 
     def process_useful_stages(multi_stages, loops_multistage):
 
-        print("INFO starting to fix home to home trips")
+        logger.info("INFO starting to fix home to home trips")
 
         mode_map = {
             -99: "unknown",
@@ -800,7 +802,7 @@ def execute(context):
             else:
                 loops_multistage.loc[loops_multistage["person_trip_id"]==person_trip_id, "mode"] =  loops_multistage[loops_multistage["person_trip_id"]==person_trip_id]["mode"] + "_loop"
 
-        print("  done!")
+        logger.info("  done!")
         return loops_multistage
 
 

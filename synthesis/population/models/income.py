@@ -2,6 +2,9 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from catboost import CatBoostClassifier
+import logging
+
+logger = logging.getLogger("synpp")
 # ---------------------------------------------------------
 # helper: stochastic draw from class probabilities
 # ---------------------------------------------------------
@@ -16,6 +19,7 @@ def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
 def configure(context):
     context.stage("data.microcensus.21.persons")
     context.stage("synthesis.population.models.employment")
+    context.stage("data.constants")
 
 
 def execute(context):
@@ -30,22 +34,12 @@ def execute(context):
     # -------------------------------------------------------------------
     survey_df = context.stage("data.microcensus.21.persons")
     pop_df = context.stage("synthesis.population.models.employment")
-    survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income (imputation is used in mode-choice modules)
+    survey_df = survey_df[survey_df["income_imputed"]== False] #keep only those that do not have imputed income
+    c = context.stage("data.constants")
 
     # Map population job_position to survey coding
-    mapping_pop_to_survey = {
-        11: 11,
-        12: 12,
-        20: 20,
-        31: 11,
-        32: 12,
-        41: 31,
-        42: 32,
-        43: 33,
-        50: 40,
-        60: 50,
-        70: 60,
-    }
+    pop_df['survey_job_position'] = pop_df['job_position'].values
+    mapping_pop_to_survey = c.MAP_JOB_POSITIONS_MZ_TO_SURVEY    
     pop_df['job_position'] = pop_df['job_position'].map(mapping_pop_to_survey)
 
     # Boolean mask: who is an adult (>= 18) – used for N_adults
@@ -184,7 +178,7 @@ def execute(context):
     Xs = X_survey.to_numpy(dtype=float, copy=False)
     Xp = X_reps.to_numpy(dtype=float, copy=False)
     income_model.fit(Xs, y, sample_weight=sample_weight)
-    print("Fitted global household income-class model on full survey using:", INCOME_MODEL)
+    logger.info("Fitted global household income-class model on full survey using: %s", INCOME_MODEL)
 
     classes_cls = income_model.classes_.astype('int64')
 
@@ -259,8 +253,8 @@ def execute(context):
         calib_df['alpha'] = calib_df['share_true'] / denom
         calib_df['alpha'] = calib_df['alpha'].clip(0.25, 4.0)
 
-        print("\n[CALIBRATION] Sample alpha factors (job_position x income_class):")
-        print(
+        logger.info("\n[CALIBRATION] Sample alpha factors (job_position x income_class):")
+        logger.info(
             calib_df.sort_values(['job_position', 'income_class'])
             .head(20)
             .to_string(index=False)
@@ -293,11 +287,11 @@ def execute(context):
             proba_reps_adj[idx, :] = adj / row_sums
 
         proba_reps_final = proba_reps_adj
-        print("\n[INFO] Using CALIBRATED probabilities for draws.")
+        logger.info("\n[INFO] Using CALIBRATED probabilities for draws.")
     else:
         # no calibration
         proba_reps_final = proba_reps_raw
-        print("\n[INFO] Using UNCALIBRATED model probabilities for draws.")
+        logger.info("\n[INFO] Using UNCALIBRATED model probabilities for draws.")
 
     SEED_INCOME = 2025
     cls_draw = draw_multinomial_from_proba(
@@ -322,8 +316,8 @@ def execute(context):
     pop_df.loc[pop_df["N_adults"].eq(0), "HH_INCOME_CLASS_hat"] = 0
     pop_df.loc[pop_df["N_adults"].eq(0), "HH_INCOME_CLASS_draw"] = 0
 
-    print("Household income class distribution (drawn), overall (persons):")
-    print(pop_df['HH_INCOME_CLASS_draw'].value_counts(normalize=True))
+    logger.info("Household income class distribution (drawn), overall (persons):")
+    logger.info("\n%s", pop_df['HH_INCOME_CLASS_draw'].value_counts(normalize=True))
 
     # -------------------------------------------------------------------
     # 8. CANTON-LEVEL COMPARISON (SURVEY persons vs POP reps)
@@ -373,18 +367,17 @@ def execute(context):
     diff_df['share_diff'] = diff_df['share_pred'] - diff_df['share_true']
     diff_df['abs_diff'] = diff_df['share_diff'].abs()
 
-    print("\nMean abs share diff across canton x income_class:",
-          diff_df['abs_diff'].mean())
+    logger.info("\nMean abs share diff across canton x income_class: %f", diff_df['abs_diff'].mean())
 
-    print("\nCanton x income_class share comparison (survey vs population reps):")
-    print(diff_df.sort_values(['canton_id', 'income_class'])
+    logger.info("\nCanton x income_class share comparison (survey vs population reps):")
+    logger.info("\n%s", diff_df.sort_values(['canton_id', 'income_class'])
               [['canton_id', 'income_class', 'share_true', 'share_pred', 'share_diff']])
 
     CANTON_TO_INSPECT = '1'
     mask = diff_df['canton_id'] == CANTON_TO_INSPECT
     if mask.any():
-        print(f"\nDetailed comparison for canton {CANTON_TO_INSPECT}:")
-        print(diff_df.loc[mask, ['income_class', 'share_true', 'share_pred', 'share_diff']]
+        logger.info("\nDetailed comparison for canton %s:", CANTON_TO_INSPECT)
+        logger.info("\n%s", diff_df.loc[mask, ['income_class', 'share_true', 'share_pred', 'share_diff']]
                     .sort_values('income_class')
                     .to_string(index=False))
 
@@ -415,8 +408,8 @@ def execute(context):
     suffix = "calibrated" if USE_CALIBRATION else "uncalibrated"
     job_compare['avg_diff'] = job_compare['avg_income_class_pred'] - job_compare['avg_income_class_true']
 
-    print(f"\nAverage income_class by job_position (survey vs population reps, {suffix}):")
-    print(job_compare.sort_values('job_position')
+    logger.info("\nAverage income_class by job_position (survey vs population reps, %s):", suffix)
+    logger.info("\n%s", job_compare.sort_values('job_position')
                  [['job_position', 'avg_income_class_true', 'avg_income_class_pred', 'avg_diff']]
                  .to_string(index=False))
 
@@ -464,11 +457,11 @@ def execute(context):
 
     dist_compare['share_diff'] = dist_compare['share_pred'] - dist_compare['share_true']
 
-    print(f"\nFull income_class distribution for job_position {JOB_TO_INSPECT} ({suffix}):")
-    print(
-        dist_compare.sort_values('income_class')
-        [['income_class', 'share_true', 'share_pred', 'share_diff']]
-        .to_string(index=False)
-    )
-    pop_df = pop_df.rename(columns={"HH_INCOME_CLASS_draw": "income_class"})
+    logger.info("\nFull income_class distribution for job_position %s (%s):", JOB_TO_INSPECT, suffix)
+    logger.info("\n%s", dist_compare.sort_values('income_class')
+                 [['income_class', 'share_true', 'share_pred', 'share_diff']]
+                 .to_string(index=False))
+    
+    pop_df = pop_df.drop(columns=['job_position'])
+    pop_df = pop_df.rename(columns={"HH_INCOME_CLASS_draw": "income_class", "survey_job_position":"job_position"})
     return pop_df

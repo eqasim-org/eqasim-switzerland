@@ -3,6 +3,9 @@ import pandas as pd
 from itertools import product
 import requests as reqlib
 import time
+import logging
+
+logger = logging.getLogger("synpp")
 
 def is_useful_column(column):
     if column == "trip_id":
@@ -207,14 +210,14 @@ def wait_for_server(url, requests_sample, utilities, timeout=600, interval=10):
     """Wait until the server at `url` responds successfully."""
     start_time = time.time()
     while time.time() - start_time < timeout:
-        print("Waiting for server...")
+        logger.info("Waiting for server...")
         try:
             response = reqlib.post(url, json = {
                     "batch": requests_sample,
                     "utilities": utilities
                 })
             if response.status_code == 200:
-                print("The server is running!")
+                logger.info("The server is running!")
                 return True
         except reqlib.ConnectionError:
             pass

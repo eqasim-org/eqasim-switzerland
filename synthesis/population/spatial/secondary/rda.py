@@ -1,7 +1,9 @@
 import numpy as np
 import numpy.linalg as la
 from numba import njit
+import logging
 
+logger = logging.getLogger("synpp")
 def check_feasibility(distances, direct_distance, consider_total_distance=True):
     return calculate_feasibility(distances, direct_distance, consider_total_distance) == 0.0
 
@@ -252,7 +254,7 @@ class GravityChainSolver:
         origin, destination = problem["origin"], problem["destination"]
 
         if origin is None or destination is None:
-            print(problem)
+            logger.error("Invalid chain for GravityChainSolver: %s", problem)
             raise RuntimeError("Invalid chain for GravityChainSolver")
 
         direct_distance = la.norm(destination - origin)
