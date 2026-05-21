@@ -79,6 +79,17 @@ def execute(context):
         with open("%s/config_cutter.xml" % context.path(), "w+") as f_write:
             f_write.write(content)
 
+    # some args to avoid errors in the cutter
+    args = [
+    "--config:eqasim:calibration.activate", "false",
+    "--config:eqasim:calibration.runCalibration", "false",
+    "--config:eqasim:alphaCalibration.activate", "false",
+    "--config:eqasim:alphaCalibration.filePath", "",
+    "--config:eqasim:networkCalibration.activate", "false",
+    "--config:eqasim:networkCalibration.calibrate", "false",
+    "--config:eqasim:networkCalibration.countsFile", "",
+    "--config:eqasim:networkCalibration.observedSpeedTripsFile", "",
+    ]
     
     # use the new config to run the cutter
     config_path = "%s/config_cutter.xml" % context.path()
@@ -91,7 +102,7 @@ def execute(context):
         "--prefix", context.config("extent_prefix"),
         "--events-path", events_path,
         "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator"
-    ])
+    ] + args )
 
     # move some parameters files to the output path to be comprehensive for the scenario (self contained)
     # 1. mode parameters

@@ -79,7 +79,18 @@ def execute(context):
         with open("%s/config_cutter.xml" % context.path(), "w+") as f_write:
             f_write.write(content)
 
-    
+    # some args to avoid errors in the cutter
+    args = [
+    "--config:eqasim:calibration.activate", "false",
+    "--config:eqasim:calibration.runCalibration", "false",
+    "--config:eqasim:alphaCalibration.activate", "false",
+    "--config:eqasim:alphaCalibration.filePath", "",
+    "--config:eqasim:networkCalibration.activate", "false",
+    "--config:eqasim:networkCalibration.calibrate", "false",
+    "--config:eqasim:networkCalibration.countsFile", "",
+    "--config:eqasim:networkCalibration.observedSpeedTripsFile", "",
+    ]
+
     # use the new config to run the cutter
     config_path = "%s/config_cutter.xml" % context.path()
     eqasim.run(context, "org.eqasim.core.scenario.cutter.RunScenarioCutterV2", [
@@ -89,7 +100,7 @@ def execute(context):
         "--vdf-travel-times-path", "%s/%s" % (context.path("matsim.simulation.run"), "simulation_output/vdf.bin"),
         "--threads", context.config("threads"),
         "--prefix", context.config("extent_prefix")
-    ])
+    ] + args )
 
     # move some parameters files to the output path
     # 1. mode parameters
