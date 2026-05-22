@@ -583,6 +583,6 @@ def execute(context):
         excluded_ids = df.loc[df["exclude"], "cross_border_person_id"].unique()
         df = df[~df["cross_border_person_id"].isin(excluded_ids)].copy()  
 
-    del df["exclude"]
+        del df["exclude"]
 
     return df

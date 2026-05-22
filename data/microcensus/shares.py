@@ -16,7 +16,7 @@ def configure(context):
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.swiss_border")
 
-    context.config("include_external_population")
+    context.config("include_external_population", default=False)
     if context.config("include_external_population"):
         context.stage("data.external_population.hts_trips.trips")
 
@@ -176,11 +176,7 @@ def execute(context):
         mode_shares_fr.columns = mode_shares_fr.iloc[0]
         mode_shares_fr = mode_shares_fr.drop("mode")
 
-        print(mode_shares_fr)
-
     cantonal_modal_shares = pd.concat([cantonal_modal_shares, mode_shares_fr])
-
-    print(cantonal_modal_shares)
 
     # Define output file paths
     global_shares_output_path   = os.path.join(context.path(), "globalModeShares.csv")
