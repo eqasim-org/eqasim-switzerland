@@ -94,6 +94,8 @@ class PersonWriter:
         person_type = getattr(p, "person_type", "normal")
         is_crossborder = (person_type == "crossborder")
         writer.add_attribute("isCrossBorder", "java.lang.Boolean", writer.true_false(is_crossborder))
+        is_french     = (person_type == "FR")
+        writer.add_attribute("isExternalFR", "java.lang.Boolean", writer.true_false(is_french))
 
         writer.add_attribute("bikeAvail", "java.lang.String", ["never", "always"][int(p.bike_availability)])
 
@@ -123,14 +125,14 @@ class PersonWriter:
             location = (
                 home_location
                 if destination_id == -1
-                else writer.location(int(geometry.x), int(geometry.y), int(destination_id))
+                else writer.location(int(geometry.x), int(geometry.y), destination_id if isinstance(destination_id, str) else str(int(destination_id)))
             )
 
             start_time = _na_to_none(a.start_time)
             end_time   = _na_to_none(a.end_time)
 
-            attributes = dict(municipalityType=a.municipality_type, municipalityId=a.municipality_id)
-            writer.add_activity(a.purpose, location, start_time, end_time, attributes=attributes)
+            attributes = dict(municipalityType = a.municipality_type, municipalityId = a.municipality_id)
+            writer.add_activity(a.purpose, location, start_time, end_time, attributes = attributes)
 
             if not a.is_last:
                 next_a = self.activities[i + 1]
@@ -297,7 +299,6 @@ def execute(context):
         external_activities = context.stage("data.external_population.read_outputs")[1].copy()
         external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
 
-        external_persons["person_type"]       = "external"
         external_persons["pt_subscription"]   = 0
         external_persons["bike_availability"] = 0
         external_persons["car_availability"]  = 1
@@ -395,6 +396,8 @@ def execute(context):
     df_persons    = df_persons[PERSON_FIELDS]
     df_activities = df_activities[ACTIVITY_FIELDS]
     df_vehicles   = df_vehicles[VEHICLE_FIELDS]  
+
+    print(df_activities[df_activities["person_id"] == 202368115057415][["destination_id", "geometry"]])
 
     # correct types before saving the data    
     df_persons = df_persons.astype(PERSONS_DTYPES)

@@ -1,6 +1,7 @@
 import gzip
 import io
-import numpy as np
+from shapely import wkt
+import geopandas as gpd
 
 import matsim.writers
 
@@ -67,15 +68,16 @@ def execute(context):
 
             if context.config("include_cross_border"):
                 cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
+                cross_border_acts    = context.stage("data.cross_border.generate_cross_border_traffic")[1].copy()
 
                 #id_person_max = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
                 #N             = id_person_max + 1
-                id_hhl_max     = np.max(df_households["household_id"].values)
-                N              = id_hhl_max + 1
+                #id_hhl_max     = np.max(df_households["household_id"].values)
+                #N              = id_hhl_max + 1
 
-                cross_border_persons    = cross_border_persons.sort_values(by="person_id")
+                #cross_border_persons    = cross_border_persons.sort_values(by="person_id")
 
-                cross_border_persons["household_id"] = range(N, N + len(cross_border_persons), 1)
+                #cross_border_persons["household_id"] = range(N, N + len(cross_border_persons), 1)
 
                 cbs_hhl = cross_border_persons[["household_id", "home_x", "home_y"]]
                 cbs_hhl["home_x"] = cbs_hhl["home_x"].astype(int)
@@ -84,6 +86,19 @@ def execute(context):
                 for item in context.progress(cbs_hhl.itertuples(), total=len(cbs_hhl), label="Homes - crossborder"):
                     writer.start_facility("home%s" % item[1], item[2], item[3])
                     writer.add_activity("home")
+                    writer.end_facility()
+
+                border_crossing_points = cross_border_acts[cross_border_acts["destination_id"].astype(str).str.startswith("BCP")]
+                border_crossing_points = gpd.GeoDataFrame(border_crossing_points, geometry="geometry")
+                border_crossing_points["geometry"] = border_crossing_points["geometry"].apply(lambda g: wkt.loads(g) if isinstance(g, str) else g)
+                border_crossing_points["destination_x"] = border_crossing_points.geometry.x
+                border_crossing_points["destination_y"] = border_crossing_points.geometry.y
+
+                border_crossing_points = border_crossing_points[["destination_id", "destination_x", "destination_y"]]
+
+                for item in context.progress(border_crossing_points.itertuples(), total = len(border_crossing_points), label = "border crossing points"):
+                    writer.start_facility(item[1], int(item[2]), int(item[3]))
+                    writer.add_activity("other")
                     writer.end_facility()
 
             if context.config("include_external_population"):

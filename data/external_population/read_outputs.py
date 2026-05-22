@@ -4,6 +4,9 @@ import geopandas as gpd
 import os
 from shapely import wkt
 from shapely.geometry import Point
+import logging
+
+logger = logging.getLogger(__name__)
 
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", 
                  "home_x", "home_y",
@@ -16,13 +19,15 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
 
 
 def configure(context):
-    context.config("include_external_population", False)
+    context.config("include_external_population", default = False)
 
     if context.config("include_external_population"):
         context.config("external_population_folder")
         context.stage("data.constants")
         context.stage("synthesis.population.destinations")
         context.stage("synthesis.population.enriched")
+        context.config("fr_sample_rate", default = 1.0)
+        context.config("input_downsampling")
 
 
 def execute(context):
@@ -185,6 +190,24 @@ def execute(context):
     df_missing["euro"] = 6
 
     vehicles = pd.concat([vehicles, df_missing], ignore_index=True)
+
+    fr_sample_rate = context.config("fr_sample_rate")
+    ch_sample_rate = context.config("input_downsampling")
+    ratio          = ch_sample_rate / fr_sample_rate
+
+    if ratio > 1:
+        logger.warning("The requested sample size for the Swiss population exceeds the sample size used for the generation of the French population. We might find a solution for this at some point but as of now we are keeping the French population unchanged.")
+
+    elif ratio < 1:
+        print(f"FR sample rate: {fr_sample_rate}. CH sample rate: {ch_sample_rate}.")
+        print(f"Downsampling with a ratio of {round(ratio, 2)}.")
+
+        person_ids  = persons["person_id"].values.tolist()
+        sampled_ids = np.random.choice(person_ids, size = int(len(person_ids) * ratio), replace = False).tolist()
+
+        persons    = persons[persons["person_id"].isin(sampled_ids)]
+        acts       = acts[acts["person_id"].isin(sampled_ids)]
+        vehicles   = vehicles[vehicles["owner_id"].isin(sampled_ids)]
 
     return persons, acts, vehicles
 

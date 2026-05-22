@@ -349,7 +349,7 @@ def read_2021_data(context):
     borders = borders[borders["end_x"].notna() & borders["end_y"].notna()]
 
     # 14. Match to an interview point    
-    borders.loc[borders["interview_place"] == "Vallorbe (544)", "interview_place"] = "Gruppe O: VD/NE -> F. Dép. Jura. Doubs"
+    #borders.loc[borders["interview_place"] == "Vallorbe (544)", "interview_place"] = "Gruppe O: VD/NE -> F. Dép. Jura. Doubs"
 
     points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance"]]
     points["interview_point_id"] = points["border_crossing_point_id"]

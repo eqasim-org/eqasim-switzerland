@@ -183,7 +183,8 @@ def execute(context):
     activities1point5["activity_index"] = 1.5
     activities1point5["duration"]       = 1
     activities1point5["is_last"]        = False
-    activities1point5["destination_id"] = -1
+    activities1point5["destination_id"] = "BCP1.5_" + activities1point5["person_id"]
+    activities1point5["purpose"]        = "other"
 
     activities1point5 = activities1point5.merge(act1[["person_id", "geom_1", "end_time_1", "trip_duration_12", "following_mode"]], on="person_id", how="left")
     activities1point5 = activities1point5.merge(act2[["person_id", "geom_2"]], on="person_id", how="left")
@@ -206,7 +207,8 @@ def execute(context):
     activities2point5["activity_index"] = 2.5
     activities2point5["duration"]       = 1
     activities2point5["is_last"]        = False
-    activities2point5["destination_id"] = -1
+    activities2point5["destination_id"] = "BCP2.5_" + activities2point5["person_id"]
+    activities2point5["purpose"]        = "other"
 
     activities2point5 = activities2point5.merge(act2[["person_id", "geom_2", "end_time_2", "trip_duration_23", "following_mode"]], on="person_id", how="left")
     activities2point5 = activities2point5.merge(act3[["person_id", "geom_3"]], on="person_id", how="left")
