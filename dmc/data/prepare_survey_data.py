@@ -7,6 +7,9 @@ from shapely import vectorized
 from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
 import logging
 from dmc.constants import constants
+from data.statent.density import impute as impute_statent
+from data.statpop.density import impute as impute_statpop
+from data.spatial.ovgk import impute_parallel as impute_ovgk
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +26,11 @@ def configure(context):
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")    
     context.stage("data.constants")
+
+    # for population and companies density
+    context.stage("data.statent.density")
+    context.stage("data.statpop.density")
+    context.stage("data.spatial.ovgk")
 
 def execute(context):
     df_persons = context.stage("data.microcensus.persons")    
@@ -52,6 +60,7 @@ def execute(context):
     equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children    
     df_persons["income"] = df_persons["income"] / equvalent_size
     df_persons["low_income"] = df_persons["income"] <= c.LOW_INCOME_THRESHOLD
+    df_persons["high_income"] = df_persons["income"] >= c.HIGH_INCOME_THRESHOLD
 
     # 3. sp_region and ms_region
     df_persons["ms_region"] = df_persons.canton_id.map(lambda x: MS_REGIONS.loc[x,"cluster"])
@@ -68,7 +77,8 @@ def execute(context):
     # 7. merge
     cols = ["person_id","home_x","home_y", "hasGeneralSubscription","hasHalbtaxSubscription","hasRegionalSubscription", "hasJuniorSubscription", 
             "hasGleis7Subscription", "statedPreferenceRegion", 'person_weight', 'age', 'sex', 'driving_license', 'sp_region', 'ms_region', "ovgk", "has_car", "num_adults",
-            'is_car_passenger', "income", "weekend", "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired", "is_junior", "low_income", "income_class"]
+            'is_car_passenger', "income", "weekend", "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired", "is_junior", 
+            "low_income", "high_income", "income_class"]
     df_persons = df_persons[cols]    
     df_trips = df_trips.merge(df_persons, on="person_id", how="left")
 
@@ -87,6 +97,25 @@ def execute(context):
     df_trips["is_first"] = df_trips["person_id"].shift(1) != df_trips["person_id"]
     df_trips["is_last"]  = df_trips["person_id"].shift(-1) != df_trips["person_id"]
 
+    # distances
+    df_trips["short_distance"] = (df_trips["euclidean_distance_km"]<constants.SHORT_DISTANCE_KM).astype(int)
+    df_trips["long_distance"]  = (df_trips["euclidean_distance_km"]>constants.LONG_DISTANCE_KM).astype(int)
+    df_trips["very_long_distance"]  = (df_trips["euclidean_distance_km"]>constants.VERY_LONG_DISTANCE_KM).astype(int)
+    
+    # impute population density and employees density at destination
+    df_trips = impute_statent(context, df_trips, x="destination_x", y="destination_y", 
+                                radius=constants.EMPLOYEES_DENSITY_RADIUS, point_type="trip destination", 
+                                measure="employees", output_column="destination_employee_density")
+        
+    df_trips = impute_statent(context, df_trips, x="destination_x", y="destination_y", 
+                                radius=constants.EMPLOYEES_DENSITY_RADIUS, point_type="trip destination", 
+                                measure="companies", output_column="destination_companies_density")
+
+    df_trips = impute_statpop(context, context.stage("data.statpop.density"), df_trips, 
+                                x="destination_x", y="destination_y", 
+                                radius=constants.POPULATION_DENSITY_RADIUS, point_type="trip destination")
+    df_trips = df_trips.rename(columns={"population_density":"destination_population_density"})
+
     # estimate parking duration without travel time
     parking_duration_min = (np.clip(df_trips["departure_time"].shift(-1), 8*3600, 19*3600) - 
                             np.clip(df_trips["departure_time"], 8*3600, 19*3600)) / 60.0
@@ -102,7 +131,14 @@ def execute(context):
     # include the municipality
     df_municipality_type = context.stage("data.spatial.municipality_types")
     df_municipalities,_ = context.stage("data.spatial.municipalities")
-    df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_type","geometry"]]
+    biggest_mun = (df_municipalities.query("municipality_name in ['Zürich', 'Genève', 'Basel', 'Lausanne', 'Luzern','Bern']")
+                        .set_index("municipality_name")["municipality_id"].to_dict() )
+    msg = "The biggest municipalities are missing from the municipalities data (maybe their names changed). In the case of a name change, update the list of biggest municipalities and their corresponding ids here. AND MAKE SURE YOU CHECK THIS IN MATSIM MODE CHOICE"
+    assert set(biggest_mun.values())=={261, 351, 1061, 2701, 5586, 6621}, msg
+    assert set(biggest_mun.keys())==set(['Zürich', 'Genève', 'Basel', 'Lausanne', 'Luzern','Bern']), msg
+    
+
+    df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_id","municipality_type","geometry"]]
 
     # Create geometry columns for home, origin, and destination
     df_trips["geometry_home"] = gpd.points_from_xy(df_trips.home_x, df_trips.home_y)
@@ -124,6 +160,21 @@ def execute(context):
     df_dest = gpd.GeoDataFrame(df_trips, geometry="geometry_destination", crs="EPSG:2056")
     df_dest = df_dest.sjoin(df_municipalities, how="left", predicate="intersects")
     df_trips["destination_municipality"] = df_dest["municipality_type"]
+    df_trips["destination_municipality_id"] = df_dest["municipality_id"]
+
+    # ovgk at destination
+    df_dest = gpd.GeoDataFrame(df_trips[['person_id', 'trip_id', 'geometry_destination']], geometry="geometry_destination", crs="EPSG:2056")
+    df_dest = impute_ovgk(context, df_dest, geometry="geometry_destination", output_column="ovgk_destination", n_jobs=8)
+    df_trips["destination_good_pt_service"] = (df_dest["ovgk_destination"].isin(["A", "B"])).astype(int)
+    df_trips["destination_medium_pt_service"] = (df_dest["ovgk_destination"].isin(["C","D"])).astype(int)
+
+    # tag destinations in zurich, geneva, basel, lausanne, luzern, Bern
+    df_trips["destination_zurich"] = df_trips["destination_municipality_id"]==biggest_mun["Zürich"]
+    df_trips["destination_geneva"] = df_trips["destination_municipality_id"]==biggest_mun["Genève"]
+    df_trips["destination_basel"] = df_trips["destination_municipality_id"]==biggest_mun["Basel"]
+    df_trips["destination_lausanne"] = df_trips["destination_municipality_id"]==biggest_mun["Lausanne"]
+    df_trips["destination_luzern"] = df_trips["destination_municipality_id"]==biggest_mun["Luzern"]
+    df_trips["destination_bern"] = df_trips["destination_municipality_id"]==biggest_mun["Bern"]
 
     # within switzerland
     df_switzerland = context.stage("data.spatial.swiss_border")
@@ -167,14 +218,18 @@ def execute(context):
     cols = ['person_id', 'trip_id', 'departure_time', 'mode', 'purpose',
             'destination_x', 'destination_y', 'origin_x', 'origin_y',
             'home_x', 'home_y', 'hasGeneralSubscription', 'hasJuniorSubscription', 'hasGleis7Subscription',
-            'hasHalbtaxSubscription', 'hasRegionalSubscription', 'ovgk', 'car_ownership_ratio', "good_pt_service", "medium_pt_service",
-            'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','is_junior','low_income','has_car','num_adults',
+            'hasHalbtaxSubscription', 'hasRegionalSubscription', 'ovgk', 'car_ownership_ratio', "good_pt_service", "medium_pt_service", "destination_good_pt_service", "destination_medium_pt_service",
+            'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','is_junior','low_income','high_income','has_car','num_adults',
             'driving_license', 'sp_region', 'ms_region', 'is_car_passenger', 'income', 'income_class',
             'destination_home', 'origin_home', 'destination_work', 'destination_education',
             'destination_shopping', 'destination_leisure', 'destination_other',
             'euclidean_distance_km', 'is_first', 'is_last',
             'parking_duration_wo_travelTime_min', 'home_municipality',
             'origin_municipality', 'destination_municipality', 'inside_ch',
-            'elevation_destination','elevation_origin', 'elevation_difference']
+            'elevation_destination','elevation_origin', 'elevation_difference',
+            'destination_employee_density','destination_population_density','destination_companies_density',
+            'short_distance', 'long_distance', 'very_long_distance',
+            'destination_zurich', 'destination_geneva', 'destination_basel', 'destination_lausanne', 'destination_luzern', 'destination_bern'
+            ]
 
     return df_trips[cols]

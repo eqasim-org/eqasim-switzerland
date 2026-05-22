@@ -4,7 +4,9 @@ import xml.etree.ElementTree as ET
 import gzip
 import os
 import matsim.simulation.config_utils as config_utils
+import logging
 
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("matsim.runtime.java")
@@ -28,7 +30,7 @@ def execute(context):
     if context.config("input_downsampling") < 1.0 and not context.config("useScheduleBasedTransport"):
 
         pce =  sample_size
-        print(f"INFO setting PCE to {round(pce,2)} for PT vehicles.")
+        logger.info(f"INFO setting PCE to {round(pce,2)} for PT vehicles.")
 
         # Register the namespace
         namespace = {'m': 'http://www.matsim.org/files/dtd'}

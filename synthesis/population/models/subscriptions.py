@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from catboost import CatBoostClassifier
+import logging
 
+logger = logging.getLogger("synpp")
 
 # ---------------------------------------------------------
 # helper: stochastic draw from class probabilities
@@ -642,18 +644,18 @@ def execute(context):
     Xs_y_np = Xs_y.to_numpy(dtype=float, copy=False)
     Xp_y_np = Xp_y.to_numpy(dtype=float, copy=False)
 
-    print("Started to fit PT subscription model (6-15) using:", PT_MODEL)
+    logger.info("Started to fit PT subscription model (6-15) using: %s", PT_MODEL)
     pt_model_youth.fit(Xs_y_np, y_y, sample_weight=w_y)
-    print("Fitted PT subscription model (6-15) using:", PT_MODEL)
+    logger.info("Fitted PT subscription model (6-15) using: %s", PT_MODEL)
 
     # Fit adult model (16+)
     pt_model_adult = build_pt_model(PT_MODEL)
     Xs_a_np = Xs_a.to_numpy(dtype=float, copy=False)
     Xp_a_np = Xp_a.to_numpy(dtype=float, copy=False)
 
-    print("Started to fit PT subscription model (16+) using:", PT_MODEL)
+    logger.info("Started to fit PT subscription model (16+) using: %s", PT_MODEL)
     pt_model_adult.fit(Xs_a_np, y_a, sample_weight=w_a)
-    print("Fitted PT subscription model (16+) using:", PT_MODEL)
+    logger.info("Fitted PT subscription model (16+) using: %s", PT_MODEL)
 
     # -------------------------------------------------------------------
     # 8. PREDICT + STOCHASTIC DRAW (person-level in pop)
@@ -686,7 +688,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 9. DIAGNOSTICS (survey weighted vs pop modeled, person-level)
     # -------------------------------------------------------------------
-    print("\n================== DIAGNOSTICS (Survey vs Modeled Pop, PT subscription) ==================")
+    logger.info("\n================== DIAGNOSTICS (Survey vs Modeled Pop, PT subscription) ==================")
 
     pop_ycol = "PT_SUB_draw" if USE_DRAW_DIAG else "PT_SUB_hat"
     classes_sorted = [0, 1, 2, 3, 4]
@@ -719,11 +721,11 @@ def execute(context):
     def overall_dist_unweighted(df, ycol):
         return (df[ycol].value_counts(normalize=True).reindex(classes_sorted, fill_value=0.0) * 100.0)
 
-    print("\n[OVERALL | Survey weighted % by class 0..4]")
-    print(overall_dist_weighted(survey_df.loc[survey_mask, :], SURVEY_TARGET_COL, SURVEY_WEIGHT_COL).round(2).to_string())
+    logger.info("\n[OVERALL | Survey weighted % by class 0..4]")
+    logger.info(overall_dist_weighted(survey_df.loc[survey_mask, :], SURVEY_TARGET_COL, SURVEY_WEIGHT_COL).round(2).to_string())
 
-    print("\n[OVERALL | Pop modeled % by class 0..4]")
-    print(overall_dist_unweighted(pop_df.loc[pop_mask, :], pop_ycol).round(2).to_string())
+    logger.info("\n[OVERALL | Pop modeled % by class 0..4]")
+    logger.info(overall_dist_unweighted(pop_df.loc[pop_mask, :], pop_ycol).round(2).to_string())
 
     def compare_multiclass(group_col, canton_id=None, order=None):
         classes_sorted = [0, 1, 2, 3, 4]
@@ -809,13 +811,13 @@ def execute(context):
 
     for g, order in diag_groups:
         if g in survey_df.columns and g in pop_df.columns:
-            print(f"\n[{g.upper()} | ALL] survey vs pop (% by class)")
-            print(compare_multiclass(g, canton_id=None, order=order).to_string(index=False))
+            logger.info(f"\n[{g.upper()} | ALL] survey vs pop (% by class)")
+            logger.info(compare_multiclass(g, canton_id=None, order=order).to_string(index=False))
 
-            print(f"\n[{g.upper()} | canton_id={DIAG_CANTON_ID}] survey vs pop (% by class)")
-            print(compare_multiclass(g, canton_id=DIAG_CANTON_ID, order=order).to_string(index=False))
+            logger.info(f"\n[{g.upper()} | canton_id={DIAG_CANTON_ID}] survey vs pop (% by class)")
+            logger.info(compare_multiclass(g, canton_id=DIAG_CANTON_ID, order=order).to_string(index=False))
 
-    print("\n================== COMMUTE DIAGNOSTIC (WORK ONLY | subscription==1) ==================")
+    logger.info("\n================== COMMUTE DIAGNOSTIC (WORK ONLY | subscription==1) ==================")
 
     pop_sub_col = "PT_SUB_draw" if USE_DRAW_DIAG else "PT_SUB_hat"
 
@@ -826,9 +828,9 @@ def execute(context):
     missing_p = [c for c in required_p if c not in pop_df.columns]
 
     if missing_s:
-        print("Skipping commute diagnostic: missing in survey_df:", missing_s)
+        logger.info("Skipping commute diagnostic: missing in survey_df: %s", missing_s)
     elif missing_p:
-        print("Skipping commute diagnostic: missing in pop_df:", missing_p)
+        logger.info("Skipping commute diagnostic: missing in pop_df: %s", missing_p)
     else:
         # --- build bins (km)
         bins = [COMMUTE_DIAG_THRESHOLD_KM, 1, 2, 5, 10, 15, 20, 30, 50, 100, np.inf]
@@ -905,11 +907,11 @@ def execute(context):
         )
         out["diff_pop_minus_survey"] = out["pop_p_sub1_pct"] - out["survey_p_sub1_pct"]
 
-        print(f"\nFilter universe: work commute > {COMMUTE_DIAG_THRESHOLD_KM:g} km (ALL people, not conditioned on subscription)")
-        print(f"Pop sub column used: {pop_sub_col}")
+        logger.info(f"\nFilter universe: work commute > {COMMUTE_DIAG_THRESHOLD_KM:g} km (ALL people, not conditioned on subscription)")
+        logger.info(f"Pop sub column used: {pop_sub_col}")
 
-        print("\nP(subscription==1 | work-commute bin) [%]:")
-        print(out.to_string(index=False, formatters={
+        logger.info("\nP(subscription==1 | work-commute bin) [%]:")
+        logger.info(out.to_string(index=False, formatters={
             "survey_p_sub1_pct": "{:.2f}".format,
             "pop_p_sub1_pct": "{:.2f}".format,
             "diff_pop_minus_survey": "{:.2f}".format,
@@ -917,7 +919,7 @@ def execute(context):
             "pop_den_n": "{:.0f}".format,
         }))
 
-    print("\n==========================================================================================")
+    logger.info("\n==========================================================================================")
     keep_columns = ['person_id', 'household_id', 'sex', 'age', 'home_x', 'home_y', 'home_municipality_id', 'home_zone_id',
        'marital_status', 'household_size', 'municipality_type','canton_id','collective_housing_resident','nationality',
        'N_children_under_3', 'N_children_under_6', 'N_children_under_12',

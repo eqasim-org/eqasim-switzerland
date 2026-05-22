@@ -2,8 +2,8 @@ import logging
 import os
 import pandas as pd
 import json
-from .run_utils import (filter_data, compute_statistics,
-                        create_comprehensive_plot, plot_by_road_cat,
+from .run_utils import (filter_data, compute_statistics, save_as_target,
+                        create_comprehensive_plot, create_simple_scatter_plot, plot_by_road_cat,
                         print_detailed_statistics, get_average_flow_veh_h_by_category)
 
 
@@ -65,6 +65,9 @@ def execute(context):
     # plot comprehensive comparison
     create_comprehensive_plot(df, stats, output_path=path_to_output)
 
+    # plot simple scatter plot
+    create_simple_scatter_plot(df, stats, output_path=path_to_output)
+
     # Plot by road category
     plot_by_road_cat(df, output_path=path_to_output)
 
@@ -72,12 +75,7 @@ def execute(context):
     get_average_flow_veh_h_by_category(df, output_path=path_to_output)
     
     # save the data (this can be used as target for network calibration)
-    df = df[['link_id','obs_vphpl']]
-    df = df.explode("link_id")
-    df = df.rename(columns={"link_id":"linkId",
-                            "obs_vphpl":"count"})
-    df.to_csv(os.path.join(path_to_output, "target_flow.csv"), index=False, sep=",")
-    
-    logger.info("\n Analysis completed successfully!")
+    save_as_target(network, df, path_to_output)
 
+    logger.info("\n Analysis completed successfully!")
     return dict(done=True, path = path_to_output)

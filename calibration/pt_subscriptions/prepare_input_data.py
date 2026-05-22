@@ -1,6 +1,9 @@
 import pandas as pd
 import numpy as np
 import geopandas as gpd
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -61,7 +64,7 @@ def execute(context):
 
     # Quick check
     home_ok = requests["has_home"].all()
-    print("All persons have a home location:", home_ok)
+    logger.info(f"All persons have a home location: {home_ok}")
 
     requests["has_work"] = requests["workX"].notna() & requests["workY"].notna()
     requests["has_education"] = requests["educationX"].notna() & requests["educationY"].notna()
@@ -73,7 +76,7 @@ def execute(context):
         .value_counts(normalize=True) * 100
     ).round(1)
 
-    print(percentages)
+    logger.info(f"Location type percentages:\n{percentages}")
 
     requests.to_csv("/cluster/project/cmdp/asallard/worklocations.csv", index=False)
 

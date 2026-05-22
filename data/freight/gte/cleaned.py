@@ -1,5 +1,7 @@
 import pandas as pd
+import logging
 
+logger = logging.getLogger("synpp")
 RENAMES = {"ernr":"agent_id",
            "journeyId":"journey_id",
            "vehicleKind":"vehicle_type",
@@ -99,13 +101,13 @@ def execute(context):
 
     # There are some NUTS ids that do not exist in our NUTS data (maybe old ids)
     # for now, drop all trips where NUTS not in NUTS data
-    print("Dropping all OD pairs where NUTS id not contained in NUTS data ...")
+    logger.info("Dropping all OD pairs where NUTS id not contained in NUTS data ...")
     number_trips = len(df_merge)
     df_nuts = context.stage("data.spatial.nuts")
     nuts_ids = list(df_nuts["nuts_id"].unique())
     df_merge = df_merge[(df_merge["origin_nuts_id"].isin(nuts_ids)) & (df_merge["destination_nuts_id"].isin(nuts_ids))]
     number_trips_dropped = number_trips - len(df_merge)
-    print("Dropped %s of %s OD pairs" % (number_trips_dropped, number_trips))
+    logger.info(f"Dropped {number_trips_dropped} of {number_trips} OD pairs")
 
     # package
     df_merge = df_merge[FIELDS]

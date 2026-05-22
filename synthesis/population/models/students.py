@@ -6,6 +6,9 @@ from joblib import Parallel, delayed
 from catboost import CatBoostClassifier
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -153,8 +156,7 @@ def execute(context):
     else:
         raise ValueError(f"Unknown STUDENT_MODEL={STUDENT_MODEL}, use 'gbm' or 'rf' or 'catboost'.")
 
-    print("Fitted global student model using:", STUDENT_MODEL)
-    print(f"Used survey weight column for training: {SURVEY_WEIGHT_COL}")
+    logger.info(f"Used survey weight column for training: {SURVEY_WEIGHT_COL}")
 
     # =========================================================
     # 4. STOCHASTIC DRAW HELPER
@@ -285,7 +287,7 @@ def execute(context):
     n = len(pop_df)
     stu_out = np.empty(n, dtype=int)
 
-    print(f"Predicting students in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
+    logger.info(f"Predicting students in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
 
     for start in range(0, n, CHUNK_SIZE):
         end = min(start + CHUNK_SIZE, n)
@@ -312,7 +314,7 @@ def execute(context):
         gc.collect()
 
         if (start // CHUNK_SIZE) % 20 == 0:
-            print(f"  ... processed {end:,}/{n:,}")
+            logger.info(f"  ... processed {end:,}/{n:,}")
 
     pop_df['STUDENT_draw'] = stu_out
 
@@ -326,8 +328,8 @@ def execute(context):
     #     canton_keys=None,   # or None for all cantons
     #     annotate=True                      # set True if you want district_id labels on points
     # )
-    print("Final STUDENT distribution in population:")
-    print(pop_df['is_student'].value_counts(normalize=True))
+    logger.info("Final STUDENT distribution in population:")
+    logger.info(pop_df['is_student'].value_counts(normalize=True))
 
     # =========================================================
     # 6. DIAGNOSTICS: COMPARE STUDENT RATES
@@ -384,8 +386,8 @@ def execute(context):
             compare['share_student_pop'] - compare['share_student_survey']
         )
 
-        print(f"\nShare of students by {label} (survey vs population):")
-        print(compare.sort_values(group_col).to_string(index=False))
+        logger.info(f"\nShare of students by {label} (survey vs population):")
+        logger.info(compare.sort_values(group_col).to_string(index=False))
 
     # normalize canton selection
     if CANTONS_FOR_ANALYSIS is None:
@@ -399,7 +401,7 @@ def execute(context):
         survey_diag = survey_df
         pop_diag    = pop_df
         pop_diag = pop_diag[pop_diag['age']>14]
-        print("\n[DIAGNOSTIC] Analysis for ALL cantons (global)")
+        logger.info("\n[DIAGNOSTIC] Analysis for ALL cantons (global)")
 
         build_compare_table(survey_diag, pop_diag, 'age_bin', 'age_bin')
         build_compare_table(survey_diag, pop_diag, 'municipality_type', 'municipality_type')
@@ -408,10 +410,10 @@ def execute(context):
         survey_diag = survey_df[survey_df['canton_id'].isin(canton_keys)]
         pop_diag    = pop_df[pop_df['canton_id'].astype(str).isin(canton_keys)]
         pop_diag = pop_diag[pop_diag['age']>14]
-        print(f"\n[DIAGNOSTIC] Analysis restricted to canton_id in {canton_keys}")
+        logger.info(f"\n[DIAGNOSTIC] Analysis restricted to canton_id in {canton_keys}")
 
         # combined across all selected cantons
-        print("\n[DIAGNOSTIC] Combined across selected cantons")
+        logger.info("\n[DIAGNOSTIC] Combined across selected cantons")
         build_compare_table(survey_diag, pop_diag, 'age_bin', 'age_bin')
         build_compare_table(survey_diag, pop_diag, 'municipality_type', 'municipality_type')
 
@@ -420,7 +422,7 @@ def execute(context):
             survey_one = survey_df[survey_df['canton_id'] == canton_key]
             pop_one    = pop_df[pop_df['canton_id'].astype(str) == canton_key]
             pop_one = pop_one[pop_one['age']>14]
-            print(f"\n[DIAGNOSTIC] canton_id = {canton_key}")
+            logger.info(f"\n[DIAGNOSTIC] canton_id = {canton_key}")
             build_compare_table(survey_one, pop_one, 'age_bin', 'age_bin')
             build_compare_table(survey_one, pop_one, 'municipality_type', 'municipality_type')
 

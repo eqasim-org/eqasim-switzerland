@@ -6,12 +6,13 @@ class constants:
     REF_INCOME_CHF    = 6000.0 # CHF per month per capita
     TIME_SCALE_MIN    = 10.0   # minutes
     DISTANCE_SCALE_KM = 10.0   # km
+    AGE_SCALE_YEAR = 10.0
 
     CAR_COST_PER_KM = 0.26  # CHF per km
     PARKING_COST_PER_HOUR_CHF_URBANCORE = 1.3  # CHF per hour
     PARKING_COST_PER_HOUR_CHF_URBAN = 1.0  # CHF per hour
     PARKING_COST_PER_HOUR_CHF_SUBURBAN = 0.5  # CHF per hour
-    PARKING_PRICE_REDUCTION_FOR_WORK = 1.0  # x% of normal parking cost for work trips
+    PARKING_PRICE_REDUCTION_FOR_WORK = 0.0  # x% of normal parking cost for work trips
     
     URBANCORE_PARKING_SEARCH_MIN = 3.0  # minutes
     URBAN_PARKING_SEARCH_MIN = 2.5  # minutes (source1: https://www.sciencedirect.com/science/article/pii/S0965856424000934)
@@ -31,3 +32,21 @@ class constants:
 
     # for old pt cost model
     PT_REGIONAL_RADIUS_KM = 10.0  # km
+
+    # densities
+    POPULATION_DENSITY_RADIUS = 500  # m
+    EMPLOYEES_DENSITY_RADIUS = 500 # m
+    
+    POPULATION_DENSITY_SCALE = 1000
+    POPULATION_DENSITY_EXPONENT = 0.7
+    
+    EMPLOYEES_DENSITY_SCALE = 200
+    EMPLOYEES_DENSITY_EXPONENT = 0.5
+
+    COMPANIES_DENSITY_SCALE = 50
+    COMPANIES_DENSITY_EXPONENT = 0.5
+
+    # distances
+    SHORT_DISTANCE_KM = 1.0
+    LONG_DISTANCE_KM = 13.0
+    VERY_LONG_DISTANCE_KM = 30.0

@@ -23,7 +23,7 @@ def get_cost(df, context, pt_regional_radius_km):
     f_nan = df["pt_cost_CHF"].isna()
     num_nans = f_nan.sum()
     if num_nans>0:
-        logger.info(f"{num_nans} trips have no price estimation from the detailed model, using the simple model instead.")
+        logger.info(f"{num_nans} out of {len(df)} trips have no price estimation from the detailed model, using the simple model instead.")
         df.loc[f_nan, "pt_cost_CHF"] = estimate_simple_cost(df[f_nan], context, pt_regional_radius_km)
     
     return df["pt_cost_CHF"]

@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
-
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.spatial.countries")
@@ -55,7 +56,7 @@ def impute(df, df_zones, zone_id_prefix = "",
                         "country": "country_id",
                         "nuts": "nuts_id",
                         "postal_code": "postal_code"}):
-    print(f"Imputing {list(zone_fields.keys())} zones for {len(df)} points...")
+    logger.info(f"Imputing {list(zone_fields.keys())} zones for {len(df)} points...")
     remaining_mask = np.ones((len(df),), dtype = bool)
     df[zone_id_prefix + "zone_id"] = np.nan
     df[zone_id_prefix + "zone_level"] = np.nan
@@ -85,14 +86,14 @@ def impute(df, df_zones, zone_id_prefix = "",
             # Compute remaining mask
             remaining_mask &= pd.isnull(df[zone_id_prefix + "zone_id"])
             count = np.count_nonzero(df[zone_id_prefix + "zone_level"] == zone_level)
-            print(f"  Found zone of type {zone_level} for {count} points")
+            logger.info("  Found zone of type %s for %d points", zone_level, count)
             
         else:
-            print(f"  Id {zone_id_field} for zone type {zone_level} not found in dataframe")
+            logger.warning("  Id %s for zone type %s not found in dataframe", zone_id_field, zone_level)
         
     unknown_count = np.count_nonzero(pd.isnull(df[zone_id_prefix + "zone_id"]))
 
     if unknown_count > 0:
-        print(f"  No information for {unknown_count} observations")
+        logger.warning("  No information for %d observations", unknown_count)
         
     return df

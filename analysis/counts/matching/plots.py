@@ -11,7 +11,7 @@ import seaborn as sns
 import pandas as pd
 import geopandas as gpd
 from .counts import Counts
-from .network import Network
+from .network import RoadNetwork
 import numpy as np
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
@@ -214,7 +214,7 @@ class Plotter:
     
     def plot_network_with_counts(self, counts: Counts = None, 
                                        matched: gpd.GeoDataFrame = None, 
-                                       network: Network=None,
+                                       network: RoadNetwork=None,
                                        output: str = None, 
                                        lw:float=1,
                                        markersize:float=6, 

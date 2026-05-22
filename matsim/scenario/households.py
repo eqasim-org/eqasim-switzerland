@@ -20,8 +20,7 @@ def configure(context):
     context.stage("data.spatial.cantons")
 
     if context.config("include_cross_border"):
-        context.stage("data.cross_border.generate_cross_border_traffic")
-        context.stage("synthesis.population.enriched")
+        context.stage("data.cross_border.generate_cross_border_traffic")        
 
     context.config("include_external_population", default = False)
     if context.config("include_external_population"):
@@ -71,7 +70,7 @@ def execute(context):
     
     # Attach canton name to agent (TODO: do it in previous stages, keep track of canton name)
     df_cantons = df_cantons.rename(columns={"canton_name_en": "canton_name"})
-    df_persons["canton_id"] = df_persons["canton_id"].astype("int64")
+    df_persons["canton_id"] = df_persons["canton_id"].astype(int)
     df_persons = pd.merge(df_persons, df_cantons, left_on="canton_id", right_on="canton_id", how="left")
     assert df_persons.canton_name.notnull().all(), "Not all persons have a canton name assigned. Check the canton data."
 

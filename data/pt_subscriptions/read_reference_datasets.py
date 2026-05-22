@@ -6,7 +6,5 @@ def execute(context):
     npvm = context.stage("data.pt_subscriptions.npvm")
     sbb  = context.stage("data.pt_subscriptions.sbb")
 
-    print(npvm.head())
-    print(sbb.head())
 
     return {"npvm": npvm, "sbb": sbb}

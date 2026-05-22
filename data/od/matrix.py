@@ -1,122 +1,134 @@
 import numpy as np
 import pandas as pd
+import logging
+from data.structural_survey.structural_survey import get_filtered_data
+logger = logging.getLogger("synpp")
 
+AGE_BIN_EDGES = np.array([35], dtype=float)
+SEX_VALUES = (0, 1)
+AGE_BINS = (0, 1)
+DEFAULT_SEGMENT_KEY = ("all", "all")
 
 def configure(context):
     context.stage("data.structural_survey.structural_survey")
     context.stage("data.spatial.zones")
 
-# TODO: Right now we only produce OD matrices for WORK. We have the information
-# from statpop on where the schools are, so we can use this in the future. Also,
-# we have commute information for school already prepared (see population.commute).
+
+def _build_matrix(df_od, df_zones, zone_ids, municipality_ids, quarter_ids):
+    municipality_matrix = pd.crosstab(
+        df_od["home_municipality_id"],
+        df_od["work_zone_id"],
+        df_od["weight"],
+        aggfunc=sum,
+    ).reindex(
+        index=pd.Index(municipality_ids, name="municipality_id"),
+        columns=pd.Index(zone_ids, name="destination_zone_id"),
+    ).fillna(0).reset_index()
+
+    quarter_matrix = pd.crosstab(
+        df_od["home_quarter_id"],
+        df_od["work_zone_id"],
+        df_od["weight"],
+        aggfunc=sum,
+    ).reindex(
+        index=pd.Index(quarter_ids, name="quarter_id"),
+        columns=pd.Index(zone_ids, name="destination_zone_id"),
+    ).fillna(0).reset_index()
+
+    municipality_matrix = pd.merge(
+        municipality_matrix,
+        df_zones[df_zones["zone_level"] == "municipality"],
+        left_on="municipality_id",
+        right_on="zone_level_id",
+    )
+    del municipality_matrix["municipality_id"]
+
+    quarter_matrix = pd.merge(
+        quarter_matrix,
+        df_zones[df_zones["zone_level"] == "quarter"],
+        left_on="quarter_id",
+        right_on="zone_level_id",
+    )
+    del quarter_matrix["quarter_id"]
+
+    matrix = pd.concat((municipality_matrix, quarter_matrix))
+    for column in ("zone_name", "zone_level", "zone_level_id"):
+        del matrix[column]
+
+    matrix = matrix.set_index("zone_id")
+    matrix = matrix.reindex(index=pd.Index(zone_ids))
+    matrix = matrix.values.astype(float)
+
+    f_origin = df_zones["zone_level"].isin(("municipality", "quarter"))
+    f_zero = np.sum(matrix, axis=1) == 0.0
+
+    for index in np.where(f_origin & f_zero)[0]:
+        matrix[index, :] = 0.0
+        matrix[index, index] = 1.0
+
+    matrix[~f_origin & f_zero] = 1.0
+
+    pdf_matrix = matrix / np.sum(matrix, axis=1)[:, np.newaxis]
+    pdf_matrix[~f_origin & f_zero, :] = np.nan
+
+    cdf_matrix = np.cumsum(matrix, axis=1)
+    cdf_matrix /= cdf_matrix[:, -1][:, np.newaxis]
+
+    return pdf_matrix, cdf_matrix, np.count_nonzero(f_origin & f_zero)
 
 def execute(context):
     df_zones = context.stage("data.spatial.zones")
-    df_od = context.stage("data.structural_survey.structural_survey")[[
+    df_od = get_filtered_data(context, "fixed")[[
         "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
         "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
-        "mode", "weight"
+        "mode", "weight", "crowfly_distance_to_work", "start_work", "sex", "age"
     ]]
 
-    # There are some people for which we don't have a valid OD pair
-    before_count = len(df_od)
-    df_od = df_od[~np.isnan(df_od["home_zone_id"])]
-    df_od = df_od[~np.isnan(df_od["work_zone_id"])]
-
-    unknown_count = before_count - len(df_od)
-    print("Removed %d (%.2f%%) observations from structural survey for which no work or home location is known" % (unknown_count, 100 * unknown_count / before_count))
-    #assert(len(df_od) == len(df_od.dropna())) Commented this, because home_quarter_id may be NaN deliberately
-
-    # Filter out people who are not working in a neighboring country
-    # TODO: Eventually, we want to have commuters back in the population!
-    # But this involves adjustments at several points:
-    # - We want them to get activity chains for commuters
-    # - We want them to have consistent work / education locations at the border
-    #   at the right crossing.
-    before_count = len(df_od)
-    df_od = df_od[~(df_od["work_zone_level"] == "country")]
-    df_od = df_od[~(df_od["home_zone_level"] == "country")]
-
-    outside_count = before_count - len(df_od)
-    print("Removed %d (%.2f%%) observations from structural survey which live or work abroad (TODO: eventually we want them back in!)" % (outside_count, 100 * outside_count / before_count))
-    #assert(len(df_od) == len(df_od.dropna())) Commented this, because home_quarter_id may be NaN deliberately
-
-    # Filter unknonwn modes
-    before_count = len(df_od)
-    df_od = df_od[~((df_od["mode"] == "unknown") | (df_od["mode"] == "other"))]
-    unknown_mode_count = before_count - len(df_od)
-    print("Removed %d (%.2f%%) observations from structural survey with unknown mode" % (unknown_mode_count, 100 * unknown_mode_count / before_count))
-
-    # Create the matrices
     zone_ids = list(df_zones["zone_id"])
     municipality_ids = list(df_zones[df_zones["zone_level"] == "municipality"]["zone_level_id"])
     quarter_ids = list(df_zones[df_zones["zone_level"] == "quarter"]["zone_level_id"])
 
-    pdf_matrices = {}
-    cdf_matrices = {}
+    # Aggregate matrix fallback (legacy behavior).
+    pdf_matrix, cdf_matrix, fixed_count = _build_matrix(df_od, df_zones, zone_ids, municipality_ids, quarter_ids)
 
-    for mode in ["car", "pt", "bike", "walk"]:
-        df_mode_od = df_od[df_od["mode"] == mode]
+    pdf_matrices = {DEFAULT_SEGMENT_KEY: pdf_matrix}
+    cdf_matrices = {DEFAULT_SEGMENT_KEY: cdf_matrix}
 
-        municipality_matrix = pd.crosstab(
-            df_od["home_municipality_id"], df_od["work_zone_id"],
-            df_od["weight"], aggfunc = sum).reindex(
-                index = pd.Index(municipality_ids, name = "municipality_id"), columns = pd.Index(zone_ids, name = "destination_zone_id")
-            ).fillna(0).reset_index()
+    df_segmented = df_od.copy()
+    df_segmented["sex"] = pd.to_numeric(df_segmented["sex"], errors="coerce")
+    df_segmented["age"] = pd.to_numeric(df_segmented["age"], errors="coerce")
+    df_segmented = df_segmented[df_segmented["sex"].isin(SEX_VALUES) & df_segmented["age"].notna()].copy()
+    df_segmented["sex"] = df_segmented["sex"].astype(int)
+    df_segmented["age_bin"] = np.digitize(df_segmented["age"].to_numpy(dtype=float), AGE_BIN_EDGES, right=False)
 
-        quarter_matrix = pd.crosstab(
-            df_od["home_quarter_id"], df_od["work_zone_id"],
-            df_od["weight"], aggfunc = sum).reindex(
-                index = pd.Index(quarter_ids, name = "quarter_id"), columns = pd.Index(zone_ids, name = "destination_zone_id")
-            ).fillna(0).reset_index()
+    fallback_segments = 0
+    for sex in SEX_VALUES:
+        for age_bin in AGE_BINS:
+            f_segment = (df_segmented["sex"] == sex) & (df_segmented["age_bin"] == age_bin)
+            key = (int(sex), int(age_bin))
 
-        municipality_matrix = pd.merge(
-            municipality_matrix, df_zones[df_zones["zone_level"] == "municipality"],
-            left_on = "municipality_id", right_on = "zone_level_id"
-        )
-        del municipality_matrix["municipality_id"]
+            if np.count_nonzero(f_segment) == 0:
+                pdf_matrices[key] = pdf_matrix.copy()
+                cdf_matrices[key] = cdf_matrix.copy()
+                fallback_segments += 1
+                continue
 
-        quarter_matrix = pd.merge(
-            quarter_matrix, df_zones[df_zones["zone_level"] == "quarter"],
-            left_on = "quarter_id", right_on = "zone_level_id"
-        )
-        del quarter_matrix["quarter_id"]
+            seg_pdf, seg_cdf, _ = _build_matrix(
+                df_segmented.loc[f_segment],
+                df_zones,
+                zone_ids,
+                municipality_ids,
+                quarter_ids,
+            )
+            pdf_matrices[key] = seg_pdf
+            cdf_matrices[key] = seg_cdf
 
-        matrix = pd.concat((municipality_matrix, quarter_matrix))
-        for column in ("zone_name", "zone_level", "zone_level_id"): del matrix[column]
-
-        matrix = matrix.set_index("zone_id")
-        matrix = matrix.reindex(index = pd.Index(zone_ids))
-        matrix = matrix.values
-
-        f_origin = df_zones["zone_level"].isin(("municipality", "quarter"))
-        f_zero = np.sum(matrix, axis = 1) == 0.0
-
-        # There are two types of origins with zero observations:
-        # - Quarters or municipalities for which we simply don't have data
-        # - Countries which we do not want to handle for now
-        #
-        # The latter ones will simply be set to NaN after avoiding a division
-        # by zero error. The former ones will be set for now in a way that all
-        # people stay inside this zone. (TODO: Probably it would be better to
-        # attach them to adjacent zones.)
-
-        for index in np.where(f_origin & f_zero)[0]:
-            matrix[index,:] = 0.0
-            matrix[index,index] = 1.0
-
-        matrix[~f_origin & f_zero] = 1.0
-
-        pdf_matrix = matrix / np.sum(matrix, axis = 1)[:, np.newaxis]
-        pdf_matrix[~f_origin & f_zero,:] = np.nan
-
-        cdf_matrix = np.cumsum(matrix, axis = 1)
-        cdf_matrix /= cdf_matrix[:, -1][:, np.newaxis]
-
-        pdf_matrices[mode] = pdf_matrix
-        cdf_matrices[mode] = cdf_matrix
-
-        print("  - Finished %s (%d fixed municipalities)" % (mode, np.count_nonzero(f_origin & f_zero)))
+    logger.info("  - Finished (%d fixed municipalities)", fixed_count)
+    logger.info(
+        "  - Built %d sex/age OD segments (%d fallback to aggregate)",
+        len(pdf_matrices) - 1,
+        fallback_segments,
+    )
 
     # A final note on the structure of these OD matrices:
     # - The origin counts for municipalities contain all originating trips, also

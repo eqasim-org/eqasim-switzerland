@@ -65,10 +65,10 @@ def execute(context):
                                             flow_col = 'flow_w' if context.config("only_weekday") else 'flow')
     
     # Identify the stations that might be mismatched
-    stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>13000)|
+    stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>25000)|
                              (flows.simulated_flow< 200 * 24)|
                              (flows.flow< 200 * 24)|
-                             (~flows.pdiff.between(-30,200))]["id"].unique()
+                             (~flows.pdiff.between(-70,200))]["id"].unique()
 
     # geh = GEH(flows.flow.values, flows.simulated_flow.values, return_vector=True)
     # stations_to_drop = flows[(geh>50)]["id"].values

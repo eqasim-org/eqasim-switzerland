@@ -1,5 +1,7 @@
 import subprocess as sp
 import os, shutil
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("maven_binary", "mvn")
@@ -44,7 +46,7 @@ def validate(context):
         shutil.which(context.config("maven_binary")),
         "-version"
     ], stderr = sp.STDOUT):
-        print("WARNING! Maven of at least version 3.x.x is recommended!")
+        logger.warning("Maven of at least version 3.x.x is recommended!")
 
 def execute(context):
     return {

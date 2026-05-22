@@ -23,6 +23,4 @@ def execute(context):
     else:
         params = context.stage("calibration.pt_routing.calibrate_parameters")
 
-    print(params)
-        
     return params

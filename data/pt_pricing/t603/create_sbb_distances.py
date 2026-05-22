@@ -1,7 +1,9 @@
 import itertools
 import pandas as pd
 import networkx as nx
+import logging
 
+logger = logging.getLogger("synpp")
 def configure(context):
     context.stage("data.pt_pricing.t603.prepare_t603")
     context.config("data_path")
@@ -50,13 +52,13 @@ def execute(context):
     for origin, destination in itertools.combinations(G.nodes, 2):
         if cpt % 1000 == 0:
             progress = cpt / N * 100
-            print(f"{progress} % already done")
+            logger.info(f"{progress} % already done")
         if origin != destination:
             try:
                 _, dist = best_path_by_hops_then_weight(G, origin, destination)
                 all_pair_paths[(origin, destination)] = {"distance": dist}
             except nx.NetworkXNoPath:
-                print(origin, destination)
+                logger.info(f"No path between {origin} and {destination}")
                 all_pair_paths[(origin, destination)] = {"distance": None}
         cpt += 1
 
@@ -78,7 +80,7 @@ def execute(context):
         ["origin_id", "destination_id", "origin_name", "destination_name", "distance"]
         ]
 
-    print(df.head())
+    logger.info(df.head())
     df = df[(df["origin_id"].notna()) & (df["destination_id"].notna())]
 
     df["origin_id"]      = df["origin_id"].astype(int)

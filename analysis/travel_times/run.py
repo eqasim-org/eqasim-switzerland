@@ -6,17 +6,22 @@ import pandas as pd
 import matplotlib
 
 matplotlib.use("Agg")
-from analysis.travel_times.plot_utils import (plot_scatter, plot_boxplot, 
+from analysis.travel_times.plot_utils import (plot_scatter, plot_boxplot, plot_distribution,
                                               plot_average_by_distance_bin,
-                                              plot_by, plot_boxplot_by)
+                                              plot_by, plot_boxplot_by,
+                                              plot_link_error_on_network)
 
 logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    context.stage("analysis.travel_times.APIs.target")
     context.stage("analysis.travel_times.APIs.get")
     context.stage("analysis.travel_times.matsim.get")
+    context.stage("analysis.travel_times.matsim.route")
     context.stage("analysis.travel_times.advanced.process")
+    context.stage("analysis.counts.matching.network")
+    context.stage("data.spatial.swiss_border")
 
     context.config("output_path")
     context.config("output_id")
@@ -58,9 +63,15 @@ def merge_and_filter_large_differences(df_api, df_matsim):
     return df
 
 def execute(context):
+    # Save travel times as csv in the output dir
+    _ = context.stage("analysis.travel_times.APIs.target")
+    
     # Load data from APIs and MATSim
     dfs_api = context.stage("analysis.travel_times.APIs.get")
     dfs_matsim = context.stage("analysis.travel_times.matsim.get")
+    _, routed_paths = context.stage("analysis.travel_times.matsim.route")
+    network = context.stage("analysis.counts.matching.network")
+    swiss_border = context.stage("data.spatial.swiss_border")
     _ = context.stage("analysis.travel_times.advanced.process")
     
     # For each API, compare with MATSim data
@@ -79,6 +90,10 @@ def execute(context):
 
         # Merge and filter large differences
         df = merge_and_filter_large_differences(df_api, df_matsim)
+
+        # Keep routed link paths for network error visualization
+        routed_links = pd.read_csv(routed_paths[api], usecols=["identifier", "links"])
+        df_links = df.merge(routed_links, on="identifier", how="left")
 
         # Plots
         bin_km = float(context.config("distance_bin_km"))
@@ -163,6 +178,23 @@ def execute(context):
             between = [3,24],
             out_path=os.path.join(out, "binned_travel_times_by_departure_hour_matsim_vs_"+api+"_long_distances.png")
         )
+
+        # plot average speed by departrue hour
+        df["average_speed_kmh_api"] = df["distance_km_api"] / (df["travel_time_min_api"] / 60.0)
+        df["average_speed_kmh_matsim"] = df["distance_km_matsim"] / (df["travel_time_min_matsim"] / 60.0)
+        plot_by(
+            df=df,
+            by="departure_hour",
+            value1="average_speed_kmh_api",
+            value2="average_speed_kmh_matsim",
+            title="Average Speed by Departure Hour: MATSim vs. "+api.upper(),
+            source1=api.upper(),
+            source2="MATSim",
+            xlabel="Departure hour of day",
+            ylabel="Average speed (km/h)",
+            between = [3,24],
+            out_path=os.path.join(out, "binned_average_speed_by_departure_hour_matsim_vs_"+api+".png")
+        )
         
         # boxplot by departure hour
         plot_boxplot_by(
@@ -174,6 +206,26 @@ def execute(context):
             xlabel="Departure hour of day",
             out_path=os.path.join(out, "boxplot_diff_by_departure_hour_matsim_vs_"+api+".png"),
             between = [6,22]
+        )
+
+        # plot distribution of Euclidean distances
+        df["departure_hour"] = df["departure_hour"].astype(int)
+        plot_distribution(
+            df=df,
+            by="departure_hour",
+            value="euclidean_distance_km_matsim",
+            title="Distribution of Trips Euclidean Distances",
+            xlabel="Euclidean distance (km)",
+            out_path=os.path.join(out, "distribution_euclidean_distances_matsim_vs_"+api+".png")
+        )
+
+        # network map of over/underestimation, aggregated by traversed links
+        plot_link_error_on_network(
+            network_gdf=network.net_geo,
+            routed_df=df_links,
+            swiss_border=swiss_border,
+            title="Link-level travel-time error: MATSim vs " + api.upper(),
+            out_path=os.path.join(out, "network_link_error_matsim_vs_" + api + ".png")
         )
 
     return dict(done = True, path = out_folders)

@@ -24,7 +24,7 @@ def execute(context):
     df_ban = []
 
     for source_path in find_ban("{}/{}".format(context.config("data_path"), "other_locations/FR/ban")):
-        print("Reading {} ...".format(source_path))
+        logger.info("Reading {} ...".format(source_path))
 
         df_partial = pd.read_csv(source_path, 
             compression = "gzip", sep = ";", usecols = BAN_DTYPES.keys(), dtype = BAN_DTYPES)

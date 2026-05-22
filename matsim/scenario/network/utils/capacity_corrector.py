@@ -2,6 +2,7 @@ import numpy as np
 from matsim.readers import Network
 import shapely.vectorized
 import geopandas as gpd
+from matsim.scenario.network.utils.routing_penalty import RoutingPenaltyProvider
 
 class CapacityCorrector:
     """
@@ -67,21 +68,6 @@ class CapacityCorrector:
             lambda x: self._correct_capacity(x, sampling_rate, minimum_speed),
             axis=1)
         return self.links
-
-    def get_centroids(self):
-        """
-        This method calculates the centroids of all links in the network.
-        It merges the link data with node coordinates to compute the midpoints.
-        """
-        links_centers = (self.links[["link_id", "from_node", "to_node"]]
-                        .merge(self.nodes, left_on='from_node', right_on='node_id', how="left")
-                        .merge(self.nodes, left_on='to_node', right_on='node_id', suffixes=('_from_node', '_to_node'), how="left")
-                        )
-        centroids_x = (links_centers.x_from_node + links_centers.x_to_node) / 2
-        centroids_y = (links_centers.y_from_node + links_centers.y_to_node) / 2
-        geometry    = gpd.points_from_xy(centroids_x, centroids_y, crs="EPSG:2056")
-        links_centers = gpd.GeoDataFrame(links_centers[["link_id"]], geometry=geometry, crs="EPSG:2056")
-        return links_centers
     
     def get_swiss_border(self):
         """
@@ -93,7 +79,7 @@ class CapacityCorrector:
 
     def reduce_capacity_outside_border(self):
         # links outside of switzerland
-        centroids = self.get_centroids()
+        centroids = RoutingPenaltyProvider.get_centroids(self.links, self.nodes)
         border = self.get_swiss_border()
         outside_mask = ~shapely.vectorized.contains(border, centroids.geometry.x.tolist(), centroids.geometry.y.tolist())
         links_outside_border = set(centroids.loc[outside_mask, "link_id"].unique())

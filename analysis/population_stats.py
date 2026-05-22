@@ -3,6 +3,8 @@ import numpy as np
 import geopandas as gpd
 import matplotlib.pyplot as plt
 from pathlib import Path
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -146,7 +148,7 @@ def execute(context):
 
     # Select those living within the shapefile
     if context.config("cutout_path"):
-        print("cutting out the interested population")
+        logger.info("Cutting out the interested population")
         zurich5km = gpd.read_file(context.config("cutout_path"))
         zurich5km = zurich5km["geometry"].values.tolist()[0]
 
@@ -160,11 +162,11 @@ def execute(context):
     pop_before["canton_id"] = pop_before["canton_id"].astype(str)
     pop_after["canton_id"] = pop_after["canton_id"].astype(str)
     pop_after = pop_after[pop_after["canton_id"]=='1']
-    print(pop_after)
+    logger.info("Filtered population after models: %d", len(pop_after))
     # Load microcensus population
     #hhl = context.stage("data.microcensus.households")[["person_id", "home_x", "home_y"]]
     pop_mz = context.stage("data.microcensus.persons")
-    print(pop_mz.columns)
+    logger.info("Loaded microcensus population: %d", len(pop_mz))
     pop_mz = pop_mz[pop_mz["weekend"]== False]
     #pop_mz = pop_mz.merge(hhl, on = "person_id")
     if context.config("cutout_path"):
@@ -172,7 +174,7 @@ def execute(context):
         homes_in_shp = homes.within(zurich5km)
         pop_mz = pop_mz[homes_in_shp]
     pop_mz = pop_mz[pop_mz["canton_id"]==1]
-    print(pop_mz)
+    logger.info("Filtered microcensus population: %d", len(pop_mz))
     # Setting up the output folder
     
     Path(output_path).mkdir(parents = True, exist_ok= True)

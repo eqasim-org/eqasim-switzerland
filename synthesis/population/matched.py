@@ -1,11 +1,11 @@
 import os
 #os.environ["NUMBA_DISABLE_JIT"] = "1"
-import itertools
 
 import numba
 import numpy as np
 import pandas as pd
-
+import logging
+logger = logging.getLogger("synpp")
 """
 This stage attaches observations from the microcensus to the synthetic population sample.
 This is done by statistical matching. Here, a recursive version of statistical matching is implemented.
@@ -15,12 +15,15 @@ It progressively decreases the minimum number of observations to ensure the most
 def configure(context):
     context.config("hot_deck_matching_runners")
     context.config("random_seed")
-    context.config("matching_minimum_observations", 20)
+    context.config("matching_minimum_observations", 10)
+    context.config("matching_enable_diagnostics", False)
     context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.microcensus.persons")
+    context.stage("data.microcensus.trips")
     context.stage("data.microcensus.activity_chains")
     context.stage("synthesis.population.sampled")
+    context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
     context.stage("data.constants")
 
 def compare_feature_distribution(df_population_sub, df_source_sub, feature, weight_col="person_weight"):
@@ -65,42 +68,55 @@ def print_matching_diagnostics(df_population_sub, df_source_sub, features, label
     """
     pop_n = len(df_population_sub)
     src_n = len(df_source_sub)
-    print(f"\n--- Matching diagnostics: {label} ---")
-    print(f"Population rows: {pop_n} | Source rows: {src_n}\n")
+    logger.info(f"\n--- Matching diagnostics: {label} ---")
+    logger.info(f"Population rows: {pop_n} | Source rows: {src_n}\n")
 
     if pop_n == 0:
-        print("No population rows in this segment.\n")
+        logger.info("No population rows in this segment.\n")
         return
     if src_n == 0:
-        print("No source rows in this segment.\n")
+        logger.info("No source rows in this segment.\n")
         return
 
     for feat in features:
         if feat not in df_population_sub.columns:
-            print(f"Feature '{feat}' not in population subset -> skipping diagnostics for this feature.\n")
+            logger.info(f"Feature '{feat}' not in population subset -> skipping diagnostics for this feature.\n")
             continue
         if feat not in df_source_sub.columns:
-            print(f"Feature '{feat}' not in source subset -> skipping diagnostics for this feature.\n")
+            logger.info(f"Feature '{feat}' not in source subset -> skipping diagnostics for this feature.\n")
             continue
 
         out = compare_feature_distribution(df_population_sub, df_source_sub, feat, weight_col=weight_col)
         tvd = 0.5 * out["abs_diff"].sum()  # Total Variation Distance
         max_abs = out["abs_diff"].max() if len(out) else 0.0
 
-        print(f"Feature '{feat}': TVD={tvd:.4f} | max_abs_diff={max_abs:.4f}")
+        logger.info(f"Feature '{feat}': TVD={tvd:.4f} | max_abs_diff={max_abs:.4f}")
         show = out[[feat, "share_population", "share_source_weighted", "diff_pop_minus_source"]].head(top_n)
-        print(show.to_string(index=False))
-        print("")
+        logger.info("\n" + show.to_string(index=False))
+        logger.info("")
 
 
-@numba.jit(nopython=True, parallel=True)
+@numba.njit(cache=True)
 def sample_indices(uniform, cdf, selected_indices):
-    indices = np.arange(len(uniform))
+    n = len(uniform)
+    out = np.empty(n, dtype=np.int64)
 
-    for i, u in enumerate(uniform):
-        indices[i] = np.count_nonzero(cdf < u)
+    # Binary search over CDF for each random draw.
+    for i in range(n):
+        u = uniform[i]
+        lo = 0
+        hi = len(cdf)
 
-    return selected_indices[indices]
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if cdf[mid] < u:
+                lo = mid + 1
+            else:
+                hi = mid
+
+        out[i] = selected_indices[lo]
+
+    return out
 
 
 def decrease_minimum_observation(N):
@@ -123,23 +139,6 @@ def recursive_iteration_statmatch(df_source, source_identifier, weight, df_targe
     df_source = df_source.sort_values(by=columns)
     df_target = df_target.sort_values(by=columns)
 
-    # Find unique values for all columns
-    unique_values = {}
-
-    for column in columns:
-        unique_values[column] = list(sorted(set(df_source[column].unique()) | set(df_target[column].unique())))
-
-    # Generate filters for all columns and values
-    source_filters, target_filters = {}, {}
-
-    for column, column_unique_values in unique_values.items():
-        source_filters[column] = [df_source[column].values == value for value in column_unique_values]
-        target_filters[column] = [df_target[column].values == value for value in column_unique_values]
-
-    # Define search order
-    source_filters = [source_filters[column] for column in columns]
-    target_filters = [target_filters[column] for column in columns]
-
     # Perform matching
     weights = df_source[weight].values
     assigned_indices = np.ones((len(df_target),), dtype=int) * -1
@@ -147,44 +146,48 @@ def recursive_iteration_statmatch(df_source, source_identifier, weight, df_targe
     assigned_levels = np.ones((len(df_target),), dtype=int) * -1
     uniform = rng.random_sample(size=(len(df_target),))
 
-    column_indices = [np.arange(len(unique_values[column])) for column in columns]
-
     if mandatory_columns:
         minimum_level = len(mandatory_columns)
     else:
         minimum_level = 1
 
-    for level in range(minimum_level, len(column_indices) + 1)[::-1]:
-        level_column_indices = column_indices[:level]
-        
-        if np.count_nonzero(unassigned_mask) > 0:
-            for column_index in itertools.product(*level_column_indices):
-                f_source = np.logical_and.reduce([source_filters[i][k] for i, k in enumerate(column_index)])
-                f_target = np.logical_and.reduce(
-                    [target_filters[i][k] for i, k in enumerate(column_index)] + [unassigned_mask])
+    for level in range(len(columns), minimum_level - 1, -1):
+        if not np.any(unassigned_mask):
+            break
 
-                selected_indices = np.nonzero(f_source)[0]
-                requested_samples = np.count_nonzero(f_target)
+        level_columns = columns[:level]
 
-                if requested_samples == 0:
-                    continue
+        # Group indices once per level instead of evaluating all value combinations
+        # against full-length boolean masks.
+        source_groups = df_source.groupby(level_columns, sort=False).indices
+        target_groups = df_target.groupby(level_columns, sort=False).indices
 
-                if len(selected_indices) < minimum_observations:
-                    continue
+        for key, target_indices_all in target_groups.items():
+            target_indices = target_indices_all[unassigned_mask[target_indices_all]]
 
-                selected_weights = weights[f_source]
-                cdf = np.cumsum(selected_weights)
-                cdf /= cdf[-1]
+            if len(target_indices) == 0:
+                continue
 
-                assigned_indices[f_target] = sample_indices(uniform[f_target], cdf, selected_indices)
-                assigned_levels[f_target] = level
-                unassigned_mask[f_target] = False
+            selected_indices = source_groups.get(key, None)
+            if selected_indices is None:
+                continue
+
+            if len(selected_indices) < minimum_observations:
+                continue
+
+            selected_weights = weights[selected_indices]
+            cdf = np.cumsum(selected_weights)
+            cdf /= cdf[-1]
+
+            assigned_indices[target_indices] = sample_indices(uniform[target_indices], cdf, selected_indices)
+            assigned_levels[target_indices] = level
+            unassigned_mask[target_indices] = False
 
     # Randomly assign unmatched observations
     cdf = np.cumsum(weights)
     cdf /= cdf[-1]
 
-    assigned_indices[unassigned_mask] = sample_indices(uniform[unassigned_mask], cdf, np.arange(len(weights)))
+    assigned_indices[unassigned_mask] = sample_indices(uniform[unassigned_mask], cdf, np.arange(len(weights), dtype=np.int64))
     assigned_levels[unassigned_mask] = 0
 
     # Write back indices
@@ -217,7 +220,7 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
 
         share_of_matched_agents = round(len(df_matching) / initial_nb_of_agents * 100,2) + percentage_matched
         
-        print(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
+        logger.info(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
         
         return df_matching, assigned_levels
 
@@ -234,7 +237,7 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
 
         share_of_matched_agents = len(df_matching_on_mandatory) / initial_nb_of_agents * 100 + percentage_matched
 
-        print(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
+        logger.info(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
         
         matching_the_missing, levels = statistical_matching(progress, df_source, source_identifier, weight, df_not_matching_on_mandatory, target_identifier, columns, mandatory_columns, random_seed, next_minimum_observations, share_of_matched_agents, initial_nb_of_agents)
         
@@ -259,7 +262,7 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     df_target = df_population.copy()
     
     if population_selector is not None:
-        df_target = pd.DataFrame(df_target[population_selector]).copy()
+        df_target = df_target.loc[population_selector].copy()
 
     df_assignment, levels = nonparallel_statistical_matching(
         context,
@@ -278,8 +281,9 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     #})
 
     for count in range(len(columns) + 1):
-        print("%d matched levels:" % count, np.count_nonzero(levels >= count),
-              "%.2f%%" % (100 * np.count_nonzero(levels >= count) / len(df_target),))
+        matched_count = np.count_nonzero(levels >= count)
+        matched_percent = 100 * matched_count / len(df_target) if len(df_target) > 0 else 0.0
+        logger.info(f"{count} matched levels: {matched_count} ({matched_percent:.2f}%)")
         
     # Remove and track unmatchable households (i.e. head of household)
 
@@ -302,10 +306,10 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
         removed_households_count = sum(unmatchable_household_selector)
         removed_persons_count    = sum(unmatchable_person_selector)
 
-        print("Unmatchable heads of household: ", removed_households_count)
-        print("  Removed households: ", removed_households_count)
-        print("  Removed persons: ", removed_persons_count)
-        print("")
+        logger.info("Unmatchable heads of household: %d", removed_households_count)
+        logger.info("  Removed households: %d", removed_households_count)
+        logger.info("  Removed persons: %d", removed_persons_count)
+        logger.info("")
 
         assert (len(df_target)     == initial_target_length     - removed_households_count)
         assert (len(df_population) == initial_population_length - removed_persons_count)
@@ -324,8 +328,8 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
 
         removed_persons_count = sum(unmatchable_person_selector)
 
-        print("  Removed persons: ", removed_persons_count)
-        print("")
+        logger.info("  Removed persons: %d", removed_persons_count)
+        logger.info("")
 
         assert (len(df_target)     == initial_target_length     - removed_persons_count)
         assert (len(df_population) == initial_population_length - removed_persons_count)
@@ -333,11 +337,26 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
         return df_target, df_population, [unmatchable_person_ids, None]
 
     
+def get_mz_persons(context):
+    df_persons = context.stage("data.microcensus.persons")
+    df_trips = context.stage("data.microcensus.trips")[0]
+    
+    # remove persons who are not employed, but have a work as one of the purposes in their activity chain
+    employed_persons = set(df_persons[df_persons["employed"] == True]["person_id"])
+    work_activities = ["work"] #,"work_secondary"]
+    persons_with_work_purpose = set(df_trips[(df_trips["origin_purpose"].isin(work_activities)) | 
+                                             (df_trips["purpose"].isin(work_activities))]["person_id"])
+    persons_to_remove = persons_with_work_purpose - employed_persons
+    logger.info(f"Removing {len(persons_to_remove)} persons who are not employed but have 'work' as a purpose in their activity chain.")
+
+    df_persons = df_persons[~df_persons["person_id"].isin(persons_to_remove)]
+    return df_persons
 
 def execute(context):
-    df_mz        = context.stage("data.microcensus.persons")
+    df_mz = get_mz_persons(context)
     const        = context.stage("data.constants")
     scenario_day = context.config("specific_day_scenario")
+    diagnostics_enabled = context.config("matching_enable_diagnostics")
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
     df_source = df_mz.copy()
@@ -361,19 +380,57 @@ def execute(context):
     df_population.loc[(df_population["employed"] == 2) & (df_population["is_student"] == 1), "employment_status"] = 2
     df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"] = 3
 
-    df_population["sex"] = df_population["sex"].astype(int)
+    df_population["sex"] = df_population["sex"].astype(np.int64)
+    
+    # add commute distance and work location type
+    df_work = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]]
+    df_population = pd.merge(df_population, df_work, on="person_id", how="left")
+    assert df_population.loc[df_population.employed==1,"work_location_type"].notna().all(), "Some employed agents are missing commute distance"
+    df_population[ "commute_distance"] = df_population["commute_distance"].fillna(-1)
+    df_population[ "work_location_type"] = df_population["work_location_type"].fillna("none")
+    
+    # trasform work_location_type to int
+    DICT_WORK_LOCATION_TYPE = {"none": 0, "fixed": 1, "remote": 2, "moving": 3}
+    df_population["work_location_type"] = df_population["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
+    df_source["work_location_type"] = df_source["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
+
+    # add commute distance classes
+    COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 1, 3, 6, 9, 12, 15, 20, 50, 1000]) * 1e3 # convert km -> m
+    df_population["commute_distance_class"] = np.digitize(df_population["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
+    df_source["commute_distance_class"] = np.digitize(df_source["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
+    
+    BROAD_COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 3, 8, 30, 1000]) * 1e3
+    df_population["broad_commute_distance_class"] = np.digitize(df_population["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
+    df_source["broad_commute_distance_class"] = np.digitize(df_source["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
+
+    # this is now necessary to include, to make sure employement is well matched, otherwise we get errors in work location assignement
+    df_source["employed"] = df_source["employed"].astype(int)
+    df_population["employed"] = (df_population["employed"]==1).astype(int)
 
     df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0)  # presence of children under 12
 
     df_source["sex"] = df_source["sex"].astype(int)
     var_raw = pd.to_numeric(df_source["car_availability"], errors="coerce")
-    df_source["car_availability"] = np.where(var_raw == 2, 0, 1).astype(int)
+    df_source["car_availability"] = np.where(var_raw == const.CAR_AVAILABILITY_NEVER, 0, 1).astype("int64")
+
+    # checkig if any duplicates
+    assert df_population['person_id'].duplicated().sum()==0, "Duplicate person_id found in population dataframe. Please ensure person_id is unique for each individual in the population."
+    assert df_source['mz_id'].duplicated().sum()==0, "Duplicate mz_id found in source dataframe. Please ensure mz_id is unique for each individual in the source."
 
     if const.census == "statpop":
-
+        # age class
         AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
         df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
         df_source["age_class"] = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
+        
+        # income classes
+        df_population['income_class'] = df_population['income_class'].astype(int)
+        df_source['income_class'] = df_source['income_class'].astype(int)
+        INCOME_CLASSIFICATION = {1:1, 2:1, 3:2, 4:2, 5:2, 6:3, 7:3, 8:3} # map 6 income classes to 3 classes (low, medium, high)
+        df_population['income_class'] = df_population['income_class'].map(INCOME_CLASSIFICATION)
+        df_source['income_class'] = df_source['income_class'].map(INCOME_CLASSIFICATION)
+
+        # further cleaning
         df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
         df_population["household_size"] = df_population["household_size"].clip(upper=2)
 
@@ -383,16 +440,23 @@ def execute(context):
         df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=3)
         df_source["number_of_cars_class"] = df_source["number_of_cars_class"].clip(upper=3)
 
-        # HT and activity-chains are better with canton_id instead of muncipality_type
+        # HT and activity-chains are better with canton_id instead of municipality_type
+        # TODO: 3 levels income class here
         columns_individual_matching = [
-            "age_class", "sex", "car_availability", "employment_status",
-            "ovgk",  "N_children_under_12", "sp_region", "canton_id",
+            "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk",  "N_children_under_12", "sp_region", 
+            "broad_commute_distance_class", "commute_distance_class", "income_class", "canton_id", "work_location_type", "urban"
+        ]
+        mandatory_columns_individual_matching = [
+            "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk",  "N_children_under_12", "sp_region", 
+            "broad_commute_distance_class"
         ]
 
         df_population["marital_status"] = df_population["marital_status"].astype(int)
         df_population["car_availability"] = df_population["car_availability"].astype(int)
-        df_population["municipality_type"] = df_population["municipality_type"].astype("object")
-        df_source["municipality_type"] = df_source["municipality_type"].astype("object")
+        df_population["municipality_type"] = df_population["municipality_type"].astype(str)
+        df_source["municipality_type"] = df_source["municipality_type"].astype(str)
+        df_population["urban"] = (df_population["municipality_type"].isin(["urbancore"])).astype(int)
+        df_source["urban"] = (df_source["municipality_type"].isin(["urbancore"])).astype(int)
         df_population["sp_region"] = df_population["sp_region"].astype(int)
         df_source["sp_region"] = df_source["sp_region"].astype(int)
         df_source["canton_id"] = df_source["canton_id"].astype(int)
@@ -400,9 +464,7 @@ def execute(context):
         df_population["ovgk"] = (df_population["ovgk"] != "None").astype(int)
         df_source["ovgk"] = (df_source["ovgk"] != "None").astype(int)
 
-        mandatory_columns_individual_matching = columns_individual_matching[:7]
-
-        print("Statistical matching starting (normal people split by age band with band-filtered source)")
+        logger.info("Statistical matching starting (normal people split by age band with band-filtered source)")
 
         # --- NORMAL PEOPLE: split into age bands + filter source by same band ---
         df_population_work = df_population.copy()
@@ -428,7 +490,7 @@ def execute(context):
                 continue
 
             # Filter source to the same age band
-            src_band = df_source.copy()
+            src_band = df_source
             if age_min is not None:
                 src_band = src_band[src_band["age"] >= age_min]
             if age_max is not None:
@@ -436,26 +498,27 @@ def execute(context):
 
             # Safety fallback: if band-filtered source is empty, fall back to full source
             if len(src_band) == 0:
-                print(f"WARNING: Source is empty for band '{band_name}' after age filter; falling back to full df_source.")
+                logger.warning(f"Source is empty for band '{band_name}' after age filter; falling back to full df_source.")
                 src_band = df_source
                 
             # Diagnostics BEFORE matching this band (systematic feature checks)
-            pop_diag = df_population_work.loc[sel, columns_individual_matching + ["person_id", "household_id"]].copy()
-            src_diag = src_band.loc[:, columns_individual_matching + ["mz_id", "person_weight"]].copy()
-            print_matching_diagnostics(
-                pop_diag,
-                src_diag,
-                features=columns_individual_matching,
-                label=f"normal band '{band_name}' (pre-match)",
-                weight_col="person_weight",
-                top_n=8
-            )
+            if diagnostics_enabled:
+                pop_diag = df_population_work.loc[sel, columns_individual_matching + ["person_id", "household_id"]].copy()
+                src_diag = src_band.loc[:, columns_individual_matching + ["mz_id", "person_weight"]].copy()
+                print_matching_diagnostics(
+                    pop_diag,
+                    src_diag,
+                    features=columns_individual_matching,
+                    label=f"normal band '{band_name}' (pre-match)",
+                    weight_col="person_weight",
+                    top_n=8
+                )
 
-            print(f"  - Matching normal people band: {band_name}")
+            logger.info(f"  - Matching normal people band: {band_name}")
             if band_name == "u15":
                 youth = [
                 "age_class", "sex",
-                "ovgk", "sp_region", "canton_id",
+                "ovgk", "sp_region", "urban", "canton_id",
                 ]
                 youth_mandatory = [
                 "age_class", "sex",
@@ -472,12 +535,12 @@ def execute(context):
                 )
             elif band_name == "15_23":
                 youth = [
-                "age_class", "sex",
-                "ovgk",  "employment_status", "car_availability", "sp_region", "canton_id",
+                "age_class", "sex", "employed", "car_availability", "ovgk", "employment_status", "sp_region", 
+                "broad_commute_distance_class", "urban", "work_location_type","commute_distance_class", "canton_id"
                 ]
                 youth_mandatory = [
-                "age_class", "sex",
-                "ovgk", "employment_status", "car_availability", "sp_region"
+                "age_class", "sex", "employed", "car_availability",
+                "ovgk", "employment_status","sp_region"
                 ]
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,
@@ -539,7 +602,7 @@ def execute(context):
             )
             df_source_center = df_source_center[df_source_center["activity_chain"] == "home"]
 
-            print("Second statistical matching starting - people with strange residence")
+            logger.info("Second statistical matching starting - people with strange residence")
 
             df_target_center, df_population_center, removed_ids_list_center  = run_statistical_matching_extended(
                 context,
@@ -619,10 +682,11 @@ def execute(context):
             )
         ]["age_class"] == 0))
 
-    print("Matching is done. In total, the following observations were removed from the census: ")
+    logger.info("Matching is done. In total, the following observations were removed from the census: ")
 
     removed_person_ids = removed_ids_list[0]
-    print("  Persons: %d (%.2f%%)" % (len(removed_person_ids), 100.0 * len(removed_person_ids) / number_of_population_persons))
+    pct_removed = 100.0 * len(removed_person_ids) / number_of_population_persons if number_of_population_persons > 0 else 0.0
+    logger.info("  Persons: %d (%.2f%%)", len(removed_person_ids), pct_removed)
 
     # Return
     return df_matching, removed_person_ids

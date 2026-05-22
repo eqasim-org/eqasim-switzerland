@@ -109,7 +109,7 @@ def execute(context):
     df_mz_households["home_zone_id"] = df_mz_households["zone_id"]
 
     # Impute population density
-    data.statpop.density.impute(
+    df_mz_households = data.statpop.density.impute(
         context, 
         context.stage("data.statpop.density"), df_mz_households, 
         "home_x", "home_y",

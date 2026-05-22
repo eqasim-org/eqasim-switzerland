@@ -1,17 +1,7 @@
-import os
 import re
 
 import matsim.runtime.pt2matsim as pt2matsim
-import sys
-import shutil
-from matsim.readers import read_network
-import json
-import re
-from matsim.scenario.network.utils.capacity_corrector import CapacityCorrector
-from matsim.scenario.network.utils.traffic_light_matcher import TrafficLightsMatcher
-from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
-from matsim.scenario.network.utils.network_cleaner import networkCleaner
-from matsim.scenario.network.utils.speed_corrector import SpeedCorrector
+from matsim.scenario.network.utils.network_handler import NetworkHandler
 
 
 def configure(context):
@@ -23,41 +13,32 @@ def configure(context):
     context.stage("data.spatial.municipality_types") # used in speed correction
     context.stage("data.spatial.municipalities") # used in speed correction
     context.stage("data.spatial.swiss_border") # used in speed correction
+    context.stage("calibration.road_regions.penalty_calibration")
 
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 20000)    
-    context.config("export_detailed_network", False)    
-    context.config("correct_links_capacity", False)
-    context.config("minimum_speed", 2) #in km/h
+    context.config("export_detailed_network", True)    
+    context.config("correct_links_capacity", True)
+    context.config("minimum_speed", 1.0) #in km/h
     context.config("input_downsampling")
-    context.config("add_traffic_lights", False)
-    context.config("assign_elevations", False)
+    context.config("add_traffic_lights", True)
+    context.config("assign_elevations", True)
     context.config("parseTurnRestrictions", True)
-    context.config("simplify_network_in_eqasim", False)
+    context.config("simplify_network_in_eqasim", True)
     # only if simplify network is true
     context.config("remove_network_loops", True)
     context.config("remove_replicate_links", True)
     context.config("remove_nodes_with_no_intersection", False)
     context.config("correct_speed", True)
     context.config("ensure_network_connectivity", True)
-    # this is for speed correction
-    context.config("adjust_speed", True)
-    context.config("speed_factor_urbancore", 0.85)
-    context.config("speed_factor_urban", 0.95)
-    context.config("speed_factor_suburban", 1.05)
-    context.config("speed_factor_rural", 1.1)
-    context.config("speed_factor_motorway", 1.2)
-    context.config("speed_limit_for_correction", 75/3.6) # in m/s (speed limit below which we correct the speed)
     # correct speed for uphill links only
-    context.config("adjust_speed_uphill", False) # if true, it is triggered only if elevation is assigned
+    context.config("adjust_speed_uphill", True) # if true, it is triggered only if elevation is assigned
+    context.config("adjust_speed_straightness", True) # if true, it is triggered only if elevation is assigned
     context.config("max_gradient_threshold", 0.1) # in percentage (10% = 0.1)
     context.config("speed_factor_uphill", 0.9) 
     # reduce capacity outside border
     context.config("capacity_factor_outside_border", 0.5)
-    # reduce speed outside border
-    context.config("speed_factor_outside_border", 0.8)
-
     # whether to route the bike in the network or not
     context.config("route_bike", True)
 
@@ -167,78 +148,5 @@ def execute(context):
         "%s/convert_network.xml" % context.path()
     ],[])
     
-   
-    # Read the network
-    network_path =  "%s/converted_network.xml.gz" % context.path()
-    net = read_network(network_path)
-    
-    # Assign municipality type
-    net.links = SpeedCorrector(context, net).assign_municipality_types_to_network()
-
-    # Assign elevations to the nodes if requested
-    if context.config("assign_elevations"):
-        df_switzerland = context.stage("data.spatial.swiss_border")
-        ch_polygon = df_switzerland.buffer(0).iloc[0] 
-        net = ElevationEstimator(network=net,
-                                    data_path=context.config("data_path"),
-                                    polygone = ch_polygon
-                                    ).run()
-
-    # If traffic lights are requested, process them first (before simplifying the network)
-    if context.config("add_traffic_lights"):
-        traffic_lights_path = context.stage("data.osm.traffic_lights")
-        detailed_network_path = "%s/detailed_network.csv" % context.path()
-        net.links = TrafficLightsMatcher(net).run(traffic_lights_path, detailed_network_path)             
-
-    # Simplify the network if requested, merge short links and remove loops and unconnected links
-    if context.config("simplify_network_in_eqasim") :
-        net, stats = networkCleaner(net).run(
-            remove_network_loops=context.config("remove_network_loops"),
-            remove_replicate_links=context.config("remove_replicate_links"),
-            remove_nodes_with_no_intersection=context.config("remove_nodes_with_no_intersection"),
-            correct_speeds=context.config("correct_speed"),
-            ensure_network_connectivity=context.config("ensure_network_connectivity")
-        )
-        # Save stats
-        with open("%s/statistics_of_cleaning_network.json" % context.path(), "w") as f:
-            json.dump(stats, f, indent=4) 
-
-    # correct link capacity for short links
-    if context.config("correct_links_capacity"):
-        net.links = CapacityCorrector(context, net).run()
-    
-    reduce_capacity_or_speed_outside_border  = (isinstance(context.config("osm_file"),list) & 
-                                                (context.config("border_offset")>0) &
-                                                ((context.config("capacity_factor_outside_border")<1) or 
-                                                 (context.config("speed_factor_outside_border")<1))
-                                                )
-    if reduce_capacity_or_speed_outside_border:
-        if context.config("capacity_factor_outside_border")<1:
-            net.links = CapacityCorrector(context, net).reduce_capacity_outside_border()
-        if context.config("speed_factor_outside_border")<1:
-            net.links = SpeedCorrector(context, net).run("outside_border")
-    
-    if context.config("adjust_speed"):
-        if abs(context.config("speed_factor_motorway")-1.0)>1e-3:
-            net.links = SpeedCorrector(context, net).run("motorway")
-        
-        # adjust link speeds of car links based on municipality types and their speed limit
-        net.links = SpeedCorrector(context, net).run("municipality_type")
-
-    if context.config("adjust_speed_uphill"):
-        if not context.config("assign_elevations"):
-            raise ValueError("To correct speeds of uphill links, elevations must be assigned first.")
-        # further correct link speeds of uphill links based on their gradient
-        net.links = SpeedCorrector(context, net).run("uphill")
-
-    
-    if context.config("route_bike"):
-        # the bike is added to car, bus, truck and taxi links. however, we check for network connectivity first
-        net.links = networkCleaner(net).add_bike_to_network()
-        
-    # Do not remove the last version of the network, just rename it.
-    shutil.move(network_path, network_path.replace("converted_network","converted_network_uncleaned"))
-    net.save(network_path)
-    
-    assert (os.path.exists("%s/converted_network.xml.gz" % context.path()))
-    return "%s/converted_network.xml.gz" % context.path()
+    network_path = "%s/converted_network.xml.gz" % context.path()
+    return NetworkHandler(context, network_path).process_network()

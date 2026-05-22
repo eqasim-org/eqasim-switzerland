@@ -1,5 +1,7 @@
 import subprocess as sp
 import os, shutil
+import logging
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("java_binary", "java")
@@ -47,7 +49,7 @@ def run(context, entry_point, arguments = [], class_path = None, vm_arguments = 
 
     command_line = list(map(str, command_line))
 
-    print("Executing java:", " ".join(command_line))
+    logger.info("Executing java: %s", " ".join(command_line))
 
     if mode == "raise" or mode == "return_code":
         return_code = sp.check_call(command_line, cwd = cwd)
@@ -69,7 +71,7 @@ def validate(context):
         shutil.which(context.config("java_binary")),
         "-version"
     ], stderr = sp.STDOUT):
-        print("WARNING! A Java JDK of at least version 17 is recommended.")
+        logger.warning("A Java JDK of at least version 17 is recommended.")
 
 def execute(context):
     return {

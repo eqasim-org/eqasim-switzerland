@@ -6,6 +6,9 @@ import data.spatial.municipality_types
 import data.spatial.ovgk
 import data.spatial.utils
 import data.spatial.zones
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -76,8 +79,8 @@ def execute(context):
     df["employed"] = df["employed"].astype(int)
     df["is_student"] = df["is_student"].astype(int)
 
-    print(df.groupby("employed")["person_id"].count() / len(df) )
-    print(df.groupby("is_student")["person_id"].count() / len(df) )
+    logger.info(f"Employed distribution:\n{df.groupby('employed')['person_id'].count() / len(df)}")
+    logger.info(f"Student distribution:\n{df.groupby('is_student')['person_id'].count() / len(df)}")
 
     # Maybe there are too many different employment categories now. And we are losing information on 
     # socio-professional class, which is used for matching in IdF.

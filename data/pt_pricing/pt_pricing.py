@@ -1,6 +1,8 @@
 import shutil
 import pandas as pd
+import logging
 
+logger = logging.getLogger("synpp")
 def configure(context):
     context.config("data_path")
     pt_pricing_option = context.config("generate_pt_pricing_inputs", default=False)
@@ -22,7 +24,7 @@ def execute(context):
         shutil.copy(zones_input_file, context.path())
         shutil.copy(pricing_input_file, context.path())
 
-        print("Files copied")
+        logger.info("Files copied")
 
     else:
         sbb_distances = context.stage("data.pt_pricing.t603.create_sbb_distances")

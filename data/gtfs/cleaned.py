@@ -1,5 +1,8 @@
 import data.gtfs.utils as gtfs
 import os, pathlib
+import logging
+
+logger = logging.getLogger("synpp")
 
 """
 This file reads GTFS schedule.
@@ -32,7 +35,7 @@ def execute(context):
     # Load feeds
     feeds = []
     for path in input_files:
-        print(path)
+        logger.info(path)
         feed = gtfs.read_feed(path)
         feed = gtfs.clean_feed(feed)
         

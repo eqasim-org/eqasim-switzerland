@@ -77,6 +77,8 @@ def route_one_trip(origin_x, origin_y, destination_x, destination_y, departure_t
         return data["routes"][0]
     else:
         logger.error(f"TomTom API request failed with status code {response.status_code}: {response.text}")
+        if response.status_code == 400 and "NO_ROUTE_FOUND" in response.text:
+            return []
         return None
     
 def route_with_tomtom(df_trips, tomtom_api_key, max_requests):
@@ -97,6 +99,9 @@ def route_with_tomtom(df_trips, tomtom_api_key, max_requests):
             if skipped>20:
                 logger.warning("\n\t Too many skipped requests to TomTom API, stopping.")
                 break
+            continue
+        elif len(route_info) == 0:
+            logger.warning(f"\n\t No route found for trip {identifier}, skipping.")
             continue
         else:
             num_requests += 1
@@ -159,7 +164,7 @@ def execute(context):
         df_remaining = df_trips[~df_trips['identifier'].isin(routed_ids)]
         logger.info(f"Remaining trips to route: {len(df_remaining)}")
 
-        if (not df_remaining.empty):
+        if (len(df_remaining)>50):
             # route remaining trips using tomtom
             new_routed_data = route_with_tomtom(df_remaining, tomtom_api_key, max_requests)
             

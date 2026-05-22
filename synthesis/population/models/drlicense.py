@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from catboost import CatBoostClassifier
+import logging
 
+logger = logging.getLogger("synpp")
 # ---------------------------------------------------------
 # helper: stochastic draw from class probabilities 
 # ---------------------------------------------------------
@@ -197,7 +199,7 @@ def execute(context):
     Xp = X_pop.to_numpy(dtype=float, copy=False)
 
     dl_model.fit(Xs, y, sample_weight=sample_weight)
-    print("Fitted driver's license (has OR learning) model using:", DL_MODEL)
+    logger.info("Fitted driver's license (has OR learning) model using: %s", DL_MODEL)
 
     # -------------------------------------------------------------------
     # 6. PREDICT + STOCHASTIC DRAW (then enforce under-18 rule)
@@ -226,7 +228,7 @@ def execute(context):
     #    - N_children_under_18 (exact)
     #
     # -------------------------------------------------------------------
-    print("\n================== DIAGNOSTICS (Survey vs Modeled Pop) ==================")
+    logger.info("\n================== DIAGNOSTICS (Survey vs Modeled Pop) ==================")
 
     USE_DRAW = True
     pop_ycol = "DL_has_or_learning_draw" if USE_DRAW else "DL_has_or_learning_hat"
@@ -346,45 +348,45 @@ def execute(context):
     # AGE GROUP (overall + canton)
     # -------------------------
     age_comp_all = compare_pct("age_group", canton_id=None, order=diag_age_labels)
-    print("\n[AGE GROUP | ALL] age_group | survey_weighted_pct_has | pop_pct_has")
-    print(age_comp_all.to_string(index=False))
+    logger.info("\n[AGE GROUP | ALL] age_group | survey_weighted_pct_has | pop_pct_has")
+    logger.info(age_comp_all.to_string(index=False))
 
     age_comp_c = compare_pct("age_group", canton_id=DIAG_CANTON_ID, order=diag_age_labels)
-    print(f"\n[AGE GROUP | canton_id={DIAG_CANTON_ID}] age_group | survey_weighted_pct_has | pop_pct_has")
-    print(age_comp_c.to_string(index=False))
+    logger.info(f"\n[AGE GROUP | canton_id={DIAG_CANTON_ID}] age_group | survey_weighted_pct_has | pop_pct_has")
+    logger.info(age_comp_c.to_string(index=False))
 
     # -------------------------
     # SEX (overall + canton)
     # -------------------------
     sex_comp_all = compare_pct("sex", canton_id=None)
-    print("\n[SEX | ALL] sex | survey_weighted_pct_has | pop_pct_has")
-    print(sex_comp_all.to_string(index=False))
+    logger.info("\n[SEX | ALL] sex | survey_weighted_pct_has | pop_pct_has")
+    logger.info(sex_comp_all.to_string(index=False))
 
     sex_comp_c = compare_pct("sex", canton_id=DIAG_CANTON_ID)
-    print(f"\n[SEX | canton_id={DIAG_CANTON_ID}] sex | survey_weighted_pct_has | pop_pct_has")
-    print(sex_comp_c.to_string(index=False))
+    logger.info(f"\n[SEX | canton_id={DIAG_CANTON_ID}] sex | survey_weighted_pct_has | pop_pct_has")
+    logger.info(sex_comp_c.to_string(index=False))
 
     # -------------------------
     # INCOME CLASS (overall + canton)
     # -------------------------
     inc_comp_all = compare_pct("income_class", canton_id=None)
-    print("\n[INCOME CLASS | ALL] income_class | survey_weighted_pct_has | pop_pct_has")
-    print(inc_comp_all.to_string(index=False))
+    logger.info("\n[INCOME CLASS | ALL] income_class | survey_weighted_pct_has | pop_pct_has")
+    logger.info(inc_comp_all.to_string(index=False))
 
     inc_comp_c = compare_pct("income_class", canton_id=DIAG_CANTON_ID)
-    print(f"\n[INCOME CLASS | canton_id={DIAG_CANTON_ID}] income_class | survey_weighted_pct_has | pop_pct_has")
-    print(inc_comp_c.to_string(index=False))
+    logger.info(f"\n[INCOME CLASS | canton_id={DIAG_CANTON_ID}] income_class | survey_weighted_pct_has | pop_pct_has")
+    logger.info(inc_comp_c.to_string(index=False))
 
     # -------------------------
     # MUNICIPALITY TYPE (overall + canton)
     # -------------------------
     mun_comp_all = compare_pct("municipality_type", canton_id=None)
-    print("\n[MUNICIPALITY TYPE | ALL] municipality_type | survey_weighted_pct_has | pop_pct_has")
-    print(mun_comp_all.to_string(index=False))
+    logger.info("\n[MUNICIPALITY TYPE | ALL] municipality_type | survey_weighted_pct_has | pop_pct_has")
+    logger.info(mun_comp_all.to_string(index=False))
 
     mun_comp_c = compare_pct("municipality_type", canton_id=DIAG_CANTON_ID)
-    print(f"\n[MUNICIPALITY TYPE | canton_id={DIAG_CANTON_ID}] municipality_type | survey_weighted_pct_has | pop_pct_has")
-    print(mun_comp_c.to_string(index=False))
+    logger.info(f"\n[MUNICIPALITY TYPE | canton_id={DIAG_CANTON_ID}] municipality_type | survey_weighted_pct_has | pop_pct_has")
+    logger.info(mun_comp_c.to_string(index=False))
 
     # -------------------------
     # N_CHILDREN_UNDER_18 exact values (overall + canton)
@@ -401,8 +403,8 @@ def execute(context):
             by="N_children_under_18_exact",
             key=lambda s: s.map(_sort_key)
         )
-    print("\n[N_CHILDREN_UNDER_18 (exact) | ALL] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
-    print(child_comp_all.to_string(index=False))
+    logger.info("\n[N_CHILDREN_UNDER_18 (exact) | ALL] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
+    logger.info(child_comp_all.to_string(index=False))
 
     child_comp_c = compare_pct("N_children_under_18_exact", canton_id=DIAG_CANTON_ID)
     if "N_children_under_18_exact" in child_comp_c.columns:
@@ -410,8 +412,8 @@ def execute(context):
             by="N_children_under_18_exact",
             key=lambda s: s.map(_sort_key)
         )
-    print(f"\n[N_CHILDREN_UNDER_18 (exact) | canton_id={DIAG_CANTON_ID}] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
-    print(child_comp_c.to_string(index=False))
+    logger.info(f"\n[N_CHILDREN_UNDER_18 (exact) | canton_id={DIAG_CANTON_ID}] N_children_under_18_exact | survey_weighted_pct_has | pop_pct_has")
+    logger.info(child_comp_c.to_string(index=False))
 
     # -------------------------
     # total #licenses (pop) + #licenses by canton
@@ -423,7 +425,7 @@ def execute(context):
     )
 
     total_licenses_pop = pop_df.loc[pop_mask2, pop_ycol].sum()
-    print(f"\n[POP] Total # driver's licenses (modeled) age>=18 using {pop_ycol}: {int(total_licenses_pop):,}")
+    logger.info(f"\n[POP] Total # driver's licenses (modeled) age>=18 using {pop_ycol}: {int(total_licenses_pop):,}")
 
     licenses_by_canton = (
         pop_df.loc[pop_mask2]
@@ -445,10 +447,10 @@ def execute(context):
     licenses_by_canton = licenses_by_canton.join(canton_n, how="left")
     licenses_by_canton["pct_has"] = (licenses_by_canton["n_licenses"] / licenses_by_canton["n_people"] * 100).round(2)
 
-    print("\n[POP] # driver's licenses by canton (age>=18):")
-    print(licenses_by_canton.to_string())
+    logger.info("\n[POP] # driver's licenses by canton (age>=18):")
+    logger.info(licenses_by_canton.to_string())
 
-    print("\n==========================================================================")
+    logger.info("\n==========================================================================")
 
     pop_df = pop_df.rename(columns={"DL_has_or_learning_draw": "driving_license"})
     return pop_df

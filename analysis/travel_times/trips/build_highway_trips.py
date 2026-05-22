@@ -1,20 +1,32 @@
 import geopandas as gpd
 from shapely import vectorized
 import numpy as np
+import logging
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
-    context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
 
-    context.config("num_highway_trips", default=2000)    
+    context.config("num_highway_trips", default=20000)    
     context.config("random_seed")
+    
+    # here we check if any of the stages that require the network from prepare are requested, to avoid unnecessary dependencies and re-running prepare when not needed
+    stages_to_check = [ "matsim.output", "matsim.simulation.run", "matsim.simulation.prepare"]
+    get_network_from_prepare = any(requested_stage.__name__ in stages_to_check for requested_stage in context.config_requested_stages)
+
+    if get_network_from_prepare:
+        context.stage("analysis.counts.matching.network_from_prepare", alias="network")
+    else:
+        context.stage("analysis.counts.matching.network", alias="network")
+    
 
 def execute(context):
-    # load network
-    net = context.stage("analysis.counts.matching.network")
+    # load network (do not create dependency on the network stage to avoid running the prepare (maybe the whole pipeline) again)
+    net = context.stage("network")
 
     # get highway links    
-    highway_links = net.links[net.links["highway"].isin(('motorway', 'trunk', 'motorway_link', 'trunk_link'))]
+    highway_links = net.links[net.links["highway"].isin(('motorway', 'trunk', 'motorway_link', 'trunk_link','primary'))]
     
     # get highway origin/destination nodes (origins from from_node, destinations from to_node)
     origin_node_ids = highway_links["from_node"].astype(str).unique()
@@ -55,27 +67,37 @@ def execute(context):
         raise ValueError(
             f"Not enough eligible origin nodes ({len(swiss_origin_nodes)}) to sample {num_trips} trips"
         )
-    sampled_origins = swiss_origin_nodes.sample(n=num_trips, replace=False, random_state=seed).reset_index(drop=True)
+    sampled_origins = swiss_origin_nodes.sample(n=num_trips, replace=False, random_state=seed*2).reset_index(drop=True)
 
     # sample destination nodes (have a distance between 10km and 100km)
     sampled_destinations = []
     for idx, origin_row in sampled_origins.iterrows():
         origin_point = origin_row.geometry
         distances = swiss_destination_nodes.geometry.distance(origin_point)
-        eligible_destinations = swiss_destination_nodes[(distances >= 10000) & (distances <= 100000)]
+        eligible_destinations = swiss_destination_nodes[distances >= 10000]
         if eligible_destinations.empty:
             raise ValueError(
-                "No eligible destination nodes found within [10km, 100km] for a sampled origin; "
+                "No eligible destination nodes found with a distance higher than 10 km for a sampled origin; "
                 "consider adjusting constraints or expanding the destination node set"
             )
         destination_row = eligible_destinations.sample(n=1, random_state=(seed or 0) + idx).iloc[0]
         sampled_destinations.append(destination_row)
+        seed += 1
     
     sampled_destinations = gpd.GeoDataFrame(sampled_destinations).reset_index(drop=True)
     
-    # sample departure times (between 7 AM and 8 PM)
+    # sample departure times (between 6 AM and 9 PM)
     rng = np.random.default_rng(seed)
-    departure_times = rng.integers(7 * 3600, 20 * 3600, size=num_trips)
+    
+    # 70% of trips between 7-9 AM and 4-7 PM, 30% uniformly distributed
+    num_peak = int(num_trips * 0.7)
+    num_off_peak = num_trips - num_peak
+    departure_times = np.concatenate([
+        rng.integers(6.5 * 3600, 10 * 3600, size=num_peak // 2),
+        rng.integers(16 * 3600, 19 * 3600, size=num_peak - num_peak // 2),
+        rng.integers(5 * 3600, 23 * 3600, size=num_off_peak)
+    ])
+    rng.shuffle(departure_times)
 
     # build trips dataframe
     trips = gpd.GeoDataFrame({

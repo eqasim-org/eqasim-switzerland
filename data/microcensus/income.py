@@ -6,49 +6,7 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator, TransformerMixin
 import numpy as np
-
-
-######################################################################
-################### Model similar to the old model ###################
-######################################################################
-
-def impute_basic(df_mz):
-    # Train the tree
-    no_income_selector = df_mz["income_class"] == -1
-
-    training_data = df_mz[~no_income_selector][[
-        "age", "sex", "marital_status", "household_size", "number_of_cars", "number_of_bikes"
-    ]].values
-
-    training_labels = df_mz[~no_income_selector]["income_class"].values
-    training_weights = df_mz[~no_income_selector]["person_weight"].values
-
-    # Use sample weights for proper representation in training
-    classifier = sklearn.tree.DecisionTreeClassifier(min_samples_leaf=30, max_depth=5)
-
-    classifier.fit(X=training_data, y=training_labels, sample_weight=training_weights)
-
-    # Predict the incomes using probabilities and sampling for variability
-    prediction_data = df_mz[no_income_selector][[
-        "age", "sex", "marital_status", "household_size", "number_of_cars", "number_of_bikes"
-    ]].values
-
-    probabilities = classifier.predict_proba(prediction_data)
-    classes = classifier.classes_
-    sampled_classes = np.array([
-        np.random.choice(classes, p=prob_row) for prob_row in probabilities
-    ])
-    df_mz.loc[no_income_selector, "income_class"] = sampled_classes
-
-    df_mz["income_imputed"] = False
-    df_mz.loc[no_income_selector, "income_imputed"] = True
-
-    return df_mz
-
-
-#########################################################################
-################### Advanced imputation using sklearn ###################
-#########################################################################
+from catboost import CatBoostClassifier
 
 class ColumnClipper(BaseEstimator, TransformerMixin):
     def __init__(self, clip_dict):
@@ -73,19 +31,18 @@ class ColumnClipper(BaseEstimator, TransformerMixin):
     
 def impute(df_mz):
     """
-    Impute missing income_class values (-1) using a RandomForest Pipeline.
-    It uses numerical and categorical features to predict the income class.
+    I modified the imputation approach in order to only use household features and not use age, sex, ... attributes because in the Mz, they as one person from that household, so this is biased
     """
 
     # Features
     num_cols = [
-        "age", "sex", "marital_status", "household_size",
-        "number_of_cars", "number_of_bikes"
+        "household_size", "number_of_cars", "number_of_bikes"
     ]
     cat_cols = [
-        "highest_education", "employment_status",
-        "municipality_type", "canton_id"
+        "N_adults", "N_children_under_18", "N_children_under_6", "is_swiss",
+        "population_density", "ovgk", "municipality_type", "canton_id", "employment_status"
     ]
+    feature_cols = num_cols + cat_cols
 
     missing = df_mz["income_class"] == -1
     df_train = df_mz[~missing].copy()
@@ -100,39 +57,36 @@ def impute(df_mz):
     # 1. Build preprocessing
     # -----------------------
     clipper = ColumnClipper({
-                        "household_size": (1, 10),
-                        "number_of_cars": (0, 5),
-                        "number_of_bikes": (0, 10)
-                    })
-
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ("num", "passthrough", num_cols),
-            ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols)
-        ]
-    )
+        "household_size": (1, 10),
+        "number_of_cars": (0, 5),
+        "number_of_bikes": (0, 5)
+    })
 
     # -----------------------
     # 2. Full pipeline
     # -----------------------
     model = Pipeline(steps=[
-                        ("clip", clipper),     
-                        ("preprocess", preprocessor),
-                        ("clf", RandomForestClassifier(
-                            n_estimators=100,
-                            min_samples_leaf=20,
-                            max_depth=10,                            
-                        ))
-                    ])
+        ("clip", clipper),
+        ("clf", CatBoostClassifier(
+            iterations=300,
+            depth=8,
+            learning_rate=0.05,
+            loss_function="MultiClass",
+            verbose=False,
+            random_seed=42
+        ))
+    ])
 
     # Train
+    # Since we keep DataFrame through the pipeline, we can pass categorical column names to CatBoost.
     model.fit(
-        df_train[num_cols + cat_cols],
-        df_train["income_class"]
+        df_train[feature_cols],
+        df_train["income_class"],
+        clf__cat_features=cat_cols
     )
 
     # Predict missing (probabilistic sampling)
-    probas = model.predict_proba(df_pred[num_cols + cat_cols])
+    probas = model.predict_proba(df_pred[feature_cols])
     classes = model.named_steps["clf"].classes_
 
     imputed = np.array([
@@ -145,4 +99,4 @@ def impute(df_mz):
     df_mz.loc[missing, "income_imputed"] = True
 
     return df_mz
-  
+    

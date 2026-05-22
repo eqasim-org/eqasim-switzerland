@@ -2,6 +2,9 @@ import numpy as np
 import shapely.geometry as geo
 import data.spatial.utils as spatial_utils
 import geopandas as gpd
+import logging
+
+logger = logging.getLogger("synpp")
 
 """
 This stage cleans the enterprise census:
@@ -66,7 +69,7 @@ def execute(context):
 
     df["commune_id"] = df["DEPCOM"].astype("category")
 
-    print("Found %d/%d (%.2f%%) observations without IRIS" % (
+    logger.info("Found %d/%d (%.2f%%) observations without IRIS" % (
         (df["iris_id"] == "undefined").sum(), len(df), 100 * (df["iris_id"] == "undefined").mean()
     ))
 
@@ -76,7 +79,7 @@ def execute(context):
     f_undefined = df["iris_id"] == "undefined"
     f_missing   = df["x"].isna()
 
-    print("Found %d/%d (%.2f%%) observations without coordinate" % (
+    logger.info("Found %d/%d (%.2f%%) observations without coordinate" % (
         ((f_missing & ~f_undefined).sum(), len(df), 100 * (f_missing & ~f_undefined).mean()
     )))
 

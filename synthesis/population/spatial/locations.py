@@ -1,6 +1,9 @@
 import geopandas as gpd
 import pandas as pd
-
+from data.statent.density import impute_parallel as impute_statent
+from data.statpop.density import impute_parallel as impute_statpop
+from data.spatial.ovgk import impute_parallel as impute_ovgk
+from dmc.constants import constants
 
 def configure(context):
     context.stage("synthesis.population.spatial.home.locations")
@@ -9,7 +12,13 @@ def configure(context):
 
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.sampled")
-
+    context.stage("data.spatial.municipality_types")
+    context.stage("data.spatial.municipalities")
+    context.stage("data.statent.density")
+    context.stage("data.statpop.density")
+    context.stage("data.spatial.ovgk")
+    
+    context.config("threads")
 
 def execute(context):
     df_home = context.stage("synthesis.population.spatial.home.locations")
@@ -59,4 +68,41 @@ def execute(context):
 
     df_locations = gpd.GeoDataFrame(df_locations, crs="epsg:2056")
 
+    # Extra attributes needed for mode choice in matsim
+    df_locations_unique = df_locations[["geometry"]].drop_duplicates(subset=['geometry']).copy()
+
+    # 1. Attach municipality to activities (TODO: Maybe this can be done in previous stages by keeping track of municipality id)
+    df_municipality_type = context.stage("data.spatial.municipality_types")
+    df_municipalities,_ = context.stage("data.spatial.municipalities")
+    df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_type","municipality_id", "geometry"]]
+    assert df_locations_unique.crs == df_municipalities.crs
+    df_locations_unique = gpd.sjoin_nearest(df_locations_unique, df_municipalities, how="left").drop(columns=["index_right"])
+    
+    # 2. attache densities to activities
+    df_locations_unique["x"] = df_locations_unique.geometry.x
+    df_locations_unique["y"] = df_locations_unique.geometry.y
+    threads = max(1, min(context.config("threads"), 8)) # avoid too many threads for this step as it can cause memory issues
+    df_locations_unique = impute_statent(context, df_locations_unique, x="x", y="y", chunk_size=10_000,
+                                radius=constants.EMPLOYEES_DENSITY_RADIUS, point_type="trip destination", 
+                                measure="employees", output_column="employee_density", n_jobs = threads)
+        
+    df_locations_unique = impute_statent(context, df_locations_unique, x="x", y="y", chunk_size=10_000,
+                                radius=constants.EMPLOYEES_DENSITY_RADIUS, point_type="trip destination", 
+                                measure="companies", output_column="companies_density", n_jobs = threads)
+
+    df_locations_unique = impute_statpop(context, context.stage("data.statpop.density"), df_locations_unique, 
+                                x="x", y="y", chunk_size = 5000, n_jobs = threads,
+                                radius=constants.POPULATION_DENSITY_RADIUS, point_type="trip destination")
+    
+    df_locations_unique = df_locations_unique.rename(columns={"population_density":"population_density"}) 
+    
+    df_locations_unique = df_locations_unique.astype({"employee_density": int, "companies_density": int, "population_density": int})
+    
+    # 3. attach OV Guteklasse
+    df_locations_unique = impute_ovgk(context, df_locations_unique)
+    
+    # atache columns back to the main dataframe
+    computed_columns = ['municipality_type', 'municipality_id', 'employee_density', 'companies_density', 'population_density','ovgk']
+    df_locations = df_locations.merge(df_locations_unique[['geometry'] + computed_columns], on='geometry', how='left')    
+    
     return df_locations

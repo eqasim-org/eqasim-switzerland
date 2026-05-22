@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
+import logging
 
+logger = logging.getLogger("synpp")
 def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
@@ -31,10 +33,14 @@ def calculate_bounds(values, bin_size):
     return bounds
 
 def execute(context):
-    df_persons = context.stage("data.microcensus.persons")[["person_id", "person_weight"]].rename(
+    df_persons = context.stage("data.microcensus.persons")[["person_id", "person_weight", "weekend"]].rename(
         columns={"person_weight": "weight"})
     df_trips = context.stage("data.microcensus.trips")[0][["person_id", "trip_id", "mode", "crowfly_distance",
                                                              "departure_time", "arrival_time", "purpose", "origin_purpose"]]
+    # Filter out weekend trips
+    weekend_persons = df_persons[df_persons["weekend"]]["person_id"].unique()
+    df_trips = df_trips[~df_trips["person_id"].isin(weekend_persons)].reset_index(drop=True)
+    df_persons = df_persons[~df_persons["person_id"].isin(weekend_persons)].drop(columns=["weekend"]).reset_index(drop=True)
     
     df_trips = pd.merge(df_trips, df_persons[["person_id", "weight"]], on="person_id")
     df_trips["travel_time"] = df_trips["arrival_time"] - df_trips["departure_time"]
@@ -53,7 +59,7 @@ def execute(context):
     df = df_trips[["mode", "travel_time", distance_column, "weight"]].rename(columns={distance_column: "distance"})
 
     modes = df["mode"].unique()
-    print(f"INFO: computing distance distributions for the following modes: {modes}")
+    logger.info(f"INFO: computing distance distributions for the following modes: {modes}")
 
     bin_size = 200
     distributions = {}

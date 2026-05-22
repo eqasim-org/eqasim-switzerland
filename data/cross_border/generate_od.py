@@ -4,7 +4,9 @@ from shapely.geometry import Point
 import geopandas as gpd
 import random
 from pathlib import Path
+import logging
 
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -581,8 +583,6 @@ def execute(context):
         excluded_ids = df.loc[df["exclude"], "cross_border_person_id"].unique()
         df = df[~df["cross_border_person_id"].isin(excluded_ids)].copy()  
 
-    del df["exclude"]     
-
-    print(df.columns)
+    del df["exclude"]
 
     return df

@@ -91,7 +91,6 @@ def create_stations(pdf_path, temp_path):
     lake_mode = False
 
     for page in range(PAGES[0], PAGES[1] + 1):
-        #print(f"Converting page {page}...")
 
         page_pdf = Path(temp_path) / f"{page}.pdf"
         page_txt = Path(temp_path) / f"{page}.txt"

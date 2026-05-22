@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
-
+import logging
+logger = logging.getLogger("synpp")
 """
 Transforms the synthetic trip table into a synthetic activity table.
 """
@@ -49,7 +50,7 @@ def execute(context):
     df_persons = context.stage("synthesis.population.enriched")[["person_id"]]
 
     missing_ids = set(np.unique(df_persons["person_id"])) - set(np.unique(df_activities["person_id"]))
-    print("Found %d persons without activities" % len(missing_ids))
+    logger.info("Found %d persons without activities", len(missing_ids))
 
     df_missing = pd.DataFrame.from_records([
         (person_id, 0, "home", True) for person_id in missing_ids
