@@ -90,7 +90,7 @@ The raw data that is used in the process can be found on our server
 - Content: `microcensus/` contains the Mikrozensus Verkehr und Mobilität in CSV
 format with 60'000 daily trips of Swiss residents.
 - The following files should be placed in the `microcensus/` directory: `etappen.csv`, `haushalte.csv`, `haushaltspersonen.csv`, `wege.csv`, `zielpersonen.csv`
-- Year: 2015 (published 2017)
+- Year: 2015, 2021
 - Contract: BfS
 
 **STATPOP**
@@ -112,7 +112,7 @@ data set.
 - Content: `statent/` contains the enterprise register for Switzerland with coordinates,
 number of employees and classifications of the enterprises.
 - The following files should be placed in the `statent/` directory: `250221_STATENT_2022_LOC_17042025.csv`
-- Year: 2021
+- Year: 2022
 - Contract: BfS
 
 **Country Borders**
