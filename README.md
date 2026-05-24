@@ -3,7 +3,13 @@ Switzerland synthetic population and corresponding travel. It also provides stag
 
 The pipeline uses the `synpp` Python package for stage chaining avaialble at [here](https://github.com/eqasim-org/synpp).
 
-# Installation
+## Main reference
+
+The main research reference for the synthetic population of Switzerland is:
+> Dib, A., Sallard, A., and M. Balac (2026) [Agent-based transport model of Switzerland: A fully automated pipeline based on eqasim and MATSim](https://polybox.ethz.ch/index.php/s/eiNCcex4dDxfjpj), presented at the _26th Swiss Transportation Research Conference_, Ascona, Switzerland.
+
+
+## Installation
 
 Before using the pipeline one needs to have the Python environment set up. This can be done either by setting up the `conda` environment or a `python` environment.
 
@@ -27,13 +33,13 @@ For settign up the python environment:
 - Install packages in `euler_requirements.txt`
 - How to do this in detail on our Euler server can be found [here](https://gitlab.ethz.ch/csfm/csfm-documentation/-/wikis/MATSim/Eqasim-on-Euler).
 
-# Run
+## Run
 
 Once you have set up your environment, all dependencies should have been installed, including synpp. At this point, all you need to do is adjust the config file (**DO NOT MODIFY** `config.yml`) to run the stages you required, and then:
 
 `python3 -m synpp config.yml`
 
-# Generating pipeline flowchart
+## Generating pipeline flowchart
 
 To generate a json file which represents the graph of the pipeline, you need to specify the output path in the config file.
 Simply add `flowchart_path: /path/to/flowchart.json` under the "General pipeline settings".
@@ -51,7 +57,7 @@ Type `python3 visualize_pipeline.py -h` for further explanations.
 
 
 
-# Output
+## Output
 
 To create a full scenario, add the `matsim.simulation.run` stage to the config file. The
 configuration option `output_path` must be set. The option
@@ -71,18 +77,7 @@ Depending on how the VM is configured (memory, cores, etc.) the pipeline will ha
 
 (TODO: More detailed explanation will follow)
 
-# Docker
-
-*This was EXPERIMENTAL. The information may be outdated*
-
-Alternatively, the pipeline is available as a dockerized application. To create
-the Docker container, call `docker build -t chpop .` in the project directory.
-
-The pipeline can then be run using `docker run -v [data path]:/data -v [cache path]:/cache chpop /cache/config_docker.yml`. This assumes that the raw data is located at `[data path]` and that the output path is at `[cache path]`. The directories will be mounted in the docker container at `/data` and `/cache`, respectively. To use the docker container, a config file must be provided in
-one of the mounted directories, e.g. in `/cache/config_docker.yml`. An example config
-file is given in `config_docker.yml`. Note that also there the paths must be adjusted accordingly.
-
-# Raw data
+## Raw data
 
 The raw data that is used in the process can be found on our server
 (Euler) under (only available to CSFM members):
