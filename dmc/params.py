@@ -1,7 +1,5 @@
-import os
-import yaml
-
 def configure(context):
+    context.config("estimate_dmc", default=False)
     if context.config("estimate_dmc"):
         context.stage("dmc.model")
     else:
