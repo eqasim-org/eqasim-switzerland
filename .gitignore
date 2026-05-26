@@ -26,3 +26,4 @@ catboost_info
 ch_cutter
 *.pkl
 *.csv
+main.py

@@ -20,18 +20,18 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
 	context.config("random_seed")
-	context.config("matching_embedding_top_k", 10)
-	context.config("matching_embedding_temperature", 0.05)
+	context.config("matching_embedding_top_k", 15)
+	context.config("matching_embedding_temperature", 0.3)
 	context.config("matching_embedding_epochs", 100)
-	context.config("matching_embedding_batch_size", 256)
+	context.config("matching_embedding_batch_size", 64)
 	context.config("matching_embedding_lr", 1.0e-3)
 	context.config("matching_embedding_dropout", 0.1)
-	context.config("matching_embedding_weight_decay", 1.0e-3)
+	context.config("matching_embedding_weight_decay", 3.0e-3)
 	context.config("matching_embedding_max_sequence_len", 12)
 	context.config("matching_loss_weight_activity", 1.0)
 	context.config("matching_loss_weight_trip_count", 1.0)
 	context.config("matching_loss_weight_mode", 0.2)
-	context.config("matching_loss_weight_departure", 0.5)
+	context.config("matching_loss_weight_departure", 0.2)
 	context.config("matching_loss_weight_reconstruction", 0.3)
 	context.config("matching_loss_weight_latent_norm", 0.05)
 	context.config("matching_loss_weight_latent_spread", 0.15)
@@ -129,8 +129,8 @@ if torch is not None:
 
 			geo_dim = self.card["canton_id"] + self.card["sp_region"] + self.card["municipality_type"] + self.card["ovgk"]
 			cars_dim = self.card["number_of_cars_class"] + self.card["car_availability"]
-			emp_dim = self.card["employed"] + self.card["employment_status"]
-			misc_dim = self.card["income_class"] + self.card["sex"] + self.card["work_location_type"] + self.card["marital_status"] + self.card["number_of_bikes_class"]
+			emp_dim = self.card["employed"] + self.card["employment_status"] + self.card["work_location_type"]
+			misc_dim = self.card["income_class"] + self.card["sex"] + self.card["marital_status"] + self.card["number_of_bikes_class"]
 
 			self.geo_proj = nn.Sequential(nn.Linear(geo_dim, geo_proj_dim), nn.LayerNorm(geo_proj_dim), nn.ReLU(), nn.Dropout(dropout))
 			self.cars_proj = nn.Sequential(nn.Linear(cars_dim, cars_proj_dim), nn.LayerNorm(cars_proj_dim), nn.ReLU(), nn.Dropout(dropout))
@@ -146,9 +146,8 @@ if torch is not None:
 				nn.Linear(32, 16),
 				nn.LayerNorm(16),
 			)
-			self.activity_emb = nn.Embedding(n_activity, 8, padding_idx=0)
-			self.mode_emb = nn.Embedding(n_mode, 8, padding_idx=0)
-			self.gru = nn.GRU(input_size=17, hidden_size=16, num_layers=1, batch_first=True)
+			# Autonomous decoder: recurrent dynamics start from h0 only.
+			self.gru = nn.GRU(input_size=1, hidden_size=16, num_layers=1, batch_first=True)
 
 			self.activity_head = nn.Linear(16, n_activity)
 			self.mode_head = nn.Linear(16, n_mode)
@@ -183,12 +182,12 @@ if torch is not None:
 			emp = torch.cat([
 				self._one_hot(x["employed"], self.card["employed"]),
 				self._one_hot(x["employment_status"], self.card["employment_status"]),
+				self._one_hot(x["work_location_type"], self.card["work_location_type"]),
 			], dim=1)
 
 			misc = torch.cat([
 				self._one_hot(x["income_class"], self.card["income_class"]),
 				self._one_hot(x["sex"], self.card["sex"]),
-				self._one_hot(x["work_location_type"], self.card["work_location_type"]),
 				self._one_hot(x["marital_status"], self.card["marital_status"]),
 				self._one_hot(x["number_of_bikes_class"], self.card["number_of_bikes_class"]),
 			], dim=1)
@@ -206,15 +205,11 @@ if torch is not None:
 			x_all = self._build_encoder_input(x)
 			return self.encoder(x_all)
 
-		def forward(self, x, act_in, mode_in, dep_in):
+		def forward(self, x, seq_len):
 			x_all = self._build_encoder_input(x)
 			z = self.encoder(x_all)
 			h0 = z.unsqueeze(0)
-			seq_in = torch.cat([
-				self.activity_emb(act_in),
-				self.mode_emb(mode_in),
-				dep_in.unsqueeze(-1),
-			], dim=-1)
+			seq_in = torch.zeros((z.shape[0], int(seq_len), 1), dtype=z.dtype, device=z.device)
 			h, _ = self.gru(seq_in, h0)
 			act_logits = self.activity_head(h)
 			mode_logits = self.mode_head(h)
@@ -278,6 +273,13 @@ def train_embedding_model(
 		misc_proj_dim=int(proj_dims["misc"]),
 	).to(device)
 
+	def _one_hot_masked(target_idx, num_classes):
+		valid = (target_idx >= 0).float()
+		t_safe = torch.clamp(target_idx, min=0)
+		oh = F.one_hot(t_safe, num_classes=num_classes).float()
+		oh = oh * valid.unsqueeze(-1)
+		return oh, valid
+
 	x_t = {}
 	for k, arr in x.items():
 		if k == "cardinalities":
@@ -285,9 +287,6 @@ def train_embedding_model(
 		dtype = torch.float32 if k == "cont" else torch.long
 		x_t[k] = torch.tensor(arr, dtype=dtype, device=device)
 
-	act_in = torch.tensor(y["act_in"], dtype=torch.long, device=device)
-	mode_in = torch.tensor(y["mode_in"], dtype=torch.long, device=device)
-	dep_in = torch.tensor(y["dep_in"], dtype=torch.float32, device=device)
 	act_tgt = torch.tensor(y["act_tgt"], dtype=torch.long, device=device)
 	mode_tgt = torch.tensor(y["mode_tgt"], dtype=torch.long, device=device)
 	dep_tgt = torch.tensor(y["dep_tgt"], dtype=torch.float32, device=device)
@@ -337,31 +336,28 @@ def train_embedding_model(
 			x_batch = {k: v[idx] for k, v in x_t.items()}
 			w_batch = sample_w[idx]
 			w_norm = w_batch / torch.clamp(w_batch.mean(), min=1e-6)
+			seq_len = act_tgt[idx].shape[1]
 
 			z, act_logits, mode_logits, dep_pred, trip_pred, x_recon, x_all = model(
-				x_batch, act_in[idx], mode_in[idx], dep_in[idx]
+				x_batch, seq_len
 			)
 
-			act_per_token = F.cross_entropy(
-				act_logits.reshape(-1, act_logits.shape[-1]),
-				act_tgt[idx].reshape(-1),
-				weight=act_weight,
-				ignore_index=-100,
-				reduction="none",
-			).reshape(act_tgt[idx].shape)
-			act_mask = (act_tgt[idx] != -100).float()
-			act_per_person = (act_per_token * act_mask).sum(dim=1) / torch.clamp(act_mask.sum(dim=1), min=1.0)
+			act_oh, act_mask = _one_hot_masked(act_tgt[idx], act_logits.shape[-1])
+			act_logp = F.log_softmax(act_logits, dim=-1)
+			act_nll = -(act_oh * act_logp).sum(dim=-1)
+			if act_weight is not None:
+				act_class_w = torch.sum(act_oh * act_weight.view(1, 1, -1), dim=-1)
+				act_nll = act_nll * act_class_w
+			act_per_person = (act_nll * act_mask).sum(dim=1) / torch.clamp(act_mask.sum(dim=1), min=1.0)
 			act_loss = (act_per_person * w_norm).mean()
 
-			mode_per_token = F.cross_entropy(
-				mode_logits.reshape(-1, mode_logits.shape[-1]),
-				mode_tgt[idx].reshape(-1),
-				weight=mode_weight,
-				ignore_index=-100,
-				reduction="none",
-			).reshape(mode_tgt[idx].shape)
-			mode_mask = (mode_tgt[idx] != -100).float()
-			mode_per_person = (mode_per_token * mode_mask).sum(dim=1) / torch.clamp(mode_mask.sum(dim=1), min=1.0)
+			mode_oh, mode_mask = _one_hot_masked(mode_tgt[idx], mode_logits.shape[-1])
+			mode_logp = F.log_softmax(mode_logits, dim=-1)
+			mode_nll = -(mode_oh * mode_logp).sum(dim=-1)
+			if mode_weight is not None:
+				mode_class_w = torch.sum(mode_oh * mode_weight.view(1, 1, -1), dim=-1)
+				mode_nll = mode_nll * mode_class_w
+			mode_per_person = (mode_nll * mode_mask).sum(dim=1) / torch.clamp(mode_mask.sum(dim=1), min=1.0)
 			mode_loss = (mode_per_person * w_norm).mean()
 
 			dep_sq = ((dep_pred - dep_tgt[idx]) ** 2) * dep_mask[idx]
@@ -482,6 +478,7 @@ def _prepare_common_features(df_source, df_population, const):
 		if "commute_distance" not in df.columns:
 			df["commute_distance"] = -1.0
 		df["commute_distance"] = pd.to_numeric(df["commute_distance"], errors="coerce").fillna(-1.0)
+		df.loc[df["employed"] != 1, "commute_distance"] = -1.0
 
 		if "work_location_type" not in df.columns:
 			df["work_location_type"] = "none"
@@ -550,17 +547,12 @@ def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count
 
 	n = len(seqs)
 	t = max(1, min(max_len, int(max_sequence_len)))
-	act_in = np.zeros((n, t), dtype=np.int64)
-	mode_in = np.zeros((n, t), dtype=np.int64)
-	dep_in = np.zeros((n, t), dtype=np.float32)
 	act_tgt = np.full((n, t), -100, dtype=np.int64)
 	mode_tgt = np.full((n, t), -100, dtype=np.int64)
 	dep_tgt = np.zeros((n, t), dtype=np.float32)
 	dep_mask = np.zeros((n, t), dtype=np.float32)
 
 	dep_scale = 30.0 * 3600.0
-	act_bos = act2idx["<bos>"]
-	mode_bos = mode2idx["<bos>"]
 
 	for i, (acts, modes, deps) in enumerate(seqs):
 		l = len(acts)
@@ -570,15 +562,6 @@ def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count
 			mode_tgt[i, k] = mode2idx[modes[k]]
 			dep_tgt[i, k] = dep_norm[k]
 			dep_mask[i, k] = 1.0
-
-		act_in[i, 0] = act_bos
-		mode_in[i, 0] = mode_bos
-		dep_in[i, 0] = 0.0
-		for k in range(1, t):
-			prev = min(k - 1, l - 1)
-			act_in[i, k] = act2idx[acts[prev]]
-			mode_in[i, k] = mode2idx[modes[prev]]
-			dep_in[i, k] = dep_norm[prev]
 
 	trip_scale = max(float(trip_count_scale), 1.0)
 	trip_count_tgt = np.clip(np.array(trip_counts_raw, dtype=np.float32) / trip_scale, 0.0, 1.0)
@@ -596,9 +579,6 @@ def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count
 			sample_weight = np.ones((n,), dtype=np.float32)
 
 	return {
-		"act_in": act_in,
-		"mode_in": mode_in,
-		"dep_in": dep_in,
 		"act_tgt": act_tgt,
 		"mode_tgt": mode_tgt,
 		"dep_tgt": dep_tgt,

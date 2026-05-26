@@ -48,6 +48,34 @@ def _sanitize_chain(chain):
     return "-".join([mapping.get(token, token[:1].upper()) for token in chain.split("-")])
 
 
+def _build_chain_from_trips(df_trips):
+    purpose_map = {
+        "home": "H",
+        "work": "W",
+        "work_secondary": "W",
+        "education": "E",
+        "shop": "S",
+        "leisure": "L",
+        "other": "O",
+    }
+
+    if len(df_trips) == 0:
+        return pd.DataFrame(columns=["person_id", "chain_short"])
+
+    d = df_trips[["person_id", "trip_id", "origin_purpose", "purpose"]].copy()
+    d = d.sort_values(["person_id", "trip_id"])
+
+    rows = []
+    for pid, g in d.groupby("person_id", sort=False):
+        first = g.iloc[0]["origin_purpose"]
+        rest = g["purpose"].tolist()
+        chain = [first] + rest
+        chain = [purpose_map.get(p, p) for p in chain]
+        rows.append((pid, "-".join(chain)))
+
+    return pd.DataFrame(rows, columns=["person_id", "chain_short"])
+
+
 def _weighted_distribution(df, value_col, weight_col=None):
     if len(df) == 0:
         return pd.Series(dtype=float)
@@ -67,7 +95,6 @@ def _prepare_groups(cantons):
     ]
     for cid in cantons:
         groups.extend([
-            (f"all_canton_{cid}", None, cid),
             (f"women_canton_{cid}", 1, cid),
             (f"men_canton_{cid}", 0, cid),
         ])
@@ -249,6 +276,18 @@ def _plot_metric_errors(out_path, group_name, metrics_micro, metrics_v1, metrics
     plt.close(fig)
 
 
+def get_mz_persons(context):
+	df_persons = context.stage("data.microcensus.persons")
+	df_trips = context.stage("data.microcensus.trips")[0]
+
+	employed_persons = set(df_persons[df_persons["employed"] == True]["person_id"])
+	persons_with_work = set(df_trips[(df_trips["origin_purpose"] == "work") | (df_trips["purpose"] == "work")]["person_id"])
+	persons_to_remove = persons_with_work - employed_persons
+
+	logger.info("Removing %d inconsistent MZ persons (non-employed with work purpose).", len(persons_to_remove))
+	return df_persons[~df_persons["person_id"].isin(persons_to_remove)].copy()
+
+
 def execute(context):
     analysis_path = context.config("analysis_path")
     out_path = os.path.join(analysis_path, "matching_compare")
@@ -268,26 +307,18 @@ def execute(context):
     df_pop_m1 = df_sampled.merge(df_m1[["person_id", "mz_person_id"]], on="person_id", how="left")
     df_pop_m2 = df_sampled.merge(df_m2[["person_id", "mz_person_id"]], on="person_id", how="left")
 
-    if "person_weight" not in df_pop_m1.columns:
-        df_pop_m1["person_weight"] = 1.0
-    if "person_weight" not in df_pop_m2.columns:
-        df_pop_m2["person_weight"] = 1.0
+    df_pop_m1["person_weight"] = 1.0
+    df_pop_m2["person_weight"] = 1.0
 
-    df_mz_persons = context.stage("data.microcensus.persons").copy()
-    df_chains = context.stage("data.microcensus.activity_chains")["person_id person_weight weekend workday day activity_chain".split()].copy()
+    df_mz_persons = get_mz_persons(context)
     df_trips = context.stage("data.microcensus.trips")[0][["person_id", "trip_id", "purpose", "origin_purpose"]].copy()
 
-    if scenario_day == "workday":
-        keep_ids = set(df_mz_persons.loc[df_mz_persons["workday"], "person_id"])
-    elif scenario_day == "weekend":
-        keep_ids = set(df_mz_persons.loc[df_mz_persons["weekend"], "person_id"])
-    elif scenario_day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
-        keep_ids = set(df_mz_persons.loc[df_mz_persons["day"] == scenario_day, "person_id"])
-    else:
-        keep_ids = set(df_mz_persons["person_id"])
+    # Keep filtering consistent with analysis.py: only non-weekend observations.
+    keep_ids = set(df_mz_persons.loc[~df_mz_persons["weekend"], "person_id"])
+    if scenario_day != "workday":
+        logger.info("compare_matching uses non-weekend filtering to match analysis.py (specific_day_scenario=%s ignored).", scenario_day)
 
     df_mz_persons = df_mz_persons[df_mz_persons["person_id"].isin(keep_ids)].copy()
-    df_chains = df_chains[df_chains["person_id"].isin(keep_ids)].copy()
     df_trips = df_trips[df_trips["person_id"].isin(keep_ids)].copy()
 
     # Ensure men/women filters are consistent across all datasets.
@@ -296,8 +327,12 @@ def execute(context):
     df_pop_m2 = _normalize_sex_column(df_pop_m2, "sex")
     df_mz_persons = _normalize_sex_column(df_mz_persons, "sex")
 
-    df_chains["chain_short"] = df_chains["activity_chain"].apply(_sanitize_chain)
-    chain_lookup = df_chains[["person_id", "chain_short"]].rename(columns={"person_id": "mz_person_id"})
+    # Build chains from trips exactly as in analysis.py, and add no-trip persons as H.
+    df_mz_chains = _build_chain_from_trips(df_trips)
+    df_mz_chains = df_mz_persons[["person_id", "person_weight"]].merge(df_mz_chains, on="person_id", how="left")
+    df_mz_chains["chain_short"] = df_mz_chains["chain_short"].fillna("H")
+
+    chain_lookup = df_mz_chains[["person_id", "chain_short"]].rename(columns={"person_id": "mz_person_id"})
 
     trips_stats = df_trips.groupby("person_id", as_index=False).agg(
         trip_count=("trip_id", "count"),
@@ -321,10 +356,10 @@ def execute(context):
         m1_group["chain_short"] = m1_group["chain_short"].fillna("H")
         m2_group["chain_short"] = m2_group["chain_short"].fillna("H")
 
-        mz_chain = df_chains[df_chains["person_id"].isin(set(mz_group["person_id"]))]
+        mz_chain = df_mz_chains[df_mz_chains["person_id"].isin(set(mz_group["person_id"]))]
         dist_micro = _weighted_distribution(mz_chain, "chain_short", "person_weight")
-        dist_v1 = _weighted_distribution(m1_group, "chain_short", "person_weight")
-        dist_v2 = _weighted_distribution(m2_group, "chain_short", "person_weight")
+        dist_v1 = _weighted_distribution(m1_group, "chain_short", None)
+        dist_v2 = _weighted_distribution(m2_group, "chain_short", None)
 
         _plot_chain_comparison(out_path, group_name, dist_micro, dist_v1, dist_v2, top_n=top_n)
 
