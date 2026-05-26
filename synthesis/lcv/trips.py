@@ -24,6 +24,12 @@ def configure(context):
     context.stage("data.statent.statent")
     context.stage("synthesis.freight.trips")
 
+    context.stage("data.microcensus.21.trips")
+    context.stage("data.microcensus.21.persons")
+
+    context.stage("data.statpop.persons")
+    context.config("lcv_home_destination_after", default=8 * 3600)
+
     context.config("input_downsampling")
     context.config("random_seed")
     context.config("data_path")
@@ -33,6 +39,106 @@ def configure(context):
 # -----------------------------------------------------------------------------
 # HELPER FUNCTIONS
 # -----------------------------------------------------------------------------
+def build_home_sampling_points(
+    context,
+    gpkg_path,
+    layer_name,
+    zone_id_col,
+    home_x_col="home_x",
+    home_y_col="home_y",
+):
+    """
+    Build zone_id -> array([[home_x, home_y], ...]) using data.statpop.persons.
+
+    Homes are assigned to zones via spatial join based on home_x/home_y.
+    No centroid fallback here: if a zone has no homes, it simply has no home candidates.
+    """
+    if layer_name is None:
+        zones_gdf = gpd.read_file(gpkg_path)
+    else:
+        zones_gdf = gpd.read_file(gpkg_path, layer=layer_name)
+
+    zones_gdf = zones_gdf[[zone_id_col, "geometry"]].copy()
+    zones_gdf = zones_gdf.rename(columns={zone_id_col: "zone_id"})
+    zones_gdf["zone_id"] = zones_gdf["zone_id"].astype(int)
+    zones_gdf = zones_gdf.drop_duplicates(subset="zone_id").reset_index(drop=True)
+
+    valid_zone_ids = set(zones_gdf["zone_id"].unique())
+
+    df_persons = context.stage("data.statpop.persons")
+    df_persons = df_persons[[home_x_col, home_y_col]].dropna().copy()
+
+    homes_gdf = gpd.GeoDataFrame(
+        df_persons,
+        geometry=gpd.points_from_xy(df_persons[home_x_col], df_persons[home_y_col]),
+        crs=zones_gdf.crs,
+    )
+
+    homes_joined = gpd.sjoin(
+        homes_gdf,
+        zones_gdf[["zone_id", "geometry"]],
+        how="inner",
+        predicate="within",
+    ).reset_index(drop=True)
+
+    homes_joined["zone_id"] = homes_joined["zone_id"].astype(int)
+    homes_joined = homes_joined[homes_joined["zone_id"].isin(valid_zone_ids)].copy()
+
+    homes_joined["x"] = homes_joined.geometry.x
+    homes_joined["y"] = homes_joined.geometry.y
+
+    home_zone_to_points = {}
+    for zid, grp in homes_joined.groupby("zone_id"):
+        home_zone_to_points[int(zid)] = grp[["x", "y"]].to_numpy()
+
+    return home_zone_to_points
+
+
+def add_home_destinations_after_time(
+    trips_df,
+    enterprise_zone_to_points,
+    home_zone_to_points,
+    after_time_sec=8 * 3600,
+    seed=None,
+):
+    """
+    For trips departing at/after after_time_sec, allow destinations to be sampled
+    from enterprise + home points in the destination zone.
+
+    Before after_time_sec, destinations stay exactly as originally sampled.
+    """
+    rng = np.random.default_rng(seed)
+    out = trips_df.copy()
+
+    eligible = out["departure_time"] >= after_time_sec
+    eligible_idx = out.index[eligible].to_numpy()
+
+    if len(eligible_idx) == 0:
+        return out
+
+    for dest_zone, idx in out.loc[eligible_idx].groupby("destination_zone").groups.items():
+        dest_zone = int(dest_zone)
+
+        enterprise_pts = enterprise_zone_to_points.get(dest_zone)
+        home_pts = home_zone_to_points.get(dest_zone)
+
+        if home_pts is None or len(home_pts) == 0:
+            continue
+
+        if enterprise_pts is None or len(enterprise_pts) == 0:
+            candidate_pts = home_pts
+        else:
+            candidate_pts = np.vstack([enterprise_pts, home_pts])
+
+        idx = np.asarray(list(idx))
+        sampled_idx = rng.integers(0, len(candidate_pts), size=len(idx))
+        sampled_pts = candidate_pts[sampled_idx]
+
+        out.loc[idx, "destination_x"] = sampled_pts[:, 0]
+        out.loc[idx, "destination_y"] = sampled_pts[:, 1]
+
+    return out
+
 def load_od_from_omx(path, matrix_key, lookup_key):
     """Load OD matrix and zone IDs from OMX file, return long OD DataFrame."""
     with h5py.File(path, "r") as f:
@@ -404,15 +510,18 @@ def execute(context):
      # 5) Sample departure times and attach to trips
     logger.info("[5/5] Sampling departure times for each trip...")
 
-    df_mz_trips   = pd.read_csv("%s/microcensus/wege.csv" % data_path, encoding = "latin1")
-    df_mz_persons = pd.read_csv("%s/microcensus/zielpersonen.csv" % data_path, encoding = "latin1")
-    df_mz_trips.merge(df_mz_persons[["HHNR", "WP"]], on="HHNR")
-    df_mz_trips = df_mz_trips[[
-        "HHNR", "WEGNR", "f51100", "wzweck1", "wzweck2", "wmittel",
-        "S_X_CH1903", "S_Y_CH1903", "Z_X_CH1903", "Z_Y_CH1903", "W_X_CH1903", "W_Y_CH1903",
-        "w_rdist", "WP"
-    ]]
+    # --- Microcensus 2015 ---
+    df_mz15_trips = pd.read_csv("%s/microcensus/wege.csv" % data_path, encoding="latin1")
+    df_mz15_trips = df_mz15_trips.drop(columns=["WP"])
+    df_mz15_persons = pd.read_csv("%s/microcensus/zielpersonen.csv" % data_path, encoding="latin1")
 
+    df_mz15_trips = df_mz15_trips.merge(
+        df_mz15_persons[["HHNR", "WP"]],
+        on="HHNR",
+        how="left",
+    )
+
+    df_mz15_trips["mz_year"] = 2015
     mode_map = {
         -99: "unknown",  # Pseudo stage
         1: "pt",         # Plane
@@ -434,7 +543,64 @@ def execute(context):
         17: "unknown"    # Other / don't know
     }
 
-    df_mz_trips["mode"] = df_mz_trips["wmittel"].map(mode_map)
+    df_mz15_trips["mode"] = df_mz15_trips["wmittel"].map(mode_map)
+    #keeping only the truck trips to obtain the departure time curve
+    df_mz15_trips = df_mz15_trips[df_mz15_trips["mode"]=="truck"]
+    df_mz15_trips = df_mz15_trips[[
+        "HHNR", "f51100", "mode", "WP"
+    ]]
+
+    # --- Microcensus 2021 ---
+    df_mz21_trips = pd.read_csv("%s/microcensus/21/wege.csv" % data_path, sep=";", encoding="latin1")
+    df_mz21_persons = pd.read_csv("%s/microcensus/21/zielpersonen.csv" % data_path, sep=";", encoding="latin1")
+    df_mz21_trips = df_mz21_trips.drop(columns=["WP"])
+    df_mz21_trips = df_mz21_trips.merge(
+        df_mz21_persons[["HHNR", "WP"]],
+        on="HHNR",
+        how="left",
+    )
+   
+    df_mz21_trips["mz_year"] = 2021
+    #TODO: wmittel1 is the mode in mz 21
+    mode_map = {
+        -99: "unknown",  # Pseudo stage
+        1: "pt",         # Plane
+        2: "pt",         # Train
+        3: "pt",         # Ship
+        4: "pt",         # Tram
+        5: "pt",         # Bus, postauto
+        6: "pt",         # other PT
+        7: "pt",         # Reisecar (coach)
+        8: "car",        # Car
+        9: "truck",       # Truck
+        10: "pt",        # Taxi
+        11: "pt",        # Taxi-like modes e.g. Uber
+        12: "car",       # Motorbike
+        13: "car",       # Mofa
+        14: "bike",      # E-bike
+        15: "bike",      # bike
+        16: "walk",      # Walking
+        17: "bike",      # Machines similar to a vehicle
+        18: "unknown"    # Other / don't know
+    }
+
+    df_mz21_trips["mode"] = df_mz21_trips["wmittel1"].map(mode_map)
+    df_mz21_trips = df_mz21_trips[df_mz21_trips["mode"]=="truck"]
+    df_mz21_trips = df_mz21_trips[[
+        "HHNR", "f51100", "mode", "WP"
+    ]]
+    # --- Combine both years ---
+    df_mz_trips = pd.concat(
+        [df_mz15_trips, df_mz21_trips],
+        ignore_index=True,
+        sort=False,
+    )
+    df_mz_trips = df_mz_trips[[
+        "HHNR", "f51100", "mode", "WP"
+    ]]
+    print(df_mz_trips)
+    
+
     ##NOTE: there are also departure times between 24:00 and 30:00 we currently do not do anything special about it
     ## we treat it the same way as for the movement of people
     df_mz_trips.loc[:, "departure_time"] = df_mz_trips["f51100"] * 60
@@ -445,7 +611,7 @@ def execute(context):
         dep_df,
         weight_col="person_weight",
         time_col="departure_time",
-        bin_width_sec=1800,
+        bin_width_sec=3600,
     )
 
     trips_df = sample_departure_times_binned(
@@ -454,9 +620,50 @@ def execute(context):
         seed=seed,
     )
 
+    logger.info("[5/5] Adding home locations as possible destinations after configured time...")
+
+    home_zone_to_points = build_home_sampling_points(
+        context,
+        "%s/npvm/1_Verkehrszonen_Schweiz_NPVM_2023.gpkg" % data_path,
+        None,
+        "No",
+        "home_x",
+        "home_y",
+    )
+
+    trips_df = add_home_destinations_after_time(
+        trips_df,
+        zone_to_points,
+        home_zone_to_points,
+        after_time_sec=context.config("lcv_home_destination_after"),
+        seed=seed,
+    )
+
+    logger.info(
+        "    Home destinations available after %d seconds; home zones with points: %d",
+        context.config("lcv_home_destination_after"),
+        len(home_zone_to_points),
+    )
+
     # if the freight module is used, make sure that the trip ids do not overlap
     if context.config("use_freight"):
         id_offset = context.stage("synthesis.freight.trips")["agent_id"].max() + 1
         trips_df["trip_id"] += id_offset
 
+    print(trips_df[trips_df["origin_x"]==trips_df["destination_x"]])
+    bin_width = 3600
+
+    departure_distribution = (
+        trips_df
+        .assign(departure_hour_bin=(trips_df["departure_time"] // bin_width).astype(int))
+        .groupby("departure_hour_bin")
+        .size()
+        .reset_index(name="n_trips")
+    )
+
+    departure_distribution["start_sec"] = departure_distribution["departure_hour_bin"] * bin_width
+    departure_distribution["end_sec"] = departure_distribution["start_sec"] + bin_width
+    departure_distribution["share"] = departure_distribution["n_trips"] / departure_distribution["n_trips"].sum()
+
+    print(departure_distribution)
     return trips_df
