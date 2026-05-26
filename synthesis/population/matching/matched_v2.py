@@ -3,9 +3,8 @@ import importlib
 import numpy as np
 import pandas as pd
 
-from sklearn.compose import ColumnTransformer
 from sklearn.neighbors import NearestNeighbors
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 
 try:
 	torch = importlib.import_module("torch")
@@ -21,13 +20,27 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
 	context.config("random_seed")
-	context.config("matching_embedding_top_k", 15)
-	context.config("matching_embedding_temperature", 0.25)
-	context.config("matching_embedding_epochs", 25)
+	context.config("matching_embedding_top_k", 10)
+	context.config("matching_embedding_temperature", 0.05)
+	context.config("matching_embedding_epochs", 100)
 	context.config("matching_embedding_batch_size", 256)
 	context.config("matching_embedding_lr", 1.0e-3)
-	context.config("matching_embedding_dropout", 0.2)
-	context.config("matching_embedding_weight_decay", 1.0e-4)
+	context.config("matching_embedding_dropout", 0.1)
+	context.config("matching_embedding_weight_decay", 1.0e-3)
+	context.config("matching_embedding_max_sequence_len", 12)
+	context.config("matching_loss_weight_activity", 1.0)
+	context.config("matching_loss_weight_trip_count", 1.0)
+	context.config("matching_loss_weight_mode", 0.2)
+	context.config("matching_loss_weight_departure", 0.5)
+	context.config("matching_loss_weight_reconstruction", 0.3)
+	context.config("matching_loss_weight_latent_norm", 0.05)
+	context.config("matching_loss_weight_latent_spread", 0.15)
+	context.config("matching_embedding_geo_proj_dim", 8)
+	context.config("matching_embedding_cars_proj_dim", 4)
+	context.config("matching_embedding_emp_proj_dim", 4)
+	context.config("matching_embedding_misc_proj_dim", 8)
+	context.config("matching_use_class_weighting", True)
+	context.config("matching_trip_count_scale", 5.0)
 	context.config("specific_day_scenario", default="workday")
 
 	context.stage("data.microcensus.persons")
@@ -38,16 +51,44 @@ def configure(context):
 	context.stage("data.constants")
 
 
-def _make_one_hot_encoder():
-	try:
-		return OneHotEncoder(handle_unknown="ignore", sparse_output=False)
-	except TypeError:
-		return OneHotEncoder(handle_unknown="ignore", sparse=False)
-
-
 def _l2_normalize(x):
 	norms = np.linalg.norm(x, axis=1, keepdims=True)
 	return x / np.maximum(norms, 1e-12)
+
+
+def _fit_feature_processors(df_source, df_population):
+	cont_cols = ["age", "N_children_under_12", "commute_distance", "household_size"]
+	cat_cols = [
+		"canton_id", "sp_region", "municipality_type", "ovgk",
+		"number_of_cars_class", "car_availability",
+		"employed", "employment_status", "income_class", "sex",
+		"work_location_type", "marital_status", "number_of_bikes_class"
+	]
+
+	scaler = StandardScaler()
+	scaler.fit(df_source[cont_cols].astype(float).values)
+
+	mappings = {}
+	for col in cat_cols:
+		merged = pd.concat([df_source[col], df_population[col]], axis=0)
+		vals = merged.astype(str).fillna("<na>").unique().tolist()
+		vals = sorted(vals)
+		mappings[col] = {v: i + 1 for i, v in enumerate(vals)}
+
+	return scaler, mappings, cont_cols
+
+
+def _transform_model_inputs(df, scaler, mappings, cont_cols):
+	out = {
+		"cont": scaler.transform(df[cont_cols].astype(float).values).astype(np.float32),
+	}
+
+	for col, mapping in mappings.items():
+		s = df[col].astype(str).fillna("<na>")
+		out[col] = s.map(lambda v: mapping.get(v, 0)).astype(np.int64).values
+
+	out["cardinalities"] = {k: len(v) + 1 for k, v in mappings.items()}  # +1 for unknown index 0
+	return out
 
 
 def _sample_knn(src_emb, src_w, tgt_emb, top_k, temperature, rng):
@@ -81,10 +122,24 @@ def _sample_knn(src_emb, src_w, tgt_emb, top_k, temperature, rng):
 
 if torch is not None:
 	class EmbeddingGRUModel(nn.Module):
-		def __init__(self, input_dim, n_activity, n_mode, dropout=0.2):
+		def __init__(self, cont_dim, cardinalities, n_activity, n_mode, dropout=0.2,
+					 geo_proj_dim=10, cars_proj_dim=4, emp_proj_dim=4, misc_proj_dim=8):
 			super().__init__()
+			self.card = cardinalities
+
+			geo_dim = self.card["canton_id"] + self.card["sp_region"] + self.card["municipality_type"] + self.card["ovgk"]
+			cars_dim = self.card["number_of_cars_class"] + self.card["car_availability"]
+			emp_dim = self.card["employed"] + self.card["employment_status"]
+			misc_dim = self.card["income_class"] + self.card["sex"] + self.card["work_location_type"] + self.card["marital_status"] + self.card["number_of_bikes_class"]
+
+			self.geo_proj = nn.Sequential(nn.Linear(geo_dim, geo_proj_dim), nn.LayerNorm(geo_proj_dim), nn.ReLU(), nn.Dropout(dropout))
+			self.cars_proj = nn.Sequential(nn.Linear(cars_dim, cars_proj_dim), nn.LayerNorm(cars_proj_dim), nn.ReLU(), nn.Dropout(dropout))
+			self.emp_proj = nn.Sequential(nn.Linear(emp_dim, emp_proj_dim), nn.LayerNorm(emp_proj_dim), nn.ReLU(), nn.Dropout(dropout))
+			self.misc_proj = nn.Sequential(nn.Linear(misc_dim, misc_proj_dim), nn.LayerNorm(misc_proj_dim), nn.ReLU(), nn.Dropout(dropout))
+
+			encoder_input_dim = cont_dim + geo_proj_dim + cars_proj_dim + emp_proj_dim + misc_proj_dim
 			self.encoder = nn.Sequential(
-				nn.Linear(input_dim, 32),
+				nn.Linear(encoder_input_dim, 32),
 				nn.LayerNorm(32),
 				nn.ReLU(),
 				nn.Dropout(dropout),
@@ -98,6 +153,7 @@ if torch is not None:
 			self.activity_head = nn.Linear(16, n_activity)
 			self.mode_head = nn.Linear(16, n_mode)
 			self.departure_head = nn.Sequential(nn.Linear(16, 1), nn.Sigmoid())
+			self.trip_count_head = nn.Sequential(nn.Linear(16, 1), nn.Sigmoid())
 
 			# Reconstruction head to keep latent informative (autoencoder-like regularization).
 			self.reconstruction = nn.Sequential(
@@ -105,14 +161,54 @@ if torch is not None:
 				nn.LayerNorm(32),
 				nn.ReLU(),
 				nn.Dropout(dropout),
-				nn.Linear(32, input_dim),
+				nn.Linear(32, encoder_input_dim),
 			)
 
+		def _one_hot(self, idx, depth):
+			return F.one_hot(idx.clamp(min=0, max=depth - 1), num_classes=depth).float()
+
+		def _build_encoder_input(self, x):
+			geo = torch.cat([
+				self._one_hot(x["canton_id"], self.card["canton_id"]),
+				self._one_hot(x["sp_region"], self.card["sp_region"]),
+				self._one_hot(x["municipality_type"], self.card["municipality_type"]),
+				self._one_hot(x["ovgk"], self.card["ovgk"]),
+			], dim=1)
+
+			cars = torch.cat([
+				self._one_hot(x["number_of_cars_class"], self.card["number_of_cars_class"]),
+				self._one_hot(x["car_availability"], self.card["car_availability"]),
+			], dim=1)
+
+			emp = torch.cat([
+				self._one_hot(x["employed"], self.card["employed"]),
+				self._one_hot(x["employment_status"], self.card["employment_status"]),
+			], dim=1)
+
+			misc = torch.cat([
+				self._one_hot(x["income_class"], self.card["income_class"]),
+				self._one_hot(x["sex"], self.card["sex"]),
+				self._one_hot(x["work_location_type"], self.card["work_location_type"]),
+				self._one_hot(x["marital_status"], self.card["marital_status"]),
+				self._one_hot(x["number_of_bikes_class"], self.card["number_of_bikes_class"]),
+			], dim=1)
+
+			x_all = torch.cat([
+				x["cont"],
+				self.geo_proj(geo),
+				self.cars_proj(cars),
+				self.emp_proj(emp),
+				self.misc_proj(misc),
+			], dim=1)
+			return x_all
+
 		def encode(self, x):
-			return self.encoder(x)
+			x_all = self._build_encoder_input(x)
+			return self.encoder(x_all)
 
 		def forward(self, x, act_in, mode_in, dep_in):
-			z = self.encode(x)
+			x_all = self._build_encoder_input(x)
+			z = self.encoder(x_all)
 			h0 = z.unsqueeze(0)
 			seq_in = torch.cat([
 				self.activity_emb(act_in),
@@ -123,15 +219,28 @@ if torch is not None:
 			act_logits = self.activity_head(h)
 			mode_logits = self.mode_head(h)
 			dep_pred = self.departure_head(h).squeeze(-1)
+			trip_pred = self.trip_count_head(z).squeeze(-1)
 			x_recon = self.reconstruction(z)
-			return z, act_logits, mode_logits, dep_pred, x_recon
+			return z, act_logits, mode_logits, dep_pred, trip_pred, x_recon, x_all
 else:
 	class EmbeddingGRUModel:
 		def __init__(self, *args, **kwargs):
 			raise RuntimeError("PyTorch is required for matched_v2. Install torch in this environment.")
 
 
-def train_embedding_model(x, y, random_seed=0, epochs=25, batch_size=256, lr=1.0e-3, dropout=0.2, weight_decay=1.0e-4):
+def train_embedding_model(
+	x,
+	y,
+	random_seed=0,
+	epochs=25,
+	batch_size=256,
+	lr=1.0e-3,
+	dropout=0.2,
+	weight_decay=1.0e-4,
+	loss_weights=None,
+	proj_dims=None,
+	use_class_weighting=True,
+):
 	"""
 	Train the embedding model from static features x and sequence targets y.
 	Returns a trained torch model.
@@ -139,18 +248,43 @@ def train_embedding_model(x, y, random_seed=0, epochs=25, batch_size=256, lr=1.0
 	if torch is None:
 		raise RuntimeError("PyTorch is required for matched_v2. Install torch in this environment.")
 
+	if loss_weights is None:
+		loss_weights = {
+			"activity": 1.0,
+			"trip_count": 1.1,
+			"mode": 0.2,
+			"departure": 0.5,
+			"reconstruction": 0.3,
+			"latent_norm": 0.01,
+			"latent_spread": 0.15,
+		}
+
 	torch.manual_seed(random_seed)
 	np.random.seed(random_seed)
 
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+	cardinalities = x["cardinalities"]
+	if proj_dims is None:
+		proj_dims = {"geo": 10, "cars": 4, "emp": 4, "misc": 8}
 	model = EmbeddingGRUModel(
-		input_dim=x.shape[1],
+		cont_dim=x["cont"].shape[1],
+		cardinalities=cardinalities,
 		n_activity=int(y["num_activity_classes"]),
 		n_mode=int(y["num_mode_classes"]),
 		dropout=float(dropout),
+		geo_proj_dim=int(proj_dims["geo"]),
+		cars_proj_dim=int(proj_dims["cars"]),
+		emp_proj_dim=int(proj_dims["emp"]),
+		misc_proj_dim=int(proj_dims["misc"]),
 	).to(device)
 
-	x_t = torch.tensor(x, dtype=torch.float32, device=device)
+	x_t = {}
+	for k, arr in x.items():
+		if k == "cardinalities":
+			continue
+		dtype = torch.float32 if k == "cont" else torch.long
+		x_t[k] = torch.tensor(arr, dtype=dtype, device=device)
+
 	act_in = torch.tensor(y["act_in"], dtype=torch.long, device=device)
 	mode_in = torch.tensor(y["mode_in"], dtype=torch.long, device=device)
 	dep_in = torch.tensor(y["dep_in"], dtype=torch.float32, device=device)
@@ -158,9 +292,38 @@ def train_embedding_model(x, y, random_seed=0, epochs=25, batch_size=256, lr=1.0
 	mode_tgt = torch.tensor(y["mode_tgt"], dtype=torch.long, device=device)
 	dep_tgt = torch.tensor(y["dep_tgt"], dtype=torch.float32, device=device)
 	dep_mask = torch.tensor(y["dep_mask"], dtype=torch.float32, device=device)
+	trip_count_tgt = torch.tensor(y["trip_count_tgt"], dtype=torch.float32, device=device)
+	sample_w = torch.tensor(y["sample_weight"], dtype=torch.float32, device=device)
+
+	act_weight = None
+	mode_weight = None
+	if use_class_weighting:
+		with torch.no_grad():
+			flat_a = act_tgt.reshape(-1)
+			flat_m = mode_tgt.reshape(-1)
+
+			valid_a = flat_a[flat_a >= 0]
+			valid_m = flat_m[flat_m >= 0]
+
+			n_a = int(y["num_activity_classes"])
+			n_m = int(y["num_mode_classes"])
+
+			if len(valid_a) > 0:
+				counts_a = torch.bincount(valid_a, minlength=n_a).float()
+				counts_a = torch.clamp(counts_a, min=1.0)
+				act_weight = (counts_a.sum() / counts_a) / n_a
+				act_weight[0] = 0.0
+				act_weight = act_weight.to(device)
+
+			if len(valid_m) > 0:
+				counts_m = torch.bincount(valid_m, minlength=n_m).float()
+				counts_m = torch.clamp(counts_m, min=1.0)
+				mode_weight = (counts_m.sum() / counts_m) / n_m
+				mode_weight[0] = 0.0
+				mode_weight = mode_weight.to(device)
 
 	optimizer = torch.optim.AdamW(model.parameters(), lr=float(lr), weight_decay=float(weight_decay))
-	n = x_t.shape[0]
+	n = x_t["cont"].shape[0]
 	epochs = max(int(epochs), 1)
 	batch_size = max(int(batch_size), 1)
 
@@ -171,28 +334,57 @@ def train_embedding_model(x, y, random_seed=0, epochs=25, batch_size=256, lr=1.0
 
 		for i in range(0, n, batch_size):
 			idx = torch.tensor(perm[i:i + batch_size], dtype=torch.long, device=device)
+			x_batch = {k: v[idx] for k, v in x_t.items()}
+			w_batch = sample_w[idx]
+			w_norm = w_batch / torch.clamp(w_batch.mean(), min=1e-6)
 
-			z, act_logits, mode_logits, dep_pred, x_recon = model(
-				x_t[idx], act_in[idx], mode_in[idx], dep_in[idx]
+			z, act_logits, mode_logits, dep_pred, trip_pred, x_recon, x_all = model(
+				x_batch, act_in[idx], mode_in[idx], dep_in[idx]
 			)
 
-			act_loss = F.cross_entropy(
+			act_per_token = F.cross_entropy(
 				act_logits.reshape(-1, act_logits.shape[-1]),
 				act_tgt[idx].reshape(-1),
+				weight=act_weight,
 				ignore_index=-100,
-			)
-			mode_loss = F.cross_entropy(
+				reduction="none",
+			).reshape(act_tgt[idx].shape)
+			act_mask = (act_tgt[idx] != -100).float()
+			act_per_person = (act_per_token * act_mask).sum(dim=1) / torch.clamp(act_mask.sum(dim=1), min=1.0)
+			act_loss = (act_per_person * w_norm).mean()
+
+			mode_per_token = F.cross_entropy(
 				mode_logits.reshape(-1, mode_logits.shape[-1]),
 				mode_tgt[idx].reshape(-1),
+				weight=mode_weight,
 				ignore_index=-100,
-			)
-			dep_mse = ((dep_pred - dep_tgt[idx]) ** 2 * dep_mask[idx]).sum() / dep_mask[idx].sum().clamp(min=1.0)
+				reduction="none",
+			).reshape(mode_tgt[idx].shape)
+			mode_mask = (mode_tgt[idx] != -100).float()
+			mode_per_person = (mode_per_token * mode_mask).sum(dim=1) / torch.clamp(mode_mask.sum(dim=1), min=1.0)
+			mode_loss = (mode_per_person * w_norm).mean()
 
-			recon_loss = F.mse_loss(x_recon, x_t[idx])
-			latent_norm = (z ** 2).mean()
+			dep_sq = ((dep_pred - dep_tgt[idx]) ** 2) * dep_mask[idx]
+			dep_per_person = dep_sq.sum(dim=1) / torch.clamp(dep_mask[idx].sum(dim=1), min=1.0)
+			dep_mse = (dep_per_person * w_norm).mean()
+
+			trip_count_per_person = (trip_pred - trip_count_tgt[idx]) ** 2
+			trip_count_mse = (trip_count_per_person * w_norm).mean()
+
+			recon_per_person = ((x_recon - x_all) ** 2).mean(dim=1)
+			recon_loss = (recon_per_person * w_norm).mean()
+			latent_norm = (((z ** 2).mean(dim=1)) * w_norm).mean()
 			latent_spread = F.relu(0.5 - z.var(dim=0).mean())
 
-			loss = act_loss + mode_loss + 0.4 * dep_mse + 0.2 * recon_loss + 0.01 * latent_norm + 0.1 * latent_spread
+			loss = (
+				float(loss_weights["activity"]) * act_loss
+				+ float(loss_weights["trip_count"]) * trip_count_mse
+				+ float(loss_weights["mode"]) * mode_loss
+				+ float(loss_weights["departure"]) * dep_mse
+				+ float(loss_weights["reconstruction"]) * recon_loss
+				+ float(loss_weights["latent_norm"]) * latent_norm
+				+ float(loss_weights["latent_spread"]) * latent_spread
+			)
 
 			optimizer.zero_grad()
 			loss.backward()
@@ -208,11 +400,18 @@ def train_embedding_model(x, y, random_seed=0, epochs=25, batch_size=256, lr=1.0
 
 def _encode_with_model(model, x, batch_size=4096):
 	device = next(model.parameters()).device
-	x_t = torch.tensor(x, dtype=torch.float32, device=device)
+	x_t = {}
+	for k, arr in x.items():
+		if k == "cardinalities":
+			continue
+		dtype = torch.float32 if k == "cont" else torch.long
+		x_t[k] = torch.tensor(arr, dtype=dtype, device=device)
+	n = x_t["cont"].shape[0]
 	out = []
 	with torch.no_grad():
-		for i in range(0, len(x_t), batch_size):
-			z = model.encode(x_t[i:i + batch_size]).cpu().numpy()
+		for i in range(0, n, batch_size):
+			batch = {k: v[i:i + batch_size] for k, v in x_t.items()}
+			z = model.encode(batch).cpu().numpy()
 			out.append(z)
 	return _l2_normalize(np.vstack(out))
 
@@ -272,6 +471,14 @@ def _prepare_common_features(df_source, df_population, const):
 			df["employment_status"] = 0
 		df["employment_status"] = pd.to_numeric(df["employment_status"], errors="coerce").fillna(0)
 
+		if "marital_status" not in df.columns:
+			df["marital_status"] = 0
+		df["marital_status"] = pd.to_numeric(df["marital_status"], errors="coerce").fillna(0)
+
+		if "number_of_bikes_class" not in df.columns:
+			df["number_of_bikes_class"] = 0
+		df["number_of_bikes_class"] = pd.to_numeric(df["number_of_bikes_class"], errors="coerce").fillna(0)
+
 		if "commute_distance" not in df.columns:
 			df["commute_distance"] = -1.0
 		df["commute_distance"] = pd.to_numeric(df["commute_distance"], errors="coerce").fillna(-1.0)
@@ -309,7 +516,7 @@ def _prepare_common_features(df_source, df_population, const):
 	return df_source, df_population, all_features, num_features, cat_features
 
 
-def _build_sequence_targets(source_ids, df_trips):
+def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count_scale=10.0, sample_weights=None):
 	seq_map = {}
 	for pid, g in df_trips.groupby("person_id"):
 		gs = g.sort_values("trip_id")
@@ -319,12 +526,18 @@ def _build_sequence_targets(source_ids, df_trips):
 		seq_map[int(pid)] = (acts, modes, deps)
 
 	seqs = []
+	trip_counts_raw = []
 	activity_values = set()
 	mode_values = set()
 	max_len = 1
 
 	for pid in source_ids:
-		acts, modes, deps = seq_map.get(int(pid), (["home"], ["no trip"], [0.0]))
+		if int(pid) in seq_map:
+			acts, modes, deps = seq_map[int(pid)]
+			trip_counts_raw.append(len(acts))
+		else:
+			acts, modes, deps = (["home"], ["no trip"], [0.0])
+			trip_counts_raw.append(0)
 		max_len = max(max_len, len(acts))
 		activity_values.update(acts)
 		mode_values.update(modes)
@@ -336,7 +549,7 @@ def _build_sequence_targets(source_ids, df_trips):
 	mode2idx = {k: i for i, k in enumerate(mode_tokens)}
 
 	n = len(seqs)
-	t = max_len
+	t = max(1, min(max_len, int(max_sequence_len)))
 	act_in = np.zeros((n, t), dtype=np.int64)
 	mode_in = np.zeros((n, t), dtype=np.int64)
 	dep_in = np.zeros((n, t), dtype=np.float32)
@@ -352,7 +565,7 @@ def _build_sequence_targets(source_ids, df_trips):
 	for i, (acts, modes, deps) in enumerate(seqs):
 		l = len(acts)
 		dep_norm = np.clip(np.array(deps, dtype=np.float32) / dep_scale, 0.0, 1.0)
-		for k in range(l):
+		for k in range(min(l, t)):
 			act_tgt[i, k] = act2idx[acts[k]]
 			mode_tgt[i, k] = mode2idx[modes[k]]
 			dep_tgt[i, k] = dep_norm[k]
@@ -367,6 +580,21 @@ def _build_sequence_targets(source_ids, df_trips):
 			mode_in[i, k] = mode2idx[modes[prev]]
 			dep_in[i, k] = dep_norm[prev]
 
+	trip_scale = max(float(trip_count_scale), 1.0)
+	trip_count_tgt = np.clip(np.array(trip_counts_raw, dtype=np.float32) / trip_scale, 0.0, 1.0)
+
+	if sample_weights is None:
+		sample_weight = np.ones((n,), dtype=np.float32)
+	else:
+		sample_weight = np.array(sample_weights, dtype=np.float32)
+		sample_weight = np.where(np.isfinite(sample_weight), sample_weight, 0.0)
+		sample_weight = np.maximum(sample_weight, 1e-6)
+		mean_w = float(np.mean(sample_weight))
+		if mean_w > 0:
+			sample_weight = sample_weight / mean_w
+		else:
+			sample_weight = np.ones((n,), dtype=np.float32)
+
 	return {
 		"act_in": act_in,
 		"mode_in": mode_in,
@@ -375,6 +603,8 @@ def _build_sequence_targets(source_ids, df_trips):
 		"mode_tgt": mode_tgt,
 		"dep_tgt": dep_tgt,
 		"dep_mask": dep_mask,
+		"trip_count_tgt": trip_count_tgt,
+		"sample_weight": sample_weight,
 		"num_activity_classes": len(activity_tokens),
 		"num_mode_classes": len(mode_tokens),
 	}
@@ -392,10 +622,29 @@ def execute(context):
 	lr = float(context.config("matching_embedding_lr"))
 	dropout = float(context.config("matching_embedding_dropout"))
 	weight_decay = float(context.config("matching_embedding_weight_decay"))
+	max_sequence_len = int(context.config("matching_embedding_max_sequence_len"))
+	loss_weights = {
+		"activity": float(context.config("matching_loss_weight_activity")),
+		"trip_count": float(context.config("matching_loss_weight_trip_count")),
+		"mode": float(context.config("matching_loss_weight_mode")),
+		"departure": float(context.config("matching_loss_weight_departure")),
+		"reconstruction": float(context.config("matching_loss_weight_reconstruction")),
+		"latent_norm": float(context.config("matching_loss_weight_latent_norm")),
+		"latent_spread": float(context.config("matching_loss_weight_latent_spread")),
+	}
+	trip_count_scale = float(context.config("matching_trip_count_scale"))
+	proj_dims = {
+		"geo": int(context.config("matching_embedding_geo_proj_dim")),
+		"cars": int(context.config("matching_embedding_cars_proj_dim")),
+		"emp": int(context.config("matching_embedding_emp_proj_dim")),
+		"misc": int(context.config("matching_embedding_misc_proj_dim")),
+	}
+	use_class_weighting = bool(context.config("matching_use_class_weighting"))
 	scenario_day = context.config("specific_day_scenario")
 
 	df_mz = get_mz_persons(context)
 	df_source = df_mz.copy()
+	df_source["person_weight"] = df_source["person_weight"].fillna(df_source["person_weight"].mean()).astype(float)
 
 	if scenario_day == "workday":
 		df_source = df_source[df_source["workday"]]
@@ -430,18 +679,21 @@ def execute(context):
 	df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"] = 3
 
 	df_source, df_population, features, num_features, cat_features = _prepare_common_features(df_source, df_population, const)
-	logger.info("Embedding matching: %d features (%d numeric, %d categorical)", len(features), len(num_features), len(cat_features))
+	logger.info("Embedding matching: grouped projections geo=%d cars=%d emp=%d misc=%d (class_weighting=%s).",
+		proj_dims["geo"], proj_dims["cars"], proj_dims["emp"], proj_dims["misc"], use_class_weighting)
 
-	preprocessor = ColumnTransformer([
-		("num", StandardScaler(), num_features),
-		("cat", _make_one_hot_encoder(), cat_features),
-	])
-
-	x_source = preprocessor.fit_transform(df_source[features]).astype(np.float32)
+	scaler, mappings, cont_cols = _fit_feature_processors(df_source, df_population)
+	x_source = _transform_model_inputs(df_source, scaler, mappings, cont_cols)
 
 	trips_cols = ["person_id", "trip_id", "departure_time", "purpose", "mode"]
 	df_trips = context.stage("data.microcensus.trips")[0][trips_cols].copy()
-	y_source = _build_sequence_targets(df_source["mz_id"].values, df_trips)
+	y_source = _build_sequence_targets(
+		df_source["mz_id"].values,
+		df_trips,
+		max_sequence_len=max_sequence_len,
+		trip_count_scale=trip_count_scale,
+		sample_weights=df_source["person_weight"].values,
+	)
 
 	model = train_embedding_model(
 		x_source,
@@ -452,6 +704,9 @@ def execute(context):
 		lr=lr,
 		dropout=dropout,
 		weight_decay=weight_decay,
+		loss_weights=loss_weights,
+		proj_dims=proj_dims,
+		use_class_weighting=use_class_weighting,
 	)
 	emb_source = _encode_with_model(model, x_source)
 
@@ -465,7 +720,7 @@ def execute(context):
 		eligible_selector = np.ones((len(df_population),), dtype=bool)
 
 	df_eligible = df_population.loc[eligible_selector].copy().reset_index(drop=True)
-	x_target = preprocessor.transform(df_eligible[features]).astype(np.float32)
+	x_target = _transform_model_inputs(df_eligible, scaler, mappings, cont_cols)
 	emb_target = _encode_with_model(model, x_target)
 
 	src_sex = df_source["sex"].values
@@ -484,9 +739,8 @@ def execute(context):
 
 		smask = (src_sex == key.sex) & (src_emp == key.employed)
 		if not np.any(smask):
-			smask = (src_sex == key.sex)
-		if not np.any(smask):
-			smask = np.ones((len(df_source),), dtype=bool)
+			logger.warning("No donor found for strict group sex=%s employed=%s; leaving %d agents unmatched.", key.sex, key.employed, int(np.sum(tmask)))
+			continue
 
 		src_local = np.where(smask)[0]
 		tgt_local = np.where(tmask)[0]
@@ -518,6 +772,8 @@ def execute(context):
 			assert np.all(df_population[df_population["person_id"].isin(unmatched)]["age"] < const.MZ_AGE_THRESHOLD)
 
 	assert len(df_matching) == len(df_population)
-	logger.info("PyTorch embedding matching done. Matched %d eligible persons.", len(df_assigned))
+	matched_eligible = int(np.sum(assigned_mz != -1))
+	unmatched_eligible = int(np.sum(assigned_mz == -1))
+	logger.info("PyTorch embedding matching done. Matched %d eligible persons; %d remained unmatched due to strict constraints.", matched_eligible, unmatched_eligible)
 
 	return df_matching, set()
