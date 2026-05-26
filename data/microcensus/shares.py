@@ -176,7 +176,7 @@ def execute(context):
         mode_shares_fr.columns = mode_shares_fr.iloc[0]
         mode_shares_fr = mode_shares_fr.drop("mode")
 
-    cantonal_modal_shares = pd.concat([cantonal_modal_shares, mode_shares_fr])
+        cantonal_modal_shares = pd.concat([cantonal_modal_shares, mode_shares_fr])
 
     # Define output file paths
     global_shares_output_path   = os.path.join(context.path(), "globalModeShares.csv")

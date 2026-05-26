@@ -16,7 +16,6 @@ def configure(context):
     context.config("last_iteration", 60)
 
     # mode shares calibration
-    context.config("estimate_dmc", default=False)
     context.config("calibrate_alphas_in_matsim", default=False)
     context.config("alphaCalibration.level", default="global")    
     context.config("calibrate_betas_in_matsim", default=False)
