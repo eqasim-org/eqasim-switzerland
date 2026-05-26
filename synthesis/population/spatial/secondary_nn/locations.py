@@ -244,7 +244,7 @@ def get_platform_mp_context():
     if platform.system() == "Windows":
         return get_context("spawn")
     elif platform.system() == "Darwin":
-        return get_context("fork")
+        return get_context("spawn")
     else:  # Linux and other Unix-like systems
         return get_context("fork")
     
