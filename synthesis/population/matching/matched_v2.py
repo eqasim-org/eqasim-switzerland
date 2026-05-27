@@ -637,7 +637,9 @@ def execute(context):
 
 	if len(df_source) == 0:
 		logger.warning("No source observations for day '%s'. Returning unmatched ids.", scenario_day)
-		df_population = context.stage("synthesis.population.sampled")[["person_id"]].copy()
+		df_population_all = context.stage("synthesis.population.sampled").copy()
+		id_cols = ["person_id"] + (["household_id"] if "household_id" in df_population_all.columns else [])
+		df_population = df_population_all[id_cols].copy()
 		df_population["mz_person_id"] = -1
 		return df_population, set()
 
@@ -735,7 +737,8 @@ def execute(context):
 		)
 		assigned_mz[tgt_local] = mz_ids[src_local[chosen_local]]
 
-	df_matching = df_population[["person_id"]].copy()
+	id_cols = ["person_id"] + (["household_id"] if "household_id" in df_population.columns else [])
+	df_matching = df_population[id_cols].copy()
 	df_matching["mz_person_id"] = -1
 
 	df_assigned = pd.DataFrame({
