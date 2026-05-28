@@ -1,5 +1,6 @@
 import logging
 import importlib
+import os
 import numpy as np
 import pandas as pd
 
@@ -22,24 +23,27 @@ def configure(context):
 	context.config("random_seed")
 	context.config("matching_embedding_top_k", 15)
 	context.config("matching_embedding_temperature", 0.3)
-	context.config("matching_embedding_epochs", 100)
+	context.config("matching_embedding_epochs", 55)
 	context.config("matching_embedding_batch_size", 64)
-	context.config("matching_embedding_lr", 1.0e-3)
-	context.config("matching_embedding_dropout", 0.1)
+	context.config("matching_embedding_lr", 3.0e-3)
+	context.config("matching_embedding_lr_decay_step", 15)
+	context.config("matching_embedding_lr_decay_gamma", 0.5)
+	context.config("matching_embedding_dropout", 0.2)
 	context.config("matching_embedding_weight_decay", 3.0e-3)
 	context.config("matching_embedding_max_sequence_len", 12)
 	context.config("matching_loss_weight_activity", 1.0)
 	context.config("matching_loss_weight_trip_count", 1.0)
-	context.config("matching_loss_weight_mode", 0.2)
-	context.config("matching_loss_weight_departure", 0.2)
+	context.config("matching_loss_weight_mode", 0.15)
+	context.config("matching_loss_weight_departure", 0.15)
 	context.config("matching_loss_weight_reconstruction", 0.3)
 	context.config("matching_loss_weight_latent_norm", 0.05)
-	context.config("matching_loss_weight_latent_spread", 0.15)
+	context.config("matching_loss_weight_latent_spread", 0.2)
 	context.config("matching_embedding_geo_proj_dim", 8)
 	context.config("matching_embedding_cars_proj_dim", 4)
 	context.config("matching_embedding_emp_proj_dim", 4)
 	context.config("matching_embedding_misc_proj_dim", 8)
 	context.config("matching_use_class_weighting", True)
+	context.config("matching_latent_noise_std", 0.08)
 	context.config("matching_trip_count_scale", 5.0)
 	context.config("specific_day_scenario", default="workday")
 
@@ -132,16 +136,16 @@ if torch is not None:
 			emp_dim = self.card["employed"] + self.card["employment_status"] + self.card["work_location_type"]
 			misc_dim = self.card["income_class"] + self.card["sex"] + self.card["marital_status"] + self.card["number_of_bikes_class"]
 
-			self.geo_proj = nn.Sequential(nn.Linear(geo_dim, geo_proj_dim), nn.LayerNorm(geo_proj_dim), nn.ReLU(), nn.Dropout(dropout))
-			self.cars_proj = nn.Sequential(nn.Linear(cars_dim, cars_proj_dim), nn.LayerNorm(cars_proj_dim), nn.ReLU(), nn.Dropout(dropout))
-			self.emp_proj = nn.Sequential(nn.Linear(emp_dim, emp_proj_dim), nn.LayerNorm(emp_proj_dim), nn.ReLU(), nn.Dropout(dropout))
-			self.misc_proj = nn.Sequential(nn.Linear(misc_dim, misc_proj_dim), nn.LayerNorm(misc_proj_dim), nn.ReLU(), nn.Dropout(dropout))
+			self.geo_proj = nn.Sequential(nn.Linear(geo_dim, geo_proj_dim), nn.LayerNorm(geo_proj_dim), nn.SiLU())
+			self.cars_proj = nn.Sequential(nn.Linear(cars_dim, cars_proj_dim), nn.LayerNorm(cars_proj_dim), nn.SiLU())
+			self.emp_proj = nn.Sequential(nn.Linear(emp_dim, emp_proj_dim), nn.LayerNorm(emp_proj_dim), nn.SiLU())
+			self.misc_proj = nn.Sequential(nn.Linear(misc_dim, misc_proj_dim), nn.LayerNorm(misc_proj_dim), nn.SiLU())
 
 			encoder_input_dim = cont_dim + geo_proj_dim + cars_proj_dim + emp_proj_dim + misc_proj_dim
 			self.encoder = nn.Sequential(
 				nn.Linear(encoder_input_dim, 32),
 				nn.LayerNorm(32),
-				nn.ReLU(),
+				nn.SiLU(),
 				nn.Dropout(dropout),
 				nn.Linear(32, 16),
 				nn.LayerNorm(16),
@@ -158,7 +162,7 @@ if torch is not None:
 			self.reconstruction = nn.Sequential(
 				nn.Linear(16, 32),
 				nn.LayerNorm(32),
-				nn.ReLU(),
+				nn.SiLU(),
 				nn.Dropout(dropout),
 				nn.Linear(32, encoder_input_dim),
 			)
@@ -208,15 +212,18 @@ if torch is not None:
 		def forward(self, x, seq_len):
 			x_all = self._build_encoder_input(x)
 			z = self.encoder(x_all)
-			h0 = z.unsqueeze(0)
+			z_train = z
+			if self.training and getattr(self, "latent_noise_std", 0.0) > 0.0:
+				z_train = z + torch.randn_like(z) * float(self.latent_noise_std)
+			h0 = z_train.unsqueeze(0)
 			seq_in = torch.zeros((z.shape[0], int(seq_len), 1), dtype=z.dtype, device=z.device)
 			h, _ = self.gru(seq_in, h0)
 			act_logits = self.activity_head(h)
 			mode_logits = self.mode_head(h)
 			dep_pred = self.departure_head(h).squeeze(-1)
-			trip_pred = self.trip_count_head(z).squeeze(-1)
-			x_recon = self.reconstruction(z)
-			return z, act_logits, mode_logits, dep_pred, trip_pred, x_recon, x_all
+			trip_pred = self.trip_count_head(z_train).squeeze(-1)
+			x_recon = self.reconstruction(z_train)
+			return z_train, act_logits, mode_logits, dep_pred, trip_pred, x_recon, x_all
 else:
 	class EmbeddingGRUModel:
 		def __init__(self, *args, **kwargs):
@@ -235,6 +242,9 @@ def train_embedding_model(
 	loss_weights=None,
 	proj_dims=None,
 	use_class_weighting=True,
+	latent_noise_std=0.0,
+	lr_decay_step=15,
+	lr_decay_gamma=0.5,
 ):
 	"""
 	Train the embedding model from static features x and sequence targets y.
@@ -272,6 +282,7 @@ def train_embedding_model(
 		emp_proj_dim=int(proj_dims["emp"]),
 		misc_proj_dim=int(proj_dims["misc"]),
 	).to(device)
+	model.latent_noise_std = float(max(latent_noise_std, 0.0))
 
 	def _one_hot_masked(target_idx, num_classes):
 		valid = (target_idx >= 0).float()
@@ -322,6 +333,11 @@ def train_embedding_model(
 				mode_weight = mode_weight.to(device)
 
 	optimizer = torch.optim.AdamW(model.parameters(), lr=float(lr), weight_decay=float(weight_decay))
+	scheduler = torch.optim.lr_scheduler.StepLR(
+		optimizer,
+		step_size=max(int(lr_decay_step), 1),
+		gamma=float(lr_decay_gamma),
+	)
 	n = x_t["cont"].shape[0]
 	epochs = max(int(epochs), 1)
 	batch_size = max(int(batch_size), 1)
@@ -387,8 +403,11 @@ def train_embedding_model(
 			optimizer.step()
 			total_loss += float(loss.item()) * len(idx)
 
+		scheduler.step()
+
 		if (epoch + 1) % 5 == 0 or epoch == 0 or epoch == epochs - 1:
-			logger.info("Embedding model epoch %d/%d - loss %.4f", epoch + 1, epochs, total_loss / n)
+			current_lr = optimizer.param_groups[0]["lr"]
+			logger.info("Embedding model epoch %d/%d - loss %.4f - lr %.6g", epoch + 1, epochs, total_loss / n, current_lr)
 
 	model.eval()
 	return model
@@ -428,21 +447,19 @@ def _prepare_common_features(df_source, df_population, const):
 	for df in (df_source, df_population):
 		if "municipality_type" not in df.columns:
 			df["municipality_type"] = "unknown"
-		df["municipality_type"] = df["municipality_type"].astype(str).str.lower().fillna("unknown")
+		df["municipality_type"] = df["municipality_type"].astype(str).fillna("unknown")
 
 		if "sex" in df.columns:
 			df["sex"] = pd.to_numeric(df["sex"], errors="coerce").fillna(-1).astype(int)
-		if "employed" in df.columns:
-			df["employed"] = pd.to_numeric(df["employed"], errors="coerce").fillna(0)
-			df["employed"] = (df["employed"] == 1).astype(int)
+
 		if "sp_region" in df.columns:
-			df["sp_region"] = pd.to_numeric(df["sp_region"], errors="coerce").fillna(-1)
+			df["sp_region"] = pd.to_numeric(df["sp_region"], errors="coerce").fillna(-1).astype(int)
 		if "canton_id" in df.columns:
-			df["canton_id"] = pd.to_numeric(df["canton_id"], errors="coerce").fillna(-1)
+			df["canton_id"] = pd.to_numeric(df["canton_id"], errors="coerce").fillna(-1).astype(int)
 
 		if "ovgk" not in df.columns:
-			df["ovgk"] = 0
-		df["ovgk"] = (df["ovgk"].astype(str) != "None").astype(int)
+			df["ovgk"] = "none"
+		df["ovgk"] = df["ovgk"].astype(str).fillna("none").str.lower()
 
 		if "N_children_under_12" not in df.columns:
 			if "N_children_under_18" in df.columns:
@@ -452,12 +469,12 @@ def _prepare_common_features(df_source, df_population, const):
 		df["N_children_under_12"] = pd.to_numeric(df["N_children_under_12"], errors="coerce").fillna(0)
 
 		if "income_class" not in df.columns:
-			df["income_class"] = -1
-		df["income_class"] = pd.to_numeric(df["income_class"], errors="coerce").fillna(-1)
+			df["income_class"] = 0
+		df["income_class"] = pd.to_numeric(df["income_class"], errors="coerce").fillna(0).astype(int)
 
 		if "number_of_cars_class" not in df.columns:
 			df["number_of_cars_class"] = 0
-		df["number_of_cars_class"] = pd.to_numeric(df["number_of_cars_class"], errors="coerce").fillna(0)
+		df["number_of_cars_class"] = pd.to_numeric(df["number_of_cars_class"], errors="coerce").fillna(0).astype(int)
 
 		if "household_size" not in df.columns:
 			df["household_size"] = 0
@@ -465,30 +482,60 @@ def _prepare_common_features(df_source, df_population, const):
 
 		if "employment_status" not in df.columns:
 			df["employment_status"] = 0
-		df["employment_status"] = pd.to_numeric(df["employment_status"], errors="coerce").fillna(0)
+		df["employment_status"] = pd.to_numeric(df["employment_status"], errors="coerce").fillna(0).astype(int)
 
 		if "marital_status" not in df.columns:
 			df["marital_status"] = 0
-		df["marital_status"] = pd.to_numeric(df["marital_status"], errors="coerce").fillna(0)
+		df["marital_status"] = pd.to_numeric(df["marital_status"], errors="coerce").fillna(0).astype(int)
 
 		if "number_of_bikes_class" not in df.columns:
 			df["number_of_bikes_class"] = 0
-		df["number_of_bikes_class"] = pd.to_numeric(df["number_of_bikes_class"], errors="coerce").fillna(0)
+		df["number_of_bikes_class"] = pd.to_numeric(df["number_of_bikes_class"], errors="coerce").fillna(0).astype(int)
 
 		if "commute_distance" not in df.columns:
 			df["commute_distance"] = -1.0
 		df["commute_distance"] = pd.to_numeric(df["commute_distance"], errors="coerce").fillna(-1.0)
-		df.loc[df["employed"] != 1, "commute_distance"] = -1.0
 
 		if "work_location_type" not in df.columns:
 			df["work_location_type"] = "none"
-		work_map = {"none": 0, "fixed": 1, "remote": 2, "moving": 3}
-		df["work_location_type"] = df["work_location_type"].map(work_map).fillna(0).astype(int)
 
-		if "car_availability" not in df.columns:
-			df["car_availability"] = 0
-		car_raw = pd.to_numeric(df["car_availability"], errors="coerce")
-		df["car_availability"] = np.where(car_raw == const.CAR_AVAILABILITY_NEVER, 0, 1).astype(int)
+	# Follow v1 employment coding: source cast directly, population maps employed==1 to 1.
+	if "employed" in df_source.columns:
+		df_source["employed"] = pd.to_numeric(df_source["employed"], errors="coerce").fillna(0).astype(int)
+	if "employed" in df_population.columns:
+		df_population["employed"] = (pd.to_numeric(df_population["employed"], errors="coerce").fillna(0) == 1).astype(int)
+
+	# Follow v1 child coding for source only (presence flag).
+	df_source["N_children_under_12"] = df_source["N_children_under_12"].astype(int)
+
+	# Follow v1 work_location_type coding for both datasets.
+	work_map = {"none": 0, "fixed": 1, "remote": 2, "moving": 3}
+	df_source["work_location_type"] = df_source["work_location_type"].map(work_map).fillna(0).astype(int)
+	df_population["work_location_type"] = df_population["work_location_type"].map(work_map).fillna(0).astype(int)
+
+	# Follow v1 car availability coding: source uses CAR_AVAILABILITY_NEVER conversion,
+	# population keeps its own encoded values and is only cast to int.
+	if "car_availability" not in df_source.columns:
+		df_source["car_availability"] = 0
+	var_raw = pd.to_numeric(df_source["car_availability"], errors="coerce")
+	df_source["car_availability"] = np.where(var_raw == const.CAR_AVAILABILITY_NEVER, 0, 1).astype(int)
+
+	if "car_availability" not in df_population.columns:
+		df_population["car_availability"] = 0
+	df_population["car_availability"] = pd.to_numeric(df_population["car_availability"], errors="coerce").fillna(0).astype(int)
+
+	if const.census == "statpop":
+		# Follow v1 statpop car-class clipping.
+		df_source["number_of_cars_class"] = df_source["number_of_cars_class"].clip(upper=5)
+		df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=5)
+
+		# Keep household-size range compact, similar to v1 cleaning.
+		df_source["household_size"] = df_source["household_size"].clip(upper=8)
+		df_population["household_size"] = df_population["household_size"].clip(upper=8)
+
+	# Follow v1 commute-distance convention for non-employed.
+	df_source.loc[df_source["employed"] != 1, "commute_distance"] = -1.0
+	df_population.loc[df_population["employed"] != 1, "commute_distance"] = -1.0
 
 	if "age" not in df_population.columns and "age_class" in df_population.columns:
 		df_population["age"] = pd.to_numeric(df_population["age_class"], errors="coerce").fillna(0) * 10.0
@@ -600,6 +647,8 @@ def execute(context):
 	epochs = int(context.config("matching_embedding_epochs"))
 	batch_size = int(context.config("matching_embedding_batch_size"))
 	lr = float(context.config("matching_embedding_lr"))
+	lr_decay_step = int(context.config("matching_embedding_lr_decay_step"))
+	lr_decay_gamma = float(context.config("matching_embedding_lr_decay_gamma"))
 	dropout = float(context.config("matching_embedding_dropout"))
 	weight_decay = float(context.config("matching_embedding_weight_decay"))
 	max_sequence_len = int(context.config("matching_embedding_max_sequence_len"))
@@ -620,6 +669,7 @@ def execute(context):
 		"misc": int(context.config("matching_embedding_misc_proj_dim")),
 	}
 	use_class_weighting = bool(context.config("matching_use_class_weighting"))
+	latent_noise_std = float(context.config("matching_latent_noise_std"))
 	scenario_day = context.config("specific_day_scenario")
 
 	df_mz = get_mz_persons(context)
@@ -689,8 +739,23 @@ def execute(context):
 		loss_weights=loss_weights,
 		proj_dims=proj_dims,
 		use_class_weighting=use_class_weighting,
+		latent_noise_std=latent_noise_std,
+		lr_decay_step=lr_decay_step,
+		lr_decay_gamma=lr_decay_gamma,
 	)
 	emb_source = _encode_with_model(model, x_source)
+
+	# Save microcensus embeddings for downstream analysis stages.
+	try:
+		emb_dir = os.path.join(context.path(), "mz_embeddings")
+		os.makedirs(emb_dir, exist_ok=True)
+		emb_cols = [f"emb_{k}" for k in range(emb_source.shape[1])]
+		df_emb = pd.DataFrame(emb_source, columns=emb_cols)
+		df_emb.insert(0, "person_id", df_source["mz_id"].values)
+		df_emb.to_csv(os.path.join(emb_dir, "mz_embeddings.csv"), index=False)
+		logger.info("Saved %d microcensus embeddings to %s", len(df_emb), emb_dir)
+	except Exception as e:
+		logger.warning("Failed to save microcensus embeddings: %s", e)
 
 	source_weights = np.maximum(pd.to_numeric(df_source["person_weight"], errors="coerce").fillna(1e-6).values, 1e-6)
 
