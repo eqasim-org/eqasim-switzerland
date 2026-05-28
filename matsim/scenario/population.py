@@ -297,6 +297,10 @@ def execute(context):
     df_activities = context.stage("synthesis.population.activities")
     df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]    
 
+    # Correct employement if required
+    if set(df_persons["employed"].unique())!={0, 1}:
+        df_persons["employed"] = (pd.to_numeric(df_persons["employed"], errors="coerce").fillna(0) == 1).astype(int)
+
     # Attach following modes to activities
     df_trips         = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
     df_trips.columns = ["person_id", "activity_index", "following_mode"]
