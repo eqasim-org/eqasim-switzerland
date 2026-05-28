@@ -33,6 +33,7 @@ def _prepare_person_attributes(context):
     df = context.stage("synthesis.population.enriched").copy()
     required = ["person_id", "age", "sex", "employed", "income_class", "car_availability", "driving_license"]
     out = df[required].copy()
+    out["employed"] = (pd.to_numeric(out["employed"], errors="coerce").fillna(0) == 1).astype(int)
     return out[["person_id", "age", "sex", "employed", "income_class", "car_availability"]]
 
 
