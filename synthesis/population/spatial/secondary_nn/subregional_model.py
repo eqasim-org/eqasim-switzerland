@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 import matplotlib.pyplot as plt
 
+from .h3 import H3_LEVEL_NAMES
 from .hierarchical_utils import SECONDARY_ACTIVITIES, build_level1_children_by_level0, build_level1_candidate_attributes_by_level0, sanitize_work_coordinates, build_hierarchical_candidate_batch_numba
 from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix
 from .choice_model import NeuralChoiceModel, train_choice_model
@@ -67,11 +68,11 @@ def execute(context):
     mz_persons = mz_persons[~mz_persons["person_id"].isin(weekend_persons)].drop(columns=["weekend"]).reset_index(drop=True)
 
     h3_data, h3_geo, h3_tree = context.stage("synthesis.population.spatial.secondary_nn.h3")
-    trips_h3 = h3_data["microcensus_trips"][["person_id", "trip_id", "destination_level_0", "destination_level_1"]]
-    h3_geo_level1 = h3_geo["level_1"]
+    trips_h3 = h3_data["microcensus_trips"][["person_id", "trip_id", f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}"]]
+    h3_geo_level1 = h3_geo[H3_LEVEL_NAMES[1]]
 
     if "outside_fraction" not in h3_geo_level1.columns:
-        raise RuntimeError("Missing outside_fraction in H3 level_1 geometry. Run h3 stage with outside_fraction enabled.")
+        raise RuntimeError(f"Missing outside_fraction in H3 {H3_LEVEL_NAMES[1]} geometry. Run h3 stage with outside_fraction enabled.")
 
     required_h3_cols = [
         "centroid", "outside_fraction", "num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure",
@@ -119,15 +120,15 @@ def execute(context):
     logger.info("\t Preparing microcensus training set...")
     df = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
     df = df.merge(mz_persons, on="person_id", how="left")
-    df = df[df["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=["destination_level_0", "destination_level_1"]).reset_index(drop=True)
+    df = df[df["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=[f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}"]).reset_index(drop=True)
 
     # Here we check that there are enough valid samples for training after filtering by the level0-level1 hierarchy, and we also determine the maximum number of level1 candidates per level0 to properly size the candidate tensors.
     valid_rows = []
     for idx, row in df.iterrows():
-        children = children_by_level0.get(row["destination_level_0"], [])
+        children = children_by_level0.get(row[f"destination_{H3_LEVEL_NAMES[0]}"], [])
         if len(children) < 2:
             continue
-        if row["destination_level_1"] not in children:
+        if row[f"destination_{H3_LEVEL_NAMES[1]}"] not in children:
             continue
         valid_rows.append(idx)
 
@@ -135,7 +136,7 @@ def execute(context):
         raise RuntimeError("No valid samples for medium model after filtering by level0-level1 hierarchy.")
     df = df.iloc[valid_rows].reset_index(drop=True)
 
-    max_children = max(len(children_by_level0[level0]) for level0 in df["destination_level_0"].unique())
+    max_children = max(len(children_by_level0[level0]) for level0 in df[f"destination_{H3_LEVEL_NAMES[0]}"].unique())
     n_samples = len(df)
 
     # here we build the candidate tensors with all features, even those not used in the model, because we want to fit the scaler on all features and then only select the ones used in the model in the wrapper. This is to ensure that the scaler is fitted on all available information and can be reused if we want to train a different model with more features without refitting the scaler.
@@ -164,8 +165,8 @@ def execute(context):
 
     with context.progress(total=n_samples, label="Medium model: building level1 choice sets") as progress:
         for i, row in df.iterrows():
-            level0 = row["destination_level_0"]
-            chosen_level1 = row["destination_level_1"]
+            level0 = row[f"destination_{H3_LEVEL_NAMES[0]}"]
+            chosen_level1 = row[f"destination_{H3_LEVEL_NAMES[1]}"]
             attrs = level1_candidate_attributes_by_level0[level0]
             children = attrs["children"]
             n_children = len(children)
@@ -290,11 +291,11 @@ def plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, valid_
     pred_idx = wrapper.predict_from_inputs(person_trip_matrix, candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:], candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC], valid_mask, rng=None, return_probabilities=False)
 
     predicted_level1 = []
-    for i, level0 in enumerate(df["destination_level_0"].to_numpy()):
+    for i, level0 in enumerate(df[f"destination_{H3_LEVEL_NAMES[0]}"].to_numpy()):
         children = children_by_level0[level0]
         predicted_level1.append(children[int(pred_idx[i])])
 
-    real_level1 = df["destination_level_1"].astype(str)
+    real_level1 = df[f"destination_{H3_LEVEL_NAMES[1]}"].astype(str)
     real_counts = real_level1.value_counts().rename("real_count")
     pred_counts = pd.Series(predicted_level1).value_counts().rename("pred_count")
     counts_df = pd.DataFrame({"real_count": real_counts, "pred_count": pred_counts}).fillna(0)
@@ -322,7 +323,7 @@ def plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, valid_
     real_dist_work = []
     pred_dist_work = []
 
-    real_level1_arr = df["destination_level_1"].astype(str).to_numpy()
+    real_level1_arr = df[f"destination_{H3_LEVEL_NAMES[1]}"].astype(str).to_numpy()
     pred_level1_arr = np.asarray(predicted_level1, dtype=str)
     for i in range(len(df)):
         real_h3 = real_level1_arr[i]

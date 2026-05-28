@@ -7,7 +7,7 @@ import torch
 import matplotlib.pyplot as plt
 import joblib
 
-from .h3 import within_ch
+from .h3 import within_ch, H3_LEVEL_NAMES
 from .hierarchical_utils import SECONDARY_ACTIVITIES, build_coarse_candidate_batch_numba
 from .feature_encoding import CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix
 from .choice_model import NeuralChoiceModel, train_choice_model
@@ -72,8 +72,8 @@ def execute(context):
     mz_trips = mz_trips[inside_ch].reset_index(drop=True)
 
     h3_data, h3_geo, _ = context.stage("synthesis.population.spatial.secondary_nn.h3")
-    trips_h3 = h3_data["microcensus_trips"][["person_id", "trip_id", "destination_level_0"]]
-    h3_geo_level0 = h3_geo["level_0"]
+    trips_h3 = h3_data["microcensus_trips"][["person_id", "trip_id", f"destination_{H3_LEVEL_NAMES[0]}"]]
+    h3_geo_level0 = h3_geo[H3_LEVEL_NAMES[0]]
 
     required_h3_cols = [
         "centroid", "outside_fraction", "num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure", "sport", 
@@ -111,16 +111,16 @@ def execute(context):
 
     person_cols = ["person_id", "age", "sex", "employed", "car_availability", "income_class", "home_x", "home_y", "work_x", "work_y"]
     trip_cols = [
-        "person_id", "trip_id", "origin_x", "origin_y", "destination_level_0", "purpose","origin_purpose",
+        "person_id", "trip_id", "origin_x", "origin_y", f"destination_{H3_LEVEL_NAMES[0]}", "purpose","origin_purpose",
         "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
         "departure_time_normalized", "daily_longest_distance_from_work",
         "activity_duration_h", "target_distance", "activity_chain"
     ]
     df_trips = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
-    df_trips = df_trips[df_trips["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=["destination_level_0"])
+    df_trips = df_trips[df_trips["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=[f"destination_{H3_LEVEL_NAMES[0]}"])
     df_trips = df_trips[trip_cols].merge(mz_persons[person_cols + ["person_weight"]], on="person_id", how="left")
 
-    y_series = df_trips["destination_level_0"].map(h3_to_index)
+    y_series = df_trips[f"destination_{H3_LEVEL_NAMES[0]}"].map(h3_to_index)
     valid = y_series.notna()
     if (~valid).any():
         logger.warning("\t Dropping %s trips with destination H3 not found in candidate set.", int((~valid).sum()))

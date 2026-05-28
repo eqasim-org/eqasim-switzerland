@@ -14,7 +14,8 @@ It also merges the unique hexagons across all datasets for each resolution level
 hexagonal geometries that can be used for further analysis or visualization.
 """
 
-H3_LEVELS = [5, 7, 9]
+H3_LEVELS = [5, 7, 10]
+H3_LEVEL_NAMES = [f"level_{i}" for i in range(len(H3_LEVELS))]
 OVGK_CATEGORIES = ['B', 'A', 'C', 'None', 'D']
 H3_DEST_FEATURE_COLUMNS = ["num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure", "sport", "gastronomy", "accommodation", "cultural", "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none"]
 
@@ -68,9 +69,9 @@ def _aggregate_destination_features_by_level(destinations_with_levels, level_col
 
 def build_h3_tree(merged_level_geoms):
     logger.info("Building H3 hierarchy tree from merged level geometries...")
-    level0_cells = set(merged_level_geoms.get("level_0", pd.DataFrame(columns=["h3_index"]))["h3_index"].tolist())
-    level1_cells = merged_level_geoms.get("level_1", pd.DataFrame(columns=["h3_index"]))["h3_index"].tolist()
-    level2_cells = merged_level_geoms.get("level_2", pd.DataFrame(columns=["h3_index"]))["h3_index"].tolist()
+    level0_cells = set(merged_level_geoms.get(H3_LEVEL_NAMES[0], pd.DataFrame(columns=["h3_index"]))["h3_index"].tolist())
+    level1_cells = merged_level_geoms.get(H3_LEVEL_NAMES[1], pd.DataFrame(columns=["h3_index"]))["h3_index"].tolist()
+    level2_cells = merged_level_geoms.get(H3_LEVEL_NAMES[-1], pd.DataFrame(columns=["h3_index"]))["h3_index"].tolist()
 
     tree = {l0: {} for l0 in level0_cells}
     logger.info("\t Adding level 1 cells to tree...")
@@ -293,21 +294,19 @@ def execute(context):
 
     # Filter hexagons to only keep those with companies (num_statent > 0).
     logger.info("H3: \t Filtering hexagons to only keep those with companies (num_statent > 0)...")
-    valid_level2 = set(merged_level_geoms["level_2"].loc[merged_level_geoms["level_2"]["num_statent"] > 0, "h3_index"])
-    valid_level1 = set(merged_level_geoms["level_1"].loc[merged_level_geoms["level_1"]["num_statent"] > 0, "h3_index"])
-    valid_level0 = set(merged_level_geoms["level_0"].loc[merged_level_geoms["level_0"]["num_statent"] > 0, "h3_index"])
-    logger.info(f"H3: \t\t Valid level_2 hexagons with companies: {len(valid_level2)}")
-    logger.info(f"H3: \t\t Valid level_1 hexagons with companies: {len(valid_level1)}")
-    logger.info(f"H3: \t\t Valid level_0 hexagons with companies: {len(valid_level0)}")
+    valid_hex = {}
+    for name in H3_LEVEL_NAMES:
+        valid_hex[name] = set(merged_level_geoms[name].loc[merged_level_geoms[name]["num_statent"] > 0, "h3_index"])
+        logger.info(f"H3: \t\t Valid {name} hexagons with companies: {len(valid_hex[name])}")
 
-    merged_level_geoms["level_2"] = merged_level_geoms["level_2"][merged_level_geoms["level_2"]["h3_index"].isin(valid_level2)].reset_index(drop=True)
-    merged_level_geoms["level_1"] = merged_level_geoms["level_1"][merged_level_geoms["level_1"]["h3_index"].isin(valid_level1)].reset_index(drop=True)
-    merged_level_geoms["level_0"] = merged_level_geoms["level_0"][merged_level_geoms["level_0"]["h3_index"].isin(valid_level0)].reset_index(drop=True)
+    for name in H3_LEVEL_NAMES:
+        merged_level_geoms[name] = merged_level_geoms[name][merged_level_geoms[name]["h3_index"].isin(valid_hex[name])].reset_index(drop=True)
 
-    # Filter MZ trips to only those whose destination falls in a company-having level_2 hexagon.
+    # Filter MZ trips to only those whose destination falls in a company-having finest-level hexagon.
+    finest_dest_col = f"destination_{H3_LEVEL_NAMES[-1]}"
     mz_trips_levels = data_collections["microcensus_trips"]
     n_before = len(mz_trips_levels)
-    mz_trips_levels = mz_trips_levels[mz_trips_levels["destination_level_2"].isin(valid_level2)].reset_index(drop=True)
+    mz_trips_levels = mz_trips_levels[mz_trips_levels[finest_dest_col].isin(valid_hex[H3_LEVEL_NAMES[-1]])].reset_index(drop=True)
     n_after = len(mz_trips_levels)
     logger.info(f"H3: \t\t MZ trips filtered from {n_before} to {n_after} (dropped {n_before - n_after} trips to hexagons without companies)")
     data_collections["microcensus_trips"] = mz_trips_levels

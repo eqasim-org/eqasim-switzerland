@@ -5,6 +5,7 @@ import pandas as pd
 import geopandas as gpd
 import h3
 from numba import njit, prange
+from .h3 import H3_LEVEL_NAMES
 from .hierarchical_utils import SECONDARY_ACTIVITIES, PRIMARY_ACTIVITIES
 
 logger = logging.getLogger("synpp: location_helpers")
@@ -82,7 +83,7 @@ def build_probability(num_employees, ovgk_none, car_available, alpha=0.7):
 
 
 def _prepare_destination_level2_index(context, h3_data, h3_geo):
-    df_dest = h3_data["destinations"][["destination_id", "level_1", "level_2"]]
+    df_dest = h3_data["destinations"][["destination_id", H3_LEVEL_NAMES[1], H3_LEVEL_NAMES[-1]]]
     
     offer_cols = [f"offers_{p}" for p in SECONDARY_ACTIVITIES]
     df_dest_attributes = context.stage("synthesis.population.destinations")[["destination_id", "number_employees", "ovgk", "geometry", *offer_cols]]
@@ -115,16 +116,16 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
         sub_dest_ids = dest_ids[mask]
         sub_geoms = geoms[mask]
 
-        # ---- level_2 ----
-        for level_2, idx in sub.groupby("level_2").indices.items():
+        # ---- finest level ----
+        for level_2, idx in sub.groupby(H3_LEVEL_NAMES[-1]).indices.items():
             index[purpose][level_2] = list(zip(sub_dest_ids[idx], sub_geoms[idx]))
             emp = sub_employees[idx]
             nov = sub_no_ovgk[idx]
             car_available_probabilities[purpose][level_2] = build_probability(emp, nov, car_available=True)
             no_car_available_probabilities[purpose][level_2] = build_probability(emp, nov, car_available=False)
 
-        # ---- level_1 ----
-        for level_1, idx in sub.groupby("level_1").indices.items():
+        # ---- middle level ----
+        for level_1, idx in sub.groupby(H3_LEVEL_NAMES[1]).indices.items():
             fallback[purpose][level_1] = list(zip(sub_dest_ids[idx], sub_geoms[idx]))
             emp = sub_employees[idx]
             nov = sub_no_ovgk[idx]
