@@ -6,6 +6,7 @@ import pandas as pd
 
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
+from .matched_v1 import get_mz_persons
 
 try:
 	torch = importlib.import_module("torch")
@@ -21,11 +22,11 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
 	context.config("random_seed")
-	context.config("matching_embedding_top_k", 15)
-	context.config("matching_embedding_temperature", 0.3)
+	context.config("matching_embedding_top_k", 20)
+	context.config("matching_embedding_temperature", 0.5)
 	context.config("matching_embedding_epochs", 55)
 	context.config("matching_embedding_batch_size", 64)
-	context.config("matching_embedding_lr", 3.0e-3)
+	context.config("matching_embedding_lr", 4.0e-3)
 	context.config("matching_embedding_lr_decay_step", 15)
 	context.config("matching_embedding_lr_decay_gamma", 0.5)
 	context.config("matching_embedding_dropout", 0.2)
@@ -40,7 +41,7 @@ def configure(context):
 	context.config("matching_loss_weight_latent_spread", 0.2)
 	context.config("matching_embedding_geo_proj_dim", 8)
 	context.config("matching_embedding_cars_proj_dim", 4)
-	context.config("matching_embedding_emp_proj_dim", 4)
+	context.config("matching_embedding_emp_proj_dim", 6)
 	context.config("matching_embedding_misc_proj_dim", 8)
 	context.config("matching_use_class_weighting", True)
 	context.config("matching_latent_noise_std", 0.08)
@@ -127,7 +128,7 @@ def _sample_knn(src_emb, src_w, tgt_emb, top_k, temperature, rng):
 if torch is not None:
 	class EmbeddingGRUModel(nn.Module):
 		def __init__(self, cont_dim, cardinalities, n_activity, n_mode, dropout=0.2,
-					 geo_proj_dim=10, cars_proj_dim=4, emp_proj_dim=4, misc_proj_dim=8):
+					 geo_proj_dim=10, cars_proj_dim=4, emp_proj_dim=6, misc_proj_dim=8):
 			super().__init__()
 			self.card = cardinalities
 
@@ -143,28 +144,28 @@ if torch is not None:
 
 			encoder_input_dim = cont_dim + geo_proj_dim + cars_proj_dim + emp_proj_dim + misc_proj_dim
 			self.encoder = nn.Sequential(
-				nn.Linear(encoder_input_dim, 32),
-				nn.LayerNorm(32),
+				nn.Linear(encoder_input_dim, 48),
+				nn.LayerNorm(48),
 				nn.SiLU(),
 				nn.Dropout(dropout),
-				nn.Linear(32, 16),
+				nn.Linear(48, 16),
 				nn.LayerNorm(16),
 			)
 			# Autonomous decoder: recurrent dynamics start from h0 only.
 			self.gru = nn.GRU(input_size=1, hidden_size=16, num_layers=1, batch_first=True)
 
-			self.activity_head = nn.Linear(16, n_activity)
-			self.mode_head = nn.Linear(16, n_mode)
-			self.departure_head = nn.Sequential(nn.Linear(16, 1), nn.Sigmoid())
-			self.trip_count_head = nn.Sequential(nn.Linear(16, 1), nn.Sigmoid())
+			self.activity_head = nn.Sequential(nn.Linear(16, 8), nn.LayerNorm(8), nn.SiLU(), nn.Linear(8, n_activity))
+			self.mode_head = nn.Sequential(nn.Linear(16, 8), nn.LayerNorm(8), nn.SiLU(), nn.Linear(8, n_mode))
+			self.departure_head = nn.Sequential(nn.Linear(16, 8), nn.LayerNorm(8), nn.SiLU(), nn.Linear(8, 1), nn.Sigmoid())
+			self.trip_count_head = nn.Sequential(nn.Linear(16, 8), nn.LayerNorm(8), nn.SiLU(), nn.Linear(8, 1), nn.Sigmoid())
 
 			# Reconstruction head to keep latent informative (autoencoder-like regularization).
 			self.reconstruction = nn.Sequential(
-				nn.Linear(16, 32),
-				nn.LayerNorm(32),
+				nn.Linear(16, 48),
+				nn.LayerNorm(48),
 				nn.SiLU(),
 				nn.Dropout(dropout),
-				nn.Linear(32, encoder_input_dim),
+				nn.Linear(48, encoder_input_dim),
 			)
 
 		def _one_hot(self, idx, depth):
@@ -430,17 +431,6 @@ def _encode_with_model(model, x, batch_size=4096):
 			out.append(z)
 	return _l2_normalize(np.vstack(out))
 
-
-def get_mz_persons(context):
-	df_persons = context.stage("data.microcensus.persons")
-	df_trips = context.stage("data.microcensus.trips")[0]
-
-	employed_persons = set(df_persons[df_persons["employed"] == True]["person_id"])
-	persons_with_work = set(df_trips[(df_trips["origin_purpose"] == "work") | (df_trips["purpose"] == "work")]["person_id"])
-	persons_to_remove = persons_with_work - employed_persons
-
-	logger.info("Removing %d inconsistent MZ persons (non-employed with work purpose).", len(persons_to_remove))
-	return df_persons[~df_persons["person_id"].isin(persons_to_remove)].copy()
 
 
 def _prepare_common_features(df_source, df_population, const):
@@ -724,7 +714,7 @@ def execute(context):
 		df_trips,
 		max_sequence_len=max_sequence_len,
 		trip_count_scale=trip_count_scale,
-		sample_weights=df_source["person_weight"].values,
+		sample_weights=None,
 	)
 
 	model = train_embedding_model(
