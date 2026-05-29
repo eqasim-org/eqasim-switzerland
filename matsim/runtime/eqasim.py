@@ -9,7 +9,6 @@ DEFAULT_EQASIM_VERSION = "2.0.0"
 DEFAULT_EQASIM_BRANCH = "cmdp"
 DEFAULT_EQASIM_COMMIT = "546b820"
 
-
 def configure(context):
     context.stage("matsim.runtime.git")
     context.stage("matsim.runtime.java")
