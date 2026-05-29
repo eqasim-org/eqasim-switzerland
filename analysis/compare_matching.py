@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import logging
-
+from synthesis.population.matching.matched_v1 import get_mz_persons
 logger = logging.getLogger("synpp")
 
 
@@ -21,39 +21,13 @@ def configure(context):
     context.stage("data.microcensus.activity_chains")
 
 
-def _extract_matching_df(stage_result):
-    value = stage_result.get() if hasattr(stage_result, "get") else stage_result
-    if isinstance(value, tuple):
-        value = value[0]
-    if isinstance(value, list) and len(value) > 0 and isinstance(value[0], pd.DataFrame):
-        value = value[0]
-    if not isinstance(value, pd.DataFrame):
-        raise RuntimeError("Matching stage output is not a DataFrame.")
-    if "mz_person_id" not in value.columns:
-        raise RuntimeError("Matching DataFrame must contain 'mz_person_id'.")
-    return value.copy()
-
-
-def _sanitize_chain(chain):
-    if pd.isna(chain):
-        return "H"
-    chain = str(chain)
-    if chain.strip() == "":
-        return "H"
-    mapping = {
-        "home": "H", "work": "W", "work_secondary": "W", "education": "E",
-        "shop": "S", "leisure": "L", "other": "O", "interaction": "I",
-        "border": "B"
-    }
-    return "-".join([mapping.get(token, token[:1].upper()) for token in chain.split("-")])
-
-
 def _build_chain_from_trips(df_trips):
     purpose_map = {
         "home": "H",
         "work": "W",
         "work_secondary": "W",
         "education": "E",
+        "education_secondary": "E",
         "shop": "S",
         "leisure": "L",
         "other": "O",
@@ -133,16 +107,7 @@ def _normalize_sex_column(df, col="sex"):
         df[col] = pd.Series(s, index=df.index).fillna(-1).astype(int)
         return df
 
-    # Common coding in some inputs: 1=male, 2=female.
-    if vals.issubset({1, 2}):
-        df[col] = (pd.Series(s, index=df.index) - 1).fillna(-1).astype(int)
-        return df
-
-    # Last fallback: keep only 0/1 valid values, others as -1.
-    s = pd.Series(s, index=df.index)
-    s = s.where(s.isin([0, 1]), -1)
-    df[col] = s.astype(int)
-    return df
+    raise ValueError(f"Cannot normalize sex column '{col}': unrecognized values {vals}")
 
 
 def _plot_chain_comparison(out_path, group_name, dist_micro, dist_v1, dist_v2, top_n=15):
@@ -276,18 +241,6 @@ def _plot_metric_errors(out_path, group_name, metrics_micro, metrics_v1, metrics
     plt.close(fig)
 
 
-def get_mz_persons(context):
-	df_persons = context.stage("data.microcensus.persons")
-	df_trips = context.stage("data.microcensus.trips")[0]
-
-	employed_persons = set(df_persons[df_persons["employed"] == True]["person_id"])
-	persons_with_work = set(df_trips[(df_trips["origin_purpose"] == "work") | (df_trips["purpose"] == "work")]["person_id"])
-	persons_to_remove = persons_with_work - employed_persons
-
-	logger.info("Removing %d inconsistent MZ persons (non-employed with work purpose).", len(persons_to_remove))
-	return df_persons[~df_persons["person_id"].isin(persons_to_remove)].copy()
-
-
 def execute(context):
     analysis_path = context.config("analysis_path")
     out_path = os.path.join(analysis_path, "matching_compare")
@@ -298,8 +251,8 @@ def execute(context):
     cantons = list(context.config("compare_matching_cantons"))
 
     df_sampled = context.stage("synthesis.population.sampled").copy()
-    df_m1 = _extract_matching_df(context.stage("synthesis.population.matching.matched_v1"))
-    df_m2 = _extract_matching_df(context.stage("synthesis.population.matching.matched_v2"))
+    df_m1 = context.stage("synthesis.population.matching.matched_v1")[0]
+    df_m2 = context.stage("synthesis.population.matching.matched_v2")[0]
 
     if "person_id" not in df_m1.columns or "person_id" not in df_m2.columns:
         raise RuntimeError("Matching outputs must include 'person_id'.")
@@ -307,8 +260,9 @@ def execute(context):
     df_pop_m1 = df_sampled.merge(df_m1[["person_id", "mz_person_id"]], on="person_id", how="left")
     df_pop_m2 = df_sampled.merge(df_m2[["person_id", "mz_person_id"]], on="person_id", how="left")
 
-    df_pop_m1["person_weight"] = 1.0
-    df_pop_m2["person_weight"] = 1.0
+    df_pop_m1 = df_pop_m1[df_pop_m1["age"] >= 6]
+    df_pop_m2 = df_pop_m2[df_pop_m2["age"] >= 6]
+    df_pop_m1["person_weight"], df_pop_m2["person_weight"] = 1.0, 1.0
 
     df_mz_persons = get_mz_persons(context)
     df_trips = context.stage("data.microcensus.trips")[0][["person_id", "trip_id", "purpose", "origin_purpose"]].copy()
@@ -322,7 +276,6 @@ def execute(context):
     df_trips = df_trips[df_trips["person_id"].isin(keep_ids)].copy()
 
     # Ensure men/women filters are consistent across all datasets.
-    df_sampled = _normalize_sex_column(df_sampled, "sex")
     df_pop_m1 = _normalize_sex_column(df_pop_m1, "sex")
     df_pop_m2 = _normalize_sex_column(df_pop_m2, "sex")
     df_mz_persons = _normalize_sex_column(df_mz_persons, "sex")
