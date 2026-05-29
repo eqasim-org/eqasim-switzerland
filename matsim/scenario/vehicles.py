@@ -5,6 +5,7 @@ import pandas as pd
 
 import matsim.writers as writers
 
+
 def configure(context):
     context.stage("synthesis.vehicles.vehicles")
 
@@ -17,8 +18,10 @@ def configure(context):
     if context.config("include_external_population"):
         context.stage("data.external_population.read_outputs")
 
+
 TYPE_FIELDS = ["type_id", "nb_seats", "length", "width", "pce", "mode"]
 VEHICLE_FIELDS = ["vehicle_id", "type_id", "age", "euro"]
+
 
 def execute(context):
     output_path = "%s/vehicles.xml.gz" % context.path()

@@ -16,6 +16,8 @@ class CustomDistanceSampler(rda.FeasibleDistanceSampler):
         distances = np.zeros((len(problem["modes"])))
 
         for index, (mode, travel_time) in enumerate(zip(problem["modes"], problem["travel_times"])):
+            if mode == "remote_walk":
+                mode = "walk"
             mode_distribution = self.distributions[mode]
 
             bound_index = np.count_nonzero(travel_time > mode_distribution["bounds"])

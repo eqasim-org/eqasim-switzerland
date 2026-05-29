@@ -190,13 +190,13 @@ def get_mode_shares_calibration_args(context):
 
 def get_delays_args(context):
     activate_tl_delays = context.config("activate_traffic_light_delays")
-    activate_unsignalized_delaus = context.config("activate_unsignalized_intersections_delays")
+    activate_unsignalized_delays = context.config("activate_unsignalized_intersections_delays")
     additional_args = []
-    if activate_tl_delays or activate_unsignalized_delaus:
+    if activate_tl_delays or activate_unsignalized_delays:
         additional_args.extend([
             "--config:eqasim:intersectionDelays.activate", "true",
             "--config:eqasim:intersectionDelays.activateTl", str(activate_tl_delays).lower(),
-            "--config:eqasim:intersectionDelays.activateUnsignalized", str(activate_unsignalized_delaus).lower()
+            "--config:eqasim:intersectionDelays.activateUnsignalized", str(activate_unsignalized_delays).lower()
         ])
     return additional_args  
 
@@ -207,9 +207,11 @@ def get_network_calibration_args(context):
     calibrate_freespeed = context.config("network_calibration.calibrate_freespeed")
     
     additional_args = []    
-    assert (calibrate_counts or calibrate_freespeed), "Network calibration is activated, one of disutilities calibration or freespeed calibration need to be activated"
+    if calibrate_network:
+        assert (calibrate_counts or calibrate_freespeed), "Network calibration is activated, one of disutilities calibration or freespeed calibration need to be activated"
+    
     additional_args.extend(
-            ["--config:eqasim:networkCalibration.activate", "true",
+            ["--config:eqasim:networkCalibration.activate", str(calibrate_network).lower(),
             "--config:eqasim:networkCalibration.calibrate", str(calibrate_network).lower(),
             "--config:eqasim:networkCalibration.updateInterval", "5",                
             "--config:eqasim:networkCalibration.minCapacity", "600",

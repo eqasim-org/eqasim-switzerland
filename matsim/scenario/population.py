@@ -311,10 +311,9 @@ def execute(context):
     df_activities = pd.merge(df_activities, df_locations, on=["person_id", "activity_index"], how="left")
 
     # Replace the primary-secondary purposes with normal ones
-    # Now that the secondary locations are assigned, no need to continue working with these purposes
-    df_activities["purpose"] = df_activities["purpose"].replace({"home_secondary":"other",
-                                                                 "work_secondary": "work",
-                                                                 "education_secondary":"education"})
+    #df_activities["purpose"] = df_activities["purpose"].replace({"home_secondary":"other",
+    #                                                             "work_secondary": "work",
+    #                                                             "education_secondary":"education"})
     
     # Find the loop attribute in the following_modes
     loop_modes = ["walk_loop", "car_loop", "car_passenger_loop", "pt_loop", "bike_loop"]
