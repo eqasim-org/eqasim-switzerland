@@ -426,5 +426,8 @@ def execute(context):
             build_compare_table(survey_one, pop_one, 'age_bin', 'age_bin')
             build_compare_table(survey_one, pop_one, 'municipality_type', 'municipality_type')
 
+    # Remove helper features created only for modeling/diagnostics.
+    pop_df = pop_df.drop(columns=["age_sq", "is_school_age", "age_bin"], errors="ignore")
+
     pop_df['canton_id'] = pop_df['canton_id'].astype("int64")
     return pop_df

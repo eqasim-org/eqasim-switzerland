@@ -560,4 +560,20 @@ def execute(context):
     logger.info("\n==========================================================================")
 
     pop_df = pop_df.rename(columns={"car_avail_draw": "car_availability"})
+
+    # Remove helper columns used only for model fitting/diagnostics.
+    pop_df = pop_df.drop(columns=[
+        "car_avail_hat",
+        "hh_n_dl",
+        "hh_n_cars",
+        "cars_per_dl",
+        "cars_shortage",
+        "hh_single_adult",
+        "age_bin",
+        "age_sq",
+        "age_group",
+        "N_children_under_18_exact",
+        "cars_shortage_bucket",
+    ], errors="ignore")
+
     return pop_df

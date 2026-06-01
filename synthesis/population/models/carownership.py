@@ -481,4 +481,5 @@ def execute(context):
 
     logger.info("\n==========================================================================================")
     pop_df = pop_df.rename(columns={"HH_CAR_OWN_draw": "number_of_cars_class"}) # 0, 1, 2, 3+ (coded as 3)
+    pop_df = pop_df.drop(columns=["HH_CAR_OWN_hat"], errors="ignore")
     return pop_df

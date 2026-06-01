@@ -464,4 +464,8 @@ def execute(context):
     
     pop_df = pop_df.drop(columns=['job_position'])
     pop_df = pop_df.rename(columns={"HH_INCOME_CLASS_draw": "income_class", "survey_job_position":"job_position"})
+
+    # Remove intermediate columns not needed downstream.
+    pop_df = pop_df.drop(columns=["HH_INCOME_CLASS_hat"], errors="ignore")
+
     return pop_df

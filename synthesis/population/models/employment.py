@@ -333,4 +333,7 @@ def execute(context):
     logger.info("\nFull employed distribution by age_bin (survey vs population):")
     logger.info(dist_compare.sort_values(['age_bin', 'employed']).to_string(index=False))
 
+    # Drop helper features created for model fitting/diagnostics.
+    pop_df = pop_df.drop(columns=["age_bin"], errors="ignore")
+
     return pop_df

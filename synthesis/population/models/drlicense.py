@@ -456,4 +456,16 @@ def execute(context):
     logger.info("\n==========================================================================")
 
     pop_df = pop_df.rename(columns={"DL_has_or_learning_draw": "driving_license"})
+
+    # Remove helper columns used only for model fitting/diagnostics.
+    pop_df = pop_df.drop(columns=[        
+        "N_adults",
+        "ovgk_grouped",
+        "age_bin",
+        "age_sq",
+        "DL_has_or_learning_hat",
+        "N_children_under_18_exact",
+        "age_group",
+    ], errors="ignore")
+
     return pop_df
