@@ -149,6 +149,7 @@ def execute(context):
                 progress.update(int(chunk_person_counts[chunk_id]))
     else:
         mp_context = get_platform_mp_context()
+        compile_in_worker = _should_compile_in_worker(mp_context)
         progress_queue = mp_context.Queue()
         base_seed = int(context.config("random_seed"))
         # Keep at most 2× num_processes tasks in-flight to bound memory usage while ensuring
@@ -156,7 +157,10 @@ def execute(context):
         max_inflight = num_processes * 2
         chunk_queue = list(enumerate(chunk_ids))   # [(chunk_idx, chunk_id), ...]
         submit_cursor = 0
-        init_args = (wrapper, worker_torch_threads, True, True, "max-autotune", progress_queue, progress_flush_persons)
+        if not compile_in_worker:
+            logger.info("\t Compiling models in parent before forking workers")
+            wrapper.optimize_wrapper(enable_compile=True, compile_mode="max-autotune")
+        init_args = (wrapper, worker_torch_threads, True, compile_in_worker, "max-autotune", progress_queue, progress_flush_persons)
 
         with context.progress(label="Assigning secondary locations with locations_v2", total=len(unique_persons)) as progress:
             with ProcessPoolExecutor(max_workers=num_processes, mp_context=mp_context, initializer=_init_location_worker,
@@ -237,8 +241,7 @@ def execute(context):
 def get_platform_mp_context():
     """
     Get the appropriate multiprocessing context for the current platform.
-    On Windows, 'spawn' is required. On Unix-like systems, 'fork' is typically preferred for performance,
-    but 'spawn' can be used if there are issues with 'fork' (e.g., with certain libraries).
+    Linux prefers fork for speed; spawn remains required on Windows and macOS.
     """
     import platform
     if platform.system() == "Windows":
@@ -247,6 +250,9 @@ def get_platform_mp_context():
         return get_context("spawn")
     else:  # Linux and other Unix-like systems
         return get_context("fork")
+
+def _should_compile_in_worker(mp_context):
+    return mp_context.get_start_method() != "fork"
     
 def _drain_progress_queue(progress, progress_queue):
     if progress_queue is None:
@@ -278,7 +284,8 @@ def _init_location_worker(wrapper, worker_torch_threads, enable_mkldnn,
         torch.set_num_threads(int(worker_torch_threads))
         torch.set_num_interop_threads(int(worker_torch_threads))
 
-    # torch.compile artifacts do not survive pickling — each worker must compile its own copy.
+    # torch.compile artifacts do not survive pickling, so spawn workers must compile their own copy.
+    # Fork workers can inherit the compiled wrapper from the parent process.
     if enable_compile:
         wrapper.optimize_wrapper(enable_compile=True, compile_mode=compile_mode)
 
