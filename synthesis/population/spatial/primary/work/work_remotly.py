@@ -9,6 +9,7 @@ logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    context.stage("data.constants")
     context.stage("data.structural_survey.structural_survey")
     context.stage("synthesis.population.spatial.primary.work.work_at_different_locations")
     context.stage("synthesis.population.sampled")
@@ -63,6 +64,8 @@ def aggregate_smoothed_rate(df, group_cols, alpha, beta):
 
 
 def execute(context):
+    c = context.stage("data.constants")
+
     # Load survey and population    
     df_survey = get_filtered_data(context, "all")[[
         "home_municipality_id", "employed", "job_position", "age", "sex",
@@ -75,7 +78,7 @@ def execute(context):
     ]].copy()
 
     moving_work_locations = context.stage("synthesis.population.spatial.primary.work.work_at_different_locations")["person_id"].unique()
-    num_agents = (df_population["employed"]==1).sum()
+    num_agents = (df_population["employed"] == c.EMPLOYED).sum()
 
     # Prepare survey observations    
     df_survey = df_survey[~df_survey["home_municipality_id"].isna()]        
@@ -122,7 +125,7 @@ def execute(context):
     ]
 
     # Predict for employed population only
-    employed_mask = df_population["employed"] == 1
+    employed_mask = df_population["employed"] == c.EMPLOYED
     df_employed = df_population.loc[employed_mask].copy()
 
     # Start from global rate and refine by hierarchical shrinkage
@@ -167,7 +170,7 @@ def execute(context):
         )
     )
     # plot analysis
-    plot_analysis(context, df_survey, df_population, out)
+    plot_analysis(context, df_survey, df_population, out, c)
 
     # reformat for compatibillity with other stages
     out = out.rename(columns={"household_id": "destination_id", "home_x": "x", "home_y": "y"})
@@ -179,7 +182,7 @@ def execute(context):
 
 
 
-def plot_analysis(context, df_survey, df_population, out):    
+def plot_analysis(context, df_survey, df_population, out, c):    
     # Define groupings for subplots
     groupings = [
         (["canton_id"], "By Canton"),
@@ -189,7 +192,7 @@ def plot_analysis(context, df_survey, df_population, out):
         (["canton_id", "age_bin", "sex"], "By Canton, Age Bin, and Sex"),  
         (["canton_id", "job_position", "nationality"], "By Canton, Job Position, and Nationality"),
     ]
-    employed_mask = df_population["employed"] == 1
+    employed_mask = df_population["employed"] == c.EMPLOYED
     
     fig, axes = plt.subplots(2, 3, figsize=(16, 12))
     axes = axes.flatten()

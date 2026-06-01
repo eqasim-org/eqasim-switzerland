@@ -1,4 +1,5 @@
 import pyproj
+from types import SimpleNamespace
 
 # TODO: Pandas is quite good at working with categorical data. Refactor everything to make use of that.
 # It will not only be more readable but will also bring a speedup!
@@ -75,6 +76,20 @@ class Constants:
                                 60: 50,
                                 70: 60,
                             }
+
+        # Employements
+        self.EMPLOYED = 1
+        self.UNEMPLOYED = 2
+        self.INACTIVE = 3
+
+        # Employement status
+        self.EMPLOYEMENT_STATUS = SimpleNamespace(
+            INACTIVE = 0,
+            EMPLOYED = 1,
+            STUDENT = 2,            
+            EMPLOYED_STUDENT = 3,
+        )
+
 
 def configure(context):
     context.config("census")

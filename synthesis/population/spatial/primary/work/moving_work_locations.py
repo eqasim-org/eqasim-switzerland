@@ -7,6 +7,7 @@ from .work_locations import get_segment_key
 logger = logging.getLogger("synpp")
 
 def configure(context):
+    context.stage("data.constants")
     context.stage("data.statent.statent")
     context.stage("data.spatial.zones")    
     context.stage("data.structural_survey.structural_survey")
@@ -25,6 +26,8 @@ def configure(context):
 
 def execute(context):
     logger.info("\t Assigning work locations to agents based on OD matrices and company data...")
+    c = context.stage("data.constants")
+
     # Number of real persons represented by one simulated agent
     persons_per_agent = 1 / context.config("input_downsampling")
     capacity_decrement = persons_per_agent * COMP_SATURATION_FACTOR
@@ -36,7 +39,7 @@ def execute(context):
     ]].copy()
 
     # Removed unemployed agents
-    persons = persons[persons["employed"]==1].reset_index(drop=True)
+    persons = persons[persons["employed"] == c.EMPLOYED].reset_index(drop=True)
 
     # Keep only those working from different places
     work_different_location = context.stage("synthesis.population.spatial.primary.work.work_at_different_locations")["person_id"].unique()    

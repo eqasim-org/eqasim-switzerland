@@ -9,6 +9,7 @@ logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    context.stage("data.constants")
     context.stage("data.structural_survey.structural_survey")
     context.stage("synthesis.population.sampled")
     context.config("random_seed")
@@ -62,6 +63,8 @@ def aggregate_smoothed_rate(df, group_cols, alpha, beta):
 
 
 def execute(context):
+    c = context.stage("data.constants")
+
     # Load survey and population    
     df_survey = get_filtered_data(context, "all")[[
         "home_municipality_id", "employed", "job_position", "age", "sex",
@@ -73,7 +76,7 @@ def execute(context):
         "employed", "nationality", "canton_id", "job_position", "home_x", "home_y"
     ]].copy()
 
-    num_agents = (df_population["employed"]==1).sum()
+    num_agents = (df_population["employed"] == c.EMPLOYED).sum()
     # Prepare survey observations    
     df_survey = df_survey[~df_survey["home_municipality_id"].isna()]
     df_survey = df_survey[df_survey["start_work"].isin([1, 2, 3, 4, 5, 6])]
@@ -115,7 +118,7 @@ def execute(context):
     ]
 
     # Predict for employed population only
-    employed_mask = df_population["employed"] == 1
+    employed_mask = df_population["employed"] == c.EMPLOYED
     df_employed = df_population.loc[employed_mask].copy()
 
     # Start from global rate and refine by hierarchical shrinkage
@@ -180,7 +183,7 @@ def plot_analysis(context, df_survey, df_population, out):
         (["canton_id", "age_bin", "sex"], "By Canton, Age Bin, and Sex"),  
         (["canton_id", "job_position", "nationality"], "By Canton, Job Position, and Nationality"),
     ]
-    employed_mask = df_population["employed"] == 1
+    employed_mask = df_population["employed"] == c.EMPLOYED
     
     fig, axes = plt.subplots(2, 3, figsize=(16, 12))
     axes = axes.flatten()

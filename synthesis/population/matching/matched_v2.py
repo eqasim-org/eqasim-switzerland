@@ -489,11 +489,11 @@ def _prepare_common_features(df_source, df_population, const):
 		if "work_location_type" not in df.columns:
 			df["work_location_type"] = "none"
 
-	# Follow v1 employment coding: source cast directly, population maps employed==1 to 1.
+	# Follow v1 employment coding: source cast directly, population maps employed==EMPLOYED to 1.
 	if "employed" in df_source.columns:
 		df_source["employed"] = pd.to_numeric(df_source["employed"], errors="coerce").fillna(0).astype(int)
 	if "employed" in df_population.columns:
-		df_population["employed"] = (pd.to_numeric(df_population["employed"], errors="coerce").fillna(0) == 1).astype(int)
+		df_population["employed"] = (pd.to_numeric(df_population["employed"], errors="coerce").fillna(0) == const.EMPLOYED).astype(int)
 
 	# Follow v1 child coding for source only (presence flag).
 	df_source["N_children_under_12"] = df_source["N_children_under_12"].astype(int)
@@ -693,12 +693,6 @@ def execute(context):
 
 	if "is_student" not in df_population.columns:
 		df_population["is_student"] = 0
-
-	df_population.loc[:, "employment_status"] = 0
-	df_population.loc[df_population["employed"] == 1, "employment_status"] = 1
-	df_population.loc[(df_population["employed"] == 3) & (df_population["is_student"] == 1), "employment_status"] = 2
-	df_population.loc[(df_population["employed"] == 2) & (df_population["is_student"] == 1), "employment_status"] = 2
-	df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"] = 3
 
 	df_source, df_population, features, num_features, cat_features = _prepare_common_features(df_source, df_population, const)
 	logger.info("Embedding matching: grouped projections geo=%d cars=%d emp=%d misc=%d (class_weighting=%s).",

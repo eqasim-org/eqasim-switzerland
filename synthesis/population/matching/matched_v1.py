@@ -373,19 +373,12 @@ def execute(context):
     df_source["canton_id"] = df_source["canton_id"].astype(int)
 
     df_population = context.stage("synthesis.population.sampled")
-
-    df_population.loc[:, "employment_status"]                                                                     = 0
-    df_population.loc[df_population["employed"] == 1, "employment_status"]                                        = 1
-    df_population.loc[(df_population["employed"] == 3) & (df_population["is_student"] == 1), "employment_status"] = 2
-    df_population.loc[(df_population["employed"] == 2) & (df_population["is_student"] == 1), "employment_status"] = 2
-    df_population.loc[(df_population["employed"] == 1) & (df_population["is_student"] == 1), "employment_status"] = 3
-
     df_population["sex"] = df_population["sex"].astype(np.int64)
     
     # add commute distance and work location type
     df_work = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]]
     df_population = pd.merge(df_population, df_work, on="person_id", how="left")
-    assert df_population.loc[df_population.employed==1,"work_location_type"].notna().all(), "Some employed agents are missing commute distance"
+    assert df_population.loc[df_population.employed == const.EMPLOYED, "work_location_type"].notna().all(), "Some employed agents are missing commute distance"
     df_population[ "commute_distance"] = df_population["commute_distance"].fillna(-1)
     df_population[ "work_location_type"] = df_population["work_location_type"].fillna("none")
     
@@ -405,7 +398,7 @@ def execute(context):
 
     # this is now necessary to include, to make sure employement is well matched, otherwise we get errors in work location assignement
     df_source["employed"] = df_source["employed"].astype(int)
-    df_population["employed"] = (df_population["employed"]==1).astype(int)
+    df_population["employed"] = (df_population["employed"] == const.EMPLOYED).astype(int)
 
     df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0)  # presence of children under 12
 

@@ -25,10 +25,13 @@ def _weighted_mean(x, w):
 
 
 def configure(context):
+    context.stage("data.constants")
     context.stage("data.microcensus.21.persons")
     context.stage("synthesis.population.models.students")
 
 def execute(context):
+    c = context.stage("data.constants")
+
     # -------------------------------------------------------------------
     # CONFIG
     # -------------------------------------------------------------------
@@ -63,12 +66,12 @@ def execute(context):
     survey_df = survey_df.copy()
     pop_df    = pop_df.copy()
 
-    # (keeping your employment_status construction in pop, in case used later)
-    pop_df.loc[:, "employment_status"] = 0
-    pop_df.loc[pop_df["employed"] == 1, "employment_status"] = 1
-    pop_df.loc[(pop_df["employed"] == 3) & (pop_df["is_student"] == 1), "employment_status"] = 2
-    pop_df.loc[(pop_df["employed"] == 2) & (pop_df["is_student"] == 1), "employment_status"] = 2
-    pop_df.loc[(pop_df["employed"] == 1) & (pop_df["is_student"] == 1), "employment_status"] = 3
+    # (keeping employment_status construction in pop, in case used later)
+    pop_df.loc[:, "employment_status"] = c.EMPLOYEMENT_STATUS.INACTIVE
+    pop_df.loc[pop_df["employed"] == c.EMPLOYED, "employment_status"] = c.EMPLOYEMENT_STATUS.EMPLOYED
+    pop_df.loc[(pop_df["employed"] == c.INACTIVE) & (pop_df["is_student"] == 1),"employment_status"] = c.EMPLOYEMENT_STATUS.STUDENT
+    pop_df.loc[(pop_df["employed"] == c.UNEMPLOYED) & (pop_df["is_student"] == 1),"employment_status"] = c.EMPLOYEMENT_STATUS.STUDENT
+    pop_df.loc[(pop_df["employed"] == c.EMPLOYED) & (pop_df["is_student"] == 1),"employment_status"] = c.EMPLOYEMENT_STATUS.EMPLOYED_STUDENT
 
     needed_survey = [
         "age", "sex", "household_size", "employment_status", "N_adults",

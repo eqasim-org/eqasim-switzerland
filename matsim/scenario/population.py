@@ -32,6 +32,7 @@ def configure(context):
     context.config("use_lcv", default = False)
     context.stage("synthesis.freight.trips")
     context.stage("synthesis.lcv.trips")
+    context.stage("data.constants")
 
     context.stage("synthesis.vehicles.vehicles")
     context.config("population_compresslevel", default=1)
@@ -293,13 +294,14 @@ PERSONS_DTYPES = {
 
 def execute(context):
     cache_path    = context.path()
+    cst           = context.stage("data.constants")
     df_persons    = context.stage("synthesis.population.models.subscriptions")
     df_activities = context.stage("synthesis.population.activities")
     df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]    
 
     # Correct employement if required
     if set(df_persons["employed"].unique())!={0, 1}:
-        df_persons["employed"] = (pd.to_numeric(df_persons["employed"], errors="coerce").fillna(0) == 1).astype(int)
+        df_persons["employed"] = (pd.to_numeric(df_persons["employed"], errors="coerce").fillna(0) == cst.EMPLOYED).astype(int)
 
     # Attach following modes to activities
     df_trips         = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]

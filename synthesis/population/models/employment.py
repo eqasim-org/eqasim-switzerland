@@ -18,10 +18,13 @@ def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
     return classes[chosen_idx]
 
 def configure(context):
+    context.stage("data.constants")
     context.stage("data.structural_survey.structural_survey")
     context.stage("data.statpop.statpop")
 
 def execute(context):
+    c = context.stage("data.constants")
+
     # -------------------------------------------------------------------
     # CONFIG
     # -------------------------------------------------------------------
@@ -180,7 +183,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 4. FIT GLOBAL JOB MODEL
     # -------------------------------------------------------------------
-    df_emp = survey_df[survey_df['employed'] == 1]
+    df_emp = survey_df[survey_df['employed'] == c.EMPLOYED]
     X_job_survey = X_survey.loc[df_emp.index]
     y_job = df_emp['job_position'].astype('int64').to_numpy()
     w_job = df_emp['weight'].astype(float).to_numpy()
@@ -240,10 +243,10 @@ def execute(context):
 
         # job draw (unchanged)
         job_chunk = np.empty(end - start, dtype=int)
-        job_chunk[act_draw == 2] = 60
-        job_chunk[act_draw == 3] = 70
+        job_chunk[act_draw == c.UNEMPLOYED] = 60
+        job_chunk[act_draw == c.INACTIVE] = 70
 
-        emp_mask_local = (act_draw == 1)
+        emp_mask_local = (act_draw == c.EMPLOYED)
         if emp_mask_local.any():
             X_emp = X_chunk.loc[emp_mask_local]
             proba_job = job_model.predict_proba(X_emp)
@@ -264,7 +267,7 @@ def execute(context):
     pop_df['employed']     = employed_out
     pop_df['job_position'] = job_out
 
-    pop_df.loc[pop_df['age'] < 15, 'employed'] = 3
+    pop_df.loc[pop_df['age'] < 15, 'employed'] = c.INACTIVE
     pop_df.loc[pop_df['age'] < 15, 'job_position'] = 70
 
     logger.info("Final employed distribution:")
@@ -283,23 +286,23 @@ def execute(context):
         pop_diag = pop_df[pop_df['canton_id'].astype(str) == canton_key]
         logger.info(f"\n[DIAGNOSTIC] Employed-by-age analysis restricted to canton_id={canton_key}")
 
-    # (A) share employed==1 by age_bin (survey weighted vs pop unweighted)
+    # (A) share employed==EMPLOYED by age_bin (survey weighted vs pop unweighted)
     survey_rate = (
         survey_diag.groupby('age_bin')
-        .apply(lambda g: np.average((g['employed'] == 1).astype(float), weights=g['weight']))
+        .apply(lambda g: np.average((g['employed'] == c.EMPLOYED).astype(float), weights=g['weight']))
         .reset_index(name='share_employed1_survey')
     )
 
     pop_rate = (
         pop_diag.groupby('age_bin')
-        .apply(lambda g: (g['employed'] == 1).mean())
+        .apply(lambda g: (g['employed'] == c.EMPLOYED).mean())
         .reset_index(name='share_employed1_pop')
     )
 
     rate_compare = pd.merge(survey_rate, pop_rate, on='age_bin', how='outer').fillna(0.0)
     rate_compare['diff_pop_minus_survey'] = rate_compare['share_employed1_pop'] - rate_compare['share_employed1_survey']
 
-    logger.info("\nShare employed==1 by age_bin (survey vs population):")
+    logger.info("\nShare employed==EMPLOYED by age_bin (survey vs population):")
     logger.info(rate_compare.sort_values('age_bin').to_string(index=False))
 
     # (B) full distribution employed(1/2/3) by age_bin
