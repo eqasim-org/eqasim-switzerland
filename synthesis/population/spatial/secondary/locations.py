@@ -3,7 +3,7 @@ import logging
 logger = logging.getLogger("synpp")
 
 def configure(context):
-    context.config("locations_algorithm", default = "nn")
+    context.config("locations_algorithm", default = "rda")
     if context.config("locations_algorithm").lower() in ["nn", "neural_network", "v2", "v.2", "locations_v2"]:
         context.stage("synthesis.population.spatial.secondary_nn.locations")
     else:
