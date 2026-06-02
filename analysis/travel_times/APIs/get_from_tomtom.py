@@ -128,7 +128,8 @@ def execute(context):
     # prepare output path
     output_path = context.config("tomtom_travel_times_path")
     os.makedirs(output_path, exist_ok=True)
-    output_path = os.path.join(output_path, "microcensus_routed_trips.json")
+    output_path_100k = os.path.join(output_path, "routed_trips_100k.json")
+    output_path = os.path.join(output_path, "routed_trips.json")
 
     max_requests = context.config("num_tomtom_requests")
     tomtom_api_key = context.config("tomtom_api_key")
@@ -148,17 +149,25 @@ def execute(context):
                                                                             target_crs="EPSG:4326")
         logger.info("Converted coordinates from EPSG:2056 to EPSG:4326.")
 
-        # check for existing routed data
+        # output_path_100k is static reference data for already routed trips (file too big, we made it static)
+        static_routed_data = {}
+        if os.path.exists(output_path_100k):
+            with open(output_path_100k, 'r') as f:
+                static_routed_data = json.load(f)
+            logger.info(f"Loaded {len(static_routed_data)} routed trips from {output_path_100k}.")
+
+        # output_path stores incremental routed trips and is the only file we write
+        output_routed_data = {}
         if os.path.exists(output_path):
             with open(output_path, 'r') as f:
-                existing_routed_data = json.load(f)
+                output_routed_data = json.load(f)
+            logger.info(f"Loaded {len(output_routed_data)} routed trips from {output_path}.")
 
-            routed_ids = set(existing_routed_data.keys())
-            logger.info(f"Found {len(routed_ids)} already routed trips.")
-        else:
-            existing_routed_data = {}
-            routed_ids = set()
+        routed_ids = set(static_routed_data.keys()) | set(output_routed_data.keys())
+        if len(routed_ids) == 0:
             logger.info("No existing routed trips found.")
+        else:
+            logger.info(f"Found {len(routed_ids)} already routed trips.")
 
         # filter to remaining trips
         df_remaining = df_trips[~df_trips['identifier'].isin(routed_ids)]
@@ -167,16 +176,19 @@ def execute(context):
         if (len(df_remaining)>50):
             # route remaining trips using tomtom
             new_routed_data = route_with_tomtom(df_remaining, tomtom_api_key, max_requests)
-            
-            # update existing data with new data
-            existing_routed_data.update(new_routed_data)
 
-            # save results as json
-            with open(output_path.replace(".json", "_updated.json"), 'w') as f:
-                json.dump(existing_routed_data, f, indent=4)
+            # output_path_100k is static reference data; only write to output_path
+            output_routed_data.update(new_routed_data)
 
-            # onces it is successful, replace old file
-            os.replace(output_path.replace(".json", "_updated.json"), output_path)
-            logger.info(f"Saved routed trips to {output_path}. Total routed trips: {len(existing_routed_data)}")
+            output_path_updated = output_path.replace(".json", "_updated.json")
+            with open(output_path_updated, 'w') as f:
+                json.dump(output_routed_data, f, indent=4)
 
-    return output_path
+            # once successful, replace old file atomically
+            os.replace(output_path_updated, output_path)
+            logger.info(
+                f"Saved {len(new_routed_data)} new routed trips to {output_path}. "
+                f"Total trips in output file: {len(output_routed_data)}"
+            )
+
+    return output_path+"|"+output_path_100k

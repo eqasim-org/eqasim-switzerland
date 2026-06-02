@@ -11,10 +11,17 @@ def configure(context):
 
 def execute(context):
     path_to_travel_times = context.stage("analysis.travel_times.APIs.get_from_tomtom")
+    
+    if '|' in path_to_travel_times:
+        path_to_travel_times = path_to_travel_times.split('|')
+    else:
+        path_to_travel_times = [path_to_travel_times]
 
     # load the json file with travel times
-    with open(path_to_travel_times, 'r') as f:
-        travel_times_data = json.load(f)
+    travel_times_data = {}
+    for path in path_to_travel_times:
+        with open(path, 'r') as f:
+            travel_times_data.update(json.load(f))
     
     # get the data into a dataframe
     records = []
