@@ -20,6 +20,12 @@ except Exception:
 logger = logging.getLogger("synpp")
 
 
+def _as_bool(value):
+	if isinstance(value, str):
+		return value.strip().lower() in ("1", "true", "t", "yes", "y", "on")
+	return bool(value)
+
+
 def configure(context):
 	context.config("random_seed")
 	context.config("matching_embedding_top_k", 20)
@@ -47,6 +53,7 @@ def configure(context):
 	context.config("matching_latent_noise_std", 0.08)
 	context.config("matching_trip_count_scale", 5.0)
 	context.config("specific_day_scenario", default="workday")
+	context.config("overwrite_matching_embedding_model", default=False)
 
 	context.stage("data.microcensus.persons")
 	context.stage("data.microcensus.trips")
@@ -432,6 +439,27 @@ def _encode_with_model(model, x, batch_size=4096):
 	return _l2_normalize(np.vstack(out))
 
 
+def _save_model_artifact(model_path, model, scaler, mappings, cont_cols, model_kwargs, latent_noise_std):
+	payload = {
+		"model_state_dict": model.state_dict(),
+		"scaler": scaler,
+		"mappings": mappings,
+		"cont_cols": cont_cols,
+		"model_kwargs": model_kwargs,
+		"latent_noise_std": float(max(latent_noise_std, 0.0)),
+	}
+	model_dir = os.path.dirname(model_path)
+	if model_dir:
+		os.makedirs(model_dir, exist_ok=True)
+	torch.save(payload, model_path)
+
+
+def _load_model_artifact(model_path):
+	if torch is None:
+		raise RuntimeError("PyTorch is required for matched_v2. Install torch in this environment.")
+	return torch.load(model_path, map_location="cpu")
+
+
 
 def _prepare_common_features(df_source, df_population, const):
 	for df in (df_source, df_population):
@@ -632,6 +660,9 @@ def execute(context):
 	random_seed = int(context.config("random_seed"))
 	rng = np.random.RandomState(random_seed)
 
+	model_path = os.path.join(context.working_directory, "matching_embedding_model.pkl")
+	overwrite_model = _as_bool(context.config("overwrite_matching_embedding_model"))
+
 	top_k = int(context.config("matching_embedding_top_k"))
 	temperature = float(context.config("matching_embedding_temperature"))
 	epochs = int(context.config("matching_embedding_epochs"))
@@ -698,35 +729,96 @@ def execute(context):
 	logger.info("Embedding matching: grouped projections geo=%d cars=%d emp=%d misc=%d (class_weighting=%s).",
 		proj_dims["geo"], proj_dims["cars"], proj_dims["emp"], proj_dims["misc"], use_class_weighting)
 
-	scaler, mappings, cont_cols = _fit_feature_processors(df_source, df_population)
+	scaler = None
+	mappings = None
+	cont_cols = None
+	model = None
+
+	artifact_exists = os.path.exists(model_path)
+	should_load_artifact = artifact_exists and not overwrite_model
+
+	if should_load_artifact:
+		try:
+			artifact = _load_model_artifact(model_path)
+			required = ["model_state_dict", "scaler", "mappings", "cont_cols", "model_kwargs"]
+			missing = [k for k in required if k not in artifact]
+			if missing:
+				raise ValueError("Missing keys in saved model artifact: %s" % ", ".join(missing))
+
+			scaler = artifact["scaler"]
+			mappings = artifact["mappings"]
+			cont_cols = artifact["cont_cols"]
+			model_kwargs = artifact["model_kwargs"]
+
+			device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+			model = EmbeddingGRUModel(**model_kwargs).to(device)
+			model.load_state_dict(artifact["model_state_dict"])
+			model.latent_noise_std = float(max(artifact.get("latent_noise_std", latent_noise_std), 0.0))
+			model.eval()
+			logger.info("Loaded embedding model from %s (overwrite=%s).", model_path, overwrite_model)
+		except Exception as e:
+			logger.warning("Failed to load embedding model from %s (%s). Re-training model.", model_path, e)
+			scaler = None
+			mappings = None
+			cont_cols = None
+			model = None
+
+	if model is None:
+		scaler, mappings, cont_cols = _fit_feature_processors(df_source, df_population)
+		x_source_train = _transform_model_inputs(df_source, scaler, mappings, cont_cols)
+
+		trips_cols = ["person_id", "trip_id", "departure_time", "purpose", "mode"]
+		df_trips = context.stage("data.microcensus.trips")[0][trips_cols].copy()
+		y_source = _build_sequence_targets(
+			df_source["mz_id"].values,
+			df_trips,
+			max_sequence_len=max_sequence_len,
+			trip_count_scale=trip_count_scale,
+			sample_weights=None,
+		)
+
+		model = train_embedding_model(
+			x_source_train,
+			y_source,
+			random_seed=random_seed,
+			epochs=epochs,
+			batch_size=batch_size,
+			lr=lr,
+			dropout=dropout,
+			weight_decay=weight_decay,
+			loss_weights=loss_weights,
+			proj_dims=proj_dims,
+			use_class_weighting=use_class_weighting,
+			latent_noise_std=latent_noise_std,
+			lr_decay_step=lr_decay_step,
+			lr_decay_gamma=lr_decay_gamma,
+		)
+		model_kwargs = {
+			"cont_dim": int(x_source_train["cont"].shape[1]),
+			"cardinalities": x_source_train["cardinalities"],
+			"n_activity": int(y_source["num_activity_classes"]),
+			"n_mode": int(y_source["num_mode_classes"]),
+			"dropout": float(dropout),
+			"geo_proj_dim": int(proj_dims["geo"]),
+			"cars_proj_dim": int(proj_dims["cars"]),
+			"emp_proj_dim": int(proj_dims["emp"]),
+			"misc_proj_dim": int(proj_dims["misc"]),
+		}
+		try:
+			_save_model_artifact(
+				model_path=model_path,
+				model=model,
+				scaler=scaler,
+				mappings=mappings,
+				cont_cols=cont_cols,
+				model_kwargs=model_kwargs,
+				latent_noise_std=latent_noise_std,
+			)
+			logger.info("Saved embedding model to %s", model_path)
+		except Exception as e:
+			logger.warning("Failed to save embedding model to %s: %s", model_path, e)
+
 	x_source = _transform_model_inputs(df_source, scaler, mappings, cont_cols)
-
-	trips_cols = ["person_id", "trip_id", "departure_time", "purpose", "mode"]
-	df_trips = context.stage("data.microcensus.trips")[0][trips_cols].copy()
-	y_source = _build_sequence_targets(
-		df_source["mz_id"].values,
-		df_trips,
-		max_sequence_len=max_sequence_len,
-		trip_count_scale=trip_count_scale,
-		sample_weights=None,
-	)
-
-	model = train_embedding_model(
-		x_source,
-		y_source,
-		random_seed=random_seed,
-		epochs=epochs,
-		batch_size=batch_size,
-		lr=lr,
-		dropout=dropout,
-		weight_decay=weight_decay,
-		loss_weights=loss_weights,
-		proj_dims=proj_dims,
-		use_class_weighting=use_class_weighting,
-		latent_noise_std=latent_noise_std,
-		lr_decay_step=lr_decay_step,
-		lr_decay_gamma=lr_decay_gamma,
-	)
 	emb_source = _encode_with_model(model, x_source)
 
 	# Save microcensus embeddings for downstream analysis stages.
