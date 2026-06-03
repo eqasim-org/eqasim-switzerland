@@ -7,6 +7,7 @@ import h3
 from numba import njit, prange
 from .h3 import H3_LEVEL_NAMES
 from .hierarchical_utils import SECONDARY_ACTIVITIES, PRIMARY_ACTIVITIES
+from matsim.scenario.population import HOME_DESTINATION_ID
 
 logger = logging.getLogger("synpp: location_helpers")
 
@@ -18,15 +19,18 @@ PRIMARY_SET = set(PRIMARY_ACTIVITIES)
 def _prepare_primary_locations(context):
     df_home = context.stage("synthesis.population.spatial.home.locations").rename(columns={"geometry": "home"})
     df_work, df_education = context.stage("synthesis.population.spatial.primary.locations")
-    df_work = df_work.rename(columns={"geometry": "work"})
-    df_education = df_education.rename(columns={"geometry": "education"})
+    df_work = df_work.rename(columns={"geometry": "work", "destination_id": "work_destination_id"})
+    df_education = df_education.rename(columns={"geometry": "education", "destination_id": "education_destination_id"})
 
     df_locations = context.stage("synthesis.population.enriched")[["person_id", "household_id"]].copy()
     df_locations = df_locations.merge(df_home[["household_id", "home"]], how="left", on="household_id")
-    df_locations = df_locations.merge(df_work[["person_id", "work"]], how="left", on="person_id")
-    df_locations = df_locations.merge(df_education[["person_id", "education"]], how="left", on="person_id")
+    df_locations = df_locations.merge(df_work[["person_id", "work", "work_destination_id"]], how="left", on="person_id")
+    df_locations = df_locations.merge(df_education[["person_id", "education", "education_destination_id"]], how="left", on="person_id")
 
-    return df_locations[["person_id", "home", "work", "education"]].sort_values(by="person_id").reset_index(drop=True)
+    df_locations["home_destination_id"] = HOME_DESTINATION_ID
+    df_locations[["work_destination_id","education_destination_id", "home_destination_id"]] = df_locations[["work_destination_id","education_destination_id", "home_destination_id"]].fillna(0)
+    return df_locations[["person_id", "home", "work", "education", "work_destination_id","education_destination_id", "home_destination_id"]
+                        ].sort_values(by="person_id").reset_index(drop=True)
 
 
 def _prepare_person_attributes(context):
@@ -106,6 +110,8 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
 
     index = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
     fallback = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
+    index_xy = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
+    fallback_xy = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
     car_available_probabilities = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
     no_car_available_probabilities = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
 
@@ -119,7 +125,11 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
 
         # ---- finest level ----
         for level_2, idx in sub.groupby(H3_LEVEL_NAMES[-1]).indices.items():
-            index[purpose][level_2] = list(zip(sub_dest_ids[idx], sub_geoms[idx]))
+            g_l2 = sub_geoms[idx]
+            index[purpose][level_2] = list(zip(sub_dest_ids[idx], g_l2))
+            index_xy[purpose][level_2] = np.stack(
+                [np.array([g.x for g in g_l2], dtype=np.float64),
+                 np.array([g.y for g in g_l2], dtype=np.float64)], axis=1)
             emp = sub_employees[idx]
             nov = sub_no_ovgk[idx]
             car_available_probabilities[purpose][level_2] = build_probability(emp, nov, car_available=True)
@@ -127,13 +137,17 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
 
         # ---- middle level ----
         for level_1, idx in sub.groupby(H3_LEVEL_NAMES[1]).indices.items():
-            fallback[purpose][level_1] = list(zip(sub_dest_ids[idx], sub_geoms[idx]))
+            g_l1 = sub_geoms[idx]
+            fallback[purpose][level_1] = list(zip(sub_dest_ids[idx], g_l1))
+            fallback_xy[purpose][level_1] = np.stack(
+                [np.array([g.x for g in g_l1], dtype=np.float64),
+                 np.array([g.y for g in g_l1], dtype=np.float64)], axis=1)
             emp = sub_employees[idx]
             nov = sub_no_ovgk[idx]
             car_available_probabilities[purpose][level_1] = build_probability(emp, nov, car_available=True)
             no_car_available_probabilities[purpose][level_1] = build_probability(emp, nov, car_available=False)
 
-    return (index, fallback, car_available_probabilities, no_car_available_probabilities)
+    return (index, fallback, car_available_probabilities, no_car_available_probabilities, index_xy, fallback_xy)
 
 
 def _reverse_tree(h3_tree):
@@ -147,7 +161,8 @@ def _reverse_tree(h3_tree):
 
 
 
-def _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_work, has_education):
+def _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_work, has_education,
+                        work_destination_id, education_destination_id, home_destination_id):
     # Cache first row (much cheaper than repeated .iat)
     first = grp.iloc[0]
     first_preceding = first["preceding_purpose"]
@@ -156,9 +171,7 @@ def _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_w
     if first_preceding not in PRIMARY_SET:
         # For synthetic prepend, always assume the person starts from home.
         first_primary = "home"
-
         added_a_trip = True
-
         new_row = {
             'person_id': first["person_id"],
             'mz_person_id': first["mz_person_id"],
@@ -193,10 +206,14 @@ def _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_w
 
     # Determine starting location
     current_x, current_y = home_x, home_y
+    origin_id = home_destination_id
 
     if first_preceding == "work" and has_work:
         current_x, current_y = work_x, work_y
+        origin_id = work_destination_id
+
     elif first_preceding == "education" and has_education:
         current_x, current_y = edu_x, edu_y
+        origin_id = education_destination_id
 
-    return grp, (current_x, current_y), added_a_trip
+    return grp, (current_x, current_y), added_a_trip, origin_id

@@ -11,6 +11,9 @@ import logging
 
 logger = logging.getLogger("synpp")
 
+# If the activity has this id, the written location will be the home location of the person. 
+# This was already there, I just want to make it a variable, to keep consistency in the pipeline in case this is changed somewhere.
+HOME_DESTINATION_ID = -1
 
 def _require_cols(df, cols, df_name):
     missing = [c for c in cols if c not in df.columns]
@@ -79,7 +82,7 @@ class PersonWriter:
 
         location = (
             home_location
-            if destination_id == -1
+            if destination_id == HOME_DESTINATION_ID
             else writer.location(int(geometry.x), int(geometry.y), destination_id if isinstance(destination_id, str) else int(destination_id))
         )
 
@@ -359,7 +362,7 @@ def execute(context):
         
         external_persons["person_type"] = "FR"
 
-        external_activities.loc[external_activities["purpose"] == "home", "destination_id"] = -1
+        external_activities.loc[external_activities["purpose"] == "home", "destination_id"] = HOME_DESTINATION_ID
 
         external_activities["destination_x"] = external_activities["destination_x"].astype(int)
         external_activities["destination_y"] = external_activities["destination_y"].astype(int)

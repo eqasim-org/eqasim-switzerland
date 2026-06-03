@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import logging
-import os
+from shapely.geometry import Point
 import queue
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from multiprocessing import get_context
@@ -66,8 +66,9 @@ def execute(context):
     df_meta["has_work"] = has_work_mask
     df_meta["has_education"] = has_education_mask
     
-    df_meta = df_meta[["person_id", "home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", 
-                       "sex", "employed", "income_class", "car_availability","has_work", "has_education"]]
+    df_meta = df_meta[["person_id","home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", 
+                       "sex", "employed", "income_class", "car_availability","has_work", "has_education",
+                       "work_destination_id","education_destination_id", "home_destination_id"]]
     
     # remove nans from meta data, they can provoke an error or loss of performance with numba
     df_meta.loc[~df_meta["has_work"], ["work_x","work_y"]] = 0.0
@@ -303,7 +304,9 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
     if len(df_trips_chunk) == 0 or len(df_meta_chunk) == 0:
         return locations_records, convergence_records
     
-    meta_cols = ["home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", "sex", "employed", "income_class", "car_availability", "has_work", "has_education"]
+    meta_cols = ["home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", "sex", "employed", "income_class", 
+                "car_availability", "has_work", "has_education",
+                "work_destination_id","education_destination_id","home_destination_id"]
     meta_lookup = df_meta_chunk.set_index("person_id")[meta_cols].to_dict("index")
     person_groups = df_trips_chunk.groupby("person_id", sort=False)
     pending_progress = 0
@@ -316,9 +319,11 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
         home_x, home_y, work_x, work_y, edu_x, edu_y = info["home_x"], info["home_y"], info["work_x"], info["work_y"], info["edu_x"], info["edu_y"]
         has_work, has_education = info["has_work"], info["has_education"]        
         age, sex, employed, income_class, car_availability = info["age"], info["sex"], info["employed"], info["income_class"], info["car_availability"]
+        work_destination_id, education_destination_id, home_destination_id = info["work_destination_id"], info["education_destination_id"], info["home_destination_id"]
         
         # This not only get the current coords, but also add a trip from primary location if the first trip is not from primary
-        grp, (current_x, current_y), added_a_trip = _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_work, has_education)
+        grp, (current_x, current_y), added_a_trip, origin_id = _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_work, has_education,
+                                                                                        work_destination_id, education_destination_id, home_destination_id)
         
         person_trip_count = len(grp)        
         following_purpose_arr = grp["following_purpose"].to_numpy()
@@ -335,7 +340,8 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
 
         consumed_fore_trip_start = 0.0
         trip_pos = 0.0
-        trip_pos_inc = 1/max(1, person_trip_count - 1)
+        destination_id = origin_id
+        trip_pos_inc = 1/max(1, person_trip_count - 1)        
 
         for local_idx in range(person_trip_count):
             following_purpose = following_purpose_arr[local_idx]
@@ -343,34 +349,46 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
 
             if following_purpose == "home":
                 next_x, next_y = home_x, home_y
+                destination_id = home_destination_id
+
             elif following_purpose == "work" and has_work:
                 next_x, next_y = work_x, work_y
+                destination_id = work_destination_id
+
             elif following_purpose == "education" and has_education:
                 next_x, next_y = edu_x, edu_y
-            elif following_purpose in SECONDARY_SET:                                
-                departure_time = departure_time_arr[local_idx]
-                origin_purpose = preceding_purpose_arr[local_idx]
-                activity_duration_h = activity_duration_arr[local_idx]
+                destination_id = education_destination_id
+
+            elif following_purpose in SECONDARY_SET:
                 target_distance = target_distance_arr[local_idx]
-                # Predict first level coarse H3 cell
-                destination_id, geom = wrapper.predict(person_id=person_id, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=current_x, origin_y=current_y, 
-                                                       age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class, 
-                                                       daily_longest_distance_from_home=chain_daily_longest, daily_crowfly_total=chain_daily_total,
-                                                       daily_longest_distance_from_work=chain_daily_longest_work,
-                                                       crowfly_consumed_before_trip=consumed_fore_trip_start, trip_position_class=trip_pos,
-                                                       departure_time_normalized=departure_time,
-                                                       activity_duration_h=activity_duration_h,
-                                                       target_distance=target_distance,
-                                                       activity_chain_vector=activity_chain_vector,
-                                                       origin_purpose=origin_purpose,
-                                                       purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng)
+                if target_distance<10.0:# less than 10 meters, it doesn't move from current location
+                    next_x, next_y = current_x, current_y                    
+                    geom = Point(next_x, next_y)
+                    locations_records.append((person_id, trip_index, destination_id, geom))
+                    convergence_records.append((True, 1))
+                else:
+                    departure_time = departure_time_arr[local_idx]
+                    origin_purpose = preceding_purpose_arr[local_idx]
+                    activity_duration_h = activity_duration_arr[local_idx]                
+                    # Predict first level coarse H3 cell
+                    destination_id, geom = wrapper.predict(person_id=person_id, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=current_x, origin_y=current_y, 
+                                                        age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class, 
+                                                        daily_longest_distance_from_home=chain_daily_longest, daily_crowfly_total=chain_daily_total,
+                                                        daily_longest_distance_from_work=chain_daily_longest_work,
+                                                        crowfly_consumed_before_trip=consumed_fore_trip_start, trip_position_class=trip_pos,
+                                                        departure_time_normalized=departure_time,
+                                                        activity_duration_h=activity_duration_h,
+                                                        target_distance=target_distance,
+                                                        activity_chain_vector=activity_chain_vector,
+                                                        origin_purpose=origin_purpose,
+                                                        purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng)
 
-                # sample a destination point within the predicted level 2 cell                 
+                    # sample a destination point within the predicted level 2 cell                 
 
-                # get coords and append to the list
-                next_x, next_y = float(geom.x), float(geom.y)
-                locations_records.append((person_id, trip_index, destination_id, geom))
-                convergence_records.append((True, 1))
+                    # get coords and append to the list
+                    next_x, next_y = float(geom.x), float(geom.y)
+                    locations_records.append((person_id, trip_index, destination_id, geom))
+                    convergence_records.append((True, 1))
             else:
                 raise ValueError(f"Unexpected following purpose {following_purpose} for person_id {person_id} trip_index {trip_index}")                       
             

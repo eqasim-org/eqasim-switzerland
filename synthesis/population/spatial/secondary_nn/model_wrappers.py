@@ -1,7 +1,6 @@
 import numpy as np
 from .location_helpers import _prepare_destination_level2_index, _reverse_tree
 import torch
-from shapely.geometry import Point
 import logging
 from .feature_encoding import (CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, DYNAMIC_CANDIDATE_FEATURES, N_PERSON_STATIC,
                                transform_candidate_static_matrix, transform_candidate_dynamic_matrix, transform_person_static_vector, 
@@ -536,6 +535,8 @@ class HierarchicalLocationChoiceModel:
         self._last_person_static = None  # cached scaled static vector per person_id
         self.destination_index = None
         self.destination_fallback = None
+        self.destination_index_xy = None    # {purpose: {level2_h3: np.ndarray [N,2]}} — company (x,y) per L2 pool
+        self.destination_fallback_xy = None  # {purpose: {level1_h3: np.ndarray [N,2]}} — company (x,y) per L1 fallback pool
         self.l1_siblings = None  # {level1_h3: [sibling_level1_h3s]} — built once, used for O(1) fallback widening
         self._purpose_categories = [str(p) for p in self.c.purpose_categories]
         self._purpose_identity = np.eye(len(self._purpose_categories), dtype=np.float32)
@@ -560,8 +561,9 @@ class HierarchicalLocationChoiceModel:
     
     def build_candidates_and_trees(self, context):
         h3_data, h3_geo, h3_tree = context.stage("synthesis.population.spatial.secondary_nn.h3")
-        (self.destination_index, self.destination_fallback, self.car_available_probabilities, 
-            self.no_car_available_probabilities) = _prepare_destination_level2_index(context, h3_data, h3_geo)
+        (self.destination_index, self.destination_fallback, self.car_available_probabilities,
+            self.no_car_available_probabilities, self.destination_index_xy,
+            self.destination_fallback_xy) = _prepare_destination_level2_index(context, h3_data, h3_geo)
         self.l1_siblings = _reverse_tree(h3_tree)  # {level1: [sibling_level1s]} — built once for O(1) fallback widening
 
     @classmethod
@@ -732,12 +734,59 @@ class HierarchicalLocationChoiceModel:
                                                      origin_x=origin_x, origin_y=origin_y, has_work=has_work, purpose=purpose, rng=rng)
         level2_h3 = self._predict_level2_from_person(person_matrix, level0_h3=level0_h3, level1_h3=level1_h3, home_x=home_x, home_y=home_y, work_x=work_x, 
                                                      work_y=work_y, origin_x=origin_x, origin_y=origin_y, has_work=has_work, purpose=purpose, rng=rng)
-        destination_id, geom = self.sample_company_in_l2(purpose, level1_h3, level2_h3, rng, car_availability, home_x, home_y)
+        destination_id, geom = self.sample_company_in_l2(
+            purpose, level1_h3, level2_h3, rng, car_availability, home_x, home_y,
+            origin_x=origin_x, origin_y=origin_y, target_distance=target_distance)
         return destination_id, geom
 
+    @staticmethod
+    def _reweight_by_distance(base_prob, xy, origin_x, origin_y, target_distance,
+                              sigma_fraction=0.25, sigma_min=50.0):
+        """Return a probability vector re-weighted by a Gaussian centred on target_distance.
 
-    def sample_company_in_l2(self, purpose, level1_h3, level2_h3, rng, car_availability=None, home_x=None, home_y=None):
+        For each candidate company at (xy[:,0], xy[:,1]), the Euclidean distance from
+        (origin_x, origin_y) is computed. A Gaussian weight peaks at target_distance with
+        standard deviation sigma = max(sigma_min, sigma_fraction * target_distance).
+        This gives more tolerance for longer trips (relative error) while setting a floor
+        of sigma_min metres for very short trips.
+
+        If the reweighted distribution collapses (all weights < 1e-12), falls back to
+        base_prob unchanged so the caller always gets a valid distribution.
+        """
+        dx = xy[:, 0] - origin_x
+        dy = xy[:, 1] - origin_y
+        distances = np.sqrt(dx * dx + dy * dy)
+        sigma = max(sigma_min, sigma_fraction * float(target_distance))
+        dist_weight = np.exp(-0.5 * ((distances - target_distance) / sigma) ** 2)
+        combined = base_prob * dist_weight
+        total = combined.sum()
+        if total > 1e-12:
+            return combined / total
+        return base_prob  # fallback: reweighting collapsed all probabilities
+
+    def sample_company_in_l2(self, purpose, level1_h3, level2_h3, rng,
+                              car_availability=None, home_x=None, home_y=None,
+                              origin_x=None, origin_y=None, target_distance=None):
+        """Sample a destination company from the level-2 (L9) pool for the given purpose.
+
+        When origin_x/origin_y and a finite target_distance are supplied, candidate
+        probabilities are re-weighted by a Gaussian kernel centred on that distance
+        that chosen companies are spatially closer to the intended trip length.
+        """
         probabilities = self.car_available_probabilities if car_availability else self.no_car_available_probabilities
+
+        use_distance = (
+            origin_x is not None and origin_y is not None
+            and target_distance is not None
+            and np.isfinite(target_distance) and float(target_distance) >= 0.0
+        )
+
+        def _pick(pool, prob, xy_lookup, key):
+            if use_distance and xy_lookup is not None:
+                xy = xy_lookup.get(key)
+                if xy is not None:
+                    prob = self._reweight_by_distance(prob, xy, origin_x, origin_y, target_distance)
+            return pool[int(rng.choice(len(pool), p=prob))]
 
         purpose_index = self.destination_index.get(purpose)
         purpose_prob = probabilities.get(purpose)
@@ -745,23 +794,26 @@ class HierarchicalLocationChoiceModel:
             pool = purpose_index.get(level2_h3)
             if pool:
                 prob = purpose_prob.get(level2_h3)
-                return pool[int(rng.choice(len(pool), p=prob))]
+                xy_lookup = self.destination_index_xy.get(purpose) if self.destination_index_xy is not None else None
+                return _pick(pool, prob, xy_lookup, level2_h3)
 
         purpose_fallback = self.destination_fallback.get(purpose)
         if purpose_fallback is not None:
             pool = purpose_fallback.get(level1_h3)
             if pool:
                 prob = purpose_prob.get(level1_h3)
-                return pool[int(rng.choice(len(pool), p=prob))]
+                xy_lookup = self.destination_fallback_xy.get(purpose) if self.destination_fallback_xy is not None else None
+                return _pick(pool, prob, xy_lookup, level1_h3)
 
         other_fallback = self.destination_fallback.get('other')
         other_prob = probabilities.get('other')
+        other_xy_lookup = self.destination_fallback_xy.get('other') if self.destination_fallback_xy is not None else None
         if other_fallback is not None:
             pool = other_fallback.get(level1_h3)
             if pool:
                 self.log(f"Using fallback pool for level1_h3 '{level1_h3}' and purpose '{purpose}' with {len(pool)} candidates", level=logging.WARNING)
                 prob = other_prob.get(level1_h3)
-                return pool[int(rng.choice(len(pool), p=prob))]
+                return _pick(pool, prob, other_xy_lookup, level1_h3)
 
         # All local fallbacks exhausted — widen to sibling level1 cells (O(1) parent lookup, pre-built at init).
         sibling_l1s = self.l1_siblings.get(level1_h3)
@@ -772,15 +824,16 @@ class HierarchicalLocationChoiceModel:
                     pool = purpose_fallback.get(sib_l1)
                     if pool:
                         prob = purpose_prob.get(sib_l1)
+                        xy_lookup = self.destination_fallback_xy.get(purpose) if self.destination_fallback_xy is not None else None
                         self.log(f"Widened to sibling level1 '{sib_l1}' for purpose '{purpose}' (original level1 '{level1_h3}' had no destinations)", level=logging.WARNING)
-                        return pool[int(rng.choice(len(pool), p=prob))]
+                        return _pick(pool, prob, xy_lookup, sib_l1)
                 if other_fallback is not None:
                     pool = other_fallback.get(sib_l1)
                     if pool:
                         prob = other_prob.get(sib_l1)
                         self.log(f"Widened to sibling level1 '{sib_l1}' (other fallback) for purpose '{purpose}' (original level1 '{level1_h3}' had no destinations)", level=logging.WARNING)
-                        return pool[int(rng.choice(len(pool), p=prob))]
-        
+                        return _pick(pool, prob, other_xy_lookup, sib_l1)
+
         raise RuntimeError(
             f"No candidates in destination pool for purpose '{purpose}', "
             f"level1_h3 '{level1_h3}', level2_h3 '{level2_h3}'"

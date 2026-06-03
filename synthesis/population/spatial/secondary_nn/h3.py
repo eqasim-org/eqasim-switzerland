@@ -14,7 +14,7 @@ It also merges the unique hexagons across all datasets for each resolution level
 hexagonal geometries that can be used for further analysis or visualization.
 """
 
-H3_LEVELS = [5, 7, 10]
+H3_LEVELS = [5, 7, 9]
 H3_LEVEL_NAMES = [f"level_{i}" for i in range(len(H3_LEVELS))]
 OVGK_CATEGORIES = ['B', 'A', 'C', 'None', 'D']
 H3_DEST_FEATURE_COLUMNS = ["num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure", "sport", "gastronomy", "accommodation", "cultural", "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none"]

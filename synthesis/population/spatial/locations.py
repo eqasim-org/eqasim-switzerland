@@ -4,6 +4,7 @@ from data.statent.density import impute_parallel as impute_statent
 from data.statpop.density import impute_parallel as impute_statpop
 from data.spatial.ovgk import impute_parallel as impute_ovgk
 from dmc.constants import constants
+from matsim.scenario.population import HOME_DESTINATION_ID
 
 def configure(context):
     context.stage("synthesis.population.spatial.home.locations")
@@ -32,7 +33,7 @@ def execute(context):
     df_home_locations = df_locations[df_locations["purpose"] == "home"]
     df_home_locations = pd.merge(df_home_locations, df_persons, on="person_id")
     df_home_locations = pd.merge(df_home_locations, df_home[["household_id", "geometry"]], on="household_id")
-    df_home_locations["destination_id"] = -1
+    df_home_locations["destination_id"] = HOME_DESTINATION_ID
     df_home_locations = df_home_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
     # Work locations
