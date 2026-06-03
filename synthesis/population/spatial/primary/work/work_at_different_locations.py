@@ -63,7 +63,7 @@ def aggregate_smoothed_rate(df, group_cols, alpha, beta):
 
 
 def execute(context):
-    c = context.stage("data.constants")
+    cst = context.stage("data.constants")
 
     # Load survey and population    
     df_survey = get_filtered_data(context, "all")[[
@@ -76,7 +76,7 @@ def execute(context):
         "employed", "nationality", "canton_id", "job_position", "home_x", "home_y"
     ]].copy()
 
-    num_agents = (df_population["employed"] == c.EMPLOYED).sum()
+    num_agents = (df_population["employed"] == cst.EMPLOYED).sum()
     # Prepare survey observations    
     df_survey = df_survey[~df_survey["home_municipality_id"].isna()]
     df_survey = df_survey[df_survey["start_work"].isin([1, 2, 3, 4, 5, 6])]
@@ -118,7 +118,7 @@ def execute(context):
     ]
 
     # Predict for employed population only
-    employed_mask = df_population["employed"] == c.EMPLOYED
+    employed_mask = df_population["employed"] == cst.EMPLOYED
     df_employed = df_population.loc[employed_mask].copy()
 
     # Start from global rate and refine by hierarchical shrinkage
@@ -163,7 +163,7 @@ def execute(context):
         )
     )
     # plot analysis
-    plot_analysis(context, df_survey, df_population, out)
+    plot_analysis(context, df_survey, df_population, out, cst)
     
     # only keep those agents
     out = out[out["work_diff_locations"] == True].reset_index(drop=True)
@@ -173,7 +173,7 @@ def execute(context):
 
 
 
-def plot_analysis(context, df_survey, df_population, out):    
+def plot_analysis(context, df_survey, df_population, out, cst):    
     # Define groupings for subplots
     groupings = [
         (["canton_id"], "By Canton"),
@@ -183,7 +183,7 @@ def plot_analysis(context, df_survey, df_population, out):
         (["canton_id", "age_bin", "sex"], "By Canton, Age Bin, and Sex"),  
         (["canton_id", "job_position", "nationality"], "By Canton, Job Position, and Nationality"),
     ]
-    employed_mask = df_population["employed"] == c.EMPLOYED
+    employed_mask = df_population["employed"] == cst.EMPLOYED
     
     fig, axes = plt.subplots(2, 3, figsize=(16, 12))
     axes = axes.flatten()
