@@ -244,13 +244,14 @@ def get_platform_mp_context():
     Get the appropriate multiprocessing context for the current platform.
     Linux prefers fork for speed; spawn remains required on Windows and macOS.
     """
-    import platform
-    if platform.system() == "Windows":
-        return get_context("spawn")
-    elif platform.system() == "Darwin":
-        return get_context("spawn")
-    else:  # Linux and other Unix-like systems
-        return get_context("fork")
+    # import platform
+    # if platform.system() == "Windows":
+    #     return get_context("spawn")
+    # elif platform.system() == "Darwin":
+    #     return get_context("spawn")
+    # else:  # Linux and other Unix-like systems
+    #     return get_context("fork")
+    return get_context("spawn")
 
 def _should_compile_in_worker(mp_context):
     return mp_context.get_start_method() != "fork"
