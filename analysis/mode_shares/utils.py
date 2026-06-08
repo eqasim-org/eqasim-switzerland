@@ -139,7 +139,7 @@ class ModeShareAnalyzer:
         persons = pd.read_csv(persons_file, dtype={0: str}, sep=";", usecols=["person","subpopulation","age","sex", "cantonId","cantonName"])
         persons = persons.astype({"person":str})
         external_persons = persons.subpopulation.isin(['crossborder', 'freight'])
-        logger.info("Excluding %d external persons over %d persons from MATSIM data.", external_persons.sum(), len(persons))
+        logger.info("Excluding %d external persons over %d persons from MATSIM data."%(external_persons.sum(), len(persons)))
         persons = persons[~external_persons]
 
         trips = pd.read_csv(trips_file, sep=";", dtype={0: str, 1: str}, usecols=["trip_id", "person", "main_mode", "euclidean_distance","end_activity_type"])
@@ -225,11 +225,13 @@ class ModeShareAnalyzer:
                             
         return mode_share
 
-    def compute_distance_by_mode(self):
-        modes = self.trips["mode"].unique()
+    def compute_distance_by_mode(self, df = None):
+        if df is None:
+            df = self.trips
+        modes = df["mode"].unique()
         distance_distribution = dict()
         for mode in modes:
-            mode_trips = self.trips[self.trips["mode"] == mode]
+            mode_trips = df[df["mode"] == mode]
             if self.from_matsim:
                 distance_distribution[mode] =  mode_trips["euclidean_distance_km"].values
             else:
@@ -238,3 +240,13 @@ class ModeShareAnalyzer:
 
         return distance_distribution
     
+    def compute_distance_by_mode_and_purpose(self, df = None):
+        if df is None:
+            df = self.trips
+        
+        purposes = df["purpose"].unique()
+        distance_distribution = dict()
+        for purpose in purposes:
+            distance_distribution[purpose] = self.compute_distance_by_mode(df[df["purpose"]==purpose])
+
+        return distance_distribution
