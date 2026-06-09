@@ -10,14 +10,13 @@ import torch
 
 from .location_helpers import (_prepare_primary_locations, _prepare_person_attributes, _euclidean, SECONDARY_SET, _get_first_location)
 from .model_wrappers import HierarchicalLocationChoiceModel
-
 logger = logging.getLogger("synpp")
 
 _WORKER_STATE = {}
 _WORKER_PROGRESS_QUEUE = None
 _WORKER_PROGRESS_FLUSH_EVERY = 100
 _CHUNCK_SIZE_PERSONS = 10000
-DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 10.0 # meters
+DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 10.0  # meters
 
 def configure(context):
     context.stage("data.constants")
@@ -32,9 +31,13 @@ def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.regional_model")
     context.stage("synthesis.population.spatial.secondary_nn.subregional_model")
     context.stage("synthesis.population.spatial.secondary_nn.local_model")
+    context.stage("synthesis.population.spatial.secondary_nn.short_range_model")
 
     context.config("random_seed")
     context.config("threads")
+    context.config("secondary_nn_short_trip_threshold_m", 1300.0)
+    context.config("secondary_nn_short_query_radius_m", 200.0)
+    context.config("secondary_nn_short_min_candidates", 6)
 
 def execute(context):
     logger.info("Starting secondary_nn location assignment")
