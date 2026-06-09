@@ -105,7 +105,10 @@ class NeuralChoiceModel(nn.Module):
 def train_choice_model(model, person_static_x, person_dynamic_x, candidate_static_x, candidate_dynamic_x, y,
                        valid_mask, epochs=50, batch_size=256, lr=1e-3, weight_decay=4e-3, num_threads=None,
                        logger_instance=None, weights=None, grad_clip=5.0, lr_step_size=10, lr_gamma=0.5,
-                       path=None, n_val_folds=5, val_every=5):
+                       path=None, n_val_folds=5, val_every=5,
+                       distance_candidates=None, distance_targets=None,
+                       distance_candidates_home=None, distance_targets_home=None,
+                       distance_loss_weight=0.0, distance_loss_short_floor_m=100.0):
     """Train the choice model with rotating-fold validation.
 
     Every ``val_every`` epochs the current hold-out fold rotates to the next one,
@@ -133,6 +136,46 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
                       if weights is not None
                       else torch.ones(person_static_tensor.shape[0], device=device))
 
+    use_distance_last_loss = (
+        float(distance_loss_weight) > 0.0
+        and distance_candidates is not None
+        and distance_targets is not None
+    )
+    use_distance_home_loss = (
+        float(distance_loss_weight) > 0.0
+        and distance_candidates_home is not None
+        and distance_targets_home is not None
+    )
+    if use_distance_last_loss:
+        distance_candidates_tensor = torch.as_tensor(distance_candidates, dtype=torch.float32, device=device)
+        distance_targets_tensor = torch.as_tensor(distance_targets, dtype=torch.float32, device=device)
+        if distance_candidates_tensor.ndim != 2:
+            raise ValueError("distance_candidates must be a 2D array [n_samples, n_candidates]")
+        if distance_targets_tensor.ndim != 1:
+            raise ValueError("distance_targets must be a 1D array [n_samples]")
+        if distance_candidates_tensor.shape[0] != person_static_tensor.shape[0]:
+            raise ValueError("distance_candidates row count must match number of samples")
+        if distance_targets_tensor.shape[0] != person_static_tensor.shape[0]:
+            raise ValueError("distance_targets length must match number of samples")
+    else:
+        distance_candidates_tensor = None
+        distance_targets_tensor = None
+    if use_distance_home_loss:
+        distance_candidates_home_tensor = torch.as_tensor(distance_candidates_home, dtype=torch.float32, device=device)
+        distance_targets_home_tensor = torch.as_tensor(distance_targets_home, dtype=torch.float32, device=device)
+        if distance_candidates_home_tensor.ndim != 2:
+            raise ValueError("distance_candidates_home must be a 2D array [n_samples, n_candidates]")
+        if distance_targets_home_tensor.ndim != 1:
+            raise ValueError("distance_targets_home must be a 1D array [n_samples]")
+        if distance_candidates_home_tensor.shape[0] != person_static_tensor.shape[0]:
+            raise ValueError("distance_candidates_home row count must match number of samples")
+        if distance_targets_home_tensor.shape[0] != person_static_tensor.shape[0]:
+            raise ValueError("distance_targets_home length must match number of samples")
+    else:
+        distance_candidates_home_tensor = None
+        distance_targets_home_tensor = None
+    short_floor = float(max(1e-6, distance_loss_short_floor_m))
+
     n_samples   = person_static_tensor.shape[0]
     n_val_folds = max(2, int(n_val_folds))
     val_every   = max(1, int(val_every))
@@ -149,6 +192,17 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
 
     local_logger = logger_instance or logger
     local_logger.info("\tStarting training (rotating %d-fold validation every %d epochs)", n_val_folds, val_every)
+    if float(distance_loss_weight) > 0.0:
+        if use_distance_last_loss or use_distance_home_loss:
+            local_logger.info(
+                "\tDistance regularization enabled: weight=%.4f, short_floor_m=%.1f, use_last=%s, use_home=%s",
+                float(distance_loss_weight),
+                float(short_floor),
+                str(use_distance_last_loss),
+                str(use_distance_home_loss),
+            )
+        else:
+            local_logger.warning("\tDistance regularization requested but distance tensors were not provided; disabling it")
     t0 = time.time()
 
     train_losses: list[float] = []
@@ -187,16 +241,54 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
                               batch_candidate_static, batch_candidate_dynamic)
             utilities = utilities.masked_fill(~batch_mask, -1e9)
 
-            loss_per_sample = F.cross_entropy(utilities, batch_y, reduction="none")
-            weighted_loss   = loss_per_sample * batch_w
-            loss = weighted_loss.sum() / batch_w.sum()
+            ce_loss_per_sample = F.cross_entropy(utilities, batch_y, reduction="none")
+            weighted_ce_loss = ce_loss_per_sample * batch_w
+            ce_loss = weighted_ce_loss.sum() / batch_w.sum().clamp_min(1e-12)
+
+            if use_distance_last_loss:
+                batch_dist_candidates = distance_candidates_tensor[idx]
+                batch_target_distance = distance_targets_tensor[idx]
+                probs = torch.softmax(utilities, dim=1)
+                expected_distance = (probs * batch_dist_candidates).sum(dim=1)
+                normalizer = torch.clamp(batch_target_distance + short_floor, min=short_floor)
+                relative_error = (expected_distance - batch_target_distance) / normalizer
+                distance_loss_per_sample = F.smooth_l1_loss(
+                    relative_error,
+                    torch.zeros_like(relative_error),
+                    reduction="none",
+                )
+                weighted_distance_loss = distance_loss_per_sample * batch_w
+                distance_last_loss = weighted_distance_loss.sum() / batch_w.sum().clamp_min(1e-12)
+            else:
+                distance_last_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+
+            if use_distance_home_loss:
+                batch_dist_home_candidates = distance_candidates_home_tensor[idx]
+                batch_target_home_distance = distance_targets_home_tensor[idx]
+                probs = torch.softmax(utilities, dim=1)
+                expected_home_distance = (probs * batch_dist_home_candidates).sum(dim=1)
+                normalizer_home = torch.clamp(batch_target_home_distance + short_floor, min=short_floor)
+                relative_home_error = (expected_home_distance - batch_target_home_distance) / normalizer_home
+                home_loss_per_sample = F.smooth_l1_loss(
+                    relative_home_error,
+                    torch.zeros_like(relative_home_error),
+                    reduction="none",
+                )
+                weighted_home_loss = home_loss_per_sample * batch_w
+                distance_home_loss = weighted_home_loss.sum() / batch_w.sum().clamp_min(1e-12)
+            else:
+                distance_home_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+
+            distance_loss = distance_last_loss + distance_home_loss
+
+            loss = ce_loss + float(distance_loss_weight) * distance_loss
 
             loss.backward()
             if grad_clip is not None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), float(grad_clip))
             optimizer.step()
 
-            total_weighted_loss += weighted_loss.sum().item()
+            total_weighted_loss += (ce_loss + float(distance_loss_weight) * distance_loss).item() * batch_w.sum().item()
             total_weight        += batch_w.sum().item()
 
         train_loss = total_weighted_loss / max(total_weight, 1e-12)
@@ -218,9 +310,37 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
 
                 v_utils = model(v_ps, v_pd, v_cs, v_cd)
                 v_utils = v_utils.masked_fill(~v_m, -1e9)
-                v_loss  = ((F.cross_entropy(v_utils, v_y, reduction="none") * v_w).sum()
-                           / v_w.sum().clamp_min(1e-12))
-                val_loss = float(v_loss.item())
+                v_ce_loss = ((F.cross_entropy(v_utils, v_y, reduction="none") * v_w).sum()
+                             / v_w.sum().clamp_min(1e-12))
+                if use_distance_last_loss:
+                    v_dist_candidates = distance_candidates_tensor[val_idx]
+                    v_target_distance = distance_targets_tensor[val_idx]
+                    v_probs = torch.softmax(v_utils, dim=1)
+                    v_expected_distance = (v_probs * v_dist_candidates).sum(dim=1)
+                    v_normalizer = torch.clamp(v_target_distance + short_floor, min=short_floor)
+                    v_relative_error = (v_expected_distance - v_target_distance) / v_normalizer
+                    v_distance_last_loss = (
+                        F.smooth_l1_loss(v_relative_error, torch.zeros_like(v_relative_error), reduction="none") * v_w
+                    ).sum() / v_w.sum().clamp_min(1e-12)
+                else:
+                    v_distance_last_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+
+                if use_distance_home_loss:
+                    v_dist_home_candidates = distance_candidates_home_tensor[val_idx]
+                    v_target_home_distance = distance_targets_home_tensor[val_idx]
+                    v_probs = torch.softmax(v_utils, dim=1)
+                    v_expected_home_distance = (v_probs * v_dist_home_candidates).sum(dim=1)
+                    v_normalizer_home = torch.clamp(v_target_home_distance + short_floor, min=short_floor)
+                    v_relative_home_error = (v_expected_home_distance - v_target_home_distance) / v_normalizer_home
+                    v_distance_home_loss = (
+                        F.smooth_l1_loss(v_relative_home_error, torch.zeros_like(v_relative_home_error), reduction="none") * v_w
+                    ).sum() / v_w.sum().clamp_min(1e-12)
+                else:
+                    v_distance_home_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+
+                v_distance_loss = v_distance_last_loss + v_distance_home_loss
+
+                val_loss = float((v_ce_loss + float(distance_loss_weight) * v_distance_loss).item())
 
             val_losses.append(val_loss)
             val_epochs.append(epoch + 1)

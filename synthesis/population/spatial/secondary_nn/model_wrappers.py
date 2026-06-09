@@ -676,10 +676,17 @@ class HierarchicalLocationChoiceModel:
         return self._last_person_static
 
     def _build_person_dynamic(self, consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose, origin_purpose):
-        purpose_hot = self._purpose_identity[self._purpose_index[purpose]]
-        remapped_origin = ORIGIN_PURPOSE_REMAP.get(origin_purpose, origin_purpose)
-        origin_idx = self._purpose_index[remapped_origin]
-        origin_purpose_hot = self._purpose_identity[origin_idx]
+        purpose_key = str(purpose)
+        purpose_idx = self._purpose_index.get(purpose_key, self._purpose_index.get("other", 0))
+        purpose_hot = self._purpose_identity[purpose_idx]
+
+        remapped_origin = ORIGIN_PURPOSE_REMAP.get(str(origin_purpose), str(origin_purpose))
+        origin_idx = self._purpose_index.get(remapped_origin, -1)
+        if origin_idx >= 0:
+            origin_purpose_hot = self._purpose_identity[origin_idx]
+        else:
+            # Match training-time behavior for unknown origin purpose: all-zero one-hot.
+            origin_purpose_hot = np.zeros(len(self._purpose_categories), dtype=np.float32)
         return transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, self.c.person_dynamic_scaler)
 
     def _predict_level0_from_person(self, person_matrix, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work, rng, purpose):

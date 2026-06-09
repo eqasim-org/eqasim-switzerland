@@ -35,6 +35,8 @@ def configure(context):
     context.config("subregional_model_batch_size", 256)
     context.config("subregional_model_epochs", 50)
     context.config("subregional_model_learning_rate", 4e-3)
+    context.config("secondary_nn_distance_loss_weight", 0.07)
+    context.config("secondary_nn_distance_loss_short_floor_m", 100.0)
 
 
 def execute(context):
@@ -59,7 +61,7 @@ def execute(context):
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
         "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
         "departure_time_normalized", "daily_longest_distance_from_work",
-        "activity_duration_h", "target_distance", "activity_chain"
+        "activity_duration_h", "target_distance", "trip_destination_distance_from_home", "activity_chain"
     ]]
     mz_trips = mz_trips.merge(mz_chain_trips, on=["person_id", "trip_id"], how="left")
 
@@ -224,6 +226,8 @@ def execute(context):
     activity_duration_h = np.where(np.isfinite(activity_duration_h) & (activity_duration_h >= 0.0), activity_duration_h, 0.0)
     target_distance = df["target_distance"].to_numpy(dtype=np.float64)
     target_distance = np.where(np.isfinite(target_distance) & (target_distance >= 0.0), target_distance, 0.0)
+    target_home_distance = df["trip_destination_distance_from_home"].to_numpy(dtype=np.float64)
+    target_home_distance = np.where(np.isfinite(target_home_distance) & (target_home_distance >= 0.0), target_home_distance, 0.0)
     activity_chain_matrix = np.stack([np.asarray(v, dtype=np.float64)[:ACTIVITY_CHAIN_N] if isinstance(v, np.ndarray) else np.zeros(ACTIVITY_CHAIN_N, dtype=np.float64) for v in df["activity_chain"].to_numpy()])
     activity_chain_matrix = np.where(np.isfinite(activity_chain_matrix) & (activity_chain_matrix >= 0.0), activity_chain_matrix, 0.0)
 
@@ -249,6 +253,8 @@ def execute(context):
         cand_statent, cand_employees, cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_sport, cand_gastronomy,
         cand_accommodation, cand_cultural, cand_ovgk_share_a, cand_ovgk_share_b,
         cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask)
+    candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
+    candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
     
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)
 
@@ -268,7 +274,13 @@ def execute(context):
                               batch_size=int(context.config("subregional_model_batch_size")),
                               lr=float(context.config("subregional_model_learning_rate")),
                               num_threads=int(context.config("threads")),
-                              path=context.path())
+                              path=context.path(),
+                              distance_candidates=candidate_dist_last_m,
+                              distance_targets=target_distance.astype(np.float32),
+                              distance_candidates_home=candidate_dist_home_m,
+                              distance_targets_home=target_home_distance.astype(np.float32),
+                              distance_loss_weight=float(context.config("secondary_nn_distance_loss_weight")),
+                              distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")))
 
     ########## Building wrapper and saving model ##########
     wrapper = DistrictChoiceWrapper(model=model, person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler,

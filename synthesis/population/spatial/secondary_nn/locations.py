@@ -17,6 +17,7 @@ _WORKER_STATE = {}
 _WORKER_PROGRESS_QUEUE = None
 _WORKER_PROGRESS_FLUSH_EVERY = 100
 _CHUNCK_SIZE_PERSONS = 10000
+DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 10.0 # meters
 
 def configure(context):
     context.stage("data.constants")
@@ -104,16 +105,52 @@ def execute(context):
     df_meta = df_meta[df_meta["_chunk_id"].notna()].copy()
     df_meta["_chunk_id"] = df_meta["_chunk_id"].astype(np.int32)
 
-    # ensure these distances are not infinite or NaN, as that would break the models; we can set them to 0 since the models will learn to ignore them when the corresponding features are missing
-    df_trips["daily_longest_distance_from_home"] = df_trips["daily_longest_distance_from_home"].replace([np.inf, -np.inf], np.nan).fillna(df_trips["daily_longest_distance_from_home"].median())
-    df_trips["daily_crowfly_total"] = df_trips["daily_crowfly_total"].replace([np.inf, -np.inf], np.nan).fillna(df_trips["daily_crowfly_total"].median())
-    df_trips["daily_longest_distance_from_work"] = df_trips["daily_longest_distance_from_work"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df_trips["crowfly_consumed_before_trip"] = df_trips["crowfly_consumed_before_trip"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    # Keep inference preprocessing aligned with training: replace inf/NaN and enforce non-negative distance features.
+    df_trips["daily_longest_distance_from_home"] = (
+        df_trips["daily_longest_distance_from_home"]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(df_trips["daily_longest_distance_from_home"].median())
+        .clip(lower=0.0)
+    )
+    df_trips["daily_crowfly_total"] = (
+        df_trips["daily_crowfly_total"]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(df_trips["daily_crowfly_total"].median())
+        .clip(lower=0.0)
+    )
+    df_trips["daily_longest_distance_from_work"] = (
+        df_trips["daily_longest_distance_from_work"]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
+    df_trips["crowfly_consumed_before_trip"] = (
+        df_trips["crowfly_consumed_before_trip"]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
     df_trips["departure_time_normalized"] = df_trips["departure_time_normalized"].replace([np.inf, -np.inf], np.nan).fillna(0.5)
-    df_trips["activity_duration_h"] = df_trips["activity_duration_h"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df_trips["target_distance"] = df_trips["target_distance"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df_trips["trip_origin_distance_from_home"] = df_trips["trip_origin_distance_from_home"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    df_trips["activity_chain"] = df_trips["activity_chain"].apply(lambda v: v.astype(np.float32))
+    df_trips["activity_duration_h"] = (
+        df_trips["activity_duration_h"]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
+    df_trips["target_distance"] = (
+        df_trips["target_distance"]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
+    df_trips["trip_origin_distance_from_home"] = (
+        df_trips["trip_origin_distance_from_home"]
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .clip(lower=0.0)
+    )
+
+    df_trips["activity_chain"] = df_trips["activity_chain"].apply(lambda value: value.astype(np.float32))
 
     # ensure cols are in the right type for the models
     assert df_meta.isna().sum().sum()==0, "Meta data contains NaNs"
@@ -362,7 +399,7 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
 
             elif following_purpose in SECONDARY_SET:
                 target_distance = target_distance_arr[local_idx]
-                if target_distance<10.0:# less than 10 meters, it doesn't move from current location
+                if target_distance<DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION:# less than 10 meters, it doesn't move from current location
                     next_x, next_y = current_x, current_y                    
                     geom = Point(next_x, next_y)
                     locations_records.append((person_id, trip_index, destination_id, geom))
