@@ -31,7 +31,7 @@ def execute(context):
     count_stations_file, counts_data_file, year  = context.stage("analysis.counts.cantons.ch")
     city = "ch"
     sample_size = context.config("input_downsampling")
-    minimum_months = 6
+    minimum_months = 8
     include_incomplete_data = True
     path_to_images = os.path.join(context.config("output_path"), 
                                   context.config("output_id"), 

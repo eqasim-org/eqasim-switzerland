@@ -30,10 +30,20 @@ class MatcherUtils:
         motorways = network.get_ways(road_types=road_type, geo_df = clipped_geo)
         return motorways
     
+    # @staticmethod
+    # def spatial_join_nearby(count_data:gpd.GeoDataFrame, roads:gpd.GeoDataFrame, search_radius:float):
+    #     joined = gpd.sjoin(count_data, roads, how="left", predicate="dwithin", distance=search_radius)
+    #     joined = joined.drop(columns=["index_left", "index_right"], errors="ignore") 
+    #     joined = joined[joined["link_id"].notna()]
+    #     return joined
+    
     @staticmethod
-    def spatial_join_nearby(count_data:gpd.GeoDataFrame, roads:gpd.GeoDataFrame, search_radius:float):
-        joined = gpd.sjoin(count_data, roads, how="left", predicate="dwithin", distance=search_radius)
-        joined = joined.drop(columns=["index_left", "index_right"], errors="ignore") 
+    def spatial_join_nearby(count_data: gpd.GeoDataFrame, roads: gpd.GeoDataFrame, search_radius: float):
+        buffered = count_data.set_geometry(count_data.geometry.buffer(search_radius))
+        joined = gpd.sjoin(buffered, roads, how="left", predicate="intersects")
+        joined = joined.drop(columns=["index_left", "index_right"], errors="ignore")
+        joined = joined.set_geometry(count_data.geometry.loc[joined.index])  # align by index before reset
+        joined = joined.reset_index(drop=True)
         joined = joined[joined["link_id"].notna()]
         return joined
     

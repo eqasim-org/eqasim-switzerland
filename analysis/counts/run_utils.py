@@ -17,6 +17,11 @@ import json
 
 logger = logging.getLogger("synpp")
 
+IDS_TO_DROP = [ # these are in very complexe intersections, very probably will not be correctly matched
+    "283","321","277","278","70","221","240","847","845","846","123","598","35","537","69"
+]
+
+
 def filter_data(df, network, require_simulated=True):
     # Work on a copy
     df = df.copy()
@@ -79,9 +84,13 @@ def filter_data(df, network, require_simulated=True):
         upper_bound = Q3 + 1.5 * IQR
         return group[(group[column] >= lower_bound) & (group[column] <= upper_bound)]
     
-    df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'obs_vphpl')).reset_index(drop=True)
+    df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'obs_vphpl'))
     if require_simulated:
-        df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'sim_vphpl')).reset_index(drop=True)
+        df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'sim_vphpl'))
+    
+    # filter the ones located in very complex intersections
+    df = df[~df['id'].astype(str).isin(IDS_TO_DROP)].copy().reset_index(drop=True)
+
     len_after = len(df)
     logger.info(f"\t Filtered dataset: {len_after} records remaining (removed {len_before - len_after} records)")
     return df
