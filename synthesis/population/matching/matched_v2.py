@@ -42,6 +42,7 @@ def configure(context):
 	context.config("matching_loss_weight_trip_count", 1.0)
 	context.config("matching_loss_weight_mode", 0.15)
 	context.config("matching_loss_weight_departure", 0.15)
+	context.config("matching_loss_weight_distance", 0.75)
 	context.config("matching_loss_weight_reconstruction", 0.3)
 	context.config("matching_loss_weight_latent_norm", 0.05)
 	context.config("matching_loss_weight_latent_spread", 0.2)
@@ -52,6 +53,7 @@ def configure(context):
 	context.config("matching_use_class_weighting", True)
 	context.config("matching_latent_noise_std", 0.08)
 	context.config("matching_trip_count_scale", 5.0)
+	context.config("matching_trip_distance_scale", 50000.0)
 	context.config("specific_day_scenario", default="workday")
 	context.config("overwrite_matching_embedding_model", default=False)
 
@@ -164,6 +166,7 @@ if torch is not None:
 			self.activity_head = nn.Sequential(nn.Linear(16, 8), nn.LayerNorm(8), nn.SiLU(), nn.Linear(8, n_activity))
 			self.mode_head = nn.Sequential(nn.Linear(16, 8), nn.LayerNorm(8), nn.SiLU(), nn.Linear(8, n_mode))
 			self.departure_head = nn.Sequential(nn.Linear(16, 8), nn.LayerNorm(8), nn.SiLU(), nn.Linear(8, 1), nn.Sigmoid())
+			self.distance_head = nn.Sequential(nn.Linear(16, 8), nn.LayerNorm(8), nn.SiLU(), nn.Linear(8, 1), nn.Sigmoid())
 			self.trip_count_head = nn.Sequential(nn.Linear(16, 8), nn.LayerNorm(8), nn.SiLU(), nn.Linear(8, 1), nn.Sigmoid())
 
 			# Reconstruction head to keep latent informative (autoencoder-like regularization).
@@ -229,9 +232,10 @@ if torch is not None:
 			act_logits = self.activity_head(h)
 			mode_logits = self.mode_head(h)
 			dep_pred = self.departure_head(h).squeeze(-1)
+			dist_pred = self.distance_head(h).squeeze(-1)
 			trip_pred = self.trip_count_head(z_train).squeeze(-1)
 			x_recon = self.reconstruction(z_train)
-			return z_train, act_logits, mode_logits, dep_pred, trip_pred, x_recon, x_all
+			return z_train, act_logits, mode_logits, dep_pred, dist_pred, trip_pred, x_recon, x_all
 else:
 	class EmbeddingGRUModel:
 		def __init__(self, *args, **kwargs):
@@ -267,6 +271,7 @@ def train_embedding_model(
 			"trip_count": 1.1,
 			"mode": 0.2,
 			"departure": 0.5,
+			"distance": 0.5,
 			"reconstruction": 0.3,
 			"latent_norm": 0.01,
 			"latent_spread": 0.15,
@@ -310,6 +315,8 @@ def train_embedding_model(
 	mode_tgt = torch.tensor(y["mode_tgt"], dtype=torch.long, device=device)
 	dep_tgt = torch.tensor(y["dep_tgt"], dtype=torch.float32, device=device)
 	dep_mask = torch.tensor(y["dep_mask"], dtype=torch.float32, device=device)
+	dist_tgt = torch.tensor(y["dist_tgt"], dtype=torch.float32, device=device)
+	dist_mask = torch.tensor(y["dist_mask"], dtype=torch.float32, device=device)
 	trip_count_tgt = torch.tensor(y["trip_count_tgt"], dtype=torch.float32, device=device)
 	sample_w = torch.tensor(y["sample_weight"], dtype=torch.float32, device=device)
 
@@ -362,7 +369,7 @@ def train_embedding_model(
 			w_norm = w_batch / torch.clamp(w_batch.mean(), min=1e-6)
 			seq_len = act_tgt[idx].shape[1]
 
-			z, act_logits, mode_logits, dep_pred, trip_pred, x_recon, x_all = model(
+			z, act_logits, mode_logits, dep_pred, dist_pred, trip_pred, x_recon, x_all = model(
 				x_batch, seq_len
 			)
 
@@ -388,6 +395,10 @@ def train_embedding_model(
 			dep_per_person = dep_sq.sum(dim=1) / torch.clamp(dep_mask[idx].sum(dim=1), min=1.0)
 			dep_mse = (dep_per_person * w_norm).mean()
 
+			dist_sq = ((dist_pred - dist_tgt[idx]) ** 2) * dist_mask[idx]
+			dist_per_person = dist_sq.sum(dim=1) / torch.clamp(dist_mask[idx].sum(dim=1), min=1.0)
+			dist_mse = (dist_per_person * w_norm).mean()
+
 			trip_count_per_person = (trip_pred - trip_count_tgt[idx]) ** 2
 			trip_count_mse = (trip_count_per_person * w_norm).mean()
 
@@ -401,6 +412,7 @@ def train_embedding_model(
 				+ float(loss_weights["trip_count"]) * trip_count_mse
 				+ float(loss_weights["mode"]) * mode_loss
 				+ float(loss_weights["departure"]) * dep_mse
+				+ float(loss_weights.get("distance", 0.0)) * dist_mse
 				+ float(loss_weights["reconstruction"]) * recon_loss
 				+ float(loss_weights["latent_norm"]) * latent_norm
 				+ float(loss_weights["latent_spread"]) * latent_spread
@@ -578,14 +590,17 @@ def _prepare_common_features(df_source, df_population, const):
 	return df_source, df_population, all_features, num_features, cat_features
 
 
-def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count_scale=10.0, sample_weights=None):
+def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count_scale=10.0,
+							trip_distance_scale=50000.0, sample_weights=None):
+
 	seq_map = {}
 	for pid, g in df_trips.groupby("person_id"):
 		gs = g.sort_values("trip_id")
 		acts = gs["purpose"].fillna("home").astype(str).tolist()
 		modes = gs["mode"].fillna("no trip").astype(str).tolist()
 		deps = pd.to_numeric(gs["departure_time"], errors="coerce").fillna(0.0).tolist()
-		seq_map[int(pid)] = (acts, modes, deps)
+		dists = pd.to_numeric(gs["crowfly_distance"], errors="coerce").tolist()
+		seq_map[int(pid)] = (acts, modes, deps, dists)
 
 	seqs = []
 	trip_counts_raw = []
@@ -595,15 +610,15 @@ def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count
 
 	for pid in source_ids:
 		if int(pid) in seq_map:
-			acts, modes, deps = seq_map[int(pid)]
+			acts, modes, deps, dists = seq_map[int(pid)]
 			trip_counts_raw.append(len(acts))
 		else:
-			acts, modes, deps = (["home"], ["no trip"], [0.0])
+			acts, modes, deps, dists = (["home"], ["no trip"], [0.0], [0.0])
 			trip_counts_raw.append(0)
 		max_len = max(max_len, len(acts))
 		activity_values.update(acts)
 		mode_values.update(modes)
-		seqs.append((acts, modes, deps))
+		seqs.append((acts, modes, deps, dists))
 
 	activity_tokens = ["<pad>", "<bos>"] + sorted(activity_values)
 	mode_tokens = ["<pad>", "<bos>"] + sorted(mode_values)
@@ -616,10 +631,14 @@ def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count
 	mode_tgt = np.full((n, t), -100, dtype=np.int64)
 	dep_tgt = np.zeros((n, t), dtype=np.float32)
 	dep_mask = np.zeros((n, t), dtype=np.float32)
+	dist_tgt = np.zeros((n, t), dtype=np.float32)
+	dist_mask = np.zeros((n, t), dtype=np.float32)
 
 	dep_scale = 30.0 * 3600.0
 
-	for i, (acts, modes, deps) in enumerate(seqs):
+	distance_scale = max(float(trip_distance_scale), 1.0)	
+
+	for i, (acts, modes, deps, dists) in enumerate(seqs):
 		l = len(acts)
 		dep_norm = np.clip(np.array(deps, dtype=np.float32) / dep_scale, 0.0, 1.0)
 		for k in range(min(l, t)):
@@ -627,6 +646,10 @@ def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count
 			mode_tgt[i, k] = mode2idx[modes[k]]
 			dep_tgt[i, k] = dep_norm[k]
 			dep_mask[i, k] = 1.0
+			dv = dists[k] if k < len(dists) else np.nan
+			if np.isfinite(dv) and dv >= 0.0:
+				dist_tgt[i, k] = np.clip(float(dv) / distance_scale, 0.0, 1.0)
+				dist_mask[i, k] = 1.0
 
 	trip_scale = max(float(trip_count_scale), 1.0)
 	trip_count_tgt = np.clip(np.array(trip_counts_raw, dtype=np.float32) / trip_scale, 0.0, 1.0)
@@ -648,6 +671,8 @@ def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count
 		"mode_tgt": mode_tgt,
 		"dep_tgt": dep_tgt,
 		"dep_mask": dep_mask,
+		"dist_tgt": dist_tgt,
+		"dist_mask": dist_mask,
 		"trip_count_tgt": trip_count_tgt,
 		"sample_weight": sample_weight,
 		"num_activity_classes": len(activity_tokens),
@@ -678,11 +703,13 @@ def execute(context):
 		"trip_count": float(context.config("matching_loss_weight_trip_count")),
 		"mode": float(context.config("matching_loss_weight_mode")),
 		"departure": float(context.config("matching_loss_weight_departure")),
+		"distance": float(context.config("matching_loss_weight_distance")),
 		"reconstruction": float(context.config("matching_loss_weight_reconstruction")),
 		"latent_norm": float(context.config("matching_loss_weight_latent_norm")),
 		"latent_spread": float(context.config("matching_loss_weight_latent_spread")),
 	}
 	trip_count_scale = float(context.config("matching_trip_count_scale"))
+	trip_distance_scale = float(context.config("matching_trip_distance_scale"))
 	proj_dims = {
 		"geo": int(context.config("matching_embedding_geo_proj_dim")),
 		"cars": int(context.config("matching_embedding_cars_proj_dim")),
@@ -767,13 +794,14 @@ def execute(context):
 		scaler, mappings, cont_cols = _fit_feature_processors(df_source, df_population)
 		x_source_train = _transform_model_inputs(df_source, scaler, mappings, cont_cols)
 
-		trips_cols = ["person_id", "trip_id", "departure_time", "purpose", "mode"]
+		trips_cols = ["person_id", "trip_id", "departure_time", "purpose", "mode", "crowfly_distance"]
 		df_trips = context.stage("data.microcensus.trips")[0][trips_cols].copy()
 		y_source = _build_sequence_targets(
 			df_source["mz_id"].values,
 			df_trips,
 			max_sequence_len=max_sequence_len,
 			trip_count_scale=trip_count_scale,
+			trip_distance_scale=trip_distance_scale,
 			sample_weights=None,
 		)
 

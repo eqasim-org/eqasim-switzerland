@@ -282,4 +282,35 @@ def execute(context):
     plt.savefig(os.path.join(figures_dir, "distance_distribution_by_mode.png"), bbox_inches="tight", dpi=300)
     plt.close()
 
+    # plot the distribution of distances by mode and purpose
+    purposes = target_mode_shares["distance_by_mode_and_purpose"].keys()
+    fig, ax = plt.subplots(len(purposes), len(MODE_ORDER), figsize=(20, 4*len(purposes)), sharey=True)
+    distance_bins = np.linspace(0, 50, 51)  # 20 bins from 0 to 50 km
+    for i, purpose in enumerate(purposes):
+        for j, mode in enumerate(MODE_ORDER):
+            f = factors[mode]
+            simulated_distances = simulated_mode_shares["distance_by_mode_and_purpose"][purpose][mode]
+            target_distances = target_mode_shares["distance_by_mode_and_purpose"][purpose][mode]["distances"]
+            target_weights = target_mode_shares["distance_by_mode_and_purpose"][purpose][mode]["weights"]
+
+            simulated_distances = simulated_distances[simulated_distances<50]
+            sel = target_distances<50
+            target_distances = target_distances[sel]
+            target_weights = target_weights[sel]
+
+            ax[i,j].hist(simulated_distances, bins=distance_bins*f, alpha=0.6, label="Simulated", color=DATASET_STYLES["Simulated"]["color"], density=True)
+            ax[i,j].hist(target_distances, bins=distance_bins*f, alpha=0.6, label="Microcensus", color=DATASET_STYLES["Target"]["color"], density=True)
+            ax[i,j].axvline(np.mean(simulated_distances), color=DATASET_STYLES["Simulated"]["color"], linestyle="--", linewidth=2, label=f"Mean (Simulated): {np.mean(simulated_distances):.1f}")
+            ax[i,j].axvline(np.average(target_distances, weights=target_weights), color=DATASET_STYLES["Target"]["color"], linestyle="--", linewidth=2, label=f"Mean (Microcensus): {np.average(target_distances, weights=target_weights):.1f}")
+            if i==0:
+                ax[i,j].set_title(mode.replace("_"," ").title())
+            if j==0:
+                ax[i,j].set_ylabel(purpose.title())
+            ax[i,j].set_xlabel("Distance [km]")
+            ax[i,j].legend(fontsize=8)
+            ax[i,j].set_ylim([0,0.6])
+
+    plt.savefig(os.path.join(figures_dir, "distance_distribution_by_mode_and_purpose.png"), bbox_inches="tight", dpi=300)
+    plt.close()
+
     return dict(done=True, path=figures_dir)

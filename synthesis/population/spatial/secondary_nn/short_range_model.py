@@ -5,18 +5,30 @@ import joblib
 import numpy as np
 import pandas as pd
 import torch
-import matplotlib.pyplot as plt
 
 from .h3 import H3_LEVEL_NAMES
-from .hierarchical_utils import SECONDARY_ACTIVITIES, build_level2_children_by_level1, build_level2_candidate_attributes_by_level1, sanitize_work_coordinates, build_hierarchical_candidate_batch_numba
-from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix
+from .hierarchical_utils import (
+    SECONDARY_ACTIVITIES,
+    build_level2_children_by_level1,
+    build_level2_candidate_attributes_by_level1,
+    sanitize_work_coordinates,
+    build_hierarchical_candidate_batch_numba,
+)
+from .feature_encoding import (
+    CANDIDATE_FEATURES,
+    STATIC_CANDIDATE_FEATURES,
+    N_CANDIDATE_DYNAMIC,
+    ACTIVITY_CHAIN_N,
+    fit_candidate_tensor,
+    fit_person_trip_matrix,
+)
 from .choice_model import NeuralChoiceModel, train_choice_model
-from .model_wrappers import LocalChoiceWrapper
+from .model_wrappers import ShortRangeChoiceWrapper
 
-logger = logging.getLogger("synpp: local_model")
+logger = logging.getLogger("synpp: short_range_model")
 
-MODEL_NAME = "local_model.pt"
-
+MODEL_NAME = "short_range_model.pt"
+DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 1.0
 
 def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.h3")
@@ -30,19 +42,20 @@ def configure(context):
     context.config("threads")
     context.config("random_seed")
 
-    # training params
-    context.config("overwrite_local_model_if_exists", True)
-    context.config("local_model_batch_size", 256)
-    context.config("local_model_epochs", 50)
-    context.config("local_model_learning_rate", 4e-3)
+    context.config("overwrite_short_range_model_if_exists", True)
+    context.config("short_range_model_batch_size", 256)
+    context.config("short_range_model_epochs", 50)
+    context.config("short_range_model_learning_rate", 4e-3)
+    context.config("short_range_trip_threshold_m", 1300.0)
+    context.config("short_range_trip_min_m", DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION)
     context.config("secondary_nn_distance_loss_weight", 0.07)
     context.config("secondary_nn_distance_loss_short_floor_m", 100.0)
 
 
 def execute(context):
-    logger.info("Training local model (neural choice) for level2-within-level1 secondary location choice...")
+    logger.info("Training short-range level2 model (<= threshold distance)...")
 
-    overwrite_model = context.config("overwrite_local_model_if_exists")
+    overwrite_model = context.config("overwrite_short_range_model_if_exists")
     model_path = os.path.join(context.working_directory, MODEL_NAME)
     if os.path.exists(model_path) and not overwrite_model:
         logger.info("Model %s already exists.", MODEL_NAME)
@@ -71,9 +84,6 @@ def execute(context):
     h3_data, h3_geo, h3_tree = context.stage("synthesis.population.spatial.secondary_nn.h3")
     trips_h3 = h3_data["microcensus_trips"][["person_id", "trip_id", f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}", f"destination_{H3_LEVEL_NAMES[-1]}"]]
     h3_geo_level2 = h3_geo[H3_LEVEL_NAMES[-1]]
-
-    if "outside_fraction" not in h3_geo_level2.columns:
-        raise RuntimeError(f"Missing outside_fraction in H3 {H3_LEVEL_NAMES[-1]} geometry. Run h3 stage with outside_fraction enabled.")
 
     required_h3_cols = [
         "centroid", "outside_fraction", "num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure",
@@ -107,22 +117,52 @@ def execute(context):
     ovgk_share_none_by_l2 = h3_level2_indexed["ovgk_share_none"].to_dict()
 
     if h3_tree is None:
-        raise RuntimeError("H3 hierarchy tree is missing from H3 stage output. Cannot train detailed model.")
+        raise RuntimeError("H3 hierarchy tree is missing from H3 stage output. Cannot train short-range model.")
     children_by_level1 = build_level2_children_by_level1(h3_tree, centroid_x_by_l2, centroid_y_by_l2)
     if len(children_by_level1) == 0:
-        raise RuntimeError("H3 hierarchy tree has no valid level2 children with centroids. Cannot train detailed model.")
+        raise RuntimeError("H3 hierarchy tree has no valid level2 children with centroids. Cannot train short-range model.")
 
-    level2_candidate_attributes_by_level1 = build_level2_candidate_attributes_by_level1(children_by_level1, centroid_x_by_l2, centroid_y_by_l2, statent_count_l2, employees_count_l2,
-                                                    urban_core_count_l2, urban_count_l2, education_count_l2, shop_count_l2, leisure_count_l2, sport_count_l2, gastronomy_count_l2,
-                                                    accommodation_count_l2, cultural_count_l2, ovgk_share_a_by_l2, ovgk_share_b_by_l2,
-                                                    ovgk_share_c_by_l2, ovgk_share_d_by_l2, ovgk_share_none_by_l2, outside_fraction_by_l2)
+    level2_candidate_attributes_by_level1 = build_level2_candidate_attributes_by_level1(
+        children_by_level1,
+        centroid_x_by_l2,
+        centroid_y_by_l2,
+        statent_count_l2,
+        employees_count_l2,
+        urban_core_count_l2,
+        urban_count_l2,
+        education_count_l2,
+        shop_count_l2,
+        leisure_count_l2,
+        sport_count_l2,
+        gastronomy_count_l2,
+        accommodation_count_l2,
+        cultural_count_l2,
+        ovgk_share_a_by_l2,
+        ovgk_share_b_by_l2,
+        ovgk_share_c_by_l2,
+        ovgk_share_d_by_l2,
+        ovgk_share_none_by_l2,
+        outside_fraction_by_l2,
+    )
 
-    logger.info("\t Preparing microcensus training set...")
+    logger.info("\t Preparing short-range training set...")
     df = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
     df = df.merge(mz_persons, on="person_id", how="left")
-    df = df[df["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=[f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}", f"destination_{H3_LEVEL_NAMES[-1]}"]).reset_index(drop=True)
+    df = df[
+        df["purpose"].isin(SECONDARY_ACTIVITIES)
+    ].dropna(
+        subset=[f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}", f"destination_{H3_LEVEL_NAMES[-1]}"]
+    ).reset_index(drop=True)
 
-    # Here we check that the level2 choice is consistent with the level1 choice and that there are at least 2 valid level2 alternatives for each level1. This ensures that the detailed model has a valid choice set to learn from for each sample. We filter out any samples that do not meet these criteria.
+    short_max = float(context.config("short_range_trip_threshold_m"))
+    short_min = float(context.config("short_range_trip_min_m"))
+    td = df["target_distance"].to_numpy(dtype=np.float64)
+    td_valid = np.isfinite(td)
+    df = df.loc[td_valid].copy()
+    df = df[(df["target_distance"] >= short_min) & (df["target_distance"] <= short_max)].reset_index(drop=True)
+    if len(df) == 0:
+        raise RuntimeError("No short-range training samples remain after target-distance filtering.")
+
     valid_rows = []
     for idx, row in df.iterrows():
         key = (row[f"destination_{H3_LEVEL_NAMES[0]}"], row[f"destination_{H3_LEVEL_NAMES[1]}"])
@@ -134,13 +174,15 @@ def execute(context):
         valid_rows.append(idx)
 
     if len(valid_rows) == 0:
-        raise RuntimeError("No valid samples for detailed model after filtering by level1-level2 hierarchy.")
+        raise RuntimeError("No valid short-range samples after filtering by hierarchy.")
     df = df.iloc[valid_rows].reset_index(drop=True)
 
-    max_children = max(len(children_by_level1[(l0, l1)]) for l0, l1 in df[[f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}"]].itertuples(index=False))
+    max_children = max(
+        len(children_by_level1[(l0, l1)])
+        for l0, l1 in df[[f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}"]].itertuples(index=False)
+    )
     n_samples = len(df)
 
-    # Here we build candidate feature tensors with shape (n_samples, max_children, n_candidate_features) where max_children is the maximum number of level2 alternatives for any level1 in the training set. We also build a valid_mask tensor with shape (n_samples, max_children) that indicates which entries in the candidate tensor are valid alternatives for each sample. The target tensor y has shape (n_samples,) and contains the index of the chosen alternative among the valid ones for each sample.
     cand_x = np.zeros((n_samples, max_children), dtype=np.float64)
     cand_y = np.zeros((n_samples, max_children), dtype=np.float64)
     cand_statent = np.zeros((n_samples, max_children), dtype=np.float64)
@@ -164,7 +206,7 @@ def execute(context):
     y = np.zeros(n_samples, dtype=np.int64)
     weights = df["person_weight"].to_numpy(dtype=np.float32)
 
-    with context.progress(total=n_samples, label="Detailed model: building level2 choice sets") as progress:
+    with context.progress(total=n_samples, label="Short-range model: building level2 choice sets") as progress:
         for i, row in df.iterrows():
             key = (row[f"destination_{H3_LEVEL_NAMES[0]}"], row[f"destination_{H3_LEVEL_NAMES[1]}"])
             chosen_level2 = row[f"destination_{H3_LEVEL_NAMES[-1]}"]
@@ -227,49 +269,100 @@ def execute(context):
     target_distance = np.where(np.isfinite(target_distance) & (target_distance >= 0.0), target_distance, 0.0)
     target_home_distance = df["trip_destination_distance_from_home"].to_numpy(dtype=np.float64)
     target_home_distance = np.where(np.isfinite(target_home_distance) & (target_home_distance >= 0.0), target_home_distance, 0.0)
-    activity_chain_matrix = np.stack([np.asarray(v, dtype=np.float64)[:ACTIVITY_CHAIN_N] if isinstance(v, np.ndarray) else np.zeros(ACTIVITY_CHAIN_N, dtype=np.float64) for v in df["activity_chain"].to_numpy()])
+    activity_chain_matrix = np.stack([
+        np.asarray(v, dtype=np.float64)[:ACTIVITY_CHAIN_N] if isinstance(v, np.ndarray) else np.zeros(ACTIVITY_CHAIN_N, dtype=np.float64)
+        for v in df["activity_chain"].to_numpy()
+    ])
     activity_chain_matrix = np.where(np.isfinite(activity_chain_matrix) & (activity_chain_matrix >= 0.0), activity_chain_matrix, 0.0)
-    
+
     _, person_static_scaler_path, person_dynamic_scaler_path = context.stage("synthesis.population.spatial.secondary_nn.regional_model")
-    person_static_scaler  = joblib.load(person_static_scaler_path)
+    person_static_scaler = joblib.load(person_static_scaler_path)
     person_dynamic_scaler = joblib.load(person_dynamic_scaler_path)
 
-    ########### Building tensors and fitting scalers ###########
     purpose_categories = [str(purpose) for purpose in SECONDARY_ACTIVITIES]
     person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(
-        age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
-        daily_longest=daily_longest, daily_total=daily_total, daily_longest_work=daily_longest_work,
+        age=age,
+        sex=sex,
+        employed=employed,
+        car_availability=car_availability,
+        income_class=income_class,
+        daily_longest=daily_longest,
+        daily_total=daily_total,
+        daily_longest_work=daily_longest_work,
         activity_chain_matrix=activity_chain_matrix,
-        consumed_before=consumed_before, trip_position=trip_position, departure_time=departure_time,
-        activity_duration_h=activity_duration_h, target_distance=target_distance,
-        purpose_series=df["purpose"], origin_purpose_series=df["origin_purpose"],
+        consumed_before=consumed_before,
+        trip_position=trip_position,
+        departure_time=departure_time,
+        activity_duration_h=activity_duration_h,
+        target_distance=target_distance,
+        purpose_series=df["purpose"],
+        origin_purpose_series=df["origin_purpose"],
         purpose_categories=purpose_categories,
-        person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler)
+        person_static_scaler=person_static_scaler,
+        person_dynamic_scaler=person_dynamic_scaler,
+    )
 
     logger.info("\t Computing candidate-hex features with Numba...")
-    candidate_tensor = build_hierarchical_candidate_batch_numba(home_x, home_y, work_x, work_y, has_work, origin_x, origin_y, cand_x, cand_y, cand_statent, cand_employees,
-                                                                cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_sport, cand_gastronomy,
-                                                                cand_accommodation, cand_cultural, cand_ovgk_share_a, cand_ovgk_share_b,
-                                                                cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask)
+    candidate_tensor = build_hierarchical_candidate_batch_numba(
+        home_x,
+        home_y,
+        work_x,
+        work_y,
+        has_work,
+        origin_x,
+        origin_y,
+        cand_x,
+        cand_y,
+        cand_statent,
+        cand_employees,
+        cand_urban_core,
+        cand_urban,
+        cand_education,
+        cand_shop,
+        cand_leisure,
+        cand_sport,
+        cand_gastronomy,
+        cand_accommodation,
+        cand_cultural,
+        cand_ovgk_share_a,
+        cand_ovgk_share_b,
+        cand_ovgk_share_c,
+        cand_ovgk_share_d,
+        cand_ovgk_share_none,
+        cand_outside_fraction,
+        valid_mask,
+    )
     candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
     candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)
 
-    ############ Training the model ###########
-    logger.info("\t Training local neural choice model...")
+    logger.info("\t Training short-range neural choice model...")
     seed = int(context.config("random_seed"))
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    candidate_static_x  = candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:]
+    candidate_static_x = candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:]
     candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]
 
-    model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dim=32)
-    train_choice_model(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
-        y=y, valid_mask=valid_mask, logger_instance=logger, weights=weights,
-        epochs=int(context.config("local_model_epochs")),
-        batch_size=int(context.config("local_model_batch_size")),
-        lr=float(context.config("local_model_learning_rate")),
+    model = NeuralChoiceModel(
+        person_input_dim=person_trip_matrix.shape[1],
+        candidate_input_dim=candidate_tensor.shape[2],
+        person_hidden_dim=32,
+        hidden_dim=32,
+    )
+    train_choice_model(
+        model=model,
+        person_static_x=static_matrix,
+        person_dynamic_x=dynamic_matrix,
+        candidate_static_x=candidate_static_x,
+        candidate_dynamic_x=candidate_dynamic_x,
+        y=y,
+        valid_mask=valid_mask,
+        logger_instance=logger,
+        weights=weights,
+        epochs=int(context.config("short_range_model_epochs")),
+        batch_size=int(context.config("short_range_model_batch_size")),
+        lr=float(context.config("short_range_model_learning_rate")),
         num_threads=int(context.config("threads")),
         path=context.path(),
         distance_candidates=candidate_dist_last_m,
@@ -277,110 +370,34 @@ def execute(context):
         distance_candidates_home=candidate_dist_home_m,
         distance_targets_home=target_home_distance.astype(np.float32),
         distance_loss_weight=float(context.config("secondary_nn_distance_loss_weight")),
-        distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")))
+        distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")),
+    )
 
-    ########## Building wrapper and saving model ##########
-    wrapper = LocalChoiceWrapper(model=model, person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler,
-        candidate_static_scaler=candidate_static_scaler, candidate_dynamic_scaler=candidate_dynamic_scaler,
-        person_trip_cols=person_trip_cols, candidate_cols=CANDIDATE_FEATURES,
-        children_by_level1=children_by_level1, level2_candidate_attributes_by_level1=level2_candidate_attributes_by_level1, purpose_categories=purpose_categories)
+    all_h3 = h3_geo_level2["h3_index"].astype(str).tolist()
+    h3_all_indexed = h3_geo_level2.set_index("h3_index").loc[all_h3]
+    all_centroids = h3_all_indexed["centroid"]
+    centroid_x = all_centroids.x.to_numpy(dtype=np.float64)
+    centroid_y = all_centroids.y.to_numpy(dtype=np.float64)
+
+    static_candidate_features = np.column_stack([
+        h3_all_indexed[name].to_numpy(dtype=np.float64) for name in STATIC_CANDIDATE_FEATURES
+    ])
+
+    wrapper = ShortRangeChoiceWrapper(
+        model=model,
+        person_static_scaler=person_static_scaler,
+        person_dynamic_scaler=person_dynamic_scaler,
+        candidate_static_scaler=candidate_static_scaler,
+        candidate_dynamic_scaler=candidate_dynamic_scaler,
+        person_trip_cols=person_trip_cols,
+        candidate_cols=CANDIDATE_FEATURES,
+        all_h3=all_h3,
+        centroid_x=centroid_x,
+        centroid_y=centroid_y,
+        static_candidate_features=static_candidate_features,
+        purpose_categories=purpose_categories,
+    )
     wrapper.save(model_path)
 
-    ########### Plotting analysis of predictions ##########
-    _ = plot_analysis(context=context, wrapper=wrapper, person_trip_matrix=person_trip_matrix, candidate_tensor=candidate_tensor, valid_mask=valid_mask, df=df,
-                      children_by_level1=children_by_level1, h3_geo_level2=h3_geo_level2, centroid_x_by_l2=centroid_x_by_l2, centroid_y_by_l2=centroid_y_by_l2)
-
-    logger.info("Detailed model saved to %s", model_path)
+    logger.info("Short-range model saved to %s", model_path)
     return (model_path,)
-
-
-def plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, valid_mask, df, children_by_level1, h3_geo_level2, centroid_x_by_l2, centroid_y_by_l2):
-    logger.info("Predicting on training data and plotting level2 counts...")
-    pred_idx = wrapper.predict_from_inputs(person_trip_matrix, candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:], candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC], valid_mask, rng=None, return_probabilities=False)
-
-    predicted_level2 = []
-    for i, (level0, level1) in enumerate(df[[f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}"]].itertuples(index=False)):
-        children = children_by_level1[(level0, level1)]
-        predicted_level2.append(children[int(pred_idx[i])])
-
-    real_level2 = df[f"destination_{H3_LEVEL_NAMES[-1]}"].astype(str)
-    real_counts = real_level2.value_counts().rename("real_count")
-    pred_counts = pd.Series(predicted_level2).value_counts().rename("pred_count")
-    counts_df = pd.DataFrame({"real_count": real_counts, "pred_count": pred_counts}).fillna(0)
-    h3_geo_counts = h3_geo_level2.set_index("h3_index").join(counts_df, how="left").fillna(0)
-
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-    h3_geo_counts.plot(column="real_count", ax=axes[0], legend=True, cmap="viridis", legend_kwds={"shrink": 0.5})
-    axes[0].set_title("Real Level2 H3 Counts")
-    h3_geo_counts.plot(column="pred_count", ax=axes[1], legend=True, cmap="viridis", legend_kwds={"shrink": 0.5})
-    axes[1].set_title("Predicted Level2 H3 Counts")
-    plt.tight_layout()
-    plot_path = os.path.join(context.path(), "detailed_level2_counts_comparison.png")
-    plt.savefig(plot_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-
-    logger.info("Plotting distance distributions for level2...")
-    home_x = df["home_x"].to_numpy(dtype=np.float64)
-    home_y = df["home_y"].to_numpy(dtype=np.float64)
-    work_x = df["work_x"].to_numpy(dtype=np.float64)
-    work_y = df["work_y"].to_numpy(dtype=np.float64)
-    has_work = np.isfinite(work_x) & np.isfinite(work_y)
-
-    real_dist_home = []
-    pred_dist_home = []
-    real_dist_work = []
-    pred_dist_work = []
-
-    real_level2_arr = df[f"destination_{H3_LEVEL_NAMES[-1]}"].astype(str).to_numpy()
-    pred_level2_arr = np.asarray(predicted_level2, dtype=str)
-    for i in range(len(df)):
-        real_h3 = real_level2_arr[i]
-        pred_h3 = pred_level2_arr[i]
-        real_cx = centroid_x_by_l2.get(real_h3)
-        real_cy = centroid_y_by_l2.get(real_h3)
-        pred_cx = centroid_x_by_l2.get(pred_h3)
-        pred_cy = centroid_y_by_l2.get(pred_h3)
-        if real_cx is None or real_cy is None or pred_cx is None or pred_cy is None:
-            continue
-
-        real_dist_home.append(np.sqrt((real_cx - home_x[i]) ** 2 + (real_cy - home_y[i]) ** 2))
-        pred_dist_home.append(np.sqrt((pred_cx - home_x[i]) ** 2 + (pred_cy - home_y[i]) ** 2))
-
-        if has_work[i]:
-            real_dist_work.append(np.sqrt((real_cx - work_x[i]) ** 2 + (real_cy - work_y[i]) ** 2))
-            pred_dist_work.append(np.sqrt((pred_cx - work_x[i]) ** 2 + (pred_cy - work_y[i]) ** 2))
-
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-    threshold = 80000
-    real_dist_home = np.array(real_dist_home)
-    pred_dist_home = np.array(pred_dist_home)
-    real_dist_home = real_dist_home[real_dist_home <= threshold]
-    pred_dist_home = pred_dist_home[pred_dist_home <= threshold]
-
-    axes[0].hist(real_dist_home, bins=50, alpha=0.4, color="black", linewidth=2, label="Real", density=True, histtype="step")
-    axes[0].hist(pred_dist_home, bins=50, alpha=0.4, color="red", linewidth=1, label="Predicted", density=True, histtype="step", linestyle="dashed")
-    axes[0].set_title("Distance from Home")
-    axes[0].set_xlabel("Distance (m)")
-    axes[0].set_ylabel("Density")
-    axes[0].legend()
-
-    if len(real_dist_work) > 0:
-        real_dist_work = np.array(real_dist_work)
-        pred_dist_work = np.array(pred_dist_work)
-        real_dist_work = real_dist_work[real_dist_work <= threshold]
-        pred_dist_work = pred_dist_work[pred_dist_work <= threshold]
-        axes[1].hist(real_dist_work, bins=50, alpha=0.4, color="black", linewidth=2, label="Real", density=True, histtype="step")
-        axes[1].hist(pred_dist_work, bins=50, alpha=0.4, color="red", linewidth=1, label="Predicted", density=True, histtype="step", linestyle="dashed")
-        axes[1].legend()
-    else:
-        axes[1].text(0.5, 0.5, "No valid work locations", ha="center", va="center", transform=axes[1].transAxes)
-
-    axes[1].set_title("Distance from Work (has work)")
-    axes[1].set_xlabel("Distance (m)")
-    axes[1].set_ylabel("Density")
-
-    plt.tight_layout()
-    dist_plot_path = os.path.join(context.path(), "detailed_distance_distributions.png")
-    plt.savefig(dist_plot_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    return h3_geo_counts

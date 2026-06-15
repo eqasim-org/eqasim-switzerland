@@ -21,6 +21,7 @@ def configure(context):
         
     context.stage("data.microcensus.shares")
     context.stage("dmc.params")
+    context.stage("calibration.car_routing_vot.optimal_value")
 
     context.config("input_downsampling")
     context.config("threads")
@@ -141,6 +142,7 @@ def execute(context):
         "--hasFreight", context.config("use_freight"),
         "--prefix", context.config("output_prefix"),
         "--carCostModel", context.config("car_cost_model").lower(),
+        "--routingDistanceUtility", context.stage("calibration.car_routing_vot.optimal_value"),
         "--routeBikeInNetwork", str(context.config("route_bike")).lower()
         ])
     

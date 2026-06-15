@@ -34,6 +34,8 @@ def configure(context):
     context.config("regional_model_epochs", 50)
     context.config("regional_model_batch_size", 512)
     context.config("regional_model_learning_rate", 4e-3) 
+    context.config("secondary_nn_distance_loss_weight", 0.07)
+    context.config("secondary_nn_distance_loss_short_floor_m", 100.0)
 
 
 def execute(context):
@@ -60,7 +62,7 @@ def execute(context):
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
         "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", 
         "trip_position_class", "departure_time_normalized", "daily_longest_distance_from_work",
-        "activity_duration_h", "target_distance", "activity_chain"
+        "activity_duration_h", "target_distance", "trip_destination_distance_from_home", "activity_chain"
     ]]
     mz_trips = mz_trips.merge(mz_chain_trips, on=["person_id", "trip_id"], how="left")
 
@@ -114,7 +116,7 @@ def execute(context):
         "person_id", "trip_id", "origin_x", "origin_y", f"destination_{H3_LEVEL_NAMES[0]}", "purpose","origin_purpose",
         "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
         "departure_time_normalized", "daily_longest_distance_from_work",
-        "activity_duration_h", "target_distance", "activity_chain"
+        "activity_duration_h", "target_distance", "trip_destination_distance_from_home", "activity_chain"
     ]
     df_trips = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
     df_trips = df_trips[df_trips["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=[f"destination_{H3_LEVEL_NAMES[0]}"])
@@ -164,6 +166,8 @@ def execute(context):
     activity_duration_h = np.where(np.isfinite(activity_duration_h) & (activity_duration_h >= 0.0), activity_duration_h, 0.0)
     target_distance = df_trips["target_distance"].to_numpy(dtype=np.float64)
     target_distance = np.where(np.isfinite(target_distance) & (target_distance >= 0.0), target_distance, 0.0)
+    target_home_distance = df_trips["trip_destination_distance_from_home"].to_numpy(dtype=np.float64)
+    target_home_distance = np.where(np.isfinite(target_home_distance) & (target_home_distance >= 0.0), target_home_distance, 0.0)
     activity_chain_matrix = np.stack([np.asarray(v, dtype=np.float64)[:ACTIVITY_CHAIN_N] if isinstance(v, np.ndarray) else np.zeros(ACTIVITY_CHAIN_N, dtype=np.float64) for v in df_trips["activity_chain"].to_numpy()])
     activity_chain_matrix = np.where(np.isfinite(activity_chain_matrix) & (activity_chain_matrix >= 0.0), activity_chain_matrix, 0.0)
 
@@ -184,6 +188,8 @@ def execute(context):
                                                           urban_core_per_h3, urban_per_h3, education_per_h3, shop_per_h3, leisure_per_h3, sport_per_h3, gastronomy_per_h3,
                                                           accommodation_per_h3, cultural_per_h3, ovgk_share_a_per_h3, ovgk_share_b_per_h3,
                                                           ovgk_share_c_per_h3, ovgk_share_d_per_h3, ovgk_share_none_per_h3, outside_fraction)
+    candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
+    candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
     valid_mask = np.ones((n_trips, num_h3), dtype=bool)
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask, random_state=int(context.config("random_seed")))
 
@@ -203,7 +209,13 @@ def execute(context):
                               batch_size=int(context.config("regional_model_batch_size")),
                               lr=float(context.config("regional_model_learning_rate")),
                               num_threads=int(context.config("threads")),
-                              path=context.path())
+                              path=context.path(),
+                              distance_candidates=candidate_dist_last_m,
+                              distance_targets=target_distance.astype(np.float32),
+                              distance_candidates_home=candidate_dist_home_m,
+                              distance_targets_home=target_home_distance.astype(np.float32),
+                              distance_loss_weight=float(context.config("secondary_nn_distance_loss_weight")),
+                              distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")))
 
     ########## Building wrapper and saving model ##########
     static_feature_map = {

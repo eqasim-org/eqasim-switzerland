@@ -197,22 +197,19 @@ def execute(context):
 
     dfs = []
     for city in city_order:
-        try:
-            city_df = _load_counts_and_match(context, network, city)
-            if city_df is None or city_df.empty:
-                logger.info(f"\t - {city}: No usable records, skipping.")
-                continue
-            logger.info(f"\t - {city}: {len(city_df)} matched stations")
-            dfs.append(city_df)
-        except Exception as e:
-            logger.warning(f"\t - {city}: Failed to build pre-simulation matches ({e}), skipping.")
-
+        city_df = _load_counts_and_match(context, network, city)
+        if city_df is None or city_df.empty:
+            logger.info(f"\t - {city}: No usable records, skipping.")
+            continue
+        logger.info(f"\t - {city}: {len(city_df)} matched stations")
+        dfs.append(city_df)
     if not dfs:
         raise RuntimeError("No counts could be matched to the prepared network.")
 
     df = pd.concat(dfs, ignore_index=True)
     logger.info(f"Combined matched dataset for calibration: {len(df)} records")
 
+    # This would filter the data and remove the outliers and not correctly matched stations/complex intersections, this last part is done manually, only for ch data.
     df = filter_data(df, network, require_simulated=False)
     if df is None or df.empty:
         raise RuntimeError("No records left after filtering pre-simulation matched counts.")

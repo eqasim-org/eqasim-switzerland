@@ -83,8 +83,14 @@ class RoutingPenaltyProvider:
 
     def load_polygone(self):
         poly_path = self.context.stage("calibration.road_regions.penalty_calibration")
-        gdf = gpd.read_file(poly_path)
-        unioned = gdf.unary_union
+        poly_path = poly_path.split(";")
+        
+        geometries = []
+        for path_i in poly_path:
+            gdf = gpd.read_file(path_i)
+            geometries.extend(gdf.geometry.tolist())
+        unioned = gpd.GeoSeries(geometries).unary_union
+
         return unioned
         
     @staticmethod

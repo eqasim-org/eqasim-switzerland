@@ -35,6 +35,7 @@ def configure(context):
     # correct speed for uphill links only
     context.config("adjust_speed_uphill", True) # if true, it is triggered only if elevation is assigned
     context.config("adjust_speed_straightness", True) # if true, it is triggered only if elevation is assigned
+    context.config("adjust_speed_mountain_links", True) # if true, it is triggered only if elevation is assigned
     context.config("max_gradient_threshold", 0.1) # in percentage (10% = 0.1)
     context.config("speed_factor_uphill", 0.9) 
     # reduce capacity outside border
