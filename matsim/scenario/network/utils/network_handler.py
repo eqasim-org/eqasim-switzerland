@@ -28,6 +28,7 @@ class NetworkHandler:
         self._adjust_capacity_outside_border_if_requested()
         self._adjust_uphill_speed_if_requested()
         self._adjust_straightness_speed_if_requested()
+        self._adjust_mountain_links_speed_if_requested()
         self._route_bike_if_requested()
         self._final_cleaning()
         return self._save_processed_network()
@@ -101,6 +102,12 @@ class NetworkHandler:
             return
         logger.info("Adjusting Straightness Speeds...")
         self.net.links = SpeedCorrector(self.context, self.net).run("straightness")
+
+    def _adjust_mountain_links_speed_if_requested(self):
+        if not self.context.config("adjust_speed_mountain_links"):
+            return
+        logger.info("Adjusting Mountain Links Speeds...")
+        self.net.links = SpeedCorrector(self.context, self.net).run("mountain_links")
 
     def _route_bike_if_requested(self):
         if self.context.config("route_bike"):

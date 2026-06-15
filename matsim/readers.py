@@ -9,7 +9,8 @@ import pandas as pd
 from matsim.writers import NetworkWriter
 import gzip
 import io
-
+import networkx as nx
+import numpy as np
 import logging
 logger = logging.getLogger(__name__)
 
@@ -93,12 +94,19 @@ class Network:
     
         return geo_net
     
-    def as_nx(self):
-        import networkx as nx 
-        G = nx.Graph()  
+    def as_nx(self, only_car_links=False):         
+        G = nx.DiGraph()  
         links = self.links
         nodes = self.nodes  
+        
+        if only_car_links:
+            links = links[links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
 
+        lengths = links['length'].values
+        free_travel_times = lengths / links['freespeed'].values
+        speed_factors = np.ones_like(lengths)
+        if "attributes" in links:
+            speed_factors = links["attributes"].apply(lambda attr: attr.get("speedFactor", 1.0) if isinstance(attr, dict) else 1.0).values       
         # Add nodes with coordinates        
         G.add_nodes_from(
             zip(nodes['node_id'], 
@@ -108,10 +116,51 @@ class Network:
         # Add edges with attributes
         G.add_edges_from(
             zip(links['from_node'], links['to_node'],
-                ({'link_id': lid, 'free_travel_time': tt} for lid, tt in zip(links['link_id'], links['free_travel_time'])))
+                ({'link_id': lid, 'travel_time': tt, "length": length, "speed_factor": sf} for lid, tt, length, sf in zip(links['link_id'], free_travel_times, lengths, speed_factors)))
         )
 
         return G
+
+    def as_igraph(self, only_car_links=False):
+        import igraph as ig
+        links = self.links
+        nodes = self.nodes
+
+        if only_car_links:
+            links = links[links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
+
+        # Calculate travel times
+        lengths = links['length'].values
+        free_travel_times = lengths / links['freespeed'].values
+        speed_factors = np.ones_like(lengths)
+        if "attributes" in links:
+            speed_factors = links["attributes"].apply(lambda attr: attr.get("speedFactor", 1.0) if isinstance(attr, dict) else 1.0).values                
+        # Create igraph
+        g = ig.Graph(directed=True)
+
+        # Add vertices with node_id and coordinates
+        g.add_vertices(len(nodes))
+        g.vs['node_id'] = nodes['node_id'].values
+        g.vs['x'] = nodes['x'].values
+        g.vs['y'] = nodes['y'].values
+
+        # Create node_id → index mapping for edge construction
+        node_id_to_index = {nid: idx for idx, nid in enumerate(nodes['node_id'])}
+
+        # Build edge list using vertex indices
+        edge_list = [
+            (node_id_to_index[src], node_id_to_index[tgt])
+            for src, tgt in zip(links['from_node'], links['to_node'])
+        ]
+
+        # Add edges with attributes
+        g.add_edges(edge_list)
+        g.es['link_id'] = links['link_id'].values
+        g.es['travel_time'] = free_travel_times
+        g.es['length'] = lengths
+        g.es['speed_factor'] = speed_factors
+
+        return g
 
     def save(self,file_path,write_attrbs=True):        
         # set the types
