@@ -1,7 +1,11 @@
 import numpy as np
 import pandas as pd
+
+from synthesis.population.models.truck_drivers import find_truck_drivers
+
 import logging
 logger = logging.getLogger("synpp")
+
 """
 This stage fuses sampled census data with microcensus data.
 """
@@ -12,6 +16,10 @@ def configure(context):
     context.stage("synthesis.population.sampled")
     context.stage("data.microcensus.persons")
     context.stage("data.constants")
+
+    context.stage("data.structural_survey.raw")
+    context.config("input_downsampling")
+
 
 def execute(context):
     df_matched, unmatched_ids = context.stage("synthesis.population.matched")
@@ -35,16 +43,19 @@ def execute(context):
         df_mz["mz_person_id"] = df_mz[["person_id"]]
         df_persons = pd.merge(df_persons,
                             df_mz[["mz_person_id",
-                                    "bike_availability", "is_car_passenger"]],
+                                    "bike_availability", "is_car_passenger",
+                                    "is_outside_of_switzerland", 
+                                    "is_crossing_the_border"]],
                             on="mz_person_id", how="left"
                             )
+        
         # recode bike availability to two values:
         var_raw = pd.to_numeric(df_persons["bike_availability"], errors="coerce")
         df_persons["bike_availability"] = np.where(var_raw == c.BIKE_AVAILABILITY_NEVER, 0, 1).astype("int64")
+
         # Reset children
         children_selector = df_persons["age"] < c.MZ_AGE_THRESHOLD
         df_persons.loc[children_selector, "driving_license"]  = False
-        #df_persons.loc[children_selector, "employed"]         = False
         df_persons.loc[children_selector, "marital_status"]   = c.MARITAL_STATUS_SINGLE
         df_persons.loc[children_selector, "car_availability"] = 0
         df_persons.loc[children_selector, "bike_availability"] = 0
@@ -87,7 +98,9 @@ def execute(context):
                                     "subscriptions_ga_class",
                                     "subscriptions_verbund_class",
                                     "subscriptions_strecke_class",
-                                    "is_car_passenger"]],
+                                    "is_car_passenger",
+                                    "is_outside_of_switzerland", 
+                                    "is_crossing_the_border"]],
                             on="mz_person_id", how="left"
                             )
 
@@ -123,5 +136,10 @@ def execute(context):
         logger.info("Fixing this to ensure consistency of the results.")
         df_persons.loc[df_persons["age_class"]<=1, "driving_license"] = False
 
-    #print(df_persons["collective_housing_resident"].value_counts())
+    # Find truck drivers
+    se = context.stage("data.structural_survey.raw")
+    sr = context.config("input_downsampling")
+
+    df_persons = find_truck_drivers(se, df_persons, sr)
+
     return df_persons

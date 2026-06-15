@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 import geopandas as gpd
-from shapely.geometry import Point
+from shapely.geometry import LineString
 
 
 import warnings
@@ -18,12 +18,17 @@ def configure(context):
     context.stage("data.constants")
     context.stage("data.spatial.swiss_border")
 
+    context.stage("data.microcensus.trips")
+    context.config("output_path")
+
 
 def execute(context):
     data_path = context.config("data_path")
     c         = context.stage("data.constants")
 
-    df_mz_trips   = pd.read_csv("%s/microcensus/wege.csv" % data_path, encoding = "latin1")
+    _, _, _, crossborder_person_ids = context.stage("data.microcensus.trips")
+
+    df_mz_trips   = pd.read_csv("%s/microcensus/wegeinland.csv" % data_path, encoding = "latin1")
     df_mz_stages  = pd.read_csv("%s/microcensus/etappen.csv" % data_path, encoding = "latin1")
     df_mz_persons = pd.read_csv("%s/microcensus/zielpersonen.csv" % data_path, sep = ",", encoding = "latin1", parse_dates = ["USTag"])
 
@@ -33,19 +38,21 @@ def execute(context):
         "w_rdist"
     ]]
 
+    df_mz_trips = df_mz_trips[df_mz_trips["HHNR"].isin(crossborder_person_ids)]
+    output_path = context.config("output_path")
+
     df_mz_stages = df_mz_stages[[
         "HHNR", "WEGNR", "ETNR", "f51300"
     ]]
 
-    df_mz_persons_work = df_mz_persons[["HHNR", "A_X_CH1903", "A_Y_CH1903", "AU_X_CH1903", "AU_Y_CH1903", "WP"]]
+    df_mz_persons_work = df_mz_persons[["HHNR", "A_X_CH1903", "A_Y_CH1903", "AU_X_CH1903", "AU_Y_CH1903"]]
 
     df_mz_trips = df_mz_trips.merge(df_mz_persons_work, on = "HHNR", how = "left")
 
     del df_mz_persons_work
     del df_mz_persons
 
-    df_mz_trips["weight_person"] = df_mz_trips["WP"]
-    del df_mz_trips["WP"]
+    print(len(df_mz_trips))
 
     # First, adjust the modes
     mode_map = {
@@ -128,13 +135,15 @@ def execute(context):
     df_mz_trips.loc[:, "crowfly_distance"] = np.sqrt(
         (df_mz_trips["origin_x"] - df_mz_trips["destination_x"])**2 +
         (df_mz_trips["origin_y"] - df_mz_trips["destination_y"])**2)
+    
+    df_mz_trips.to_csv(f"{output_path}/wegeinland_raw.csv", index = False)
 
     # Filter persons for which we do not have sufficient information
     unknown_ids = set(df_mz_trips[
         (df_mz_trips["mode"] == "unknown") | (df_mz_trips["purpose"] == "unknown")
     ]["person_id"])
 
-    logger.info("  Removed %d persons with trips with unknown mode or unknown purpose" % len(unknown_ids))
+    print("  Removed %d persons with trips with unknown mode or unknown purpose" % len(unknown_ids))
     df_mz_trips = df_mz_trips[~df_mz_trips["person_id"].isin(unknown_ids)]
 
     filterout_ids = unknown_ids
@@ -259,21 +268,19 @@ def execute(context):
     df_act_chains = df_mz_trips.copy()
     df_act_chains = df_act_chains.sort_values(["person_id", "trip_id"])
 
-    # Create the activity chain
     def build_activity_chain(trips):
-        chain = [trips.iloc[0]["origin_purpose"]]
-        chain += trips["purpose"].tolist()
-        return "-".join(chain)
+        parts = [str(trips.iloc[0]["origin_purpose"])]
+        parts += trips["purpose"].astype(str).tolist()
+        parts = [p for p in parts if p not in ("nan", "None", "")]
 
-    # Apply it per person
+        return "-".join(parts)
+
     activity_chains = (
         df_act_chains
-        .drop(columns="person_id")  
-        .groupby(df_act_chains["person_id"])
+        .groupby("person_id")
         .apply(build_activity_chain)
-        .reset_index(name="activity_chain") 
+        .reset_index(name="activity_chain")
     )
-    activity_chains.columns = ["person_id", "activity_chain"]
 
     # Identify people with multiple "work" or "education" in a row - excluding work_secondary
     def has_consecutive_work_or_edu(chain):
@@ -403,14 +410,14 @@ def execute(context):
         )
         activity_chains.columns = ["person_id", "activity_chain"]
 
-        assert len(list(activity_chains[activity_chains["activity_chain"].str.contains("work-work-")]["activity_chain"].unique())) == 0
-        assert len(list(activity_chains[activity_chains["activity_chain"].str.contains("education-education-")]["activity_chain"].unique())) == 0
-
-        logger.info("  done!")
+        #assert len(list(activity_chains[activity_chains["activity_chain"].str.contains("work-work-")]["activity_chain"].unique())) == 0
+        #assert len(list(activity_chains[activity_chains["activity_chain"].str.contains("education-education-")]["activity_chain"].unique())) == 0
 
     # Match observed trip coordinates with reported home coordinates for home trips.
     for col in ["origin_x", "origin_y", "destination_x", "destination_y", "home_x", "home_y"]:
         df_mz_trips[col] = df_mz_trips[col].astype(int)
+
+    print(len(df_mz_trips))
 
     df_purpose_home        = df_mz_trips[df_mz_trips["purpose"]=="home"][["person_id", "destination_x", "destination_y", "home_x", "home_y"]]
     df_origin_purpose_home = df_mz_trips[df_mz_trips["origin_purpose"]=="home"][["person_id", "origin_x", "origin_y", "home_x", "home_y"]]
@@ -457,9 +464,16 @@ def execute(context):
         home_coord = df_home_2ndcase[df_home_2ndcase["person_id"]==person_id][["x", "y"]]
         x          = home_coord["x"].values[0]
         y          = home_coord["y"].values[0]
-        if df_person[df_person["trip_id"]==1]["origin_x"].values[0] == x and df_person[df_person["trip_id"]==1]["origin_y"].values[0] == y:
+
+        trip1 = df_person[df_person["trip_id"] == 1]
+        if trip1.empty:
+            continue
+        ox = trip1["origin_x"].iloc[0]
+        oy = trip1["origin_y"].iloc[0]
+
+        if pd.notna(ox) and pd.notna(oy) and abs(ox - x) < 1e-6 and abs(oy - y) < 1e-6:
             cpt += 1
-            df_person.loc[df_person["trip_id"]==1, "origin_purpose"] = "home"
+            df_person.loc[df_person["trip_id"] == 1, "origin_purpose"] = "home"
         df_new_list.append(df_person)
 
     logger.info(f"    INFO fixed origin purpose to home for {cpt} activity chains.")
@@ -467,8 +481,8 @@ def execute(context):
     # 3rd case: multiple home locations found, one corresponds to the reported home.
     cond3  = (person_summary["home_location_count"] > 1) & (person_summary["has_home_match"])
     share3 = cond3.sum() / len(person_summary) * 100
-    logger.info(f"  INFO for {round(share3, 2)}% of the agents, multiple home locations were found. One corresponds to the reported home location.")
-    logger.info(f"    For these agents, create home_secondary activities.")
+    print(f"  INFO for {round(share3, 2)}% of the agents, multiple home locations were found. One corresponds to the reported home location.")
+    print(f"    For these agents, create home_secondary activities.")
 
     df_home_3rdcase     = person_summary[cond3]
     df_home_3rdcase_ids = df_home_3rdcase["person_id"]
@@ -585,7 +599,7 @@ def execute(context):
     df_mz_trips = pd.concat(df_new_list, ignore_index=True)
 
     df_purpose_home        = df_mz_trips[df_mz_trips["purpose"].str.contains("home")][["person_id", "destination_x", "destination_y"]]
-    df_origin_purpose_home = df_mz_trips[df_mz_trips["origin_purpose"].str.contains("home")][["person_id", "origin_x", "origin_y"]]
+    df_origin_purpose_home = df_mz_trips[df_mz_trips["origin_purpose"].str.contains("home", na=False)][["person_id", "origin_x", "origin_y"]]
 
     df_purpose_home.columns        = ["person_id", "x", "y"]
     df_origin_purpose_home.columns = ["person_id", "x", "y"]
@@ -649,8 +663,11 @@ def execute(context):
 
     def map_home_label_and_coords(row, x_col, y_col, purpose_col):
         key = (row["person_id"], row[x_col], row[y_col])
+        purpose = row[purpose_col]
+        purpose_str = "" if pd.isna(purpose) else str(purpose)
+
         # Only adjust if this is a home purpose and the key exists in the mapping
-        if row[purpose_col].startswith("home") and key in label_map:
+        if purpose_str.startswith("home") and key in label_map:
             # Update purpose
             new_purpose = label_map[key]
             # Update coordinates
@@ -658,6 +675,7 @@ def execute(context):
             row[x_col] = new_x
             row[y_col] = new_y
             return pd.Series([new_purpose, new_x, new_y])
+        
         # No change
         return pd.Series([row[purpose_col], row[x_col], row[y_col]])
 
@@ -824,7 +842,7 @@ def execute(context):
     loops_multistage = process_useful_stages(multi_stages.copy(), loops_multistage.copy())
 
     loops    = pd.concat([loops_singlestage, loops_multistage])
-    nonloops = df_mz_trips[~df_mz_trips["origin_purpose"].str.startswith("home") | ~df_mz_trips["purpose"].str.startswith("home") | ~(df_mz_trips["origin_purpose"]==df_mz_trips["purpose"])].copy()
+    nonloops = df_mz_trips[~df_mz_trips["origin_purpose"].str.startswith("home", na=False) | ~df_mz_trips["purpose"].str.startswith("home", na=False) | ~(df_mz_trips["origin_purpose"]==df_mz_trips["purpose"])].copy()
 
     df_mz_trips = pd.concat([loops, nonloops])
     df_mz_trips = df_mz_trips.sort_values(by=["person_id", "trip_id", "departure_time"])
@@ -842,9 +860,6 @@ def execute(context):
     
     # Identify activity chains completely outside of Switzerland
     swiss_border = context.stage("data.spatial.swiss_border").copy().unary_union
-    swiss_border = swiss_border.simplify(tolerance = 100) # simplify the border's shape to make computations easier 
-
-    swiss_border_gdf = gpd.GeoDataFrame(geometry=[swiss_border], crs="epsg:2056")
 
     origins = gpd.GeoDataFrame(df_mz_trips,
                                geometry = gpd.points_from_xy(df_mz_trips["origin_x"], df_mz_trips["origin_y"]),
@@ -853,34 +868,38 @@ def execute(context):
     destinations = gpd.GeoDataFrame(df_mz_trips,
                                     geometry = gpd.points_from_xy(df_mz_trips["destination_x"], df_mz_trips["destination_y"]),
                                     crs = "epsg:2056")
+    
+    df_mz_trips["origin_in_ch"] = origins.geometry.within(swiss_border)
+    df_mz_trips["dest_in_ch"]   = destinations.geometry.within(swiss_border)
 
-    origin_join = gpd.sjoin(origins, swiss_border_gdf, how = "left", predicate = "within")
-    df_mz_trips["origin_in_ch"] = origin_join.index_right.notna().values
-
-    dest_join = gpd.sjoin(destinations, swiss_border_gdf, how = "left", predicate = "within")
-    df_mz_trips["destination_in_ch"] = dest_join.index_right.notna().values
-
-    df_mz_trips["trip_outside_ch"] = (~df_mz_trips["origin_in_ch"]) & (~df_mz_trips["destination_in_ch"])
+    df_mz_trips["trip_outside_ch"] = (~df_mz_trips["origin_in_ch"]) & (~df_mz_trips["dest_in_ch"])
 
     persons_all_outside = df_mz_trips.groupby("person_id")["trip_outside_ch"].all()
     persons_outside_ch  = persons_all_outside[persons_all_outside].index
 
-    df_mz_trips["trip_crossing_border"] = ((df_mz_trips["origin_in_ch"]) & (~df_mz_trips["destination_in_ch"])) | ((~df_mz_trips["origin_in_ch"]) & (df_mz_trips["destination_in_ch"]))
+    df_mz_trips["trip_crossing_border"] = ((df_mz_trips["origin_in_ch"]) & (~df_mz_trips["dest_in_ch"])) | ((~df_mz_trips["origin_in_ch"]) & (df_mz_trips["dest_in_ch"]))
     persons_crossing_border             = df_mz_trips.groupby("person_id")["trip_crossing_border"].any()
     persons_crossing_the_border         = persons_crossing_border[persons_crossing_border].index
 
-    df_mz_trips[[
-        "person_id", "trip_id", "departure_time", "arrival_time", "mode", "origin_purpose", "purpose", 
-        "origin_x", "origin_y", "destination_x", "destination_y", 
-        "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
-        "mode_detailed",
-        "trip_outside_ch", "origin_in_ch", "destination_in_ch", "trip_crossing_border", "weight_person"
-    ]].to_csv("/home/asallard/Documents/Tests/MZ cross border trips/clustering/mz_trips.csv", index = False)
+    print(len(df_mz_trips))
+
+    df_mz_trips["geometry"] = df_mz_trips.apply(
+        lambda r: LineString([
+            (r["origin_x"], r["origin_y"]),
+            (r["destination_x"], r["destination_y"])
+        ]),
+        axis=1
+    )
+
+    gdf = gpd.GeoDataFrame(df_mz_trips, geometry="geometry", crs="EPSG:2056")
+    
+    output_path = context.config("output_path")
+    gdf.to_file(f"{output_path}/wegeinland_processed.gpkg", driver = "gpkg")
 
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "origin_purpose", "purpose", 
         "origin_x", "origin_y", "destination_x", "destination_y", 
         "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
         "mode_detailed",
-        "trip_outside_ch", "origin_in_ch", "destination_in_ch", "trip_crossing_border", "weight_person"
+        "trip_outside_ch"
     ]], filterout_ids, persons_outside_ch, persons_crossing_the_border

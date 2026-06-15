@@ -39,21 +39,21 @@ def execute(context):
     if context.config("include_cross_border"):
         cross_border_vehicles = context.stage("data.cross_border.generate_cross_border_traffic")[2].copy()
         cross_border_persons  = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
-        id_person_max         = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
-        N                     = id_person_max + 1
+        #id_person_max         = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
+        #N                     = id_person_max + 1
 
-        cross_border_persons["new_person_id"]    = range(N, N + len(cross_border_persons), 1)
+        #cross_border_persons["new_person_id"]    = range(N, N + len(cross_border_persons), 1)
 
-        id_map = cross_border_persons.set_index("person_id")["new_person_id"]
-        cross_border_vehicles["person_id"]  = cross_border_vehicles["vehicle_id"].str.split(":").str[0]
-        cross_border_vehicles["type_id"]    = cross_border_vehicles["vehicle_id"].str.split(":").str[1]
-        cross_border_vehicles["person_id"]  = cross_border_vehicles["person_id"].map(id_map).fillna(cross_border_vehicles["person_id"])
-        cross_border_vehicles["vehicle_id"] = cross_border_vehicles["person_id"].astype(str) + ":" + cross_border_vehicles["type_id"]
+        #id_map = cross_border_persons.set_index("person_id")["new_person_id"]
+        #cross_border_vehicles["person_id"]  = cross_border_vehicles["vehicle_id"].str.split(":").str[0]
+        #cross_border_vehicles["type_id"]    = cross_border_vehicles["vehicle_id"].str.split(":").str[1]
+        #cross_border_vehicles["person_id"]  = cross_border_vehicles["person_id"].map(id_map).fillna(cross_border_vehicles["person_id"])
+        #cross_border_vehicles["vehicle_id"] = cross_border_vehicles["person_id"].astype(str) + ":" + cross_border_vehicles["type_id"]
 
-        cross_border_vehicles.loc[cross_border_vehicles["type_id"] == "car", "type_id"] = "default_car"
-        cross_border_vehicles.loc[cross_border_vehicles["type_id"] == "car_passenger", "type_id"] = "default_car_passenger"
+        cross_border_vehicles.loc[cross_border_vehicles["mode"] == "car", "type_id"] = "default_car"
+        cross_border_vehicles.loc[cross_border_vehicles["mode"] == "car_passenger", "type_id"] = "default_car_passenger"
 
-        del cross_border_vehicles["person_id"]
+        #del cross_border_vehicles["person_id"]
 
         df_vehicles = pd.concat([df_vehicles, cross_border_vehicles])
 

@@ -9,7 +9,6 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
-    #context.config("weekend", default = False)
 
     context.stage("data.microcensus.households")
     context.stage("data.microcensus.trips")
@@ -199,7 +198,7 @@ def execute(context):
 
     # Merge in the other data sets
     df_mz_households = context.stage("data.microcensus.households")
-    df_mz_trips, filterout_person_ids = context.stage("data.microcensus.trips")
+    df_mz_trips, filterout_person_ids, persons_outside_ch, persons_crossing_the_border = context.stage("data.microcensus.trips")
 
     df_mz_persons = pd.merge(df_mz_persons, df_mz_households)
     df_mz_persons = data.microcensus.income.impute(df_mz_persons)
@@ -232,21 +231,28 @@ def execute(context):
     car_passenger_ids = df_mz_trips.loc[df_mz_trips["mode"] == "car_passenger", "person_id"].unique()
     df_mz_persons["is_car_passenger"] = df_mz_persons["person_id"].isin(car_passenger_ids)
 
-    # commute distance
+    # Commute distance
     df_mz_persons["commute_distance"] = -1
     employed = df_mz_persons["employed"]
     df_mz_persons.loc[employed, "commute_distance"] = np.sqrt(
         (df_mz_persons.loc[employed, "work_x"] - df_mz_persons.loc[employed, "home_x"]) ** 2 +
         (df_mz_persons.loc[employed, "work_y"] - df_mz_persons.loc[employed, "home_y"]) ** 2
     ).fillna(0.0).replace([np.inf, -np.inf], 0.0)
+
+    # Flag persons completely outside of Switzerland and those crossing the border
+    df_mz_persons.loc[:, "is_outside_of_switzerland"] = df_mz_persons["person_id"].isin(persons_outside_ch)
+    df_mz_persons.loc[:, "is_crossing_the_border"]    = df_mz_persons["person_id"].isin(persons_crossing_the_border)
+    columns.extend(["is_outside_of_switzerland", "is_crossing_the_border"])
     
-    # work_location_type
+    # Work_location_type
     df_mz_persons["work_location_type"] = "none"    
     df_mz_persons.loc[employed, "work_location_type"] = "fixed"
+
     # 1.those working from different locations
     # 1.1 they have secondary work
     moving = df_mz_trips[(df_mz_trips.purpose=="work_secondary")|(df_mz_trips.origin_purpose=="work_secondary")].person_id.unique()
     df_mz_persons.loc[employed & df_mz_persons["person_id"].isin(moving), "work_location_type"] = "moving"    
+    
     # 1.2 trips to work don't go to the declared work location
     work_trips = df_mz_trips[df_mz_trips.purpose.isin(["work","work_secondary"])].copy()
     work_trips = work_trips.merge(df_mz_persons[["person_id", "work_x", "work_y"]], on="person_id", how="left")
@@ -256,6 +262,7 @@ def execute(context):
     ).fillna(0.0).replace([np.inf, -np.inf], 0.0)
     moving2 = work_trips[work_trips["distance_from_work_to_work"] > 10].person_id.unique()
     df_mz_persons.loc[employed & df_mz_persons["person_id"].isin(moving2), "work_location_type"] = "moving"
+    
     # 1.3 trips from work don't start from the declared work location
     work_trips = df_mz_trips[df_mz_trips.origin_purpose.isin(["work","work_secondary"])].copy()
     work_trips = work_trips.merge(df_mz_persons[["person_id", "work_x", "work_y"]], on="person_id", how="left")

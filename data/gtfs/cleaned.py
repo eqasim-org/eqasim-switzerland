@@ -13,6 +13,7 @@ def configure(context):
     context.config("gtfs_name", default = "")
     context.config("gtfs_folder", default = "gtfs")
 
+
 def execute(context):
     gtfs_folder = context.config("gtfs_folder")
     all_input_files = get_input_files("{}/{}".format(context.config("data_path"), gtfs_folder))

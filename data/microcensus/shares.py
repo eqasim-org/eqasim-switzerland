@@ -91,7 +91,7 @@ def load_clean_trips(context):
          Filtered trips DataFrame including merged person attributes.
     """
     persons = context.stage("data.microcensus.persons")
-    trips, filterout_ids = context.stage("data.microcensus.trips")
+    trips, filterout_ids, _, _ = context.stage("data.microcensus.trips")
 
     # Merge with persons
     persons = persons[['person_id', 'person_weight', 'age', 'sex', 

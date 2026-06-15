@@ -47,7 +47,8 @@ def execute(context):
                 "FREQPERWEEK_TOWORK": float,
                 "COMMUTERTOWORK_DETAIL": int,                
                 "STARTWORK": int,
-                "HIGHESTCOMPLEDU": int
+                "HIGHESTCOMPLEDU": int,
+                "CURROCCUPATIONISCO": int
             }
 
             renames = {
@@ -75,7 +76,8 @@ def execute(context):
                 "FREQPERWEEK_TOWORK": "freq_per_week",
                 "COMMUTERTOWORK_DETAIL": "commute_to_work", #0: no displacement or no fixed work location, 2: in the same commune, ...6: abroad
                 "STARTWORK": "start_work", #1: a domicile, 2: different locations, 3: employer adress, >4: other adresses
-                "HIGHESTCOMPLEDU": "highest_completed_education", #1: None, ... 11: Bachelor, 12: Master, 13: Doctorate                   
+                "HIGHESTCOMPLEDU": "highest_completed_education", #1: None, ... 11: Bachelor, 12: Master, 13: Doctorate       
+                "CURROCCUPATIONISCO": "isco_code"            
             }            
             data_frames.append(data.utils.read_csv(context, f, fields, renames, total=total, sep=sep))
 

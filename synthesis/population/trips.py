@@ -20,11 +20,12 @@ def execute(context):
 
     if c.census == "statpop":
         df_persons = context.stage("synthesis.population.enriched")[[
-            "person_id", "mz_person_id", "age"
+            "person_id", "mz_person_id", "age", "is_truck_driver", "is_outside_of_switzerland"
         ]]
+
     elif c.census == "are_synpop":
         df_persons = context.stage("synthesis.population.enriched")[[
-            "person_id", "mz_person_id", "age_class"
+            "person_id", "mz_person_id", "age_class", "is_truck_driver", "is_outside_of_switzerland"
         ]]    
 
     df_trips = pd.DataFrame(context.stage("data.microcensus.trips")[0], copy=True)[[
@@ -50,7 +51,8 @@ def execute(context):
     df_trips = df_trips[["person_id", "mz_person_id", "trip_id",
                          "departure_time", "arrival_time",
                          "travel_time", "mode",
-                         "preceding_purpose", "following_purpose"]].sort_values(by=["person_id", "trip_id"])
+                         "preceding_purpose", "following_purpose",
+                         "is_truck_driver", "is_outside_of_switzerland"]].sort_values(by=["person_id", "trip_id"])
 
     # Diversify departure times
     counts = df_trips[["person_id", "trip_id"]].groupby("person_id").size().reset_index(name="count")["count"].values
@@ -65,15 +67,15 @@ def execute(context):
     interval = np.minimum(1800.0, interval)
 
     # Set up RNG
-    rng = np.random.RandomState(context.config("random_seed"))
+    rng    = np.random.RandomState(context.config("random_seed"))
     offset = rng.random_sample(size=(len(counts),)) * interval * 2.0 - interval
     offset = np.repeat(offset, counts)
 
     df_trips["departure_time"] += offset
-    df_trips["arrival_time"] += offset
-    df_trips["departure_time"] = np.round(df_trips["departure_time"])
-    df_trips["arrival_time"] = np.round(df_trips["arrival_time"])
-    df_trips["trip_duration"] = df_trips["arrival_time"] - df_trips["departure_time"]
+    df_trips["arrival_time"]   += offset
+    df_trips["departure_time"]  = np.round(df_trips["departure_time"])
+    df_trips["arrival_time"]    = np.round(df_trips["arrival_time"])
+    df_trips["trip_duration"]   = df_trips["arrival_time"] - df_trips["departure_time"]
 
     # Define trip index
     df_trips = df_trips.sort_values(by=["person_id", "trip_id"])
@@ -85,6 +87,21 @@ def execute(context):
     remote_agents = set(remote_agents["person_id"].values)
     f = (df_trips["following_purpose"] == "work") & (df_trips["person_id"].isin(remote_agents))
     df_trips.loc[f, "mode"] = "remote_walk"
+
+    # Delete trips for truck drivers and agents not in Switzerland
+    initial_length = len(df_trips)
+    df_trips       = df_trips[~df_trips["is_truck_driver"]]
+    final_length   = len(df_trips)
+    share          = round((final_length - initial_length) / initial_length * 100, 2)
+
+    print(f"Removed {initial_length - final_length} ({share}%) trips (truck drivers)")
+
+    initial_length = len(df_trips)
+    df_trips       = df_trips[~df_trips["is_outside_of_switzerland"].astype("boolean").fillna(False).astype(bool)]
+    final_length   = len(df_trips)
+    share          = round((final_length - initial_length) / initial_length * 100, 2)
+
+    print(f"Removed {initial_length - final_length} ({share}%) activities (people outside of Switzerland)")
 
     return df_trips[[
         "person_id", "mz_person_id", "trip_id", "trip_index",

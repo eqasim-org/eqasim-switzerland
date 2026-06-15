@@ -130,8 +130,10 @@ class PersonWriter:
         writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
 
         person_type = getattr(p, "person_type", "normal")
+        
         is_crossborder = (person_type == "crossborder")
         writer.add_attribute("isCrossBorder", "java.lang.Boolean", writer.true_false(is_crossborder))
+        
         is_french     = (person_type == "FR")
         writer.add_attribute("isExternalFR", "java.lang.Boolean", writer.true_false(is_french))
 
@@ -345,10 +347,6 @@ def execute(context):
         external_activities = context.stage("data.external_population.read_outputs")[1].copy()
         external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
 
-        external_persons["person_type"] = "external"
-
-        logger.warning(f"All these are wrong and need to be corrected")
-
         external_persons["pt_subscription"]   = 0
         external_persons["bike_availability"] = 0
         external_persons["car_availability"]  = 1
@@ -368,7 +366,6 @@ def execute(context):
         external_activities["destination_y"] = external_activities["destination_y"].astype(int)
 
         for col in ACTIVITY_ATTRIBUTES_TO_SAVE.values():
-            logger.warning(f"Column {col} does not exist in the external population activities. Filling it with default values (0).")
             external_activities[col] = 0
         
         external_vehicles = external_vehicles[VEHICLE_FIELDS]
@@ -393,10 +390,7 @@ def execute(context):
         cross_border_persons    = cross_border_persons.sort_values(by="person_id")
         cross_border_activities = cross_border_activities.sort_values(by=["person_id", "activity_index"])
         cross_border_vehicles   = cross_border_vehicles.sort_values(by=["owner_id"])
-
-        cross_border_activities["purpose"] = cross_border_activities["purpose"].replace({"home_secondary":"other",
-                                                                 "work_secondary": "work",
-                                                                 "education_secondary":"education"})
+        
         for col in ACTIVITY_ATTRIBUTES_TO_SAVE.values():
             if col not in cross_border_activities.columns:
                 cross_border_activities[col] = 0
@@ -425,6 +419,10 @@ def execute(context):
     df_vehicles   = df_vehicles[VEHICLE_FIELDS]
     df_vehicles["owner_id"] = df_vehicles["owner_id"].astype(int)
 
+    print("BEFORE")
+    print(len(df_persons), len(df_activities), len(df_vehicles))
+    print(len(df_persons[df_persons["person_type"] == "FR"]))
+
     # correct types before saving the data    
     df_persons = df_persons.astype(PERSONS_DTYPES)
     df_activities["geometry"] = df_activities["geometry"].apply(lambda g: wkt.loads(g) if isinstance(g, str) else g)
@@ -433,8 +431,14 @@ def execute(context):
     )
     valid_ids = valid_ids[valid_ids].index
 
+    # TODO was there a reason why vehicles are not impacted by this selection of valid ids?
     df_persons    = df_persons[df_persons["person_id"].isin(valid_ids)]
     df_activities = df_activities[df_activities["person_id"].isin(df_persons["person_id"].values.tolist())]
+    df_vehicles   = df_vehicles[df_vehicles["owner_id"].isin(df_persons["person_id"].values.tolist())]
+
+    print("AFTER")
+    print(len(df_persons), len(df_activities), len(df_vehicles))
+    print(len(df_persons[df_persons["person_type"] == "FR"]))
 
     # TODO check why there are multiple activities with same attributes but only different municipality_id and municipality_types.
     df_activities = df_activities.drop_duplicates(["person_id", "activity_index"], keep = "first")
@@ -449,13 +453,17 @@ def execute(context):
     # Cast only the columns that exist (so removing/adding columns won't break)
     df_persons = df_persons.astype({k: v for k, v in PERSONS_DTYPES.items() if k in df_persons.columns})
 
+    df_persons    = df_persons.sort_values(by = "person_id")
+    df_activities = df_activities.sort_values(by = ["person_id", "activity_index"])
+    df_vehicles   = df_vehicles.sort_values(by = ["owner_id"])
+
     person_iterator   = iter(df_persons.itertuples(index=False, name="Person"))
     activity_iterator = iter(df_activities.itertuples(index=False, name="Activity"))
     vehicle_iterator  = backlog_iterator(iter(df_vehicles.itertuples(index=False, name="Vehicle")))
 
     number_of_written_persons    = 0
     number_of_written_activities = 0
-    logger.info("Starting to write population!!")
+    logger.info("Starting to write population")
 
     population_xml_path = "%s/population.xml" % cache_path
     population_gz_path = "%s/population.xml.gz" % cache_path
@@ -470,6 +478,7 @@ def execute(context):
     open_fn = open if use_pigz else gzip.open
     open_kwargs = {} if use_pigz else {"compresslevel": compresslevel}
 
+    # TODO check why at some point (most probably not related to cross border or external population) the vehicles and populations get un-aligned
     with open_fn(output_path, "wb+", **open_kwargs) as f:
         with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:
             writer = matsim.writers.PopulationWriter(raw_writer)
@@ -493,6 +502,9 @@ def execute(context):
                                 vehicle_iterator.previous()
                                 break
                             vehicles.append(vehicle)
+
+                        if len(vehicles) == 0:
+                            vehicles = df_vehicles[df_vehicles["owner_id"] == person_id]
 
                         person_writer.add_vehicles(vehicles)
                         number_of_written_activities += person_writer.write(

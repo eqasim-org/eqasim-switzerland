@@ -4,6 +4,7 @@ from joblib import Parallel, delayed
 import logging
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.stage("data.statpop.persons")
 
@@ -30,26 +31,29 @@ def impute(context, kd_tree, df, x="x", y="y", radius= 2.5 * 1e3, point_type="",
     df["population_density"] = counts # / (np.pi * c.POPULATION_DENSITY_RADIUS**2)
     return df
 
-def impute_parallel(context, kd_tree, df, x="x", y="y", radius=2.5 * 1e3, point_type="", chunk_size=1000, n_jobs=10):
 
+def impute_parallel(context, kd_tree, df, x="x", y="y", radius=2.5 * 1e3, point_type="", chunk_size=1000, n_jobs=10):
     total_points = len(df)
     logger.info("Imputing population density within %d m of %d %s coordinates...", radius, total_points, point_type)
 
-    # Split DataFrame into roughly equal chunks
     chunk_count = max(1, int(np.ceil(total_points / chunk_size)))
     df_splits = np.array_split(df, chunk_count)
 
     def process_chunk(chunk):
-        coords = np.vstack([chunk[x], chunk[y]]).T
-        return kd_tree.query_radius(coords, radius, count_only=True)
+        coords = np.vstack([chunk[x], chunk[y]]).T.astype(float)  # ensure float array
+        nan_mask = np.isnan(coords).any(axis=1)
+        valid_coords = coords[~nan_mask]
 
-    # Run in parallel
+        result = np.zeros(len(coords), dtype=int)
+        if len(valid_coords) > 0:
+            result[~nan_mask] = kd_tree.query_radius(valid_coords, radius, count_only=True)
+        return result
+
     results = Parallel(n_jobs=n_jobs)(
         delayed(process_chunk)(chunk)
         for chunk in context.progress(df_splits, total=chunk_count, label="Imputing population density...")
     )
 
-    # Flatten list of arrays
     counts = np.concatenate(results)
     df["population_density"] = counts
     return df

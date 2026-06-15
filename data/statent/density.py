@@ -89,8 +89,15 @@ def _get_output_column(measure, output_column):
 
 
 def _query_density(kd_tree, coords, radius, measure, employee_weights):
+    coords = np.array(coords)
+    nan_mask = np.isnan(coords).any(axis=1)
+    valid_coords = coords[~nan_mask]
+
     if measure == "companies":
-        return kd_tree.query_radius(coords, radius, count_only=True)
+        result = np.zeros(len(coords), dtype=int)
+        if len(valid_coords) > 0:
+            result[~nan_mask] = kd_tree.query_radius(valid_coords, radius, count_only=True)
+        return result
 
     if measure == "employees":
         if employee_weights is None:
@@ -98,8 +105,10 @@ def _query_density(kd_tree, coords, radius, measure, employee_weights):
                 "employee_weights are required to impute employees density. "
                 "Pass the object returned by execute(context) as kd_tree argument."
             )
-
-        indices = kd_tree.query_radius(coords, radius, count_only=False)
-        return np.array([employee_weights[index].sum() for index in indices])
+        result = np.zeros(len(coords), dtype=float)
+        if len(valid_coords) > 0:
+            indices = kd_tree.query_radius(valid_coords, radius, count_only=False)
+            result[~nan_mask] = np.array([employee_weights[index].sum() for index in indices])
+        return result
 
     raise ValueError("Unknown density measure '{}'. Use 'companies' or 'employees'.".format(measure))

@@ -83,6 +83,7 @@ def execute(context):
     df_locations_unique["x"] = df_locations_unique.geometry.x
     df_locations_unique["y"] = df_locations_unique.geometry.y
     threads = max(1, min(context.config("threads"), 8)) # avoid too many threads for this step as it can cause memory issues
+    
     df_locations_unique = impute_statent(context, df_locations_unique, x="x", y="y", chunk_size=10_000,
                                 radius=constants.EMPLOYEES_DENSITY_RADIUS, point_type="trip destination", 
                                 measure="employees", output_column="employee_density", n_jobs = threads)

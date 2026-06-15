@@ -323,7 +323,7 @@ def execute(context):
         "mode", "weight",  "age", "sex", "employed", "job_position", "canton_id", "district_id", "is_student",
         "education_municipality_id", "education_quarter_id", "education_zone_id", "education_zone_level", "municipality_type",
         "nationality", "crowfly_distance_to_work", "crowfly_distance_to_school", "freq_per_week", "commute_to_work", "start_work", 
-        "highest_completed_education",        
+        "highest_completed_education", "isco_code",       
     ]]
 
 
