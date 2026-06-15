@@ -211,7 +211,7 @@ def get_network_calibration_args(context):
         assert (calibrate_counts or calibrate_freespeed), "Network calibration is activated, one of disutilities calibration or freespeed calibration need to be activated"
     
     additional_args.extend(
-            ["--config:eqasim:networkCalibration.activate", str(calibrate_network).lower(),
+            ["--config:eqasim:networkCalibration.activate", "true",
             "--config:eqasim:networkCalibration.calibrate", str(calibrate_network).lower(),
             "--config:eqasim:networkCalibration.updateInterval", "5",                
             "--config:eqasim:networkCalibration.minCapacity", "600",
@@ -231,6 +231,7 @@ def get_network_calibration_args(context):
     objective = []
     if calibrate_counts:  
         objective.append("penalty")
+        objective.append("agent")
         calibration_counts_file = context.stage("analysis.counts.target")
         calibration_regions = context.stage("calibration.road_regions.penalty_calibration")
         additional_args.extend([
