@@ -1,7 +1,5 @@
 import os
 from .matching.network import RoadNetwork
-import glob
-import subprocess
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,16 +7,13 @@ from sklearn.metrics import r2_score
 from sklearn.linear_model import LinearRegression
 from pathlib import Path
 import seaborn as sns
-from scipy import stats
-import warnings
-import sys
 import logging
 import json
 
 logger = logging.getLogger("synpp")
 
 IDS_TO_DROP = [ # these are in very complexe intersections, very probably will not be correctly matched
-    "283","321","277","278","70","221","240","847","845","846","123","598","35","537","69"
+    "283","321","277","278","70","221","240","847","845","846","123","598","35","537","68"
 ]
 
 
@@ -84,9 +79,9 @@ def filter_data(df, network, require_simulated=True):
         upper_bound = Q3 + 1.5 * IQR
         return group[(group[column] >= lower_bound) & (group[column] <= upper_bound)]
     
-    df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'obs_vphpl'))
+    df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'obs_vphpl')).reset_index(drop=True)
     if require_simulated:
-        df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'sim_vphpl'))
+        df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'sim_vphpl')).reset_index(drop=True)
     
     # filter the ones located in very complex intersections
     df = df[~df['id'].astype(str).isin(IDS_TO_DROP)].copy().reset_index(drop=True)
