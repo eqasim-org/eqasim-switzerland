@@ -35,8 +35,8 @@ def execute(context):
 
     # 4. run the scenario in eqasim (we do not run any calibration, and all other files are already set in the config from the natioanl model)
     dmc_param_path = "calibrated_dmc_parameters.yml" if os.path.exists("%s/calibrated_dmc_parameters.yml" % regional_scenario) else "dmc_parameters.yml"
-    freespeed_special_region = "freespeed_special_region.yml" if os.path.exists("%s/freespeed_special_region.yml" % regional_scenario) else ""
-    penalty_special_region = "penalties_special_region.yml" if os.path.exists("%s/penalties_special_region.yml" % regional_scenario) else ""
+    freespeed_special_region = get_regions_path(regional_scenario, kind="freespeed")
+    penalty_special_region = get_regions_path(regional_scenario, kind="penalty")
     args = [
         "--config:eqasim:calibration.activate", "false",
         "--config:eqasim:calibration.runCalibration", "false",
@@ -73,3 +73,23 @@ def execute(context):
     os.chdir(cwd)
 
     return simulation_path, regional_scenario
+
+
+
+def get_regions_path(path,kind="freespeed"):
+    regions = []
+    if kind=="freespeed":
+        region_dir = os.path.join(path, "calibration_regions")
+        if os.path.exists(region_dir):
+            regions = glob.glob(f"{region_dir}/freespeed_special_region_*.yml")
+    elif kind=="penalty":
+        region_dir = os.path.join(path, "calibration_regions")
+        if os.path.exists(region_dir):
+            regions = glob.glob(f"{region_dir}/penalties_special_region_*.yml")
+    
+    if len(regions)==0:
+        return ""
+    
+    # only keep the region_dir/region.yml part, not the full path
+    regions = [os.path.join("calibration_regions", os.path.basename(region)) for region in regions]
+    return ";".join(regions)
