@@ -102,7 +102,7 @@ def execute(context):
         target_regional_model_path = "%s/%s%s" % (target_path, context.config("extent_prefix"), context.config("simulation_directory"))
         shutil.move(regional_model_scenario_path, target_regional_model_path)
 
-        target_regional_results_path = "%s/%s%s/simulation_output" % (target_path, context.config("extent_prefix"), context.config("simulation_directory"))
+        target_regional_results_path = "%s/simulation_output" % target_regional_model_path
         shutil.move(regional_model_results_path, target_regional_results_path)
 
         # replace the config file (output_config contains all the parameters used in the simulation)

@@ -131,11 +131,21 @@ def execute(context):
 
     # 4. special regions
     freespeed_calibration_path = context.stage("calibration.road_regions.freespeed_calibration")
-    if freespeed_calibration_path!="" and os.path.exists(freespeed_calibration_path):
-        shutil.copy(freespeed_calibration_path, f"{output_path}/freespeed_special_region.yml" )
+    if freespeed_calibration_path!="":
+        region_dir = os.path.join(output_path, "calibration_regions")
+        os.makedirs(region_dir, exist_ok=True)
+        regions = freespeed_calibration_path.split(";")
+        for i,region in enumerate(regions):
+            if os.path.exists(region):
+                shutil.copy(region, f"{region_dir}/freespeed_special_region_{i}.yml" )
 
     penalty_calibration_path = context.stage("calibration.road_regions.penalty_calibration")    
-    if penalty_calibration_path!="" and os.path.exists(penalty_calibration_path):
-        shutil.copy(penalty_calibration_path, f"{output_path}/penalties_special_region.yml" )
+    if penalty_calibration_path!="":
+        region_dir = os.path.join(output_path, "calibration_regions")
+        os.makedirs(region_dir, exist_ok=True)
+        regions = penalty_calibration_path.split(";")
+        for i,region in enumerate(regions):
+            if os.path.exists(region):
+                shutil.copy(region, f"{region_dir}/penalties_special_region_{i}.yml" )
 
     return output_path

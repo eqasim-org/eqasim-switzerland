@@ -8,6 +8,7 @@ from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter, GEH
 from ..matching.utils.merge import Merge
+from ..run_utils import IDS_TO_DROP
 import os
 import geopandas as gpd
 import logging
@@ -63,6 +64,8 @@ def execute(context):
                                             sample_size = sample_size, 
                                             get_average=False, 
                                             flow_col = 'flow_w' if context.config("only_weekday") else 'flow')
+    # drop complex intersections
+    flows = flows[~flows['id'].astype(str).isin(IDS_TO_DROP)].reset_index(drop=True)
     
     # Identify the stations that might be mismatched
     stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>25000)|
