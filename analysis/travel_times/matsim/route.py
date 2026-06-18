@@ -2,7 +2,6 @@ from matsim.runtime.eqasim import run as run_eqasim
 import os
 import pandas as pd
 import logging 
-from shapely import vectorized
 import glob
 
 logger = logging.getLogger("synpp")
@@ -11,14 +10,14 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.stage("analysis.travel_times.APIs.get")
-    # context.stage("matsim.output")
+    context.stage("calibration.car_routing_vot.optimal_value")
 
     context.config("output_path")
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")
     context.config("output_prefix", "switzerland_")
     context.config("threads")
-    context.config("router_return_links", default = True)
+    context.config("router_return_links", default = True)    
 
 
 def execute(context):
@@ -83,7 +82,8 @@ def execute(context):
             "--events-path", path_to_events,
             "--output-path", output_path,
             "--threads", str(context.config("threads")),
-            "--return-links", str(context.config("router_return_links")).lower()
+            "--return-links", str(context.config("router_return_links")).lower(),
+            "--routingDistanceUtility", str(context.stage("calibration.car_routing_vot.optimal_value"))
         ]
     )
     os.chdir(cwd)
