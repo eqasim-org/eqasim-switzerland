@@ -12,10 +12,12 @@ def configure(context):
     context.stage("analysis.travel_times.trips.build_highway_trips")
     context.stage("analysis.travel_times.trips.build_urban_trips")
     context.stage("analysis.travel_times.trips.build_geneva_trips")
+    context.stage("analysis.travel_times.trips.build_zurich_trips")
+    context.stage("analysis.travel_times.trips.build_lausanne_trips")
 
 def execute(context):
     logger.info("\t - Loading microcensus trip data")
-    df_trips,filterout_ids = context.stage("data.microcensus.trips")
+    df_trips,_ = context.stage("data.microcensus.trips")
     
     ### filter weekend trips - currently disabled
     # df_persons = context.stage("data.microcensus.persons")    
@@ -52,8 +54,10 @@ def execute(context):
     highway_trips = context.stage("analysis.travel_times.trips.build_highway_trips")
     urban_trips = context.stage("analysis.travel_times.trips.build_urban_trips")
     geneva_trips = context.stage("analysis.travel_times.trips.build_geneva_trips")
-    car_trips = pd.concat([highway_trips, urban_trips, geneva_trips, car_trips], ignore_index=True)
-    logger.info(f"\t - Total car trips after adding highway, urban, and geneva trips: {len(car_trips)}")
+    zurich_trips = context.stage("analysis.travel_times.trips.build_zurich_trips")
+    lausanne_trips = context.stage("analysis.travel_times.trips.build_lausanne_trips")
+    car_trips = pd.concat([highway_trips, urban_trips, geneva_trips, zurich_trips, lausanne_trips, car_trips], ignore_index=True)
+    logger.info(f"\t - Total car trips after adding highway, urban, geneva, zurich, and lausanne trips: {len(car_trips)}")
 
     # save to csv    
     # logger.info("\t - Saving car trips to temporary file")   
