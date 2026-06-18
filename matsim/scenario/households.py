@@ -25,6 +25,7 @@ def configure(context):
     context.config("include_external_population", default = False)
     if context.config("include_external_population"):
         context.stage("data.external_population.read_outputs")
+        context.stage("data.external_population.constants")
 
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class",
@@ -93,13 +94,14 @@ def execute(context):
 
     if context.config("include_external_population"):
         external_persons   = context.stage("data.external_population.read_outputs")[0].copy()
+        ex_constants = context.stage("data.external_population.constants")
 
-        external_persons["municipality_type"] = "fr"
-        external_persons["sp_region"]         = -1
-        external_persons["canton_id"]         = 0
-        external_persons["ovgk"]              = "fr"
+        external_persons["municipality_type"] = ex_constants.municipality_type
+        external_persons["sp_region"]         = ex_constants.sp_region
+        external_persons["canton_id"]         = ex_constants.canton_id
+        external_persons["ovgk"]              = ex_constants.ovgk
 
-        external_persons["canton_name"] = "fr"
+        external_persons["canton_name"] = ex_constants.canton_name
         external_persons["income_per_capita"] = 0
 
         external_persons = external_persons[[c for c in FIELDS if c in external_persons.columns]]

@@ -8,6 +8,7 @@ import pandas as pd
 import matsim.writers
 from matsim.writers import backlog_iterator
 import logging
+from data.external_population.constants import ExternalPopulationConstants
 
 logger = logging.getLogger("synpp")
 
@@ -49,6 +50,7 @@ def configure(context):
     context.config("include_external_population", default = False)
     if context.config("include_external_population"):
         context.stage("data.external_population.read_outputs")
+        context.stage("data.external_population.constants")
 
 
 VEHICLE_FIELDS = ["mode", "vehicle_id", "owner_id"]
@@ -133,9 +135,8 @@ class PersonWriter:
         
         is_crossborder = (person_type == "crossborder")
         writer.add_attribute("isCrossBorder", "java.lang.Boolean", writer.true_false(is_crossborder))
-        
-        is_french     = (person_type == "FR")
-        writer.add_attribute("isExternalFR", "java.lang.Boolean", writer.true_false(is_french))
+        is_french     = (person_type == ExternalPopulationConstants.person_type)
+        writer.add_attribute(ExternalPopulationConstants.is_external, "java.lang.Boolean", writer.true_false(is_french))
 
         writer.add_attribute("bikeAvail", "java.lang.String", ["never", "always"][int(p.bike_availability)])
 
@@ -346,20 +347,17 @@ def execute(context):
         external_persons    = context.stage("data.external_population.read_outputs")[0].copy()
         external_activities = context.stage("data.external_population.read_outputs")[1].copy()
         external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
+        ex_constants = context.stage("data.external_population.constants")
 
-        external_persons["pt_subscription"]   = 0
-        external_persons["bike_availability"] = 0
-        external_persons["car_availability"]  = 1
-
-        external_persons.loc[external_persons["sex"]=="male", "sex"]   = 0
-        external_persons.loc[external_persons["sex"]=="female", "sex"] = 1
-        external_persons["sex"] = external_persons["sex"].astype(int)
+        external_persons["person_type"] = ex_constants.person_type
+        external_persons["sex"] = ex_constants.convert_sex(external_persons["sex"]).astype(int)
+        external_persons["pt_subscription"]   = ex_constants.get_subscriptions(external_persons)
+        external_persons["bike_availability"] = ex_constants.convert_bike_availability(external_persons["number_of_bikes_class"],cst)
+        external_persons["car_availability"]  = ex_constants.convert_car_availability(external_persons["car_availability"])
 
         external_persons = external_persons[external_persons["home_x"].notna()]
         external_persons = external_persons[external_persons["home_y"].notna()]
         
-        external_persons["person_type"] = "FR"
-
         external_activities.loc[external_activities["purpose"] == "home", "destination_id"] = HOME_DESTINATION_ID
 
         external_activities["destination_x"] = external_activities["destination_x"].astype(int)

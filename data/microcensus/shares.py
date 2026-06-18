@@ -19,6 +19,7 @@ def configure(context):
     context.config("include_external_population", default=False)
     if context.config("include_external_population"):
         context.stage("data.external_population.hts_trips.trips")
+        context.stage("data.external_population.constants")
 
 
 def merge_same_trips(context, df):
@@ -167,10 +168,12 @@ def execute(context):
 
     if context.config("include_external_population"):
         fr_trips       = context.stage("data.external_population.hts_trips.trips")
+        ex_constants   = context.stage("data.external_population.constants")
+
         mode_shares_fr = fr_trips.groupby("mode", as_index = False)["trip_weight"].sum() 
 
         mode_shares_fr["trip_weight"] = (mode_shares_fr["trip_weight"] / fr_trips["trip_weight"].sum()).round(3)
-        mode_shares_fr = mode_shares_fr.rename(columns = {"trip_weight": "fr"})
+        mode_shares_fr = mode_shares_fr.rename(columns = {"trip_weight": ex_constants.canton_name})
         mode_shares_fr = mode_shares_fr.T
 
         mode_shares_fr.columns = mode_shares_fr.iloc[0]
