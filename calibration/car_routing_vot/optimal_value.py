@@ -72,7 +72,7 @@ def find_optimal_value(context, df):
     _objective = lambda value: objective(context, df, trips_list, value)
     result = minimize_scalar(_objective, bounds=(0.0, 2.0), method='bounded', tol = 1e-3,
                              options={'disp': True, 'maxiter': 50})
-    optimal = result.x
+    optimal = round(result.x, 3)
     logger.info(f"\t - Optimal routing_distance_utility: {optimal:.6f} (loss={result.fun:.6f})")
     return optimal
 
