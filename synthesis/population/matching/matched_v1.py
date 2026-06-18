@@ -1,16 +1,15 @@
-import os
-#os.environ["NUMBA_DISABLE_JIT"] = "1"
-
 import numba
 import numpy as np
 import pandas as pd
 import logging
 logger = logging.getLogger("synpp")
+
 """
 This stage attaches observations from the microcensus to the synthetic population sample.
 This is done by statistical matching. Here, a recursive version of statistical matching is implemented.
 It progressively decreases the minimum number of observations to ensure the most important attributes are always matched.
 """
+
 
 def configure(context):
     context.config("hot_deck_matching_runners")
@@ -25,6 +24,7 @@ def configure(context):
     context.stage("synthesis.population.sampled")
     context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
     context.stage("data.constants")
+
 
 def compare_feature_distribution(df_population_sub, df_source_sub, feature, weight_col="person_weight"):
     """
@@ -339,7 +339,7 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     
 def get_mz_persons(context):
     df_persons = context.stage("data.microcensus.persons")
-    df_trips = context.stage("data.microcensus.trips")[0]
+    df_trips   = context.stage("data.microcensus.trips")[0]
     
     # remove persons who are not employed, but have a work as one of the purposes in their activity chain
     employed_persons = set(df_persons[df_persons["employed"] == True]["person_id"])
@@ -352,10 +352,12 @@ def get_mz_persons(context):
     df_persons = df_persons[~df_persons["person_id"].isin(persons_to_remove)]
     return df_persons
 
+
 def execute(context):
-    df_mz = get_mz_persons(context)
+    df_mz        = get_mz_persons(context)
     const        = context.stage("data.constants")
     scenario_day = context.config("specific_day_scenario")
+
     diagnostics_enabled = context.config("matching_enable_diagnostics")
 
     # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
@@ -368,73 +370,85 @@ def execute(context):
         df_source = df_mz[df_mz["day"] == scenario_day]
     else:
         raise ValueError(f"Unimplemented day for scenario: {scenario_day}")
+    
+    df_source = df_source[(~ df_source["is_crossing_the_border"])]
 
-    df_source     = df_source.rename(columns={"person_id": "mz_id"})
+    df_source              = df_source.rename(columns={"person_id": "mz_id"})
     df_source["canton_id"] = df_source["canton_id"].astype(int)
 
-    df_population = context.stage("synthesis.population.sampled")
-    df_population["sex"] = df_population["sex"].astype(np.int64)
+    df_population        = context.stage("synthesis.population.sampled")
+    df_population["sex"] = df_population["sex"].astype(int)
     
     # add commute distance and work location type
-    df_work = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]]
+    df_work       = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]]
     df_population = pd.merge(df_population, df_work, on="person_id", how="left")
+    
     assert df_population.loc[df_population.employed == const.EMPLOYED, "work_location_type"].notna().all(), "Some employed agents are missing commute distance"
-    df_population[ "commute_distance"] = df_population["commute_distance"].fillna(-1)
+
+    df_population[ "commute_distance"]   = df_population["commute_distance"].fillna(-1)
     df_population[ "work_location_type"] = df_population["work_location_type"].fillna("none")
     
     # trasform work_location_type to int
     DICT_WORK_LOCATION_TYPE = {"none": 0, "fixed": 1, "remote": 2, "moving": 3}
+
     df_population["work_location_type"] = df_population["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
-    df_source["work_location_type"] = df_source["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
+    df_source["work_location_type"]     = df_source["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
 
     # add commute distance classes
     COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 1, 3, 6, 9, 12, 15, 20, 50, 1000]) * 1e3 # convert km -> m
+
     df_population["commute_distance_class"] = np.digitize(df_population["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
-    df_source["commute_distance_class"] = np.digitize(df_source["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
+    df_source["commute_distance_class"]     = np.digitize(df_source["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
     
     BROAD_COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 3, 8, 30, 1000]) * 1e3
+
     df_population["broad_commute_distance_class"] = np.digitize(df_population["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
-    df_source["broad_commute_distance_class"] = np.digitize(df_source["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
+    df_source["broad_commute_distance_class"]     = np.digitize(df_source["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
 
     # this is now necessary to include, to make sure employement is well matched, otherwise we get errors in work location assignement
-    df_source["employed"] = df_source["employed"].astype(int)
+    df_source["employed"]     = df_source["employed"].astype(int)
     df_population["employed"] = (df_population["employed"] == const.EMPLOYED).astype(int)
 
     df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0)  # presence of children under 12
 
     df_source["sex"] = df_source["sex"].astype(int)
+
     var_raw = pd.to_numeric(df_source["car_availability"], errors="coerce")
     df_source["car_availability"] = np.where(var_raw == const.CAR_AVAILABILITY_NEVER, 0, 1).astype("int64")
 
     # checkig if any duplicates
-    assert df_population['person_id'].duplicated().sum()==0, "Duplicate person_id found in population dataframe. Please ensure person_id is unique for each individual in the population."
-    assert df_source['mz_id'].duplicated().sum()==0, "Duplicate mz_id found in source dataframe. Please ensure mz_id is unique for each individual in the source."
+    assert df_population["person_id"].duplicated().sum()==0, "Duplicate person_id found in population dataframe. Please ensure person_id is unique for each individual in the population."
+    assert df_source["mz_id"].duplicated().sum()==0, "Duplicate mz_id found in source dataframe. Please ensure mz_id is unique for each individual in the source."
 
     if const.census == "statpop":
         # age class
         AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
         df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
-        df_source["age_class"] = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
+        df_source["age_class"]     = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
         
         # income classes
-        df_population['income_class'] = df_population['income_class'].astype(int)
-        df_source['income_class'] = df_source['income_class'].astype(int)
+        df_population["income_class"] = df_population["income_class"].astype(int)
+        df_source["income_class"]     = df_source["income_class"].astype(int)
+        
         INCOME_CLASSIFICATION = {1:1, 2:1, 3:2, 4:2, 5:2, 6:3, 7:3, 8:3} # map 6 income classes to 3 classes (low, medium, high)
+        
         df_population['income_class'] = df_population['income_class'].map(INCOME_CLASSIFICATION)
-        df_source['income_class'] = df_source['income_class'].map(INCOME_CLASSIFICATION)
+        df_source['income_class']     = df_source['income_class'].map(INCOME_CLASSIFICATION)
 
         # further cleaning
         df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
-        df_population["household_size"] = df_population["household_size"].clip(upper=2)
+        df_population["household_size"]   = df_population["household_size"].clip(upper=2)
 
         number_of_population_persons    = len(np.unique(df_population["person_id"]))
 
         population_selector  = df_population["age"] >= const.MZ_AGE_THRESHOLD
+        
         df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=3)
-        df_source["number_of_cars_class"] = df_source["number_of_cars_class"].clip(upper=3)
+        df_source["number_of_cars_class"]     = df_source["number_of_cars_class"].clip(upper=3)
 
         # HT and activity-chains are better with canton_id instead of municipality_type
         # TODO: 3 levels income class here
+
         columns_individual_matching = [
             "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk",  "N_children_under_12", "sp_region", 
             "broad_commute_distance_class", "commute_distance_class", "income_class", "canton_id", "work_location_type", "urban"
@@ -444,18 +458,19 @@ def execute(context):
             "broad_commute_distance_class"
         ]
 
-        df_population["marital_status"] = df_population["marital_status"].astype(int)
-        df_population["car_availability"] = df_population["car_availability"].astype(int)
+        df_population["marital_status"]    = df_population["marital_status"].astype(int)
+        df_population["car_availability"]  = df_population["car_availability"].astype(int)
         df_population["municipality_type"] = df_population["municipality_type"].astype(str)
+        df_population["urban"]             = (df_population["municipality_type"].isin(["urbancore"])).astype(int)
+        df_population["sp_region"]         = df_population["sp_region"].astype(int)
+        df_population["canton_id"]         = df_population["canton_id"].astype(int)
+        df_population["ovgk"]              = (df_population["ovgk"] != "None").astype(int)
+        
         df_source["municipality_type"] = df_source["municipality_type"].astype(str)
-        df_population["urban"] = (df_population["municipality_type"].isin(["urbancore"])).astype(int)
-        df_source["urban"] = (df_source["municipality_type"].isin(["urbancore"])).astype(int)
-        df_population["sp_region"] = df_population["sp_region"].astype(int)
-        df_source["sp_region"] = df_source["sp_region"].astype(int)
-        df_source["canton_id"] = df_source["canton_id"].astype(int)
-        df_population["canton_id"] = df_population["canton_id"].astype(int)
-        df_population["ovgk"] = (df_population["ovgk"] != "None").astype(int)
-        df_source["ovgk"] = (df_source["ovgk"] != "None").astype(int)
+        df_source["urban"]             = (df_source["municipality_type"].isin(["urbancore"])).astype(int)
+        df_source["sp_region"]         = df_source["sp_region"].astype(int)
+        df_source["canton_id"]         = df_source["canton_id"].astype(int)
+        df_source["ovgk"]              = (df_source["ovgk"] != "None").astype(int)
 
         logger.info("Statistical matching starting (normal people split by age band with band-filtered source)")
 
@@ -508,51 +523,44 @@ def execute(context):
                 )
 
             logger.info(f"  - Matching normal people band: {band_name}")
+            
             if band_name == "u15":
-                youth = [
-                "age_class", "sex",
-                "ovgk", "sp_region", "urban", "canton_id",
-                ]
-                youth_mandatory = [
-                "age_class", "sex",
-                "ovgk", "sp_region"
-                ]
+                youth           = ["age_class", "sex", "ovgk", "sp_region", "urban", "canton_id"]
+                youth_mandatory = ["age_class", "sex","ovgk", "sp_region"]
+                
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,
                     src_band, "mz_id", "person_weight",
                     df_population_work, "person_id",
                     youth, youth_mandatory,
-                    minimum_observations=context.config("matching_minimum_observations"),
-                    population_selector=sel,
-                    option="person"
+                    minimum_observations = context.config("matching_minimum_observations"),
+                    population_selector  = sel,
+                    option = "person"
                 )
+            
             elif band_name == "15_23":
-                youth = [
-                "age_class", "sex", "employed", "car_availability", "ovgk", "employment_status", "sp_region", 
-                "broad_commute_distance_class", "urban", "work_location_type","commute_distance_class", "canton_id"
-                ]
-                youth_mandatory = [
-                "age_class", "sex", "employed", "car_availability",
-                "ovgk", "employment_status","sp_region"
-                ]
+                youth           = ["age_class", "sex", "employed", "car_availability", "ovgk", "employment_status", "sp_region", "broad_commute_distance_class", "urban", "work_location_type","commute_distance_class", "canton_id"]
+                youth_mandatory = ["age_class", "sex", "employed", "car_availability", "ovgk", "employment_status","sp_region"]
+                
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,
                     src_band, "mz_id", "person_weight",
                     df_population_work, "person_id",
                     youth, youth_mandatory,
-                    minimum_observations=context.config("matching_minimum_observations"),
-                    population_selector=sel,
-                    option="person"
+                    minimum_observations = context.config("matching_minimum_observations"),
+                    population_selector = sel,
+                    option = "person"
                 )
+            
             else:
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,
                     src_band, "mz_id", "person_weight",
                     df_population_work, "person_id",
                     columns_individual_matching, mandatory_columns_individual_matching,
-                    minimum_observations=context.config("matching_minimum_observations"),
-                    population_selector=sel,
-                    option="person"
+                    minimum_observations = context.config("matching_minimum_observations"),
+                    population_selector = sel,
+                    option = "person"
                 )
 
             targets_by_band[band_name] = df_target_band
@@ -595,7 +603,7 @@ def execute(context):
             )
             df_source_center = df_source_center[df_source_center["activity_chain"] == "home"]
 
-            logger.info("Second statistical matching starting - people with strange residence")
+            logger.info("Second statistical matching starting - people with collective residence")
 
             df_target_center, df_population_center, removed_ids_list_center  = run_statistical_matching_extended(
                 context,

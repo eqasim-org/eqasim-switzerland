@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pyproj
+import geopandas as gpd
 import data.microcensus.income
 import data.utils
 import logging
@@ -12,6 +13,7 @@ def configure(context):
 
     context.stage("data.microcensus.households")
     context.stage("data.microcensus.trips")
+    context.stage("data.spatial.swiss_border")
     context.stage("data.constants")
 
 def execute(context):
@@ -29,7 +31,7 @@ def execute(context):
     df_mz_persons["person_weight"] = df_mz_persons["WP"]
     df_mz_persons["date"] = df_mz_persons["USTag"]
 
-    df_mz_persons["is_swiss"] = df_mz_persons["f43500"]
+    df_mz_persons["is_swiss"] = (df_mz_persons["nation"] == 8100)
 
     columns = ["person_id", "person_weight", "age", "sex", "date", "is_swiss"]
 
@@ -276,4 +278,14 @@ def execute(context):
     # 2.add employed people with no work trip to those working remotly
     df_mz_persons.loc[employed & (df_mz_persons["commute_distance"] < 10), "work_location_type"] = "remote" # small errors might come from coordinate conversion
 
+    # Compute distance from home to Swiss border using household home coordinates
+    swiss_border = context.stage("data.spatial.swiss_border").copy().unary_union
+    swiss_border = swiss_border.simplify(tolerance=100)
+    swiss_border_boundary = swiss_border.boundary
+
+    home_coords = df_mz_persons[["person_id", "home_x", "home_y"]].drop_duplicates("person_id")
+    home_gdf = gpd.GeoDataFrame(home_coords, geometry=gpd.points_from_xy(home_coords["home_x"], home_coords["home_y"]), crs="epsg:2056")
+    home_gdf["dist_home_to_border"] = home_gdf["geometry"].apply(lambda p: p.distance(swiss_border_boundary))
+    df_mz_persons = df_mz_persons.merge(home_gdf[["person_id", "dist_home_to_border"]], on="person_id", how="left")
+    
     return df_mz_persons

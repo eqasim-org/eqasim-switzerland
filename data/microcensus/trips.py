@@ -842,7 +842,14 @@ def execute(context):
     
     # Identify activity chains completely outside of Switzerland
     swiss_border = context.stage("data.spatial.swiss_border").copy().unary_union
-    swiss_border = swiss_border.simplify(tolerance = 100) # simplify the border's shape to make computations easier 
+    swiss_border = swiss_border.simplify(tolerance = 100) # simplify the border's shape to make computations easier
+
+    # Compute distance from home to Swiss border for each person
+    swiss_border_boundary = swiss_border.boundary
+    home_coords = df_mz_trips[["person_id", "home_x", "home_y"]].drop_duplicates("person_id")
+    home_gdf = gpd.GeoDataFrame(home_coords, geometry=gpd.points_from_xy(home_coords["home_x"], home_coords["home_y"]), crs="epsg:2056")
+    home_gdf["dist_home_to_border"] = home_gdf["geometry"].apply(lambda p: p.distance(swiss_border_boundary))
+    df_mz_trips = df_mz_trips.merge(home_gdf[["person_id", "dist_home_to_border"]], on="person_id", how="left")
 
     swiss_border_gdf = gpd.GeoDataFrame(geometry=[swiss_border], crs="epsg:2056")
 
@@ -869,18 +876,10 @@ def execute(context):
     persons_crossing_border             = df_mz_trips.groupby("person_id")["trip_crossing_border"].any()
     persons_crossing_the_border         = persons_crossing_border[persons_crossing_border].index
 
-    df_mz_trips[[
-        "person_id", "trip_id", "departure_time", "arrival_time", "mode", "origin_purpose", "purpose", 
-        "origin_x", "origin_y", "destination_x", "destination_y", 
-        "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
-        "mode_detailed",
-        "trip_outside_ch", "origin_in_ch", "destination_in_ch", "trip_crossing_border", "weight_person"
-    ]].to_csv("/home/asallard/Documents/Tests/MZ cross border trips/clustering/mz_trips.csv", index = False)
-
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "origin_purpose", "purpose", 
         "origin_x", "origin_y", "destination_x", "destination_y", 
         "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
         "mode_detailed",
-        "trip_outside_ch", "origin_in_ch", "destination_in_ch", "trip_crossing_border", "weight_person"
+        "trip_outside_ch", "origin_in_ch", "destination_in_ch", "trip_crossing_border", "weight_person",
     ]], filterout_ids, persons_outside_ch, persons_crossing_the_border

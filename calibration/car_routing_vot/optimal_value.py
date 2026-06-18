@@ -7,14 +7,15 @@ from .server import start_server, route_trips, set_server_config, stop_server
 logger = logging.getLogger("synpp")
 
 def configure(context):
-    context.stage("calibration.car_routing_vot.dataset")
-    context.stage("matsim.runtime.eqasim")
-    context.stage("matsim.runtime.java")
-    context.config("threads")
-
     context.config("calibrate_routing_vot", default=False)
     context.config("events_file_for_routing_vot_calibration", default=None)
     context.config("network_file_for_routing_vot_calibration", default=None)
+
+    if context.config("calibrate_routing_vot"):
+        context.stage("calibration.car_routing_vot.dataset")
+        context.stage("matsim.runtime.eqasim")
+        context.stage("matsim.runtime.java")
+        context.config("threads")
 
 def execute(context):
     if not context.config("calibrate_routing_vot"):
