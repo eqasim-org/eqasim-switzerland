@@ -109,6 +109,7 @@ def execute(context):
         config_file = "%s/%sconfig.xml" % (target_regional_model_path, context.config("extent_prefix") )
         output_config_file = "%s/output_config.xml" %target_regional_results_path
         assert os.path.exists(output_config_file), "Output config file does not exist: %s" % output_config_file
-        os.replace(output_config_file, config_file)
+        if os.path.exists(config_file): os.remove(config_file)
+        shutil.copyfile(output_config_file, config_file)
 
     return {}

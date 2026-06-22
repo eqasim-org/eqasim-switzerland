@@ -10,7 +10,7 @@ def configure(context):
 
 def execute(context):
     out_dir = context.config("output_path")
-    mz_trips,filtered_out = context.stage("data.microcensus.trips")
+    mz_trips,filtered_out,_,_ = context.stage("data.microcensus.trips")
     mz_persons = context.stage("data.microcensus.persons")
     #mz_persons = mz_persons[mz_persons["age"]>15]
     mz_persons = mz_persons[(~mz_persons.person_id.isin(filtered_out)) & (mz_persons.weekend==False)]

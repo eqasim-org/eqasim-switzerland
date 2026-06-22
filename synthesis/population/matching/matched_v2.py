@@ -30,7 +30,7 @@ def configure(context):
 	context.config("random_seed")
 	context.config("matching_embedding_top_k", 20)
 	context.config("matching_embedding_temperature", 0.5)
-	context.config("matching_embedding_epochs", 55)
+	context.config("matching_embedding_epochs", 70)
 	context.config("matching_embedding_batch_size", 64)
 	context.config("matching_embedding_lr", 4.0e-3)
 	context.config("matching_embedding_lr_decay_step", 15)
@@ -38,12 +38,12 @@ def configure(context):
 	context.config("matching_embedding_dropout", 0.2)
 	context.config("matching_embedding_weight_decay", 3.0e-3)
 	context.config("matching_embedding_max_sequence_len", 12)
-	context.config("matching_loss_weight_activity", 1.0)
-	context.config("matching_loss_weight_trip_count", 1.0)
+	context.config("matching_loss_weight_activity", 2.0)
+	context.config("matching_loss_weight_trip_count", 1.5)
 	context.config("matching_loss_weight_mode", 0.15)
-	context.config("matching_loss_weight_departure", 0.15)
-	context.config("matching_loss_weight_distance", 0.75)
-	context.config("matching_loss_weight_reconstruction", 0.3)
+	context.config("matching_loss_weight_departure", 0.1)
+	context.config("matching_loss_weight_distance", 0.2)
+	context.config("matching_loss_weight_reconstruction", 0.2)
 	context.config("matching_loss_weight_latent_norm", 0.05)
 	context.config("matching_loss_weight_latent_spread", 0.2)
 	context.config("matching_embedding_geo_proj_dim", 8)
@@ -53,7 +53,7 @@ def configure(context):
 	context.config("matching_use_class_weighting", True)
 	context.config("matching_latent_noise_std", 0.08)
 	context.config("matching_trip_count_scale", 5.0)
-	context.config("matching_trip_distance_scale", 50000.0)
+	context.config("matching_trip_distance_scale", 30000.0)
 	context.config("specific_day_scenario", default="workday")
 	context.config("overwrite_matching_embedding_model", default=False)
 
@@ -137,7 +137,7 @@ def _sample_knn(src_emb, src_w, tgt_emb, top_k, temperature, rng):
 if torch is not None:
 	class EmbeddingGRUModel(nn.Module):
 		def __init__(self, cont_dim, cardinalities, n_activity, n_mode, dropout=0.2,
-					 geo_proj_dim=10, cars_proj_dim=4, emp_proj_dim=6, misc_proj_dim=8):
+					 geo_proj_dim=12, cars_proj_dim=6, emp_proj_dim=10, misc_proj_dim=8):
 			super().__init__()
 			self.card = cardinalities
 
@@ -153,11 +153,11 @@ if torch is not None:
 
 			encoder_input_dim = cont_dim + geo_proj_dim + cars_proj_dim + emp_proj_dim + misc_proj_dim
 			self.encoder = nn.Sequential(
-				nn.Linear(encoder_input_dim, 48),
-				nn.LayerNorm(48),
+				nn.Linear(encoder_input_dim, 64),
+				nn.LayerNorm(64),
 				nn.SiLU(),
 				nn.Dropout(dropout),
-				nn.Linear(48, 16),
+				nn.Linear(64, 16),
 				nn.LayerNorm(16),
 			)
 			# Autonomous decoder: recurrent dynamics start from h0 only.
@@ -171,11 +171,11 @@ if torch is not None:
 
 			# Reconstruction head to keep latent informative (autoencoder-like regularization).
 			self.reconstruction = nn.Sequential(
-				nn.Linear(16, 48),
-				nn.LayerNorm(48),
+				nn.Linear(16, 64),
+				nn.LayerNorm(64),
 				nn.SiLU(),
 				nn.Dropout(dropout),
-				nn.Linear(48, encoder_input_dim),
+				nn.Linear(64, encoder_input_dim),
 			)
 
 		def _one_hot(self, idx, depth):

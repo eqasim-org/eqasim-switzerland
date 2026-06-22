@@ -34,7 +34,7 @@ def configure(context):
 
 def execute(context):
     df_persons = context.stage("data.microcensus.persons")    
-    df_trips,filterout_person_ids = context.stage("data.microcensus.trips")
+    df_trips,filterout_person_ids, _, _ = context.stage("data.microcensus.trips")
     filterout_person_ids = set(filterout_person_ids)
     logger.info(f"There are {len(df_trips)} trips in total.")
     logger.info(f"There are {len(df_persons)} persons in total.")

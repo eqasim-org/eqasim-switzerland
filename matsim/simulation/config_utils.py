@@ -231,8 +231,11 @@ def get_network_calibration_args(context):
     objective = []
     if calibrate_counts:  
         objective.append("penalty")
-        objective.append("agent")
-        objective.append("subpopulations")
+        if context.config("network_calibration.calibrate_agents_ascs"):
+            objective.append("agent")
+        if context.config("network_calibration.calibrate_crossborder_population"):        
+            objective.append("subpopulations")
+            
         calibration_counts_file = context.stage("analysis.counts.target")
         calibration_regions = context.stage("calibration.road_regions.penalty_calibration")
         additional_args.extend([

@@ -14,8 +14,17 @@ def configure(context):
     context.stage("data.pt_pricing.pt_pricing")
     context.stage("data.microcensus.shares")
 
-    context.stage("calibration.road_regions.freespeed_calibration")
-    context.stage("calibration.road_regions.penalty_calibration")
+    context.config("network_calibration.activate", default=False)
+    context.config("network_calibration.calibrate_disutilities", default=True)
+    context.config("network_calibration.calibrate_freespeed", default=True)
+
+    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_disutilities"):
+        context.stage("calibration.road_regions.penalty_calibration")
+        context.stage("analysis.counts.target")
+
+    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
+        context.stage("calibration.road_regions.freespeed_calibration")
+        context.stage("analysis.travel_times.APIs.target")    
 
     context.config("calibrate_alphas_in_matsim", default=False)
     context.config("calibrate_betas_in_matsim", default=False)
@@ -129,23 +138,33 @@ def execute(context):
     shutil.copy(zones_path, f"{output_path}/gtfs_zones.csv" )    
     shutil.copy(pricing_path, f"{output_path}/pricingDescription.xml" )
 
-    # 4. special regions
-    freespeed_calibration_path = context.stage("calibration.road_regions.freespeed_calibration")
-    if freespeed_calibration_path!="":
-        region_dir = os.path.join(output_path, "calibration_regions")
+    # 4. calibration files (special regions and target files)
+    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
+        freespeed_calibration_path = context.stage("calibration.road_regions.freespeed_calibration")
+        region_dir = os.path.join(output_path, "network_calibration_files")
         os.makedirs(region_dir, exist_ok=True)
-        regions = freespeed_calibration_path.split(";")
-        for i,region in enumerate(regions):
-            if os.path.exists(region):
-                shutil.copy(region, f"{region_dir}/freespeed_special_region_{i}.yml" )
+        if freespeed_calibration_path!="":                        
+            regions = freespeed_calibration_path.split(";")
+            for i,region in enumerate(regions):
+                if os.path.exists(region):
+                    shutil.copy(region, f"{region_dir}/freespeed_special_region_{i}.yml" )
 
-    penalty_calibration_path = context.stage("calibration.road_regions.penalty_calibration")    
-    if penalty_calibration_path!="":
-        region_dir = os.path.join(output_path, "calibration_regions")
+        target_traveltimes_file = context.stage("analysis.travel_times.APIs.target")
+        if target_traveltimes_file!="":
+            shutil.copy(target_traveltimes_file, f"{region_dir}/target_travel_times.csv" )
+
+    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_disutilities"):
+        penalty_calibration_path = context.stage("calibration.road_regions.penalty_calibration")    
+        region_dir = os.path.join(output_path, "network_calibration_files")
         os.makedirs(region_dir, exist_ok=True)
-        regions = penalty_calibration_path.split(";")
-        for i,region in enumerate(regions):
-            if os.path.exists(region):
-                shutil.copy(region, f"{region_dir}/penalties_special_region_{i}.yml" )
-
+        if penalty_calibration_path!="":            
+            regions = penalty_calibration_path.split(";")
+            for i,region in enumerate(regions):
+                if os.path.exists(region):
+                    shutil.copy(region, f"{region_dir}/penalties_special_region_{i}.yml" )
+        
+        target_counts_file = context.stage("analysis.counts.target")
+        if target_counts_file!="":
+            shutil.copy(target_counts_file, f"{region_dir}/target_counts.csv" )
+        
     return output_path

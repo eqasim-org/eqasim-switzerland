@@ -198,7 +198,7 @@ def execute(context):
 
     # Microcensus trips data
     logger.info("H3: \t Processing Microcensus trips data...")
-    mz_trips,_ = context.stage("data.microcensus.trips")
+    mz_trips,_, _, _ = context.stage("data.microcensus.trips")
     mz_trips = mz_trips[["person_id","trip_id","origin_x","origin_y","destination_x", "destination_y"]]
     inside_ch = within_ch(context, mz_trips, cols1=["origin_x", "origin_y"], cols2=["destination_x", "destination_y"])
     mz_trips = mz_trips[inside_ch].reset_index(drop=True)

@@ -17,7 +17,7 @@ def configure(context):
 
 def execute(context):
     logger.info("\t - Loading microcensus trip data")
-    df_trips,_ = context.stage("data.microcensus.trips")
+    df_trips = context.stage("data.microcensus.trips")[0]
     
     ### filter weekend trips - currently disabled
     # df_persons = context.stage("data.microcensus.persons")    

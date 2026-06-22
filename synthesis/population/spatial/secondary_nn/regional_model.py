@@ -57,7 +57,7 @@ def execute(context):
     constants = context.stage("data.constants")
     mz_persons["car_availability"] = (mz_persons["car_availability"] != constants.CAR_AVAILABILITY_NEVER)
 
-    mz_trips, _ = context.stage("data.microcensus.trips")
+    mz_trips = context.stage("data.microcensus.trips")[0]
     mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "origin_purpose", "purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
         "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", 

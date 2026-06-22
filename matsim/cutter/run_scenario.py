@@ -44,8 +44,8 @@ def execute(context):
         "--config:eqasim:alphaCalibration.filePath", "cantonal_target_mode_shares.csv",
         "--config:eqasim:networkCalibration.activate", "true", # this will not calibrate, but just activate the module to use penalties and speed factors
         "--config:eqasim:networkCalibration.calibrate", "false",
-        "--config:eqasim:networkCalibration.countsFile", "",
-        "--config:eqasim:networkCalibration.observedSpeedTripsFile", "",
+        "--config:eqasim:networkCalibration.countsFile", str(os.path.join("network_calibration_files", "target_counts.csv")),
+        "--config:eqasim:networkCalibration.observedSpeedTripsFile", str(os.path.join("network_calibration_files", "target_travel_times.csv")),
         "--config:eqasim:networkCalibration.penaltiesSpecialRegionPath", penalty_special_region,
         "--config:eqasim:networkCalibration.freespeedSpecialRegionPath", freespeed_special_region,
         "--config:eqasim.costParametersPath", "cost_parameters.yml",
@@ -79,11 +79,11 @@ def execute(context):
 def get_regions_path(path,kind="freespeed"):
     regions = []
     if kind=="freespeed":
-        region_dir = os.path.join(path, "calibration_regions")
+        region_dir = os.path.join(path, "network_calibration_files")
         if os.path.exists(region_dir):
             regions = glob.glob(f"{region_dir}/freespeed_special_region_*.yml")
     elif kind=="penalty":
-        region_dir = os.path.join(path, "calibration_regions")
+        region_dir = os.path.join(path, "network_calibration_files")
         if os.path.exists(region_dir):
             regions = glob.glob(f"{region_dir}/penalties_special_region_*.yml")
     
@@ -91,5 +91,5 @@ def get_regions_path(path,kind="freespeed"):
         return ""
     
     # only keep the region_dir/region.yml part, not the full path
-    regions = [os.path.join("calibration_regions", os.path.basename(region)) for region in regions]
+    regions = [os.path.join("network_calibration_files", os.path.basename(region)) for region in regions]
     return ";".join(regions)

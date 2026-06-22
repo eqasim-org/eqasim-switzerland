@@ -32,7 +32,7 @@ def execute(context):
     df_car_trips = df_car[["identifier", "travel_time_min", "distance_km"]]
 
     # to keep consistency with tomtom
-    mz_trips , _ = context.stage("data.microcensus.trips")
+    mz_trips , _, _, _ = context.stage("data.microcensus.trips")
 
     mz_trips["identifier"] = mz_trips["person_id"].astype(str) + "_" + mz_trips["trip_id"].astype(str)
     mz_trips["euclidean_distance_km"] = mz_trips["crowfly_distance"] / 1000.0
