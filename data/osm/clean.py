@@ -16,6 +16,7 @@ def configure(context):
     context.config("border_offset", 20000)
     # we include the network of this region, i don't know if this is the right config param to use, to check later!
     context.config("cross_border_exclude_shapefiles", default=None)
+    context.config("include_external_population", default = False)
 
 
 def execute(context):
@@ -56,7 +57,8 @@ def get_region(context):
     
     # outside CH region
     out_region_file = context.config("cross_border_exclude_shapefiles")
-    if out_region_file is not None:
+    include_external_population = context.config("include_external_population")
+    if out_region_file is not None and include_external_population:
         out_region = read_outside_region(out_region_file)
         geometries.append(unary_union(out_region.geometry))
     

@@ -3,10 +3,12 @@ import pandas as pd
 import numpy as np
 
 class ExternalPopulationConstants:
-    canton_id = 100
+    canton_id = -1
     canton_name = "fr"
-    municipality_type = "fr"
-    sp_region = 10
+    municipality_type = "urban" # for now, we suppose it is urban, we will need to impute it later by subregion
+    municipality_id = -1
+    municipality_name = "fr"
+    sp_region = -1
     ovgk = "fr"
 
     person_type = "FR"
