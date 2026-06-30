@@ -1,30 +1,54 @@
 from io import StringIO
 import os
 import json
- 
 import pandas as pd
+import geopandas as gpd
 from shapely import wkt
-from shapely.ops import transform
+from shapely.geometry import GeometryCollection, MultiPolygon
+from shapely.ops import transform, polygonize, unary_union
 from pyproj import Transformer
+from data.osm.clean import read_outside_region
+from shapely.validation import make_valid
  
  
 def configure(context):
-    pass
+    # we need to include the network of this french region, 
+    # I don't know if this is the right config param to use, to check later!
+    context.config("cross_border_exclude_shapefiles", default=None)
+    context.config("include_external_population", default = False)
+    context.stage("data.external_population.constants")
+ 
  
 def execute(context):
     df = pd.read_csv(StringIO(REGIONS_CSV), skipinitialspace=True)
+    
+    # whether to transform the coordinates from WGS84 to LV95 (EPSG:2056) or not
+    df["transform_coordinates"] = True
+ 
+    # include the french part as a separet calibration region
+    out_region_file = context.config("cross_border_exclude_shapefiles")
+    include_external_population = context.config("include_external_population")
+    if out_region_file is not None and include_external_population:
+        out_region = read_outside_region(out_region_file).to_crs("EPSG:4326")
+        valid_geometries = [make_valid(geom) if not geom.is_valid else geom for geom in out_region.geometry]
+        valid_gdf = gpd.GeoDataFrame(geometry=valid_geometries, crs="EPSG:4326")
+        out_region_geometry = unary_union(valid_gdf.geometry)
+ 
+        out_region_geometry = multipolygone_to_polygone_wkt(out_region_geometry)
+        df = df.append({"WKT":out_region_geometry, 
+                        "nom":"France", 
+                        "description":"French part of the cross-border region", 
+                        "transform_coordinates":True}, ignore_index=True)
  
     paths = [] 
     for i, row in df.iterrows():
         name = row["nom"]
         description = row.get("description", "")
         raw_wkt = row["WKT"]
- 
-        try:
-            geometry = reproject_to_lv95(raw_wkt)
-        except (ValueError, Exception) as exc:
-            raise ValueError(f"Error processing region '{name}': {exc}") from exc
- 
+        transform_coordinates = row.get("transform_coordinates", True)
+        
+        geometry = reproject_to_lv95(raw_wkt, transform_coordinates)
+   
         region = {
             "type": "FeatureCollection",
             "features": [
@@ -49,6 +73,7 @@ def execute(context):
     return ";".join(paths)
  
  
+ 
 # ---------------------------------------------------------------------------
 # Data — exported from Google My Maps (WKT, WGS84, lon lat order)
 #
@@ -57,14 +82,14 @@ def execute(context):
 # ---------------------------------------------------------------------------
 
 REGIONS_CSV = """
-  WKT,nom,description
-  "POLYGON ((9.5776218 47.4803117, 8.945908 47.1955361, 8.5476536 47.1114862, 8.4405369 47.08344, 8.2043308 46.8547824, 7.7803999 46.7772429, 7.3843679 46.7248064, 7.1481619 46.6532129, 6.9119558 46.4983983, 6.9159298 46.447373, 6.9413357 46.4066701, 6.9412114 46.3876148, 6.9326283 46.3698507, 6.9672588 46.3265422, 7.0194439 46.2705626, 7.0125774 46.2230774, 6.9115446 46.295772, 6.8585378 46.3782701, 6.6497975 46.4180474, 6.6360646 46.368795, 6.3504201 46.2511674, 6.3202077 46.1618297, 6.3778859 46.059007, 6.2021047 45.9636298, 6.094988 45.8355663, 5.9171047 45.592594, 6.2276463 45.302557, 7.4471287 45.2097527, 7.9854588 45.6492226, 8.4358982 45.8561984, 8.7215427 45.8714994, 8.7836069 45.8328168, 8.8934702 45.8576893, 9.0417856 45.7983597, 9.1351694 45.7906996, 9.2422861 45.8155909, 9.3658823 45.746634, 9.5608896 45.7236294, 9.9536508 45.6161493, 10.3079599 45.506538, 10.5084604 45.5854028, 10.7089609 45.5757911, 11.0934824 45.4275626, 11.3626474 45.4179239, 11.4972299 45.5354039, 11.5192026 45.612307, 11.3818735 45.6948603, 12.3624033 45.9589772, 11.8632999 47.7397886, 9.5776218 47.4803117))",Alpes,
-  "POLYGON ((6.6497975 46.4180474, 6.75095 46.5068798, 6.6963616 46.5394792, 6.6342202 46.5642699, 6.5676156 46.5700528, 6.4320031 46.5365271, 6.3084069 46.4954182, 6.2019769 46.4859634, 5.9275475 46.5827644, 5.7105675 46.40692, 5.5869713 46.1886917, 5.6528893 46.0058523, 5.9138146 45.9256695, 6.2021047 45.9636298, 6.3778859 46.059007, 6.3202077 46.1618297, 6.3504201 46.2511674, 6.6360646 46.368795, 6.6497975 46.4180474))",Geneva+Lausanne,
-  "POLYGON ((8.6258716 47.2731001, 8.6492175 47.3652663, 8.6341113 47.4359112, 8.5736865 47.4818723, 8.5228747 47.4911525, 8.4480304 47.4897606, 8.3683795 47.4526289, 8.3354205 47.4052481, 8.3690662 47.3643362, 8.4226245 47.3266506, 8.4940356 47.2856777, 8.5729999 47.2474698, 8.6306781 47.2278892, 8.6492175 47.2572574, 8.6258716 47.2731001))",Zurich,
-  "POLYGON ((7.5859198 46.8387105, 7.5879798 46.8973912, 7.5838599 46.9292866, 7.5673804 46.9513209, 7.5179419 46.9667864, 7.5117621 46.9939572, 7.5419745 47.0192418, 7.4465308 47.0445144, 7.3964057 47.0061328, 7.3483405 46.9803735, 7.3483405 46.9321, 7.3998389 46.905836, 7.4691901 46.9077124, 7.5241217 46.8833137, 7.5577674 46.8213286, 7.5859198 46.8387105))",Berne,
-  "POLYGON ((6.9349542 46.8713119, 7.1670403 47.0344207, 7.3139825 47.1382132, 7.4650445 47.1690314, 7.4471917 47.2212882, 7.3702874 47.2119604, 7.1848931 47.1671642, 7.0777764 47.1316737, 6.9225945 47.057815, 6.8003716 46.9876012, 6.5984979 46.853471, 6.5669122 46.7604149, 6.6836419 46.7293604, 6.9349542 46.8713119))",Neuchatel,
-  "POLYGON ((7.106366 46.8830945, 7.0102356 46.8225188, 7.0548675 46.7454091, 7.1736572 46.721878, 7.2382019 46.7595227, 7.2842071 46.8201695, 7.2018097 46.8793399, 7.106366 46.8830945))",Fribourg,
-  "POLYGON ((8.3511068 47.0205112, 8.4405369 47.08344, 8.4560494 47.0874306, 8.4588733 47.0915919, 8.4526935 47.0990712, 8.4427371 47.09837, 8.4262577 47.0892544, 8.4156146 47.0740582, 8.3878055 47.0820075, 8.3610263 47.0829427, 8.3847156 47.0976689, 8.4046283 47.1165966, 8.3775058 47.1278099, 8.3538166 47.1165966, 8.3400836 47.1056147, 8.317081 47.0932281, 8.2899585 47.1039789, 8.2645526 47.1079514, 8.2478366 47.0978475, 8.2330737 47.0906018, 8.2463441 47.0741819, 8.2363878 47.0529001, 8.2360444 47.0381615, 8.2439409 47.0259932, 8.2599054 47.0265783, 8.2832513 47.0240039, 8.2987008 47.0124176, 8.3043727 47.0052968, 8.3102092 46.9986239, 8.3033427 46.9959311, 8.3018836 46.9913647, 8.3010253 46.9876762, 8.3018836 46.9846315, 8.3058318 46.9807083, 8.3149298 46.9759064, 8.3299502 46.977956, 8.3401204 46.9928855, 8.3511068 47.0205112))",Lucerne,
+WKT,nom,description
+"POLYGON ((9.5776218 47.4803117, 8.945908 47.1955361, 8.5476536 47.1114862, 8.4405369 47.08344, 8.2043308 46.8547824, 7.7803999 46.7772429, 7.3843679 46.7248064, 7.1481619 46.6532129, 6.9119558 46.4983983, 6.9159298 46.447373, 6.9413357 46.4066701, 6.9412114 46.3876148, 6.9326283 46.3698507, 6.9672588 46.3265422, 7.0194439 46.2705626, 7.0125774 46.2230774, 6.9115446 46.295772, 6.8585378 46.3782701, 6.6497975 46.4180474, 6.6360646 46.368795, 6.3504201 46.2511674, 6.3202077 46.1618297, 6.3778859 46.059007, 6.2021047 45.9636298, 6.094988 45.8355663, 5.9171047 45.592594, 6.2276463 45.302557, 7.4471287 45.2097527, 7.9854588 45.6492226, 8.4358982 45.8561984, 8.7215427 45.8714994, 8.7836069 45.8328168, 8.8934702 45.8576893, 9.0417856 45.7983597, 9.1351694 45.7906996, 9.2422861 45.8155909, 9.3658823 45.746634, 9.5608896 45.7236294, 9.9536508 45.6161493, 10.3079599 45.506538, 10.5084604 45.5854028, 10.7089609 45.5757911, 11.0934824 45.4275626, 11.3626474 45.4179239, 11.4972299 45.5354039, 11.5192026 45.612307, 11.3818735 45.6948603, 12.3624033 45.9589772, 11.8632999 47.7397886, 9.5776218 47.4803117))",Alpes,
+"POLYGON ((6.6607838 46.4644176, 6.7305686 46.4705265, 6.75095 46.5068798, 6.6963616 46.5394792, 6.6342202 46.5642699, 6.5676156 46.5700528, 6.4320031 46.5365271, 6.3084069 46.4954182, 6.2019769 46.4859634, 6.0983506 46.4856949, 6.0877086 46.4755106, 6.0720934 46.4655613, 6.0737317 46.4536616, 6.0842939 46.4430625, 6.0740868 46.4324512, 6.0626834 46.4158048, 6.1181158 46.3951792, 6.1673192 46.3676635, 6.1285592 46.3251664, 6.1173 46.3138956, 6.1170301 46.2969331, 6.1041363 46.2857761, 6.1229643 46.25185, 6.1023466 46.2391569, 6.0885969 46.2468808, 6.0707131 46.2433303, 6.0624637 46.2461825, 6.0452902 46.2333619, 6.0318953 46.2385891, 5.9742394 46.219106, 5.9618828 46.1973637, 5.9927788 46.1832248, 5.9618829 46.1463678, 5.9714928 46.1325712, 6.1004812 46.1423272, 6.1346823 46.1412596, 6.153782 46.1521982, 6.1872536 46.1651438, 6.1886763 46.1789055, 6.2231152 46.1998159, 6.2838155 46.2179204, 6.3126699 46.24569, 6.2982455 46.2630485, 6.2762483 46.2493227, 6.2528264 46.2627074, 6.2499022 46.2985191, 6.228906 46.317, 6.2996083 46.3981623, 6.4630299 46.4454958, 6.5426933 46.4540274, 6.5989826 46.4606285, 6.6607838 46.4644176))",Geneva+Lausanne,
+"POLYGON ((8.6258716 47.2731001, 8.6492175 47.3652663, 8.6341113 47.4359112, 8.5736865 47.4818723, 8.5228747 47.4911525, 8.4480304 47.4897606, 8.3683795 47.4526289, 8.3354205 47.4052481, 8.3690662 47.3643362, 8.4226245 47.3266506, 8.4940356 47.2856777, 8.5729999 47.2474698, 8.6306781 47.2278892, 8.6492175 47.2572574, 8.6258716 47.2731001))",Zurich,
+"POLYGON ((7.5859198 46.8387105, 7.5879798 46.8973912, 7.5838599 46.9292866, 7.5673804 46.9513209, 7.5179419 46.9667864, 7.5117621 46.9939572, 7.5419745 47.0192418, 7.4465308 47.0445144, 7.3964057 47.0061328, 7.3483405 46.9803735, 7.3483405 46.9321, 7.3998389 46.905836, 7.4691901 46.9077124, 7.5241217 46.8833137, 7.5577674 46.8213286, 7.5859198 46.8387105))",Berne,
+"POLYGON ((6.9349542 46.8713119, 7.1670403 47.0344207, 7.3139825 47.1382132, 7.4650445 47.1690314, 7.4471917 47.2212882, 7.3702874 47.2119604, 7.1848931 47.1671642, 7.0777764 47.1316737, 6.9225945 47.057815, 6.8003716 46.9876012, 6.5984979 46.853471, 6.5669122 46.7604149, 6.6836419 46.7293604, 6.9349542 46.8713119))",Neuchatel,
+"POLYGON ((7.106366 46.8830945, 7.0102356 46.8225188, 7.0548675 46.7454091, 7.1736572 46.721878, 7.2382019 46.7595227, 7.2842071 46.8201695, 7.2018097 46.8793399, 7.106366 46.8830945))",Fribourg,
+"POLYGON ((8.3511068 47.0205112, 8.4405369 47.08344, 8.4560494 47.0874306, 8.4588733 47.0915919, 8.4526935 47.0990712, 8.4427371 47.09837, 8.4262577 47.0892544, 8.4156146 47.0740582, 8.3878055 47.0820075, 8.3610263 47.0829427, 8.3847156 47.0976689, 8.4046283 47.1165966, 8.3775058 47.1278099, 8.3538166 47.1165966, 8.3400836 47.1056147, 8.317081 47.0932281, 8.2899585 47.1039789, 8.2645526 47.1079514, 8.2478366 47.0978475, 8.2330737 47.0906018, 8.2463441 47.0741819, 8.2363878 47.0529001, 8.2360444 47.0381615, 8.2439409 47.0259932, 8.2599054 47.0265783, 8.2832513 47.0240039, 8.2987008 47.0124176, 8.3043727 47.0052968, 8.3102092 46.9986239, 8.3033427 46.9959311, 8.3018836 46.9913647, 8.3010253 46.9876762, 8.3018836 46.9846315, 8.3058318 46.9807083, 8.3149298 46.9759064, 8.3299502 46.977956, 8.3401204 46.9928855, 8.3511068 47.0205112))",Lucerne,
 """
 
 
@@ -74,8 +99,8 @@ REGIONS_CSV = """
 
 ########### FUNCTIONS ############
 _TRANSFORMER = Transformer.from_crs("EPSG:4326", "EPSG:2056", always_xy=True) 
-
-def reproject_to_lv95(wkt_wgs84: str) -> dict:
+ 
+def reproject_to_lv95(wkt_wgs84: str, transform_coordinates: bool = True) -> dict:
     """
     Parse a WKT polygon in WGS84 and return a GeoJSON-like geometry dict
     in EPSG:2056 (LV95).
@@ -87,7 +112,10 @@ def reproject_to_lv95(wkt_wgs84: str) -> dict:
     if not geom_wgs84.is_valid:
         raise ValueError(f"Input geometry is not valid: {wkt_wgs84[:80]}…")
  
-    geom_lv95 = transform(_TRANSFORMER.transform, geom_wgs84)
+    if transform_coordinates:
+        geom_lv95 = transform(_TRANSFORMER.transform, geom_wgs84)
+    else:
+        geom_lv95 = geom_wgs84
  
     if not geom_lv95.is_valid:
         raise ValueError(
@@ -105,3 +133,55 @@ def reproject_to_lv95(wkt_wgs84: str) -> dict:
             list(geom_lv95.exterior.coords)
         ],        
     }
+ 
+ 
+def _extract_polygons(geometry):
+    """
+    Recursively extract all Polygon parts from any Shapely geometry
+    (Polygon, MultiPolygon, GeometryCollection, or nested thereof).
+ 
+    Returns:
+        list[Polygon]: all polygon sub-geometries found
+    """
+    if geometry.geom_type == "Polygon":
+        return [geometry]
+    elif geometry.geom_type == "MultiPolygon":
+        return list(geometry.geoms)
+    elif isinstance(geometry, GeometryCollection):
+        polygons = []
+        for geom in geometry.geoms:
+            polygons.extend(_extract_polygons(geom))
+        return polygons
+    else:
+        # Point, LineString, etc. — not useful for our purpose
+        return []
+ 
+ 
+def multipolygone_to_polygone_wkt(geometry):
+    """
+    Convert any Shapely geometry to a single Polygon WKT by extracting
+    all polygon parts and returning the largest one.
+ 
+    Handles Polygon, MultiPolygon, and GeometryCollection (including
+    nested collections that unary_union can produce on complex inputs).
+ 
+    Args:
+        geometry: A Shapely geometry of any type
+ 
+    Returns:
+        str: WKT representation of the largest Polygon found
+ 
+    Raises:
+        ValueError: if no polygon parts can be extracted from the geometry
+    """
+    polygons = _extract_polygons(geometry)
+ 
+    if not polygons:
+        raise ValueError(
+            f"No polygon parts found in geometry of type {geometry.geom_type}"
+        )
+ 
+    # Return the largest polygon by area
+    largest = max(polygons, key=lambda p: p.area)
+    return largest.wkt
+ 
