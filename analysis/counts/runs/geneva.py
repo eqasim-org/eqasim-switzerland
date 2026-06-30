@@ -1,9 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Oct 16 10:17:26 2025
-
-@author: dabdelkader
-"""
 from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
@@ -23,6 +17,9 @@ def configure(context):
     context.config("only_weekday", default=False)
 
 def execute(context):        
+    if not context.config("only_weekday"):
+        return None # these data only have weekday flow
+     
     # paths and parameters  
     geneva_counts_data  = context.stage("analysis.counts.cantons.geneva")
     city = "geneva"
@@ -37,11 +34,8 @@ def execute(context):
     network = context.stage("analysis.counts.matching.network")
 
     # load counts
-    counts = Counts(file_path=geneva_counts_data, 
-                columns_to_keep={'flow':"flow", 'flow_w':"flow_w", 'ANGLE':"angle",
-                                 "quantile_lower_flow_weekday":'flow_lower',
-                                 "quantile_upper_flow_weekday":"flow_upper",
-                                 "max_flow":"flow_max"},
+    counts = Counts(file_path=geneva_counts_data,  id_column="OBJECTID",
+                columns_to_keep={'mean_flow_2025':"flow", "median_flow_2025":"median_flow"},
                 context = context)
         
     # Match the data with the network
@@ -49,16 +43,17 @@ def execute(context):
     matched = matcher.match(network = network, 
                             counts = counts, 
                             search_radius=20, 
-                            get_pairs= False, 
+                            get_pairs= True, 
                             by_highway_order=False, 
-                            direction_from_osm=False)
+                            direction_from_osm=False,
+                            only_two_link_ids = True)
 
     # Compare the with simulation
     cmp     = context.stage("analysis.counts.matching.compare")    
     flows   = cmp.compare_flow_total_efficient(counts, matched, network, 
                                             sample_size = sample_size, 
                                             get_average=False, 
-                                            flow_col = 'flow_w' if context.config("only_weekday") else 'flow')
+                                            flow_col = 'flow')
     
     # Identify the stations that might be mismatched
     stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>15000)|

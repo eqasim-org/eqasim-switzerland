@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Oct 16 10:53:54 2025
-
-@author: dabdelkader
-"""
-
 import os
 
 
@@ -13,7 +6,7 @@ def configure(context):
     context.config("counts_path", default=os.path.join(context.config("data_path"),"traffic_counts"))
 
 def execute(context):
-    year = 2023
+    year = 2025
     # Define paths
     data_path = context.config("counts_path")
     count_stations_file = os.path.join(data_path,"Switzerland","liste_des_postesdecomptage.xlsx")

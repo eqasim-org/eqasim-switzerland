@@ -220,12 +220,12 @@ def execute(context):
         )
 
         # network map of over/underestimation, aggregated by traversed links
-        plot_link_error_on_network(
-            network_gdf=network.net_geo,
-            routed_df=df_links,
-            swiss_border=swiss_border,
-            title="Link-level travel-time error: MATSim vs " + api.upper(),
-            out_path=os.path.join(out, "network_link_error_matsim_vs_" + api + ".png")
-        )
+        # plot_link_error_on_network(
+        #     network_gdf=network.net_geo,
+        #     routed_df=df_links,
+        #     swiss_border=swiss_border,
+        #     title="Link-level travel-time error: MATSim vs " + api.upper(),
+        #     out_path=os.path.join(out, "network_link_error_matsim_vs_" + api + ".png")
+        # )
 
     return dict(done = True, path = out_folders)

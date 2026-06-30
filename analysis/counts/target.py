@@ -78,18 +78,10 @@ def _load_counts_and_match(context, network, city):
         )
     elif city == "geneva":
         file_path = context.stage("analysis.counts.cantons.geneva")
-        counts = Counts(
-            file_path=file_path,
-            columns_to_keep={
-                "flow": "flow",
-                "flow_w": "flow_w",
-                "ANGLE": "angle",
-                "quantile_lower_flow_weekday": "flow_lower",
-                "quantile_upper_flow_weekday": "flow_upper",
-                "max_flow": "flow_max",
-            },
-            context=context,
-        )
+        counts = Counts(file_path=file_path,  
+                        id_column="OBJECTID",
+                        columns_to_keep={'mean_flow_2025':"flow", "median_flow_2025":"median_flow"},
+                        context = context)
         match_kwargs = dict(
             search_radius=20,
             get_pairs=False,
@@ -191,7 +183,7 @@ def execute(context):
         "geneva",
         "luzern",
         "saint_gallen",
-        "vaud",
+        # "vaud", #I do not want to include this in the calibration, it contains unclean data (observations over only one week)
         "zurich",
     ]
 
