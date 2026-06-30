@@ -29,6 +29,7 @@ logger = logging.getLogger("synpp: short_range_model")
 
 MODEL_NAME = "short_range_model.pt"
 DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 1.0
+SHORT_RANGE_MODEL_THRESHOLD = 2000.0
 
 def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.h3")
@@ -44,9 +45,9 @@ def configure(context):
 
     context.config("overwrite_short_range_model_if_exists", True)
     context.config("short_range_model_batch_size", 256)
-    context.config("short_range_model_epochs", 50)
+    context.config("short_range_model_epochs", 60)
     context.config("short_range_model_learning_rate", 4e-3)
-    context.config("short_range_trip_threshold_m", 1300.0)
+    context.config("short_range_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
     context.config("short_range_trip_min_m", DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION)
     context.config("secondary_nn_distance_loss_weight", 0.07)
     context.config("secondary_nn_distance_loss_short_floor_m", 100.0)
