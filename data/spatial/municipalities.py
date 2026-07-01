@@ -1,11 +1,16 @@
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from sklearn.neighbors import KDTree
-
+from data.osm.clean import read_outside_region
+from shapely.ops import unary_union
 
 def configure(context):
     context.config("data_path")
+
+    # we include the network of this region, i don't know if this is the right config param to use, to check later!
+    context.config("cross_border_exclude_shapefiles", default=None)
+    context.config("include_external_population", default = False)
+    context.stage("data.external_population.constants")
 
 
 REFERENCE_YEAR = 2023
@@ -74,7 +79,28 @@ def execute(context):
     df_mapping = pd.concat([df_existing, df_mapping])
     df_reference = df_reference[["municipality_id", "municipality_name", "geometry"]]
 
+    # include the external region
+    out_region_file = context.config("cross_border_exclude_shapefiles")
+    include_external_population = context.config("include_external_population")
+    if out_region_file is not None and include_external_population:
+        out_region = read_outside_region(out_region_file)
+        out_region_geometry = unary_union(out_region.geometry)
+        cst = context.stage("data.external_population.constants")
+        df_reference = df_reference.append({"municipality_id":cst.municipality_id,	
+                                            "municipality_name":cst.municipality_name,	
+                                            "geometry":out_region_geometry}, ignore_index=True)
+    
+    df_reference = gpd.GeoDataFrame(df_reference, geometry="geometry", crs="EPSG:2056")
     return df_reference, df_mapping
+
+
+
+
+
+
+
+
+
 
 
 def update_municipality_ids(df, df_mapping, remove_unknown=False):

@@ -1,7 +1,6 @@
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from sklearn.neighbors import KDTree
 import logging
 
 logger = logging.getLogger("synpp")
@@ -15,9 +14,25 @@ def configure(context):
     else:
         context.stage("data.spatial.municipality_type_data", alias="municipality_type")
 
+    # we include the network of this region, i don't know if this is the right config param to use, to check later!
+    context.config("cross_border_exclude_shapefiles", default=None)
+    context.config("include_external_population", default = False)
+    context.stage("data.external_population.constants")
+
 
 def execute(context):
-    return context.stage("municipality_type")
+    df = context.stage("municipality_type")
+    # outside CH region
+    out_region_file = context.config("cross_border_exclude_shapefiles")
+    include_external_population = context.config("include_external_population")
+    if out_region_file is not None and include_external_population:
+        cst = context.stage("data.external_population.constants")
+        df = df.append({"municipality_id":cst.municipality_id,	
+                        "municipality_type":cst.municipality_type,	
+                        "imputed_municipality_type":True}, ignore_index=True)
+        
+    df = df.astype({"municipality_type": "category", "municipality_id":int})
+    return df
 
 
 
@@ -26,6 +41,6 @@ def impute(df, df_municipality_types, remove_unknown=False):
     df = pd.merge(df, df_municipality_types, on="municipality_id", how="left")
 
     if remove_unknown:
-        return df[~np.isnan(df["municipality_type"])]
+        return df[~df["municipality_type"].isna()]
     else:
         return df

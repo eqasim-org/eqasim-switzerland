@@ -191,7 +191,9 @@ def get_mode_shares_calibration_args(context):
 def get_delays_args(context):
     activate_tl_delays = context.config("activate_traffic_light_delays")
     activate_unsignalized_delays = context.config("activate_unsignalized_intersections_delays")
-    additional_args = []
+    
+    additional_args = ["--config:eqasim:flow.writeFlowInterval", "1000",
+                       "--config:eqasim:intersectionDelays.writeDelayInterval", "1000"] #it takes too much space
     if activate_tl_delays or activate_unsignalized_delays:
         additional_args.extend([
             "--config:eqasim:intersectionDelays.activate", "true",

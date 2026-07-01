@@ -9,6 +9,8 @@ def configure(context):
     context.stage("data.spatial.quarters")
     context.stage("data.spatial.nuts")
     context.stage("data.spatial.postal_codes")
+    context.config("include_external_population", default = False)
+    context.stage("data.external_population.constants")
 
 def execute(context):
     df_countries = pd.DataFrame(context.stage("data.spatial.countries"), copy = True)
@@ -16,6 +18,11 @@ def execute(context):
     df_quarters = pd.DataFrame(context.stage("data.spatial.quarters"), copy = True)
     df_nuts = pd.DataFrame(context.stage("data.spatial.nuts"), copy=True)
     df_postal_code = pd.DataFrame(context.stage("data.spatial.postal_codes"), copy=True)
+    
+    # remove outside municipalities
+    if context.config("include_external_population"):
+        cst = context.stage("data.external_population.constants")
+        df_municipalities = df_municipalities[df_municipalities["municipality_id"] != cst.municipality_id].reset_index(drop=True)
 
     df_countries["zone_level_id"] = df_countries["country_id"]
     df_municipalities["zone_level_id"] = df_municipalities["municipality_id"]

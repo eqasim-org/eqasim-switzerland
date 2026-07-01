@@ -10,6 +10,7 @@ import torch
 
 from .location_helpers import (_prepare_primary_locations, _prepare_person_attributes, _euclidean, SECONDARY_SET, _get_first_location)
 from .model_wrappers import HierarchicalLocationChoiceModel
+from .short_range_model import SHORT_RANGE_MODEL_THRESHOLD
 logger = logging.getLogger("synpp")
 
 _WORKER_STATE = {}
@@ -35,7 +36,7 @@ def configure(context):
 
     context.config("random_seed")
     context.config("threads")
-    context.config("secondary_nn_short_trip_threshold_m", 1300.0)
+    context.config("secondary_nn_short_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
     context.config("secondary_nn_short_query_radius_m", 200.0)
     context.config("secondary_nn_short_min_candidates", 6)
 

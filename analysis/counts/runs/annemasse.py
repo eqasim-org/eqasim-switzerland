@@ -3,9 +3,13 @@ from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.utils.merge import Merge
 import os
+import geopandas as gpd
+import logging
+
+logger = logging.getLogger("synpp:ANNEMASSE TRAFFIC COUNTS")
 
 def configure(context):
-    context.stage("analysis.counts.cantons.bern")
+    context.stage("analysis.counts.cantons.annemasse")
     context.stage("analysis.counts.matching.network")
     context.stage("analysis.counts.matching.compare")
     context.stage("data.spatial.swiss_border")
@@ -16,12 +20,13 @@ def configure(context):
     context.config("simulation_directory", default = "simulation_output")
     context.config("only_weekday", default=False)
 
-def execute(context):
+def execute(context): 
     if context.config("only_weekday"):
-        return None # these data do not have weekday counts   
+        logger.warning("The Annemasse counts data does not have a weekday/weekend split. The 'only_weekday' option will be ignored.")        
+
     # paths and parameters  
-    bern_counts_data  = context.stage("analysis.counts.cantons.bern")
-    city = "bern"
+    annemasse_counts_data  = context.stage("analysis.counts.cantons.annemasse")
+    city = "annemasse"
     sample_size = context.config("input_downsampling")
     path_to_images = os.path.join(context.config("output_path"), 
                                   context.config("output_id"), 
@@ -32,36 +37,37 @@ def execute(context):
     # Load the network and the counts
     network = context.stage("analysis.counts.matching.network")
 
-    # load counts    
-    counts = Counts(file_path=bern_counts_data, id_column="objectid",
-                    columns_to_keep={'flow':"flow"}, context = context)
+    # load counts
+    counts = Counts(file_path=annemasse_counts_data, id_column="OBJECTID",
+                    columns_to_keep={'TJM':"flow"}, context = context)
             
     # Match the data with the network
     matcher = TrafficDataMatcher(city, cache = context.path())
-    matched = matcher.match(network = network, 
-                            counts = counts, 
-                            search_radius=15, 
-                            get_pairs= True,                        
-                            by_highway_order=False, 
+    matched = matcher.match(network = network,
+                            counts = counts,
+                            search_radius=20,
+                            get_pairs= True,
+                            by_highway_order=False,
                             direction_from_osm=False,
-                            only_two_link_ids=False)
+                            only_two_link_ids=True)
 
-    # Compare the with simulation
+    # Compare the with simulation    
     cmp     = context.stage("analysis.counts.matching.compare")    
     flows   = cmp.compare_flow_total_efficient(counts, matched, network, 
-                                           sample_size = sample_size, 
-                                           get_average=False, 
-                                           flow_col = "flow")
+                                            sample_size = sample_size, 
+                                            get_average=False, 
+                                            flow_col = 'flow')
     
     # Identify the stations that might be mismatched
-    stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>10000)|
-                         (flows.simulated_flow<1000)|
-                         (flows.flow<1000)|
-                         (~flows.pdiff.between(-70,200))]["id"].unique()
+    stations_to_drop = flows[#(abs(flows.flow-flows.simulated_flow)>15000)|
+                             #(flows.simulated_flow<1000)|
+                             #(~flows.pdiff.between(-70,200))|
+                            (flows.flow<1000)
+                            ]["id"].unique()
 
     # Plot the network and highligh these links in green  
     plotter = Plotter()
-    plotter.plot_network_with_counts( 
+    matched_links = plotter.plot_network_with_counts( 
                                     counts, matched, network,
                                     output=os.path.join(path_to_images, f"{city}_network.png"),
                                     lw = 0.7,
@@ -69,7 +75,8 @@ def execute(context):
                                     figsize = (40,40),                                                    
                                     road_types = "all",
                                     cut = True,
-                                    highlight_stations = stations_to_drop)
+                                    highlight_stations = stations_to_drop,
+                                    return_matched_links = True)
 
     # filter out stations to drop and save results
     flows = flows[~flows['id'].isin(stations_to_drop)].reset_index(drop=True)
@@ -94,7 +101,20 @@ def execute(context):
                                 title = f"Average Observed vs Simulated Flow by Highway Type ({city})",
                                 output_file = os.path.join(path_to_images, f"flow_by_road_type_{city}.png"))
     
-    return path_to_results
+
+    border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))  
+    roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link']      
+    Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
+                        matched_links.to_crs(epsg=4326)], 
+                        data_to_show=["link_id"], 
+                        point_gdf=[counts.counts[['id','geometry']].merge(
+                                   flows[["id","pdiff"]], on="id", how="left").to_crs(epsg=4326)],
+                        point_data_to_show=['id',"pdiff"],
+                        border = border,
+                        path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
+    
+    # return path_to_results
+    return None # we return None in order to avoid including these results in the averall results
    
 
 
