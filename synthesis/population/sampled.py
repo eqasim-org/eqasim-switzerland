@@ -488,5 +488,4 @@ def execute(context):
     logger.info(f"  Sampled {sampling_col}: {len(kept_ids)}, persons: {df['person_id'].nunique()}")
     logger.info(f"Proportion of original population: {len(df) / num_persons}")
 
-
     return df

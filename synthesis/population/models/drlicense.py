@@ -27,7 +27,7 @@ def _weighted_mean(x, w):
 def configure(context):
     context.stage("data.constants")
     context.stage("data.microcensus.21.persons")
-    context.stage("synthesis.population.models.students")
+    context.stage("synthesis.population.models.cross_border")
 
 def execute(context):
     c = context.stage("data.constants")
@@ -43,7 +43,7 @@ def execute(context):
     # 0. LOAD DATA
     # -------------------------------------------------------------------
     survey_df = context.stage("data.microcensus.21.persons")
-    pop_df    = context.stage("synthesis.population.models.students")
+    pop_df    = context.stage("synthesis.population.models.cross_border")
 
     for df in (survey_df, pop_df):
         df["N_children_under_18"] = pd.to_numeric(df["N_children_under_18"], errors="coerce")

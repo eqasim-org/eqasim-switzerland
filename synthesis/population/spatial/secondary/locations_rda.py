@@ -91,6 +91,15 @@ def execute(context):
 
     # Load trips and primary locations
     df_trips                = context.stage("synthesis.population.trips").sort_values(by=["person_id", "trip_index"])
+
+    # Border-crossing agents are located directly from data.cross_border.swiss_residents_od
+    # (see synthesis.population.spatial.locations), using the actual border-crossing point they
+    # were matched to in synthesis.population.trips. "border" is not a destination purpose known
+    # to this solver (see prepare_destinations), so these agents must be excluded here.
+    is_cb_trip   = (df_trips["preceding_purpose"] == "border") | (df_trips["following_purpose"] == "border")
+    cb_person_ids = set(df_trips.loc[is_cb_trip, "person_id"])
+    df_trips     = df_trips[~df_trips["person_id"].isin(cb_person_ids)]
+
     df_trips                = pd.merge(df_trips, df_car_availability[["person_id","car_availability"]], how="left", on="person_id")
     df_trips["travel_time"] = df_trips["arrival_time"] - df_trips["departure_time"]
     df_primary              = prepare_locations(context)

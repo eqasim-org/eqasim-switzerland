@@ -83,6 +83,15 @@ def execute(context):
     if "mz_person_id" not in df_trips.columns or "trip_id" not in df_trips.columns:
         raise RuntimeError("synthesis.population.trips must provide mz_person_id and trip_id for mz_chains feature lookup")
 
+    # Border-crossing agents are located directly from data.cross_border.swiss_residents_od
+    # (see synthesis.population.spatial.locations), using the actual border-crossing point they
+    # were matched to in synthesis.population.trips. "border" is not part of SECONDARY_ACTIVITIES
+    # (see location_helpers.SECONDARY_SET) and has no mz_chains entry (mz_person_id was replaced
+    # with cross_border_person_id for these trips), so they must be excluded here.
+    is_cb_trip    = (df_trips["preceding_purpose"] == "border") | (df_trips["following_purpose"] == "border")
+    cb_person_ids = set(df_trips.loc[is_cb_trip, "person_id"])
+    df_trips      = df_trips[~df_trips["person_id"].isin(cb_person_ids)]
+
     mz_chains = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[["person_id", "trip_id", "daily_longest_distance_from_home",
                                     "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
                                     "departure_time_normalized", "daily_longest_distance_from_work",

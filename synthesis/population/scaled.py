@@ -98,8 +98,6 @@ def execute(context):
         df_statpop["person_id"] = np.arange(df_statpop.shape[0]) + 1
 
         # remove unneeded columns
-
-
         logger.info("Number of households in household controls : %d", df_household_controls["weight"].sum())
         logger.info("Number of persons in population controls : %d", df_population_controls["weight"].sum())
         logger.info("Number of households after scaling : %d", len(df_statpop["household_id"].unique()))

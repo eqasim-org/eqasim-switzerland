@@ -10,22 +10,23 @@ def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
-    
+    context.stage("data.cross_border.swiss_residents_od")
     context.stage("synthesis.population.spatial.primary.work.work_remotly")
 
     context.config("random_seed")
+
 
 def execute(context):
     c      = context.stage("data.constants")
 
     if c.census == "statpop":
         df_persons = context.stage("synthesis.population.enriched")[[
-            "person_id", "mz_person_id", "age", "is_truck_driver", "is_outside_of_switzerland"
+            "person_id", "mz_person_id", "age", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id"
         ]]
 
     elif c.census == "are_synpop":
         df_persons = context.stage("synthesis.population.enriched")[[
-            "person_id", "mz_person_id", "age_class", "is_truck_driver", "is_outside_of_switzerland"
+            "person_id", "mz_person_id", "age_class", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id"
         ]]    
 
     df_trips = pd.DataFrame(context.stage("data.microcensus.trips")[0], copy=True)[[
@@ -52,7 +53,8 @@ def execute(context):
                          "departure_time", "arrival_time",
                          "travel_time", "mode",
                          "preceding_purpose", "following_purpose",
-                         "is_truck_driver", "is_outside_of_switzerland"]].sort_values(by=["person_id", "trip_id"])
+                         "is_truck_driver", "is_outside_of_switzerland",
+                         "is_crossing_the_border"]].sort_values(by=["person_id", "trip_id"])
 
     # Diversify departure times
     counts = df_trips[["person_id", "trip_id"]].groupby("person_id").size().reset_index(name="count")["count"].values
@@ -101,15 +103,78 @@ def execute(context):
     final_length   = len(df_trips)
     share          = round((final_length - initial_length) / initial_length * 100, 2)
 
-    print(f"Removed {initial_length - final_length} ({share}%) activities (people outside of Switzerland)")
+    print(f"Removed {initial_length - final_length} ({share}%) trips (people outside of Switzerland)")
 
-    return df_trips[[
+    # Adapt trips for agents crossing the border:
+    # they get a single trip (home-border or border-home) instead of their
+    # regular microcensus-derived chain, with mz_person_id replaced by a
+    # cross_border_person_id matched from the same canton.
+    df_trips_noncb = df_trips[~df_trips["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)].copy()
+
+    is_cb_person = df_persons["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)
+    is_cb_person &= ~df_persons["is_truck_driver"].astype("boolean").fillna(False).astype(bool)
+    is_cb_person &= ~df_persons["is_outside_of_switzerland"].astype("boolean").fillna(False).astype(bool)
+
+    df_cb_persons = df_persons.loc[is_cb_person, ["person_id", "canton_id"]].copy()
+    df_cb_persons["canton_id"] = pd.to_numeric(df_cb_persons["canton_id"], errors="coerce")
+
+    final_columns = [
         "person_id", "mz_person_id", "trip_id", "trip_index",
         "departure_time", "arrival_time",
         "preceding_purpose",
         "following_purpose",
-        # "is_first_trip", "is_last_trip",
         "trip_duration",
-        # "activity_duration",
         "mode"
-    ]]
+    ]
+
+    if len(df_cb_persons) == 0:
+        return df_trips_noncb[final_columns]
+
+    cb_ch_od = context.stage("data.cross_border.swiss_residents_od").copy()
+    cb_ch_od["origin_canton_id"] = pd.to_numeric(cb_ch_od["origin_canton_id"], errors="coerce")
+    od_by_canton = {canton: group for canton, group in cb_ch_od.groupby("origin_canton_id")}
+
+    matched_records = []
+    n_fallback = 0
+
+    for canton_id, group in df_cb_persons.groupby("canton_id"):
+        candidates = od_by_canton.get(canton_id)
+        if candidates is None or len(candidates) == 0:
+            n_fallback += len(group)
+            candidates = cb_ch_od
+
+        sampled = candidates.sample(
+            n=len(group), replace=True, random_state=rng.randint(0, 2**31 - 1)
+        ).reset_index(drop=True)
+        sampled["person_id"] = group["person_id"].values
+        matched_records.append(sampled)
+
+    df_matched = pd.concat(matched_records, ignore_index=True)
+
+    if n_fallback > 0:
+        print(f"Warning: {n_fallback} border-crossing persons had no swiss_residents_od record for their canton; sampled from the full dataset instead.")
+
+    # Direction: 50% leaving Switzerland (home -> border), 50% entering (border -> home)
+    is_leaving = rng.random_sample(size=len(df_matched)) < 0.5
+
+    # Sample departure/arrival times from an already existing (non-border) trip
+    sampled_times = df_trips_noncb[["departure_time", "arrival_time"]].sample(
+        n=len(df_matched), replace=True, random_state=rng.randint(0, 2**31 - 1)
+    ).reset_index(drop=True)
+
+    df_trips_cb = pd.DataFrame({
+        "person_id": df_matched["person_id"].values,
+        "mz_person_id": df_matched["cross_border_person_id"].values,
+        "trip_id": 1,
+        "trip_index": 0,
+        "departure_time": sampled_times["departure_time"].values,
+        "arrival_time": sampled_times["arrival_time"].values,
+        "preceding_purpose": np.where(is_leaving, "home", "border"),
+        "following_purpose": np.where(is_leaving, "border", "home"),
+        "mode": df_matched["trip_mode"].values,
+    })
+    df_trips_cb["trip_duration"] = df_trips_cb["arrival_time"] - df_trips_cb["departure_time"]
+
+    df_trips = pd.concat([df_trips_noncb, df_trips_cb], ignore_index=True, sort=False)
+
+    return df_trips[final_columns]

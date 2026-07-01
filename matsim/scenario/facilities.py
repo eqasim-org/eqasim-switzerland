@@ -1,7 +1,5 @@
 import gzip
 import io
-from shapely import wkt
-import geopandas as gpd
 
 import matsim.writers
 
@@ -48,7 +46,7 @@ def execute(context):
             writer.start_facilities()
 
             for item in context.progress(df_statent.itertuples(), total=len(df_statent)):
-                writer.start_facility(item[1], item[2], item[3])
+                writer.start_facility(item[1], int(item[2]), int(item[3]))
                 if item[4]: writer.add_activity("work")
                 if item[5]: writer.add_activity("education")
                 if item[6]: writer.add_activity("other")
@@ -62,13 +60,12 @@ def execute(context):
             ]].drop_duplicates("household_id")
 
             for item in context.progress(df_households.itertuples(), total=len(df_households), label="Homes"):
-                writer.start_facility("home%s" % item[1], item[2], item[3])
+                writer.start_facility("home%s" % item[1], int(item[2]), int(item[3]))
                 writer.add_activity("home")
                 writer.end_facility()
 
             if context.config("include_cross_border"):
                 cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
-                cross_border_acts    = context.stage("data.cross_border.generate_cross_border_traffic")[1].copy()
 
                 cbs_hhl = cross_border_persons[["household_id", "home_x", "home_y"]]
                 cbs_hhl["home_x"] = cbs_hhl["home_x"].astype(int)
@@ -79,18 +76,8 @@ def execute(context):
                     writer.add_activity("home")
                     writer.end_facility()
 
-                border_crossing_points = cross_border_acts[cross_border_acts["destination_id"].astype(str).str.startswith("BCP")]
-                border_crossing_points = gpd.GeoDataFrame(border_crossing_points, geometry="geometry")
-                border_crossing_points["geometry"] = border_crossing_points["geometry"].apply(lambda g: wkt.loads(g) if isinstance(g, str) else g)
-                border_crossing_points["destination_x"] = border_crossing_points.geometry.x
-                border_crossing_points["destination_y"] = border_crossing_points.geometry.y
-
-                border_crossing_points = border_crossing_points[["destination_id", "destination_x", "destination_y"]]
-
-                for item in context.progress(border_crossing_points.itertuples(), total = len(border_crossing_points), label = "border crossing points"):
-                    writer.start_facility(item[1], int(item[2]), int(item[3]))
-                    writer.add_activity("other")
-                    writer.end_facility()
+                # Border crossing points are now part of synthesis.population.destinations
+                # and are written in the main STATENT loop above.
 
             if context.config("include_external_population"):
                 external_activities = context.stage("data.external_population.read_outputs")[1].copy()[["destination_id", "destination_x", "destination_y"]].drop_duplicates(subset = ["destination_id"], keep = "first")

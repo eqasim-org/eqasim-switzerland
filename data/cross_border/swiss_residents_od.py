@@ -1,57 +1,69 @@
-import numpy as np
 import pandas as pd
-from shapely.geometry import Point, LineString
+import numpy as np
+from shapely.geometry import Point
 import geopandas as gpd
-
+import random
+from pathlib import Path
 
 def configure(context):
     context.config("data_path")
     context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.spatial.municipalities")
+    context.stage("data.spatial.cantons")
     context.stage("data.spatial.swiss_border")
     context.stage("data.cross_border.interview_places")
 
-    context.config("cross_border_countries", default = "All")
-    context.config("cross_border_exclude_shapefiles", default=None)
 
-    context.config("output_path")
-
-
-def has_point(x):
-    return pd.notna(x)
-
-
-def make_segment_1(row):
-    if has_point(row["interview_geometry_point"]):
-        return LineString([
-            Point(row["origin_x"], row["origin_y"]),
-            row["interview_geometry_point"]
-        ])
-    return LineString([
-        Point(row["origin_x"], row["origin_y"]),
-        Point(row["destination_x"], row["destination_y"])
-    ])
+def sample_rows_by_weight(df2, weight_col="weight"):
+    df = df2.copy()
+    
+    # Separate integer and fractional parts
+    df["int_part"]  = df[weight_col].astype(int)
+    df["frac_part"] = df[weight_col] - df["int_part"]
+    
+    # Repeat rows according to integer part
+    repeated = df.iloc[np.repeat(np.arange(len(df)), df["int_part"])].copy().drop(columns=["int_part", "frac_part"])
+    
+    # Handle fractional part with Bernoulli sampling
+    fractional_mask = np.random.rand(len(df)) < df["frac_part"]
+    fractional = df[fractional_mask].drop(columns=["int_part", "frac_part"])
+    
+    # Combine both
+    sampled_df = pd.concat([repeated, fractional], ignore_index=True)
+    return sampled_df
 
 
-def make_segment_2(row):
-    if has_point(row["interview_geometry_point"]):
-        return LineString([
-            row["interview_geometry_point"],
-            Point(row["destination_x"], row["destination_y"])
-        ])
-    return None
+def expand_and_sample(df, expand_column, weight_column):
+    df = df.copy()
+
+    # Expand
+    df_expanded = df.loc[df.index.repeat(df[expand_column])].copy()
+    df_expanded["passenger_index"] = df_expanded.groupby(df_expanded.index).cumcount() + 1
+    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]==1), "trip_mode"] = "car"
+    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]>1), "trip_mode"]  = "car_passenger"
+    
+    del df_expanded[expand_column]
+    del df_expanded["passenger_index"]
+
+    # Sample
+    df_sampled = sample_rows_by_weight(df_expanded, weight_col = weight_column)
+    del df_sampled[weight_column]
+
+    return df_sampled.copy().reset_index()
 
 
 def process_from_to_trips(df_trips, context):
     # Load municipalities
     df_municipalities, _ = context.stage("data.spatial.municipalities")
+    df_cantons           = context.stage("data.spatial.cantons")
+
 
     # 1. Remove "through" trips that were not classified properly
     trips    = df_trips[(df_trips["origin_country"]=="CH") | (df_trips["destination_country"]=="CH")].copy()
     trips_od = trips[["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
-        "interview_place", "interview_point_id", "interview_geometry_point", "group_weight"]].copy()
-    
+        "interview_place", "interview_point_id", "interview_geometry_point"]].copy()
+
     # 2. Remove trips with missing information on start or end point
     mask_missing_start = pd.to_numeric(trips_od["start_x"], errors="coerce").isna() # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
     mask_missing_end   = pd.to_numeric(trips_od["end_x"], errors="coerce").isna()   # Same with destinations
@@ -64,65 +76,56 @@ def process_from_to_trips(df_trips, context):
     df.loc[mask, ["start_x", "end_x"]] = df.loc[mask, ["end_x", "start_x"]].values
     df.loc[mask, ["start_y", "end_y"]] = df.loc[mask, ["end_y", "start_y"]].values
 
-    # Prepare to sample points from destination municipality
     origins = df.copy().apply(lambda row: Point(row["start_x"], row["start_y"]), axis = 1)
     origins = gpd.GeoSeries(origins, crs = "EPSG:4326").to_crs("EPSG:2056")
 
-    joined = gpd.sjoin(gpd.GeoDataFrame(geometry = origins), df_municipalities, how = "left", predicate = "within")
+    joined         = gpd.sjoin(gpd.GeoDataFrame(geometry = origins), df_municipalities, how = "left", predicate = "within")
+    joined_cantons = gpd.sjoin(gpd.GeoDataFrame(geometry = origins), df_cantons, how = "left", predicate = "within")
 
     df["origin_municipality"] = joined["municipality_id"].values
-
-    # In 23 cases, corresponding mostly to people going to Liechtenstein or to points exactly on the border
-    # in le Locle or Saint-Gingolph, the municipality cannot be found. 
-    # Let's remove these observations.
+    df["origin_canton_id"]    = joined_cantons["canton_id"].values
+    df["origin_canton_name"]  = joined_cantons["canton_name"].values
     df = df[df["origin_municipality"].notna()].copy()
 
-    # Re-create the destinations
-    destinations = df.copy().apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
-    destinations = gpd.GeoSeries(destinations, crs = "EPSG:4326").to_crs("EPSG:2056")
-
-    df["destination_x"] = destinations.apply(lambda p : p.x)
-    df["destination_y"] = destinations.apply(lambda p : p.y)
-
-    # Re-create the origins
-    origins = df.copy().apply(lambda row: Point(row["start_x"], row["start_y"]), axis = 1)
-    origins = gpd.GeoSeries(origins, crs = "EPSG:4326").to_crs("EPSG:2056")
-
-    df["origin_x"] = origins.apply(lambda p : p.x)
-    df["origin_y"] = origins.apply(lambda p : p.y)
+    df = expand_and_sample(df.copy(), "nb_passengers", "weight")
 
     df["cross_border_person_id"] = range(len(df))
     df["cross_border_person_id"] = "CBS_CH_" + df["cross_border_person_id"].astype(str)
 
-    df["residence_x"] =  df["origin_x"]
-    df["residence_y"] =  df["origin_y"]
+    # --- Maps: border crossers by municipality and canton ---
+    muni_counts = (
+        df.groupby("origin_municipality")
+        .size()
+        .reset_index(name="n_crossers")
+        .rename(columns={"origin_municipality": "municipality_id"})
+    )
+    muni_counts["municipality_id"] = pd.to_numeric(muni_counts["municipality_id"], errors="coerce")
 
-    df["label"] = "From-To"
+    gdf_muni = df_municipalities[["municipality_id", "municipality_name", "geometry"]].copy()
+    gdf_muni["municipality_id"] = pd.to_numeric(gdf_muni["municipality_id"], errors="coerce")
+    gdf_muni = gdf_muni.merge(muni_counts, on="municipality_id", how="left")
+    gdf_muni["n_crossers"] = gdf_muni["n_crossers"].fillna(0).astype(int)
+    gdf_muni.to_file(f"{context.path()}/crossers_by_municipality.gpkg", driver="GPKG")
 
-    df = df[["cross_border_person_id", "label", "weight",
-        "origin_x", "origin_y", "destination_x", "destination_y",
-        "residence_x", "residence_y",
+    canton_counts = (
+        df.groupby("origin_canton_id")
+        .size()
+        .reset_index(name="n_crossers")
+        .rename(columns={"origin_canton_id": "canton_id"})
+    )
+    canton_counts["canton_id"] = pd.to_numeric(canton_counts["canton_id"], errors="coerce")
+
+    gdf_canton = df_cantons[["canton_id", "canton_name", "geometry"]].copy()
+    gdf_canton["canton_id"] = pd.to_numeric(gdf_canton["canton_id"], errors="coerce")
+    gdf_canton = gdf_canton.merge(canton_counts, on="canton_id", how="left")
+    gdf_canton["n_crossers"] = gdf_canton["n_crossers"].fillna(0).astype(int)
+    gdf_canton.to_file(f"{context.path()}/crossers_by_canton.gpkg", driver="GPKG")
+
+    df = df[["cross_border_person_id",
+        "origin_municipality", "origin_canton_id", "destination_country",
         "trip_mode", "trip_purpose",
         "interview_place", "interview_point_id", "interview_geometry_point"]]
-    
-    seg1 = df.copy()
-    seg1["geometry"] = seg1.apply(make_segment_1, axis=1)
-    seg1["segment"] = "origin_to_destination"  # or keep "origin_to_interview" if you prefer
 
-    seg2 = df.copy()
-    seg2["geometry"] = seg2.apply(make_segment_2, axis=1)
-    seg2["segment"] = "interview_to_destination"
-    seg2 = seg2[seg2["geometry"].notna()]
-
-    result = gpd.GeoDataFrame(
-        pd.concat([seg1, seg2], ignore_index=True),
-        geometry="geometry",
-        crs="EPSG:2056"
-    )
-
-    output_path = context.config("output_path")
-    result.to_file(f"{output_path}/swiss_residents_border_crossing.gpkg", driver = "gpkg")
-    
     return df
 
 
@@ -245,7 +248,7 @@ def read_2021_data(context):
     del borders["crossing_cat"]
     del borders["direction_alps"]
 
-    # 13. Only keep Swiss residents
+    # 13. Only keep Swiss residents, their mobility should be covered in the Microcensus
     residents_ch_mask = borders["residence_country"] == "CH"
     borders = borders[residents_ch_mask].copy()
 
@@ -255,25 +258,35 @@ def read_2021_data(context):
     borders = borders[borders["start_x"].notna() & borders["start_y"].notna()]
     borders = borders[borders["end_x"].notna() & borders["end_y"].notna()]
 
-    # 14. Match to an interview point    
-    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance"]]
+    # 14. Match to an interview point
+
+    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "label"]]
     points["interview_point_id"] = points["border_crossing_point_id"]
 
-    grouped_points = {k: v for k, v in points.groupby("interview_place")}
+    # "label" indicates which mode a point was surveyed for ("road" serves car trips,
+    # "pt" serves public transport trips), so candidates are grouped by place AND mode.
+    mode_to_label = {"car": "road", "pt": "pt"}
+
+    grouped_points = {k: v for k, v in points.groupby(["interview_place", "label"])}
 
     def sample_point(row):
-        candidates = grouped_points.get(row["interview_place"])
+        label = mode_to_label.get(row["trip_mode"])
+        candidates = grouped_points.get((row["interview_place"], label))
         if candidates is not None and "importance" in candidates.columns:
             sampled = candidates.sample(n=1, weights=candidates["importance"])
             return sampled.iloc[0][["geometry", "importance", "interview_point_id"]]
-        
-        # Fall back to closest point based on origin coordinates
+
+        # Fall back to the closest point that still matches the trip's mode, if any exist
+        same_label = points[points["label"] == label] if label is not None else points
+        if len(same_label) == 0:
+            same_label = points
+
         origin    = Point(row["start_x"], row["start_y"])
-        distances = points["geometry"].apply(lambda geom: origin.distance(geom))
-        closest   = points.loc[distances.idxmin()]
+        distances = same_label["geometry"].apply(lambda geom: origin.distance(geom))
+        closest   = same_label.loc[distances.idxmin()]
         return closest[["geometry", "importance", "interview_point_id"]]
 
-    result = borders[borders["trip_mode"] == "car"][["interview_place", "start_x", "start_y"]].apply(sample_point, axis=1)
+    result = borders[["interview_place", "start_x", "start_y", "trip_mode"]].apply(sample_point, axis=1)
     borders[["interview_geometry_point", "candidate_label", "interview_point_id"]] = result
 
     return borders
@@ -418,7 +431,6 @@ def execute(context):
         borders["scaling_factor"]
     )
 
-    # Now process the trips
     trips = borders[borders["travel_cat"].isin(["From CH", "To CH"])]   
     from_to_trips = process_from_to_trips(trips, context)
 

@@ -39,11 +39,6 @@ def execute(context):
 
 
 
-
-
-
-
-
 ################### helper functions ####################
 
 def get_region(context):

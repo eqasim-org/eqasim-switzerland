@@ -12,13 +12,15 @@ def configure(context):
     context.stage("synthesis.population.spatial.secondary.locations")
 
     context.stage("synthesis.population.activities")
+    context.stage("synthesis.population.trips")
     context.stage("synthesis.population.sampled")
+    context.stage("data.cross_border.swiss_residents_od")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
     context.stage("data.statent.density")
     context.stage("data.statpop.density")
     context.stage("data.spatial.ovgk")
-    
+
     context.config("threads")
 
 def execute(context):
@@ -50,9 +52,28 @@ def execute(context):
                                       on="person_id")
     df_education_locations = df_education_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
+    # Border locations: agents crossing the border are matched (via the
+    # cross_border_person_id stashed in mz_person_id by synthesis.population.trips)
+    # to the actual interview/border-crossing point sampled in
+    # data.cross_border.swiss_residents_od, rather than a generic secondary location.
+    df_border_locations = df_locations[df_locations["purpose"] == "border"]
+
+    df_cb_trips = context.stage("synthesis.population.trips")
+    df_cb_trips = df_cb_trips[(df_cb_trips["preceding_purpose"] == "border") | (df_cb_trips["following_purpose"] == "border")]
+    df_cb_trips = df_cb_trips[["person_id", "mz_person_id"]].drop_duplicates("person_id")
+    df_cb_trips = df_cb_trips.rename(columns={"mz_person_id": "cross_border_person_id"})
+
+    cb_ch_od = context.stage("data.cross_border.swiss_residents_od")[[
+        "cross_border_person_id", "interview_point_id", "interview_geometry_point"
+    ]].rename(columns={"interview_point_id": "destination_id", "interview_geometry_point": "geometry"})
+
+    df_border_locations = pd.merge(df_border_locations, df_cb_trips, on="person_id", how="left")
+    df_border_locations = pd.merge(df_border_locations, cb_ch_od, on="cross_border_person_id", how="left")
+    df_border_locations = df_border_locations[["person_id", "activity_index", "destination_id", "geometry"]]
+
     # Secondary locations
-    df_secondary_locations = df_locations[~df_locations["purpose"].isin(("home", "work", "education"))].copy()
-    df_secondary["activity_index"] = df_secondary["trip_index"] 
+    df_secondary_locations = df_locations[~df_locations["purpose"].isin(("home", "work", "education", "border"))].copy()
+    df_secondary["activity_index"] = df_secondary["trip_index"]
     df_secondary_locations = pd.merge(df_secondary_locations,
                                       df_secondary[["person_id", "activity_index", "destination_id", "geometry"]],
                                       on=["person_id", "activity_index"], how="left")
@@ -60,7 +81,7 @@ def execute(context):
 
     # Validation
     initial_count = len(df_locations)
-    df_locations = pd.concat([df_home_locations, df_work_locations, df_education_locations, df_secondary_locations])
+    df_locations = pd.concat([df_home_locations, df_work_locations, df_education_locations, df_border_locations, df_secondary_locations])
 
     df_locations = df_locations.sort_values(by=["person_id", "activity_index"])
     final_count = len(df_locations)

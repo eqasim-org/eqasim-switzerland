@@ -24,7 +24,6 @@ def configure(context):
     if context.config("include_external_population"):
         context.config("external_population_folder")
         context.stage("data.constants")
-        context.stage("synthesis.population.destinations")
         context.stage("synthesis.population.enriched")
         context.config("fr_sample_rate", default = 1.0)
         context.config("input_downsampling")
@@ -152,8 +151,7 @@ def execute(context):
 
     acts_not_home = acts[acts["purpose"]!="home"]
     unique_ids    = acts_not_home["destination_id"].astype(int).unique()
-    max_id        = np.max(context.stage("synthesis.population.destinations").copy()["destination_id"].values.tolist())
-    correspondence = {old: max_id + i + 1 for i, old in enumerate(unique_ids)}
+    correspondence = {old: "FR_%d" % old for old in unique_ids}
 
     acts_not_home["destination_id"] = acts_not_home["destination_id"].map(correspondence)
     facility_locations = acts_not_home.groupby("destination_id")[["destination_x", "destination_y"]].first()

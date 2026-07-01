@@ -1,14 +1,9 @@
-
 import osmium
-from shapely.geometry import Point, LineString
 import pandas as pd
 import geopandas as gpd
 import logging
 from data.osm.clean import get_region
-import os
-from multiprocessing import Pool
 from multiprocessing import get_context
-import multiprocessing
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +15,8 @@ def configure(context):
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 20000) 
     context.config("add_traffic_lights", True) 
+    context.config("cross_border_exclude_shapefiles", default=None)
+
 
 CAR_ROAD_TAGS = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary','unclassified', 'residential', 'motorway_link', 
                  'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link', 'living_street'}
@@ -44,6 +41,7 @@ class TrafficLightsHandler(osmium.SimpleHandler):
             for nd in w.nodes:
                 if nd.ref in self.signal_nodes:
                     self.matched_signal_ids.add(nd.ref)
+
 
 def read_file(osm_file):
     logger.info(f"  Finding traffic lights is in progress for {osm_file}...")

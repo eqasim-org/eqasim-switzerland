@@ -96,7 +96,7 @@ def configure(context):
 
     context.config("analysis.pt.matsim_output_folder_path")
     context.config("analysis.pt.perimeter", default = "spatial/MMT/CMDP_Limites_WG84.shp")
-    context.config("analysis.pt.tpg_data", default = "TPG_passenger_counts_2024")
+    context.config("analysis.pt.tpg_data", default = "TPG_passenger_counts")
 
 
 def execute(context):
@@ -129,8 +129,8 @@ def execute(context):
 
     # Read TPG lines and stop name descriptions
     tpg_path  = data_path + "/" + context.config("analysis.pt.tpg_data")
-    tpg_lines = pd.read_csv(f"{tpg_path}/tpg_Lignes-arrêts_2024.csv")
-    tpg_stops = pd.read_csv(f"{tpg_path}/tpg_Arrets.csv", encoding = "latin1", sep = ";")
+    tpg_lines = pd.read_csv(f"{tpg_path}/counts2024/tpg_Lignes-arrêts_2024.csv")
+    tpg_stops = pd.read_csv(f"{tpg_path}/counts2024/tpg_Arrets.csv", encoding = "latin1", sep = ";")
 
     tpg_stops.columns = ["stop_code", "lon", "lat", "country", "name", "municipality", "gtfs_code", "date1", "date2"]
     tpg_stops = tpg_stops[["stop_code", "gtfs_code", "name"]]
@@ -210,7 +210,7 @@ def execute(context):
     direction_comparison_df          = pd.DataFrame(records)
     direction_comparison_df["match"] = direction_comparison_df["TPG_direction"] == direction_comparison_df["MATSim_direction"]
 
-    line_directions                   = direction_comparison_df[(direction_comparison_df["TPG_direction"]!="missing") & (direction_comparison_df["MATSim_direction"]!="missing")]
+    line_directions                   = direction_comparison_df[(direction_comparison_df["TPG_direction"]!="missing") & (direction_comparison_df["MATSim_direction"]!="missing")].copy()
     line_directions["line_direction"] = line_directions["line"] + "_" + line_directions["direction"]
     line_directions_names             = line_directions["MATSim_direction"].values
 
@@ -226,7 +226,7 @@ def execute(context):
     counts_ge["alightings"] = counts_ge["alightings"] / context.config("input_downsampling")
 
     # Read the processed TPG counts
-    tpg_mofr = pd.read_csv(f"{tpg_path}/tpg_counts_agg_workdays.csv")
+    tpg_mofr = pd.read_csv(f"{tpg_path}/counts2024/tpg_counts_agg_workdays.csv")
 
     # Add MATSim counts to TPG counts
     tpg_mofr["gtfs_code"]          = tpg_mofr["gtfs_code"].astype(str)

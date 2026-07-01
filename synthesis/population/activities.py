@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
 import logging
+
 logger = logging.getLogger("synpp")
+
 """
 Transforms the synthetic trip table into a synthetic activity table.
 """
@@ -64,7 +66,14 @@ def execute(context):
 
     initial_length   = len(df_activities)
     df_activities    = df_activities[~df_activities["person_id"].isin(truck_drivers)]
-    df_truck_drivers = pd.DataFrame.from_records([(person_id, 0, "truck_driver", True) for person_id in truck_drivers], columns = ["person_id", "activity_index", "purpose", "is_last"])
+    
+    # Truck drivers have no modeled trips (removed in synthesis.population.trips), so their
+    # sole activity must be purpose="home" to be picked up by the home-location branch in
+    # synthesis/population/spatial/locations.py. Any other label falls through to the
+    # secondary-location model, which never sees them (it operates on trip chains) and
+    # leaves their activity's geometry as NaN.
+    
+    df_truck_drivers = pd.DataFrame.from_records([(person_id, 0, "home", True) for person_id in truck_drivers], columns = ["person_id", "activity_index", "purpose", "is_last"])
     df_activities    = pd.concat([df_activities, df_truck_drivers], sort=True)
     final_length     = len(df_activities)
     share            = round((final_length - initial_length) / initial_length * 100, 2)

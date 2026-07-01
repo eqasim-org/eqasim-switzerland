@@ -64,19 +64,23 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     far_points   = points[far_mask].copy()
     close_points = points[close_mask].copy()
 
-    close_points_registry = close_points.copy().drop_duplicates(subset = ["geometry"], keep = "first")
-    merging_aux_df        = close_points_registry.copy().rename(columns = {"geometry": "close_point_geometry"})
-    del merging_aux_df["dist_to_border"]     
+    # Points too far from the border are projected onto the nearest surveyed interview
+    # place instead of the nearest other observed (and already close) record.
+    interview_points = context.stage("data.cross_border.interview_places").copy()[["geometry"]].reset_index(drop = True)
+    interview_points["record"] = range(len(interview_points))
+    merging_aux_df    = interview_points.copy().rename(columns = {"geometry": "close_point_geometry"})
 
-    nearest = far_points.sjoin_nearest(close_points_registry[["geometry", "record"]], how="left")
-    del nearest["index_right"]  
+    nearest = far_points.sjoin_nearest(interview_points[["geometry", "record"]], how="left")
+    del nearest["index_right"]
     nearest = pd.merge(nearest, merging_aux_df, left_on = "record_right", right_on = "record", how = "left")
     nearest = nearest[["record_left", "dist_to_border", "close_point_geometry", "geometry"]]
     nearest.columns = ["record", "dist_to_border", "geometry", "geometry_before_projection"]
-    nearest["purpose"] = projected_purpose
+    nearest["purpose"]      = projected_purpose
+    nearest["is_projected"] = True
 
     close_points["geometry_before_projection"] = close_points["geometry"]
     close_points["purpose"]             = default_purpose
+    close_points["is_projected"]        = False
 
     points = pd.concat([nearest, close_points])
     points = points.sort_values(by = "record")
@@ -84,7 +88,8 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     df[column_name + "_point"]             = points["geometry"].values
     df[column_name + "_before_projection"] = points["geometry_before_projection"].values
     df[column_name + "_purpose"]           = points["purpose"].values
-    
+    df[column_name + "_is_projected"]      = points["is_projected"].values
+
     del df[x]
     del df[y]
 
@@ -168,12 +173,16 @@ def process_from_to_trips(df_trips, context):
 
     df["label"] = "From-To"
 
+    # Only the origin (residence) can be projected here, the destination is always a real
+    # STATENT-sampled point inside Switzerland (see data.cross_border.destinations).
+    df["is_border_point_projected"] = df["origin_is_projected"]
+
     df = df[["cross_border_person_id", "label",
         "origin_x", "origin_y", "destination_x", "destination_y",
         "residence_x", "residence_y",
-        "trip_mode", "trip_purpose",
+        "trip_mode", "trip_purpose", "is_border_point_projected",
         "interview_place", "interview_point_id", "interview_geometry_point"]]
-    
+
     return df
 
 
@@ -212,10 +221,13 @@ def process_through_trips(through_trips, N, context):
 
     df["label"] = "Through"
 
+    # Either end of a through-trip can be projected, since neither is a real point inside CH.
+    df["is_border_point_projected"] = df["origin_is_projected"] | df["destination_is_projected"]
+
     df = df[["cross_border_person_id", "label",
         "origin_x", "origin_y", "destination_x", "destination_y",
         "residence_x", "residence_y",
-        "trip_mode", "trip_purpose",
+        "trip_mode", "trip_purpose", "is_border_point_projected",
         "interview_place", "interview_point_id", "interview_geometry_point"]]
 
     return df
@@ -353,25 +365,33 @@ def read_2021_data(context):
     # 14. Match to an interview point    
     #borders.loc[borders["interview_place"] == "Vallorbe (544)", "interview_place"] = "Gruppe O: VD/NE -> F. Dép. Jura. Doubs"
 
-    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance"]]
+    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "label"]]
     points["interview_point_id"] = points["border_crossing_point_id"]
 
-    grouped_points = {k: v for k, v in points.groupby("interview_place")}
+    # "label" indicates which mode a point was surveyed for ("road" serves car trips,
+    # "pt" serves public transport trips), so candidates are grouped by place AND mode.
+    mode_to_label = {"car": "road", "pt": "pt"}
+
+    grouped_points = {k: v for k, v in points.groupby(["interview_place", "label"])}
 
     def sample_point(row):
-        candidates = grouped_points.get(row["interview_place"])
+        label = mode_to_label.get(row["trip_mode"])
+        candidates = grouped_points.get((row["interview_place"], label))
         if candidates is not None and "importance" in candidates.columns:
             sampled = candidates.sample(n=1, weights=candidates["importance"])
             return sampled.iloc[0][["geometry", "importance", "interview_point_id"]]
-        
-        # Fall back to closest point based on origin coordinates
-        print(row["interview_place"])
+
+        # Fall back to the closest point that still matches the trip's mode, if any exist
+        same_label = points[points["label"] == label] if label is not None else points
+        if len(same_label) == 0:
+            same_label = points
+
         origin    = Point(row["start_x"], row["start_y"])
-        distances = points["geometry"].apply(lambda geom: origin.distance(geom))
-        closest   = points.loc[distances.idxmin()]
+        distances = same_label["geometry"].apply(lambda geom: origin.distance(geom))
+        closest   = same_label.loc[distances.idxmin()]
         return closest[["geometry", "importance", "interview_point_id"]]
 
-    result = borders[borders["trip_mode"] == "car"][["interview_place", "start_x", "start_y"]].apply(sample_point, axis=1)
+    result = borders[["interview_place", "start_x", "start_y", "trip_mode"]].apply(sample_point, axis=1)
     borders[["interview_geometry_point", "candidate_label", "interview_point_id"]] = result
 
     return borders

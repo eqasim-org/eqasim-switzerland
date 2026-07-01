@@ -3,6 +3,7 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import LineString
 
+
 def configure(context):
     context.config("random_seed")
     context.config("output_path")
@@ -10,13 +11,15 @@ def configure(context):
     context.stage("data.cross_border.destinations")
     context.stage("data.microcensus.trips")
 
+
 def execute(context):
     df       = context.stage("data.cross_border.destinations").copy()
     mz_trips = context.stage("data.microcensus.trips")[0].copy()
 
     population = df[["cross_border_person_id", "label", "mz_person_id",
-                     "origin_x", "origin_y", 
+                     "origin_x", "origin_y",
                      "destination_x", "destination_y", "destination_id",
+                     "is_border_point_projected",
                      "interview_place", "interview_point_id", "interview_geometry_point"]]
     
     mz_trips   = mz_trips[["person_id", "trip_id", 
@@ -174,7 +177,12 @@ def execute(context):
     # ── 4. Build fake activities at index 1.5 (all persons with mode car) ───────────────────────
     car_users      = (df_activities["following_mode"] == "car") | (df_activities["following_mode"] == "car_passenger")
     car_users      = df_activities[car_users]["person_id"].values.tolist()
-    mask_car_users = population["cross_border_person_id"].isin(car_users)
+
+    # Skip persons whose origin/destination has already been projected onto an interview
+    # place (data.cross_border.generate_od): for them the "home" activity itself already
+    # sits at/near the border crossing, so inserting a separate 1.5/2.5 activity at
+    # interview_geometry_point there would be redundant (or duplicate the same point).
+    mask_car_users = population["cross_border_person_id"].isin(car_users) & ~population["is_border_point_projected"]
 
     activities1point5 = (
         population[mask_car_users].copy()
@@ -183,8 +191,8 @@ def execute(context):
     activities1point5["activity_index"] = 1.5
     activities1point5["duration"]       = 1
     activities1point5["is_last"]        = False
-    activities1point5["destination_id"] = "BCP1.5_" + activities1point5["person_id"]
-    activities1point5["purpose"]        = "other"
+    activities1point5["destination_id"] = activities1point5["interview_point_id"]
+    activities1point5["purpose"]        = "border"
 
     activities1point5 = activities1point5.merge(act1[["person_id", "geom_1", "end_time_1", "trip_duration_12", "following_mode"]], on="person_id", how="left")
     activities1point5 = activities1point5.merge(act2[["person_id", "geom_2"]], on="person_id", how="left")
@@ -207,8 +215,8 @@ def execute(context):
     activities2point5["activity_index"] = 2.5
     activities2point5["duration"]       = 1
     activities2point5["is_last"]        = False
-    activities2point5["destination_id"] = "BCP2.5_" + activities2point5["person_id"]
-    activities2point5["purpose"]        = "other"
+    activities2point5["destination_id"] = activities2point5["interview_point_id"]
+    activities2point5["purpose"]        = "border"
 
     activities2point5 = activities2point5.merge(act2[["person_id", "geom_2", "end_time_2", "trip_duration_23", "following_mode"]], on="person_id", how="left")
     activities2point5 = activities2point5.merge(act3[["person_id", "geom_3"]], on="person_id", how="left")

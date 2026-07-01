@@ -44,8 +44,7 @@ def execute(context):
         df_persons = pd.merge(df_persons,
                             df_mz[["mz_person_id",
                                     "bike_availability", "is_car_passenger",
-                                    "is_outside_of_switzerland", 
-                                    "is_crossing_the_border"]],
+                                    "is_outside_of_switzerland"]],
                             on="mz_person_id", how="left"
                             )
         
@@ -99,8 +98,7 @@ def execute(context):
                                     "subscriptions_verbund_class",
                                     "subscriptions_strecke_class",
                                     "is_car_passenger",
-                                    "is_outside_of_switzerland", 
-                                    "is_crossing_the_border"]],
+                                    "is_outside_of_switzerland"]],
                             on="mz_person_id", how="left"
                             )
 
