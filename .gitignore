@@ -27,3 +27,4 @@ ch_cutter
 *.pkl
 *.csv
 main*.py
+.claude
