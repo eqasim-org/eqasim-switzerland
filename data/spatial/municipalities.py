@@ -86,9 +86,12 @@ def execute(context):
         out_region = read_outside_region(out_region_file)
         out_region_geometry = unary_union(out_region.geometry)
         cst = context.stage("data.external_population.constants")
+        dtypes = df_reference.dtypes
         df_reference = df_reference.append({"municipality_id":cst.municipality_id,	
                                             "municipality_name":cst.municipality_name,	
                                             "geometry":out_region_geometry}, ignore_index=True)
+        df_reference = df_reference.astype(dtypes)
+    
     
     df_reference = gpd.GeoDataFrame(df_reference, geometry="geometry", crs="EPSG:2056")
     return df_reference, df_mapping
