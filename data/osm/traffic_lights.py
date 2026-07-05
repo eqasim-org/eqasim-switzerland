@@ -16,6 +16,7 @@ def configure(context):
     context.config("border_offset", 20000) 
     context.config("add_traffic_lights", True) 
     context.config("cross_border_exclude_shapefiles", default=None)
+    context.config("include_external_population", default = False)
 
 
 CAR_ROAD_TAGS = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary','unclassified', 'residential', 'motorway_link', 
