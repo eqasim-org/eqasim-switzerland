@@ -19,20 +19,13 @@ except Exception:
 
 logger = logging.getLogger("synpp")
 
-
-def _as_bool(value):
-	if isinstance(value, str):
-		return value.strip().lower() in ("1", "true", "t", "yes", "y", "on")
-	return bool(value)
-
-
 def configure(context):
 	context.config("random_seed")
 	context.config("matching_embedding_top_k", 20)
 	context.config("matching_embedding_temperature", 0.5)
-	context.config("matching_embedding_epochs", 70)
-	context.config("matching_embedding_batch_size", 64)
-	context.config("matching_embedding_lr", 4.0e-3)
+	context.config("matching_embedding_epochs", 100)
+	context.config("matching_embedding_batch_size", 128)
+	context.config("matching_embedding_lr", 5.0e-3)
 	context.config("matching_embedding_lr_decay_step", 15)
 	context.config("matching_embedding_lr_decay_gamma", 0.5)
 	context.config("matching_embedding_dropout", 0.2)
@@ -40,9 +33,9 @@ def configure(context):
 	context.config("matching_embedding_max_sequence_len", 12)
 	context.config("matching_loss_weight_activity", 2.0)
 	context.config("matching_loss_weight_trip_count", 1.5)
-	context.config("matching_loss_weight_mode", 0.15)
+	context.config("matching_loss_weight_mode", 0.1)
 	context.config("matching_loss_weight_departure", 0.1)
-	context.config("matching_loss_weight_distance", 0.2)
+	context.config("matching_loss_weight_distance", 0.3)
 	context.config("matching_loss_weight_reconstruction", 0.2)
 	context.config("matching_loss_weight_latent_norm", 0.05)
 	context.config("matching_loss_weight_latent_spread", 0.2)
@@ -55,7 +48,7 @@ def configure(context):
 	context.config("matching_trip_count_scale", 5.0)
 	context.config("matching_trip_distance_scale", 30000.0)
 	context.config("specific_day_scenario", default="workday")
-	context.config("overwrite_matching_embedding_model", default=False)
+	context.config("overwrite_matching_embedding_model", default=True)
 
 	context.stage("data.microcensus.persons")
 	context.stage("data.microcensus.trips")
@@ -63,6 +56,12 @@ def configure(context):
 	context.stage("synthesis.population.sampled")
 	context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
 	context.stage("data.constants")
+
+
+def _as_bool(value):
+	if isinstance(value, str):
+		return value.strip().lower() in ("1", "true", "t", "yes", "y", "on")
+	return bool(value)
 
 
 def _l2_normalize(x):
@@ -876,19 +875,28 @@ def execute(context):
 
 	src_sex = df_source["sex"].values
 	src_emp = df_source["employed"].values
+	src_emp_type = df_source["work_location_type"].values
+	src_car_avail = df_source["car_availability"].values
+	
 	tgt_sex = df_eligible["sex"].values
 	tgt_emp = df_eligible["employed"].values
+	tgt_emp_type = df_eligible["work_location_type"].values
+	tgt_car_avail = df_eligible["car_availability"].values
 	mz_ids = df_source["mz_id"].values
 
 	assigned_mz = np.full((len(df_eligible),), -1, dtype=np.int64)
-	group_keys = pd.DataFrame({"sex": tgt_sex, "employed": tgt_emp}).drop_duplicates().itertuples(index=False)
+	group_keys = pd.DataFrame({"sex": tgt_sex, "employed": tgt_emp, "work_location_type": tgt_emp_type, "car_availability": tgt_car_avail}).drop_duplicates().itertuples(index=False)
 
 	for key in group_keys:
-		tmask = (tgt_sex == key.sex) & (tgt_emp == key.employed)
+		tmask = ((tgt_sex == key.sex) & (tgt_emp == key.employed) & 
+				 (tgt_emp_type == key.work_location_type)&
+				 (tgt_car_avail == key.car_availability))
 		if not np.any(tmask):
 			continue
 
-		smask = (src_sex == key.sex) & (src_emp == key.employed)
+		smask = ((src_sex == key.sex) & (src_emp == key.employed) & 
+				 (src_emp_type == key.work_location_type) & 
+				 (src_car_avail == key.car_availability))
 		if not np.any(smask):
 			logger.warning("No donor found for strict group sex=%s employed=%s; leaving %d agents unmatched.", key.sex, key.employed, int(np.sum(tmask)))
 			continue

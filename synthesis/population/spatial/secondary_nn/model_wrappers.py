@@ -217,8 +217,6 @@ class RegionalChoiceWrapper:
         return masks
 
 
-
-
 class DistrictChoiceWrapper:
     logger: logging.Logger = logging.getLogger("synpp: HierarchicalLocationChoiceModel")
 
@@ -342,8 +340,6 @@ class DistrictChoiceWrapper:
                 "education_secondary": sf[:, _si["education"]]   > 0.0,
             }
         return masks
-
-
 
 
 class LocalChoiceWrapper:
@@ -1072,7 +1068,7 @@ class HierarchicalLocationChoiceModel:
     def _predict_short_level2_from_person(self, person_matrix, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work, purpose, target_distance, rng):
         if self.s is None:
             raise RuntimeError("Short-range wrapper is not available")
-        start_radius = float(self.short_trip_threshold_m) + float(self.short_query_radius_m)
+        start_radius = float(self.short_trip_threshold_m) + float(self.short_query_radius_m)*1.5
         purpose_key = str(purpose)
         support_mask = None
         if self.short_destination_support_masks is not None:

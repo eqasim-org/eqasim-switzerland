@@ -29,7 +29,7 @@ logger = logging.getLogger("synpp: short_range_model")
 
 MODEL_NAME = "short_range_model.pt"
 DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 1.0
-SHORT_RANGE_MODEL_THRESHOLD = 2000.0
+SHORT_RANGE_MODEL_THRESHOLD = 1500.0
 
 def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.h3")
