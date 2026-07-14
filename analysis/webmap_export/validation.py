@@ -1,16 +1,5 @@
-"""Post-build validation per webmap-handoff briefing.
-
-Two modes:
-  - ``validate(db, source_type, full=False)``: schema-only checks. Used by the
-    skeleton smoke test and after Phase-1 (DDL only) — does not require any
-    rows.
-  - ``validate(db, source_type, full=True)``: full check including row counts,
-    bbox plausibility, and pre-aggregation consistency. Run after the final
-    build phase.
-
-Raises ``AssertionError`` with a specific message on the first failure. Caller
-catches and decides whether to abort the stage.
-"""
+"""Post-build validation: validate(db, source_type, full=False) checks schema only;
+full=True adds row counts, bbox plausibility and pre-aggregation consistency."""
 
 from __future__ import annotations
 
@@ -34,17 +23,15 @@ def _expected_tables(source_type: str) -> set[str]:
 
 
 def validate_schema(db, source_type: str) -> None:
-    """Schema-only checks — safe on an empty (DDL-only) database."""
+    """Schema-only checks - safe on an empty (DDL-only) database."""
     actual = {r[0] for r in db.execute("SHOW TABLES").fetchall()}
     expected = _expected_tables(source_type)
     missing = expected - actual
     if missing:
         raise AssertionError(f"Tables missing for {source_type}: {sorted(missing)}")
 
-
     for table, required_cols in EXPECTED_COLUMNS.items():
         if table not in actual:
-
             if table in expected:
                 raise AssertionError(f"Required table {table} missing")
             continue
@@ -57,10 +44,7 @@ def validate_schema(db, source_type: str) -> None:
 
 
 def validate_full(db, source_type: str) -> None:
-    """Schema + row-level sanity checks. Run only after Phase 6.
-
-    Mirrors the briefing's validate.py spec.
-    """
+    """Schema + row-level sanity checks; run only after Phase 6."""
     validate_schema(db, source_type)
 
     sv = db.execute("SELECT schema_version FROM metadata").fetchone()
@@ -86,43 +70,105 @@ def validate_full(db, source_type: str) -> None:
     """).fetchone()[0]
     if bbox_violations:
         raise AssertionError(
-            f"{bbox_violations} home_pt coords outside CH-bbox — projection bug?"
+            f"{bbox_violations} home_pt coords outside CH-bbox - projection bug?"
         )
 
-
-    grid_sum = db.execute("SELECT SUM(n_persons) FROM demo_grid_5000m").fetchone()[0] or 0
-    if abs(grid_sum - n_persons) / max(n_persons, 1) > 0.01:
-        raise AssertionError(
-            f"demo_grid_5000m persons sum {grid_sum} differs >1% from persons {n_persons}"
-        )
-
-    trip_grid_sum = db.execute(
-        "SELECT SUM(n_trips) FROM trip_grid_origin_500m"
-    ).fetchone()[0] or 0
-    if abs(trip_grid_sum - n_trips) / max(n_trips, 1) > 0.01:
-        raise AssertionError(
-            f"trip_grid_origin_500m trips sum {trip_grid_sum} differs >1% from trips {n_trips}"
-        )
-
-    _validate_grid_consistency(db)
+    _validate_v2_hex_consistency(db, n_persons=n_persons, n_trips=n_trips)
+    if source_type == "synthetic":
+        _validate_v4_pre_aggregates(db)
 
 
-def _validate_grid_consistency(db) -> None:
-    """Every 500m demo-grid cell must have at least one overlapping 100m
-    subcell. A mismatch indicates the cell_id encoding is inconsistent with
-    the cell_geom decoder (e.g. CAST-rounding vs FLOOR).
-    """
-    n_broken = db.execute("""
-        SELECT COUNT(*) FROM demo_grid_500m g500
-        WHERE NOT EXISTS (
-            SELECT 1 FROM demo_grid_100m g100
-            WHERE ST_Intersects(g100.cell_geom, g500.cell_geom)
-        )
+def _validate_v2_hex_consistency(db, *, n_persons: int, n_trips: int) -> None:
+    """H3 parent/child hierarchy + cross-resolution sum consistency.
+
+    Invariants: every hex has a parent at each coarser resolution; n_persons sums
+    match across resolutions and equal persons-with-home; trip hex sum matches trips."""
+    from .schema import H3_RES_COARSE, H3_RES_FINE, H3_RES_MID
+
+    n_orphan12 = db.execute(f"""
+        SELECT COUNT(*) FROM demo_hex_res{H3_RES_FINE}
+        WHERE h3_parent_res9 NOT IN (SELECT h3_index FROM demo_hex_res{H3_RES_MID})
     """).fetchone()[0]
-    if n_broken > 0:
+    if n_orphan12 > 0:
         raise AssertionError(
-            f"{n_broken} 500m cells have no overlapping 100m subcell "
-            f"— grid encoding inconsistent"
+            f"{n_orphan12} res-{H3_RES_FINE} hex without res-{H3_RES_MID} parent"
+        )
+
+    n_orphan9 = db.execute(f"""
+        SELECT COUNT(*) FROM demo_hex_res{H3_RES_MID}
+        WHERE h3_parent_res6 NOT IN (SELECT h3_index FROM demo_hex_res{H3_RES_COARSE})
+    """).fetchone()[0]
+    if n_orphan9 > 0:
+        raise AssertionError(
+            f"{n_orphan9} res-{H3_RES_MID} hex without res-{H3_RES_COARSE} parent"
+        )
+
+    s12 = db.execute(f"SELECT SUM(n_persons) FROM demo_hex_res{H3_RES_FINE}").fetchone()[0] or 0
+    s9 = db.execute(f"SELECT SUM(n_persons) FROM demo_hex_res{H3_RES_MID}").fetchone()[0] or 0
+    s6 = db.execute(f"SELECT SUM(n_persons) FROM demo_hex_res{H3_RES_COARSE}").fetchone()[0] or 0
+    if not (s12 == s9 == s6):
+        raise AssertionError(
+            f"demo_hex resolution sums mismatch: r{H3_RES_FINE}={s12}, "
+            f"r{H3_RES_MID}={s9}, r{H3_RES_COARSE}={s6}"
+        )
+
+    n_persons_with_home = db.execute(
+        "SELECT COUNT(*) FROM persons WHERE home_pt IS NOT NULL"
+    ).fetchone()[0]
+    if s12 != n_persons_with_home:
+        raise AssertionError(
+            f"demo_hex_res{H3_RES_FINE} sum ({s12}) ≠ persons-with-home ({n_persons_with_home})"
+        )
+
+    trip_hex_sum = db.execute(
+        f"SELECT SUM(n_trips) FROM trip_hex_origin_res{H3_RES_MID}"
+    ).fetchone()[0] or 0
+    if abs(trip_hex_sum - n_trips) / max(n_trips, 1) > 0.01:
+        raise AssertionError(
+            f"trip_hex_origin_res{H3_RES_MID} sum ({trip_hex_sum}) differs >1% from trips ({n_trips})"
+        )
+
+
+def _validate_v4_pre_aggregates(db) -> None:
+    """Iteration-4 pre-aggregate sanity checks (synthetic only).
+
+    Skips gracefully if spider_link_index is empty (partial build)."""
+    spider_n = db.execute("SELECT COUNT(*) FROM spider_link_index").fetchone()[0]
+    if spider_n == 0:
+        return
+
+    slv_sum = db.execute(
+        "SELECT COALESCE(SUM(n_traversals), 0) FROM spider_link_volumes_by_hex_res6"
+    ).fetchone()[0]
+    spider_with_home = db.execute("""
+        SELECT COUNT(*) FROM spider_link_index sli
+        JOIN persons p ON p.person_id = sli.person_id
+        WHERE p.home_h3_res6 IS NOT NULL
+    """).fetchone()[0]
+    if slv_sum != spider_with_home:
+        raise AssertionError(
+            f"spider_link_volumes_by_hex_res6 sum ({slv_sum}) ≠ spider rows joinable "
+            f"to a home_h3_res6 ({spider_with_home})"
+        )
+
+    zflv_sum = db.execute(
+        "SELECT COALESCE(SUM(n_trips), 0) FROM zone_flow_link_volumes_hex_res6"
+    ).fetchone()[0]
+    spider_joined = db.execute("""
+        SELECT COUNT(*) FROM spider_link_index sli
+        JOIN trips t ON t.person_id = sli.person_id AND t.trip_index = sli.trip_index
+        WHERE t.origin_h3_res6 IS NOT NULL AND t.dest_h3_res6 IS NOT NULL
+    """).fetchone()[0]
+    if zflv_sum != spider_joined:
+        raise AssertionError(
+            f"zone_flow_link_volumes_hex_res6 sum ({zflv_sum}) ≠ spider×trip "
+            f"hex-keyed rows ({spider_joined})"
+        )
+
+    nfm_n = db.execute("SELECT COUNT(*) FROM node_flow_matrix").fetchone()[0]
+    if nfm_n == 0:
+        raise AssertionError(
+            "node_flow_matrix is empty but spider_link_index has rows"
         )
 
 

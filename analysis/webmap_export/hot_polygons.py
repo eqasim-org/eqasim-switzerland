@@ -1,12 +1,5 @@
-"""Phase 4 — load swisstopo polygons + compute polygon-level aggregates.
-
-Polygon types loaded (all from swisstopo TLM):
-  canton   – swissBOUNDARIES3D_*_TLM_KANTONSGEBIET.shp
-  bezirk   – swissBOUNDARIES3D_*_TLM_BEZIRKSGEBIET.shp
-  gemeinde – swissBOUNDARIES3D_*_TLM_HOHEITSGEBIET.shp
-
-Aggregates mirror demo_grid + trip_grid_origin + out_of_home column lists, so
-polygon-Y queries are an O(1) lookup on the backend.
+"""Load swisstopo TLM polygons (canton, bezirk, gemeinde) and build polygon aggregates.
+Aggregates mirror the demo/trip/out-of-home column lists for O(1) backend lookups.
 """
 
 from __future__ import annotations
@@ -37,7 +30,7 @@ def load_hot_polygons(
     loaded: list[str] = []
     for ptype, shp in [("canton", canton_shp), ("bezirk", bezirk_shp), ("gemeinde", gemeinde_shp)]:
         if shp is None or not shp.exists():
-            log.warning("hot_polygons: %s shapefile missing — skipping", ptype)
+            log.warning("hot_polygons: %s shapefile missing - skipping", ptype)
             continue
         id_col, name_col, parent_col = _POLY_SPECS[ptype]
         parent_expr = (
@@ -64,7 +57,7 @@ def load_hot_polygons(
 
 
 def build_hot_polygon_demo(db: duckdb.DuckDBPyConnection) -> int:
-    """Spatial join persons → hot_polygons; aggregate same cols as demo_grid_*."""
+    """Spatial join persons -> hot_polygons; aggregate same cols as demo_grid_*."""
     db.execute("""
         INSERT INTO hot_polygon_demo
         WITH joined AS (
@@ -197,19 +190,14 @@ def build_hot_polygon_out_of_home(db: duckdb.DuckDBPyConnection) -> int:
 
 
 def build_hot_polygon_flows(db: duckdb.DuckDBPyConnection) -> int:
-    """Trips classified by origin AND dest polygon (canton level if available).
-
-    Uses the smallest polygon_type present (gemeinde > bezirk > canton). For
-    >1 polygon types, only one is chosen — backend can flow at finer levels via
-    raw R-Tree lookup if needed.
-    """
+    """OD flows at the finest polygon level present (gemeinde > bezirk > canton)."""
     chosen = db.execute("""
         SELECT polygon_type FROM hot_polygons GROUP BY polygon_type
         ORDER BY CASE polygon_type WHEN 'gemeinde' THEN 1 WHEN 'bezirk' THEN 2 ELSE 3 END
         LIMIT 1
     """).fetchone()
     if chosen is None:
-        log.warning("hot_polygon_flows: no polygons loaded — skipping")
+        log.warning("hot_polygon_flows: no polygons loaded - skipping")
         return 0
     ptype = chosen[0]
     db.execute(f"""
@@ -234,6 +222,41 @@ def build_hot_polygon_flows(db: duckdb.DuckDBPyConnection) -> int:
     """)
     n = db.execute("SELECT COUNT(*) FROM hot_polygon_flows").fetchone()[0]
     log.info("hot_polygon_flows: %d pairs", n)
+    return n
+
+
+def build_hot_polygon_flows_canton(db: duckdb.DuckDBPyConnection) -> int:
+    """Add canton->canton OD rows to hot_polygon_flows.
+
+    Uses precomputed trips.origin/dest_canton_id, so it must run AFTER canton
+    assignment; 'canton:<n>' ids coexist with the gemeinde rows.
+    """
+    has_cols = db.execute("""
+        SELECT COUNT(*) FROM information_schema.columns
+        WHERE table_name = 'trips' AND column_name IN ('origin_canton_id', 'dest_canton_id')
+    """).fetchone()[0]
+    if has_cols < 2:
+        return 0
+    db.execute("""
+        INSERT INTO hot_polygon_flows
+        SELECT
+            'canton:' || CAST(origin_canton_id AS VARCHAR) AS origin_polygon_id,
+            'canton:' || CAST(dest_canton_id   AS VARCHAR) AS dest_polygon_id,
+            COUNT(*)::INTEGER AS n_trips,
+            COUNT(*) FILTER (WHERE main_mode = 'car')::INTEGER,
+            COUNT(*) FILTER (WHERE main_mode = 'pt')::INTEGER,
+            COUNT(*) FILTER (WHERE main_mode = 'walk')::INTEGER,
+            COUNT(*) FILTER (WHERE main_mode = 'bike')::INTEGER,
+            COUNT(*) FILTER (WHERE main_mode = 'car_passenger')::INTEGER
+        FROM trips
+        WHERE origin_canton_id IS NOT NULL AND dest_canton_id IS NOT NULL
+        GROUP BY origin_canton_id, dest_canton_id
+        ON CONFLICT (origin_polygon_id, dest_polygon_id) DO NOTHING
+    """)
+    n = db.execute(
+        "SELECT COUNT(*) FROM hot_polygon_flows WHERE origin_polygon_id LIKE 'canton:%'"
+    ).fetchone()[0]
+    log.info("hot_polygon_flows: %d canton->canton pairs added", n)
     return n
 
 

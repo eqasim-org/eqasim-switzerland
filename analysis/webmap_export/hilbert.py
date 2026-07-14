@@ -1,6 +1,5 @@
 """2D Hilbert curve index for spatial-locality bulk loads.
-
-Order = 16 → 2^16 cells per axis, plenty for CH-bbox.
+Order = 16 -> 2^16 cells per axis, plenty for the CH bbox.
 """
 
 from __future__ import annotations
@@ -29,23 +28,14 @@ def _xy_to_d(n: int, x: int, y: int) -> int:
 
 
 def hilbert_2d(xs: np.ndarray, ys: np.ndarray, bbox: tuple[float, float, float, float]) -> np.ndarray:
-    """Vectorised 2D Hilbert index for arrays of (x, y) in EPSG:2056.
-
-    Args:
-        xs, ys: arrays of equal length, EPSG:2056 coords.
-        bbox: (xmin, ymin, xmax, ymax) used to normalise into [0, SIDE).
-
-    Returns:
-        uint64 array of Hilbert indices.
-    """
+    """Vectorised 2D Hilbert index (uint64) for EPSG:2056 coords; bbox
+    (xmin, ymin, xmax, ymax) normalises coordinates into [0, SIDE)."""
     xmin, ymin, xmax, ymax = bbox
     xs = np.asarray(xs, dtype=np.float64)
     ys = np.asarray(ys, dtype=np.float64)
 
-
     nx = np.clip(((xs - xmin) / (xmax - xmin) * SIDE).astype(np.int64), 0, SIDE - 1)
     ny = np.clip(((ys - ymin) / (ymax - ymin) * SIDE).astype(np.int64), 0, SIDE - 1)
-
 
     d = np.zeros_like(nx, dtype=np.uint64)
     x = nx.copy()

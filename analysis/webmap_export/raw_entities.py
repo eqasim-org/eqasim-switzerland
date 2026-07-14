@@ -1,11 +1,5 @@
 """Phase 2 loaders: persons, households, activities, trips.
-
-Each loader writes one table and is a pure function of its inputs (no side
-effects beyond the DuckDB connection). The loaders are tolerant of missing
-optional inputs — they leave NULLs rather than refusing to run.
-
-Coord system: all spatial columns are EPSG:2056 (LV95). Activities/trips
-without coords are dropped (not inserted) and counted as warnings.
+All spatial columns are EPSG:2056 (LV95); rows without coords are dropped.
 """
 
 from __future__ import annotations
@@ -52,7 +46,6 @@ def load_persons_synthetic(
         if col in df.columns:
             df[col] = df[col].astype(bool)
 
-
     home_x = pd.Series(np.nan, index=df.index, dtype="float64")
     home_y = pd.Series(np.nan, index=df.index, dtype="float64")
     if activities_for_home_pt is not None and not activities_for_home_pt.empty:
@@ -74,13 +67,11 @@ def load_persons_synthetic(
         home_x = home_x.where(~needs_statpop, merged["home_x"].to_numpy())
         home_y = home_y.where(~needs_statpop, merged["home_y"].to_numpy())
 
-
     bad = (home_x < 2_000_000) | (home_y < 1_000_000)
     home_x = home_x.where(~bad, other=np.nan)
     home_y = home_y.where(~bad, other=np.nan)
     df["home_x"] = home_x
     df["home_y"] = home_y
-
 
     if activities_for_n_acts is not None and not activities_for_n_acts.empty:
         counts = activities_for_n_acts.groupby("person_id").size().rename("n_activities")
@@ -88,7 +79,6 @@ def load_persons_synthetic(
     else:
         df["n_activities"] = pd.NA
     df["n_activities"] = df["n_activities"].astype("Int32")
-
 
     has_xy = df["home_x"].notna() & df["home_y"].notna()
     hidx = np.zeros(len(df), dtype=np.uint64)
@@ -110,28 +100,15 @@ def load_persons_microcensus(
     db: duckdb.DuckDBPyConnection,
     household_persons_pickle: Path,
     households_pickle: Optional[Path] = None,
+    respondents_pickle: Optional[Path] = None,
 ) -> int:
-    """Microcensus persons: full 163k roster from household_persons[0],
-    enriched with home_x/home_y/canton_id by joining the households cache.
-
-    Schema-contract fixes vs. the v1.0 first-iteration build:
-      • ``sex`` is normalised from MZ's {1=male, 2=female, -98=unknown}
-        encoding to the schema-contract {0=male, 1=female, NULL=unknown}.
-      • ``canton_id`` is taken straight from the households cache (already
-        pre-computed by the upstream MZ-spatial stage) — no spatial join here.
-      • ``home_x`` / ``home_y`` (LV95) are looked up via household_id, so all
-        163k persons get a ``home_pt`` rather than 0.
-      • ``hilbert_idx`` is computed from the home point (matches synthetic
-        ordering, so demo_grid joins behave identically).
-    """
+    """Load microcensus persons (full roster, enriched from the households cache)."""
     with open(household_persons_pickle, "rb") as f:
         triple = pickle.load(f)
     df = triple[0].copy()
 
-
     df["household_id"] = df["household_id"].astype("int64")
     df["person_id"] = df["household_id"] * 100 + df["hhpers_id"].astype("int64")
-
 
     sex_raw = pd.to_numeric(df["sex"], errors="coerce").astype("Int64")
     sex_norm = pd.Series(pd.NA, index=df.index, dtype="Int32")
@@ -141,14 +118,12 @@ def load_persons_microcensus(
     df["sex"] = sex_norm
     df["age"] = pd.to_numeric(df["age"], errors="coerce").astype("Int32")
 
-
     home_x = pd.Series(np.nan, index=df.index, dtype="float64")
     home_y = pd.Series(np.nan, index=df.index, dtype="float64")
     canton = pd.Series(pd.NA, index=df.index, dtype="Int32")
     if households_pickle is not None and households_pickle.exists():
         with open(households_pickle, "rb") as f:
             hh = pickle.load(f)
-
 
         hh = (hh[["person_id", "home_x", "home_y", "canton_id"]]
               .rename(columns={"person_id": "household_id"})
@@ -159,17 +134,38 @@ def load_persons_microcensus(
         home_y = merged["home_y"].astype("float64")
         canton = pd.to_numeric(merged["canton_id"], errors="coerce").astype("Int32")
     else:
-        log.warning("microcensus households cache missing — persons will have "
+        log.warning("microcensus households cache missing - persons will have "
                     "NULL home_pt and NULL canton_id")
     df["home_x"] = home_x.to_numpy()
     df["home_y"] = home_y.to_numpy()
     df["canton_id"] = canton.to_numpy()
 
-
     bad = (df["home_x"] < 2_000_000) | (df["home_y"] < 1_000_000) | df["home_x"].isna() | df["home_y"].isna()
     df.loc[bad, "home_x"] = np.nan
     df.loc[bad, "home_y"] = np.nan
 
+    # Survey attributes exist only for diary respondents (hhpers_id=1, so
+    # person_id = respondent_id*100+1); other household members stay NULL.
+    if respondents_pickle is not None and respondents_pickle.exists():
+        with open(respondents_pickle, "rb") as f:
+            resp = pickle.load(f).copy()
+        resp["person_id"] = resp["person_id"].astype("int64") * 100 + 1
+        bool_cols = ["driving_license", "employed",
+                     "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
+                     "subscriptions_strecke", "subscriptions_gleis7",
+                     "subscriptions_junior", "subscriptions_other"]
+        keep = ["person_id", "car_availability"] + [c for c in bool_cols if c in resp.columns]
+        resp = resp[keep].rename(columns={"driving_license": "has_driving_license"})
+        resp["car_availability"] = (
+            pd.to_numeric(resp["car_availability"], errors="coerce").map(_CAR_AVAIL_MAP)
+        )
+        df = df.merge(resp, on="person_id", how="left")
+        log.info("microcensus: enriched %d respondents with survey attributes "
+                 "(car_availability/licence/employed/subscriptions)",
+                 int(df["car_availability"].notna().sum()))
+    else:
+        log.warning("microcensus respondents cache missing - car_availability/"
+                    "subscriptions/employed stay NULL")
 
     for col in ("car_availability", "has_driving_license", "employed",
                 "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
@@ -196,8 +192,38 @@ def load_persons_microcensus(
     return len(df)
 
 
+def backfill_n_activities(db: duckdb.DuckDBPyConnection) -> int:
+    """Fill persons.n_activities from the activities table (microcensus)."""
+    db.execute("""
+        UPDATE persons SET n_activities = a.cnt
+        FROM (SELECT person_id, COUNT(*)::INTEGER AS cnt FROM activities GROUP BY person_id) a
+        WHERE persons.person_id = a.person_id
+    """)
+    n = db.execute("SELECT COUNT(*) FROM persons WHERE n_activities IS NOT NULL").fetchone()[0]
+    log.info("backfilled n_activities for %d persons", n)
+    return n
+
+
+def backfill_preceding_purpose(db: duckdb.DuckDBPyConnection) -> int:
+    """Fill trips.preceding_purpose from the preceding activity's purpose (microcensus)."""
+    db.execute("""
+        UPDATE trips SET preceding_purpose = a.purpose
+        FROM activities a
+        WHERE a.person_id = trips.person_id
+          AND a.activity_index = trips.trip_index - 1
+    """)
+    n = db.execute("SELECT COUNT(*) FROM trips WHERE preceding_purpose IS NOT NULL").fetchone()[0]
+    log.info("backfilled preceding_purpose for %d trips", n)
+    return n
+
+
 def _insert_persons(db: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
-    """Insert into the `persons` table. df may carry extra cols — they're ignored."""
+    """Insert into the persons table; extra df columns are ignored."""
+    from .hex import (
+        H3_RES_COARSE, H3_RES_FINE, H3_RES_MID,
+        hex_for_xy_lv95, hex_parent_int,
+    )
+
     cols = ["person_id", "household_id", "age", "sex", "car_availability",
             "has_driving_license", "employed",
             "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
@@ -207,13 +233,39 @@ def _insert_persons(db: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
     for c in cols:
         if c not in df.columns:
             df[c] = pd.NA
-    payload = df[cols + ["home_x", "home_y"]].copy()
+
+    has_xy = df["home_x"].notna() & df["home_y"].notna()
+    h12 = np.full(len(df), -1, dtype="int64")
+    h9 = np.full(len(df), -1, dtype="int64")
+    h6 = np.full(len(df), -1, dtype="int64")
+    if has_xy.any():
+        idx = has_xy.to_numpy()
+        h12_subset = hex_for_xy_lv95(
+            df.loc[has_xy, "home_x"].to_numpy(),
+            df.loc[has_xy, "home_y"].to_numpy(),
+            H3_RES_FINE,
+        )
+        h12[idx] = h12_subset
+        h9[idx] = hex_parent_int(h12_subset, H3_RES_MID)
+        h6[idx] = hex_parent_int(h12_subset, H3_RES_COARSE)
+    df = df.copy()
+    df["home_h3_res12"] = h12
+    df["home_h3_res9"] = h9
+    df["home_h3_res6"] = h6
+
+    h3_cols = [f"home_h3_res{H3_RES_FINE}",
+               f"home_h3_res{H3_RES_MID}",
+               f"home_h3_res{H3_RES_COARSE}"]
+    payload = df[cols + ["home_x", "home_y"] + h3_cols].copy()
     db.register("_tmp_persons", payload)
     db.execute(f"""
-        INSERT INTO persons ({", ".join(cols + ["home_pt"])})
+        INSERT INTO persons ({", ".join(cols + ["home_pt"] + h3_cols)})
         SELECT {", ".join(cols)},
                CASE WHEN home_x IS NULL OR home_y IS NULL THEN NULL
-                    ELSE ST_Point(home_x, home_y) END AS home_pt
+                    ELSE ST_Point(home_x, home_y) END AS home_pt,
+               CASE WHEN home_h3_res{H3_RES_FINE} < 0 THEN NULL ELSE home_h3_res{H3_RES_FINE} END,
+               CASE WHEN home_h3_res{H3_RES_MID} < 0 THEN NULL ELSE home_h3_res{H3_RES_MID} END,
+               CASE WHEN home_h3_res{H3_RES_COARSE} < 0 THEN NULL ELSE home_h3_res{H3_RES_COARSE} END
         FROM _tmp_persons
     """)
     db.unregister("_tmp_persons")
@@ -224,18 +276,10 @@ def load_households_synthetic(
     enriched_pickle: Optional[Path],
     households_pickle: Optional[Path] = None,
 ) -> int:
-    """Insert one row per household with attribute fields.
-
-    Source of truth: ``synthesis.population.enriched`` cache, which has the
-    per-person income/cars/bikes/ovgk columns (constant within a household).
-    The legacy ``data.statpop.households`` cache is just a household_id list
-    and is kept here only as a last-resort fallback (rows go in with NULL
-    attributes, matching old behaviour).
-    """
+    """Insert one row per household with attribute fields."""
     if enriched_pickle is not None and enriched_pickle.exists():
         with open(enriched_pickle, "rb") as f:
             enriched = pickle.load(f)
-
 
         df = (enriched[["household_id", "income_class",
                         "number_of_cars_class", "number_of_bikes_class", "ovgk"]]
@@ -246,7 +290,6 @@ def load_households_synthetic(
             "number_of_bikes_class": "n_bikes_class",
         })
         df["household_id"] = df["household_id"].astype("int64")
-
 
         for col in ("income_class", "n_cars_class", "n_bikes_class", "ovgk"):
             df[col] = df[col].astype("string")
@@ -261,9 +304,9 @@ def load_households_synthetic(
         return len(df)
 
     if households_pickle is None or not households_pickle.exists():
-        log.warning("synthetic households: no enriched cache and no households cache — table left empty")
+        log.warning("synthetic households: no enriched cache and no households cache - table left empty")
         return 0
-    log.warning("synthetic households: enriched cache missing — falling back to %s "
+    log.warning("synthetic households: enriched cache missing - falling back to %s "
                 "(household_id only, attributes will be NULL)", households_pickle)
     with open(households_pickle, "rb") as f:
         df = pickle.load(f)
@@ -288,16 +331,13 @@ def load_households_microcensus(
 ) -> int:
     """Insert microcensus households from the per-household cache.
 
-    The cache (``data.microcensus.households``) has one row per household.
-    Its key column is misleadingly called ``person_id`` but in this dataset
-    that ID == household_id (the household's reference person). It carries
-    income_class / number_of_cars_class / number_of_bikes_class / ovgk
-    directly, so we just rename and insert.
+    The cache's key column is called ``person_id`` but in this dataset it
+    equals household_id (the household's reference person).
     """
     with open(households_pickle, "rb") as f:
         df = pickle.load(f)
     if "person_id" not in df.columns:
-        log.warning("microcensus households cache has no person_id key — skipping")
+        log.warning("microcensus households cache has no person_id key - skipping")
         return 0
     df = df.copy()
     df = df.rename(columns={
@@ -327,14 +367,8 @@ ACTIVITY_BATCH = 500_000
 def parse_activities_csv(path: Path) -> pd.DataFrame:
     """Read eqasim output_activities.csv[.gz] into a DataFrame.
 
-    Columns produced by eqasim ActivityWriter (verified against the Java source):
-      person_id, activity_index, purpose, start_time, end_time, x, y,
-      facility_id, link_id  (delimiter ;)
-
-    eqasim emits literal ``-Infinity`` / ``Infinity`` for first/last activity
-    boundaries — convert those to NaN so downstream SQL sees NULL. Freight
-    person IDs (``freight_*``) are non-numeric and dropped — they don't count
-    as travellers in webmap analyses.
+    eqasim emits literal -Infinity/Infinity for first/last activity boundaries;
+    these are converted to NaN. Non-numeric (freight) person IDs are dropped.
     """
     df = pd.read_csv(path, sep=";", dtype={"person_id": str, "activity_index": "int32"},
                      na_values=["", "NA", "NaN", "-Infinity", "Infinity"])
@@ -351,9 +385,9 @@ def load_activities(
     db: duckdb.DuckDBPyConnection,
     activities_csv: Optional[Path],
 ) -> int:
-    """Wrapper: parse + insert. Used when the caller has no DataFrame."""
+    """Parse and insert activities from a CSV."""
     if activities_csv is None or not activities_csv.exists():
-        log.warning("activities CSV not found — table left empty")
+        log.warning("activities CSV not found - table left empty")
         return 0
     return insert_activities_df(db, parse_activities_csv(activities_csv))
 
@@ -400,10 +434,7 @@ TRIP_BATCH = 500_000
 
 
 def parse_trips_csv(path: Path) -> pd.DataFrame:
-    """eqasim output_trips.csv[.gz] schema (verified against TripWriter.java).
-
-    Drops freight rows (non-numeric person_id) — same rationale as activities.
-    """
+    """Read eqasim output_trips.csv[.gz] into a DataFrame."""
     df = pd.read_csv(path, sep=";",
                      dtype={"person_id": str, "person_trip_id": "int32"},
                      na_values=["", "NA", "NaN"])
@@ -427,7 +458,7 @@ def load_trips_synthetic(
     trips_csv: Optional[Path],
 ) -> int:
     if trips_csv is None or not trips_csv.exists():
-        log.warning("synthetic trips CSV not found — table left empty")
+        log.warning("synthetic trips CSV not found - table left empty")
         return 0
     df = parse_trips_csv(trips_csv)
     return _insert_trips(db, df)
@@ -439,15 +470,8 @@ def load_trips_microcensus(
 ) -> int:
     """Load microcensus trips. Returns row count.
 
-    The trips cache keys each trip on the diary respondent's
-    ``person_id`` — which in MZ equals their ``household_id`` (the
-    respondent is treated as a single representative per household).
-    To make trips joinable against ``persons`` (where each row carries
-    the synthetic key ``household_id * 100 + hhpers_id``) we map the
-    diary respondent to ``household_id * 100 + 1``, i.e. we assume the
-    diary respondent is always hhpers_id=1 (head of household).
-    Documented assumption — if upstream changes that convention, fix
-    here AND in :func:`derive_activities_microcensus` together.
+    person_id is mapped to household_id * 100 + 1, assuming the diary respondent
+    is hhpers_id=1 (head of household); keep in sync with derive_activities_microcensus.
     """
     with open(trips_pickle, "rb") as f:
         tup = pickle.load(f)
@@ -473,42 +497,23 @@ def derive_activities_microcensus(
     db: duckdb.DuckDBPyConnection,
     trips_pickle: Path,
 ) -> int:
-    """Reconstruct an activity sequence per diary respondent from MZ trips.
+    """Reconstruct N+1 activities per diary respondent from N MZ trips.
 
-    MZ provides only trips, but each trip carries `purpose` (= the purpose
-    *at the destination*, i.e. the start of the next activity), plus
-    `departure_time`, `arrival_time` and `origin`/`destination` coords. So
-    for every respondent with N trips we materialise N+1 activities:
-
-      Activity 0 (home start):  location = trip[0].origin,
-                                purpose  = "home",
-                                start_time = NULL, end_time = trip[0].departure_time
-      Activity i (1 ≤ i < N):   location = trip[i-1].destination,
-                                purpose  = trip[i-1].purpose,
-                                start_time = trip[i-1].arrival_time,
-                                end_time   = trip[i].departure_time
-      Activity N (terminal):    location = trip[N-1].destination,
-                                purpose  = trip[N-1].purpose,
-                                start_time = trip[N-1].arrival_time,
-                                end_time   = NULL
-
-    person_id is synthesised the same way as in :func:`load_trips_microcensus`
-    (raw_pid * 100 + 1) so activities can be joined back to persons.
+    MZ trip purpose is the purpose at the destination (start of the next
+    activity). person_id = raw_pid * 100 + 1, as in load_trips_microcensus.
     """
     with open(trips_pickle, "rb") as f:
         tup = pickle.load(f)
     trips = tup[0].copy() if isinstance(tup, tuple) else tup.copy()
     if trips.empty:
-        log.warning("microcensus trips empty — no activities derived")
+        log.warning("microcensus trips empty - no activities derived")
         return 0
 
     trips["person_id"] = trips["person_id"].astype("int64") * 100 + 1
     trips["trip_id"] = trips["trip_id"].astype("int32")
     trips = trips.sort_values(["person_id", "departure_time", "trip_id"], kind="mergesort").reset_index(drop=True)
 
-
     trips["trip_ord"] = trips.groupby("person_id", sort=False).cumcount()
-
 
     next_dep = (trips.groupby("person_id", sort=False)["departure_time"]
                        .shift(-1).rename("next_departure_time"))
@@ -521,7 +526,6 @@ def derive_activities_microcensus(
         "x":              trips["destination_x"].values,
         "y":              trips["destination_y"].values,
     })
-
 
     first_trip = trips.drop_duplicates("person_id", keep="first")
     home_acts = pd.DataFrame({
@@ -560,16 +564,30 @@ def _insert_trips(db: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> int:
         if col not in df.columns:
             df[col] = pd.NA
 
+    from .hex import H3_RES_COARSE, H3_RES_MID, hex_for_xy_lv95, hex_parent_int
+
     df["hilbert_origin"] = hilbert_2d(df["origin_x"].to_numpy(),
                                       df["origin_y"].to_numpy(),
                                       CH_BBOX_LV95)
+    origin_h3_9 = hex_for_xy_lv95(
+        df["origin_x"].to_numpy(), df["origin_y"].to_numpy(), H3_RES_MID,
+    )
+    dest_h3_9 = hex_for_xy_lv95(
+        df["dest_x"].to_numpy(), df["dest_y"].to_numpy(), H3_RES_MID,
+    )
+    df["origin_h3_res9"] = origin_h3_9
+    df["dest_h3_res9"] = dest_h3_9
+    df["origin_h3_res6"] = hex_parent_int(origin_h3_9, H3_RES_COARSE)
+    df["dest_h3_res6"] = hex_parent_int(dest_h3_9, H3_RES_COARSE)
     df = df.sort_values("hilbert_origin", kind="mergesort").reset_index(drop=True)
 
     n_total = 0
     cols_payload = ["person_id", "trip_index", "departure_time", "travel_time",
                     "main_mode", "preceding_purpose", "following_purpose",
                     "network_distance", "crowfly_distance",
-                    "origin_x", "origin_y", "dest_x", "dest_y", "hilbert_origin"]
+                    "origin_x", "origin_y", "dest_x", "dest_y", "hilbert_origin",
+                    "origin_h3_res9", "dest_h3_res9",
+                    "origin_h3_res6", "dest_h3_res6"]
     for start in range(0, len(df), TRIP_BATCH):
         chunk = df.iloc[start:start + TRIP_BATCH][cols_payload]
         db.register("_tmp_trips", chunk)
@@ -578,13 +596,18 @@ def _insert_trips(db: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> int:
                 (person_id, trip_index, departure_time, travel_time,
                  main_mode, preceding_purpose, following_purpose,
                  network_distance, crowfly_distance,
-                 origin_pt, dest_pt, hilbert_origin)
+                 origin_pt, dest_pt, hilbert_origin,
+                 origin_h3_res9, dest_h3_res9,
+                 origin_h3_res6, dest_h3_res6)
             SELECT person_id, trip_index, departure_time, travel_time,
                    main_mode, preceding_purpose, following_purpose,
                    network_distance, crowfly_distance,
                    ST_Point(origin_x, origin_y),
                    ST_Point(dest_x, dest_y),
-                   hilbert_origin FROM _tmp_trips
+                   hilbert_origin,
+                   origin_h3_res9, dest_h3_res9,
+                   origin_h3_res6, dest_h3_res6
+            FROM _tmp_trips
         """)
         db.unregister("_tmp_trips")
         n_total += len(chunk)

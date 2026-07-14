@@ -1,12 +1,5 @@
-"""Phase 5a — spider_routes + spider_link_index from MATSim events XML.
-
-Adapted from webmap-backend/scripts/build_spider_db/build_spider_db.py with
-two changes:
-  - person_id is BIGINT (cast from "<id>:car" prefix)
-  - schema is created beforehand by schema.create_all_tables — we INSERT only.
-
-SAX-streamed; flushes every BATCH_SIZE trips. Memory grows only with the
-number of in-flight (open) car trips, not the file size.
+"""Phase 5a - spider_routes + spider_link_index from MATSim events XML.
+SAX-streamed; flushes every BATCH_SIZE trips, so memory scales with open trips only.
 """
 
 from __future__ import annotations
@@ -87,7 +80,7 @@ class _TripExtractor(xml.sax.handler.ContentHandler):
         try:
             pid = int(person_id_str)
         except ValueError:
-            log.warning("Non-numeric person_id %r in spider — skipped", person_id_str)
+            log.warning("Non-numeric person_id %r in spider - skipped", person_id_str)
             return
         self._buf_person.append(pid)
         self._buf_trip_idx.append(vs.trip_counter)
@@ -137,6 +130,8 @@ def build_spider(db: duckdb.DuckDBPyConnection, events_xml: Path) -> int:
     else:
         parser.parse(str(events_xml))
 
+    # ORDER BY link_id clusters rows physically so backend WHERE link_id = ?
+    # filters hit a tight row-group range (zonemap pruning) instead of a full scan.
     db.execute("""
         INSERT INTO spider_link_index
         SELECT link_id, person_id, trip_index, departure_time,
@@ -147,6 +142,7 @@ def build_spider(db: duckdb.DuckDBPyConnection, events_xml: Path) -> int:
                    generate_subscripts(route_links, 1) AS pos
             FROM spider_routes
         )
+        ORDER BY link_id
     """)
     n_idx = db.execute("SELECT COUNT(*) FROM spider_link_index").fetchone()[0]
     log.info("spider_link_index: %d rows", n_idx)

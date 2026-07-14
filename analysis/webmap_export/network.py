@@ -1,7 +1,5 @@
-"""Phase 5b — network_links + network_nodes from MATSim XML.
-
-SAX-streamed for memory efficiency. Coords are EPSG:2056 (LV95) as the
-synpop pipeline runs everything in LV95.
+"""Phase 5b - network_links + network_nodes from MATSim XML.
+SAX-streamed; coords are EPSG:2056 (LV95) like the rest of the pipeline.
 """
 
 from __future__ import annotations
@@ -21,11 +19,18 @@ BATCH_SIZE = 200_000
 
 
 class _NetworkParser(xml.sax.handler.ContentHandler):
+    # Road class is carried as a per-link OSM attribute in the MATSim XML.
+    _ROAD_TYPE_ATTR = "osm:way:highway"
+
     def __init__(self, con: duckdb.DuckDBPyConnection) -> None:
         super().__init__()
         self._con = con
         self._nodes: dict[str, tuple[float, float]] = {}
         self._link_buf: list[tuple] = []
+        self._cur_link: tuple | None = None
+        self._cur_road_type: str | None = None
+        self._capture_road_type = False
+        self._char_buf: list[str] = []
 
     def startElement(self, name, attrs):
         if name == "node":
@@ -34,15 +39,31 @@ class _NetworkParser(xml.sax.handler.ContentHandler):
             y = float(attrs.get("y", "nan"))
             self._nodes[nid] = (x, y)
         elif name == "link":
-            lid = attrs.get("id")
-            f = attrs.get("from")
-            t = attrs.get("to")
-            length = _to_float(attrs.get("length"))
-            capacity = _to_float(attrs.get("capacity"))
-            freespeed = _to_float(attrs.get("freespeed"))
-            permlanes = _to_float(attrs.get("permlanes"))
-            modes = attrs.get("modes")
-            self._link_buf.append((lid, f, t, length, capacity, freespeed, permlanes, modes))
+            # Append deferred to endElement('link') so the child road_type attribute can be folded in.
+            self._cur_link = (
+                attrs.get("id"), attrs.get("from"), attrs.get("to"),
+                _to_float(attrs.get("length")), _to_float(attrs.get("capacity")),
+                _to_float(attrs.get("freespeed")), _to_float(attrs.get("permlanes")),
+                attrs.get("modes"),
+            )
+            self._cur_road_type = None
+        elif name == "attribute" and self._cur_link is not None:
+            if attrs.get("name") == self._ROAD_TYPE_ATTR:
+                self._capture_road_type = True
+                self._char_buf = []
+
+    def characters(self, content):
+        if self._capture_road_type:
+            self._char_buf.append(content)
+
+    def endElement(self, name):
+        if name == "attribute" and self._capture_road_type:
+            self._cur_road_type = ("".join(self._char_buf).strip() or None)
+            self._capture_road_type = False
+        elif name == "link" and self._cur_link is not None:
+            self._link_buf.append((*self._cur_link, self._cur_road_type))
+            self._cur_link = None
+            self._cur_road_type = None
             if len(self._link_buf) >= BATCH_SIZE:
                 self._flush_links()
 
@@ -63,7 +84,8 @@ class _NetworkParser(xml.sax.handler.ContentHandler):
         })
         self._con.register("_tmp_n", tbl)
         self._con.execute("""
-            INSERT INTO network_nodes SELECT node_id, ST_Point(x, y) FROM _tmp_n
+            INSERT INTO network_nodes (node_id, geom)
+            SELECT node_id, ST_Point(x, y) FROM _tmp_n
         """)
         self._con.unregister("_tmp_n")
         log.info("network_nodes: %d", len(ids))
@@ -71,7 +93,7 @@ class _NetworkParser(xml.sax.handler.ContentHandler):
     def _flush_links(self):
         if not self._link_buf:
             return
-        link_id, fr, to, length, cap, fs, pl, modes = zip(*self._link_buf)
+        link_id, fr, to, length, cap, fs, pl, modes, road_type = zip(*self._link_buf)
         from_xy = [self._nodes.get(f) for f in fr]
         to_xy = [self._nodes.get(t) for t in to]
         x1 = [p[0] if p else None for p in from_xy]
@@ -87,6 +109,7 @@ class _NetworkParser(xml.sax.handler.ContentHandler):
             "freespeed": pa.array(fs, type=pa.float64()),
             "permlanes": pa.array(pl, type=pa.float64()),
             "modes":     pa.array(modes, type=pa.string()),
+            "road_type": pa.array(road_type, type=pa.string()),
             "x1": pa.array(x1, type=pa.float64()),
             "y1": pa.array(y1, type=pa.float64()),
             "x2": pa.array(x2, type=pa.float64()),
@@ -95,8 +118,8 @@ class _NetworkParser(xml.sax.handler.ContentHandler):
         self._con.register("_tmp_l", tbl)
         self._con.execute("""
             INSERT INTO network_links
-                (link_id, from_node, to_node, length, capacity, freespeed, permlanes, modes, geom)
-            SELECT link_id, from_node, to_node, length, capacity, freespeed, permlanes, modes,
+                (link_id, from_node, to_node, length, capacity, freespeed, permlanes, modes, road_type, geom)
+            SELECT link_id, from_node, to_node, length, capacity, freespeed, permlanes, modes, road_type,
                    CASE WHEN x1 IS NULL OR x2 IS NULL THEN NULL
                         ELSE ST_MakeLine(ST_Point(x1,y1), ST_Point(x2,y2)) END
             FROM _tmp_l
@@ -118,20 +141,6 @@ def build_network(db: duckdb.DuckDBPyConnection, network_xml: Path) -> tuple[int
     n_nodes = db.execute("SELECT COUNT(*) FROM network_nodes").fetchone()[0]
     n_links = db.execute("SELECT COUNT(*) FROM network_links").fetchone()[0]
     return n_nodes, n_links
-
-
-def load_link_speeds(db: duckdb.DuckDBPyConnection, parquet_path: Path) -> int:
-    """Optional eqasim upstream input. Skipped silently if missing."""
-    if not parquet_path.exists():
-        return 0
-    db.execute(f"""
-        INSERT INTO link_speeds (link_id, time_bucket, speed)
-        SELECT CAST(link_id AS VARCHAR), time_bucket, speed
-        FROM read_parquet('{parquet_path}')
-    """)
-    n = db.execute("SELECT COUNT(*) FROM link_speeds").fetchone()[0]
-    log.info("link_speeds: %d rows", n)
-    return n
 
 
 def _to_float(v):

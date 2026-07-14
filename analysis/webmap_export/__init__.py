@@ -1,13 +1,10 @@
 """eqasim post-process stage: webmap DuckDB export.
 
-Produces up to two files in <matsim_dir>/simulation_output/webmap/:
-    synthetic.duckdb
-    microcensus.duckdb
-
-Selected via the single config option ``webmap_export``:
-    "both"        → build both files
-    "synthetic"   → build only synthetic.duckdb
-    "microcensus" → build only microcensus.duckdb
+Writes to <matsim_dir>/simulation_output/webmap/, selected via the
+``webmap_export`` config option:
+    "both"        -> synthetic.duckdb and microcensus.duckdb
+    "synthetic"   -> only synthetic.duckdb
+    "microcensus" -> only microcensus.duckdb
 """
 
 from __future__ import annotations
@@ -17,9 +14,12 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import grids, hot_polygons, network, raw_entities, spider
+from . import (
+    canton, events_extras, grids, hot_polygons, network, pre_aggregates,
+    raw_entities, spider, static_assets, transit,
+)
 from .schema import (
-    GRID_RESOLUTIONS_M,
+    H3_RESOLUTIONS,
     SCHEMA_VERSION,
     create_all_indexes,
     create_all_tables,
@@ -29,6 +29,7 @@ from .sources import (
     DEFAULT_DATA_PATH,
     DEFAULT_HOME_PIPE,
     discover_microcensus,
+    discover_sample_rate,
     discover_synthetic,
 )
 from .validation import CH_BBOX_LV95, validate_full, validate_schema
@@ -40,6 +41,7 @@ _VALID_MODES = {"both", "synthetic", "microcensus"}
 
 def configure(context):
     context.config("webmap_export", "both")
+    context.config("scale_pt_to_full_population", True)
     context.stage("matsim.simulation.run")
 
 
@@ -47,7 +49,7 @@ def execute(context):
     mode = str(context.config("webmap_export")).strip().lower()
     if mode not in _VALID_MODES:
         log.warning(
-            "webmap_export=%r is not one of %s — stage skipped",
+            "webmap_export=%r is not one of %s - stage skipped",
             mode, sorted(_VALID_MODES),
         )
         return {"skipped": True, "webmap_export": mode}
@@ -66,6 +68,12 @@ def execute(context):
     build_synthetic = mode in ("both", "synthetic")
     build_microcensus = mode in ("both", "microcensus")
 
+    sample_rate = discover_sample_rate(matsim_dir, home_pipe=home_pipe)
+    scale_pt = bool(context.config("scale_pt_to_full_population"))
+    run_name = matsim_dir.name.replace(".cache", "")
+    log.info("webmap_export: sample_rate=%s scale_pt=%s run_name=%s",
+             sample_rate, scale_pt, run_name)
+
     if build_synthetic:
         _build_synthetic(
             output_db=syn_path,
@@ -73,6 +81,9 @@ def execute(context):
             cache_dir=cache_dir,
             data_path=data_path,
             home_pipe=home_pipe,
+            sample_rate=sample_rate,
+            run_name=run_name,
+            scale_pt=scale_pt,
         )
 
     if build_microcensus:
@@ -97,10 +108,12 @@ def execute(context):
 
 def _build_synthetic(
     *, output_db: Path, matsim_dir: Path, cache_dir: Path, data_path: Path,
-    home_pipe: Path,
+    home_pipe: Path, sample_rate: float | None = None, run_name: str = "",
+    scale_pt: bool = True,
 ) -> None:
     import duckdb
-    log.info("=== synthetic.duckdb build START")
+    log.info("=== synthetic.duckdb build START (sample_rate=%s, scale_pt=%s, run=%s)",
+             sample_rate, scale_pt, run_name)
     src = discover_synthetic(matsim_dir, cache_dir=cache_dir, data_path=data_path, home_pipe=home_pipe)
     _unlink_db(output_db)
 
@@ -124,13 +137,12 @@ def _build_synthetic(
         n_trips = raw_entities.load_trips_synthetic(db, src.output_trips_csv)
         db.execute("CHECKPOINT")
 
-        for r in GRID_RESOLUTIONS_M:
-            grids.build_demo_grid(db, r)
+        grids.build_demo_hex_pyramid(db)
         if n_trips:
-            grids.build_trip_grid_origin(db, 500)
-            grids.build_flow_grid(db, 500)
+            grids.build_trip_hex_origin(db)
+            grids.build_flow_hex(db)
         if n_acts:
-            grids.build_out_of_home_grid(db, 500)
+            grids.build_oh_hex(db)
         db.execute("CHECKPOINT")
 
         loaded = hot_polygons.load_hot_polygons(
@@ -145,16 +157,62 @@ def _build_synthetic(
                 hot_polygons.build_hot_polygon_out_of_home(db)
         db.execute("CHECKPOINT")
 
+        spider_loaded = False
+        network_loaded = False
         if src.output_events_xml is not None and src.output_events_xml.exists():
             spider.build_spider(db, src.output_events_xml)
+            spider_loaded = True
         else:
             log.info("spider: skipped (events_xml=%s)", src.output_events_xml)
         if src.output_network_xml is not None and src.output_network_xml.exists():
             network.build_network(db, src.output_network_xml)
-            if src.link_speeds_parquet:
-                network.load_link_speeds(db, src.link_speeds_parquet)
+            network_loaded = True
         else:
             log.info("network: skipped (network_xml=%s)", src.output_network_xml)
+        db.execute("CHECKPOINT")
+
+        try:
+            canton.assign_canton_ids(
+                db, source_type="synthetic", overwrite_persons=True,
+                has_trips=bool(n_trips), has_network=network_loaded,
+                has_activities=bool(n_acts),
+            )
+            # canton->canton OD requires trips.origin/dest_canton_id to be filled
+            if loaded and n_trips:
+                hot_polygons.build_hot_polygon_flows_canton(db)
+        except Exception as e:
+            log.error("canton assignment failed (non-fatal): %s", e)
+        db.execute("CHECKPOINT")
+
+        if spider_loaded and network_loaded:
+            pre_aggregates.build_all(db)
+            db.execute("CHECKPOINT")
+        else:
+            log.info("pre-aggregates: skipped (need both spider + network)")
+
+        board_acc, transfer_data = {}, {}
+        if src.output_events_xml is not None and src.output_events_xml.exists():
+            try:
+                board_acc, transfer_data = events_extras.extract(db, src.output_events_xml)
+            except Exception as e:  # link_speeds/boardings are optional
+                log.error("events_extras failed (non-fatal): %s", e)
+            db.execute("CHECKPOINT")
+
+        try:
+            static_assets.build_all(db)
+            static_assets.build_metadata_asset(
+                db, sample_rate=sample_rate, run_name=run_name,
+                scaled_to_full_population=bool(sample_rate and scale_pt),
+            )
+        except Exception as e:  # never let optional assets abort a long build
+            log.error("static_assets build failed (non-fatal): %s", e)
+
+        if src.output_transit_schedule_xml is not None and src.output_transit_schedule_xml.exists():
+            try:
+                transit.build_all(db, src.output_transit_schedule_xml,
+                                  board_acc, transfer_data, sample_rate, scale_pt)
+            except Exception as e:
+                log.error("transit assets failed (non-fatal): %s", e)
         db.execute("CHECKPOINT")
 
         create_all_indexes(db, "synthetic")
@@ -171,7 +229,7 @@ def _build_synthetic(
         db.execute("CHECKPOINT")
     finally:
         db.close()
-    log.info("=== synthetic.duckdb build DONE → %s (%.1f MB)",
+    log.info("=== synthetic.duckdb build DONE -> %s (%.1f MB)",
              output_db, output_db.stat().st_size / 1e6 if output_db.exists() else 0)
 
 
@@ -183,7 +241,7 @@ def _build_microcensus(
     try:
         src = discover_microcensus(cache_dir=cache_dir, data_path=data_path)
     except FileNotFoundError as e:
-        log.error("microcensus.duckdb: missing inputs — %s", e)
+        log.error("microcensus.duckdb: missing inputs - %s", e)
         return
     _unlink_db(output_db)
 
@@ -194,19 +252,22 @@ def _build_microcensus(
 
         n_persons = raw_entities.load_persons_microcensus(
             db, src.household_persons_pickle, src.households_pickle,
+            src.respondents_pickle,
         )
         n_hh = raw_entities.load_households_microcensus(db, src.households_pickle)
         n_trips = raw_entities.load_trips_microcensus(db, src.trips_pickle)
 
         n_acts = raw_entities.derive_activities_microcensus(db, src.trips_pickle)
+        raw_entities.backfill_n_activities(db)
+        if n_trips:
+            raw_entities.backfill_preceding_purpose(db)
         db.execute("CHECKPOINT")
 
-        for r in GRID_RESOLUTIONS_M:
-            grids.build_demo_grid(db, r)
+        grids.build_demo_hex_pyramid(db)
         if n_trips:
-            grids.build_trip_grid_origin(db, 500)
+            grids.build_trip_hex_origin(db)
         if n_acts:
-            grids.build_out_of_home_grid(db, 500)
+            grids.build_oh_hex(db)
         db.execute("CHECKPOINT")
 
         loaded = hot_polygons.load_hot_polygons(
@@ -218,6 +279,16 @@ def _build_microcensus(
                 hot_polygons.build_hot_polygon_trips(db)
             if n_acts:
                 hot_polygons.build_hot_polygon_out_of_home(db)
+        db.execute("CHECKPOINT")
+
+        try:
+            canton.assign_canton_ids(
+                db, source_type="microcensus", overwrite_persons=False,
+                has_trips=bool(n_trips), has_network=False,
+                has_activities=bool(n_acts),
+            )
+        except Exception as e:
+            log.error("canton assignment failed (non-fatal): %s", e)
         db.execute("CHECKPOINT")
 
         create_all_indexes(db, "microcensus")
@@ -232,7 +303,7 @@ def _build_microcensus(
         db.execute("CHECKPOINT")
     finally:
         db.close()
-    log.info("=== microcensus.duckdb build DONE → %s (%.1f MB)",
+    log.info("=== microcensus.duckdb build DONE -> %s (%.1f MB)",
              output_db, output_db.stat().st_size / 1e6 if output_db.exists() else 0)
 
 
@@ -253,8 +324,9 @@ def _insert_metadata(
         INSERT INTO metadata (
             schema_version, build_date, source_type, matsim_run_id,
             eqasim_commit_hash, person_count, trip_count, activity_count,
-            grid_resolutions_m, bbox_lv95, hot_polygon_types, has_pt_static
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            grid_resolutions_m, bbox_lv95, hot_polygon_types,
+            h3_resolutions, has_pt_static
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             SCHEMA_VERSION,
@@ -263,9 +335,10 @@ def _insert_metadata(
             None,
             None,
             int(n_persons), int(n_trips), int(n_acts),
-            list(GRID_RESOLUTIONS_M),
+            [],
             list(CH_BBOX_LV95),
             list(hot_polygon_types),
+            list(H3_RESOLUTIONS),
             bool(has_pt_static),
         ],
     )

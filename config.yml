@@ -26,6 +26,7 @@ config:
     disable_progress_bar: false
     java_memory: 192G
     input_downsampling: 0.01
+    scale_pt_to_full_population: true
 
     # default to false until we fix projections
     enable_scaling: false
