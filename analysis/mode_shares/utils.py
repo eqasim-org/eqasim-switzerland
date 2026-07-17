@@ -22,6 +22,7 @@ class ModeShareAnalyzer:
 
     def __init__(self, context, from_matsim = False):
         self.from_matsim = from_matsim
+        self.ex_cst = context.stage("data.external_population.constants")
         if from_matsim:
             self.load_matsim_data(context)
         else:
@@ -168,6 +169,8 @@ class ModeShareAnalyzer:
         # purposes
         trips = trips.rename(columns={"end_activity_type":"purpose"})
         trips["purpose"] = trips["purpose"].str.replace("_secondary", "", regex=False)
+        trips = trips[trips["purpose"].isin(['work', 'home', 'other', 'shop', 'education', 'leisure'])].reset_index(drop=True)
+
         # nans filter
         #trips = trips[(trips.cantonId.notna()) & (trips.income_class.notna()) & (trips.sex.notna())].reset_index(drop=True)
 
@@ -186,10 +189,14 @@ class ModeShareAnalyzer:
 
         self.trips = trips
 
-    def compute_mode_shares(self):
-        total_person_weight = self.trips['person_weight'].sum()
+    def compute_mode_shares(self, consider_external_population:bool = True):
+        df = self.trips.copy()
+        if not consider_external_population:
+            df = df[df.canton_id!=self.ex_cst.canton_id].reset_index(drop=True)
+
+        total_person_weight = df['person_weight'].sum()
         mode_share_person = (
-            self.trips.groupby('mode')
+            df.groupby('mode')
             .apply(lambda x: x['person_weight'].sum())
             .reset_index(name='mode_share')
         )
@@ -197,8 +204,12 @@ class ModeShareAnalyzer:
         mode_share_person = mode_share_person.set_index("mode")             
         return mode_share_person[['mode_share']]
 
-    def compute_mode_shares_by(self, by = "canton_id"):
-        mode_share =  (self.trips
+    def compute_mode_shares_by(self, by = "canton_id", consider_external_population:bool = True):
+        df = self.trips.copy()
+        if not consider_external_population:
+            df = df[df.canton_id!=self.ex_cst.canton_id].reset_index(drop=True)
+
+        mode_share =  (df
                         .groupby([by, "mode"], observed=False)["person_weight"]
                         .sum()
                         .groupby(level=by, observed = False)
@@ -211,8 +222,12 @@ class ModeShareAnalyzer:
                    
         return mode_share
 
-    def compute_mode_distribution_by(self, by = "distance_bin"):
-        mode_share =  (self.trips
+    def compute_mode_distribution_by(self, by = "distance_bin", consider_external_population:bool = True):
+        df = self.trips.copy()
+        if not consider_external_population:
+            df = df[df.canton_id!=self.ex_cst.canton_id].reset_index(drop=True)
+
+        mode_share =  (df
                         .groupby([by, "mode"], observed=False)["person_weight"]
                         .sum()
                         .groupby(level="mode", observed = False)
@@ -225,9 +240,13 @@ class ModeShareAnalyzer:
                             
         return mode_share
 
-    def compute_distance_by_mode(self, df = None):
+    def compute_distance_by_mode(self, df = None, consider_external_population:bool = True):
         if df is None:
-            df = self.trips
+            df = self.trips.copy()
+
+        if not consider_external_population:
+            df = df[df.canton_id!=self.ex_cst.canton_id].reset_index(drop=True)
+
         modes = df["mode"].unique()
         distance_distribution = dict()
         for mode in modes:
@@ -240,13 +259,16 @@ class ModeShareAnalyzer:
 
         return distance_distribution
     
-    def compute_distance_by_mode_and_purpose(self, df = None):
+    def compute_distance_by_mode_and_purpose(self, df = None, consider_external_population:bool = True):
         if df is None:
-            df = self.trips
+            df = self.trips.copy()
         
+        if not consider_external_population:
+            df = df[df.canton_id!=self.ex_cst.canton_id].reset_index(drop=True)
+
         purposes = df["purpose"].unique()
         distance_distribution = dict()
         for purpose in purposes:
-            distance_distribution[purpose] = self.compute_distance_by_mode(df[df["purpose"]==purpose])
+            distance_distribution[purpose] = self.compute_distance_by_mode(df[df["purpose"]==purpose], consider_external_population=consider_external_population)
 
         return distance_distribution

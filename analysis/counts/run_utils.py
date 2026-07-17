@@ -13,7 +13,7 @@ import json
 logger = logging.getLogger("synpp")
 
 IDS_TO_DROP = [ # these are in very complexe intersections, very probably will not be correctly matched
-    "283","321","277","278","70","221","240","847","845","846","123","598","35","537","68"
+    "283","321","277","278","70","221","240","847","845","846","123","598","35","537","68","69"
 ]
 
 
