@@ -25,7 +25,7 @@ class Network:
 
     _crsTag = 'coordinateReferenceSystem'
 
-    def __init__(self, nodes, links, node_attrs, link_attrs, net_attrs=None):
+    def __init__(self, nodes, links, node_attrs, link_attrs, net_attrs=None, only_car_links=False):
         self.nodes = nodes
         self.links = links
         self.link_attrs = link_attrs
@@ -37,6 +37,12 @@ class Network:
         # This will add attributes as a column in the links dataframe
         if "attributes" not in self.links.columns and not self.link_attrs.empty:
             self.put_attributes_in_links()
+
+        # keep only car links
+        if only_car_links:
+            self.links = self.links[self.links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
+            self.nodes = self.nodes[self.nodes['node_id'].isin(pd.unique(self.links['from_node'].tolist() + self.links['to_node'].tolist()))].reset_index(drop=True) 
+
     
     def put_attributes_in_links(self):
         if self.link_attrs.empty:
@@ -162,6 +168,38 @@ class Network:
 
         return g
 
+    def as_pandana(self, only_car_links=False, use_speed_factor=False, directed=True):
+        import pandana as pdna
+        links = self.links.reset_index(drop=True).copy()
+        nodes = self.nodes.reset_index(drop=True).copy()
+
+        if only_car_links:
+            links = links[links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
+            nodes = nodes[nodes['node_id'].isin(pd.unique(links['from_node'].tolist() + links['to_node'].tolist()))].reset_index(drop=True) 
+
+        # Calculate travel times
+        lengths = links['length'].values
+        free_travel_times = lengths / links['freespeed'].values
+
+        if use_speed_factor:
+            speed_factors = np.ones_like(lengths)
+            if "attributes" in links:
+                speed_factors = links["attributes"].apply(lambda attr: attr.get("speedFactor", 1.0) if isinstance(attr, dict) else 1.0).values
+            free_travel_times = free_travel_times / speed_factors
+        
+        # get indices        
+        node_id_map = dict(zip(nodes["node_id"], nodes.index))
+        from_nodes = links["from_node"].map(lambda x: node_id_map.get(x)).astype('int32')
+        to_nodes = links["to_node"].map(lambda x: node_id_map.get(x)).astype('int32')
+
+        # Create pandana network
+        weights = pd.DataFrame(dict(length=lengths, travel_time=free_travel_times))
+        net = pdna.Network(nodes['x'], nodes['y'], from_nodes, to_nodes,
+                           twoway=not directed,
+                           edge_weights = weights)
+        
+        return net
+
     def save(self,file_path,write_attrbs=True):        
         # set the types
         self.nodes = self.nodes.astype({'node_id':str,'x':float,'y':float})
@@ -203,6 +241,14 @@ class Network:
                              self.links['attributes'] if "attributes" in self.links else None,
                              write_attrbs = write_attrbs)
             writer.end_network()
+
+
+
+
+
+
+
+
 
 
 
@@ -348,7 +394,7 @@ def parse_links(content, skip_attributes):
     return links, link_attrs
 
 
-def read_network(filename, skip_attributes=False):
+def read_network(filename, skip_attributes=False, only_car_links=False):
     """Read a MATSim network.xml.gz file. Returns a Network object with dataframes
     for nodes, links, node_attributes, and link_attributes. If the network has a CRS
     projection set, it will be available in network_attrs."""
@@ -363,7 +409,7 @@ def read_network(filename, skip_attributes=False):
     if not link_attrs.empty:
         link_attrs["link_id"] = link_attrs["link_id"].astype(str)
 
-    return Network(nodes, links, node_attrs, link_attrs, network_attrs)
+    return Network(nodes, links, node_attrs, link_attrs, network_attrs, only_car_links=only_car_links)
 
 
 

@@ -55,7 +55,16 @@ class AssignmentSolver:
 
             assignment_result = self.objective.evaluate(problem, distance_result, relaxation_result, discretization_result)
 
-            if best_result is None or assignment_result["objective"] < best_result["objective"]:
+            is_better = False
+            if best_result is None:
+                is_better = True
+            elif assignment_result["valid"] and not best_result["valid"]:
+                # Always prefer a valid solution over an invalid one.
+                is_better = True
+            elif assignment_result["valid"] == best_result["valid"] and assignment_result["objective"] < best_result["objective"]:
+                is_better = True
+
+            if is_better:
                 best_result = assignment_result
 
                 assignment_result["distance"]       = distance_result
@@ -360,8 +369,19 @@ class FeasibleDistanceSampler(DistanceSampler):
 
 
 class DiscretizationErrorObjective(AssignmentObjective):
-    def __init__(self, thresholds):
+    def __init__(self, thresholds, detour_factor = None):
         self.thresholds = thresholds
+        self.detour_factor = detour_factor
+        self.use_detour_factor = detour_factor is not None
+        self.detour_objective_weight = float(self.thresholds.get("detour_objective_weight", 1.0))
+        self.detour_objective_epsilon = float(self.thresholds.get("detour_objective_epsilon", 200.0))
+        if self.use_detour_factor:
+            logger.info(
+                "Using detour factor with threshold: %s, objective weight: %s, epsilon: %s",
+                self.thresholds["detour_factor"],
+                self.detour_objective_weight,
+                self.detour_objective_epsilon,
+            )
 
     def evaluate(self, problem, distance_result, relaxation_result, discretization_result):
         sampled_distances = distance_result["distances"]
@@ -386,4 +406,85 @@ class DiscretizationErrorObjective(AssignmentObjective):
         valid &= relaxation_result["valid"]
         valid &= discretization_result["valid"]
 
+        # Check detour factor validity if applicable
+        detour_factor_validity, detour_factor_objective =  self.check_detour_factor(problem, discretized_locations)
+        valid &= detour_factor_validity
+        objective += detour_factor_objective
+
         return dict(valid=valid, objective=objective)
+
+    def check_detour_factor(self, problem, discretized_locations):
+        if not self.use_detour_factor:
+            return True, 0.0
+
+        if discretized_locations.shape[0] < 2:
+            return True, 0.0
+
+        origin_x = discretized_locations[:-1, 0]
+        origin_y = discretized_locations[:-1, 1]
+        destination_x = discretized_locations[1:, 0]
+        destination_y = discretized_locations[1:, 1]
+
+        detour_factors = np.asarray(self.detour_factor.get_detour_factor(
+            origin_x, origin_y, destination_x, destination_y
+        ), dtype=float)
+
+        # Treat invalid routed factors as very high detours.
+        threshold = self.thresholds["detour_factor"]
+        detour_factors = np.where(np.isfinite(detour_factors), detour_factors, threshold + 5.0)
+
+        euclidean_distances = la.norm(discretized_locations[:-1] - discretized_locations[1:], axis=1)
+        excess_detour = np.maximum(0.0, detour_factors - threshold)
+        per_leg_penalty = excess_detour * (euclidean_distances + self.detour_objective_epsilon)
+
+        probs = np.array(
+            [self.probability_to_unvalid_based_on_detour_factor(v) for v in detour_factors],
+            dtype=float
+        )
+
+        activity_durations = np.asarray(problem.get("activity_durations", np.zeros_like(probs)), dtype=float)
+        if len(activity_durations) != len(probs):
+            activity_durations = np.resize(activity_durations, len(probs))
+        long_activity_mask = np.isfinite(activity_durations) & (activity_durations >= 3.0 * 3600.0)
+
+        # Allow high detour legs ending at long-duration activities.
+        probs[long_activity_mask] = 0.0
+        per_leg_penalty[long_activity_mask] = 0.0
+
+        high_idx = np.where(probs > 0.0)[0]
+        if len(high_idx) == 0:
+            return True, 0.0
+
+        same_anchor = False
+        if (problem.get("origin") is not None) and (problem.get("destination") is not None):
+            same_anchor = bool(la.norm(problem["destination"] - problem["origin"]) < 1e-6)
+
+        # Rule 1 (and tails): if same anchors, invalidate stochastically when high detours are present.
+        if same_anchor or (problem.get("origin") is None) or (problem.get("destination") is None):
+            p_invalid = 1.0 - np.prod(1.0 - probs[high_idx])
+            objective_penalty = self.detour_objective_weight * float(np.max(per_leg_penalty[high_idx]))
+            return np.random.random_sample() >= p_invalid, objective_penalty
+
+        # Rule 2: for different anchors, allow one high-detour leg, penalize only additional ones.
+        if len(high_idx) <= 1:
+            return True, 0.0
+
+        sorted_by_prob = high_idx[np.argsort(probs[high_idx])[::-1]]
+        extra_idx = sorted_by_prob[1:]
+        extra_probs = probs[extra_idx]
+        p_invalid = 1.0 - np.prod(1.0 - extra_probs)
+        objective_penalty = self.detour_objective_weight * float(np.max(per_leg_penalty[extra_idx]))
+        return np.random.random_sample() >= p_invalid, objective_penalty
+
+    def probability_to_unvalid_based_on_detour_factor(self, detour_factor):
+        threshold = self.thresholds["detour_factor"]
+        if detour_factor<threshold:
+            return 0.0
+        elif detour_factor<threshold+0.5:
+            return 0.8
+        elif detour_factor<threshold+1:
+            return 0.95
+        elif detour_factor<threshold+2:
+            return 0.99
+        else:
+            return 1.0

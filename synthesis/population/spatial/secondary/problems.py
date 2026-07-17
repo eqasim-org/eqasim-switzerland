@@ -6,10 +6,16 @@ FIXED_PURPOSES = ["home", "work", "education"]
 
 
 def find_bare_assignment_problems(df):
+    has_activity_duration = "activity_duration" in df.columns
+    fields = FIELDS + (["activity_duration"] if has_activity_duration else [])
     problem = None
 
-    for row in df[FIELDS].itertuples(index=False):
-        person_id, trip_index, preceding_purpose, following_purpose, mode, travel_time = row
+    for row in df[fields].itertuples(index=False):
+        if has_activity_duration:
+            person_id, trip_index, preceding_purpose, following_purpose, mode, travel_time, activity_duration = row
+        else:
+            person_id, trip_index, preceding_purpose, following_purpose, mode, travel_time = row
+            activity_duration = np.nan
 
         if not problem is None and person_id != problem["person_id"]:
             # We switch person, but we're still tracking a problem. This is a tail!
@@ -20,12 +26,13 @@ def find_bare_assignment_problems(df):
             # Start a new problem
             problem = dict(
                 person_id=person_id, trip_index=trip_index, purposes=[preceding_purpose],
-                modes=[], travel_times=[]
+                modes=[], travel_times=[], activity_durations=[]
             )
 
         problem["purposes"].append(following_purpose)
         problem["modes"].append(mode)
         problem["travel_times"].append(travel_time)
+        problem["activity_durations"].append(activity_duration)
 
         if problem["purposes"][-1] in FIXED_PURPOSES:
             # The current chain (or initial tail) ends with a fixed activity.

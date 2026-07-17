@@ -25,6 +25,10 @@ def configure(context):
     context.stage("synthesis.population.spatial.secondary.distance_distributions")
     context.stage("synthesis.population.destinations")
 
+    context.config("consider_detour_factor_in_sl", default=True)
+    if context.config("consider_detour_factor_in_sl"):
+        context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
+
     context.config("random_seed")
     context.config("threads")
 
@@ -102,6 +106,10 @@ def execute(context):
 
     df_trips                = pd.merge(df_trips, df_car_availability[["person_id","car_availability"]], how="left", on="person_id")
     df_trips["travel_time"] = df_trips["arrival_time"] - df_trips["departure_time"]
+    # Duration of the activity reached by each trip; used by detour-factor heuristics.
+    df_trips["activity_duration"] = df_trips.groupby("person_id")["departure_time"].shift(-1) - df_trips["arrival_time"]
+    df_trips["activity_duration"] = df_trips["activity_duration"].fillna(0.0)
+    df_trips.loc[df_trips["activity_duration"] < 0.0, "activity_duration"] = 0.0
     df_primary              = prepare_locations(context)
 
     # Prepare data
@@ -142,12 +150,18 @@ def execute(context):
             batch_trips["car_availability"].iloc[0] # all persons in batch have same car availability
         ))
 
+    # Load detour factors if they are used
+    detour_factor = None
+    if context.config("consider_detour_factor_in_sl"):
+        detour_factor = context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
+
     # Run algorithm in parallel
     with context.progress(label="Assigning secondary locations to persons", total=number_of_persons):
         with context.parallel(processes = processes, data=dict(
                 distance_distributions = distance_distributions,
-                destinations = destinations
-        )) as parallel:
+                destinations = destinations,
+                detour_factor = detour_factor
+                )) as parallel:
             df_locations, df_convergence = [], []
 
             for df_locations_item, df_convergence_item in parallel.imap_unordered(process, batches):
@@ -208,14 +222,16 @@ def process(context, arguments):
 
     # Set up assignment solver
     thresholds = dict(
-        car=300.0, car_passenger=300.0, pt=300.0,
-        bike=200.0, walk=200.0,
+        car=350.0, car_passenger=350.0, pt=320.0,
+        bike=240.0, walk=200.0,
         bike_loop=200.0, walk_loop=200.0,
         car_loop=300.0, pt_loop=300.0,
-        remote_walk = 200.0
+        remote_walk = 200.0, detour_factor = 1.6
     )
 
-    assignment_objective = DiscretizationErrorObjective(thresholds=thresholds)
+    detour_factor = context.data("detour_factor")
+
+    assignment_objective = DiscretizationErrorObjective(thresholds=thresholds, detour_factor=detour_factor)
     assignment_solver = AssignmentSolver(
         distance_sampler=distance_sampler,
         relaxation_solver=relaxation_solver,
