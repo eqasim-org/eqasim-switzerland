@@ -3,6 +3,7 @@ from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.utils.merge import Merge
 import os
+import geopandas as gpd
 
 def configure(context):
     context.stage("analysis.counts.cantons.bern")
@@ -17,8 +18,6 @@ def configure(context):
     context.config("only_weekday", default=False)
 
 def execute(context):
-    if context.config("only_weekday"):
-        return None # these data do not have weekday counts   
     # paths and parameters  
     bern_counts_data  = context.stage("analysis.counts.cantons.bern")
     city = "bern"
@@ -34,7 +33,7 @@ def execute(context):
 
     # load counts    
     counts = Counts(file_path=bern_counts_data, id_column="objectid",
-                    columns_to_keep={'flow':"flow"}, context = context)
+                    columns_to_keep={'flow':"flow", "flow_w":"flow_w"}, context = context)
             
     # Match the data with the network
     matcher = TrafficDataMatcher(city, cache = context.path())
@@ -44,14 +43,14 @@ def execute(context):
                             get_pairs= True,                        
                             by_highway_order=False, 
                             direction_from_osm=False,
-                            only_two_link_ids=False)
+                            only_two_link_ids=True)
 
     # Compare the with simulation
     cmp     = context.stage("analysis.counts.matching.compare")    
     flows   = cmp.compare_flow_total_efficient(counts, matched, network, 
                                            sample_size = sample_size, 
                                            get_average=False, 
-                                           flow_col = "flow")
+                                           flow_col = 'flow_w' if context.config("only_weekday") else 'flow')
     
     # Identify the stations that might be mismatched
     stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>10000)|
@@ -61,7 +60,7 @@ def execute(context):
 
     # Plot the network and highligh these links in green  
     plotter = Plotter()
-    plotter.plot_network_with_counts( 
+    matched_links = plotter.plot_network_with_counts( 
                                     counts, matched, network,
                                     output=os.path.join(path_to_images, f"{city}_network.png"),
                                     lw = 0.7,
@@ -69,7 +68,8 @@ def execute(context):
                                     figsize = (40,40),                                                    
                                     road_types = "all",
                                     cut = True,
-                                    highlight_stations = stations_to_drop)
+                                    highlight_stations = stations_to_drop,
+                                    return_matched_links = True)
 
     # filter out stations to drop and save results
     flows = flows[~flows['id'].isin(stations_to_drop)].reset_index(drop=True)
@@ -93,6 +93,18 @@ def execute(context):
                                 distance_to_border = 0, 
                                 title = f"Average Observed vs Simulated Flow by Highway Type ({city})",
                                 output_file = os.path.join(path_to_images, f"flow_by_road_type_{city}.png"))
+    
+    # Plot the map in html  
+    roads_to_show = ['motorway', 'trunk', 'primary', 'secondary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary_link']
+    border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))        
+    Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
+                        matched_links.to_crs(epsg=4326)], 
+                        data_to_show=["link_id"], 
+                        point_gdf=[counts.counts[['id','geometry']].merge(
+                                   flows[["id","pdiff"]], on="id", how="left").to_crs(epsg=4326)],
+                        point_data_to_show=['id',"pdiff"],
+                        border = border,
+                        path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
     
     return path_to_results
    

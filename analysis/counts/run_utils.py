@@ -385,10 +385,12 @@ def create_simple_scatter_plot(df, stats_dict, output_path=None):
     cities = df_clean['city'].unique()
     colors = plt.cm.Set1(np.linspace(0, 1, len(cities)))
     
+    total_number_of_points = len(df_clean)
     for i, city in enumerate(cities):
         city_data = df_clean[df_clean['city'] == city]
+        n_city = len(city_data)
         ax.scatter(city_data['flow'], city_data['simulated_flow'],
-                   alpha=0.6, s=50, label=city.capitalize(),
+                   alpha=0.6, s=50, label=f"{city.capitalize()} ({n_city})",
                    color=colors[i], edgecolors="white")
     
     # Add perfect correlation line (1:1)
@@ -405,7 +407,7 @@ def create_simple_scatter_plot(df, stats_dict, output_path=None):
     
     ax.set_xlabel('Observed Flow (vehicles/day)', fontsize=12)
     ax.set_ylabel('Simulated Flow (vehicles/day)', fontsize=12)
-    ax.set_title('Observed vs Simulated Traffic Flows', fontsize=14, fontweight='bold')
+    ax.set_title(f'Observed vs Simulated Traffic Flows (n={total_number_of_points})', fontsize=14, fontweight='bold')
     ax.legend()
     ax.grid(True, alpha=0.3)
     

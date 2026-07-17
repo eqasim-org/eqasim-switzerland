@@ -19,11 +19,15 @@ def configure(context):
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")
     context.config("only_weekday", default=False)
+    context.config("include_external_population", default = False)
 
 def execute(context): 
     if context.config("only_weekday"):
         logger.warning("The Annemasse counts data does not have a weekday/weekend split. The 'only_weekday' option will be ignored.")        
 
+    if not context.config("include_external_population"):
+        return None
+    
     # paths and parameters  
     annemasse_counts_data  = context.stage("analysis.counts.cantons.annemasse")
     city = "annemasse"
@@ -59,11 +63,10 @@ def execute(context):
                                             flow_col = 'flow')
     
     # Identify the stations that might be mismatched
-    stations_to_drop = flows[#(abs(flows.flow-flows.simulated_flow)>15000)|
-                             #(flows.simulated_flow<1000)|
-                             #(~flows.pdiff.between(-70,200))|
-                            (flows.flow<1000)
-                            ]["id"].unique()
+    stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>25000)|
+                                (flows.simulated_flow< 200 * 24)|
+                                (flows.flow< 200 * 24)|
+                                (~flows.pdiff.between(-70,200))]["id"].unique()
 
     # Plot the network and highligh these links in green  
     plotter = Plotter()
@@ -113,8 +116,9 @@ def execute(context):
                         border = border,
                         path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
     
-    # return path_to_results
-    return None # we return None in order to avoid including these results in the averall results
+    
+    return path_to_results
+
    
 
 

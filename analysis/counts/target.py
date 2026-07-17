@@ -19,11 +19,13 @@ def configure(context):
     context.stage("analysis.counts.cantons.saint_gallen")
     context.stage("analysis.counts.cantons.vaud")
     context.stage("analysis.counts.cantons.zurich")
+    context.stage("analysis.counts.cantons.annemasse")
     context.stage("analysis.counts.matching.network_from_prepare")
     context.stage("data.spatial.swiss_border")
 
     context.config("only_weekday", default=False)
     context.config("input_downsampling")
+    context.config("include_external_population", default = False)
 
 
 def _load_counts_and_match(context, network, city):
@@ -43,21 +45,19 @@ def _load_counts_and_match(context, network, city):
             only_two_link_ids=True,
         )
     elif city == "bern":
-        if context.config("only_weekday"):
-            return None
         file_path = context.stage("analysis.counts.cantons.bern")
         counts = Counts(
             file_path=file_path,
             id_column="objectid",
-            columns_to_keep={"flow": "flow"},
+            columns_to_keep={'flow':"flow", "flow_w":"flow_w"},
             context=context,
-        )
+        )    
         match_kwargs = dict(
             search_radius=15,
             get_pairs=True,
             by_highway_order=False,
             direction_from_osm=False,
-            only_two_link_ids=False,
+            only_two_link_ids=True,
         )
     elif city == "ch":
         count_stations_file, counts_data_file, year = context.stage("analysis.counts.cantons.ch")
@@ -87,6 +87,7 @@ def _load_counts_and_match(context, network, city):
             get_pairs=False,
             by_highway_order=False,
             direction_from_osm=False,
+            only_two_link_ids = True,
         )
     elif city == "luzern":
         if context.config("only_weekday"):
@@ -152,6 +153,21 @@ def _load_counts_and_match(context, network, city):
             direction_from_osm=False,
             only_two_link_ids=True,
         )
+    elif city == "annemasse":
+        file_path = context.stage("analysis.counts.cantons.annemasse")
+        counts = Counts(
+            file_path=file_path,
+            id_column="OBJECTID",
+            columns_to_keep={"TJM": "flow"}, # we do not have the flow_w option and we still need to calibrate it, so we use the TJM as a proxy for flow_w
+            context=context,
+        )
+        match_kwargs = dict(
+            search_radius=20,
+            get_pairs=True,
+            by_highway_order=False,
+            direction_from_osm=False,
+            only_two_link_ids=True,
+        )
     else:
         raise ValueError(f"Unsupported city {city}")
 
@@ -183,9 +199,11 @@ def execute(context):
         "geneva",
         "luzern",
         "saint_gallen",
-        # "vaud", #I do not want to include this in the calibration, it contains unclean data (observations over only one week)
-        "zurich",
+        "vaud",
+        "zurich"
     ]
+    if context.config("include_external_population"):
+        city_order.append("annemasse")
 
     dfs = []
     for city in city_order:

@@ -1,17 +1,10 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Oct 16 10:53:54 2025
-
-@author: dabdelkader
-"""
-
 import matplotlib.pyplot as plt
 import pandas as pd
 import geopandas as gpd
 import os
 import contextily as ctx
-from shapely import wkb
-import pyarrow.parquet as pq
+
+TO_BE_REMOVED = ["3072-2061"]
 
 def configure(context):
     context.config("data_path")
@@ -20,47 +13,29 @@ def configure(context):
 def execute(context):
     # Define paths
     data_path = context.config("counts_path")
-    counts_data1  = os.path.join(data_path,"Bern","ksvd","KSVD.gpkg")    
-    counts_data2  = os.path.join(data_path,"Bern","ksvd_ksvdvb.parquet")
+    data_path  = os.path.join(data_path,"Bern","traffic_counts_bern_2026")  
     output_path = os.path.join(context.path(),"processed_data.gpkg")
     
-    # read data
-    df1 = gpd.read_file(counts_data1)
+    # find the files
+    locations = "Liste_Points_de_comptage.xlsx"
+    files = [f for f in os.listdir(data_path) if f.endswith(".xlsx") and f!=locations]
+    
+    # read file by file and aggregate
+    df = []
+    for f in files:
+        flow, week_day_flow, station_name = process_file(data_path,f)
+        if flow is not None and week_day_flow is not None and station_name is not None:
+            df.append({"flow":flow,"flow_w":week_day_flow,"objectid":station_name})
+    df = pd.DataFrame(df)
 
-    # Use pyarrow directly to avoid nanosecond overflow on very large timestamps
-    df2 = pq.read_table(counts_data2).to_pandas(timestamp_as_object=True)
+    # read stations
+    stations = pd.read_excel(os.path.join(data_path,locations), sheet_name=None, skiprows=2)
+    stations = stations[list(stations.keys())[0]]
+    stations.columns = ["objectid","description","x","y"]
 
-    # identify the flow
-    df2["flow"] = df2["dtv"]
-
-    # merge the dataframes
-    df2["geometry"] = df2["geometry"].apply(wkb.loads)
-    df2 = df2[['objectid','flow','geometry']].rename(
-            columns = {"geometry":"link_geometry"})
-
-    # turn into geopandas and merge (I need both link geometry and the point geometry)
-    df2 = gpd.GeoDataFrame(df2, geometry="link_geometry", crs="EPSG:2056")
-    df1 = gpd.GeoDataFrame(df1, geometry="geometry", crs="EPSG:2056")
-
-    df = df1[["geometry","link_blatt"]].sjoin_nearest(df2, how="left")
-    df = df.merge(df2[["objectid","link_geometry"]], on="objectid", how="left")    
-
-    # only keep unique objectid
-    df = df.drop_duplicates(subset=["objectid"]).reset_index(drop=True)
-
-    # projection (it appears that some points are not exactly on the link, so we project them)
-    df = df[["objectid","flow","geometry","link_geometry"]]    
-    df["projected_point"] = df.apply(
-        lambda row: row.link_geometry.interpolate(
-            row.link_geometry.project(row.geometry)
-        ),
-        axis=1
-    )
-
-    # only keep relevant columns
-    df = df[["objectid","flow","projected_point"]]
-    df = df.rename(columns = {"projected_point":"geometry"})
-    df = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:2056")
+    # merge the data
+    df = pd.merge(df, stations[["objectid","x","y"]], on="objectid", how="inner")
+    df = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.x, df.y), crs="EPSG:2056")
 
     # plot
     fig, ax = plt.subplots(figsize=(10,10))
@@ -83,3 +58,43 @@ def execute(context):
 
 
 
+def process_file(data_path, file_name):
+    file_path = os.path.join(data_path,file_name)
+    df_temp = pd.read_excel(file_path, sheet_name=None, skiprows=9)
+    keys = list(df_temp.keys())
+
+    # assertions (two directions)
+    if len(df_temp)!=2:
+        return None, None, None
+
+    # process files
+    flows = []
+    weekday_flows = []
+    for key in keys:
+        df_temp[key]["Datum"] = pd.to_datetime(df_temp[key]["Datum"], format="%d.%m.%Y")
+        dfi = df_temp[key].groupby("Datum").agg({"Total":"sum"}).reset_index()
+        # assert whether we have enought data (6 months minimum)
+        if len(dfi)<180:
+            return None, None, None
+        # get day of the week
+        dfi["day_of_week"] = dfi["Datum"].dt.day_name()
+        # average flow
+        avg_flow = dfi.Total.mean()
+        # get the average flow per weekday
+        dfi = dfi[dfi.day_of_week.isin(["Monday","Tuesday","Wednesday","Thursday","Friday"])]
+        avg_weekday_flow = dfi.Total.mean()
+        flows.append(avg_flow)
+        weekday_flows.append(avg_weekday_flow)
+    
+    # sum bidirectional flow
+    flow = sum(flows)
+    week_day_flow = sum(weekday_flows)
+
+    # get station name from file name
+    name_parts = file_name.split("-")
+    station_name = name_parts[2].strip()+'-'+name_parts[3].strip()
+    for item in TO_BE_REMOVED:
+        if item in station_name:
+            return None, None, None
+
+    return flow, week_day_flow, station_name
