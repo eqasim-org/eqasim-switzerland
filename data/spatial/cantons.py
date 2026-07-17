@@ -1,8 +1,14 @@
 import geopandas as gpd
 import unicodedata
+from data.osm.clean import read_outside_region
+from shapely.ops import unary_union
 
 def configure(context):
     context.config("data_path")
+
+    context.config("cross_border_exclude_shapefiles", default=None)
+    context.config("include_external_population", default = False)
+    context.stage("data.external_population.constants")
 
 
 def execute(context):
@@ -20,8 +26,29 @@ def execute(context):
     df = df[["canton_id", "canton_name", "geometry"]]
 
     df = process_canton_names(df)
+
+    # include the external region
+    out_region_file = context.config("cross_border_exclude_shapefiles")
+    include_external_population = context.config("include_external_population")
+    if out_region_file is not None and include_external_population:
+        out_region = read_outside_region(out_region_file)
+        out_region_geometry = unary_union(out_region.geometry)
+        cst = context.stage("data.external_population.constants")
+        dtypes = df.dtypes
+        df = df.append({"canton_id":cst.canton_id,	
+                        "canton_name":cst.canton_name,
+                        "canton_name_en":cst.canton_name,
+                        "geometry":out_region_geometry}, ignore_index=True)
+        df = df.astype(dtypes)
+        
+    df = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:2056")
     return df
 
+
+
+
+
+############################# helper functions #############################
 
 SP_REGION_1 = [25, 12, 13, 1, 2, 14, 9]
 SP_REGION_2 = [21, 26, 15, 16, 22, 11, 24, 3, 6, 7]
