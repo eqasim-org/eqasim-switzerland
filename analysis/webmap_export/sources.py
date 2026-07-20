@@ -40,9 +40,9 @@ class MicrocensusSources:
     swisstopo_gemeinde_shp: Optional[Path]
 
 
-DEFAULT_CACHE_DIR = Path("/cluster/scratch/rsahleanu/cache")
+DEFAULT_CACHE_DIR = Path("/cluster/work/ivt_vpl/anding/cache")
 DEFAULT_DATA_PATH = Path("/cluster/project/cmdp/ch_data/pipeline")
-DEFAULT_HOME_PIPE = Path("/cluster/home/rsahleanu/pipe")
+DEFAULT_HOME_PIPE = Path("/cluster/home/anding/ch")
 
 
 def _newest_cache(name_prefix: str, cache_dir: Path) -> Optional[Path]:
@@ -85,9 +85,11 @@ def discover_synthetic(
         home_pipe / "switzerland_persons.parquet",
         DEFAULT_CACHE_DIR.parent / "output" / "webmap_data" / "synthetic" / "switzerland_persons.parquet",
     ]
-    synth = _newest_cache("synthesis.output", cache_dir)
-    if synth:
-        _persons_candidates.append(synth.with_suffix(".cache") / "switzerland_persons.parquet")
+    # every synthesis.output cache, not just the newest marker - a re-run may leave
+    # the newest .cache dir empty while an older one still holds the parquet
+    _persons_candidates.extend(
+        cache_dir.glob("synthesis.output__*.cache/switzerland_persons.parquet")
+    )
     _existing = [p for p in _persons_candidates if p.exists()]
     persons_parquet = (
         max(_existing, key=lambda p: p.stat().st_mtime)

@@ -100,7 +100,7 @@ def build_hot_polygon_demo(db: duckdb.DuckDBPyConnection) -> int:
             COUNT(*) FILTER (WHERE n_cars_class = '0')::INTEGER,
             COUNT(*) FILTER (WHERE n_cars_class = '1')::INTEGER,
             COUNT(*) FILTER (WHERE n_cars_class = '2')::INTEGER,
-            COUNT(*) FILTER (WHERE n_cars_class = '3+')::INTEGER,
+            COUNT(*) FILTER (WHERE n_cars_class IN ('3', '3+'))::INTEGER,
             COALESCE(SUM(n_activities), 0)::INTEGER
         FROM joined GROUP BY polygon_id
     """)

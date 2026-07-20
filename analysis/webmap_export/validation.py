@@ -76,6 +76,9 @@ def validate_full(db, source_type: str) -> None:
     _validate_v2_hex_consistency(db, n_persons=n_persons, n_trips=n_trips)
     if source_type == "synthetic":
         _validate_v4_pre_aggregates(db)
+        _validate_pt_link_volumes(db)
+    if source_type == "microcensus":
+        _validate_microcensus_enrichment(db)
 
 
 def _validate_v2_hex_consistency(db, *, n_persons: int, n_trips: int) -> None:
@@ -169,6 +172,84 @@ def _validate_v4_pre_aggregates(db) -> None:
     if nfm_n == 0:
         raise AssertionError(
             "node_flow_matrix is empty but spider_link_index has rows"
+        )
+
+
+def _validate_pt_link_volumes(db) -> None:
+    """Range sanity for pt_link_volumes; empty table is allowed (no events/schedule)."""
+    n = db.execute("SELECT COUNT(*) FROM pt_link_volumes").fetchone()[0]
+    if n == 0:
+        return
+    bad_bins = db.execute(
+        "SELECT COUNT(*) FROM pt_link_volumes WHERE time_bin < 0 OR time_bin > 95"
+    ).fetchone()[0]
+    if bad_bins:
+        raise AssertionError(f"pt_link_volumes: {bad_bins} rows with time_bin outside 0..95")
+    bad_vol = db.execute(
+        "SELECT COUNT(*) FROM pt_link_volumes WHERE volume < 0"
+    ).fetchone()[0]
+    if bad_vol:
+        raise AssertionError(f"pt_link_volumes: {bad_vol} rows with negative volume")
+    no_route = db.execute(
+        "SELECT COUNT(*) FROM pt_link_volumes WHERE route_id = ''"
+    ).fetchone()[0]
+    if no_route == n:
+        raise AssertionError(
+            "pt_link_volumes: every row has an empty route_id - "
+            "TransitDriverStarts.transitRouteId not picked up?"
+        )
+
+
+def _validate_microcensus_enrichment(db) -> None:
+    """The webmap's microcensus panels need respondent survey attributes and
+    per-day activity counts; all-NULL columns mean the respondents pickle was
+    not found/joined (raw_entities.load_persons_microcensus degrades silently)."""
+    n_car = db.execute(
+        "SELECT COUNT(*) FROM persons WHERE car_availability IS NOT NULL"
+    ).fetchone()[0]
+    n_subs = db.execute(
+        "SELECT COUNT(*) FROM persons WHERE subscriptions_ga IS NOT NULL"
+    ).fetchone()[0]
+    if n_car == 0 or n_subs == 0:
+        raise AssertionError(
+            f"microcensus persons lack survey attributes (car_availability non-null: "
+            f"{n_car}, subscriptions_ga non-null: {n_subs}) - respondents pickle "
+            "missing or person-id join broken"
+        )
+    n_acts = db.execute(
+        "SELECT COUNT(*) FROM persons WHERE n_activities IS NOT NULL"
+    ).fetchone()[0]
+    if n_acts == 0:
+        raise AssertionError(
+            "microcensus persons have no n_activities - activities derivation "
+            "or backfill_n_activities failed"
+        )
+    n_income = db.execute("""
+        SELECT COUNT(*) FROM persons p
+        JOIN households h ON h.household_id = p.household_id
+        WHERE h.income_class IS NOT NULL
+    """).fetchone()[0]
+    if n_income == 0:
+        raise AssertionError(
+            "no microcensus person joins a household with income_class - "
+            "household key convention broken"
+        )
+    n_act_rows, n_act_canton = db.execute(
+        "SELECT COUNT(*), COUNT(canton_id) FROM activities"
+    ).fetchone()
+    if n_act_rows > 0 and n_act_canton == 0:
+        raise AssertionError(
+            f"activities.canton_id is NULL for all {n_act_rows} activities - "
+            "canton assignment did not run (or failed non-fatally)"
+        )
+    cars_2, cars_3_plus = db.execute(
+        "SELECT COALESCE(SUM(cars_2), 0), COALESCE(SUM(cars_3_plus), 0) "
+        "FROM hot_polygon_demo"
+    ).fetchone()
+    if cars_2 > 0 and cars_3_plus == 0:
+        raise AssertionError(
+            f"hot_polygon_demo: cars_3_plus sums to 0 while cars_2 sums to {cars_2} - "
+            "n_cars_class '3'/'3+' label mismatch in the aggregation filters"
         )
 
 

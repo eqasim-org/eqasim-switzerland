@@ -190,10 +190,13 @@ def _build_synthetic(
         else:
             log.info("pre-aggregates: skipped (need both spider + network)")
 
-        board_acc, transfer_data = {}, {}
+        board_acc, transfer_data, pt_vol_acc = {}, {}, {}
         if src.output_events_xml is not None and src.output_events_xml.exists():
             try:
-                board_acc, transfer_data = events_extras.extract(db, src.output_events_xml)
+                handler = events_extras.extract(db, src.output_events_xml)
+                board_acc = handler.board_acc
+                transfer_data = handler.transfer_data
+                pt_vol_acc = handler.pt_vol_acc
             except Exception as e:  # link_speeds/boardings are optional
                 log.error("events_extras failed (non-fatal): %s", e)
             db.execute("CHECKPOINT")
@@ -210,7 +213,8 @@ def _build_synthetic(
         if src.output_transit_schedule_xml is not None and src.output_transit_schedule_xml.exists():
             try:
                 transit.build_all(db, src.output_transit_schedule_xml,
-                                  board_acc, transfer_data, sample_rate, scale_pt)
+                                  board_acc, transfer_data, sample_rate, scale_pt,
+                                  pt_vol_acc=pt_vol_acc)
             except Exception as e:
                 log.error("transit assets failed (non-fatal): %s", e)
         db.execute("CHECKPOINT")
@@ -243,6 +247,10 @@ def _build_microcensus(
     except FileNotFoundError as e:
         log.error("microcensus.duckdb: missing inputs - %s", e)
         return
+    log.info("microcensus sources: household_persons=%s households=%s trips=%s "
+             "respondents=%s",
+             src.household_persons_pickle, src.households_pickle,
+             src.trips_pickle, src.respondents_pickle)
     _unlink_db(output_db)
 
     db = duckdb.connect(str(output_db))
@@ -296,11 +304,14 @@ def _build_microcensus(
             db, source_type="microcensus", n_persons=n_persons, n_trips=n_trips, n_acts=n_acts,
             hot_polygon_types=loaded, has_pt_static=False,
         )
+        db.execute("CHECKPOINT")  # keep the finished db on disk even if validation fails
         try:
             validate_full(db, "microcensus")
-        except AssertionError as e:
-            log.error("Validation FAILED for microcensus.duckdb: %s", e)
-        db.execute("CHECKPOINT")
+        except AssertionError:
+            # microcensus validation is a hard failure: an unenriched db silently
+            # blanks the webmap's comparison panels, so surface a non-zero exit
+            log.error("Validation FAILED for microcensus.duckdb - failing the build")
+            raise
     finally:
         db.close()
     log.info("=== microcensus.duckdb build DONE -> %s (%.1f MB)",

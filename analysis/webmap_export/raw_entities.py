@@ -154,18 +154,31 @@ def load_persons_microcensus(
                      "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
                      "subscriptions_strecke", "subscriptions_gleis7",
                      "subscriptions_junior", "subscriptions_other"]
-        keep = ["person_id", "car_availability"] + [c for c in bool_cols if c in resp.columns]
+        keep = (["person_id", "car_availability"]
+                + [c for c in bool_cols if c in resp.columns]
+                + (["person_weight"] if "person_weight" in resp.columns else []))
         resp = resp[keep].rename(columns={"driving_license": "has_driving_license"})
         resp["car_availability"] = (
             pd.to_numeric(resp["car_availability"], errors="coerce").map(_CAR_AVAIL_MAP)
         )
         df = df.merge(resp, on="person_id", how="left")
-        log.info("microcensus: enriched %d respondents with survey attributes "
-                 "(car_availability/licence/employed/subscriptions)",
-                 int(df["car_availability"].notna().sum()))
+        n_enriched = int(df["car_availability"].notna().sum())
+        if n_enriched == 0:
+            log.error("microcensus: respondents pickle %s found but 0 of %d rows "
+                      "joined on person_id = raw_pid*100+1 - id convention broken? "
+                      "(sample respondent ids: %s, sample roster ids: %s)",
+                      respondents_pickle, len(resp),
+                      resp["person_id"].head(3).tolist(),
+                      df["person_id"].head(3).tolist())
+        else:
+            log.info("microcensus: enriched %d respondents with survey attributes "
+                     "(car_availability/licence/employed/subscriptions) from %s",
+                     n_enriched, respondents_pickle)
     else:
-        log.warning("microcensus respondents cache missing - car_availability/"
-                    "subscriptions/employed stay NULL")
+        log.error("microcensus respondents cache missing (looked for %s) - "
+                  "car_availability/subscriptions/employed stay NULL and the webmap "
+                  "loses its car-availability and PT-subscription panels",
+                  respondents_pickle)
 
     for col in ("car_availability", "has_driving_license", "employed",
                 "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
@@ -224,8 +237,8 @@ def _insert_persons(db: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
         hex_for_xy_lv95, hex_parent_int,
     )
 
-    cols = ["person_id", "household_id", "age", "sex", "car_availability",
-            "has_driving_license", "employed",
+    cols = ["person_id", "household_id", "age", "sex", "person_weight",
+            "car_availability", "has_driving_license", "employed",
             "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
             "subscriptions_strecke", "subscriptions_gleis7",
             "subscriptions_junior", "subscriptions_other",
@@ -364,15 +377,29 @@ def load_households_microcensus(
 ACTIVITY_BATCH = 500_000
 
 
-def parse_activities_csv(path: Path) -> pd.DataFrame:
-    """Read eqasim output_activities.csv[.gz] into a DataFrame.
+_MATSIM_ACTIVITY_RENAMES = {
+    "person": "person_id",
+    "activity_number": "activity_index",
+    "activity_type": "purpose",
+    "coord_x": "x",
+    "coord_y": "y",
+}
 
+
+def parse_activities_csv(path: Path) -> pd.DataFrame:
+    """Read output_activities.csv[.gz] into a DataFrame.
+
+    Handles both the eqasim layout (person_id/activity_index/purpose/x/y) and the
+    MATSim-native one (person/activity_number/activity_type/coord_x/coord_y).
     eqasim emits literal -Infinity/Infinity for first/last activity boundaries;
     these are converted to NaN. Non-numeric (freight) person IDs are dropped.
     """
-    df = pd.read_csv(path, sep=";", dtype={"person_id": str, "activity_index": "int32"},
+    df = pd.read_csv(path, sep=";", dtype={"person_id": str, "person": str},
                      na_values=["", "NA", "NaN", "-Infinity", "Infinity"])
+    if "person_id" not in df.columns and "person" in df.columns:
+        df = df.rename(columns=_MATSIM_ACTIVITY_RENAMES)
     df = _filter_numeric_person_id(df, "activities")
+    df["activity_index"] = pd.to_numeric(df["activity_index"], errors="coerce").astype("int32")
     for tcol in ("start_time", "end_time"):
         if tcol in df.columns:
             df[tcol] = pd.to_numeric(df[tcol], errors="coerce")
@@ -433,11 +460,43 @@ def insert_activities_df(db: duckdb.DuckDBPyConnection, df: Optional[pd.DataFram
 TRIP_BATCH = 500_000
 
 
+_MATSIM_TRIP_RENAMES = {
+    "person": "person_id",
+    "trip_number": "trip_index",
+    "dep_time": "departure_time",
+    "trav_time": "travel_time",
+    "traveled_distance": "network_distance",
+    "euclidean_distance": "crowfly_distance",
+    "start_activity_type": "preceding_purpose",
+    "end_activity_type": "following_purpose",
+    "start_x": "origin_x", "start_y": "origin_y",
+    "end_x": "dest_x", "end_y": "dest_y",
+}
+
+
+def _hhmmss_to_seconds(series: pd.Series) -> pd.Series:
+    """MATSim-native CSV times ('HH:MM:SS', hours may exceed 24) to seconds."""
+    if pd.api.types.is_numeric_dtype(series):
+        return series
+    parts = series.astype("string").str.split(":", expand=True)
+    if parts.shape[1] != 3:
+        return pd.to_numeric(series, errors="coerce")
+    return (pd.to_numeric(parts[0], errors="coerce") * 3600
+            + pd.to_numeric(parts[1], errors="coerce") * 60
+            + pd.to_numeric(parts[2], errors="coerce"))
+
+
 def parse_trips_csv(path: Path) -> pd.DataFrame:
-    """Read eqasim output_trips.csv[.gz] into a DataFrame."""
-    df = pd.read_csv(path, sep=";",
-                     dtype={"person_id": str, "person_trip_id": "int32"},
+    """Read output_trips.csv[.gz] into a DataFrame.
+
+    Handles both the eqasim layout (person_id/person_trip_id/mode/...) and the
+    MATSim-native one (person/trip_number/main_mode with HH:MM:SS times)."""
+    df = pd.read_csv(path, sep=";", dtype={"person_id": str, "person": str},
                      na_values=["", "NA", "NaN"])
+    if "person_id" not in df.columns and "person" in df.columns:
+        df = df.rename(columns=_MATSIM_TRIP_RENAMES)
+        for tcol in ("departure_time", "travel_time"):
+            df[tcol] = _hhmmss_to_seconds(df[tcol])
     df = _filter_numeric_person_id(df, "trips")
     df = df.rename(columns={
         "person_trip_id": "trip_index",
@@ -447,6 +506,7 @@ def parse_trips_csv(path: Path) -> pd.DataFrame:
         "origin_x": "origin_x", "origin_y": "origin_y",
         "destination_x": "dest_x", "destination_y": "dest_y",
     })
+    df["trip_index"] = pd.to_numeric(df["trip_index"], errors="coerce").astype("int32")
     df["main_mode"] = df["main_mode"].apply(_canonical_mode)
     df["preceding_purpose"] = df["preceding_purpose"].apply(_canonical_purpose)
     df["following_purpose"] = df["following_purpose"].apply(_canonical_purpose)
@@ -640,4 +700,6 @@ def _canonical_mode(value) -> Optional[str]:
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return None
     s = str(value).strip().lower()
+    if s.endswith("_loop"):  # MATSim-native round-trip variants (car_loop, ...)
+        s = s[:-len("_loop")]
     return s if s in _MODE_BUCKETS else "walk"

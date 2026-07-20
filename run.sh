@@ -1,9 +1,14 @@
 #!/bin/bash
-#SBATCH -n 1
-#SBATCH --cpus-per-task=24
-#SBATCH --time=12:00:00
-#SBATCH --mem-per-cpu=8192
-#SBATCH --output=/cluster/scratch/rsahleanu/synpp_%j.log
-#SBATCH --error=/cluster/scratch/rsahleanu/synpp_%j.log
 
-python3 -m synpp config.yml
+module load stack/2024-06
+module load gcc/12.2.0
+module load python/3.10.13
+module load eth_proxy
+module load openjdk/21.0.3_9
+
+export PATH=/cluster/home/anding/apache-maven-3.9.9/bin:$PATH
+source ~/.bashrc
+
+source /cluster/home/anding/myenv/bin/activate
+
+sbatch -n 1 --cpus-per-task=24 --time=24:00:00 --mem-per-cpu=6000 --wrap="python3 -m synpp config_andrew.yml"

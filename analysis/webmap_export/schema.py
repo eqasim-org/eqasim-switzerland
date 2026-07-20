@@ -94,12 +94,18 @@ CREATE TABLE metadata (
 );
 """
 
+# person_weight: microcensus survey expansion weight (MZ WP) - set only for diary
+# respondents, NULL for other household members and for all synthetic persons.
+# The microcensus pre-aggregate tables (demo_hex_*, hot_polygon_demo, ...) are
+# UNWEIGHTED respondent counts; the backend can weight person-level queries by
+# SUM(person_weight) instead of COUNT(*) where representativity matters.
 DDL_PERSONS = """
 CREATE TABLE persons (
     person_id             BIGINT PRIMARY KEY,
     household_id          BIGINT,
     age                   INTEGER,
     sex                   INTEGER,
+    person_weight         DOUBLE,
     car_availability      VARCHAR,
     has_driving_license   BOOLEAN,
     employed              BOOLEAN,
@@ -348,6 +354,37 @@ CREATE TABLE link_speeds (
 );
 """
 
+# pt_link_volumes: passengers on board a transit vehicle while it traverses a link,
+# per (link, line, route, 15-min bin), scaled to full population (1/sample_rate).
+# time_bin is 0..95; bin b covers [b*15min, (b+1)*15min) and labels as
+# f"{b // 4:02d}:{b % 4 * 15:02d}" ("00:00" .. "23:45").
+# canton_id, line_name and mode are denormalized (network_links / transit schedule).
+#
+# The webmap backend serves the legacy CDN asset
+# matsim/transit/volumes_by_link_line/pt_link_volumes_by_canton from this table by
+# slicing per canton_id and emitting a JSON array:
+#   [{"link_id": "<link_id>",
+#     "modes_list": [<distinct modes of the link's lines, sorted>],
+#     "lines": [
+#        {"line_id": ..., "line_name": ..., "mode": ..., "route_id": ...,
+#         "hourly_avg_volumes": {"HH:MM": <volume>, ...}}   # 15-min bin labels
+#     ]}]
+# The legacy per-line shape is SUM(volume) GROUP BY link_id, line_id, time_bin;
+# keeping one row per route_id additionally enables direction filtering downstream.
+DDL_PT_LINK_VOLUMES = """
+CREATE TABLE pt_link_volumes (
+    link_id               VARCHAR NOT NULL,
+    line_id               VARCHAR NOT NULL,
+    route_id              VARCHAR NOT NULL,
+    line_name             VARCHAR,
+    mode                  VARCHAR,
+    time_bin              INTEGER NOT NULL,
+    volume                INTEGER NOT NULL,
+    canton_id             INTEGER,
+    PRIMARY KEY (link_id, line_id, route_id, time_bin)
+);
+"""
+
 DDL_STATIC_ASSETS = """
 CREATE TABLE static_assets (
     key                   VARCHAR PRIMARY KEY,
@@ -431,6 +468,12 @@ INDEX_DDL_TRIPS_H3 = [
     "CREATE INDEX idx_trips_dest_canton      ON trips (dest_canton_id)",
 ]
 
+# IF NOT EXISTS so patch_transit_assets can (re)create them on an existing db
+INDEX_DDL_PT_LINK_VOLUMES = [
+    "CREATE INDEX IF NOT EXISTS idx_pt_link_volumes_link   ON pt_link_volumes (link_id)",
+    "CREATE INDEX IF NOT EXISTS idx_pt_link_volumes_canton ON pt_link_volumes (canton_id)",
+]
+
 INDEX_DDL_SYNTHETIC_ONLY = [
     "CREATE INDEX idx_spider_link      ON spider_link_index (link_id)",
     "CREATE INDEX idx_spider_link_trip ON spider_link_index (person_id, trip_index)",
@@ -442,6 +485,7 @@ INDEX_DDL_SYNTHETIC_ONLY = [
     "CREATE INDEX idx_link_speeds_link ON link_speeds (link_id)",
     "CREATE INDEX idx_link_speeds_canton ON link_speeds (canton_id)",
     "CREATE INDEX idx_link_speeds_road_type ON link_speeds (road_type)",
+    *INDEX_DDL_PT_LINK_VOLUMES,
     "CREATE INDEX idx_slvh6_home  ON spider_link_volumes_by_hex_res6 (home_h3_index)",
     "CREATE INDEX idx_slvh6_link  ON spider_link_volumes_by_hex_res6 (link_id)",
     "CREATE INDEX idx_zflvh_orig  ON zone_flow_link_volumes_hex_res6 (origin_h3_index)",
@@ -482,6 +526,7 @@ def create_all_tables(db, source_type: str) -> None:
         db.execute(DDL_NETWORK_LINKS)
         db.execute(DDL_NETWORK_NODES)
         db.execute(DDL_LINK_SPEEDS)
+        db.execute(DDL_PT_LINK_VOLUMES)
         db.execute(DDL_SPIDER_LINK_VOLUMES_BY_HEX_R6)
         db.execute(DDL_ZONE_FLOW_LINK_VOLUMES_HEX_R6)
         db.execute(DDL_NODE_FLOW_MATRIX)
@@ -517,6 +562,7 @@ EXPECTED_TABLES_SYNTHETIC = {
     "spider_routes", "spider_link_index",
     "network_links", "network_nodes",
     "static_assets",
+    "pt_link_volumes",
     "spider_link_volumes_by_hex_res6",
     "zone_flow_link_volumes_hex_res6",
     "node_flow_matrix",
@@ -526,6 +572,7 @@ EXPECTED_TABLES_MICROCENSUS = EXPECTED_TABLES_SYNTHETIC - {
     f"flow_hex_res{H3_RES_MID}", "hot_polygon_flows",
     "spider_routes", "spider_link_index",
     "network_links", "network_nodes",
+    "pt_link_volumes",
     "spider_link_volumes_by_hex_res6",
     "zone_flow_link_volumes_hex_res6",
     "node_flow_matrix",

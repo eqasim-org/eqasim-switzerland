@@ -103,7 +103,7 @@ def build_demo_hex_pyramid(db: duckdb.DuckDBPyConnection) -> None:
         "COUNT(*) FILTER (WHERE h.n_cars_class = '0')::INTEGER AS cars_0",
         "COUNT(*) FILTER (WHERE h.n_cars_class = '1')::INTEGER AS cars_1",
         "COUNT(*) FILTER (WHERE h.n_cars_class = '2')::INTEGER AS cars_2",
-        "COUNT(*) FILTER (WHERE h.n_cars_class = '3+')::INTEGER AS cars_3_plus",
+        "COUNT(*) FILTER (WHERE h.n_cars_class IN ('3', '3+'))::INTEGER AS cars_3_plus",
         "COALESCE(SUM(p.n_activities), 0)::INTEGER AS sum_activities",
     ])
 

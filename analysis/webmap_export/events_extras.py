@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import gzip
 import logging
+import sys
 import xml.sax
 import xml.sax.handler
 from pathlib import Path
@@ -46,10 +47,14 @@ class _EventsHandler(xml.sax.handler.ContentHandler):
         # vehicle -> (current link, enter time)
         self._veh_link: dict[str, tuple[str, float]] = {}
         self._veh_line: dict[str, str] = {}        # vehicle -> line_id
+        self._veh_route: dict[str, str] = {}       # vehicle -> route_id (direction)
         self._veh_driver: dict[str, str] = {}      # vehicle -> driver person id
         self._veh_facility: dict[str, str] = {}    # vehicle -> current facility
-        # (line_id, facility, hour) -> [boardings, alightings]
-        self.board_acc: dict[tuple[str, str, int], list] = {}
+        self._veh_pax: dict[str, int] = {}         # vehicle -> passengers on board
+        # (line_id, route_id, facility, hour) -> [boardings, alightings]
+        self.board_acc: dict[tuple[str, str, str, int], list] = {}
+        # (link_id, line_id, route_id, time_bin) -> passengers traversing the link
+        self.pt_vol_acc: dict[tuple[str, str, str, int], int] = {}
         # person -> (alight_line, alight_facility, alight_time); cleared on a real activity
         self._last_alight: dict[str, tuple[str, str, float]] = {}
         # person -> transfer_stop awaiting the onward leg's egress
@@ -63,34 +68,48 @@ class _EventsHandler(xml.sax.handler.ContentHandler):
         et = attrs.get("type")
 
         if et == "entered link":
-            if not self._track_speeds:
-                return
             veh = attrs.get("vehicle")
             link = attrs.get("link")
-            if veh and link:
+            # transit vehicles are always tracked (PT volumes), others only for speeds
+            if veh and link and (self._track_speeds or veh in self._veh_line):
                 self._veh_link[veh] = (link, float(attrs.get("time", 0)))
         elif et == "left link":
             veh = attrs.get("vehicle")
             link = attrs.get("link")
             prev = self._veh_link.pop(veh, None)
-            if prev and link and prev[0] == link and link in self._len:
-                tt = float(attrs.get("time", 0)) - prev[1]
-                length = self._len[link]
-                if tt > 0 and length and length > 0:
-                    spd = length / tt  # m/s
-                    key = (link, _bin15(prev[1]))
-                    acc = self.speed_acc.get(key)
-                    if acc is None:
-                        self.speed_acc[key] = [spd, 1]
-                    else:
-                        acc[0] += spd
-                        acc[1] += 1
+            if prev and link and prev[0] == link:
+                line = self._veh_line.get(veh)
+                if line is not None:
+                    pax = self._veh_pax.get(veh, 0)
+                    if pax > 0:
+                        # intern: the same link string recurs across bins/departures
+                        key = (sys.intern(link), line,
+                               self._veh_route.get(veh) or "", _bin15(prev[1]))
+                        self.pt_vol_acc[key] = self.pt_vol_acc.get(key, 0) + pax
+                if self._track_speeds and link in self._len:
+                    tt = float(attrs.get("time", 0)) - prev[1]
+                    length = self._len[link]
+                    if tt > 0 and length and length > 0:
+                        spd = length / tt  # m/s
+                        key = (link, _bin15(prev[1]))
+                        acc = self.speed_acc.get(key)
+                        if acc is None:
+                            self.speed_acc[key] = [spd, 1]
+                        else:
+                            acc[0] += spd
+                            acc[1] += 1
 
         elif et == "TransitDriverStarts":
             veh = attrs.get("vehicleId")
             if veh:
-                self._veh_line[veh] = attrs.get("transitLineId")
+                # intern: the same line/route ids recur on every departure and are
+                # held by millions of accumulator keys
+                line = attrs.get("transitLineId")
+                route = attrs.get("transitRouteId")
+                self._veh_line[veh] = sys.intern(line) if line else line
+                self._veh_route[veh] = sys.intern(route) if route else route
                 self._veh_driver[veh] = attrs.get("driverId")
+                self._veh_pax[veh] = 0  # vehicle may be reused for a new departure
         elif et == "VehicleArrivesAtFacility":
             veh = attrs.get("vehicle")
             fac = attrs.get("facility")
@@ -108,11 +127,16 @@ class _EventsHandler(xml.sax.handler.ContentHandler):
             person = attrs.get("person")
             if person is not None and person == self._veh_driver.get(veh):
                 return  # the driver, not a passenger
+            # occupancy must be tracked even when the facility is unknown
+            if et == "PersonEntersVehicle":
+                self._veh_pax[veh] = self._veh_pax.get(veh, 0) + 1
+            else:
+                self._veh_pax[veh] = max(0, self._veh_pax.get(veh, 0) - 1)
             fac = self._veh_facility.get(veh)
             if fac is None:
                 return
             t = float(attrs.get("time", 0))
-            key = (line, fac, _hour(t))
+            key = (line, self._veh_route.get(veh) or "", fac, _hour(t))
             acc = self.board_acc.get(key)
             if acc is None:
                 self.board_acc[key] = [0, 0]
@@ -167,13 +191,16 @@ def parse_events(
 def extract(
     db: duckdb.DuckDBPyConnection,
     events_xml: Path,
-) -> tuple[dict[tuple[str, str, int], list], dict[str, dict]]:
-    """Run the events pass, fill the link_speeds table, and return (board_acc, transfer_data)."""
+) -> "_EventsHandler":
+    """Run the events pass, fill the link_speeds table, and return the handler
+    (board_acc, transfer_data and pt_vol_acc accumulators filled)."""
     handler = parse_events(db, events_xml)
     _insert_link_speeds(db, handler.speed_acc)
-    log.info("events_extras: link_speeds rows=%d, boarding keys=%d, transfer stops=%d",
-             len(handler.speed_acc), len(handler.board_acc), len(handler.transfer_data))
-    return handler.board_acc, handler.transfer_data
+    log.info("events_extras: link_speeds rows=%d, boarding keys=%d, transfer stops=%d, "
+             "pt volume keys=%d",
+             len(handler.speed_acc), len(handler.board_acc), len(handler.transfer_data),
+             len(handler.pt_vol_acc))
+    return handler
 
 
 def _insert_link_speeds(db: duckdb.DuckDBPyConnection, acc: dict) -> int:

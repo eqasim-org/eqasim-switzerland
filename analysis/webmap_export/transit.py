@@ -7,15 +7,19 @@ from __future__ import annotations
 import gzip
 import json
 import logging
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import duckdb
 import pyarrow as pa
 
+from .schema import DDL_PT_LINK_VOLUMES, INDEX_DDL_PT_LINK_VOLUMES
 from .static_assets import GEOJSON_CT, JSON_CT, put_asset
 
 log = logging.getLogger(__name__)
+
+PT_LINK_VOLUME_BATCH = 500_000
 
 
 def parse_transit_schedule(path: Path) -> tuple[dict, dict]:
@@ -117,17 +121,40 @@ def _sc(n: float, factor: float) -> int:
     return int(round(n * factor))
 
 
+# MATSim route ids carry the direction as a .H/.R suffix (Hin/Rück)
+_DIR_RE = re.compile(r"\.([HR])$")
+
+
 def build_boarding_data_by_line(
     db: duckdb.DuckDBPyConnection, stops: dict, lines: dict, geo: dict, board_acc: dict,
     sample_rate: float | None = None, scale_pt: bool = True,
 ) -> bool:
+    """board_acc is keyed (line_id, route_id, facility, hour). The per-line 'stops'
+    shape (contract with the webmap) aggregates over route_id; each stop's additive
+    'directions' key splits the same counts by the route's .H/.R direction suffix.
+    Events on routes without that suffix count in the totals only."""
     if not lines:
         log.info("transit: no transit lines - boarding_data_by_line.json skipped")
         return False
     f = _scale_factor(sample_rate) if scale_pt else 1.0
     by_line_fac: dict[tuple[str, str], dict[int, list]] = {}
-    for (line_id, fac, hour), ba in board_acc.items():
-        by_line_fac.setdefault((line_id, fac), {})[hour] = ba
+    by_dir_fac: dict[tuple[str, str], dict[str, dict[int, list]]] = {}
+    for (line_id, route_id, fac, hour), ba in board_acc.items():
+        acc = by_line_fac.setdefault((line_id, fac), {}).setdefault(hour, [0, 0])
+        acc[0] += ba[0]
+        acc[1] += ba[1]
+        m = _DIR_RE.search(route_id)
+        if m:
+            dacc = (by_dir_fac.setdefault((line_id, fac), {})
+                    .setdefault(m.group(1), {}).setdefault(hour, [0, 0]))
+            dacc[0] += ba[0]
+            dacc[1] += ba[1]
+
+    def _hourly(hours: dict[int, list]) -> list[dict]:
+        return [
+            {"hour": h, "boardings": _sc(hours[h][0], f), "alightings": _sc(hours[h][1], f)}
+            for h in sorted(hours)
+        ]
 
     out = []
     for line_id, info in lines.items():
@@ -135,18 +162,18 @@ def build_boarding_data_by_line(
         stops_out = []
         for fac in info["stops"]:
             hours = by_line_fac.get((line_id, fac), {})
-            data = [
-                {"hour": h, "boardings": _sc(hours[h][0], f), "alightings": _sc(hours[h][1], f)}
-                for h in sorted(hours)
-            ]
             g = geo.get(fac, {})
-            stops_out.append({
+            entry = {
                 "stop_id": fac,
                 "name": stops.get(fac, {}).get("name", ""),
                 "bfs": g.get("bfs"),
                 "canton_id": g.get("canton_id"),
-                "data": data,
-            })
+                "data": _hourly(hours),
+            }
+            dirs = by_dir_fac.get((line_id, fac))
+            if dirs:
+                entry["directions"] = {d: _hourly(dirs[d]) for d in sorted(dirs)}
+            stops_out.append(entry)
         out.append({
             "line_id": line_id,
             "line_name": info["name"],
@@ -239,14 +266,13 @@ def parse_transit_routes(path: Path) -> list[dict]:
     return routes
 
 
-def build_transit_routes(db: duckdb.DuckDBPyConnection, schedule_xml: Path,
+def build_transit_routes(db: duckdb.DuckDBPyConnection, routes: list[dict],
                          stops: dict) -> bool:
     """Emit transit_routes GeoJSON: one WGS84 LineString per transitRoute.
 
     Geometry comes from ordered network links (stop coords as fallback);
     identical (line_id, link-sequence) routes are de-duped.
     """
-    routes = parse_transit_routes(schedule_xml)
     if not routes:
         log.info("transit: no routes - transit_routes skipped")
         return False
@@ -321,20 +347,85 @@ def build_transit_routes(db: duckdb.DuckDBPyConnection, schedule_xml: Path,
     return True
 
 
+def build_pt_link_volumes(
+    db: duckdb.DuckDBPyConnection, pt_vol_acc: dict, routes: list[dict],
+    sample_rate: float | None = None, scale_pt: bool = True,
+) -> bool:
+    """Fill pt_link_volumes from the events-pass occupancy accumulator
+    (see schema.DDL_PT_LINK_VOLUMES for the JSON shape the backend serves from it).
+
+    pt_vol_acc is keyed (link_id, line_id, route_id, 15-min bin of link entry);
+    values are passengers on board while the vehicle traverses the link, summed
+    over departures, scaled to full population (1/sample_rate). line_name/mode
+    are denormalized from the schedule, canton_id from network_links.
+    Idempotent (recreates its rows) so the patch flow can re-run it in place.
+    """
+    # table/indexes may be absent when patching a db built before they existed
+    db.execute(DDL_PT_LINK_VOLUMES.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS"))
+    db.execute("DELETE FROM pt_link_volumes")
+    if not pt_vol_acc:
+        log.info("transit: no PT link volumes accumulated - pt_link_volumes left empty")
+        return False
+    f = _scale_factor(sample_rate) if scale_pt else 1.0
+    meta = {(r["line_id"], r["route_id"]): (r["line_name"], r["mode"]) for r in routes}
+
+    items = list(pt_vol_acc.items())
+    db.execute("""
+        CREATE TEMP TABLE _ptv_raw (
+            link_id VARCHAR, line_id VARCHAR, route_id VARCHAR,
+            line_name VARCHAR, mode VARCHAR, time_bin INTEGER, volume INTEGER
+        )
+    """)
+    for start in range(0, len(items), PT_LINK_VOLUME_BATCH):
+        chunk = items[start:start + PT_LINK_VOLUME_BATCH]
+        names_modes = [meta.get((line, rid), (None, None)) for (_, line, rid, _), _ in chunk]
+        tbl = pa.table({
+            "link_id": pa.array([k[0] for k, _ in chunk], type=pa.string()),
+            "line_id": pa.array([k[1] for k, _ in chunk], type=pa.string()),
+            "route_id": pa.array([k[2] for k, _ in chunk], type=pa.string()),
+            "line_name": pa.array([nm[0] for nm in names_modes], type=pa.string()),
+            "mode": pa.array([nm[1] for nm in names_modes], type=pa.string()),
+            "time_bin": pa.array([k[3] for k, _ in chunk], type=pa.int32()),
+            "volume": pa.array([_sc(v, f) for _, v in chunk], type=pa.int32()),
+        })
+        db.register("_tmp_ptv", tbl)
+        db.execute("INSERT INTO _ptv_raw SELECT * FROM _tmp_ptv")
+        db.unregister("_tmp_ptv")
+
+    # LEFT JOIN so links absent from the network still get a volume row
+    db.execute("""
+        INSERT INTO pt_link_volumes
+            (link_id, line_id, route_id, line_name, mode, time_bin, volume, canton_id)
+        SELECT r.link_id, r.line_id, r.route_id, r.line_name, r.mode,
+               r.time_bin, r.volume, nl.canton_id
+        FROM _ptv_raw r
+        LEFT JOIN network_links nl ON nl.link_id = r.link_id
+    """)
+    db.execute("DROP TABLE _ptv_raw")
+    for stmt in INDEX_DDL_PT_LINK_VOLUMES:
+        db.execute(stmt)
+    n = db.execute("SELECT COUNT(*) FROM pt_link_volumes").fetchone()[0]
+    log.info("transit: pt_link_volumes - %d (link,line,route,15min) rows (scaled ×%.2f)", n, f)
+    return True
+
+
 def build_all(
     db: duckdb.DuckDBPyConnection, schedule_xml: Path,
     board_acc: dict, transfer_data: dict | None = None,
     sample_rate: float | None = None, scale_pt: bool = True,
+    pt_vol_acc: dict | None = None,
 ) -> None:
-    """Parse the schedule and emit all PT static assets.
+    """Parse the schedule and emit all PT static assets plus pt_link_volumes.
 
     When scale_pt is True, passenger counts are scaled to full population via sample_rate.
     """
     log.info("=== transit assets START (sample_rate=%s, scale_pt=%s)", sample_rate, scale_pt)
     stops, lines = parse_transit_schedule(schedule_xml)
     geo = _facility_geo(db, stops)
+    routes = parse_transit_routes(schedule_xml)
     build_stop_municipality(db, stops, geo)
     build_boarding_data_by_line(db, stops, lines, geo, board_acc or {}, sample_rate, scale_pt)
     build_stop_transfer_data_by_canton(db, stops, lines, geo, transfer_data or {}, sample_rate, scale_pt)
-    build_transit_routes(db, schedule_xml, stops)
+    build_transit_routes(db, routes, stops)
+    build_pt_link_volumes(db, pt_vol_acc or {}, routes, sample_rate, scale_pt)
     log.info("=== transit assets DONE")

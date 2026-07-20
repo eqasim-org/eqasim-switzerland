@@ -49,10 +49,11 @@ def patch(matsim_dir: Path, db_path: Path) -> int:
         db.execute("INSTALL spatial; LOAD spatial;")
         log.info("parsing events (PT-only)…")
         handler = events_extras.parse_events(db, events, track_speeds=False)
-        log.info("  boarding keys=%d, transfer stops=%d",
-                 len(handler.board_acc), len(handler.transfer_data))
+        log.info("  boarding keys=%d, transfer stops=%d, pt volume keys=%d",
+                 len(handler.board_acc), len(handler.transfer_data),
+                 len(handler.pt_vol_acc))
         transit.build_all(db, sched, handler.board_acc, handler.transfer_data,
-                          sample_rate, scale_pt)
+                          sample_rate, scale_pt, pt_vol_acc=handler.pt_vol_acc)
         static_assets.build_metadata_asset(
             db, sample_rate=sample_rate, run_name=run_name,
             scaled_to_full_population=bool(sample_rate and scale_pt),

@@ -1,7 +1,9 @@
 """Standalone webmap_export driver: rebuild synthetic.duckdb + microcensus.duckdb
 without going through synpp (which would re-run MATSim and wipe simulation_output).
 
-Usage: venv/bin/python3 -m analysis.webmap_export.run_standalone [both|synthetic|microcensus] [--matsim-dir <run-cache.cache>]
+Usage: venv/bin/python3 -m analysis.webmap_export.run_standalone [both|synthetic|microcensus]
+           [--matsim-dir <run-cache.cache>] [--cache-dir <synpp-cache>]
+           [--data-path <pipeline-data>] [--home-pipe <pipe-root>]
 """
 from __future__ import annotations
 
@@ -9,7 +11,7 @@ import logging
 import sys
 from pathlib import Path
 
-from . import _build_microcensus, _build_synthetic
+from . import _build_microcensus, _build_synthetic, _write_metadata_json
 from .schema import SCHEMA_VERSION
 from .sources import (
     DEFAULT_CACHE_DIR, DEFAULT_DATA_PATH, DEFAULT_HOME_PIPE,
@@ -39,19 +41,28 @@ def _newest_run_cache(cache_dir: Path) -> Path | None:
 def main(argv: list[str]) -> int:
     mode = "both"
     matsim_dir: Path | None = None
+    cache_dir = DEFAULT_CACHE_DIR
+    data_path = DEFAULT_DATA_PATH
+    home_pipe = DEFAULT_HOME_PIPE
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--matsim-dir":
             matsim_dir = Path(argv[i + 1]); i += 2; continue
+        if a == "--cache-dir":
+            cache_dir = Path(argv[i + 1]); i += 2; continue
+        if a == "--data-path":
+            data_path = Path(argv[i + 1]); i += 2; continue
+        if a == "--home-pipe":
+            home_pipe = Path(argv[i + 1]); i += 2; continue
         if a in ("both", "synthetic", "microcensus"):
             mode = a
         i += 1
 
     if matsim_dir is None:
-        matsim_dir = _newest_run_cache(DEFAULT_CACHE_DIR)
+        matsim_dir = _newest_run_cache(cache_dir)
         if matsim_dir is None:
-            log.error("No completed matsim.simulation.run cache under %s", DEFAULT_CACHE_DIR)
+            log.error("No completed matsim.simulation.run cache under %s", cache_dir)
             return 2
     log.info("Using matsim_dir = %s", matsim_dir)
 
@@ -60,24 +71,29 @@ def main(argv: list[str]) -> int:
     syn_path = output_dir / "synthetic.duckdb"
     mc_path = output_dir / "microcensus.duckdb"
 
-    sample_rate = discover_sample_rate(matsim_dir)
-    scale_pt = discover_scale_pt()
+    sample_rate = discover_sample_rate(matsim_dir, home_pipe=home_pipe)
+    scale_pt = discover_scale_pt(home_pipe=home_pipe)
     run_name = matsim_dir.name.replace(".cache", "")
     log.info("sample_rate=%s  scale_pt=%s  run_name=%s", sample_rate, scale_pt, run_name)
 
     if mode in ("both", "synthetic"):
         _build_synthetic(
             output_db=syn_path, matsim_dir=matsim_dir,
-            cache_dir=DEFAULT_CACHE_DIR, data_path=DEFAULT_DATA_PATH,
-            home_pipe=DEFAULT_HOME_PIPE, sample_rate=sample_rate, run_name=run_name,
+            cache_dir=cache_dir, data_path=data_path,
+            home_pipe=home_pipe, sample_rate=sample_rate, run_name=run_name,
             scale_pt=scale_pt,
         )
     if mode in ("both", "microcensus"):
         _build_microcensus(
-            output_db=mc_path, cache_dir=DEFAULT_CACHE_DIR, data_path=DEFAULT_DATA_PATH,
+            output_db=mc_path, cache_dir=cache_dir, data_path=data_path,
         )
 
     (output_dir / "schema_version.txt").write_text(SCHEMA_VERSION + "\n")
+    _write_metadata_json(
+        output_dir, syn_path, mc_path,
+        wrote_synthetic=mode in ("both", "synthetic"),
+        wrote_microcensus=mode in ("both", "microcensus"),
+    )
     log.info("standalone webmap_export DONE (schema=%s) -> %s", SCHEMA_VERSION, output_dir)
     return 0
 
