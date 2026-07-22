@@ -7,7 +7,8 @@ The pipeline uses the `synpp` Python package for stage chaining avaialble at [he
 
 The main research reference for the synthetic population of Switzerland is:
 > Dib, A., Sallard, A., and M. Balac (2026) [Agent-based transport model of Switzerland: A fully automated pipeline based on eqasim and MATSim](https://polybox.ethz.ch/index.php/s/eiNCcex4dDxfjpj), presented at the _26th Swiss Transportation Research Conference_, Ascona, Switzerland.
-> Dib, A., Sallard, A., and M. Balac (2026) [Agent-Based Transport Model Calibration via Online Stochastic Batch Optimization](https://www.research-collection.ethz.ch/entities/publication/62e03c14-62a2-4b7f-b16e-402bac39b5eb), presented at the World Conference on transport research (WCTR 2026), Toulouse, France.
+
+> Dib, A., and M. Balac (2026) [Agent-Based Transport Model Calibration via Online Stochastic Batch Optimization](https://www.research-collection.ethz.ch/entities/publication/62e03c14-62a2-4b7f-b16e-402bac39b5eb), presented at the World Conference on transport research (WCTR 2026), Toulouse, France.
 
 ## Preparing the environment
 
