@@ -14,7 +14,7 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
                  "household_id", "is_car_passenger", 
                  "statpop_person_id", "statpop_household_id", "mz_person_id", "mz_head_id", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
-                 "income_class",
+                 "income_class", "income_per_capita",
                  "number_of_cars_class", "number_of_bikes_class"]
 
 
@@ -23,10 +23,11 @@ def configure(context):
 
     if context.config("include_external_population"):
         context.config("external_population_folder")
-        context.stage("data.constants")
-        context.stage("synthesis.population.enriched")
         context.config("fr_sample_rate", default = 1.0)
         context.config("input_downsampling")
+
+        context.stage("data.constants")
+        context.stage("synthesis.population.enriched")
 
 
 def execute(context):
@@ -52,7 +53,9 @@ def execute(context):
 
     acts_file = next(f for f in os.listdir(folder) if f.endswith("_activities.csv"))
     acts      = pd.read_csv(os.path.join(folder, acts_file), sep = ";")[["person_id", "activity_index", "start_time", "end_time",
-                                                                          "is_first", "is_last", "purpose", "location_id", "geometry"]]
+                                                                          "is_first", "is_last", "purpose", "location_id", "geometry",
+                                                                          "commune_id", "population_density", "employee_density", "companies_density",
+                                                                          "municipality_type", "ovgk"]]
     acts["geometry"] = acts["geometry"].apply(wkt.loads)
     acts = gpd.GeoDataFrame(acts, geometry="geometry", crs="EPSG:2154")
     acts = acts.to_crs("EPSG:2056")
@@ -75,14 +78,47 @@ def execute(context):
     households.loc[:, "car_availability"]  = households["car_availability"].map({"none": "never", "all": "always", "some": "always"})
     households.loc[:, "bike_availability"] = households["bike_availability"].map({"none": "never", "all": "always", "some": "always"})
 
-    bins   = [0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, float("inf")]
-    labels = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    # Match the income_class shares of the Swiss population instead of using
+    # fixed CHF thresholds: the poorest X% of French households are assigned
+    # to the income classes that make up the poorest X% of the Swiss
+    # population, regardless of the CHF boundaries this implies.
+    df_enriched  = context.stage("synthesis.population.enriched")
+    swiss_shares = df_enriched["income_class"].value_counts(normalize=True).sort_index()
 
-    households["income_class"] = pd.cut(households["income"], bins=bins, labels=labels, right=True)
+    class_labels = swiss_shares.index.astype(int).to_numpy()
+    cum_shares   = swiss_shares.cumsum().to_numpy()
+
+    # Weight by household size so the resulting *population* shares (not
+    # household shares) match the Swiss population shares.
+    household_size = persons.groupby("household_id").size().rename("household_size")
+    households      = households.merge(household_size, on = "household_id", how = "left")
+    households["household_size"] = households["household_size"].fillna(1)
+
+    order        = households["income"].sort_values(kind = "mergesort").index
+    cum_population = households.loc[order, "household_size"].cumsum()
+    total_population = cum_population.iloc[-1]
+
+    thresholds = np.round(cum_shares * total_population).astype(int)
+    thresholds[-1] = total_population  # guard against rounding
+
+    class_idx = np.searchsorted(thresholds, cum_population.to_numpy(), side = "left")
+    class_idx = np.clip(class_idx, 0, len(class_labels) - 1)
+
+    households.loc[order, "income_class"] = class_labels[class_idx]
+    households["income_class"] = households["income_class"].astype(int)
+
     households["number_of_cars_class"]  = households["number_of_vehicles"]
     households["number_of_bikes_class"] = households["number_of_bikes"]
 
     persons = persons.merge(households, on = "household_id", how = "left")
+
+    # OECD-modified equivalence scale: 1 for the first adult, 0.5 for each
+    # additional adult, 0.3 for each child (age < 14).
+    persons["is_child"] = persons["age"] < 14
+    num_children        = persons.groupby("household_id")["is_child"].transform("sum")
+    num_adults          = persons["household_size"] - num_children
+    equivalent_size      = 1 + 0.5 * (num_adults - 1) + 0.3 * num_children
+    persons["income_per_capita"] = persons["income"] / equivalent_size
 
     car_passenger_ids = set(trips.loc[trips["mode"] == "car_passenger", "person_id"])
     persons["is_car_passenger"] = persons["person_id"].isin(car_passenger_ids)
@@ -117,12 +153,11 @@ def execute(context):
     persons = persons[persons["person_id"].isin(valid_ids)]
 
     acts["destination_id"]    = acts["location_id"].astype(str).str.split("_").str[-1].astype(int)
-    acts["municipality_id"]   = 0
-    acts["municipality_type"] = 0
+    acts["municipality_id"]   = acts["commune_id"]
 
     # Adjust IDS
-    id_person_max    = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
-    id_household_max = np.max(context.stage("synthesis.population.enriched").copy()["household_id"].values)
+    id_person_max    = np.max(df_enriched["person_id"].values)
+    id_household_max = np.max(df_enriched["household_id"].values)
     id_person_max    = max(id_person_max, id_household_max)  # just in case person_id and household_id are not on the same scale
     N                = id_person_max + 1
 

@@ -1,18 +1,19 @@
 import gzip
 import io
-
-import numpy as np
 import pandas as pd
 
 import matsim.writers
+
 
 def _require_cols(df, cols, df_name):
     missing = [c for c in cols if c not in df.columns]
     if missing:
         raise KeyError(f"{df_name} is missing required columns: {missing}")
 
+
 def _na_to_default(x, default):
     return default if pd.isna(x) else x
+
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -31,6 +32,7 @@ def configure(context):
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class",
           "municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"]
 
+
 INCOME_VALUES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]
 
 
@@ -39,6 +41,7 @@ def write_number_of_cars_class(value, c):
         return "%d+" % c.MAX_NUMBER_OF_CARS_CLASS
     else:
         return str(value)
+
 
 def add_household(writer, household, member_ids, c):
     # household is a namedtuple row now
@@ -79,10 +82,12 @@ def execute(context):
     df_persons["income"] = df_persons["income_class"].astype(int).map(c.INCOME_CLASS_MAP)
     
     # Calculate income per capita using the OECD equivalence scale: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Glossary:Equivalised_income
-    df_persons['is_child'] = df_persons['age'] < 14
-    num_children = df_persons.groupby('household_id')['is_child'].transform('sum')
-    num_adults = df_persons['household_size'] - num_children
+    df_persons["is_child"] = df_persons["age"] < 14
+    num_children = df_persons.groupby("household_id")["is_child"].transform("sum")
+    num_adults   = df_persons['household_size'] - num_children
+
     assert (num_adults >= 1).all(), "All households should have at least one adult."
+
     equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children
     df_persons["income_per_capita"] = df_persons["income"] / equvalent_size
 
@@ -102,23 +107,17 @@ def execute(context):
         external_persons["ovgk"]              = ex_constants.ovgk
 
         external_persons["canton_name"] = ex_constants.canton_name
-        external_persons["income_per_capita"] = 0
+        if "income_per_capita" not in external_persons.columns:
+            external_persons["income_per_capita"] = 0
 
         external_persons = external_persons[[c for c in FIELDS if c in external_persons.columns]]
         df_persons = pd.concat([df_persons, external_persons])
 
     if context.config("include_cross_border"):
         cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
-
-        #id_person_max    = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
-        #id_household_max = np.max(context.stage("synthesis.population.enriched").copy()["household_id"].values)
-        #id_person_max    = max(id_person_max, id_household_max)  # just in case person_id and household_id are not on the same scale
-        #N                = id_person_max + 1
-
-        cross_border_persons    = cross_border_persons.sort_values(by="person_id")
+        cross_border_persons = cross_border_persons.sort_values(by="person_id")
 
         cross_border_persons["household_id"] = cross_border_persons["person_id"].values
-        #cross_border_persons["person_id"]    = cross_border_persons["household_id"].values
 
         cross_border_persons["municipality_type"] = "crossborder"
         cross_border_persons["sp_region"]         = -1

@@ -7,10 +7,10 @@ from shapely.ops import unary_union
 def configure(context):
     context.config("data_path")
 
-    # we include the network of this region, i don't know if this is the right config param to use, to check later!
-    context.config("cross_border_exclude_shapefiles", default=None)
     context.config("include_external_population", default = False)
-    context.stage("data.external_population.constants")
+    if context.config("include_external_population", default = False):
+        context.config("outbound_flows_perimeter", default=None)
+        context.stage("data.external_population.constants")
 
 
 REFERENCE_YEAR = 2023
@@ -64,7 +64,9 @@ def execute(context):
 
     df_deprecated = gpd.GeoDataFrame(df_all[df_all["year"] != REFERENCE_YEAR])
     df_deprecated["deprecated_municipality_id"] = df_deprecated["municipality_id"]
+    
     del df_deprecated["municipality_id"]
+    
     df_deprecated["geometry"] = df_deprecated.centroid
     df_deprecated.crs = df_all.crs
 
@@ -76,34 +78,28 @@ def execute(context):
     df_existing = pd.DataFrame(df_reference[["municipality_id"]])
     df_existing["deprecated_municipality_id"] = df_existing["municipality_id"]
 
-    df_mapping = pd.concat([df_existing, df_mapping])
+    df_mapping   = pd.concat([df_existing, df_mapping])
     df_reference = df_reference[["municipality_id", "municipality_name", "geometry"]]
 
     # include the external region
-    out_region_file = context.config("cross_border_exclude_shapefiles")
     include_external_population = context.config("include_external_population")
-    if out_region_file is not None and include_external_population:
-        out_region = read_outside_region(out_region_file)
-        out_region_geometry = unary_union(out_region.geometry)
-        cst = context.stage("data.external_population.constants")
-        dtypes = df_reference.dtypes
-        df_reference = df_reference.append({"municipality_id":cst.municipality_id,	
-                                            "municipality_name":cst.municipality_name,	
-                                            "geometry":out_region_geometry}, ignore_index=True)
-        df_reference = df_reference.astype(dtypes)
     
+    if include_external_population:
+        out_region_file = context.config("outbound_flows_perimeter")
+        if out_region_file is not None:
+            out_region          = read_outside_region(out_region_file)
+            out_region_geometry = unary_union(out_region.geometry)
+            cst                 = context.stage("data.external_population.constants")
+            dtypes              = df_reference.dtypes
+            df_reference        = df_reference.append({"municipality_id":   cst.municipality_id,	
+                                                       "municipality_name": cst.municipality_name,	
+                                                       "geometry":          out_region_geometry},
+                                                       ignore_index=True)
+            df_reference        = df_reference.astype(dtypes)    
     
-    df_reference = gpd.GeoDataFrame(df_reference, geometry="geometry", crs="EPSG:2056")
+    df_reference = gpd.GeoDataFrame(df_reference, geometry = "geometry", crs = "EPSG:2056")
+
     return df_reference, df_mapping
-
-
-
-
-
-
-
-
-
 
 
 def update_municipality_ids(df, df_mapping, remove_unknown=False):
@@ -114,7 +110,7 @@ def update_municipality_ids(df, df_mapping, remove_unknown=False):
 
     df_join = pd.merge(
         df[["deprecated_municipality_id"]], df_mapping,
-        on="deprecated_municipality_id", how="left"
+        on = "deprecated_municipality_id", how="left"
     )
 
     df.loc[:, "municipality_id"] = df_join.loc[:, "municipality_id"].values
