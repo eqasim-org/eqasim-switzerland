@@ -926,7 +926,7 @@ def execute(context):
        'N_children_under_18', 'employed', 'job_position',
        'is_student', 'ovgk', "sp_region",
        'driving_license', 'number_of_cars_class', 'car_availability', 'bike_availability', 'PT_SUB_draw', 'mz_person_id', 'is_car_passenger',
-       'income_class']
+       'income_class', 'is_crossing_the_border']
     pop_df = pop_df[keep_columns]
     pop_df = pop_df.rename(columns={"PT_SUB_draw": "pt_subscription"})
 

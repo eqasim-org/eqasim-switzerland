@@ -8,11 +8,22 @@ from joblib import Parallel, delayed
 
 logger = logging.getLogger("synpp")
 
-DIST_BINS          = [300, 500, 750, 1000]
-RAIL_TYPES         = {100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117}
-TRAM_TYPES         = {0, 900, 1, 400, 401, 402, 3, 700,702,704,705,710,712,715,716,717}
-OTHER_TYPES        = {4, 5, 6, 1000, 1300, 1303, 1400, 1500}
-NB_LINES_THRESHOLD = 7
+DIST_BINS            = [300, 500, 750, 1000]
+RAIL_TYPES           = {2, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117}
+TRAM_BUS_TYPES       = {0, 900, 1, 400, 401, 402, 3, 700, 702, 704, 705, 710, 712, 715, 716, 717, 4}
+CABLE_TYPES          = {6, 1300, 1301, 1302, 1303, 1304, 1305, 1306, 1307, 7, 1400, 1401, 1402}
+UNCLASSIFIED_TYPES   = {202, 1500, 1700}
+BAHNKNOTEN_MIN_LINES = 2
+
+COUNTING_WINDOW_START_MIN = 360
+COUNTING_WINDOW_END_MIN   = 1200
+KURSINTERVALL_WINDOW_MIN  = COUNTING_WINDOW_END_MIN - COUNTING_WINDOW_START_MIN
+
+CAT_RANK = {"I": 0, "II": 1, "III": 2, "IV": 3, "V": 4, "X": 5}
+
+# ARE spec reference day: a normal weekday outside holidays/tourist high season
+# (Mittwoch der Kalenderwoche 12).
+REFERENCE_DATE = "2024/03/20"
 
 
 def read_gtfs(gtfs_path):
@@ -52,7 +63,7 @@ def service_ids_for_date(calendar, calendar_dates, target_date = None):
     d = pd.to_datetime(target_date) if target_date else None
 
     if d is not None:
-        weekday = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"][d.dayofweek]
+        weekday = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][d.dayofweek]
     else:
         weekday = "wednesday"
 
@@ -81,9 +92,19 @@ def classify_routes(routes):
     r    = routes.copy()
     mode = r["route_type"].fillna(-1).astype(int)
 
-    r["mode_group"] = "C"
-    r.loc[mode.isin(RAIL_TYPES), "mode_group"] = "A2"
-    r.loc[mode.isin(TRAM_TYPES), "mode_group"] = "B"
+    r["mode_group"] = "UNCLASSIFIED"
+    r.loc[mode.isin(RAIL_TYPES),         "mode_group"] = "A"
+    r.loc[mode.isin(TRAM_BUS_TYPES),     "mode_group"] = "B"
+    r.loc[mode.isin(CABLE_TYPES),        "mode_group"] = "C"
+    r.loc[mode.isin(UNCLASSIFIED_TYPES), "mode_group"] = "UNCLASSIFIED"
+
+    known_types = RAIL_TYPES | TRAM_BUS_TYPES | CABLE_TYPES | UNCLASSIFIED_TYPES
+    unmapped    = mode[~mode.isin(known_types)]
+    if len(unmapped) > 0:
+        logger.warning(
+            "OVGK: %d routes have unmapped route_type values %s; treating as UNCLASSIFIED",
+            len(unmapped), sorted(unmapped.unique())
+        )
 
     return r[["route_id", "mode_group"]]
 
@@ -96,15 +117,15 @@ def parse_time_to_min(s):
 def interval_and_mode_to_stopcat(stop_cat_mode, interval_min):
     if pd.isna(interval_min):
         return None
-    
-    THRESHOLDS = [(5, "I", "I", "II", "V"),
-                  (10, "I", "II", "III", "V"),
-                  (20, "II", "III", "IV", "V"),
-                  (40, "III", "IV", "V", "V"),
-                  (60, "IV", "V", "V", "V"),
-                  (float("inf"), "X", "X", "X", "X")]
-    
-    for upper, rail_1, rail_2, b, c in THRESHOLDS:
+
+    THRESHOLDS = [(5, "I", "I", "II"),
+                  (10, "I", "II", "III"),
+                  (20, "II", "III", "IV"),
+                  (40, "III", "IV", "V"),
+                  (60, "IV", "V", "V"),
+                  (float("inf"), "X", "X", "X")]
+
+    for upper, rail_1, rail_2, b in THRESHOLDS:
         if interval_min < upper:
             if stop_cat_mode == "A1":
                 return rail_1
@@ -112,12 +133,29 @@ def interval_and_mode_to_stopcat(stop_cat_mode, interval_min):
                 return rail_2
             elif stop_cat_mode == "B":
                 return b
-            elif stop_cat_mode == "C":
-                return c
             else:
-                return c
-            
+                logger.warning("OVGK: unexpected stop_cat_mode %r", stop_cat_mode)
+                return None
+
     return "X"
+
+
+def estimate_group_departures(st_timed, group_label):
+    g = st_timed[st_timed["mode_group"] == group_label]
+    if g.empty:
+        return pd.DataFrame(columns=["station_id", "departures"])
+
+    dir_counts = g.groupby("station_id")["direction_id"].nunique()
+    raw        = g.groupby("station_id").size()
+
+    departures = pd.Series(index=raw.index, dtype=float)
+    two_dir    = dir_counts[dir_counts >= 2].index
+    one_dir    = dir_counts.index.difference(two_dir)  # single direction, or missing direction_id
+
+    departures.loc[two_dir] = raw.loc[two_dir] / 2.0
+    departures.loc[one_dir] = raw.loc[one_dir]
+
+    return departures.reset_index().rename(columns={0: "departures"}).rename(columns={"index": "station_id"})
 
 
 def compute_stop_category(gtfs_path, date):
@@ -132,40 +170,28 @@ def compute_stop_category(gtfs_path, date):
             trips2 = trips2[trips2["service_id"].astype(str).isin(service_ids)]
 
     stop_times2    = stop_times.merge(trips2[["trip_id", "route_id", "mode_group", "direction_id"]], on="trip_id", how="inner")
+    stop_times2    = stop_times2[stop_times2["mode_group"] != "UNCLASSIFIED"]  # drop non-spec trips entirely
     stop_to_parent = stops.set_index("stop_id").apply(lambda r: r["parent_station"] if pd.notna(r.get("parent_station")) and r.get("parent_station") != "" else r.name, axis=1)
-    
+
     stop_times2["station_id"] = stop_times2["stop_id"].map(stop_to_parent).fillna(stop_times2["stop_id"])
 
     route_names = routes[["route_id", "route_short_name"]].copy()
     route_names["route_key"] = route_names["route_short_name"].fillna(route_names["route_id"]).astype(str)
 
-    rail_st = stop_times2[stop_times2["mode_group"] == "A2"].merge(route_names[["route_id", "route_key"]], on="route_id", how="left")
-
+    rail_st = stop_times2[stop_times2["mode_group"] == "A"].merge(route_names[["route_id", "route_key"]], on="route_id", how="left")
     rail_lines_per_station = rail_st.groupby("station_id")["route_key"].nunique().reset_index().rename(columns={"route_key": "num_rail_lines"})
+
+    cable_stations = set(stop_times2.loc[stop_times2["mode_group"] == "C", "station_id"].unique())
 
     st_timed = stop_times2.copy()
     st_timed["dep_min"] = parse_time_to_min(stop_times2["departure_time"].astype(str))
-    st_timed = st_timed[(st_timed["dep_min"] >= 360) & (st_timed["dep_min"] < 1200)]  # 06:00–20:00
+    st_timed = st_timed[(st_timed["dep_min"] >= COUNTING_WINDOW_START_MIN) & (st_timed["dep_min"] < COUNTING_WINDOW_END_MIN)]
 
-    # Highest-ranking mode per station
-    mode_rank = {"A2": 0, "B": 1, "C": 2}
-    station_mode = (
-        st_timed.groupby("station_id")["mode_group"]
-        .apply(lambda x: min(x.unique(), key=lambda m: mode_rank.get(m, 99)))
-        .reset_index()
-        .rename(columns={"mode_group": "best_mode"})
-    )
+    dep_a = estimate_group_departures(st_timed, "A").rename(columns={"departures": "departures_a"})
+    dep_b = estimate_group_departures(st_timed, "B").rename(columns={"departures": "departures_b"})
 
-    # Departures per station, divided by 2 to account for both directions
-    dep_counts = (
-        st_timed.groupby("station_id")
-        .size()
-        .reset_index(name="raw_departures")
-    )
-    dep_counts["departures"] = dep_counts["raw_departures"] / 2.0
-    
-    # Average interval in minutes over 14h window
-    dep_counts["interval_min"] = (14 * 60) / dep_counts["departures"]
+    dep_a["A_Intervall"] = KURSINTERVALL_WINDOW_MIN / dep_a["departures_a"]
+    dep_b["B_Intervall"] = KURSINTERVALL_WINDOW_MIN / dep_b["departures_b"]
 
     # Assemble final stop category
     result = stops[["stop_id", "stop_name", "stop_lat", "stop_lon"]].copy()
@@ -173,27 +199,37 @@ def compute_stop_category(gtfs_path, date):
     # Attach parent station
     result["station_id"] = result["stop_id"].map(stop_to_parent).fillna(result["stop_id"])
 
-    result = result.merge(station_mode,   on="station_id", how="left")
-    result = result.merge(dep_counts[["station_id", "interval_min"]], on="station_id", how="left")
+    result = result.merge(dep_a[["station_id", "departures_a", "A_Intervall"]], on="station_id", how="left")
+    result = result.merge(dep_b[["station_id", "departures_b", "B_Intervall"]], on="station_id", how="left")
     result = result.merge(rail_lines_per_station, on="station_id", how="left")
     result["num_rail_lines"] = result["num_rail_lines"].fillna(0).astype(int)
 
-    # Classify: A1 if rail + more than one distinct line, else A2, B, C
-    def assign_category(row):
-        if row["best_mode"] == "A2":
-            return "A1" if row["num_rail_lines"] > NB_LINES_THRESHOLD else "A2"
-        return row.get("best_mode", "C")
+    result["Bahnknoten"]  = (result["num_rail_lines"] >= BAHNKNOTEN_MIN_LINES).astype(int)
+    result["Bahnlinie_Anz"] = result["num_rail_lines"]
+    result["TramBus_Anz"] = result["departures_b"]
+    result["Seilbahn_Anz"] = result["station_id"].isin(cable_stations).astype(int)
 
-    result["stop_category"] = result.apply(assign_category, axis=1)
-    result["stop_category"] = result["stop_category"].fillna("C")
+    def assign_category(row):
+        cat_a = None
+        if pd.notna(row["A_Intervall"]):
+            mode_a = "A1" if row["Bahnknoten"] == 1 else "A2"
+            cat_a  = interval_and_mode_to_stopcat(mode_a, row["A_Intervall"])
+
+        cat_b = None
+        if pd.notna(row["B_Intervall"]):
+            cat_b = interval_and_mode_to_stopcat("B", row["B_Intervall"])
+
+        cat_c = "V" if row["Seilbahn_Anz"] == 1 else None
+
+        candidates = [c for c in (cat_a, cat_b, cat_c) if c is not None]
+        return min(candidates, key=lambda c: CAT_RANK.get(c, 99)) if candidates else None
+
+    result["stop_cat"] = result.apply(assign_category, axis=1)
+    result["Hst_Kat"]  = result["stop_cat"]
 
     stops = result[["stop_id", "station_id", "stop_name", "stop_lat", "stop_lon",
-                   "best_mode", "num_rail_lines", "interval_min", "stop_category"]].copy()
-    
-    stops = stops.rename(columns = {"stop_category": "stop_cat_mode"})
-
-    stops["stop_cat"] = stops.apply(lambda r : interval_and_mode_to_stopcat(r["stop_cat_mode"], r["interval_min"]), axis = 1)
-    
+                     "Bahnknoten", "Bahnlinie_Anz", "TramBus_Anz", "Seilbahn_Anz",
+                     "A_Intervall", "B_Intervall", "stop_cat", "Hst_Kat"]].copy()
 
     return stops
 
@@ -288,9 +324,8 @@ def execute(context):
     
     else:
         gtfs_path = "%s/output" % context.path("data.gtfs.cleaned")
-        date      = "2024/03/20"
 
-        stops = compute_stop_category(gtfs_path, date)
+        stops = compute_stop_category(gtfs_path, REFERENCE_DATE)
         ovgk  = compute_ovgk_areas(stops).rename(columns = {"ovgk_class": "ovgk"})
 
         ovgk.to_file(f"{context.path()}/rings.gpkg", driver = "GPKG")
@@ -312,6 +347,7 @@ def impute(context, df_ovgk, df, on, point_type="", chunk_size=100):
     df_join["ovgk"] = df_join["ovgk"].astype("category")
 
     return df_join[on + ["ovgk"]]
+
 
 def impute_parallel(context, df, x="x", y="y", geometry="geometry", output_column="ovgk", point_type="", chunk_size=5000, n_jobs=8):
     if geometry not in df.columns:

@@ -2,8 +2,8 @@ import gzip
 import io
 import shutil
 import subprocess
-from shapely import wkt
 import pandas as pd
+from shapely import wkt
 
 import matsim.writers
 from matsim.writers import backlog_iterator
@@ -272,7 +272,7 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
 
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
                    "geometry", "destination_id", "following_mode", "municipality_type","municipality_id",
-                   'employee_density', 'companies_density', 'population_density','ovgk']
+                   "employee_density", "companies_density", "population_density", "ovgk"]
 
 
 PERSONS_DTYPES = {
@@ -303,7 +303,7 @@ def execute(context):
     cst           = context.stage("data.constants")
     df_persons    = context.stage("synthesis.population.models.subscriptions")
     df_activities = context.stage("synthesis.population.activities")
-    df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]    
+    df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]  
 
     # Correct employement if required
     if set(df_persons["employed"].unique())!={0, 1}:
@@ -342,15 +342,16 @@ def execute(context):
     df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
 
     df_persons["person_type"] = "normal"
+    df_persons.loc[df_persons["is_crossing_the_border"], "person_type"] = "crossborder"
 
     if context.config("include_external_population"):
         external_persons    = context.stage("data.external_population.read_outputs")[0].copy()
         external_activities = context.stage("data.external_population.read_outputs")[1].copy()
         external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
-        ex_constants = context.stage("data.external_population.constants")
+        ex_constants        = context.stage("data.external_population.constants")
 
-        external_persons["person_type"] = ex_constants.person_type
-        external_persons["sex"] = ex_constants.convert_sex(external_persons["sex"]).astype(int)
+        external_persons["person_type"]       = ex_constants.person_type
+        external_persons["sex"]               = ex_constants.convert_sex(external_persons["sex"]).astype(int)
         external_persons["pt_subscription"]   = ex_constants.get_subscriptions(external_persons)
         external_persons["bike_availability"] = ex_constants.convert_bike_availability(external_persons["number_of_bikes_class"],cst)
         external_persons["car_availability"]  = ex_constants.convert_car_availability(external_persons["car_availability"])
@@ -364,14 +365,10 @@ def execute(context):
         external_activities["destination_x"] = external_activities["destination_x"].astype(int)
         external_activities["destination_y"] = external_activities["destination_y"].astype(int)
 
+        for col in ACTIVITY_ATTRIBUTES_TO_SAVE.values():
+            if not col in external_activities.columns:
+                raise RuntimeError("Missing column in external activities: %s" % col)
 
-        external_activities["municipality_type"] = ex_constants.municipality_type
-        external_activities["municipality_id"]   = ex_constants.municipality_id
-        external_activities["employee_density"]  = 0
-        external_activities["companies_density"] = 0
-        external_activities["population_density"]= 0
-        external_activities["ovgk"]              = ex_constants.ovgk
-        
         external_vehicles = external_vehicles[VEHICLE_FIELDS]
 
         df_persons    = pd.concat([df_persons, external_persons])
@@ -423,10 +420,6 @@ def execute(context):
     df_vehicles   = df_vehicles[VEHICLE_FIELDS]
     df_vehicles["owner_id"] = df_vehicles["owner_id"].astype(int)
 
-    print("BEFORE")
-    print(len(df_persons), len(df_activities), len(df_vehicles))
-    print(len(df_persons[df_persons["person_type"] == "FR"]))
-
     # correct types before saving the data    
     df_persons = df_persons.astype(PERSONS_DTYPES)
     df_activities["geometry"] = df_activities["geometry"].apply(lambda g: wkt.loads(g) if isinstance(g, str) else g)
@@ -439,10 +432,6 @@ def execute(context):
     df_persons    = df_persons[df_persons["person_id"].isin(valid_ids)]
     df_activities = df_activities[df_activities["person_id"].isin(df_persons["person_id"].values.tolist())]
     df_vehicles   = df_vehicles[df_vehicles["owner_id"].isin(df_persons["person_id"].values.tolist())]
-
-    print("AFTER")
-    print(len(df_persons), len(df_activities), len(df_vehicles))
-    print(len(df_persons[df_persons["person_type"] == "FR"]))
 
     # TODO check why there are multiple activities with same attributes but only different municipality_id and municipality_types.
     df_activities = df_activities.drop_duplicates(["person_id", "activity_index"], keep = "first")
@@ -470,8 +459,8 @@ def execute(context):
     logger.info("Starting to write population")
 
     population_xml_path = "%s/population.xml" % cache_path
-    population_gz_path = "%s/population.xml.gz" % cache_path
-    compresslevel = int(context.config("population_compresslevel"))
+    population_gz_path  = "%s/population.xml.gz" % cache_path
+    compresslevel       = int(context.config("population_compresslevel"))
 
     use_pigz = bool(context.config("population_use_pigz")) and shutil.which("pigz") is not None
     if bool(context.config("population_use_pigz")) and not use_pigz:
