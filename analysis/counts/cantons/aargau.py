@@ -42,9 +42,15 @@ def execute(context):
     df = df[df.flow.notna()].reset_index(drop=True)
     df = df[df.x.notna() & df.y.notna()]    
     
+    # # keep only the most recent year
+    # df = df[df["JAHR"].notna() & df["objectid"].notna()].reset_index(drop=True)
+    # df = df.groupby("objectid").apply(lambda x: x[x["JAHR"]==x["JAHR"].max()]).reset_index(drop=True)
+    # assert (len(df)==len(df.objectid.unique())), "there are duplicate objectid, please check!"
+
     # keep only the most recent year
-    df = df.groupby("objectid").apply(lambda x: x[x["JAHR"]==x["JAHR"].max()]).reset_index(drop=True)
-    assert (len(df)==len(df.objectid.unique())), "there are duplicate objectid, please check!"
+    df = df[df["JAHR"].notna() & df["objectid"].notna()].reset_index(drop=True)
+    df = df.sort_values("JAHR").groupby("objectid", as_index=False).tail(1).reset_index(drop=True)
+    assert (len(df) == len(df.objectid.unique())), "there are duplicate objectid entries after filtering to the most recent year"
 
     # keep only relevant columns
     df = df[["objectid","x","y","flow","flow_w"]]    

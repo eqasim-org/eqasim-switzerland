@@ -16,10 +16,11 @@ class ExternalPopulationConstants:
 
     @staticmethod
     def convert_sex(sex):
-        sex = sex.copy()
-        sex.loc[sex=="male"]   = 0
-        sex.loc[sex=="female"] = 1
-        return sex.astype(int).values
+        sex = sex.values
+        sex_array = np.zeros(len(sex), dtype=int)
+        # sex.loc[sex=="male"]   = 0
+        sex_array[sex=="female"] = 1
+        return sex_array
     
     @staticmethod
     def get_subscriptions(df): 
@@ -28,6 +29,7 @@ class ExternalPopulationConstants:
         for col in subscription_cols:
             if col not in df.columns:
                 df[col] = False
+            df[col] = df[col].astype(bool)
 
         df = df[subscription_cols + ['age']].reset_index(drop=True)
         

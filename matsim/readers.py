@@ -41,7 +41,9 @@ class Network:
         # keep only car links
         if only_car_links:
             self.links = self.links[self.links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
-            self.nodes = self.nodes[self.nodes['node_id'].isin(pd.unique(self.links['from_node'].tolist() + self.links['to_node'].tolist()))].reset_index(drop=True) 
+            
+            used_node_ids = set(self.links['from_node']) | set(self.links['to_node'])
+            self.nodes = self.nodes[self.nodes['node_id'].isin(used_node_ids)].reset_index(drop=True)
 
     
     def put_attributes_in_links(self):

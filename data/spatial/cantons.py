@@ -1,4 +1,5 @@
 import geopandas as gpd
+import pandas as pd
 import unicodedata
 from data.osm.clean import read_outside_region
 from shapely.ops import unary_union
@@ -35,10 +36,12 @@ def execute(context):
         out_region_geometry = unary_union(out_region.geometry)
         cst = context.stage("data.external_population.constants")
         dtypes = df.dtypes
-        df = df.append({"canton_id":cst.canton_id,	
-                        "canton_name":cst.canton_name,
-                        "canton_name_en":cst.canton_name,
-                        "geometry":out_region_geometry}, ignore_index=True)
+        df = pd.concat([df, pd.DataFrame({"canton_id":[cst.canton_id],	
+                                          "canton_name":[cst.canton_name],
+                                          "canton_name_en":[cst.canton_name],
+                                          "geometry":[out_region_geometry]})], 
+                        ignore_index=True)
+
         df = df.astype(dtypes)
         
     df = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:2056")

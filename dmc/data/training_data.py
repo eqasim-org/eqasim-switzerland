@@ -23,7 +23,8 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.stage("data.spatial.swiss_border")
-
+    context.stage("data.external_population.constants")
+    
     context.config("car_cost_per_km", constants.CAR_COST_PER_KM) #CHF per km
     context.config("parking_cost_per_hour_CHF_urban", constants.PARKING_COST_PER_HOUR_CHF_URBAN)
     context.config("parking_cost_per_hour_CHF_urbancore", constants.PARKING_COST_PER_HOUR_CHF_URBANCORE)
@@ -140,7 +141,9 @@ def execute(context):
         mode_columns = [col for col in df.columns if mode in col]
         is_nan = df[mode_columns].isna().sum(axis=1) > 0
 
-        df.loc[is_nan & not_available_mode, mode_columns] = df.loc[is_nan & not_available_mode, mode_columns].fillna(0)
+        mask = is_nan & not_available_mode
+        for col in mode_columns:
+            df.loc[mask, col] = df.loc[mask, col].fillna(0).astype(df[col].dtype)
 
     ### remove nans and deactivate availability when modes are not selected 
     for mode in ['car', 'car_passenger', 'pt', 'walk', 'bike']:    
@@ -148,8 +151,10 @@ def execute(context):
         mode_columns = [col for col in df.columns if mode in col]
         is_nan = df[mode_columns].isna().sum(axis=1) > 0
 
-        df.loc[is_nan & not_selected, mode_columns] = df.loc[is_nan & not_selected, mode_columns].fillna(0)
-        df.loc[is_nan & not_selected, f"{mode}_availability"] = False
+        mask = is_nan & not_selected
+        for col in mode_columns:
+            df.loc[mask, col] = df.loc[mask, col].fillna(0).astype(df[col].dtype)
+        df.loc[mask, f"{mode}_availability"] = False
     
     ### remove trips with only one availability
     cols_availabilities = ['car_availability', 'pt_availability', 'bike_availability', 'walk_availability', 'car_passenger_availability']

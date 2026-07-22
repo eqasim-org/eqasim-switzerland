@@ -234,7 +234,7 @@ def execute(context):
     df_mz_persons["is_car_passenger"] = df_mz_persons["person_id"].isin(car_passenger_ids)
 
     # Commute distance
-    df_mz_persons["commute_distance"] = -1
+    df_mz_persons["commute_distance"] = -1.0
     employed = df_mz_persons["employed"]
     df_mz_persons.loc[employed, "commute_distance"] = np.sqrt(
         (df_mz_persons.loc[employed, "work_x"] - df_mz_persons.loc[employed, "home_x"]) ** 2 +

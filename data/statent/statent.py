@@ -25,8 +25,9 @@ def execute(context):
 
     df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08_CD", "EMPTOT"]])
     df.columns = ["x", "y", "noga", "number_employees"]
-    df.loc[:, "noga"] = df["noga"].astype(str)
-    df.loc[:, "enterprise_id"] = np.arange(len(df))
+    
+    df["noga"] = df["noga"].astype(str)
+    df["enterprise_id"] = np.arange(len(df))
 
     df.loc[df["noga"].str.startswith("851"), "education_type"] = "kindergarten"
     df.loc[df["noga"].str.startswith("852"), "education_type"] = "primary"

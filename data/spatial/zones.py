@@ -57,6 +57,8 @@ def execute(context):
 
     return df_zones[["zone_id", "zone_name", "zone_level", "zone_level_id"]]
 
+
+
 def impute(df, df_zones, zone_id_prefix = "",
            zone_fields={"quarter": "quarter_id",
                         "municipality": "municipality_id",
@@ -65,42 +67,48 @@ def impute(df, df_zones, zone_id_prefix = "",
                         "postal_code": "postal_code"}):
     logger.info(f"Imputing {list(zone_fields.keys())} zones for {len(df)} points...")
     remaining_mask = np.ones((len(df),), dtype = bool)
-    df[zone_id_prefix + "zone_id"] = np.nan
-    df[zone_id_prefix + "zone_level"] = np.nan
-    
+
+    df[zone_id_prefix + "zone_id"] = pd.Series([np.nan] * len(df), index=df.index, dtype="object")
+    df[zone_id_prefix + "zone_level"] = pd.Series([np.nan] * len(df), index=df.index, dtype="object")
+
     for zone_level, zone_id_field in zone_fields.items():
         if zone_id_field in df:
-            
+
             # Create filters
-            f = ~pd.isnull(df[zone_id_field]) & remaining_mask            
+            f = ~pd.isnull(df[zone_id_field]) & remaining_mask
             f_zone = df_zones["zone_level"] == zone_level
-            
+
             # Create temp df to merge
             temp1 = df.loc[f, [zone_id_field]].rename({zone_id_field: "zone_level_id"}, axis=1).reset_index(drop=True)
             temp2 = df_zones.loc[f_zone, ["zone_level_id", "zone_id", "zone_level"]].reset_index(drop=True)
 
             # Merge
             df_join = pd.merge(temp1, temp2, how = "left", on = "zone_level_id")
-            
+
+            # Make sure zone_level values are plain strings/objects,
+            # not categorical, before assigning into an object column
+            zone_id_values = df_join["zone_id"].values
+            zone_level_values = df_join["zone_level"].astype(object).values
+
             # Add to df
             if np.sum(f) == len(df):
-                df[zone_id_prefix + "zone_id"] = df_join["zone_id"].values
-                df[zone_id_prefix + "zone_level"] = df_join["zone_level"].values
+                df[zone_id_prefix + "zone_id"] = zone_id_values
+                df[zone_id_prefix + "zone_level"] = zone_level_values
             else:
-                df.loc[f, zone_id_prefix + "zone_id"] = df_join["zone_id"].values
-                df.loc[f, zone_id_prefix + "zone_level"] = df_join["zone_level"].values
-                
+                df.loc[f, zone_id_prefix + "zone_id"] = zone_id_values
+                df.loc[f, zone_id_prefix + "zone_level"] = zone_level_values
+
             # Compute remaining mask
             remaining_mask &= pd.isnull(df[zone_id_prefix + "zone_id"])
             count = np.count_nonzero(df[zone_id_prefix + "zone_level"] == zone_level)
             logger.info("  Found zone of type %s for %d points", zone_level, count)
-            
+
         else:
             logger.warning("  Id %s for zone type %s not found in dataframe", zone_id_field, zone_level)
-        
+
     unknown_count = np.count_nonzero(pd.isnull(df[zone_id_prefix + "zone_id"]))
 
     if unknown_count > 0:
         logger.warning("  No information for %d observations", unknown_count)
-        
+
     return df

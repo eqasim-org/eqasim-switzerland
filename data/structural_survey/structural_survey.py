@@ -36,23 +36,26 @@ def execute(context):
     rng = np.random.RandomState(random_seed)
 
     # Find the correct modes
-    df_se.loc[:, "mode_numeric"] = df_se.loc[:, "mode"].astype(int)
-    df_se.loc[df_se["mode_numeric"] == -10, "mode"] = "unknown"
-    df_se.loc[df_se["mode_numeric"] == -9, "mode"] = "unknown"
-    df_se.loc[df_se["mode_numeric"] == -8, "mode"] = "unknown"
-    df_se.loc[df_se["mode_numeric"] == 1, "mode"] = "walk"  # walking
-    df_se.loc[df_se["mode_numeric"] == 2, "mode"] = "walk"  # skateboard
-  
-    df_se.loc[df_se["mode_numeric"] == 4, "mode"] = "car"  # Mofa / Moped / light motor bike
-    df_se.loc[df_se["mode_numeric"] == 5, "mode"] = "car"  # Car as driver or passenger
-    df_se.loc[df_se["mode_numeric"] == 6, "mode"] = "car"  # company bus
-    df_se.loc[df_se["mode_numeric"] == 7, "mode"] = "pt"  # Train
-    df_se.loc[df_se["mode_numeric"] == 8, "mode"] = "pt"  # Tram / Metro
-    df_se.loc[df_se["mode_numeric"] == 9, "mode"] = "pt"  # Bus
-    df_se.loc[df_se["mode_numeric"] == 10, "mode"] = "other"  # Ship, cable car, ...
-    df_se.loc[df_se["mode_numeric"] == 11, "mode"] = "bike"  # bike
-    df_se.loc[df_se["mode_numeric"] == 12, "mode"] = "bike"  # e-bike
-    del df_se["mode_numeric"]
+    mode_numeric = df_se["mode"].astype(int)
+    mode_map = {
+        -10: "unknown",
+        -9: "unknown",
+        -8: "unknown",
+        1: "walk",    # walking
+        2: "walk",    # skateboard
+        4: "car",     # Mofa / Moped / light motor bike
+        5: "car",     # Car as driver or passenger
+        6: "car",     # company bus
+        7: "pt",      # Train
+        8: "pt",      # Tram / Metro
+        9: "pt",      # Bus
+        10: "other",  # Ship, cable car, ...
+        11: "bike",   # bike
+        12: "bike",   # e-bike
+    }
+
+    df_se["mode"] = mode_numeric.map(mode_map).astype("object")
+    del mode_numeric
 
     # Impute the home zone
     df_se = df_se.reset_index(drop=True)
@@ -329,12 +332,12 @@ def execute(context):
 
 def get_filtered_data(context, filter_type = "all"):
     df_od = context.stage("data.structural_survey.structural_survey")
-    df_od = df_od[~np.isnan(df_od["home_zone_id"])]
-    df_od = df_od[~np.isnan(df_od["work_zone_id"])]
+    df_od = df_od[~pd.isnull(df_od["home_zone_id"])]
+    df_od = df_od[~pd.isnull(df_od["work_zone_id"])]
     df_od = df_od[~(df_od["work_zone_level"] == "country")]
     df_od = df_od[~(df_od["home_zone_level"] == "country")]
-    df_od = df_od[df_od["employed"] == 1]    
-    
+    df_od = df_od[df_od["employed"] == 1]
+
     match filter_type:
         case "all":
             return df_od

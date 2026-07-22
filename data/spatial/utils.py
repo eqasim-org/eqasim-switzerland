@@ -27,27 +27,30 @@ def sample_coordinates(row, count, random_seed=0):
 
     return np.array(list(map(lambda p: (p.x, p.y), samples[:count])))
 
-
 def to_gpd(context, df, x="x", y="y", crs="epsg:2056", coord_type="", chunk_size=10000):
-    
     result = []
     chunk_count = max(1, int(len(df) / chunk_size))
-    for chunk in context.progress(np.array_split(df, chunk_count), 
-                              total=chunk_count,
-                              label="Converting %s coordinates" % coord_type):
+
+    # pandas-native chunking instead of np.array_split
+    indices = np.array_split(np.arange(len(df)), chunk_count)
+
+    for idx in context.progress(indices,
+                                 total=chunk_count,
+                                 label="Converting %s coordinates" % coord_type):
+        chunk = df.iloc[idx]
         result.append(
             gpd.GeoDataFrame(
                 chunk,
                 geometry=gpd.points_from_xy(chunk[x], chunk[y], crs=crs)
-                )
             )
-        
+        )
+
     df = gpd.GeoDataFrame(
         pd.concat(result).reset_index(),
         crs=result[0].crs
-        )
+    )
     del result
-    
+
     if not crs == "epsg:2056":
         df = df.to_crs("epsg:2056")
         df.crs = "epsg:2056"
@@ -73,10 +76,14 @@ def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_d
     
     result = []
     chunk_count = max(1, int(len(df_points) / chunk_size))
-    for chunk in context.progress(np.array_split(df_points, chunk_count), 
-                                  total=chunk_count,
-                                  label="Imputing %s zones onto %s points..." % (zone_type, point_type)):
+    indices = np.array_split(np.arange(len(df_points)), chunk_count)
+
+    for idx in context.progress(indices,
+                                 total=chunk_count,
+                                 label="Imputing %s zones onto %s points..." % (zone_type, point_type)):
+        chunk = df_points.iloc[idx]
         result.append(gpd.sjoin(df_zones, chunk, predicate="contains", how="right"))
+        
     df_points = pd.concat(result).reset_index()
 
     if "left_index" in df_points: del df_points["left_index"]

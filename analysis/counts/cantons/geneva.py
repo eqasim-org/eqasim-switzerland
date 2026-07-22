@@ -17,7 +17,7 @@ def execute(context):
 
     # change types
     df.loc[:,["mean_flow_2025","median_flow_2025"]] = df.loc[:,["mean_flow_2025","median_flow_2025"]
-                                                             ].applymap(lambda x: x.replace(",",".").replace(" ","") 
+                                                            ].map(lambda x: x.replace(",",".").replace(" ","") 
                                                                         if isinstance(x,str) else x)
 
     df = df.astype({"mean_flow_2025":float, "median_flow_2025":float, "denomination":str, "counter_id":str})

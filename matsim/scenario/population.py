@@ -84,7 +84,7 @@ class PersonWriter:
 
         location = (
             home_location
-            if destination_id == HOME_DESTINATION_ID
+            if destination_id == HOME_DESTINATION_ID or destination_id==str(HOME_DESTINATION_ID)
             else writer.location(int(geometry.x), int(geometry.y), destination_id if isinstance(destination_id, str) else int(destination_id))
         )
 
@@ -358,13 +358,19 @@ def execute(context):
         external_persons = external_persons[external_persons["home_x"].notna()]
         external_persons = external_persons[external_persons["home_y"].notna()]
         
+        external_activities["destination_id"] = external_activities["destination_id"].astype(object)
         external_activities.loc[external_activities["purpose"] == "home", "destination_id"] = HOME_DESTINATION_ID
 
         external_activities["destination_x"] = external_activities["destination_x"].astype(int)
         external_activities["destination_y"] = external_activities["destination_y"].astype(int)
 
-        for col in ACTIVITY_ATTRIBUTES_TO_SAVE.values():
-            external_activities[col] = 0
+
+        external_activities["municipality_type"] = ex_constants.municipality_type
+        external_activities["municipality_id"]   = ex_constants.municipality_id
+        external_activities["employee_density"]  = 0
+        external_activities["companies_density"] = 0
+        external_activities["population_density"]= 0
+        external_activities["ovgk"]              = ex_constants.ovgk
         
         external_vehicles = external_vehicles[VEHICLE_FIELDS]
 

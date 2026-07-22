@@ -7,37 +7,29 @@ The pipeline uses the `synpp` Python package for stage chaining avaialble at [he
 
 The main research reference for the synthetic population of Switzerland is:
 > Dib, A., Sallard, A., and M. Balac (2026) [Agent-based transport model of Switzerland: A fully automated pipeline based on eqasim and MATSim](https://polybox.ethz.ch/index.php/s/eiNCcex4dDxfjpj), presented at the _26th Swiss Transportation Research Conference_, Ascona, Switzerland.
+> Dib, A., Sallard, A., and M. Balac (2026) [Agent-Based Transport Model Calibration via Online Stochastic Batch Optimization](https://www.research-collection.ethz.ch/entities/publication/62e03c14-62a2-4b7f-b16e-402bac39b5eb), presented at the World Conference on transport research (WCTR 2026), Toulouse, France.
 
+## Preparing the environment
 
-## Installation
+We use `uv` for dependency management. Make sure that you can call `uv` from your working environment. You can set up all dependencies by calling:
 
-Before using the pipeline one needs to have the Python environment set up. This can be done either by setting up the `conda` environment or a `python` environment.
+```bash
+cd /project/code
+uv sync
+```
 
-For setting up the conda environment (not continuously tested):
+In particular, the dependencies contain the [synpp](https://github.com/eqasim-org/synpp) package, which is the computational backbone of the pipeline.
 
-Two bash scripts which set up everything that is needed to run the pipeline on Linux machines, as well as a requirements.txt file, can be found in `environment`:
+## Executing the pipeline
 
-- `setup.sh [path]` downloads Miniconda3, creates a Python virtual environment, installs OpenJDK and Maven. A path needs to be passed, which defines the directory in which the environment will be setup. Make sure you call this script with `bash`!
-- `activate.sh [path]` activates the environment when the script is *source*'d. The path to the environment needs to be supplied.
+To run the pipeline, go to the project directory and call the `synpp` execution script:
 
-Example:
-- `bash environment/setup.sh myenv`
-- `source environment/activate.sh myenv`
+```bash
+cd /project/code
+uv run -m synpp config.yml
+```
 
-To clean, simply delete the environment directory (here `myenv`).
-
-In case you are using a Mac machine there are minoconda paths within the `environment/setup.sh` file that you can use.
-
-For settign up the python environment:
-- Install `Python 3.10.13`
-- Install packages in `euler_requirements.txt`
-- How to do this in detail on our Euler server can be found [here](https://gitlab.ethz.ch/csfm/csfm-documentation/-/wikis/MATSim/Eqasim-on-Euler).
-
-## Run
-
-Once you have set up your environment, all dependencies should have been installed, including synpp. At this point, all you need to do is adjust the config file (**DO NOT MODIFY** `config.yml`) to run the stages you required, and then:
-
-`python3 -m synpp config.yml`
+It will read the configuration file, run the processing pipeline, and eventually create the synthetic population inside the output directory.
 
 ## Generating pipeline flowchart
 
@@ -66,7 +58,7 @@ will be saved.
 
 # Setting up and running on Windows
 
-We recommend to run the pipeline on a Linux server, mainly because for large scenarios around 100GB of memory are needed. However, it is possible to run the pipeline locally on a Windows machine. This can either be done by setting up an environment step by step (see `environment/setup.sh` for the neccessary steps). Alternatively, the whole pipeline can run in  a Virtual Machine (VM). The procedure would be as follows:
+We recommend to run the pipeline on a Linux server, mainly because for large scenarios around 100GB of memory are needed. However, it is possible to run the pipeline locally on a Windows machine. The whole pipeline can run in a Virtual Machine (VM). The procedure would be as follows:
 
 - Install VirtualBox
 - Install a lightweight Linux system in the VM, for instance Ubuntu Server

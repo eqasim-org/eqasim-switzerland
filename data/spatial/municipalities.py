@@ -87,9 +87,9 @@ def execute(context):
         out_region_geometry = unary_union(out_region.geometry)
         cst = context.stage("data.external_population.constants")
         dtypes = df_reference.dtypes
-        df_reference = df_reference.append({"municipality_id":cst.municipality_id,	
-                                            "municipality_name":cst.municipality_name,	
-                                            "geometry":out_region_geometry}, ignore_index=True)
+        df_reference = pd.concat([df_reference, pd.DataFrame({"municipality_id":[cst.municipality_id],	
+                                            "municipality_name":[cst.municipality_name],	
+                                            "geometry":[out_region_geometry]})], ignore_index=True)
         df_reference = df_reference.astype(dtypes)
     
     

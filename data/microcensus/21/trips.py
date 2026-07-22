@@ -3,7 +3,10 @@ import pandas as pd
 import pyproj
 import logging
 import warnings
-from pandas.errors import SettingWithCopyWarning
+try:
+    from pandas.errors import SettingWithCopyWarning
+except ImportError:
+    from pandas.errors import ChainedAssignmentError as SettingWithCopyWarning
 
 warnings.filterwarnings("ignore", category=SettingWithCopyWarning)
 
@@ -632,6 +635,7 @@ def execute(context):
     single_homes   = df_home_coordinates[df_home_coordinates["home_location_count"]==1]
     multiple_homes = df_home_coordinates[df_home_coordinates["home_location_count"]>1]
 
+    multiple_homes["home_id"] = multiple_homes["home_id"].astype(object)
     multiple_homes, coord_map, label_map = merge_close_home_locations(multiple_homes)
 
     df_home_coordinates = pd.concat([single_homes, multiple_homes]).sort_values(by="person_id")

@@ -1,60 +1,68 @@
 # General pipeline settings
 # path to the working directory/cache
-working_directory: 
+working_directory: ...
 # path where the pipeline flowchart should be stored
-flowchart_path:
+flowchart_path: .../flowchart.json
 dryrun: false
-
 
 # Requested stages
 run:
     - synthesis.output
-    - matsim.simulation.run
-    # - dmc.model # uncomment if you want to estimte the dmc model using biogeme
+    - matsim.output
 
 
 # These are configuration options that we use in the pipeline
-config:
+config:        
     # path to the input data folder
-    data_path: 
-    threads: 48
-    random_seed: 0
+    data_path: ...
+    output_path: ...
+    analysis_path: ...
+    output_id: output
     
-    # it seems fastest with 1
+    # General parameters
+    threads: 48
+    random_seed: 518745
     hot_deck_matching_runners: 1
     disable_progress_bar: false
-    java_memory: 10G
-    input_downsampling: 0.10
+    java_memory: 210G
 
-    # default to false until we fix projections
-    enable_scaling: true
-    # to which year we want to scale the population; this will not be used if enable_scaling is set to false
+    # General population
+    input_downsampling: 0.001
+    enable_scaling: false
     scaling_year: 2025
+    use_freight: true
+    only_permanent_residents: false
+    
+    # algorithms selection
+    matching_algorithm: v1
+    locations_algorithm: rda    
+    compute_ovgk_from_gtfs: true
 
-    # which population census we want to use. There are two options: statpop and are_synpop; default is statpop.
+    # census
     census: statpop
 
-    only_permanent_residents: true
+    # lcv
+    use_lcv: true
 
-    # do we want to include freight demand in the synthetic population, defailt is true
-    use_freight: true
-    # do we want to include LCV in the demand, deafult is false
-    use_lcv: false
-    # do we want to use poisson (true) or stochastic (false) sampling for lcv matrices, as values are floats, default is false
-    lcv_poisson_sampling: false
+    # Cross-border traffic
+    include_cross_border: true
+    weekend: false # if false, the working days will be selected. 
+    
+    # PT pricing
+    generate_pt_pricing_inputs: false
+
+    # Pt routing parameters
+    calibrate_pt_routing_params: false
+    
     # there are two options to convert pt schedule: [hafas, gtfs]; default is gtfs
     pt_schedule: gtfs
-    # Folder where the gtfs file should be found
-    gtfs_folder: gtfs # default = gtfs.
-    # name of the gtfs zip file, should be placed in gtfs folder within data_path
-    gtfs_name: gtfs_fp2024_2024-11-11
-    # date from which gtfs should be take. Options are [dayWithMostTrips, dayWithMostServices, <exact date>]
-    gtfs_date: "dayWithMostServices" 
-    # if hafas is used, the date needs to be specified
     hafas_date: 01.10.2018
+    gtfs_name: gtfs_fp2024_2024-11-11
+    gtfs_date: "dayWithMostServices" 
     
     # if we should use schedule based pt or simulated
     useScheduleBasedTransport: false
+    
     # defines the prefix for the cutout scenario name; it should be of the zurich_ format
     extent_prefix: switzerland_
 
@@ -65,62 +73,70 @@ config:
     export_detailed_network: true
 
     # last iteration when runing MATSim
-    last_iteration: 60
+    last_iteration: 100
 
     # If you want to simplify the network (merge short links) in eqasim and correct their capacity, default is false
-    simplify_network_in_eqasim: false
-    correct_links_capacity: false
-
-    # path to the osm file, should be placed in data_path/osm (it can be list of comma separated files)    
-    osm_file: switzerland-latest-2025.osm.pbf
-    border_offset: 20000 # offset for border extension in meters, default is 20000
+    simplify_network_in_eqasim: true
+    correct_links_capacity: true
+    remove_nodes_with_no_intersection: true
+    
+    # path to the osm file, should be placed in data_path/osm (it can be list of files)    
+    osm_file: [bayern-251102.osm.pbf, nord-est-251102.osm.pbf, switzerland-latest-2025.osm.pbf,
+               alsace-251102.osm.pbf, nord-ovest-251102.osm.pbf, austria-251102.osm.pbf, 
+               baden-wuerttemberg-251102.osm.pbf, franche-comte-251102.osm.pbf, rhone-alpes-251102.osm.pbf, 
+               liechtenstein-251116.osm.pbf]
+    border_offset: 50000 # offset for border extension in meters   
 
     # wether to parse turn restrictions or not
-    parseTurnRestrictions: true
+    parseTurnRestrictions: True
 
     # whether to add traffic lights to the network, default is false
-    add_traffic_lights: false
+    add_traffic_lights: true
 
     # whether to assign elevations to the nodes, default is false
-    assign_elevations: false
+    assign_elevations: true
 
+    # correct the speed
+    correct_speed: true
+    correct_speed_uphill: true
+    speed_factor_outside_border: 0.7
+    capacity_factor_outside_border: 0.5
+    
     # Specific day scenario (default: workday, also possible: weekend, Monday, ... Sunday)
-    # workday takes Monday-Friday
     specific_day_scenario: workday
-
-    # when estimating the dmc model using biogeme (TODO: add pt cost params)
-    routed_trips_file: "Routed_alternatives_v3_FINAL.txt" # absolute path to the data  
-
-    # Cross-border traffic
-    include_cross_border: true  # Generate cross-border traffic from A+GQPV survey, default = False
-    cross_border_countries: "All" # default = "All". Allow selection of cross-border traffic based on origin country. Use country codes such as "AT", "DE", "FR", "IT"
-    cross_border_exclude_shapefiles: ["/cluster/project/cmdp/ch_data/pipeline/spatial/MMT/MMT_extent_FR.gpkg"] # For the Geneva scenario, we are using a "real" synthetic
-    # population for residents of this area, so we want to remove A+GQPV traffic generated in this zone.
-
-    # PT pricing
-    # default is false; true does nto work on Euler
-    generate_pt_pricing_inputs: false
-
-    # Pt routing parameters
-    # can run on Euler but takes huge amount of time
-    calibrate_pt_routing_params: false # Please make sure you really want to switch this parameter to true because the calibration takes 12+ hours!
 
     # calibration and dmc model estimation
     estimate_dmc: true
     calibrate_alphas_in_matsim: true
-    alphaCalibration.level: canton # possible values are global, canton, cluster
-    alphaCalibration.filePath: absolute/path/to/cantons_mode_shares.csv # path to the file containing mode shares per canton or cluster
-
+    alphaCalibration.level: canton
     calibrate_betas_in_matsim: false
-    activate_traffic_light_delays: false
-    activate_unsignalized_intersections_delays: false
+    activate_traffic_light_delays: true
+    activate_unsignalized_intersections_delays: true
+    network_calibration.activate: true
+    network_calibration.calibrate_disutilities: true
+    network_calibration.calibrate_freespeed: true
 
-    # Swiss people crossing the border to perform secondary activities
-    # TODO: this will be improved later while identifying MZ activity chains crossing the border
+    # This is for the counts
+    simulation_directory: simulation_output
+    only_weekday: true
+    # tomtom_api_key: ...
+    # eqasim_path: ... # you can set the path to jar file
+    # num_tomtom_requests: 0 # number of requests to tomtom each time the stage is run
+    # num_mapbox_requests: 0
+    travel_times_from: tomtom
+
+    # This is to run the cutter
+    # extent_path: ...
+    # extent_prefix: ...
+
+    # This is for the french part
+    cross_border_countries: "All"
+    cross_border_exclude_shapefiles: ["/cluster/project/cmdp/ch_data/pipeline/spatial/MMT/MMT_extent_FR.gpkg"]
+
+    # Swiss people crossing the border
     generate_outbound_flows: true # default: false
-    outbound_flows_perimeter: ["/cluster/project/cmdp/ch_data/pipeline/spatial/MMT/MMT_extent_FR.gpkg"] # Where secondary activities outside of Switzerland can be assigned
-    
-    # Add mobility generated by French residents. The inputs are generated by the eqasim-france pipeline.
+    outbound_flows_perimeter: ["/cluster/project/cmdp/ch_data/pipeline/spatial/MMT/MMT_extent_FR.gpkg"]
     include_external_population: true # default:false
     external_population_folder: /cluster/project/cmdp/ch_data/pipeline/fr_population_100pct_20260521
     fr_sample_rate: 1.0 # Sample size used for the generation of the outputs in the folder above. Will be used to downsample the FR population if necessary.
+    gtfs_name: merged_gtfs 

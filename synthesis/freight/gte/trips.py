@@ -114,8 +114,8 @@ def execute(context):
                 enterprises = df_statent.values[choices, 0:2]
 
                 # assign coordinates
-                df_trips.loc[df_trips["origin_id"] == origin_id, "origin_x"] = enterprises[:, 0]
-                df_trips.loc[df_trips["origin_id"] == origin_id, "origin_y"] = enterprises[:, 1]
+                df_trips.loc[df_trips["origin_id"] == origin_id, "origin_x"] = enterprises[:, 0].astype(float)
+                df_trips.loc[df_trips["origin_id"] == origin_id, "origin_y"] = enterprises[:, 1].astype(float)
 
             progress.update()
 

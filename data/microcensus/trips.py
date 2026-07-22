@@ -6,7 +6,10 @@ from shapely.geometry import Point
 
 
 import warnings
-from pandas.errors import SettingWithCopyWarning
+try:
+    from pandas.errors import SettingWithCopyWarning
+except ImportError:
+    from pandas.errors import ChainedAssignmentError as SettingWithCopyWarning
 import logging
 
 logger = logging.getLogger("synpp")

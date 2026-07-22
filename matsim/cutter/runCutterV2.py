@@ -23,6 +23,7 @@ def configure(context):
     context.config("extent_path", default="")
     context.config("extent_prefix", default="")
     context.config("use_vdf", default=False)
+    context.config("threads")
 
 def execute(context):
     if context.config("extent_path") == "" or context.config("extent_prefix") == "":

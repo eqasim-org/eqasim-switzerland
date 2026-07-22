@@ -21,10 +21,12 @@ def impute(context, kd_tree, df, x="x", y="y", radius= 2.5 * 1e3, point_type="",
     logger.info("Imputing population density within %d m of %d %s coordinates...", radius, len(df), point_type)
     counts = []
     chunk_count = max(1, int(len(df) / chunk_size))
-    for chunk in context.progress(np.array_split(df, chunk_count), 
-                                  total=chunk_count,
-                                  label="Imputing population density..."):
-        
+    indices = np.array_split(np.arange(len(df)), chunk_count)
+
+    for idx in context.progress(indices,
+                                 total=chunk_count,
+                                 label="Imputing population density..."):
+        chunk = df.iloc[idx]
         coordinates = np.vstack([chunk[x], chunk[y]]).T
         counts.extend(kd_tree.query_radius(coordinates, radius, count_only=True))
     
@@ -37,7 +39,8 @@ def impute_parallel(context, kd_tree, df, x="x", y="y", radius=2.5 * 1e3, point_
     logger.info("Imputing population density within %d m of %d %s coordinates...", radius, total_points, point_type)
 
     chunk_count = max(1, int(np.ceil(total_points / chunk_size)))
-    df_splits = np.array_split(df, chunk_count)
+    indices = np.array_split(np.arange(total_points), chunk_count)
+    df_splits = [df.iloc[idx] for idx in indices]
 
     def process_chunk(chunk):
         coords = np.vstack([chunk[x], chunk[y]]).T.astype(float)  # ensure float array

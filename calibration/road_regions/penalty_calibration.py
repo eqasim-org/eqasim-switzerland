@@ -35,10 +35,12 @@ def execute(context):
         out_region_geometry = unary_union(valid_gdf.geometry)
  
         out_region_geometry = multipolygone_to_polygone_wkt(out_region_geometry)
-        df = df.append({"WKT":out_region_geometry, 
-                        "nom":"France", 
-                        "description":"French part of the cross-border region", 
-                        "transform_coordinates":True}, ignore_index=True)
+        df = pd.concat([df, 
+                        pd.DataFrame({"WKT":[out_region_geometry], 
+                                      "nom":["France"], 
+                                      "description":["French part of the cross-border region"], 
+                                      "transform_coordinates":[True]})],
+                        ignore_index=True)
  
     paths = [] 
     for i, row in df.iterrows():

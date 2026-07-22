@@ -30,8 +30,8 @@ def configure(context):
     context.config("calibrate_betas_in_matsim", default=False)
     context.config("extent_path", default="")
     context.config("extent_prefix", default="")
-
-
+    context.config("threads")
+    
 
 def execute(context):
     if context.config("extent_path") == "" or context.config("extent_prefix") == "":

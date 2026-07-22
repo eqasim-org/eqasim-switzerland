@@ -118,7 +118,8 @@ def execute(context):
 
     # Resampling for calibration
     resample_distributions(distance_distributions, dict(
-        car=0.8, car_passenger=1.0, pt=1.0, bike=0.0, walk=0.0, walk_loop=0.0, bike_loop=0.0, car_loop=0.8, pt_loop=1.0, remote_walk = 0.0
+        car=0.8, car_passenger=1.0, pt=1.0, bike=0.0, walk=0.0, walk_loop=0.0, bike_loop=0.0, 
+        car_loop=0.8, pt_loop=1.0, car_passenger_loop = 1.0, remote_walk = 0.0
     ))
 
     # Segment into subsamples (pt agents with car availability / without car availability in the same batch)

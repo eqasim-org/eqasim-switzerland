@@ -9,16 +9,14 @@ def check_feasibility(distances, direct_distance, consider_total_distance=True):
 
 def calculate_feasibility(distances, direct_distance, consider_total_distance=True):
     total_distance = np.sum(distances)
-    delta_distance = 0.0
 
     remaining_distance = total_distance - distances
-    delta = max(distances - direct_distance - remaining_distance)
+    delta = float(np.max(distances - direct_distance - remaining_distance))
 
     if consider_total_distance:
         delta = max(delta, direct_distance - total_distance)
 
-    return float(max(delta, 0))
-
+    return float(max(delta, 0.0))
 
 class DiscretizationSolver:
     def solve(self, problem, locations):
@@ -266,7 +264,7 @@ class GravityChainSolver:
             logger.error("Invalid chain for GravityChainSolver: %s", problem)
             raise RuntimeError("Invalid chain for GravityChainSolver")
 
-        direct_distance = la.norm(destination - origin)
+        direct_distance = float(la.norm(destination - origin))
 
         if direct_distance < 1e-12: # We have a zero direct distance, choose a direction randomly
             angle = self.random.random() * 2.0 * np.pi
@@ -337,7 +335,7 @@ class FeasibleDistanceSampler(DistanceSampler):
             distances = self.sample_distances(problem)
             return dict(valid = True, distances = distances, iterations = None)
 
-        direct_distance = la.norm(destination - origin, axis=1)
+        direct_distance = float(la.norm(destination - origin))
 
         # One point and two trips
         if direct_distance < 1e-3 and problem["size"] == 1:

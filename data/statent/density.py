@@ -26,10 +26,11 @@ def impute(context, df, x="x", y="y", radius= 500, point_type="", chunk_size=1e5
     logger.info("Imputing %s density within %d m of %d %s coordinates...", measure, radius, len(df), point_type)
     counts = []
     chunk_count = max(1, int(np.ceil(len(df) / chunk_size)))
-    for chunk in context.progress(np.array_split(df, chunk_count), 
+    indices = np.array_split(np.arange(len(df)), chunk_count)
+    for idx in context.progress(indices, 
                                   total=chunk_count,
                                   label="Imputing {} density...".format(measure)):
-        
+        chunk = df.iloc[idx]
         coordinates = np.vstack([chunk[x], chunk[y]]).T
         counts.extend(_query_density(kd_tree, coordinates, radius, measure, employee_weights))
     
@@ -48,7 +49,8 @@ def impute_parallel(context, df, x="x", y="y", radius=500, point_type="", chunk_
 
     # Split DataFrame into roughly equal chunks
     chunk_count = max(1, int(np.ceil(total_points / chunk_size)))
-    df_splits = np.array_split(df, chunk_count)
+    indices = np.array_split(np.arange(total_points), chunk_count)
+    df_splits = [df.iloc[idx] for idx in indices]
 
     def process_chunk(chunk):
         coords = np.vstack([chunk[x], chunk[y]]).T
