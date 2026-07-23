@@ -10,10 +10,15 @@ def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
-    context.stage("data.cross_border.swiss_residents_od")
     context.stage("synthesis.population.spatial.primary.work.work_remotly")
 
     context.config("random_seed")
+
+
+BORDER_MATCH_COLUMNS = [
+    "cross_border_person_id", "destination_country_raw",
+    "border_crossing_point", "border_crossing_trip_mode",
+]
 
 
 def execute(context):
@@ -22,12 +27,12 @@ def execute(context):
     if c.census == "statpop":
         df_persons = context.stage("synthesis.population.enriched")[[
             "person_id", "mz_person_id", "age", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id"
-        ]]
+        ] + BORDER_MATCH_COLUMNS]
 
     elif c.census == "are_synpop":
         df_persons = context.stage("synthesis.population.enriched")[[
             "person_id", "mz_person_id", "age_class", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id"
-        ]]    
+        ] + BORDER_MATCH_COLUMNS]
 
     df_trips = pd.DataFrame(context.stage("data.microcensus.trips")[0], copy=True)[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "origin_purpose"
@@ -105,18 +110,24 @@ def execute(context):
 
     print(f"Removed {initial_length - final_length} ({share}%) trips (people outside of Switzerland)")
 
-    # Adapt trips for agents crossing the border:
-    # they get a single trip (home-border or border-home) instead of their
-    # regular microcensus-derived chain, with mz_person_id replaced by a
-    # cross_border_person_id matched from the same canton.
+    # Adapt trips for agents crossing the border: they get a single trip
+    # (home-border or border-home) instead of their regular
+    # microcensus-derived chain. The destination country, crossing point, and
+    # trip mode are the ones synthesis.population.models.cross_border already
+    # matched this person to (from data.cross_border.swiss_residents_od) --
+    # reading that match here instead of sampling independently keeps it
+    # consistent with matsim/scenario/population.py's crossBorderOD attribute
+    # and with the location synthesis.population.spatial.locations assigns.
     df_trips_noncb = df_trips[~df_trips["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)].copy()
+    df_trips_noncb["destination_country_raw"] = None
+    df_trips_noncb["border_crossing_point"]   = None
 
     is_cb_person = df_persons["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)
     is_cb_person &= ~df_persons["is_truck_driver"].astype("boolean").fillna(False).astype(bool)
     is_cb_person &= ~df_persons["is_outside_of_switzerland"].astype("boolean").fillna(False).astype(bool)
+    is_cb_person &= df_persons["cross_border_person_id"].notna()
 
-    df_cb_persons = df_persons.loc[is_cb_person, ["person_id", "canton_id"]].copy()
-    df_cb_persons["canton_id"] = pd.to_numeric(df_cb_persons["canton_id"], errors="coerce")
+    df_cb_persons = df_persons.loc[is_cb_person, ["person_id"] + BORDER_MATCH_COLUMNS].copy()
 
     final_columns = [
         "person_id", "mz_person_id", "trip_id", "trip_index",
@@ -124,54 +135,33 @@ def execute(context):
         "preceding_purpose",
         "following_purpose",
         "trip_duration",
-        "mode"
+        "mode",
+        "destination_country_raw", "border_crossing_point",
     ]
 
     if len(df_cb_persons) == 0:
         return df_trips_noncb[final_columns]
 
-    cb_ch_od = context.stage("data.cross_border.swiss_residents_od").copy()
-    cb_ch_od["origin_canton_id"] = pd.to_numeric(cb_ch_od["origin_canton_id"], errors="coerce")
-    od_by_canton = {canton: group for canton, group in cb_ch_od.groupby("origin_canton_id")}
-
-    matched_records = []
-    n_fallback = 0
-
-    for canton_id, group in df_cb_persons.groupby("canton_id"):
-        candidates = od_by_canton.get(canton_id)
-        if candidates is None or len(candidates) == 0:
-            n_fallback += len(group)
-            candidates = cb_ch_od
-
-        sampled = candidates.sample(
-            n=len(group), replace=True, random_state=rng.randint(0, 2**31 - 1)
-        ).reset_index(drop=True)
-        sampled["person_id"] = group["person_id"].values
-        matched_records.append(sampled)
-
-    df_matched = pd.concat(matched_records, ignore_index=True)
-
-    if n_fallback > 0:
-        print(f"Warning: {n_fallback} border-crossing persons had no swiss_residents_od record for their canton; sampled from the full dataset instead.")
-
     # Direction: 50% leaving Switzerland (home -> border), 50% entering (border -> home)
-    is_leaving = rng.random_sample(size=len(df_matched)) < 0.5
+    is_leaving = rng.random_sample(size=len(df_cb_persons)) < 0.5
 
     # Sample departure/arrival times from an already existing (non-border) trip
     sampled_times = df_trips_noncb[["departure_time", "arrival_time"]].sample(
-        n=len(df_matched), replace=True, random_state=rng.randint(0, 2**31 - 1)
+        n=len(df_cb_persons), replace=True, random_state=rng.randint(0, 2**31 - 1)
     ).reset_index(drop=True)
 
     df_trips_cb = pd.DataFrame({
-        "person_id": df_matched["person_id"].values,
-        "mz_person_id": df_matched["cross_border_person_id"].values,
+        "person_id": df_cb_persons["person_id"].values,
+        "mz_person_id": df_cb_persons["cross_border_person_id"].values,
         "trip_id": 1,
         "trip_index": 0,
         "departure_time": sampled_times["departure_time"].values,
         "arrival_time": sampled_times["arrival_time"].values,
         "preceding_purpose": np.where(is_leaving, "home", "border"),
         "following_purpose": np.where(is_leaving, "border", "home"),
-        "mode": df_matched["trip_mode"].values,
+        "mode": df_cb_persons["border_crossing_trip_mode"].values,
+        "destination_country_raw": df_cb_persons["destination_country_raw"].values,
+        "border_crossing_point": df_cb_persons["border_crossing_point"].values,
     })
     df_trips_cb["trip_duration"] = df_trips_cb["arrival_time"] - df_trips_cb["departure_time"]
 

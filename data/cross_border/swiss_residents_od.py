@@ -5,6 +5,8 @@ import geopandas as gpd
 import random
 from pathlib import Path
 
+from data.cross_border.generate_od import project_point_series_close_to_border
+
 def configure(context):
     context.config("data_path")
     context.config("specific_day_scenario", default = "workday")
@@ -61,7 +63,8 @@ def process_from_to_trips(df_trips, context):
 
     # 1. Remove "through" trips that were not classified properly
     trips    = df_trips[(df_trips["origin_country"]=="CH") | (df_trips["destination_country"]=="CH")].copy()
-    trips_od = trips[["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
+    trips_od = trips[["origin_country", "destination_country", "origin_country_raw", "destination_country_raw",
+        "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
         "interview_place", "interview_point_id", "interview_geometry_point"]].copy()
 
     # 2. Remove trips with missing information on start or end point
@@ -73,6 +76,7 @@ def process_from_to_trips(df_trips, context):
     # Reorder start and end so that all trips start in CH
     mask = df["destination_country"] == "CH"
     df.loc[mask, ["origin_country", "destination_country"]] = df.loc[mask, ["destination_country", "origin_country"]].values
+    df.loc[mask, ["origin_country_raw", "destination_country_raw"]] = df.loc[mask, ["destination_country_raw", "origin_country_raw"]].values
     df.loc[mask, ["start_x", "end_x"]] = df.loc[mask, ["end_x", "start_x"]].values
     df.loc[mask, ["start_y", "end_y"]] = df.loc[mask, ["end_y", "start_y"]].values
 
@@ -91,6 +95,13 @@ def process_from_to_trips(df_trips, context):
 
     df["cross_border_person_id"] = range(len(df))
     df["cross_border_person_id"] = "CBS_CH_" + df["cross_border_person_id"].astype(str)
+
+    # Project the foreign destination point onto/near the border, the same way
+    # generate_od.py derives the foreign population's home point: kept as-is if
+    # already close to the border, otherwise projected onto the nearest surveyed
+    # interview point. This ties the resulting point directly to this record's
+    # own destination_country_raw, rather than to a generically-sampled interview place.
+    df = project_point_series_close_to_border(df.copy(), "end_x", "end_y", 20, "other", "other", "border_crossing", context)
 
     # --- Maps: border crossers by municipality and canton ---
     muni_counts = (
@@ -122,7 +133,8 @@ def process_from_to_trips(df_trips, context):
     gdf_canton.to_file(f"{context.path()}/crossers_by_canton.gpkg", driver="GPKG")
 
     df = df[["cross_border_person_id",
-        "origin_municipality", "origin_canton_id", "destination_country",
+        "origin_municipality", "origin_canton_id", "destination_country", "destination_country_raw",
+        "border_crossing_point",
         "trip_mode", "trip_purpose",
         "interview_place", "interview_point_id", "interview_geometry_point"]]
 
@@ -153,10 +165,15 @@ def read_2021_data(context):
     
     # Process the columns
     # 1. Rename countries
+    # Keep the unprocessed country codes around, since the grouping below collapses
+    # everything outside of swiss_neighbors into "other".
+    df2021["origin_country_raw"]      = df2021["origin_country"]
+    df2021["destination_country_raw"] = df2021["destination_country"]
+
     swiss_neighbors = ["CH", "FR", "DE", "IT", "AT", "LI"]
     for column in ["residence_country", "origin_country", "destination_country"]:
         df2021.loc[:, column] = df2021[column].apply(lambda x: x if x in swiss_neighbors else "other")
-    
+
     # 2. Separate road and rail observations
     df2021["road_type"] = df2021["road_type"].astype(str)
     df2021.loc[df2021["road_type"]=="1", "road_type"] = "road"

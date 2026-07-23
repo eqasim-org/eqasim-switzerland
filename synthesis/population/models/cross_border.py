@@ -184,6 +184,49 @@ def _compute_od_tables(context, pop_df: pd.DataFrame):
     return od_muni, od_canton, canton_crossing_rate, df_municipalities, df_cantons
 
 
+def _match_border_crossings(pop_df: pd.DataFrame, od_df: pd.DataFrame, crossers_mask: pd.Series, seed: int) -> pd.DataFrame:
+    """
+    For every person with is_crossing_the_border == 1, samples one specific
+    data.cross_border.swiss_residents_od record from the same canton (falling
+    back to the national table when the canton has no record of its own, or
+    when canton_id itself is missing). This is the single source of truth for
+    that person's destination country, border-crossing point, and trip mode --
+    synthesis.population.trips reads the result directly instead of matching
+    independently, so the label used in matsim/scenario/population.py and the
+    spatial location used in synthesis.population.spatial.locations always
+    refer to the same underlying record.
+
+    Returns a DataFrame aligned with pop_df.index with columns
+    cross_border_person_id, destination_country_raw, border_crossing_point,
+    border_crossing_trip_mode -- all pd.NA outside of crossers_mask.
+    """
+    od = od_df.copy()
+    od["origin_canton_id"] = pd.to_numeric(od["origin_canton_id"], errors="coerce")
+    od_by_canton = {canton: group for canton, group in od.groupby("origin_canton_id")}
+
+    match_cols = ["cross_border_person_id", "destination_country_raw", "border_crossing_point", "trip_mode"]
+    result = pd.DataFrame({
+        col: pd.Series(pd.NA, index=pop_df.index, dtype="object") for col in match_cols
+    })
+
+    rng = np.random.default_rng(seed)
+
+    crosser_canton = pd.to_numeric(pop_df.loc[crossers_mask, "canton_id"], errors="coerce")
+    for canton_id, sub in crosser_canton.groupby(crosser_canton, dropna=False):
+        candidates = None if pd.isna(canton_id) else od_by_canton.get(canton_id)
+        if candidates is None or len(candidates) == 0:
+            candidates = od
+
+        sampled = candidates.sample(
+            n=len(sub), replace=True, random_state=int(rng.integers(0, 2**31 - 1))
+        ).reset_index(drop=True)
+
+        for col in match_cols:
+            result.loc[sub.index, col] = sampled[col].values
+
+    return result.rename(columns={"trip_mode": "border_crossing_trip_mode"})
+
+
 # ---------------------------------------------------------------------------
 # Logistic regression (statsmodels)
 # ---------------------------------------------------------------------------
@@ -574,6 +617,16 @@ def execute(context):
     # 9. STOCHASTIC DRAW
     # -------------------------------------------------------------------
     pop_df["is_crossing_the_border"] = _draw_bernoulli(proba, seed=SEED_CB)
+
+    # -------------------------------------------------------------------
+    # 9b. MATCH EACH CROSSER TO A SPECIFIC data.cross_border.swiss_residents_od
+    #     RECORD (destination country, crossing point, trip mode)
+    # -------------------------------------------------------------------
+    crossers_mask = pop_df["is_crossing_the_border"] == 1
+    od_df         = context.stage("data.cross_border.swiss_residents_od")
+    border_match  = _match_border_crossings(pop_df, od_df, crossers_mask, seed=SEED_CB + 1)
+    for col in border_match.columns:
+        pop_df[col] = border_match[col].values
 
     # -------------------------------------------------------------------
     # 10. DIAGNOSTICS

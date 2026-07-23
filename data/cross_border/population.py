@@ -1,7 +1,3 @@
-import numpy as np
-import pandas as pd
-import geopandas as gpd
-
 def configure(context):
     context.config("random_seed")
 
@@ -16,14 +12,17 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
                  "statpop_person_id", "statpop_household_id", "mz_person_id", "mz_head_id", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
                  "income_class",
-                 "number_of_cars_class", "number_of_bikes_class"]
+                 "number_of_cars_class", "number_of_bikes_class",
+                 "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]
 
 
 def execute(context):
     df         = context.stage("data.cross_border.destinations")
     mz_persons = context.stage("data.microcensus.persons")
 
-    population = df[["cross_border_person_id", "mz_person_id", "origin_x", "origin_y"]].copy()
+    population = df[["cross_border_person_id", "mz_person_id", "origin_x", "origin_y",
+                      "origin_country", "destination_country",
+                      "origin_country_raw", "destination_country_raw"]].copy()
 
     population["household_id"]          = population["cross_border_person_id"].values 
     population["home_x"]                = population["origin_x"].values 
@@ -51,6 +50,7 @@ def execute(context):
                                   how = "left",
                                   left_on = "mz_person_id",
                                   right_on = "person_id")
+    
     del population["person_id"]
     population["person_id"] = population["cross_border_person_id"]
     

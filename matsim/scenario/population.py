@@ -138,6 +138,10 @@ class PersonWriter:
         is_french     = (person_type == ExternalPopulationConstants.person_type)
         writer.add_attribute(ExternalPopulationConstants.is_external, "java.lang.Boolean", writer.true_false(is_french))
 
+        cross_border_od = getattr(p, "cross_border_od", None)
+        if pd.notna(cross_border_od):
+            writer.add_attribute("crossBorderOD", "java.lang.String", str(cross_border_od))
+
         writer.add_attribute("bikeAvail", "java.lang.String", ["never", "always"][int(p.bike_availability)])
 
         if is_crossborder:
@@ -266,7 +270,7 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
                  "pt_subscription", 
                  "household_id", "is_car_passenger", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
-                 "income_class", "person_type",
+                 "income_class", "person_type", "cross_border_od",
                  "bike_availability"]
 
 
@@ -342,7 +346,20 @@ def execute(context):
     df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
 
     df_persons["person_type"] = "normal"
-    df_persons.loc[df_persons["is_crossing_the_border"], "person_type"] = "crossborder"
+    is_crossing_the_border = df_persons["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)
+    df_persons.loc[is_crossing_the_border, "person_type"] = "crossborder"
+
+    # For Swiss residents crossing the border, destination_country_raw was already
+    # assigned in synthesis.population.models.cross_border (matched to a specific
+    # data.cross_border.swiss_residents_od record) and carried through
+    # synthesis.population.models.subscriptions -- the same record
+    # synthesis.population.spatial.locations used for the border activity's
+    # location, so label and point stay consistent.
+    df_persons["cross_border_od"] = None
+    has_raw_od = df_persons["destination_country_raw"].notna()
+    df_persons.loc[has_raw_od, "cross_border_od"] = "CH-" + df_persons.loc[has_raw_od, "destination_country_raw"]
+
+    df_persons = df_persons.drop(columns=["destination_country_raw"])
 
     if context.config("include_external_population"):
         external_persons    = context.stage("data.external_population.read_outputs")[0].copy()
@@ -397,6 +414,9 @@ def execute(context):
                 cross_border_activities[col] = 0
 
         cross_border_persons["person_type"]       = "crossborder"
+        cross_border_persons["cross_border_od"]   = (
+            cross_border_persons["origin_country_raw"] + "-" + cross_border_persons["destination_country_raw"]
+        )
         cross_border_persons["pt_subscription"]   = 0
         cross_border_persons["bike_availability"] = 0
         cross_border_persons["car_availability"]  = 1
