@@ -8,6 +8,7 @@ import logging
 
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.config("data_path")
     context.config("specific_day_scenario", default = "workday")
@@ -124,7 +125,8 @@ def process_from_to_trips(df_trips, context):
 
     # 1. Remove "through" trips that were not classified properly
     trips    = df_trips[(df_trips["origin_country"]=="CH") | (df_trips["destination_country"]=="CH")].copy()
-    trips_od = trips[["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
+    trips_od = trips[["origin_country", "destination_country", "origin_country_raw", "destination_country_raw",
+        "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
         "interview_place", "interview_point_id", "interview_geometry_point"]].copy()
 
     # 2. Remove trips with missing information on start or end point
@@ -181,14 +183,16 @@ def process_from_to_trips(df_trips, context):
         "origin_x", "origin_y", "destination_x", "destination_y",
         "residence_x", "residence_y",
         "trip_mode", "trip_purpose", "is_border_point_projected",
-        "interview_place", "interview_point_id", "interview_geometry_point"]]
+        "interview_place", "interview_point_id", "interview_geometry_point",
+        "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]]
 
     return df
 
 
 def process_through_trips(through_trips, N, context):
     through_od = through_trips[
-        ["origin_country", "destination_country", "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
+        ["origin_country", "destination_country", "origin_country_raw", "destination_country_raw",
+        "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
         "interview_place", "interview_point_id", "interview_geometry_point"]
     ]
 
@@ -228,7 +232,8 @@ def process_through_trips(through_trips, N, context):
         "origin_x", "origin_y", "destination_x", "destination_y",
         "residence_x", "residence_y",
         "trip_mode", "trip_purpose", "is_border_point_projected",
-        "interview_place", "interview_point_id", "interview_geometry_point"]]
+        "interview_place", "interview_point_id", "interview_geometry_point",
+        "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]]
 
     return df
 
@@ -257,6 +262,11 @@ def read_2021_data(context):
     
     # Process the columns
     # 1. Rename countries
+    # Keep the unprocessed country codes around, since the grouping below collapses
+    # everything outside of swiss_neighbors into "other".
+    df2021["origin_country_raw"]      = df2021["origin_country"]
+    df2021["destination_country_raw"] = df2021["destination_country"]
+
     swiss_neighbors = ["CH", "FR", "DE", "IT", "AT", "LI"]
     for column in ["residence_country", "origin_country", "destination_country"]:
         df2021.loc[:, column] = df2021[column].apply(lambda x: x if x in swiss_neighbors else "other")

@@ -88,7 +88,8 @@ def execute(context):
              "trip_mode", "trip_purpose", "destination_id",
              "origin_x", "origin_y", "destination_x", "destination_y",
              "is_border_point_projected",
-             "interview_place", "interview_point_id", "interview_geometry_point"]]
+             "interview_place", "interview_point_id", "interview_geometry_point",
+             "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]]
     
     for col in ["mz_person_id", "residence_x", "residence_y", "destination_id",
              "origin_x", "origin_y", "destination_x", "destination_y"]:

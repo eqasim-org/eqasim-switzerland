@@ -14,7 +14,6 @@ def configure(context):
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.trips")
     context.stage("synthesis.population.sampled")
-    context.stage("data.cross_border.swiss_residents_od")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
     context.stage("data.statent.density")
@@ -52,23 +51,19 @@ def execute(context):
                                       on="person_id")
     df_education_locations = df_education_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
-    # Border locations: agents crossing the border are matched (via the
-    # cross_border_person_id stashed in mz_person_id by synthesis.population.trips)
-    # to the actual interview/border-crossing point sampled in
-    # data.cross_border.swiss_residents_od, rather than a generic secondary location.
+    # Border locations: the point comes straight from the same
+    # data.cross_border.swiss_residents_od record synthesis.population.trips
+    # already matched each crosser to (mz_person_id holds that record's
+    # cross_border_person_id), so the location is guaranteed to be consistent
+    # with the destination_country_raw carried on that same trip.
     df_border_locations = df_locations[df_locations["purpose"] == "border"]
 
     df_cb_trips = context.stage("synthesis.population.trips")
     df_cb_trips = df_cb_trips[(df_cb_trips["preceding_purpose"] == "border") | (df_cb_trips["following_purpose"] == "border")]
-    df_cb_trips = df_cb_trips[["person_id", "mz_person_id"]].drop_duplicates("person_id")
-    df_cb_trips = df_cb_trips.rename(columns={"mz_person_id": "cross_border_person_id"})
-
-    cb_ch_od = context.stage("data.cross_border.swiss_residents_od")[[
-        "cross_border_person_id", "interview_point_id", "interview_geometry_point"
-    ]].rename(columns={"interview_point_id": "destination_id", "interview_geometry_point": "geometry"})
+    df_cb_trips = df_cb_trips[["person_id", "mz_person_id", "border_crossing_point"]].drop_duplicates("person_id")
+    df_cb_trips = df_cb_trips.rename(columns={"mz_person_id": "destination_id", "border_crossing_point": "geometry"})
 
     df_border_locations = pd.merge(df_border_locations, df_cb_trips, on="person_id", how="left")
-    df_border_locations = pd.merge(df_border_locations, cb_ch_od, on="cross_border_person_id", how="left")
     df_border_locations = df_border_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
     # Secondary locations
