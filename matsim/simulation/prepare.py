@@ -140,7 +140,13 @@ def execute(context):
         # everything else will be simulated
         etree.SubElement(module, "param", name="deterministicServiceModes",
                         value="rail,subway,ferry,tram,funicular,cable-car,gondola,other")
-        etree.SubElement(module, "param", name="createLinkEventsInterval", value="10")
+        # The deterministic PT engine (rail/tram/subway/ferry/...) only writes
+        # linkEnter/linkLeave events when iterationNumber % interval == 0. The
+        # webmap's pt_link_volumes are built from those events, so the LAST
+        # iteration must satisfy that or those modes get no link volumes (only
+        # bus, which runs on the QSim, does). value=1 => every iteration writes
+        # them, so the output iteration always has rail/tram/etc. link volumes.
+        etree.SubElement(module, "param", name="createLinkEventsInterval", value="1")
 
         # Append to root
         root.append(module)

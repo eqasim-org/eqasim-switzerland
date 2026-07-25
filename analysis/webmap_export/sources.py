@@ -193,9 +193,9 @@ def discover_sample_rate(
 
 
 def discover_scale_pt(
-    *, home_pipe: Path = DEFAULT_HOME_PIPE, default: bool = True,
+    *, home_pipe: Path = DEFAULT_HOME_PIPE, default: bool = False,
 ) -> bool:
-    """Read the scale_pt_to_full_population flag from config.yml (default True)."""
+    """Read the scale_pt_to_full_population flag from config.yml (default False)."""
     yml = home_pipe / "ch-zh-synpop" / "config.yml"
     if yml.exists():
         try:

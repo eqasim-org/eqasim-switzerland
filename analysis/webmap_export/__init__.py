@@ -41,7 +41,7 @@ _VALID_MODES = {"both", "synthetic", "microcensus"}
 
 def configure(context):
     context.config("webmap_export", "both")
-    context.config("scale_pt_to_full_population", True)
+    context.config("scale_pt_to_full_population", False)
     context.stage("matsim.simulation.run")
 
 

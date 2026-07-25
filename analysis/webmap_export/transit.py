@@ -130,9 +130,11 @@ def build_boarding_data_by_line(
     sample_rate: float | None = None, scale_pt: bool = True,
 ) -> bool:
     """board_acc is keyed (line_id, route_id, facility, hour). The per-line 'stops'
-    shape (contract with the webmap) aggregates over route_id; each stop's additive
-    'directions' key splits the same counts by the route's .H/.R direction suffix.
-    Events on routes without that suffix count in the totals only."""
+    shape (contract with the webmap) aggregates over route_id into each stop's
+    direction-less 'data'; each stop's additive 'data_by_direction' key splits the
+    same counts by the route's .H/.R direction suffix (H + R == data total, modulo
+    routes with no suffix, which count toward 'data' only). Covers all PT modes -
+    boarding events are emitted for rail/tram too, unlike link-traversal events."""
     if not lines:
         log.info("transit: no transit lines - boarding_data_by_line.json skipped")
         return False
@@ -172,7 +174,7 @@ def build_boarding_data_by_line(
             }
             dirs = by_dir_fac.get((line_id, fac))
             if dirs:
-                entry["directions"] = {d: _hourly(dirs[d]) for d in sorted(dirs)}
+                entry["data_by_direction"] = {d: _hourly(dirs[d]) for d in sorted(dirs)}
             stops_out.append(entry)
         out.append({
             "line_id": line_id,
@@ -261,8 +263,11 @@ def parse_transit_routes(path: Path) -> list[dict]:
             rp = route.find("routeProfile")
             if rp is not None:
                 stop_refs = [s.attrib["refId"] for s in rp.findall("stop") if "refId" in s.attrib]
+            deps = route.find("departures")
+            n_departures = len(deps.findall("departure")) if deps is not None else 0
             routes.append({"line_id": lid, "line_name": lname, "route_id": rid,
-                           "mode": mode, "link_refs": link_refs, "stop_refs": stop_refs})
+                           "mode": mode, "link_refs": link_refs, "stop_refs": stop_refs,
+                           "n_departures": n_departures})
     return routes
 
 
@@ -347,6 +352,107 @@ def build_transit_routes(db: duckdb.DuckDBPyConnection, routes: list[dict],
     return True
 
 
+def _stops_lonlat(db: duckdb.DuckDBPyConnection, stops: dict, fids: set) -> dict:
+    """Transform the given stop facility ids from EPSG:2056 to WGS84 [lon, lat]."""
+    wanted = [f for f in fids if f in stops]
+    if not wanted:
+        return {}
+    db.execute("CREATE TEMP TABLE _rd_stops (fid VARCHAR, x DOUBLE, y DOUBLE)")
+    db.executemany("INSERT INTO _rd_stops VALUES (?,?,?)",
+                   [(f, stops[f]["x"], stops[f]["y"]) for f in wanted])
+    out: dict[str, list] = {}
+    for fid, gj in db.execute("""
+        SELECT fid, ST_AsGeoJSON(ST_Transform(ST_Point(x, y), 'EPSG:2056', 'EPSG:4326', true))
+        FROM _rd_stops
+    """).fetchall():
+        try:
+            out[fid] = json.loads(gj)["coordinates"]
+        except (TypeError, KeyError, ValueError):
+            continue
+    db.execute("DROP TABLE _rd_stops")
+    return out
+
+
+def build_route_directions(db: duckdb.DuckDBPyConnection, routes: list[dict],
+                           stops: dict) -> bool:
+    """Emit route_directions JSON: per line & direction (.H/.R suffix), the terminus
+    (last stop) and origin (first stop) weighted by number of departures - i.e. real
+    service frequency, not route-variant count. Coordinates are WGS84 [lon, lat].
+
+    Feeds the webmap direction toggle and terminus markers. Covers ALL PT modes
+    (rail/tram/etc.) - departures are read from the schedule, independent of the
+    events pass. Stored under static_assets key 'route_directions'.
+    """
+    if not routes:
+        log.info("transit: no routes - route_directions skipped")
+        return False
+
+    # (line_id, direction) -> {"terminus"|"origin": {stop_id: [n_departures, n_routes]}}
+    agg: dict[tuple[str, str], dict[str, dict[str, list]]] = {}
+    for r in routes:
+        m = _DIR_RE.search(r["route_id"])
+        if m is None:
+            continue  # no .H/.R suffix -> excluded from directional termini
+        stop_refs = r["stop_refs"]
+        if len(stop_refs) < 2:
+            continue
+        ndep = r.get("n_departures", 0)
+        a = agg.setdefault((r["line_id"], m.group(1)), {"terminus": {}, "origin": {}})
+        for role, fac in (("terminus", stop_refs[-1]), ("origin", stop_refs[0])):
+            slot = a[role].setdefault(fac, [0, 0])
+            slot[0] += ndep
+            slot[1] += 1
+
+    if not agg:
+        log.info("transit: no suffixed routes - route_directions skipped")
+        return False
+
+    needed = {fac for dirs in agg.values() for role in dirs.values() for fac in role}
+    lonlat = _stops_lonlat(db, stops, needed)
+
+    def _rank(cand: dict[str, list], require_coord: bool) -> list[tuple[str, list]]:
+        """Stops desc by departures, then n_routes, then stop_id (stable)."""
+        items = [(fid, wr) for fid, wr in cand.items()
+                 if not require_coord or fid in lonlat]
+        return sorted(items, key=lambda kv: (-kv[1][0], -kv[1][1], kv[0]))
+
+    out: dict[str, dict] = {}
+    for (line_id, direction), dirs in agg.items():
+        termini = _rank(dirs["terminus"], require_coord=True)
+        if not termini:
+            continue  # no resolvable terminus stop+coord in this direction
+        win_fid, (win_dep, win_routes) = termini[0]
+        total_dep = sum(wr[0] for wr in dirs["terminus"].values())
+        origins = _rank(dirs["origin"], require_coord=True) or _rank(dirs["origin"], False)
+        entry = {
+            "terminus": stops.get(win_fid, {}).get("name", ""),
+            "terminus_id": win_fid,
+            "coord": lonlat[win_fid],
+            "n_departures": win_dep,
+            "n_routes": win_routes,
+            "share": round(win_dep / total_dep, 4) if total_dep else 0.0,
+        }
+        if origins:
+            o_fid = origins[0][0]
+            entry["origin"] = stops.get(o_fid, {}).get("name", "")
+            entry["origin_id"] = o_fid
+            if o_fid in lonlat:
+                entry["origin_coord"] = lonlat[o_fid]
+        alternates = [
+            {"terminus": stops.get(fid, {}).get("name", ""), "terminus_id": fid,
+             "coord": lonlat[fid], "n_departures": dep, "n_routes": nr}
+            for fid, (dep, nr) in termini[1:]
+        ]
+        if alternates:
+            entry["alternates"] = alternates
+        out.setdefault(line_id, {})[direction] = entry
+
+    payload = json.dumps(out, ensure_ascii=False).encode("utf-8")
+    put_asset(db, "route_directions", JSON_CT, payload)
+    log.info("transit: route_directions - %d lines with a resolvable direction", len(out))
+    return True
+
+
 def build_pt_link_volumes(
     db: duckdb.DuckDBPyConnection, pt_vol_acc: dict, routes: list[dict],
     sample_rate: float | None = None, scale_pt: bool = True,
@@ -427,5 +533,6 @@ def build_all(
     build_boarding_data_by_line(db, stops, lines, geo, board_acc or {}, sample_rate, scale_pt)
     build_stop_transfer_data_by_canton(db, stops, lines, geo, transfer_data or {}, sample_rate, scale_pt)
     build_transit_routes(db, routes, stops)
+    build_route_directions(db, routes, stops)
     build_pt_link_volumes(db, pt_vol_acc or {}, routes, sample_rate, scale_pt)
     log.info("=== transit assets DONE")
