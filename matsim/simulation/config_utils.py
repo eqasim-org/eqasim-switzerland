@@ -224,8 +224,8 @@ def get_network_calibration_args(context):
             "--config:eqasim:networkCalibration.maxPenalty", "0.4",
             "--config:eqasim:networkCalibration.maxFreespeedFactor", "1.4",
             "--config:eqasim:networkCalibration.minFreespeedFactor", "0.5",
-            "--config:eqasim:networkCalibration.penaltiesWarmupIterations", "20",
-            "--config:eqasim:networkCalibration.freespeedWarmupIterations", "25",
+            "--config:eqasim:networkCalibration.penaltiesWarmupIterations", "44",
+            "--config:eqasim:networkCalibration.freespeedWarmupIterations", "31",
             "--config:eqasim:networkCalibration.correctCapacities", str(context.config("correct_links_capacity")).lower(),
             "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed"))]
     )

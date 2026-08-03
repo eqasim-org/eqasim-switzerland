@@ -14,6 +14,7 @@ def configure(context):
     context.stage("analysis.travel_times.trips.build_geneva_trips")
     context.stage("analysis.travel_times.trips.build_zurich_trips")
     context.stage("analysis.travel_times.trips.build_lausanne_trips")
+    context.stage("analysis.travel_times.trips.build_french_trips")
 
 def execute(context):
     logger.info("\t - Loading microcensus trip data")
@@ -56,7 +57,13 @@ def execute(context):
     geneva_trips = context.stage("analysis.travel_times.trips.build_geneva_trips")
     zurich_trips = context.stage("analysis.travel_times.trips.build_zurich_trips")
     lausanne_trips = context.stage("analysis.travel_times.trips.build_lausanne_trips")
-    car_trips = pd.concat([highway_trips, urban_trips, geneva_trips, zurich_trips, lausanne_trips, car_trips], ignore_index=True)
+    french_trips = context.stage("analysis.travel_times.trips.build_french_trips")
+
+    car_trips = [highway_trips, urban_trips, geneva_trips, zurich_trips, lausanne_trips, car_trips]
+    if french_trips is not None:
+        car_trips.append(french_trips)
+
+    car_trips = pd.concat(car_trips, ignore_index=True)
     logger.info(f"\t - Total car trips after adding highway, urban, geneva, zurich, and lausanne trips: {len(car_trips)}")
 
     # save to csv    

@@ -23,6 +23,7 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.stage("data.spatial.swiss_border")
+    context.stage("data.external_population.constants")
 
     context.config("car_cost_per_km", constants.CAR_COST_PER_KM) #CHF per km
     context.config("parking_cost_per_hour_CHF_urban", constants.PARKING_COST_PER_HOUR_CHF_URBAN)
