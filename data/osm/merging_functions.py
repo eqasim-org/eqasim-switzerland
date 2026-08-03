@@ -2,9 +2,10 @@ import os
 import shapely.geometry as sgeo
 import osmium
 from multiprocessing import Pool
+from shapely.prepared import prep
 import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("synpp")
 
 """
 This file contains functions that merge multiple osm files, and cut to the borders
@@ -14,7 +15,7 @@ This file contains functions that merge multiple osm files, and cut to the borde
 def collect_ids(args):
     osm_file, wkb_area = args
 
-    area = sgeo.shape(wkb_area)
+    area = prep(sgeo.shape(wkb_area))
     way_ids = set()
     node_ids = set()
 
@@ -38,7 +39,7 @@ def collect_ids(args):
 
     return (way_ids, node_ids)
 
-def merge_using_pyosmium(context, osm_files, border, output_path):
+def merge_using_pyosmium(context, osm_files, border, output_path, speed_corrections=None):
     # Geometry that defines the region of interest
     area = border["geometry"].iloc[0]
     wkb_area = area.__geo_interface__ # to wkb format, for multiprocessing
@@ -77,6 +78,7 @@ def merge_using_pyosmium(context, osm_files, border, output_path):
     ]
 
     total = len(tracker.way_ids()) + len(tracker.node_ids())
+    write_item = _write_item if speed_corrections is None else _write_item_with_speed_corrections
     with osmium.SimpleWriter(output_path) as writer:
         for items in context.progress(
             osmium.zip_processors(*processors),
@@ -85,13 +87,43 @@ def merge_using_pyosmium(context, osm_files, border, output_path):
         ):
             for item in items:
                 if item:
-                    writer.add(item)  # write only once
+                    write_item(writer, item, speed_corrections)
                     break
 
     return output_path
 
 
-def merge_files(context, osm_files, border, output_file):
+def _write_item(writer, item, speed_corrections):
+    writer.add(item)
+
+def _write_item_with_speed_corrections(writer, item, speed_corrections):
+    if item.type_str() == "w":
+        new_speed = speed_corrections.get(item.id)
+        if new_speed is None:
+            writer.add_way(item)
+            return
+        
+        tags = dict(item.tags)
+        tags["maxspeed"] = str(new_speed)
+
+        writer.add_way(
+            osmium.osm.mutable.Way(
+                id=item.id,
+                version=item.version,
+                visible=item.visible,
+                changeset=item.changeset,
+                uid=item.uid,
+                user=item.user,
+                timestamp=item.timestamp,
+                nodes=list(item.nodes),
+                tags=tags,
+            )
+        )
+    else:
+        writer.add(item)
+        
+
+def merge_files(context, osm_files, border, output_file, speed_corrections=None):
     new_file_path = output_file.replace(".osm.gz","-pyosmium.osm")
-    return merge_using_pyosmium(context, osm_files, border, new_file_path)
+    return merge_using_pyosmium(context, osm_files, border, new_file_path, speed_corrections)
         

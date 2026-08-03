@@ -11,6 +11,7 @@ import gzip
 import io
 import networkx as nx
 import numpy as np
+import geopandas as gpd
 import logging
 logger = logging.getLogger(__name__)
 
@@ -40,10 +41,28 @@ class Network:
 
         # keep only car links
         if only_car_links:
-            self.links = self.links[self.links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
-            self.nodes = self.nodes[self.nodes['node_id'].isin(pd.unique(self.links['from_node'].tolist() + self.links['to_node'].tolist()))].reset_index(drop=True) 
+            self.filter_car_links(inplace=True)
 
-    
+    def filter_car_links(self, links=None, nodes=None, inplace=False):
+        if inplace and (links is None or nodes is None):
+            links = self.links.copy()
+            nodes = self.nodes.copy()
+        assert links is not None and nodes is not None, "links and nodes must be provided if inplace=False"
+
+        # filter links to only those that allow car mode
+        links = links[links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
+
+        # filter nodes to only those that connect car links    
+        used_node_ids = set(links['from_node']) | set(links['to_node'])
+        nodes = nodes[nodes['node_id'].isin(used_node_ids)].reset_index(drop=True)
+
+        if inplace:
+            self.links = links
+            self.nodes = nodes
+            return
+        else:
+            return links, nodes
+
     def put_attributes_in_links(self):
         if self.link_attrs.empty:
             self.links["attributes"] = None
@@ -64,7 +83,6 @@ class Network:
             crs=Network._crsTag in self.network_attrs and self.network_attrs[Network._crsTag] or 'No CRS')
     
     def as_geo(self, projection=None):
-        import geopandas as gpd
         import shapely.geometry as shp
     
         """Return a GeoPandas GeoDataFrame containing link geometries suitable for plotting."""
@@ -106,7 +124,7 @@ class Network:
         nodes = self.nodes  
         
         if only_car_links:
-            links = links[links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
+            links, nodes = self.filter_car_links(links, nodes)
 
         lengths = links['length'].values
         free_travel_times = lengths / links['freespeed'].values
@@ -133,7 +151,7 @@ class Network:
         nodes = self.nodes
 
         if only_car_links:
-            links = links[links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
+            links, nodes = self.filter_car_links(links, nodes)
 
         # Calculate travel times
         lengths = links['length'].values
@@ -174,8 +192,7 @@ class Network:
         nodes = self.nodes.reset_index(drop=True).copy()
 
         if only_car_links:
-            links = links[links['modes'].str.split(",").map(lambda x: "car" in x)].reset_index(drop=True)
-            nodes = nodes[nodes['node_id'].isin(pd.unique(links['from_node'].tolist() + links['to_node'].tolist()))].reset_index(drop=True) 
+            links, nodes = self.filter_car_links(links, nodes)
 
         # Calculate travel times
         lengths = links['length'].values
@@ -242,7 +259,16 @@ class Network:
                              write_attrbs = write_attrbs)
             writer.end_network()
 
-
+    def get_links_centroids(self):
+        links_centers = (
+            self.links[["link_id", "from_node", "to_node"]]
+            .merge(self.nodes, left_on="from_node", right_on="node_id", how="left")
+            .merge(self.nodes, left_on="to_node", right_on="node_id", suffixes=("_from_node", "_to_node"), how="left")
+        )
+        centroids_x = (links_centers.x_from_node + links_centers.x_to_node) / 2
+        centroids_y = (links_centers.y_from_node + links_centers.y_to_node) / 2
+        geometry = gpd.points_from_xy(centroids_x, centroids_y, crs="EPSG:2056")
+        return gpd.GeoDataFrame(links_centers[["link_id"]], geometry=geometry, crs="EPSG:2056")
 
 
 
