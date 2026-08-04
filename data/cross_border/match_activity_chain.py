@@ -8,11 +8,16 @@ def configure(context):
 
     context.stage("data.cross_border.sample")
     context.stage("data.microcensus.activity_chains")
+    context.stage("data.microcensus.persons")
+    context.stage("data.constants")
 
 
 def execute(context):
     df           = context.stage("data.cross_border.sample")
     mz_actchains = context.stage("data.microcensus.activity_chains")
+    mz_persons   = context.stage("data.microcensus.persons")[['person_id', 'age']]
+    mz_actchains = mz_actchains.merge(mz_persons, on = "person_id", how = "left")
+    cst          = context.stage("data.constants")
 
     purpose_to_actchain = {
         "work": ["home-work-home"],
@@ -31,11 +36,20 @@ def execute(context):
     elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
         mz_actchains = mz_actchains[mz_actchains["day"]==day]
 
+    mode_age_limit = {"car": 18, "pt": cst.MZ_AGE_THRESHOLD, "car_passenger": cst.MZ_AGE_THRESHOLD}
+    purpose_age_limit = {"work": 18, "work_secondary": 18, "shop": cst.MZ_AGE_THRESHOLD, "leisure": cst.MZ_AGE_THRESHOLD, 
+                         "education": cst.MZ_AGE_THRESHOLD, "other": cst.MZ_AGE_THRESHOLD}
+    
     for purpose, chains in purpose_to_actchain.items():
+        age_limit = purpose_age_limit.get(purpose, cst.MZ_AGE_THRESHOLD)
+
         for trip_mode in ["car", "pt", "car_passenger"]:
+            age_limit = max(age_limit, mode_age_limit.get(trip_mode, cst.MZ_AGE_THRESHOLD))
+
             mask_cb    = (df["trip_purpose"] == purpose) & (df["trip_mode"] == trip_mode)
             candidates = mz_actchains[(mz_actchains["activity_chain"].isin(chains)) &
-                                       (mz_actchains["mode_chain"]==f"{trip_mode}-{trip_mode}")][["person_id", "person_weight"]]
+                                       (mz_actchains["mode_chain"]==f"{trip_mode}-{trip_mode}") & 
+                                       (mz_actchains["age"] > age_limit)][["person_id", "person_weight"]]
 
             candidates.columns = ["mz_person_id", "mz_person_weight"]
             N_sample           = np.sum(mask_cb)

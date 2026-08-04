@@ -108,6 +108,21 @@ def _weighted_mean(x, w):
     return np.average(x[m], weights=w[m]) if m.sum() > 0 else np.nan
 
 
+def _age_compatible_od_candidates(od_group: pd.DataFrame, age_value, c) -> pd.DataFrame:
+    """Return OD candidates compatible with the person's age constraints."""
+    if pd.isna(age_value):
+        return pd.DataFrame(columns=od_group.columns)
+
+    age_val = float(age_value)
+    if age_val <= c.MZ_AGE_THRESHOLD:
+        return pd.DataFrame(columns=od_group.columns)
+
+    if age_val < 18:
+        return od_group[~od_group["trip_mode"].astype(str).str.lower().eq("car")]
+
+    return od_group
+
+
 def _add_survey_features(df):
     """Add derived model columns to MZ persons data (in-place)."""
     df["is_swiss"]        = df["is_swiss"].astype(int)
@@ -184,23 +199,16 @@ def _compute_od_tables(context, pop_df: pd.DataFrame):
     return od_muni, od_canton, canton_crossing_rate, df_municipalities, df_cantons
 
 
-def _match_border_crossings(pop_df: pd.DataFrame, od_df: pd.DataFrame, crossers_mask: pd.Series, seed: int) -> pd.DataFrame:
+def _match_border_crossings(pop_df: pd.DataFrame, od_df: pd.DataFrame, crossers_mask: pd.Series, seed: int, c) -> pd.DataFrame:
     """
     For every person with is_crossing_the_border == 1, samples one specific
     data.cross_border.swiss_residents_od record from the same canton (falling
     back to the national table when the canton has no record of its own, or
-    when canton_id itself is missing). This is the single source of truth for
-    that person's destination country, border-crossing point, and trip mode --
-    synthesis.population.trips reads the result directly instead of matching
-    independently, so the label used in matsim/scenario/population.py and the
-    spatial location used in synthesis.population.spatial.locations always
-    refer to the same underlying record.
-
-    Returns a DataFrame aligned with pop_df.index with columns
-    cross_border_person_id, destination_country_raw, border_crossing_point,
-    border_crossing_trip_mode -- all pd.NA outside of crossers_mask.
+    when canton_id itself is missing). The sampled record is constrained to be
+    compatible with the person's age: no one younger than 6 can be assigned a
+    crossing, and car trips are only allowed for people older than 18.
     """
-    od = od_df.copy()
+    od = od_df.sort_values("trip_mode").copy()
     od["origin_canton_id"] = pd.to_numeric(od["origin_canton_id"], errors="coerce")
     od_by_canton = {canton: group for canton, group in od.groupby("origin_canton_id")}
 
@@ -212,17 +220,32 @@ def _match_border_crossings(pop_df: pd.DataFrame, od_df: pd.DataFrame, crossers_
     rng = np.random.default_rng(seed)
 
     crosser_canton = pd.to_numeric(pop_df.loc[crossers_mask, "canton_id"], errors="coerce")
+    crosser_ages = pd.to_numeric(pop_df.loc[crossers_mask, "age"], errors="coerce")
+
     for canton_id, sub in crosser_canton.groupby(crosser_canton, dropna=False):
         candidates = None if pd.isna(canton_id) else od_by_canton.get(canton_id)
         if candidates is None or len(candidates) == 0:
             candidates = od
 
-        sampled = candidates.sample(
-            n=len(sub), replace=True, random_state=int(rng.integers(0, 2**31 - 1))
-        ).reset_index(drop=True)
+        sub_indices = sub.index
+        sub_ages = crosser_ages.loc[sub_indices]
 
-        for col in match_cols:
-            result.loc[sub.index, col] = sampled[col].values
+        for person_idx, person_age in sub_ages.items():
+            if pd.notna(person_age) and person_age <= c.MZ_AGE_THRESHOLD:
+                continue
+
+            person_candidates = _age_compatible_od_candidates(candidates, person_age, c)
+            if person_candidates.empty:
+                person_candidates = _age_compatible_od_candidates(od, person_age, c)
+            if person_candidates.empty:
+                continue
+
+            sampled = person_candidates.sample(
+                n=1, replace=True, random_state=int(rng.integers(0, 2**31 - 1))
+            ).reset_index(drop=True).iloc[0]
+
+            for col in match_cols:
+                result.loc[person_idx, col] = sampled[col]
 
     return result.rename(columns={"trip_mode": "border_crossing_trip_mode"})
 
@@ -401,9 +424,7 @@ def _max_relative_error(pop_df, proba, od_table, pop_col, id_col, min_n=_RAKING_
     return float(rel_err.max())
 
 
-def _iterative_spatial_calibration(
-    pop_df: pd.DataFrame, proba: np.ndarray, od_canton: pd.DataFrame, od_muni: pd.DataFrame
-) -> np.ndarray:
+def _iterative_spatial_calibration(pop_df: pd.DataFrame, proba: np.ndarray, od_canton: pd.DataFrame, od_muni: pd.DataFrame, age_eligible: pd.Series, valid_income: pd.Series) -> np.ndarray:
     """
     Alternates canton- and municipality-level calibration (raking) until the
     aggregated counts at both levels are within _RAKING_TOLERANCE of the
@@ -422,6 +443,9 @@ def _iterative_spatial_calibration(
     for i in range(1, _RAKING_ITERATIONS + 1):
         proba = _calibrate_canton(pop_df, proba, od_canton)
         proba = _calibrate_municipality(pop_df, proba, od_muni)
+
+        proba[~age_eligible] = 0.0
+        proba[~valid_income.values] = 0.0
 
         canton_err = _max_relative_error(pop_df, proba, od_canton, "canton_id", "canton_id")
         muni_err   = _max_relative_error(pop_df, proba, od_muni, "home_municipality_id", "municipality_id")
@@ -499,6 +523,7 @@ def execute(context):
     survey_df = survey_df[survey_df["income_class"] >= 0].copy()
     survey_df["income_class"] = survey_df["income_class"].astype(int)
 
+    survey_df = survey_df[pd.to_numeric(survey_df["age"], errors="coerce") > c.MZ_AGE_THRESHOLD].copy()
     survey_df["is_crossing_the_border"] = survey_df["is_crossing_the_border"].astype(int)
     survey_df = _add_survey_features(survey_df)
 
@@ -595,6 +620,9 @@ def execute(context):
         proba = selected_model.predict(sm.add_constant(X_pop))
 
     proba = np.asarray(proba, dtype=float)
+    age_eligible = pd.to_numeric(pop_df["age"], errors="coerce") > c.MZ_AGE_THRESHOLD
+    age_eligible = age_eligible.fillna(False).to_numpy()
+    proba[~age_eligible] = 0.0
     proba[~valid_income.values] = 0.0
 
     # -------------------------------------------------------------------
@@ -606,8 +634,7 @@ def execute(context):
             "Spatial calibration: raking up to %d iteration(s), shrinkage K=%d, tolerance=%.1f%%",
             _RAKING_ITERATIONS, _CALIBRATION_SHRINKAGE_K, _RAKING_TOLERANCE * 100,
         )
-        proba = _iterative_spatial_calibration(pop_df, proba, od_canton, od_muni)
-        proba[~valid_income.values] = 0.0
+        proba = _iterative_spatial_calibration(pop_df, proba, od_canton, od_muni, age_eligible, valid_income)
         logger.info(
             "Spatial calibration done. Mean predicted probability: %.3f%% -> %.3f%%",
             mean_before, proba.mean() * 100,
@@ -624,7 +651,7 @@ def execute(context):
     # -------------------------------------------------------------------
     crossers_mask = pop_df["is_crossing_the_border"] == 1
     od_df         = context.stage("data.cross_border.swiss_residents_od")
-    border_match  = _match_border_crossings(pop_df, od_df, crossers_mask, seed=SEED_CB + 1)
+    border_match  = _match_border_crossings(pop_df, od_df, crossers_mask, seed=SEED_CB + 1, c=c)
     for col in border_match.columns:
         pop_df[col] = border_match[col].values
 
