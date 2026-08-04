@@ -24,7 +24,7 @@ def configure(context):
     context.config("simplify_network_in_eqasim", True)
     # only if simplify network is true
     context.config("remove_network_loops", True)
-    context.config("remove_replicate_links", True)
+    context.config("remove_replicate_links", False)
     context.config("remove_nodes_with_no_intersection", False)
     context.config("correct_speed", True)
     context.config("ensure_network_connectivity", True)
