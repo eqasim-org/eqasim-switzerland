@@ -1,19 +1,10 @@
 import gzip
 import io
 import pandas as pd
-
 import matsim.writers
 
-
-def _require_cols(df, cols, df_name):
-    missing = [c for c in cols if c not in df.columns]
-    if missing:
-        raise KeyError(f"{df_name} is missing required columns: {missing}")
-
-
-def _na_to_default(x, default):
-    return default if pd.isna(x) else x
-
+FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class","municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"]
+INCOME_VALUES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -27,43 +18,6 @@ def configure(context):
     if context.config("include_external_population"):
         context.stage("data.external_population.read_outputs")
         context.stage("data.external_population.constants")
-
-
-FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class",
-          "municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"]
-
-
-INCOME_VALUES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]
-
-
-def write_number_of_cars_class(value, c):
-    if value == c.MAX_NUMBER_OF_CARS_CLASS:
-        return "%d+" % c.MAX_NUMBER_OF_CARS_CLASS
-    else:
-        return str(value)
-
-
-def add_household(writer, household, member_ids, c):
-    # household is a namedtuple row now
-    writer.start_household(household.household_id)
-    writer.add_members(member_ids)
-    writer.add_income(INCOME_VALUES[int(household.income_class)])
-
-    writer.start_attributes()
-    writer.add_attribute("incomeClass", "java.lang.Integer", str(int(household.income_class)))
-    writer.add_attribute("numberOfCars", "java.lang.String", write_number_of_cars_class(household.number_of_cars_class, c))
-    writer.add_attribute("municipalityType", "java.lang.String", str(household.municipality_type))
-    writer.add_attribute("spRegion", "java.lang.Integer", str(household.sp_region))
-    writer.add_attribute("ovgk", "java.lang.String", str(household.ovgk))
-    writer.add_attribute("cantonName", "java.lang.String", str(household.canton_name))
-    writer.add_attribute("incomePerCapita", "java.lang.Double", str(household.income_per_capita))
-
-    canton_id = str(_na_to_default(household.canton_id, -1))
-    writer.add_attribute("cantonId", "java.lang.Double", canton_id)
-
-    writer.end_attributes()
-    writer.end_household()
-
 
 def execute(context):
     cache_path = context.path()
@@ -79,17 +33,7 @@ def execute(context):
     assert df_persons.canton_name.notnull().all(), "Not all persons have a canton name assigned. Check the canton data."
 
     # Attach real average income per person per household    
-    df_persons["income"] = df_persons["income_class"].astype(int).map(c.INCOME_CLASS_MAP)
-    
-    # Calculate income per capita using the OECD equivalence scale: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Glossary:Equivalised_income
-    df_persons["is_child"] = df_persons["age"] < 14
-    num_children = df_persons.groupby("household_id")["is_child"].transform("sum")
-    num_adults   = df_persons['household_size'] - num_children
-
-    assert (num_adults >= 1).all(), "All households should have at least one adult."
-
-    equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children
-    df_persons["income_per_capita"] = df_persons["income"] / equvalent_size
+    df_persons[['income','income_per_capita']] = get_income(df_persons, c)
 
     _require_cols(df_persons, ["household_id", "person_id", "income_class", "number_of_cars_class",
                            "municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"], "df_persons")
@@ -107,8 +51,8 @@ def execute(context):
         external_persons["ovgk"]              = ex_constants.ovgk
 
         external_persons["canton_name"] = ex_constants.canton_name
-        if "income_per_capita" not in external_persons.columns:
-            external_persons["income_per_capita"] = 0
+        if "income_per_capita" not in external_persons.columns or 'income' not in external_persons.columns:
+            external_persons[['income','income_per_capita']] = get_income(external_persons, c)
 
         external_persons = external_persons[[c for c in FIELDS if c in external_persons.columns]]
         df_persons = pd.concat([df_persons, external_persons])
@@ -156,3 +100,81 @@ def execute(context):
             writer.end_households()
 
     return "%s/households.xml.gz" % cache_path
+
+
+
+
+
+
+
+
+
+
+########## helper functions ##########
+
+def add_household(writer, household, member_ids, c):
+    # household is a namedtuple row now
+    writer.start_household(household.household_id)
+    writer.add_members(member_ids)
+    writer.add_income(INCOME_VALUES[int(household.income_class)])
+
+    writer.start_attributes()
+    writer.add_attribute("incomeClass", "java.lang.Integer", str(int(household.income_class)))
+    writer.add_attribute("numberOfCars", "java.lang.String", write_number_of_cars_class(household.number_of_cars_class, c))
+    writer.add_attribute("municipalityType", "java.lang.String", str(household.municipality_type))
+    writer.add_attribute("spRegion", "java.lang.Integer", str(household.sp_region))
+    writer.add_attribute("ovgk", "java.lang.String", str(household.ovgk))
+    writer.add_attribute("cantonName", "java.lang.String", str(household.canton_name))
+    writer.add_attribute("incomePerCapita", "java.lang.Double", str(household.income_per_capita))
+
+    canton_id = str(_na_to_default(household.canton_id, -1))
+    writer.add_attribute("cantonId", "java.lang.Double", canton_id)
+
+    writer.end_attributes()
+    writer.end_household()
+
+def _require_cols(df, cols, df_name):
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise KeyError(f"{df_name} is missing required columns: {missing}")
+
+def _na_to_default(x, default):
+    return default if pd.isna(x) else x
+
+def write_number_of_cars_class(value, c):
+    if value == c.MAX_NUMBER_OF_CARS_CLASS:
+        return "%d+" % c.MAX_NUMBER_OF_CARS_CLASS
+    else:
+        return str(value)
+    
+def get_income(df_persons, cst):
+    cols = ["household_id", "income_class", "age"]
+    cols = cols+['household_size'] if 'household_size' in df_persons.columns else cols
+    df = df_persons[cols].copy()
+
+     # transform income class into income
+    df["income"] = df["income_class"].astype(int).map(cst.INCOME_CLASS_MAP)
+       
+    # Calculate income per capita using the OECD equivalence scale: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Glossary:Equivalised_income
+    if len(df)==df['household_id'].nunique():
+        # If household structure is not kept, we use an average household structure (average is also very near to median here)
+        num_children = 1
+        num_adults = 2
+    else:
+        if "household_size" not in df.columns:
+            # If household_size is not present, we can calculate it by counting the number of persons per household
+            df['household_size'] = df.groupby('household_id')['age'].transform('count')
+
+        df["is_child"] = df["age"] < 14
+        num_children = df.groupby("household_id")["is_child"].transform("sum")
+        num_adults   = df['household_size'] - num_children
+        assert (num_adults >= 1).all(), "All households should have at least one adult."
+
+    equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children
+    df["income_per_capita"] = df["income"] / equvalent_size
+
+    return df[['income','income_per_capita']]
+
+
+
+
