@@ -8,7 +8,7 @@ logger = logging.getLogger("synpp")
 
 def load_trips(context):
     # Load only the minimal columns needed for fast processing
-    df_trips = context.stage("synthesis.population.trips")[["person_id", "trip_index", "departure_time", "preceding_purpose", "following_purpose"]].copy()
+    df_trips = context.stage("synthesis.population.trips")[["person_id", "trip_id", "trip_index", "departure_time", "preceding_purpose", "following_purpose"]].copy()
 
     # Define origin/destination activity indices
     df_trips["preceding_activity_index"] = df_trips["trip_index"]
@@ -43,7 +43,7 @@ def load_trips(context):
     # Compute euclidean (crow-fly)
     df["euclidean_distance"] = np.hypot(df["destination_x"] - df["origin_x"], df["destination_y"] - df["origin_y"])
 
-    result = df[["person_id", "trip_index", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time", "euclidean_distance", "preceding_purpose", "following_purpose"]].copy()
+    result = df[["person_id", "trip_id", "trip_index", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time", "euclidean_distance", "preceding_purpose", "following_purpose"]].copy()
     return result
 
 def get_variation_window_min(context, df_trips):
@@ -53,19 +53,22 @@ def get_variation_window_min(context, df_trips):
 
     euclidean_distances_km = (df["euclidean_distance"] / 1000).values
     car_availability = df["car_availability"].fillna(False).astype(bool).values
-    car_availability_additional_range = 8  # if car is available, we add 8 minutes to the variation window
+    car_availability_additional_range = 5  # if car is available, we add 5 minutes to the variation window
 
     # Get the variation window for each trip based on the distance
     variation_window = np.zeros(len(euclidean_distances_km), dtype=int)
-    variation_window[euclidean_distances_km >= 5]  = 10
-    variation_window[euclidean_distances_km >= 10] = 13
-    variation_window[euclidean_distances_km >= 15] = 16
-    variation_window[euclidean_distances_km >= 50] = 25
+    variation_window[euclidean_distances_km >= 10] = 5
+    variation_window[euclidean_distances_km >= 15] = 10
+    variation_window[euclidean_distances_km >= 30] = 20
 
     # Add additional range if car is available
     has_variation_window = variation_window > 0
     variation_window[car_availability & has_variation_window] += car_availability_additional_range
 
+    # we do not change departure times of crossborder
+    cb = (df_trips["preceding_purpose"] == "border") | (df_trips["following_purpose"] == "border")
+    variation_window[cb] = 0
+    
     return variation_window
 
 def filter_trips(context, df_trips):
@@ -84,10 +87,10 @@ def filter_trips(context, df_trips):
 def propose_departures(row, min_time=0, max_time=30*3600, interval_s=5*60, rng=np.random):
     departure_time = row["departure_time"]
     var_window = row["variation_window_min"] * 60
-    start_time = max(min_time, departure_time - var_window)
-    end_time = min(max_time, departure_time + var_window + 10)
+    start_time = max(min_time, departure_time - var_window - 1)
+    end_time = min(max_time, departure_time + var_window + 1)
     dur = end_time - start_time
-    n = max(3, (dur + interval_s - 1) // interval_s + 1)
+    n = max(3, (dur + interval_s) // interval_s)
     a = np.empty(n, dtype=np.int64)
     a[0] = int(start_time)
     a[n-1] = int(end_time)
@@ -106,7 +109,7 @@ def prepare_trips_for_router(context, df_trips):
     df = df.explode("departure_time")
 
     # Router needs an identifier, different for each trip
-    df["identifier"] = df["person_id"].astype(str) + "_" + df["trip_index"].astype(str) + "_" + df["departure_time"].astype(str)
+    df["identifier"] = df["person_id"].astype(str) + "__" + df["trip_index"].astype(str) + "__" + df["departure_time"].astype(str)
 
     return df[["identifier", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time"]]
 
@@ -183,11 +186,11 @@ def compute_utilities(context, df):
     return utility + noise
 
 def find_best_departure_times(context, df, original_departures):
-    # we first filter out the trips with not a valid route (access_egress_time_min = 1e6)
-    df = df[df["access_egress_time_min"] < 1e4].copy()
+    # we first filter out the trips with not a valid route or for which the best departuer times wouldn't help much
+    df = df[(df["access_egress_time_min"] < 3600) & (df["initial_waiting_time_min"] < 3600)].copy()
 
     # split the identifier into person_id, trip_index, and departure_time (this is how it was before routing)
-    df[["person_id","trip_index","departure_time"]] = df['identifier'].str.split('_', expand=True)
+    df[["person_id","trip_index","departure_time"]] = df['identifier'].str.split('__', expand=True)
     df = df.astype({"person_id": str, "trip_index": int, "departure_time": int}).reset_index(drop=True)
 
     # group par person_id and trip_index, and select the row with the maximum utility
@@ -202,7 +205,7 @@ def find_best_departure_times(context, df, original_departures):
     selection = (best_departure_times["car_availability"] == False) & (best_departure_times["initial_waiting_time_min"] > 5) 
     random_noise = np.random.uniform(0, 1, size=selection.sum()) * 5 * 60  # random noise between 0 and 5 minutes in seconds
     best_departure_times.loc[selection, "departure_time"] = (best_departure_times.loc[selection, "departure_time"] + 
-                                                             (best_departure_times.loc[selection, "initial_waiting_time_min"] * 60 - random_noise).astype(int)
+                                                            (best_departure_times.loc[selection, "initial_waiting_time_min"] * 60 - random_noise).astype(int)
                                                             )
 
     # Keep trips that were not candidates for routing, or for which no PT route
@@ -222,15 +225,22 @@ def find_best_departure_times(context, df, original_departures):
 def get_mz_departures(context, df_trips):
     # get the mz departures from mz trips
     mz_departures = context.stage("data.microcensus.trips")[0][["person_id", "trip_id", "departure_time"]].copy()
-    mz_departures = mz_departures.rename(columns={"person_id": "mz_person_id", "trip_id": "trip_index", "departure_time": "mz_departure_time"})
+    mz_departures = mz_departures.rename(columns={"person_id": "mz_person_id", "departure_time": "mz_departure_time"})
     # get mz id of each person
     df_persons = context.stage("synthesis.population.enriched")[["person_id", "mz_person_id"]]
     # merge the mz departures with the trips to get the mz departure time for each trip
-    df = df_trips[["person_id","trip_index","departure_time"]].merge(df_persons, on="person_id", how="left")
-    df = df.merge(mz_departures, on=["mz_person_id","trip_index"], how="left")
+    df = df_trips[["person_id","trip_id","departure_time"]].merge(df_persons, on="person_id", how="left")
+    df = df.merge(mz_departures, on=["mz_person_id","trip_id"], how="left")
     # if mz departure time is not available, keep the original departure time
     df["departure_time"] = df["mz_departure_time"].fillna(df["departure_time"])
 
+    # Since we get departure times from mz instead of using the ones assigned in synthesis.population.trips, to which we add noise of -30,30 minutes
+    # we add a lower noise here, because the rest will come from the departure time selection process
+    base_seed = context.config('random_seed')
+    rng = np.random.default_rng(base_seed+1)
+    noise = rng.uniform(-5*60, 5*60, size=len(df))
+    df["departure_time"] = (df["departure_time"] + noise).astype(int)
+    
     return df["departure_time"].values
 
 
