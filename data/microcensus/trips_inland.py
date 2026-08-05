@@ -3,9 +3,8 @@ import pandas as pd
 import pyproj
 import geopandas as gpd
 from shapely.geometry import LineString
-
-
 import warnings
+
 try:
     from pandas.errors import SettingWithCopyWarning
 except ImportError:

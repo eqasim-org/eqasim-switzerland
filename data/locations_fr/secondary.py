@@ -1,4 +1,3 @@
-import numpy as np
 from shapely import set_precision
 from shapely.validation import make_valid
 from shapely.ops import unary_union
@@ -7,21 +6,19 @@ import geopandas as gpd
 
 def configure(context):
     context.stage("data.locations_fr.bpe.cleaned")
-    context.stage("data.statent.statent")
     context.stage("data.spatial.swiss_border")
     context.config("outbound_flows_perimeter", 20000) # Can be a number (= buffer diameter around the Swiss border in meters) or a list of .gpkg or shapefiles
 
 
 def execute(context):
 
-    statent_max_id       = context.stage("data.statent.statent")["enterprise_id"].max()
-    start_destination_id = statent_max_id + 1
-
     df_locations = context.stage("data.locations_fr.bpe.cleaned")[[
         "enterprise_id", "x", "y", "activity_type", "commune_id", "geometry", "weight"
     ]].copy()
-    df_locations["destination_id"] = np.arange(start_destination_id, start_destination_id + len(df_locations))
-    del df_locations["enterprise_id"]
+
+    # enterprise_id is already a canonical id, disjoint from STATENT's by
+    # construction, so no offset is needed here.
+    df_locations = df_locations.rename(columns = {"enterprise_id": "destination_id"})
 
     # Attach attributes for activity types
     df_locations["offers_leisure"] = df_locations["activity_type"] == "leisure"

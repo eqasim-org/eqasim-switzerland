@@ -3,9 +3,12 @@ import pandas as pd
 import logging
 
 logger = logging.getLogger("synpp")
+
+
 def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
+
 
 def calculate_bounds(values, bin_size):
     values = np.sort(values)
@@ -31,6 +34,7 @@ def calculate_bounds(values, bin_size):
         bounds.append(np.inf)
 
     return bounds
+
 
 def execute(context):
     df_persons = context.stage("data.microcensus.persons")[["person_id", "person_weight", "weekend"]].rename(

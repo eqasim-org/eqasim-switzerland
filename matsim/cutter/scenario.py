@@ -1,9 +1,6 @@
-import os.path
-import shutil
-import glob
-import matsim.runtime.eqasim as eqasim
 import logging
 logger = logging.getLogger("synpp")
+
 
 def configure(context):
     context.config("cutterVersion", default="v1")
@@ -19,6 +16,7 @@ def configure(context):
             context.stage("matsim.cutter.runCutterV2", alias="cutter_run")
         else:
             raise ValueError("Invalid cutter version specified:", context.config("cutterVersion"))
+
 
 def execute(context):
     if context.config("extent_path") == "" or context.config("extent_prefix") == "":

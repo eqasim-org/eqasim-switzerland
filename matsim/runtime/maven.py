@@ -3,9 +3,11 @@ import os, shutil
 import logging
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.config("maven_binary", "mvn")
     context.config("maven_skip_tests", False)
+
 
 def run(context, arguments = [], cwd = None):
     """
@@ -38,6 +40,7 @@ def run(context, arguments = [], cwd = None):
     if not return_code == 0:
         raise RuntimeError("Maven return code: %d" % return_code)
 
+
 def validate(context):
     if shutil.which(context.config("maven_binary")) in ["", None]:
         raise RuntimeError("Cannot find Maven binary at: %s" % context.config("maven_binary"))
@@ -47,6 +50,7 @@ def validate(context):
         "-version"
     ], stderr = sp.STDOUT):
         logger.warning("Maven of at least version 3.x.x is recommended!")
+
 
 def execute(context):
     return {

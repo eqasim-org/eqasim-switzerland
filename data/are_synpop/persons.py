@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 
 import data.spatial.cantons
 import data.spatial.municipality_types

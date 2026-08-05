@@ -1,7 +1,6 @@
 import os, glob
 import pandas as pd
 import geopandas as gpd
-import numpy as np
 
 """
 This stage loads the raw data from the new French address registry (BAN).

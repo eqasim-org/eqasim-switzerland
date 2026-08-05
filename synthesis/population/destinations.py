@@ -58,14 +58,11 @@ def execute(context):
 
     # add remote work locations
     df_remote_work = context.stage("remote_work_locations")
-    df_remote_work["destination_id"] = df_remote_work["destination_id"].astype("int64")
-    df_destinations["destination_id"] = df_destinations["destination_id"].astype("int64")
     df_destinations = pd.concat([df_destinations, df_remote_work], ignore_index=True)
 
     # add the french population
     if context.config("generate_outbound_flows"):
         df_FR = context.stage("data.locations_fr.secondary")
-        df_FR["destination_id"] = df_FR["destination_id"].astype("int64")
         df_destinations = pd.concat([df_destinations, df_FR], ignore_index=True)
 
     # add cross-border interview / border-crossing points. These keep their
@@ -73,5 +70,18 @@ def execute(context):
     # they are not (yet) selectable by the secondary-location choice models.
     df_borders = build_border_destinations(context)
     df_destinations = pd.concat([df_destinations, df_borders], ignore_index=True)
+
+    # Several raw BPE records can collapse onto the same destination_id (e.g.
+    # one SIRET, several sites); merge them since MATSim needs unique ids.
+    offers_columns = [c for c in df_destinations.columns if c.startswith("offers_")]
+    other_columns  = [c for c in df_destinations.columns
+                       if c not in offers_columns and c not in ("destination_id", "number_employees")]
+
+    aggregation = {c: "any" for c in offers_columns}
+    aggregation["number_employees"] = "sum"
+    aggregation.update({c: "first" for c in other_columns})
+
+    df_destinations = df_destinations.groupby("destination_id", as_index = False).agg(aggregation)
+    df_destinations = gpd.GeoDataFrame(df_destinations, geometry = "geometry", crs = df_borders.crs)
 
     return df_destinations

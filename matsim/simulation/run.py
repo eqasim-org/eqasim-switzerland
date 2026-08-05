@@ -1,9 +1,10 @@
 import os.path
-import shutil
 import matsim.runtime.eqasim as eqasim
 from matsim.simulation.config_utils import get_mode_shares_calibration_args, get_delays_args, get_network_calibration_args, get_dmc_parameters_args
 import logging
+
 logger = logging.getLogger("synpp")
+
 
 def configure(context):
     context.stage("matsim.simulation.prepare")    

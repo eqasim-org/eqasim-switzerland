@@ -4,6 +4,8 @@ import geopandas as gpd
 import os
 from shapely import wkt
 from shapely.geometry import Point
+import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
 import logging
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,7 @@ def execute(context):
         return
 
     folder = context.config("external_population_folder")
+    c      = context.stage("data.constants")
 
     assert any(f.endswith("_persons.csv") for f in os.listdir(folder)), f"No *_persons.csv file found in {folder}"
     assert any(f.endswith("_households.csv") for f in os.listdir(folder)), f"No *_persons.csv file found in {folder}"
@@ -56,6 +59,11 @@ def execute(context):
                                                                           "is_first", "is_last", "purpose", "location_id", "geometry",
                                                                           "commune_id", "population_density", "employee_density", "companies_density",
                                                                           "municipality_type", "ovgk"]]
+    # pd.read_csv treats the literal string "None" (the fallback value written
+    # by data.spatial.ovgk for unclassified locations) as a missing value by
+    # default - restore it so it doesn't end up as a raw NaN in population.xml.
+    acts["ovgk"] = acts["ovgk"].fillna("None").astype("category")
+
     acts["geometry"] = acts["geometry"].apply(wkt.loads)
     acts = gpd.GeoDataFrame(acts, geometry="geometry", crs="EPSG:2154")
     acts = acts.to_crs("EPSG:2056")
@@ -107,6 +115,11 @@ def execute(context):
     households.loc[order, "income_class"] = class_labels[class_idx]
     households["income_class"] = households["income_class"].astype(int)
 
+    plot_income_class_distribution(
+        swiss_shares, c.INCOME_CLASS_MAP,
+        output_path = os.path.join(context.path(), "income_class_comparison.png")
+    )
+
     households["number_of_cars_class"]  = households["number_of_vehicles"]
     households["number_of_bikes_class"] = households["number_of_bikes"]
 
@@ -152,7 +165,9 @@ def execute(context):
 
     persons = persons[persons["person_id"].isin(valid_ids)]
 
-    acts["destination_id"]    = acts["location_id"].astype(str).str.split("_").str[-1].astype(int)
+    # location_id already comes out of eqasim-france as a canonical id, so it
+    # can be used directly instead of re-deriving a local "FR_<n>" id.
+    acts["destination_id"]    = acts["location_id"]
     acts["municipality_id"]   = acts["commune_id"]
 
     # Adjust IDS
@@ -161,12 +176,19 @@ def execute(context):
     id_person_max    = max(id_person_max, id_household_max)  # just in case person_id and household_id are not on the same scale
     N                = id_person_max + 1
 
-    # 1. Adjust person_id
-    persons["new_person_id"] = range(N, N + len(persons), 1)
+    # 1. Adjust household_id first, one new id per distinct original
+    # household so real multi-member households (unlike cross-border
+    # commuters) stay grouped together instead of becoming singletons.
+    unique_household_ids = persons["household_id"].unique()
+    household_id_map      = pd.Series(range(N, N + len(unique_household_ids)), index = unique_household_ids)
+    persons["household_id"] = persons["household_id"].map(household_id_map)
+
+    # 2. Adjust person_id in a disjoint range (one new id per person)
+    M = N + len(unique_household_ids)
+    persons["new_person_id"] = range(M, M + len(persons), 1)
     person_id_map            = persons.set_index("person_id")["new_person_id"]
 
-    persons["person_id"]    = persons["new_person_id"].values
-    persons["household_id"] = persons["new_person_id"].values
+    persons["person_id"] = persons["new_person_id"].values
 
     vehicles["owner_id"]    = vehicles["owner_id"].map(person_id_map).fillna(vehicles["owner_id"])
     vehicles["vehicle_id"]   = vehicles["owner_id"].astype(str) + ":" + vehicles["mode"]
@@ -185,10 +207,6 @@ def execute(context):
     homes["destination_y"] = homes["person_id"].map(home_coords["home_y"])
 
     acts_not_home = acts[acts["purpose"]!="home"]
-    unique_ids    = acts_not_home["destination_id"].astype(int).unique()
-    correspondence = {old: "FR_%d" % old for old in unique_ids}
-
-    acts_not_home["destination_id"] = acts_not_home["destination_id"].map(correspondence)
     facility_locations = acts_not_home.groupby("destination_id")[["destination_x", "destination_y"]].first()
     acts_not_home["destination_x"] = acts_not_home["destination_id"].map(facility_locations["destination_x"])
     acts_not_home["destination_y"] = acts_not_home["destination_id"].map(facility_locations["destination_y"])
@@ -244,6 +262,73 @@ def execute(context):
 
     return persons, acts, vehicles
 
+
+def plot_income_class_distribution(swiss_shares, income_class_map, output_path = None):
+    """
+    Visualizes the income_class distribution as a single CHF-denominated
+    histogram. The Swiss and French income_class distributions are identical
+    by construction (see the matching logic around households["income_class"]
+    above: French households are assigned classes to match the Swiss
+    population shares), so only one histogram is drawn.
+
+    income_class_map (data.constants's INCOME_CLASS_MAP) gives the midpoint of
+    each 2'000 CHF-wide income bracket, e.g. class 1 -> 3'000 means the
+    bracket 2'000-4'000. Classes 0 and 8 are open-ended ("less than 2'000"
+    and "more than 16'000"), so their bracket only has one real edge.
+
+    Parameters
+    ----------
+    swiss_shares : pd.Series
+        Share of the population per income_class, e.g. the result of
+        `df_enriched["income_class"].value_counts(normalize=True)`.
+    income_class_map : dict
+        Maps income_class to its CHF bracket midpoint, i.e.
+        `data.constants`'s `INCOME_CLASS_MAP` (c.INCOME_CLASS_MAP).
+    output_path : str, optional
+        If given, the figure is saved there instead of being returned.
+    """
+
+    classes = np.sort(np.array(list(income_class_map.keys())))
+    values  = np.array([income_class_map[c] for c in classes], dtype = float)
+
+    # Reconstruct bracket edges from the midpoints: each bracket is 2'000 CHF
+    # wide, except class 0 which starts at 0 (its value is already the edge).
+    edges       = np.empty(len(values) + 1)
+    edges[0]    = 0
+    edges[1]    = values[0]
+    edges[2:]   = values[1:] + 1000
+    widths      = np.diff(edges)
+
+    shares = swiss_shares.reindex(classes).fillna(0).to_numpy()
+
+    fig, ax = plt.subplots(figsize = (10, 5))
+    ax.bar(edges[:-1], shares, width = widths, align = "edge", color = "steelblue", edgecolor = "white")
+
+    ax.set_xlim(0, edges[-1])
+    tick_labels     = [f"{int(e):,}" for e in edges]
+    tick_labels[-2] += "+"  # class 8 is open-ended starting from this edge
+    tick_labels[-1] = ""    # the outer edge is a nominal width, not a real threshold
+    ax.set_xticks(edges)
+    ax.set_xticklabels(tick_labels)
+    ax.set_xlabel("Household income (CHF)")
+
+    ax.set_ylabel("Share of population")
+    ax.yaxis.set_major_formatter(PercentFormatter(xmax = 1))
+    ax.set_title("Income class distribution (Swiss and French populations, matched by construction)")
+
+    class_axis = ax.secondary_xaxis(-0.15)
+    class_axis.set_xticks((edges[:-1] + edges[1:]) / 2)
+    class_axis.set_xticklabels([str(c) for c in classes])
+    class_axis.set_xlabel("Income class")
+
+    fig.tight_layout()
+
+    if output_path is not None:
+        fig.savefig(output_path)
+        plt.close(fig)
+        return None
+
+    return fig, ax
 
 
 

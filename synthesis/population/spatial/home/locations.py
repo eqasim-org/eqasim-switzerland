@@ -3,7 +3,6 @@ import data.spatial.utils as spatial_utils
 
 def configure(context):
     context.stage("synthesis.population.enriched")
-    #context.stage("data.statpop.households")
 
 
 def execute(context):

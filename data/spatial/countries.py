@@ -5,6 +5,7 @@ import pandas as pd
 def configure(context):
     context.config("data_path")
 
+
 def execute(context):
     data_path = context.config("data_path")
 
@@ -17,6 +18,7 @@ def execute(context):
     df = df[["country_id", "country_name"]]
 
     return df
+
 
 def update_country_ids(df, df_countries, remove_unknown = False):
     assert("country_id" in df.columns)

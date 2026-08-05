@@ -7,6 +7,7 @@ import logging
 
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.stage("data.statent.statent")
     context.stage("synthesis.population.enriched")

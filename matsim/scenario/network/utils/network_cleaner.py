@@ -1,6 +1,5 @@
 import warnings
 import pandas as pd
-import geopandas as gpd
 import networkx as nx
 from tqdm import tqdm
 import os

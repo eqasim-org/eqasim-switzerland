@@ -2,10 +2,11 @@ import numpy as np
 import pandas as pd
 
 from data.spatial import countries, municipalities, quarters, zones, utils
-import data.utils
 from data.spatial.municipality_types import impute as impute_municipality_type
 import logging
+
 logger = logging.getLogger("synpp")
+
 
 def configure(context):
     context.stage("data.structural_survey.raw")

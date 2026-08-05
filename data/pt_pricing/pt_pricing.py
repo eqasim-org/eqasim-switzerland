@@ -1,8 +1,8 @@
 import shutil
-import pandas as pd
 import logging
 
 logger = logging.getLogger("synpp")
+
 def configure(context):
     context.config("data_path")
     pt_pricing_option = context.config("generate_pt_pricing_inputs", default=False)
@@ -10,6 +10,7 @@ def configure(context):
     if pt_pricing_option:
         context.stage("data.pt_pricing.t603.create_sbb_distances")
         context.stage("data.pt_pricing.t651.process_all_authorities")
+
     
 def execute(context):
     data_path         = context.config("data_path")

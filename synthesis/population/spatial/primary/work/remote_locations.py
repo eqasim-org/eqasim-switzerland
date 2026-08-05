@@ -4,11 +4,13 @@ import geopandas as gpd
 import logging
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.stage("synthesis.population.spatial.primary.work.work_remotly", alias="remote_locations")
     context.stage("data.spatial.ovgk")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
+
     
 def execute(context):
     df = context.stage("remote_locations")

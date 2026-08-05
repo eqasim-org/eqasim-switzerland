@@ -1,6 +1,5 @@
-import numpy as np
 import pandas as pd
-import geopandas as gpd
+
 
 def configure(context):
     context.config("data_path")
@@ -33,12 +32,6 @@ def execute(context):
     vehicle_counts["person transport_total"] = vehicle_counts["person transport_person"] + vehicle_counts["person transport_company"] + vehicle_counts["person transport_unknown"]
     vehicle_counts["cars_like_total"]        = vehicle_counts["cars_total"] #+ vehicle_counts["person transport_total"]
     vehicle_counts["cars_like_person"]       = vehicle_counts["car_person"] #+ vehicle_counts["person transport_person"]
-
-    #municipalities = context.stage("data.spatial.municipalities")[0].copy()
-
-    #map_vehicle_counts =  municipalities.merge(vehicle_counts, left_on = "municipality_id", right_on = "municipality", how = "left")
-
-    #map_vehicle_counts.to_file(f"{context.path()}/number_of_vehicles.gpkg", driver ="GPKG")
 
     return vehicle_counts
 

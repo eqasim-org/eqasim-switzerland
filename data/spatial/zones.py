@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.stage("data.spatial.countries")
     context.stage("data.spatial.municipalities")
@@ -11,6 +12,7 @@ def configure(context):
     context.stage("data.spatial.postal_codes")
     context.config("include_external_population", default = False)
     context.stage("data.external_population.constants")
+
 
 def execute(context):
     df_countries = pd.DataFrame(context.stage("data.spatial.countries"), copy = True)
@@ -56,7 +58,6 @@ def execute(context):
     df_zones["zone_level"] = df_zones["zone_level"].astype("category")
 
     return df_zones[["zone_id", "zone_name", "zone_level", "zone_level_id"]]
-
 
 
 def impute(df, df_zones, zone_id_prefix = "",

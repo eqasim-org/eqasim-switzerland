@@ -1,7 +1,5 @@
 import numpy as np
 import pandas as pd
-import gc
-
 from data.spatial.cantons import impute_sp_region
 from data.spatial.municipality_types import impute as impute_municipality_types
 import data.spatial.ovgk
@@ -10,6 +8,7 @@ import data.spatial.zones
 import data.statpop.density
 import data.statpop.head_of_household
 import data.utils
+
 import logging
 logger = logging.getLogger("synpp")
 

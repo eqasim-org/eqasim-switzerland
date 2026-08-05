@@ -1,7 +1,6 @@
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import os
 from synthesis.population.spatial.secondary.components import CustomDistanceSampler, CustomDiscretizationSolver, CandidateIndex, CustomFreeChainSolver
 from synthesis.population.spatial.secondary.problems import find_assignment_problems
 from synthesis.population.spatial.secondary.rda import AssignmentSolver, DiscretizationErrorObjective, \

@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 import geopandas as gpd
 import shapely.geometry as geo
 from sklearn.neighbors import KDTree

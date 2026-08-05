@@ -4,8 +4,10 @@ from joblib import Parallel, delayed
 import logging
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.stage("data.statent.statent")
+
 
 def execute(context):
     df_statpop = context.stage("data.statent.statent")[["x","y","number_employees"]].reset_index(drop=True)
@@ -17,6 +19,7 @@ def execute(context):
         "kd_tree": kd_tree,
         "employee_weights": employee_weights
     }
+
 
 def impute(context, df, x="x", y="y", radius= 500, point_type="", chunk_size=1e5,
            measure="companies", output_column=None):
@@ -37,6 +40,7 @@ def impute(context, df, x="x", y="y", radius= 500, point_type="", chunk_size=1e5
     df[output_column] = counts
 
     return df
+
 
 def impute_parallel(context, df, x="x", y="y", radius=500, point_type="", chunk_size=1e4,
                     n_jobs=10, measure="companies", output_column=None):
@@ -66,7 +70,6 @@ def impute_parallel(context, df, x="x", y="y", radius=500, point_type="", chunk_
     counts = np.concatenate(results)
     df[output_column] = counts
     return df
-
 
 
 ############# HELP FUNCTIONS #############

@@ -198,13 +198,13 @@ def _match_border_crossings(pop_df: pd.DataFrame, od_df: pd.DataFrame, crossers_
 
     Returns a DataFrame aligned with pop_df.index with columns
     cross_border_person_id, destination_country_raw, border_crossing_point,
-    border_crossing_trip_mode -- all pd.NA outside of crossers_mask.
+    border_crossing_trip_mode, interview_point_id -- all pd.NA outside of crossers_mask.
     """
     od = od_df.copy()
     od["origin_canton_id"] = pd.to_numeric(od["origin_canton_id"], errors="coerce")
     od_by_canton = {canton: group for canton, group in od.groupby("origin_canton_id")}
 
-    match_cols = ["cross_border_person_id", "destination_country_raw", "border_crossing_point", "trip_mode"]
+    match_cols = ["cross_border_person_id", "destination_country_raw", "border_crossing_point", "trip_mode", "interview_point_id"]
     result = pd.DataFrame({
         col: pd.Series(pd.NA, index=pop_df.index, dtype="object") for col in match_cols
     })

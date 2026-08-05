@@ -6,6 +6,7 @@ from .work_locations import get_segment_key
 
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.stage("data.constants")
     context.stage("data.statent.statent")
@@ -23,6 +24,7 @@ def configure(context):
 
     context.config("random_seed")
     context.config("input_downsampling")    
+
 
 def execute(context):
     logger.info("\t Assigning work locations to agents based on OD matrices and company data...")

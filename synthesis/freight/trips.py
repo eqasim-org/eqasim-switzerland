@@ -9,6 +9,7 @@ def configure(context):
     
     context.config("random_seed")
 
+
 def execute(context):
     df_gte_trips = context.stage("synthesis.freight.gte.trips")
     df_gqgv_trips = context.stage("synthesis.freight.gqgv.trips")

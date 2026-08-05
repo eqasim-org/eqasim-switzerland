@@ -3,6 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import data.utils
 from data.structural_survey.structural_survey import get_filtered_data
 
 logger = logging.getLogger("synpp")
@@ -25,12 +26,14 @@ def add_age_bin(df):
     df["age_bin"] = df["age_bin"].cat.add_categories([-1]).fillna(-1).astype(int)
     return df
 
+
 def sanitize_features(df, columns):
     df = df.copy()
     for c in columns:
         if c in df.columns:
             df[c] = df[c].fillna(-1).astype(int)
     return df
+
 
 def group_job_positions(df):
     # Group job positions into broader categories to reduce sparsity
@@ -51,6 +54,7 @@ def group_job_positions(df):
     }
     df["job_position"] = df["job_position"].map(mapping).fillna("unknown")
     return df
+
 
 def aggregate_smoothed_rate(df, group_cols, alpha, beta):
     tmp = df[group_cols + ["weight", "work_remotly"]].copy()
@@ -173,7 +177,9 @@ def execute(context):
     plot_analysis(context, df_survey, df_population, out, c)
 
     # reformat for compatibillity with other stages
+    # Prefixed/base62-encoded so it can't collide with a real facility id.
     out = out.rename(columns={"household_id": "destination_id", "home_x": "x", "home_y": "y"})
+    out["destination_id"] = "CH_REMOTE_" + out["destination_id"].apply(data.utils.to_base62)
     out["commute_distance"]   = 0.0
     out = out[out["work_remotly"] == True].reset_index(drop=True)
     

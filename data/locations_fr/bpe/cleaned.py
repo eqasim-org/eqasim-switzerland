@@ -1,6 +1,6 @@
 import numpy as np
-import shapely.geometry as geo
-import data.spatial.utils as spatial_utils
+import pandas as pd
+import data.utils
 import geopandas as gpd
 import logging
 
@@ -38,8 +38,29 @@ ACTIVITY_TYPE_MAP = [
 def execute(context):
     df = context.stage("data.locations_fr.bpe.raw")
 
-    # Clean IDs
-    df["enterprise_id"] = np.arange(len(df))
+    # Coordinates are needed early for the canonical id built below.
+    df["x"] = df["LAMBERT_X"].astype(str).str.replace(",", ".").astype(float)
+    df["y"] = df["LAMBERT_Y"].astype(str).str.replace(",", ".").astype(float)
+
+    # Canonical id from SIRET+coordinates (base62), falling back to
+    # IRIS+type+coordinates when SIRET is missing. Keep in sync with
+    # eqasim-france's data/bpe/cleaned.py.
+    siret  = df["SIRET"].astype(str).str.strip()
+    x_key  = df["x"].round().astype("Int64").apply(lambda v: data.utils.to_base62(v) if pd.notna(v) else "")
+    y_key  = df["y"].round().astype("Int64").apply(lambda v: data.utils.to_base62(v) if pd.notna(v) else "")
+    siret_key = siret.apply(lambda s: data.utils.to_base62(int(s)) if s.isdigit() else "")
+
+    has_siret = siret.str.len() > 0
+    df["enterprise_id"] = "FR_BPE_" + siret_key + "_" + x_key + "_" + y_key
+    df.loc[~has_siret, "enterprise_id"] = (
+        "FR_BPE_NOSIRET_" + df["DCIRIS"] + "_" + df["TYPEQU"] + "_" + x_key + "_" + y_key
+    )
+
+    # SIRET+coordinates (or IRIS+type+coordinates) is not always unique: a
+    # single address/SIRET can host several distinct BPE equipment records.
+    # Disambiguate with a suffix so enterprise_id stays one-to-one with rows.
+    duplicate_index = df.groupby("enterprise_id").cumcount()
+    df.loc[duplicate_index > 0, "enterprise_id"] += "_" + duplicate_index[duplicate_index > 0].astype(str)
 
     # Clean activity type
     df["activity_type"] = "other"
@@ -50,11 +71,7 @@ def execute(context):
 
     #Add 
     df = df.rename(columns={"TYPEQU":"education_type"})
-    df["weight"] = df["CAPACITE"].fillna(500) 
-
-    # Clean coordinates
-    df["x"] = df["LAMBERT_X"].astype(str).str.replace(",", ".").astype(float)
-    df["y"] = df["LAMBERT_Y"].astype(str).str.replace(",", ".").astype(float)
+    df["weight"] = df["CAPACITE"].fillna(500)
 
     # Clean IRIS and commune
     df["iris_id"] = df["DCIRIS"].str.replace("_", "")

@@ -1,7 +1,7 @@
-from multiprocessing import context
 import os.path
 import shutil
 import glob
+
 
 def configure(context):
     context.stage("matsim.simulation.run")    
@@ -20,6 +20,7 @@ def configure(context):
     context.config("calibrate_betas_in_matsim", default=False)
     context.config("simulation_directory", "simulation_output")
     context.config("extent_prefix", default="")
+
 
 def execute(context):
     source_path = context.path("matsim.simulation.prepare")

@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 
 FIELDS = ["person_id", "trip_index", "preceding_purpose", "following_purpose", "mode", "travel_time"]
 FIXED_PURPOSES = ["home", "work", "education"]

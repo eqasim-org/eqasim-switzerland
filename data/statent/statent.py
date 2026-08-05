@@ -1,8 +1,5 @@
-import numpy as np
 import pandas as pd
 
-import data.spatial.municipalities
-import data.spatial.quarters
 import data.spatial.utils
 from data.spatial.zones import impute
 import data.utils
@@ -23,11 +20,15 @@ def execute(context):
         "%s/statent/250221_STATENT_2022_LOC_17042025.csv" % data_path,
         encoding = "latin1", sep = ","))
 
-    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08_CD", "EMPTOT"]])
-    df.columns = ["x", "y", "noga", "number_employees"]
-    
+    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08_CD", "EMPTOT", "ANONYM_LOCAL_ID"]])
+    df.columns = ["x", "y", "noga", "number_employees", "anonym_local_id"]
+
     df["noga"] = df["noga"].astype(str)
-    df["enterprise_id"] = np.arange(len(df))
+
+    # Canonical id from BFS's stable per-establishment id, base62-encoded.
+    # Keep in sync with eqasim-france's data/locations_CH/statent/statent.py.
+    df["enterprise_id"] = "CH_STATENT_" + df["anonym_local_id"].astype(int).apply(data.utils.to_base62)
+    del df["anonym_local_id"]
 
     df.loc[df["noga"].str.startswith("851"), "education_type"] = "kindergarten"
     df.loc[df["noga"].str.startswith("852"), "education_type"] = "primary"

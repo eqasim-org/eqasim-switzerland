@@ -1,12 +1,8 @@
-import sklearn.tree
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator, TransformerMixin
 import numpy as np
 from catboost import CatBoostClassifier
+
 
 class ColumnClipper(BaseEstimator, TransformerMixin):
     def __init__(self, clip_dict):
@@ -28,6 +24,7 @@ class ColumnClipper(BaseEstimator, TransformerMixin):
         for col, (low, high) in self.clip_dict.items():
             X[col] = X[col].clip(lower=low, upper=high)
         return X
+
     
 def impute(df_mz):
     """

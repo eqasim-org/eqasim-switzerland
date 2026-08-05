@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import warnings
+
 
 INDEX_RENAMES = {0: "total",
                  1: "truck",
@@ -11,6 +13,7 @@ def configure(context):
     context.config("scaling_year")
     context.stage("data.constants")
 
+
 def execute(context):
     data_path = context.config("data_path")
     c         = context.stage("data.constants")
@@ -19,11 +22,13 @@ def execute(context):
     scaling_year = np.max([c.BASE_SCALING_YEAR, context.config("scaling_year")])
 
     # Load excel for projections
-    df = pd.read_excel(
-        "%s/projections/are/freight/Verkehrsperspektiven_2040_Ergebnisse_Gueterverkehr_de.xlsx" % data_path,
-        sheet_name="Fahrzeugkilometer_Referenz", header=9,
-        index_col=None, nrows=3
-    ).dropna(axis=1)[[2010,2020,2030,2040]].rename(index=INDEX_RENAMES).reset_index().rename(columns={"index":"type"})
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Print area cannot be set to Defined name.*")
+        df = pd.read_excel(
+            "%s/projections/are/freight/Verkehrsperspektiven_2040_Ergebnisse_Gueterverkehr_de.xlsx" % data_path,
+            sheet_name="Fahrzeugkilometer_Referenz", header=9,
+            index_col=None, nrows=3
+        ).dropna(axis=1)[[2010,2020,2030,2040]].rename(index=INDEX_RENAMES).reset_index().rename(columns={"index":"type"})
 
     # Convert to long format
     df = df.melt(

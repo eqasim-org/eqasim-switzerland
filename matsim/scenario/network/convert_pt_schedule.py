@@ -1,5 +1,3 @@
-import pandas as pd
-
 def configure(context):
     pt_schedule = context.config("pt_schedule", "gtfs")
 

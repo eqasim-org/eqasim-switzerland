@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def configure(context):
     method = context.config("vehicles_method", "default")
 
@@ -15,6 +16,7 @@ def configure(context):
     
     if context.config("route_bike"):
         context.stage("synthesis.vehicles.bikes.default")
+
 
 def execute(context):
     df_car_types, df_cars = context.stage("cars")

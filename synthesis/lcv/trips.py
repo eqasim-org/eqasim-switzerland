@@ -20,6 +20,7 @@ import geopandas as gpd
 import logging
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.stage("data.statent.statent")
     context.stage("synthesis.freight.trips")
@@ -138,6 +139,7 @@ def add_home_destinations_after_time(
         out.loc[idx, "destination_y"] = sampled_pts[:, 1]
 
     return out
+
 
 def load_od_from_omx(path, matrix_key, lookup_key):
     """Load OD matrix and zone IDs from OMX file, return long OD DataFrame."""
@@ -316,8 +318,6 @@ def build_zone_sampling_points(
     return zone_to_points
 
 
-
-
 def generate_trip_list(od_counts, zone_to_points, seed=None):
     """
     Expand OD counts into one row per trip with random enterprise origin/destination.
@@ -385,6 +385,7 @@ def generate_trip_list(od_counts, zone_to_points, seed=None):
 
     return trips_df
 
+
 def build_departure_time_bins(dep_df,
                               weight_col="person_weight",
                               time_col="departure_time",
@@ -431,6 +432,7 @@ def build_departure_time_bins(dep_df,
     bins = bins[bins["end_sec"] > bins["start_sec"]].reset_index(drop=True)
 
     return bins
+
 
 def sample_departure_times_binned(trips_df, bins_df, seed=None):
    

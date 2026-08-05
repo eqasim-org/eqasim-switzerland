@@ -1,5 +1,8 @@
-import pyproj
+import warnings
+import pandas as pd
 from types import SimpleNamespace
+
+warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
 
 # TODO: Pandas is quite good at working with categorical data. Refactor everything to make use of that.
 # It will not only be more readable but will also bring a speedup!

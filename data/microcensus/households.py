@@ -3,7 +3,6 @@ import pandas as pd
 import pyproj
 
 from data.spatial.cantons import impute_sp_region
-import data.spatial.municipalities
 from data.spatial.municipality_types import impute as impute_municipality_type
 import data.spatial.ovgk
 import data.spatial.utils

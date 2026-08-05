@@ -17,11 +17,11 @@ def execute(context):
         parquet = pl.read_parquet("{}/{}".format(context.config("data_path"), "other_locations/FR/bpe_2024/BPE24.parquet"),
          columns = [ "CAPACITE",
                         "DCIRIS", "LAMBERT_X", "LAMBERT_Y",
-                        "TYPEQU", "DEPCOM", "DEP"
+                        "TYPEQU", "DEPCOM", "DEP", "SIRET"
                     ],
                 )
 
-        parquet  = parquet.cast( dict(DEPCOM = str, DEP = str, DCIRIS = str))
+        parquet  = parquet.cast( dict(DEPCOM = str, DEP = str, DCIRIS = str, SIRET = str))
         parquet  = parquet.filter(pl.col("DEP").cast(pl.Utf8).is_in(dpts_str))
 
         progress.update(len(parquet))

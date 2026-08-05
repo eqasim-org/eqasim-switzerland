@@ -1,10 +1,10 @@
-import numpy as np
 import pandas as pd
 import os
 from shapely import vectorized
 import logging 
 
 logger = logging.getLogger("synpp")
+
 """
 This stage reads trip data from microcensus and computes modal shares.
 It estimates global shares first, then shares by canton.

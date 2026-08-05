@@ -1,4 +1,4 @@
-import zipfile, io
+import zipfile
 import pandas as pd
 import geopandas as gpd
 import shapely.geometry as geo

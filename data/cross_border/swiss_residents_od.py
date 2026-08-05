@@ -2,8 +2,6 @@ import pandas as pd
 import numpy as np
 from shapely.geometry import Point
 import geopandas as gpd
-import random
-from pathlib import Path
 
 from data.cross_border.generate_od import project_point_series_close_to_border
 

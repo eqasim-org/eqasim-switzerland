@@ -1,10 +1,10 @@
-import subprocess as sp
 import os, os.path
 import shutil
 
 import matsim.runtime.git as git
 import matsim.runtime.java as java
 import matsim.runtime.maven as maven
+
 
 def configure(context):
     context.stage("matsim.runtime.git")
@@ -14,6 +14,7 @@ def configure(context):
     context.config("pt2matsim_version", "25.8")
     context.config("pt2matsim_branch", "v25.8")
     context.config("pt2matsim_path", "") 
+
 
 def run(context, command, arguments, vm_arguments):
     jar_path = context.stage("matsim.runtime.pt2matsim")    

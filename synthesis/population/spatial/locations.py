@@ -6,6 +6,7 @@ from data.spatial.ovgk import impute_parallel as impute_ovgk
 from dmc.constants import constants
 from matsim.scenario.population import HOME_DESTINATION_ID
 
+
 def configure(context):
     context.stage("synthesis.population.spatial.home.locations")
     context.stage("synthesis.population.spatial.primary.locations")
@@ -21,6 +22,7 @@ def configure(context):
     context.stage("data.spatial.ovgk")
 
     context.config("threads")
+
 
 def execute(context):
     df_home = context.stage("synthesis.population.spatial.home.locations")
@@ -53,15 +55,17 @@ def execute(context):
 
     # Border locations: the point comes straight from the same
     # data.cross_border.swiss_residents_od record synthesis.population.trips
-    # already matched each crosser to (mz_person_id holds that record's
-    # cross_border_person_id), so the location is guaranteed to be consistent
-    # with the destination_country_raw carried on that same trip.
+    # already matched each crosser to. interview_point_id is that record's
+    # real border-crossing-point facility id (already written as a facility
+    # via data.cross_border.interview_places/synthesis.population.destinations),
+    # so the location is guaranteed to be consistent with the
+    # destination_country_raw carried on that same trip.
     df_border_locations = df_locations[df_locations["purpose"] == "border"]
 
     df_cb_trips = context.stage("synthesis.population.trips")
     df_cb_trips = df_cb_trips[(df_cb_trips["preceding_purpose"] == "border") | (df_cb_trips["following_purpose"] == "border")]
-    df_cb_trips = df_cb_trips[["person_id", "mz_person_id", "border_crossing_point"]].drop_duplicates("person_id")
-    df_cb_trips = df_cb_trips.rename(columns={"mz_person_id": "destination_id", "border_crossing_point": "geometry"})
+    df_cb_trips = df_cb_trips[["person_id", "interview_point_id", "border_crossing_point"]].drop_duplicates("person_id")
+    df_cb_trips = df_cb_trips.rename(columns={"interview_point_id": "destination_id", "border_crossing_point": "geometry"})
 
     df_border_locations = pd.merge(df_border_locations, df_cb_trips, on="person_id", how="left")
     df_border_locations = df_border_locations[["person_id", "activity_index", "destination_id", "geometry"]]

@@ -1,7 +1,5 @@
 import os
-
 import matsim.runtime.pt2matsim as pt2matsim
-# import matsim.runtime.java as java
 
 
 def configure(context):    

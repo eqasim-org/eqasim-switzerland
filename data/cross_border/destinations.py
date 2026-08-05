@@ -91,7 +91,10 @@ def execute(context):
              "interview_place", "interview_point_id", "interview_geometry_point",
              "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]]
     
-    for col in ["mz_person_id", "residence_x", "residence_y", "destination_id",
+    # destination_id is a canonical id string for real destinations (e.g.
+    # "CH_STATENT_..."), or the int sentinel -1 for "Through" trips - keep it
+    # out of the blanket int cast below.
+    for col in ["mz_person_id", "residence_x", "residence_y",
              "origin_x", "origin_y", "destination_x", "destination_y"]:
         df[col] = df[col].astype(int)
 

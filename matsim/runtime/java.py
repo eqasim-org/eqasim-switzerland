@@ -3,9 +3,11 @@ import os, shutil
 import logging
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.config("java_binary", "java")
     context.config("java_memory", "50G", volatile=True)
+
 
 def run(context, entry_point, arguments = [], class_path = None, vm_arguments = [], cwd = None, memory = None, mode = "raise"):
     """
@@ -63,6 +65,7 @@ def run(context, entry_point, arguments = [], class_path = None, vm_arguments = 
     else:
         raise RuntimeError("Mode is expected to be one of 'raise', 'return_code' or 'output'")
 
+
 def validate(context):
     if shutil.which(context.config("java_binary")) in ["", None]:
         raise RuntimeError("Cannot find Java binary at: %s" % context.config("java_binary"))
@@ -72,6 +75,7 @@ def validate(context):
         "-version"
     ], stderr = sp.STDOUT):
         logger.warning("A Java JDK of at least version 17 is recommended.")
+
 
 def execute(context):
     return {

@@ -1,9 +1,6 @@
 import numpy as np
 from matsim.readers import Network
-import shapely.vectorized
-import geopandas as gpd
 import pyproj
-import networkx as nx
 import logging
 from calibration.network_freespeed.mountains_links_speeds import SPEED_SEGMENTS, ROUTING_PENALTY_M_PER_S, SPEED_TOLERANCE_KMH, MIN_FREESPEED_M_S
 

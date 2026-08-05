@@ -1,10 +1,8 @@
 import pyogrio
 import pandas as pd
 import os
-import geopandas as gpd
 import py7zr
 import glob
-import numpy as np
 import logging
 
 logger = logging.getLogger("synpp")

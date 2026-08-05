@@ -6,6 +6,7 @@ def configure(context):
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.quarters")
 
+
 def execute(context):
     df_zones = context.stage("data.spatial.zones")
     df_municipalities = context.stage("data.spatial.municipalities")[0]
@@ -22,8 +23,5 @@ def execute(context):
     )[["zone_id", "zone_level_id", "zone_level", "geometry"]]
 
     df = pd.concat([df_municipalities, df_quarters])
-
-    #df["zone_level"] = df["zone_level"].astype("str")
-    #df.to_file("/home/sebastian/zones.shp")
 
     return df

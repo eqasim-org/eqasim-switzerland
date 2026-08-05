@@ -1,7 +1,5 @@
 import numpy as np
-import pandas as pd
 import logging
-import numba
 
 logger = logging.getLogger("synpp")
 
@@ -115,7 +113,6 @@ def correct_companies_number_of_employees(context, df_statent, df_fixed_location
 
         nb_empl_cb = destinations_cb_commute.groupby("destination_id")["cross_border_person_id"].count().reset_index()
         nb_empl_cb.columns = ["enterprise_id", "nb_employees_crossborder"]
-        nb_empl_cb["enterprise_id"] = nb_empl_cb["enterprise_id"].astype(int)
 
         df_statent = df_statent.merge(nb_empl_cb, on = "enterprise_id", how="left")
         df_statent["nb_employees_crossborder"] = df_statent["nb_employees_crossborder"].fillna(0).astype(int)

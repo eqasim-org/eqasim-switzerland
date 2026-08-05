@@ -80,18 +80,37 @@ def execute(context):
                 # and are written in the main STATENT loop above.
 
             if context.config("include_external_population"):
+                # Write one home facility per person directly from home_x/home_y,
+                # like the Swiss branch above - this covers every person regardless
+                # of how their activity chain labels the home/cross-perimeter purpose.
+                external_persons = context.stage("data.external_population.read_outputs")[0][[
+                    "household_id", "home_x", "home_y"
+                ]].drop_duplicates("household_id")
+                # matsim.scenario.population drops persons with no home coordinate
+                # before writing them - keep this in sync so we don't crash below.
+                external_persons = external_persons[external_persons["home_x"].notna() & external_persons["home_y"].notna()]
+
+                for item in context.progress(external_persons.itertuples(), total=len(external_persons), label="Homes - FR"):
+                    writer.start_facility("home%s" % item[1], int(item[2]), int(item[3]))
+                    writer.add_activity("home")
+                    writer.end_facility()
+
                 external_activities = context.stage("data.external_population.read_outputs")[1].copy()[["destination_id", "destination_x", "destination_y"]].drop_duplicates(subset = ["destination_id"], keep = "first")
 
                 for col in ["offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other"]:
                     external_activities[col] = True
-                
-                homes    = external_activities[external_activities["destination_id"].astype(str).str.startswith("home")]
-                nonhomes = external_activities[~external_activities["destination_id"].astype(str).str.startswith("home")]
 
-                for item in context.progress(homes.itertuples(), total=len(homes), label="Homes - FR"):
-                    writer.start_facility(item[1], int(item[2]), int(item[3]))
-                    writer.add_activity("home")
-                    writer.end_facility()
+                # Real destinations only: exclude home-labeled ids (written above)
+                # and the home-sentinel ("-1", e.g. cross-perimeter activities that
+                # stay at home without a "home" purpose label).
+                is_home_like = (external_activities["destination_id"].astype(str) == "-1") \
+                    | external_activities["destination_id"].astype(str).str.startswith("home")
+                nonhomes = external_activities[~is_home_like]
+
+                # A French commuter's activity at a Swiss facility can now
+                # resolve to an id already written above - skip duplicates.
+                already_written = set(df_statent["destination_id"])
+                nonhomes = nonhomes[~nonhomes["destination_id"].isin(already_written)]
 
                 for item in context.progress(nonhomes.itertuples(), total=len(nonhomes), label="Destinations - FR"):
                     writer.start_facility(item[1], int(item[2]), int(item[3]))

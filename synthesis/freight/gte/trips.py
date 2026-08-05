@@ -5,6 +5,7 @@ from shapely import get_coordinates
 import logging
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.stage("data.freight.gte.od")
     context.stage("data.spatial.zones")
