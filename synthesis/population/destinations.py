@@ -6,6 +6,7 @@ def configure(context):
     context.stage("synthesis.population.destinations_statent")
     context.stage("synthesis.population.spatial.primary.work.remote_locations", alias="remote_work_locations")
     context.stage("data.cross_border.interview_places")
+    context.stage("data.cross_border.swiss_residents_od")
     context.stage("data.spatial.ovgk")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
@@ -16,8 +17,18 @@ def configure(context):
 
 
 def build_border_destinations(context):
-    df = context.stage("data.cross_border.interview_places")[["border_crossing_point_id", "geometry"]].copy()
-    df = df.rename(columns={"border_crossing_point_id": "destination_id"})
+    df_interview = context.stage("data.cross_border.interview_places")[["border_crossing_point_id", "geometry"]].copy()
+    df_interview = df_interview.rename(columns={"border_crossing_point_id": "destination_id"})
+
+    df_cb = context.stage("data.cross_border.swiss_residents_od")[["cross_border_person_id", "border_crossing_point"]].copy()
+    df_cb = df_cb.rename(columns={"cross_border_person_id": "destination_id", "border_crossing_point": "geometry"})
+    df_cb = gpd.GeoDataFrame(df_cb, geometry="geometry", crs=df_interview.crs)
+
+    df = gpd.GeoDataFrame(
+        pd.concat([df_interview, df_cb], ignore_index=True, sort=False),
+        geometry="geometry",
+        crs=df_interview.crs,
+    )
 
     # Truncate to int (not round) to match the int(geometry.x)/int(geometry.y) cast that
     # matsim/scenario/population.py applies when writing an activity's coordinates. Both sides
