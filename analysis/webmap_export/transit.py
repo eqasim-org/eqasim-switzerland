@@ -110,6 +110,59 @@ def build_stop_municipality(db: duckdb.DuckDBPyConnection, stops: dict, geo: dic
     return True
 
 
+def _facility_lonlat(db: duckdb.DuckDBPyConnection, stops: dict) -> dict:
+    """Map facility_id to WGS84 [lon, lat], transformed from the schedule's EPSG:2056."""
+    if not stops:
+        return {}
+    fids = list(stops.keys())
+    tbl = pa.table({
+        "fid": pa.array(fids, type=pa.string()),
+        "x": pa.array([stops[f]["x"] for f in fids], type=pa.float64()),
+        "y": pa.array([stops[f]["y"] for f in fids], type=pa.float64()),
+    })
+    db.register("_tmp_stop_coords", tbl)
+    rows = db.execute("""
+        SELECT fid,
+               ST_X(ST_Transform(ST_Point(x, y), 'EPSG:2056', 'EPSG:4326', true)),
+               ST_Y(ST_Transform(ST_Point(x, y), 'EPSG:2056', 'EPSG:4326', true))
+        FROM _tmp_stop_coords
+    """).fetchall()
+    db.unregister("_tmp_stop_coords")
+    return {fid: [round(lon, 6), round(lat, 6)]
+            for (fid, lon, lat) in rows if lon is not None and lat is not None}
+
+
+def build_stop_coords(db: duckdb.DuckDBPyConnection, stops: dict, coords: dict) -> bool:
+    """Emit stop_coords JSON: facility_id -> [lon, lat, name], one entry per PLATFORM,
+    for EVERY facility in the schedule.
+
+        {"8503000:0:11.link:pt_8503000:0:11": [8.539143, 47.378219, "Zürich HB"], ...}
+
+    Keys are byte-identical to the stop_id values in boarding_data_by_line, so the
+    backend places a stop with a dict hit instead of the request-time
+    stop_id -> link_id -> network_links -> network_nodes -> ST_Transform resolution.
+
+    Platform level is deliberate: it is the atomic fact the schedule carries. A
+    station-level view is a display decision the consumer makes by grouping on the
+    name (or on the leading numeric DIDOK token) and averaging - cheap, and it keeps
+    that choice changeable without a re-export. The reverse is not possible: platform
+    positions cannot be recovered from a station average.
+
+    Additive and zone-independent (no gemeinde/canton keys) so re-zoning tools can
+    copy it verbatim."""
+    if not coords:
+        log.info("transit: no stops - stop_coords.json skipped")
+        return False
+    out = {fid: [lonlat[0], lonlat[1], (stops[fid].get("name") or "")]
+           for fid, lonlat in coords.items()}
+    payload = json.dumps(out, ensure_ascii=False).encode("utf-8")
+    put_asset(db, "stop_coords", JSON_CT, payload)
+    n_named = sum(1 for v in out.values() if v[2])
+    log.info("transit: stop_coords - %d/%d facilities (%d named), %.1f MB",
+             len(out), len(stops), n_named, len(payload) / 1e6)
+    return True
+
+
 def _scale_factor(sample_rate: float | None) -> float:
     """Return 1/sample_rate, or 1.0 when the rate is unknown/invalid."""
     if sample_rate and sample_rate > 0:
@@ -529,7 +582,9 @@ def build_all(
     stops, lines = parse_transit_schedule(schedule_xml)
     geo = _facility_geo(db, stops)
     routes = parse_transit_routes(schedule_xml)
+    lonlat = _facility_lonlat(db, stops)
     build_stop_municipality(db, stops, geo)
+    build_stop_coords(db, stops, lonlat)
     build_boarding_data_by_line(db, stops, lines, geo, board_acc or {}, sample_rate, scale_pt)
     build_stop_transfer_data_by_canton(db, stops, lines, geo, transfer_data or {}, sample_rate, scale_pt)
     build_transit_routes(db, routes, stops)

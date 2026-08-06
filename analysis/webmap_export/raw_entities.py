@@ -16,6 +16,7 @@ import pandas as pd
 import pyarrow as pa
 
 from .hilbert import CH_BBOX_LV95, hilbert_2d
+from .sources import REQUIRED_PERSON_COLUMNS
 
 log = logging.getLogger(__name__)
 
@@ -38,13 +39,24 @@ def load_persons_synthetic(
     df = pd.read_parquet(persons_parquet)
     df = df.rename(columns={"person_id": "person_id"}).copy()
 
+    missing = [c for c in sorted(REQUIRED_PERSON_COLUMNS) if c not in df.columns]
+    if missing:
+        log.warning(
+            "persons parquet %s is missing %d expected column(s): %s - these stay NULL "
+            "and the webmap panels that use them will render empty",
+            persons_parquet, len(missing), ", ".join(missing),
+        )
+    log.info("Reading %d synthetic persons from %s", len(df), persons_parquet)
+
     df["car_availability"] = df["car_availability"].map(_CAR_AVAIL_MAP)
     for col in ("has_driving_license", "employed",
                 "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
                 "subscriptions_strecke", "subscriptions_gleis7",
                 "subscriptions_junior", "subscriptions_other"):
         if col in df.columns:
-            df[col] = df[col].astype(bool)
+            # nullable dtype: persons unmatched to the microcensus (age 0-5) carry
+            # None here, and plain astype(bool) would silently record them as False
+            df[col] = df[col].astype("boolean")
 
     home_x = pd.Series(np.nan, index=df.index, dtype="float64")
     home_y = pd.Series(np.nan, index=df.index, dtype="float64")

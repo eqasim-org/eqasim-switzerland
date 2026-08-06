@@ -75,6 +75,7 @@ def validate_full(db, source_type: str) -> None:
 
     _validate_v2_hex_consistency(db, n_persons=n_persons, n_trips=n_trips)
     if source_type == "synthetic":
+        _validate_synthetic_enrichment(db)
         _validate_v4_pre_aggregates(db)
         _validate_pt_link_volumes(db)
     if source_type == "microcensus":
@@ -197,6 +198,52 @@ def _validate_pt_link_volumes(db) -> None:
         raise AssertionError(
             "pt_link_volumes: every row has an empty route_id - "
             "TransitDriverStarts.transitRouteId not picked up?"
+        )
+
+
+def _validate_synthetic_enrichment(db) -> None:
+    """The webmap's PT-subscription and car-availability panels need these columns
+    populated. A stale/partial persons parquet loads without error and leaves them
+    all-NULL (raw_entities.load_persons_synthetic degrades silently), so assert
+    coverage here. The threshold is below 100% because persons unmatched to the
+    microcensus (age 0-5) legitimately carry NULL subscriptions."""
+    n_persons, n_car, n_subs = db.execute("""
+        SELECT COUNT(*),
+               COUNT(car_availability),
+               COUNT(subscriptions_ga)
+        FROM persons
+    """).fetchone()
+    if n_persons == 0:
+        raise AssertionError("synthetic persons table is empty")
+
+    for name, n in (("car_availability", n_car), ("subscriptions_ga", n_subs)):
+        if n < 0.9 * n_persons:
+            raise AssertionError(
+                f"synthetic persons.{name} non-null for only {n}/{n_persons} "
+                f"({100.0 * n / n_persons:.1f}%) - expected >=90%; the persons parquet "
+                "is probably a stale/partial file missing this column "
+                "(check the 'persons parquet ->' line in the build log)"
+            )
+
+    # persons and trips/activities must come from the same downsampling: a leftover
+    # parquet at a different sample rate leaves most persons with no plan at all.
+    n_with_acts = db.execute(
+        "SELECT COUNT(DISTINCT person_id) FROM activities"
+    ).fetchone()[0]
+    n_orphan_acts = db.execute("""
+        SELECT COUNT(DISTINCT a.person_id) FROM activities a
+        WHERE NOT EXISTS (SELECT 1 FROM persons p WHERE p.person_id = a.person_id)
+    """).fetchone()[0]
+    if n_orphan_acts:
+        raise AssertionError(
+            f"{n_orphan_acts} person_ids appear in activities but not in persons - "
+            "persons parquet does not match the MATSim run"
+        )
+    if n_with_acts < 0.5 * n_persons:
+        raise AssertionError(
+            f"only {n_with_acts}/{n_persons} synthetic persons "
+            f"({100.0 * n_with_acts / n_persons:.1f}%) have any activity - expected >=50%; "
+            "persons parquet is probably at a different sample rate than the MATSim run"
         )
 
 

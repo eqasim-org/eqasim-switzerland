@@ -3,9 +3,22 @@ Missing optional inputs become None - the caller decides how to react."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+log = logging.getLogger(__name__)
+
+# Columns the webmap's person panels need. A parquet missing any of these is a
+# stale/partial leftover, not a synthesis.output product - see _pick_persons_parquet.
+REQUIRED_PERSON_COLUMNS = frozenset({
+    "person_id", "household_id", "age", "sex",
+    "car_availability", "has_driving_license", "employed",
+    "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
+    "subscriptions_strecke", "subscriptions_gleis7", "subscriptions_junior",
+    "subscriptions_other",
+})
 
 
 @dataclass
@@ -51,6 +64,90 @@ def _newest_cache(name_prefix: str, cache_dir: Path) -> Optional[Path]:
     return candidates[0] if candidates else None
 
 
+def _config_output_paths(home_pipe: Path) -> list[Path]:
+    """Every absolute `output_path:` declared in the repo's config*.yml files.
+
+    synthesis/output.py writes its parquets to <output_path>/webmap_data/synthetic/,
+    so this is where the genuine persons artifact lives.
+    """
+    out: list[Path] = []
+    repo = home_pipe / "ch-zh-synpop"
+    for yml in sorted(repo.glob("config*.yml")):
+        try:
+            for line in yml.read_text(errors="ignore").splitlines():
+                s = line.strip()
+                if s.startswith("output_path:"):
+                    v = s.split(":", 1)[1].split("#")[0].strip().strip("\"'")
+                    if v.startswith("/"):
+                        out.append(Path(v))
+        except OSError:
+            continue
+    return out
+
+
+def _parquet_columns(path: Path) -> Optional[set[str]]:
+    """Column names from the parquet footer only (no data read); None if unreadable."""
+    try:
+        import pyarrow.parquet as pq
+        return set(pq.ParquetFile(path).schema_arrow.names)
+    except Exception as exc:  # noqa: BLE001 - a bad candidate must not kill discovery
+        log.warning("could not read parquet schema of %s: %s", path, exc)
+        return None
+
+
+def _pick_persons_parquet(candidates: list[Path], fallback: Path) -> Path:
+    """Newest candidate that carries the full expected column set.
+
+    Selecting on mtime alone once silently picked a 10-column leftover over the
+    real 21-column artifact, so completeness is the primary key and mtime only
+    breaks ties among complete files.
+    """
+    seen: set[Path] = set()
+    existing: list[Path] = []
+    for c in candidates:
+        try:
+            if not c.exists():
+                continue
+            key = c.resolve()
+        except OSError:
+            # config*.yml may name another user's scratch dir we cannot stat
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        existing.append(c)
+
+    if not existing:
+        log.error("no persons parquet found; falling back to %s (does not exist)", fallback)
+        return fallback
+
+    complete: list[Path] = []
+    for c in existing:
+        cols = _parquet_columns(c)
+        if cols is None:
+            continue
+        missing = REQUIRED_PERSON_COLUMNS - cols
+        if missing:
+            log.warning(
+                "skipping persons parquet %s: missing %d expected column(s): %s",
+                c, len(missing), ", ".join(sorted(missing)),
+            )
+            continue
+        complete.append(c)
+
+    pool = complete or existing
+    chosen = max(pool, key=lambda p: p.stat().st_mtime)
+    if not complete:
+        log.error(
+            "NO persons parquet has the full expected column set - falling back to %s; "
+            "subscriptions/car_availability panels in the webmap will be NULL", chosen,
+        )
+    else:
+        log.info("persons parquet -> %s (%d on disk, %d complete)",
+                 chosen, len(existing), len(complete))
+    return chosen
+
+
 def _swisstopo_paths(data_path: Path) -> tuple[Optional[Path], Optional[Path], Optional[Path]]:
     spatial = data_path / "spatial"
     canton = next(iter((spatial / "canton").glob("swissBOUNDARIES3D_*_TLM_KANTONSGEBIET.shp")), None) if (spatial / "canton").exists() else None
@@ -78,22 +175,23 @@ def discover_synthetic(
     """Best-effort discovery - missing inputs become None."""
     sim_out = matsim_dir / "simulation_output"
 
-    # The home_pipe persons parquet may be a stale leftover from an earlier sample
-    # size; pick the freshest existing candidate by mtime so persons and
-    # trips/activities stay at the same downsampling.
+    # The genuine artifact first: synthesis/output.py writes to
+    # <output_path>/webmap_data/synthetic/ and never into its own synpp cache dir
+    # (those .cache dirs stay empty), so anything found under synthesis.output__*.cache
+    # is a leftover. Candidates are ranked by column completeness, then mtime.
     _persons_candidates = [
-        home_pipe / "switzerland_persons.parquet",
-        DEFAULT_CACHE_DIR.parent / "output" / "webmap_data" / "synthetic" / "switzerland_persons.parquet",
+        p / "webmap_data" / "synthetic" / "switzerland_persons.parquet"
+        for p in _config_output_paths(home_pipe)
     ]
-    # every synthesis.output cache, not just the newest marker - a re-run may leave
-    # the newest .cache dir empty while an older one still holds the parquet
-    _persons_candidates.extend(
-        cache_dir.glob("synthesis.output__*.cache/switzerland_persons.parquet")
+    _persons_candidates.append(
+        cache_dir / "synthesis_output" / "webmap_data" / "synthetic" / "switzerland_persons.parquet"
     )
-    _existing = [p for p in _persons_candidates if p.exists()]
-    persons_parquet = (
-        max(_existing, key=lambda p: p.stat().st_mtime)
-        if _existing else home_pipe / "switzerland_persons.parquet"
+    _persons_candidates.append(home_pipe / "switzerland_persons.parquet")
+    _persons_candidates.extend(
+        sorted(cache_dir.glob("synthesis.output__*.cache/switzerland_persons.parquet"))
+    )
+    persons_parquet = _pick_persons_parquet(
+        _persons_candidates, home_pipe / "switzerland_persons.parquet"
     )
 
     canton_shp, bezirk_shp, gemeinde_shp = _swisstopo_paths(data_path)
