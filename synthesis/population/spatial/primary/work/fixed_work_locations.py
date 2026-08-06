@@ -29,8 +29,12 @@ def configure(context):
     if context.config("include_cross_border"):
         context.stage("data.cross_border.destinations")
 
+    context.config("include_external_population", default = False)
+    if context.config("include_external_population"):
+        context.stage("data.external_population.commutes")
+
     context.config("random_seed")
-    context.config("input_downsampling")    
+    context.config("input_downsampling")
 
 
 def execute(context):

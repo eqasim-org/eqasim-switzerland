@@ -1,5 +1,7 @@
 import numpy as np
+import pandas as pd
 import logging
+from scipy.spatial import cKDTree
 
 logger = logging.getLogger("synpp")
 
@@ -121,6 +123,27 @@ def correct_companies_number_of_employees(context, df_statent, df_fixed_location
                                                       df_statent["number_employees"] * 0.01) 
 
         del df_statent["nb_employees_crossborder"], destinations_cb, destinations_cb_commute, nb_empl_cb
+
+
+    if context.config("include_external_population"):
+        logger.info("\t Adjusting company employee counts to account for French commuters...")
+        commutes = context.stage("data.external_population.commutes")
+
+        # Commutes only carry a raw destination point (no enterprise_id), so
+        # snap each one to its nearest STATENT enterprise.
+        tree = cKDTree(df_statent[["x", "y"]].to_numpy(dtype=float))
+        _, nearest_idx = tree.query(commutes[["destination_x", "destination_y"]].to_numpy(dtype=float))
+
+        nb_empl_fr = pd.Series(df_statent["enterprise_id"].to_numpy()[nearest_idx]).value_counts()
+        nb_empl_fr = nb_empl_fr.rename_axis("enterprise_id").reset_index(name="nb_employees_french")
+
+        df_statent = df_statent.merge(nb_empl_fr, on = "enterprise_id", how="left")
+        df_statent["nb_employees_french"] = df_statent["nb_employees_french"].fillna(0).astype(int)
+
+        df_statent["number_employees"] = np.maximum( (df_statent["number_employees"] - df_statent["nb_employees_french"] * capacity_decrement),
+                                                      df_statent["number_employees"] * 0.01)
+
+        del df_statent["nb_employees_french"], commutes, nb_empl_fr
 
 
     if df_fixed_locations is not None:
