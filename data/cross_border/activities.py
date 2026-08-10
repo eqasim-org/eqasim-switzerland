@@ -20,7 +20,9 @@ def execute(context):
                      "origin_x", "origin_y",
                      "destination_x", "destination_y", "destination_id",
                      "is_border_point_projected",
-                     "interview_place", "interview_point_id", "interview_geometry_point"]]
+                     "interview_place", "interview_point_id", "interview_geometry_point",
+                     "entry_interview_point_id", "entry_interview_geometry_point",
+                     "exit_interview_point_id", "exit_interview_geometry_point"]]
     
     mz_trips   = mz_trips[["person_id", "trip_id", 
                            "departure_time", "arrival_time", 
@@ -36,6 +38,8 @@ def execute(context):
                          "origin_x", "origin_y",
                          "destination_x", "destination_y",
                          "destination_id",
+                         "entry_interview_point_id", "entry_interview_geometry_point",
+                         "exit_interview_point_id", "exit_interview_geometry_point",
                          "departure_time", "arrival_time",
                          "mode",
                          "preceding_purpose", "following_purpose"]].sort_values(by=["cross_border_person_id", "trip_id"])
@@ -122,6 +126,27 @@ def execute(context):
     geometry = gpd.GeoSeries.from_xy(df_activities["location_x"], df_activities["location_y"])
 
     df_activities["geometry"] = geometry
+
+    # Through traffic does not perform a real activity in Switzerland. Its first
+    # and last activities are therefore the two border anchors used for routing
+    # across the country, with direction-specific facility IDs.
+    through_entry = (df_activities["label"] == "Through") & (df_activities["activity_index"] == 1)
+    through_exit = (df_activities["label"] == "Through") & df_activities["following_mode"].isna()
+    df_activities.loc[through_entry, "purpose"] = "border"
+    df_activities.loc[through_entry, "destination_id"] = df_trips.loc[
+        df_trips["label"] == "Through", "entry_interview_point_id"
+    ].values
+    df_activities.loc[through_entry, "geometry"] = df_trips.loc[
+        df_trips["label"] == "Through", "entry_interview_geometry_point"
+    ].values
+    df_activities.loc[through_exit, "purpose"] = "border"
+    df_activities.loc[through_exit, "destination_id"] = df_trips.loc[
+        df_trips["label"] == "Through", "exit_interview_point_id"
+    ].values
+    df_activities.loc[through_exit, "geometry"] = df_trips.loc[
+        df_trips["label"] == "Through", "exit_interview_geometry_point"
+    ].values
+
     df_activities["duration"] = df_activities["end_time"] - df_activities["start_time"]
     df_activities["is_last"]  = df_activities["following_mode"].isna()
 
@@ -178,20 +203,19 @@ def execute(context):
     car_users      = (df_activities["following_mode"] == "car") | (df_activities["following_mode"] == "car_passenger")
     car_users      = df_activities[car_users]["person_id"].values.tolist()
 
-    # Skip persons whose origin/destination has already been projected onto an interview
-    # place (data.cross_border.generate_od): for them the "home" activity itself already
-    # sits at/near the border crossing, so inserting a separate 1.5/2.5 activity at
-    # interview_geometry_point there would be redundant (or duplicate the same point).
-    mask_car_users = population["cross_border_person_id"].isin(car_users) & ~population["is_border_point_projected"]
+    # From-To car users get two artificial border activities. We also insert them
+    # for projected origins so the routing link comes from the directional border
+    # facility instead of the generic home facility at the same coordinate.
+    mask_car_users = population["cross_border_person_id"].isin(car_users) & (population["label"] == "From-To")
 
     activities1point5 = (
         population[mask_car_users].copy()
-        .rename(columns={"cross_border_person_id": "person_id", "interview_geometry_point": "geometry"})
+        .rename(columns={"cross_border_person_id": "person_id", "entry_interview_geometry_point": "geometry"})
     )
     activities1point5["activity_index"] = 1.5
     activities1point5["duration"]       = 1
     activities1point5["is_last"]        = False
-    activities1point5["destination_id"] = activities1point5["interview_point_id"]
+    activities1point5["destination_id"] = activities1point5["entry_interview_point_id"]
     activities1point5["purpose"]        = "border"
 
     activities1point5 = activities1point5.merge(act1[["person_id", "geom_1", "end_time_1", "trip_duration_12", "following_mode"]], on="person_id", how="left")
@@ -210,12 +234,12 @@ def execute(context):
     activities2point5 = (
         population[population["cross_border_person_id"].isin(persons_with_3_acts) & mask_car_users]
         .copy()
-        .rename(columns={"cross_border_person_id": "person_id", "interview_geometry_point": "geometry"})
+        .rename(columns={"cross_border_person_id": "person_id", "exit_interview_geometry_point": "geometry"})
     )
     activities2point5["activity_index"] = 2.5
     activities2point5["duration"]       = 1
     activities2point5["is_last"]        = False
-    activities2point5["destination_id"] = activities2point5["interview_point_id"]
+    activities2point5["destination_id"] = activities2point5["exit_interview_point_id"]
     activities2point5["purpose"]        = "border"
 
     activities2point5 = activities2point5.merge(act2[["person_id", "geom_2", "end_time_2", "trip_duration_23", "following_mode"]], on="person_id", how="left")
