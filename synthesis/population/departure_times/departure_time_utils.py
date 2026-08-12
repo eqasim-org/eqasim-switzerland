@@ -146,7 +146,7 @@ def run_pt_router(context, df):
                 "--output-trips-path", output_path,
                 "--batch-size", "2048",
                 "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator",
-                "--threads", str(2*context.config("threads"))
+                "--threads", str(context.config("threads"))
             ]
         )
     

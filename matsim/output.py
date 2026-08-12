@@ -10,6 +10,7 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.scenario.network.convert_osm")
     context.stage("matsim.cutter.run_scenario")
+    context.stage("data.pt_pricing.pt_pricing")
 
     context.config("output_path")
     context.config("output_id")    
@@ -95,6 +96,13 @@ def execute(context):
     # copy contract information
     contracts_path = context.stage("contracts.contracts")
     shutil.copyfile(contracts_path, "%s/CONTRACTS.html" % target_path)
+
+    # copy pt prices files
+    sbb_path, zones_path, pricing_path = context.stage("data.pt_pricing.pt_pricing")
+
+    shutil.copy(sbb_path, f"{target_path}/SBB_all_distances.csv" )
+    shutil.copy(zones_path, f"{target_path}/gtfs_zones.csv" )
+    shutil.copy(pricing_path, f"{target_path}/pricingDescription.xml" )
 
     # copy the regional model results too
     regional_model_results_path, regional_model_scenario_path = context.stage("matsim.cutter.run_scenario")
