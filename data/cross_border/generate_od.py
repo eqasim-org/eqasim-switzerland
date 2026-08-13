@@ -8,9 +8,14 @@ import logging
 
 logger = logging.getLogger("synpp")
 
+# Which border crossing points serve which mode. "label" comes from
+# data.cross_border.interview_places; car passengers cross with their driver.
+MODE_TO_LABEL = {"car": "road", "car_passenger": "road", "pt": "pt"}
+
 
 def configure(context):
     context.config("data_path")
+    context.config("random_seed")
     context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.spatial.municipalities")
@@ -21,18 +26,19 @@ def configure(context):
     context.config("cross_border_exclude_shapefiles", default=None)
 
 
-def sample_rows_by_weight(df2, weight_col="weight"):
+def sample_rows_by_weight(df2, rng, weight_col="weight"):
     df = df2.copy()
-    
+
     # Separate integer and fractional parts
     df["int_part"]  = df[weight_col].astype(int)
     df["frac_part"] = df[weight_col] - df["int_part"]
-    
+
     # Repeat rows according to integer part
     repeated = df.iloc[np.repeat(np.arange(len(df)), df["int_part"])].copy().drop(columns=["int_part", "frac_part"])
-    
-    # Handle fractional part with Bernoulli sampling
-    fractional_mask = np.random.rand(len(df)) < df["frac_part"]
+
+    # Handle fractional part with Bernoulli sampling (rng is seeded from
+    # random_seed so that the generated population is reproducible)
+    fractional_mask = rng.random_sample(len(df)) < df["frac_part"]
     fractional = df[fractional_mask].drop(columns=["int_part", "frac_part"])
     
     # Combine both
@@ -50,10 +56,14 @@ def sample_points_in_polygon(polygon, n):
     return points
 
 
-def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context):
+def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context, mode_column = "trip_mode"):
     df = df.copy()
     points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df[x], df[y]), crs = "EPSG:4326").to_crs("EPSG:2056")
     points["record"] = range(len(points))
+
+    # A projected point becomes that agent's border activity, so it has to be a
+    # crossing its own mode can use.
+    points["label"] = df[mode_column].map(MODE_TO_LABEL).values if mode_column in df.columns else None
 
     ch_borders        = context.stage("data.spatial.swiss_border").copy()[0]
     ch_borders_simple = ch_borders.simplify(50)
@@ -67,21 +77,37 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
 
     # Points too far from the border are projected onto the nearest surveyed interview
     # place instead of the nearest other observed (and already close) record.
-    interview_points = context.stage("data.cross_border.interview_places").copy()[["geometry"]].reset_index(drop = True)
+    interview_points = context.stage("data.cross_border.interview_places").copy()[
+        ["geometry", "border_crossing_point_id", "label"]].reset_index(drop = True)
     interview_points["record"] = range(len(interview_points))
     merging_aux_df    = interview_points.copy().rename(columns = {"geometry": "close_point_geometry"})
 
-    nearest = far_points.sjoin_nearest(interview_points[["geometry", "record"]], how="left")
-    del nearest["index_right"]
+    # Nearest crossing among the ones serving the agent's mode, so that a pt
+    # agent does not end up projected onto a motorway crossing.
+    nearest_parts = []
+
+    for label, group in far_points.groupby("label", dropna = False):
+        candidates = interview_points[interview_points["label"] == label]
+
+        if len(candidates) == 0:  # unknown mode: fall back to every crossing
+            candidates = interview_points
+
+        part = group.sjoin_nearest(candidates[["geometry", "record"]], how="left")
+        nearest_parts.append(part[~part.index.duplicated(keep = "first")])  # ties give one row each
+
+    nearest = pd.concat(nearest_parts) if len(nearest_parts) > 0 else far_points.assign(record_right = None)
+
+    if "index_right" in nearest: del nearest["index_right"]
     nearest = pd.merge(nearest, merging_aux_df, left_on = "record_right", right_on = "record", how = "left")
-    nearest = nearest[["record_left", "dist_to_border", "close_point_geometry", "geometry"]]
-    nearest.columns = ["record", "dist_to_border", "geometry", "geometry_before_projection"]
+    nearest = nearest[["record_left", "dist_to_border", "close_point_geometry", "geometry", "border_crossing_point_id"]]
+    nearest.columns = ["record", "dist_to_border", "geometry", "geometry_before_projection", "point_id"]
     nearest["purpose"]      = projected_purpose
     nearest["is_projected"] = True
 
     close_points["geometry_before_projection"] = close_points["geometry"]
     close_points["purpose"]             = default_purpose
     close_points["is_projected"]        = False
+    close_points["point_id"]            = None  # a real location, not a crossing
 
     points = pd.concat([nearest, close_points])
     points = points.sort_values(by = "record")
@@ -90,6 +116,7 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     df[column_name + "_before_projection"] = points["geometry_before_projection"].values
     df[column_name + "_purpose"]           = points["purpose"].values
     df[column_name + "_is_projected"]      = points["is_projected"].values
+    df[column_name + "_point_id"]          = points["point_id"].values
 
     del df[x]
     del df[y]
@@ -100,26 +127,56 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     return df
 
 
-def expand_and_sample(df, expand_column, weight_column):
+def expand_and_sample(df, expand_column, weight_column, rng):
     df = df.copy()
 
-    # Expand
+    # Expand: one row per occupant of the vehicle / member of the group
     df_expanded = df.loc[df.index.repeat(df[expand_column])].copy()
     df_expanded["passenger_index"] = df_expanded.groupby(df_expanded.index).cumcount() + 1
-    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]==1), "trip_mode"] = "car"
-    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]>1), "trip_mode"]  = "car_passenger"
-    
+    df_expanded["trip_mode"]       = assign_car_passengers(df_expanded["trip_mode"], df_expanded["passenger_index"])
+
     del df_expanded[expand_column]
     del df_expanded["passenger_index"]
 
     # Sample
-    df_sampled = sample_rows_by_weight(df_expanded, weight_col = weight_column)
+    df_sampled = sample_rows_by_weight(df_expanded, rng, weight_col = weight_column)
     del df_sampled[weight_column]
 
     return df_sampled.copy().reset_index()
 
 
-def process_from_to_trips(df_trips, context):
+def sjoin_within_unique(points, polygons):
+    """
+    Point-in-polygon join returning exactly one row per point, in the order of
+    `points` (a GeoSeries). A plain sjoin returns one row per match, and these
+    layers do overlap: data.spatial.cantons and data.spatial.municipalities
+    append the external-population region as an extra polygon covering the real
+    ones, so every point inside it matches twice. That silently breaks the
+    positional `.values` assignments the callers do afterwards. The region is
+    appended last, so keeping the first match keeps the real canton /
+    municipality.
+    """
+
+    points = gpd.GeoDataFrame(geometry = points.reset_index(drop = True))
+
+    joined = gpd.sjoin(points, polygons, how = "left", predicate = "within")
+    joined = joined[~joined.index.duplicated(keep = "first")]
+
+    return joined.reindex(points.index)
+
+
+def assign_car_passengers(trip_mode, passenger_index):
+    """
+    In a car, only the first occupant drives; everyone else rides along. The
+    survey codes the whole group with a single vehicle type ("car" here, since
+    FAHRZEUGTYP is mapped to car/pt when the data is read), so the passengers
+    have to be derived from their position within the expanded group.
+    """
+
+    return np.where((trip_mode == "car") & (passenger_index > 1), "car_passenger", trip_mode)
+
+
+def process_from_to_trips(df_trips, context, rng):
     # Load municipalities
     df_municipalities, _ = context.stage("data.spatial.municipalities")
 
@@ -136,9 +193,13 @@ def process_from_to_trips(df_trips, context):
      # This removes 1.49% of the records
     df = trips_od[~(mask_missing_start) & ~(mask_missing_end)].copy()
 
-    # Reorder start and end so that all trips end in CH
+    # Reorder start and end so that all trips end in CH. The raw country codes
+    # have to be swapped along with everything else, otherwise the records
+    # interviewed on the way out of Switzerland keep a reversed country pair
+    # (which is what matsim/scenario/population.py builds cross_border_od from).
     mask = df["origin_country"] == "CH"
     df.loc[mask, ["origin_country", "destination_country"]] = df.loc[mask, ["destination_country", "origin_country"]].values
+    df.loc[mask, ["origin_country_raw", "destination_country_raw"]] = df.loc[mask, ["destination_country_raw", "origin_country_raw"]].values
     df.loc[mask, ["start_x", "end_x"]] = df.loc[mask, ["end_x", "start_x"]].values
     df.loc[mask, ["start_y", "end_y"]] = df.loc[mask, ["end_y", "start_y"]].values
 
@@ -146,7 +207,7 @@ def process_from_to_trips(df_trips, context):
     destinations = df.copy().apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
     destinations = gpd.GeoSeries(destinations, crs = "EPSG:4326").to_crs("EPSG:2056")
 
-    joined = gpd.sjoin(gpd.GeoDataFrame(geometry = destinations), df_municipalities, how = "left", predicate = "within")
+    joined = sjoin_within_unique(destinations, df_municipalities)
 
     df["destination_municipality"] = joined["municipality_id"].values
 
@@ -155,7 +216,7 @@ def process_from_to_trips(df_trips, context):
     # Let's remove these observations.
     df = df[df["destination_municipality"].notna()].copy()
 
-    df = expand_and_sample(df.copy(), "nb_passengers", "weight")
+    df = expand_and_sample(df.copy(), "nb_passengers", "weight", rng)
 
     # Fix the origins
     df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", 20, "home", "other", "origin", context)
@@ -177,19 +238,23 @@ def process_from_to_trips(df_trips, context):
 
     # Only the origin (residence) can be projected here, the destination is always a real
     # STATENT-sampled point inside Switzerland (see data.cross_border.destinations).
+    df["destination_is_projected"]  = False
+    df["destination_point_id"]      = None
     df["is_border_point_projected"] = df["origin_is_projected"]
 
     df = df[["cross_border_person_id", "label",
         "origin_x", "origin_y", "destination_x", "destination_y",
         "residence_x", "residence_y",
-        "trip_mode", "trip_purpose", "is_border_point_projected",
+        "trip_mode", "trip_purpose",
+        "is_border_point_projected", "origin_is_projected", "destination_is_projected",
+        "origin_point_id", "destination_point_id",
         "interview_place", "interview_point_id", "interview_geometry_point",
         "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]]
 
     return df
 
 
-def process_through_trips(through_trips, N, context):
+def process_through_trips(through_trips, N, context, rng):
     through_od = through_trips[
         ["origin_country", "destination_country", "origin_country_raw", "destination_country_raw",
         "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
@@ -203,13 +268,12 @@ def process_through_trips(through_trips, N, context):
 
     df_expanded = df.loc[df.index.repeat(df["nb_passengers"])].copy()
     df_expanded["passenger_index"] = df_expanded.groupby(df_expanded.index).cumcount() + 1
-    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]==1), "trip_mode"] = "car"
-    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]>1), "trip_mode"]  = "car_passenger"
+    df_expanded["trip_mode"]       = assign_car_passengers(df_expanded["trip_mode"], df_expanded["passenger_index"])
 
     del df_expanded["nb_passengers"]
     del df_expanded["passenger_index"]
 
-    df_sampled = sample_rows_by_weight(df_expanded, weight_col = "weight")
+    df_sampled = sample_rows_by_weight(df_expanded, rng, weight_col = "weight")
     del df_sampled["weight"]
 
     df = df_sampled.copy().reset_index()
@@ -231,7 +295,9 @@ def process_through_trips(through_trips, N, context):
     df = df[["cross_border_person_id", "label",
         "origin_x", "origin_y", "destination_x", "destination_y",
         "residence_x", "residence_y",
-        "trip_mode", "trip_purpose", "is_border_point_projected",
+        "trip_mode", "trip_purpose",
+        "is_border_point_projected", "origin_is_projected", "destination_is_projected",
+        "origin_point_id", "destination_point_id",
         "interview_place", "interview_point_id", "interview_geometry_point",
         "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]]
 
@@ -344,9 +410,14 @@ def read_2021_data(context):
     elif day == "workday":
         day_key = "Mo-Fr"
     elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
-        day_key = "Mo-FR"
+        # The survey only distinguishes Mo-Fr from the weekend, so a single
+        # weekday gets the regular workday demand (and a single weekend day
+        # the regular weekend demand).
+        day_key = "Mo-Fr"
     elif day in ["Saturday", "Sunday"]:
         day_key = "WE"
+    else:
+        raise ValueError(f"Unsupported specific_day_scenario: '{day}'")
 
     day_value = days[day_key]
     df_days   = df2021[df2021["day_cat"]==day_key].copy()
@@ -380,16 +451,20 @@ def read_2021_data(context):
 
     # "label" indicates which mode a point was surveyed for ("road" serves car trips,
     # "pt" serves public transport trips), so candidates are grouped by place AND mode.
-    mode_to_label = {"car": "road", "pt": "pt"}
+    mode_to_label = MODE_TO_LABEL
 
     grouped_points = {k: v for k, v in points.groupby(["interview_place", "label"])}
+
+    # Shared, seeded RNG: passing it to every .sample() call keeps the draws
+    # reproducible while still giving each row its own draw.
+    point_rng = np.random.RandomState(context.config("random_seed"))
 
     def sample_point(row):
         label = mode_to_label.get(row["trip_mode"])
         candidates = grouped_points.get((row["interview_place"], label))
         if candidates is not None and "importance" in candidates.columns:
-            sampled = candidates.sample(n=1, weights=candidates["importance"])
-            return sampled.iloc[0][["geometry", "importance", "interview_point_id"]]
+            sampled = candidates.sample(n=1, weights=candidates["importance"], random_state=point_rng)
+            return sampled.iloc[0][["geometry", "importance", "interview_point_id", "label"]]
 
         # Fall back to the closest point that still matches the trip's mode, if any exist
         same_label = points[points["label"] == label] if label is not None else points
@@ -399,10 +474,27 @@ def read_2021_data(context):
         origin    = Point(row["start_x"], row["start_y"])
         distances = same_label["geometry"].apply(lambda geom: origin.distance(geom))
         closest   = same_label.loc[distances.idxmin()]
-        return closest[["geometry", "importance", "interview_point_id"]]
+        return closest[["geometry", "importance", "interview_point_id", "label"]]
 
     result = borders[["interview_place", "start_x", "start_y", "trip_mode"]].apply(sample_point, axis=1)
-    borders[["interview_geometry_point", "candidate_label", "interview_point_id"]] = result
+    borders[["interview_geometry_point", "importance", "interview_point_id", "interview_point_label"]] = result
+
+    # The point has to serve the mode the agent travels with, since it becomes
+    # that agent's border activity in data.cross_border.activities: car (and
+    # its passengers) cross at a road point, public transport at a pt one. That
+    # holds by construction above, including in the fallback, so this only
+    # catches a mode that mode_to_label does not know about.
+    expected_label = borders["trip_mode"].map(mode_to_label)
+    mismatched     = expected_label.notna() & (borders["interview_point_label"] != expected_label)
+
+    assert not mismatched.any(), (
+        "%d records got a border crossing point that does not serve their mode, e.g. %s"
+        % (int(mismatched.sum()),
+           borders.loc[mismatched, ["trip_mode", "interview_point_label"]].head().to_dict("records"))
+    )
+
+    logger.info("Border crossing points by mode: %s",
+                borders.groupby(["trip_mode", "interview_point_label"]).size().to_dict())
 
     return borders
 
@@ -487,9 +579,14 @@ def read_2015_data(context):
     elif day == "workday":
         day_key = "Mo-Fr"
     elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
-        day_key = "Mo-FR"
+        # The survey only distinguishes Mo-Fr from the weekend, so a single
+        # weekday gets the regular workday demand (and a single weekend day
+        # the regular weekend demand).
+        day_key = "Mo-Fr"
     elif day in ["Saturday", "Sunday"]:
         day_key = "WE"
+    else:
+        raise ValueError(f"Unsupported specific_day_scenario: '{day}'")
 
     day_value = days[day_key]
     df_days   = df2015[df2015["day_cat"]==day_key].copy()
@@ -518,7 +615,9 @@ def read_2015_data(context):
 
 
 def execute(context):
-    borders2021 = read_2021_data(context)    
+    rng = np.random.RandomState(context.config("random_seed"))
+
+    borders2021 = read_2021_data(context)
     borders2015 = read_2015_data(context)
 
     grouped2021 = borders2021.groupby(["trip_mode", "trip_purpose", "origin_country", "destination_country"], as_index = False)["group_weight"].sum().rename(columns = {"group_weight": "group_weight_2021"})
@@ -572,10 +671,10 @@ def execute(context):
 
     # Now process the trips
     trips = borders[borders["travel_cat"].isin(["From CH", "To CH"])]   
-    from_to_trips = process_from_to_trips(trips, context)
+    from_to_trips = process_from_to_trips(trips, context, rng)
 
     through = borders[borders["travel_cat"]=="Through CH"]
-    through_trips = process_through_trips(through, len(from_to_trips), context)
+    through_trips = process_through_trips(through, len(from_to_trips), context, rng)
 
     df = pd.concat([from_to_trips, through_trips])
         

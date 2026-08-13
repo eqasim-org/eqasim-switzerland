@@ -11,8 +11,13 @@ def configure(context):
 
 
 def execute(context):
-    df           = context.stage("data.cross_border.sample")
+    df           = context.stage("data.cross_border.sample").copy()
     mz_actchains = context.stage("data.microcensus.activity_chains")
+
+    # One shared, seeded RNG for every (purpose, mode) group: re-passing the
+    # same random_seed to each .sample() call made groups drawing from the same
+    # candidate pool return the very same sequence of microcensus persons.
+    rng = np.random.RandomState(context.config("random_seed"))
 
     purpose_to_actchain = {
         "work": ["home-work-home"],
@@ -40,14 +45,28 @@ def execute(context):
             candidates.columns = ["mz_person_id", "mz_person_weight"]
             N_sample           = np.sum(mask_cb)
 
+            if N_sample == 0:
+                continue
+
+            assert len(candidates) > 0, (
+                f"No microcensus activity chain available for purpose '{purpose}' with mode '{trip_mode}' "
+                f"on '{day}' ({N_sample} cross-border agents need one)."
+            )
+
             sampled_ids = candidates["mz_person_id"].sample(
                 n = N_sample,
                 weights = candidates["mz_person_weight"],
-                random_state = context.config("random_seed"),
+                random_state = rng,
                 replace = True
-            )
+            ).values
 
-            df.loc[mask_cb, "mz_person_id"] = sampled_ids.values
+            # Shuffle before assigning so the draw order carries no structure
+            # from the order of the cross-border records themselves. permutation
+            # returns a new array, unlike shuffle, which cannot write into the
+            # read-only view .values hands back here.
+            sampled_ids = rng.permutation(sampled_ids)
+
+            df.loc[mask_cb, "mz_person_id"] = sampled_ids
 
     assert len(df[df["mz_person_id"].isna()]) == 0
 

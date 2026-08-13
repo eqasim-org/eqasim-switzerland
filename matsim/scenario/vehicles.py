@@ -32,7 +32,15 @@ def execute(context):
     if context.config("include_external_population"):
         external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
 
-        external_vehicles["type_id"] = "default_" + external_vehicles["mode"]
+        # The external fleet holds one vehicle per mode, including the "_loop"
+        # variants of car and car_passenger. Those are the same physical vehicles
+        # as far as MATSim is concerned, and the synthetic fleet (synthesis.vehicles.*)
+        # defines no "_loop" type at all, so they take the type of their base mode.
+        # Without this they ask for "default_car_loop", which no vehicle type
+        # declares, and MATSim aborts while reading vehicles.xml.gz.
+        base_mode = external_vehicles["mode"].str.replace("_loop$", "", regex = True)
+
+        external_vehicles["type_id"] = "default_" + base_mode
 
         df_vehicles = pd.concat([df_vehicles, external_vehicles])
 
@@ -56,6 +64,15 @@ def execute(context):
         #del cross_border_vehicles["person_id"]
 
         df_vehicles = pd.concat([df_vehicles, cross_border_vehicles])
+
+    # Fail here rather than in MATSim, which only reports "VehicleType <id> does
+    # not exist" followed by a null pointer while parsing vehicles.xml.gz.
+    unknown_types = sorted(set(df_vehicles["type_id"].unique()) - set(df_vehicle_types["type_id"].unique()))
+
+    assert len(unknown_types) == 0, (
+        "%d vehicles refer to types that are not defined in vehicles.xml.gz: %s" % (
+            int(df_vehicles["type_id"].isin(unknown_types).sum()), unknown_types)
+    )
 
     with gzip.open(output_path, 'wb+') as writer:
         with io.BufferedWriter(writer, buffer_size = 2 * 1024**3) as writer:

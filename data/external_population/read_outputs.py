@@ -10,7 +10,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", 
+AVAILABILITY_MAP = {"none": "never", "all": "always", "some": "always"}
+
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex",
                  "home_x", "home_y",
                  "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund", "subscriptions_strecke",
                  "household_id", "is_car_passenger", 
@@ -18,6 +20,50 @@ PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_li
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
                  "income_class", "income_per_capita",
                  "number_of_cars_class", "number_of_bikes_class"]
+
+
+def normalize_for_comparison(df):
+    """
+    Brings a column to a comparable form so that the different spellings of the
+    same value (e.g. True/False, "True"/"False", 1/0) compare equal.
+    """
+
+    if df.dtype == object:
+        df = df.replace({"True": True, "False": False, "true": True, "false": False})
+
+    if df.dtype == bool:
+        df = df.astype(int)
+
+    return df.reset_index(drop = True)
+
+
+def drop_duplicate_columns(df, source_name):
+    """
+    Removes the copies pandas creates when a CSV header repeats a column name:
+    the second occurrence of "x" is read as "x.1", the third as "x.2", etc.
+    The eqasim-france export currently writes has_driving_license twice (once
+    as True/False, once as 1/0), and without this the copy would be carried
+    along by every stage reading this data set. Only the first occurrence is
+    kept; a copy that disagrees with it is reported, since that would point at
+    two genuinely different attributes rather than a duplicated header.
+    """
+
+    duplicate_columns = []
+
+    for column in df.columns:
+        base, separator, suffix = column.rpartition(".")
+
+        if separator == "" or not suffix.isdigit() or base not in df.columns:
+            continue
+
+        if not normalize_for_comparison(df[base]).equals(normalize_for_comparison(df[column])):
+            logger.warning("Column %s in %s is a duplicate of %s but has different values; keeping %s.", column, source_name, base, base)
+        else:
+            logger.info("Dropping %s from %s: duplicate header entry for %s.", column, source_name, base)
+
+        duplicate_columns.append(column)
+
+    return df.drop(columns = duplicate_columns)
 
 
 def configure(context):
@@ -46,7 +92,25 @@ def execute(context):
     assert any(f.endswith("_activities.csv") for f in os.listdir(folder)), f"No *_persons.csv file found in {folder}"
 
     persons_file = next(f for f in os.listdir(folder) if f.endswith("_persons.csv"))
-    persons      = pd.read_csv(os.path.join(folder, persons_file), sep = ";")[["person_id", "household_id", "age", "sex", "employed", "has_driving_license", "has_pt_subscription", "census_person_id", "hts_id"]]
+    persons      = pd.read_csv(os.path.join(folder, persons_file), sep = ";")
+    persons      = drop_duplicate_columns(persons, persons_file)
+
+    person_columns = ["person_id", "household_id", "age", "sex", "employed", "has_driving_license", "has_pt_subscription", "census_person_id", "hts_id"]
+
+    # eqasim-france now writes car_availability per person (e.g. boat commuters
+    # are individually forced to "none" while their household record keeps the
+    # untouched household value), so the person-level value is the correct one
+    # and overrides the household one further down. Older exports without the
+    # column keep falling back to the household value.
+    has_person_car_availability = "car_availability" in persons.columns
+
+    if has_person_car_availability:
+        persons = persons.rename(columns = {"car_availability": "person_car_availability"})
+        person_columns.append("person_car_availability")
+    else:
+        logger.warning("No person-level car_availability found in %s, falling back to the household-level value.", persons_file)
+
+    persons = persons[person_columns]
 
     households_file = next(f for f in os.listdir(folder) if f.endswith("_households.csv"))
     households      = pd.read_csv(os.path.join(folder, households_file), sep = ";")[["household_id", "car_availability", "bike_availability", "number_of_vehicles", "number_of_bikes", "income"]]
@@ -73,7 +137,8 @@ def execute(context):
 
     vehicles_file = next(f for f in os.listdir(folder) if f.endswith("_vehicles.csv"))
     vehicles      = pd.read_csv(os.path.join(folder, vehicles_file), sep = ";")
-    
+    vehicles      = drop_duplicate_columns(vehicles, vehicles_file)
+
     homes_file = next(f for f in os.listdir(folder) if f.endswith("_homes.gpkg"))
     homes      = gpd.read_file(os.path.join(folder, homes_file))[["household_id", "geometry"]]
     homes.crs  = "EPSG:2154"
@@ -83,8 +148,8 @@ def execute(context):
     homes["home_y"] = homes.geometry.y
 
     households = households.merge(homes[["household_id", "home_x", "home_y"]], on = "household_id", how = "left")
-    households.loc[:, "car_availability"]  = households["car_availability"].map({"none": "never", "all": "always", "some": "always"})
-    households.loc[:, "bike_availability"] = households["bike_availability"].map({"none": "never", "all": "always", "some": "always"})
+    households.loc[:, "car_availability"]  = households["car_availability"].map(AVAILABILITY_MAP)
+    households.loc[:, "bike_availability"] = households["bike_availability"].map(AVAILABILITY_MAP)
 
     # Match the income_class shares of the Swiss population instead of using
     # fixed CHF thresholds: the poorest X% of French households are assigned
@@ -124,6 +189,17 @@ def execute(context):
     households["number_of_bikes_class"] = households["number_of_bikes"]
 
     persons = persons.merge(households, on = "household_id", how = "left")
+
+    # The person-level car_availability wins over the household-level one; the
+    # household value only fills in for persons without a valid own value.
+    if has_person_car_availability:
+        person_car_availability = persons["person_car_availability"].map(AVAILABILITY_MAP)
+
+        number_of_overrides = int((person_car_availability.notna() & (person_car_availability != persons["car_availability"])).sum())
+        logger.info("Overriding household-level car_availability with the person-level value for %d/%d external persons.", number_of_overrides, len(persons))
+
+        persons["car_availability"] = person_car_availability.fillna(persons["car_availability"])
+        persons = persons.drop(columns = ["person_car_availability"])
 
     # OECD-modified equivalence scale: 1 for the first adult, 0.5 for each
     # additional adult, 0.3 for each child (age < 14).

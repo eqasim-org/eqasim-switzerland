@@ -3,6 +3,7 @@ import io
 import shutil
 import subprocess
 import pandas as pd
+import geopandas as gpd
 from shapely import wkt
 
 import matsim.writers
@@ -24,6 +25,41 @@ def _require_cols(df, cols, df_name):
 
 def _na_to_none(x):
     return None if pd.isna(x) else x
+
+
+def snap_to_shared_facilities(external_activities, df_destinations):
+    """
+    Moves an external activity onto the facility it names whenever that facility
+    is also part of synthesis.population.destinations.
+
+    Both sides describe the same French BPE (or Swiss STATENT) locations, but they
+    reach them through different paths: data.locations_fr.secondary snaps the point
+    to a 1 m grid, while data.external_population.read_outputs reprojects the raw
+    coordinate from EPSG:2154 and lets matsim.scenario.population truncate it. The
+    two disagree by up to a metre. matsim/scenario/facilities.py writes the shared
+    ids only once, from df_destinations, so the activity has to follow -- MATSim's
+    ScenarioValidator rejects an activity that is not exactly on its facility.
+    """
+
+    coordinates = df_destinations[["destination_id", "destination_x", "destination_y"]].drop_duplicates("destination_id")
+    coordinates = coordinates.set_index("destination_id")
+
+    shared = external_activities["destination_id"].isin(coordinates.index)
+
+    if shared.any():
+        x = external_activities.loc[shared, "destination_id"].map(coordinates["destination_x"]).astype(float)
+        y = external_activities.loc[shared, "destination_id"].map(coordinates["destination_y"]).astype(float)
+
+        external_activities.loc[shared, "destination_x"] = x.values
+        external_activities.loc[shared, "destination_y"] = y.values
+        external_activities.loc[shared, "geometry"]      = gpd.points_from_xy(x.values, y.values)
+
+        logger.info(
+            "Moved %d external activities (%d distinct facilities) onto the coordinates written to facilities.xml.gz.",
+            int(shared.sum()), int(external_activities.loc[shared, "destination_id"].nunique()),
+        )
+
+    return external_activities
 
 
 def configure(context):
@@ -51,6 +87,7 @@ def configure(context):
     if context.config("include_external_population"):
         context.stage("data.external_population.read_outputs")
         context.stage("data.external_population.constants")
+        context.stage("synthesis.population.destinations")
 
 
 VEHICLE_FIELDS = ["mode", "vehicle_id", "owner_id"]
@@ -379,6 +416,9 @@ def execute(context):
         external_activities["destination_id"] = external_activities["destination_id"].astype(object)
         external_activities.loc[external_activities["purpose"] == "home", "destination_id"] = HOME_DESTINATION_ID
 
+        external_activities = snap_to_shared_facilities(
+            external_activities, context.stage("synthesis.population.destinations"))
+
         external_activities["destination_x"] = external_activities["destination_x"].astype(int)
         external_activities["destination_y"] = external_activities["destination_y"].astype(int)
 
@@ -414,9 +454,17 @@ def execute(context):
                 cross_border_activities[col] = 0
 
         cross_border_persons["person_type"]       = "crossborder"
-        cross_border_persons["cross_border_od"]   = (
-            cross_border_persons["origin_country_raw"] + "-" + cross_border_persons["destination_country_raw"]
-        )
+
+        # These agents travel <abroad> -> CH -> <abroad>, so the od label has
+        # three parts (e.g. "FR-CH-FR"). data.cross_border.generate_od orders
+        # every record so that it ends in CH: "From-To" agents then carry
+        # destination_country_raw == "CH" and go back to their origin country,
+        # while "Through" agents keep two distinct foreign endpoints.
+        origin_country      = cross_border_persons["origin_country_raw"]
+        destination_country = cross_border_persons["destination_country_raw"]
+        destination_country = destination_country.where(destination_country != "CH", origin_country)
+
+        cross_border_persons["cross_border_od"] = origin_country + "-CH-" + destination_country
         cross_border_persons["pt_subscription"]   = 0
         cross_border_persons["bike_availability"] = 0
         cross_border_persons["car_availability"]  = 1

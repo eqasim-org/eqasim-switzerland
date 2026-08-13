@@ -1,7 +1,52 @@
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import LineString
+
+
+def rename_projected_ends(df_activities, population):
+    """
+    Names "border" the activities that sit on a projected end of the trip.
+
+    data.cross_border.generate_od moves an origin or destination that is more
+    than 20 km from the border onto the nearest surveyed interview place, so
+    that end is not where the agent lives or goes -- it is the point where it
+    crosses the border. Keeping the "home" purpose inherited from the
+    microcensus chain there would hide the crossing.
+
+    The first activity always sits at the origin. The last one sits at the
+    origin as well for "From-To" agents, which come back to where they started,
+    and at the destination for "Through" agents, which leave the country again.
+
+    They also take the id of the crossing they were projected onto as their
+    destination_id, so that the activity refers to the border facility
+    synthesis.population.destinations writes for that point (e.g.
+    "BCP_road_Chiasso_Autostrada_421_01") instead of the agent's home facility.
+    """
+
+    projection = population.rename(columns = {"cross_border_person_id": "person_id"})
+    projection = projection[["person_id", "origin_is_projected", "destination_is_projected",
+                             "origin_point_id", "destination_point_id"]]
+
+    df = df_activities.merge(projection, on = "person_id", how = "left")
+
+    is_first   = df["activity_index"] == df.groupby("person_id")["activity_index"].transform("min")
+    is_through = df["label"] == "Through"
+
+    at_origin      = is_first | (df["is_last"] & ~is_through)
+    at_destination = df["is_last"] & is_through
+
+    on_origin_crossing      = at_origin & df["origin_is_projected"].fillna(False)
+    on_destination_crossing = at_destination & df["destination_is_projected"].fillna(False)
+
+    df["destination_id"] = df["destination_id"].astype(object)
+
+    df.loc[on_origin_crossing, "purpose"]             = "border"
+    df.loc[on_origin_crossing, "destination_id"]      = df.loc[on_origin_crossing, "origin_point_id"]
+    df.loc[on_destination_crossing, "purpose"]        = "border"
+    df.loc[on_destination_crossing, "destination_id"] = df.loc[on_destination_crossing, "destination_point_id"]
+
+    return df.drop(columns = ["origin_is_projected", "destination_is_projected",
+                              "origin_point_id", "destination_point_id"])
 
 
 def configure(context):
@@ -19,7 +64,8 @@ def execute(context):
     population = df[["cross_border_person_id", "label", "mz_person_id",
                      "origin_x", "origin_y",
                      "destination_x", "destination_y", "destination_id",
-                     "is_border_point_projected",
+                     "is_border_point_projected", "origin_is_projected", "destination_is_projected",
+                     "origin_point_id", "destination_point_id",
                      "interview_place", "interview_point_id", "interview_geometry_point"]]
     
     mz_trips   = mz_trips[["person_id", "trip_id", 
@@ -130,7 +176,9 @@ def execute(context):
                                    "purpose", "is_last",
                                    "geometry", "destination_id", "following_mode"
                                    ]]
-    
+
+    df_activities = rename_projected_ends(df_activities, population)
+
     # ── 0. Sort ────────────────────────────────────────────────────────────────────
     df_activities = df_activities.sort_values(["person_id", "activity_index"]).reset_index(drop=True)
 
@@ -163,7 +211,12 @@ def execute(context):
         trip_duration_col: column name for the trip duration between the two real activities
         """
         df = fake_df.copy()
-        
+
+        if len(df) == 0:
+            # apply() over an empty frame gives back a DataFrame rather than a
+            # Series, which the single-column assignments below cannot take.
+            return df.drop(columns = [geom_before, geom_after, end_time_col, trip_duration_col])
+
         df["dist_before"] = df.apply(lambda r: r[geom_before].distance(r["geometry"]), axis=1)
         df["dist_after"]  = df.apply(lambda r: r[geom_after].distance(r["geometry"]),  axis=1)
         df["ratio"]       = df["dist_before"] / (df["dist_before"] + df["dist_after"])
@@ -174,18 +227,20 @@ def execute(context):
         return df.drop(columns=["dist_before", "dist_after", "ratio", geom_before, geom_after,
                                 end_time_col, trip_duration_col])
 
-    # ── 4. Build fake activities at index 1.5 (all persons with mode car) ───────────────────────
-    car_users      = (df_activities["following_mode"] == "car") | (df_activities["following_mode"] == "car_passenger")
-    car_users      = df_activities[car_users]["person_id"].values.tolist()
-
-    # Skip persons whose origin/destination has already been projected onto an interview
-    # place (data.cross_border.generate_od): for them the "home" activity itself already
-    # sits at/near the border crossing, so inserting a separate 1.5/2.5 activity at
-    # interview_geometry_point there would be redundant (or duplicate the same point).
-    mask_car_users = population["cross_border_person_id"].isin(car_users) & ~population["is_border_point_projected"]
+    # ── 4. Build fake activities at index 1.5 (every mode) ─────────────────────────
+    # The interview point each record carries is the one that serves its own mode
+    # (road points for car and its passengers, pt points for public transport,
+    # see sample_point in data.cross_border.generate_od), so public transport
+    # agents get their border activity the same way car agents do.
+    #
+    # Skipped are the persons whose origin/destination has already been projected
+    # onto an interview place: rename_projected_ends has just named that end
+    # "border", so inserting a separate 1.5/2.5 activity at the same
+    # interview_geometry_point would only duplicate the point.
+    mask_border_activity = ~population["is_border_point_projected"]
 
     activities1point5 = (
-        population[mask_car_users].copy()
+        population[mask_border_activity].copy()
         .rename(columns={"cross_border_person_id": "person_id", "interview_geometry_point": "geometry"})
     )
     activities1point5["activity_index"] = 1.5
@@ -208,7 +263,7 @@ def execute(context):
     persons_with_3_acts = persons_with_3_acts[persons_with_3_acts >= 3].index
 
     activities2point5 = (
-        population[population["cross_border_person_id"].isin(persons_with_3_acts) & mask_car_users]
+        population[population["cross_border_person_id"].isin(persons_with_3_acts) & mask_border_activity]
         .copy()
         .rename(columns={"cross_border_person_id": "person_id", "interview_geometry_point": "geometry"})
     )
@@ -249,39 +304,4 @@ def execute(context):
                                    "geometry", "destination_id", "following_mode"
                                    ]]
     
-    df_sorted = df_activities.sort_values(["person_id", "activity_index"])
-
-    # Shift to get origin and destination activity side by side
-    trips = pd.DataFrame({
-        "person_id"       : df_sorted["person_id"],
-        "trip_index"      : df_sorted["activity_index"],
-        "origin_id"       : df_sorted["destination_id"],
-        "departure_time"  : df_sorted["end_time"],
-        "geom_origin"     : df_sorted["geometry"].values,
-        "mode"            : df_sorted["following_mode"],
-        "geom_destination": df_sorted.groupby("person_id")["geometry"].shift(-1).values,
-        "destination_id"  : df_sorted.groupby("person_id")["destination_id"].shift(-1).values,
-        "arrival_time"    : df_sorted.groupby("person_id")["start_time"].shift(-1).values,
-    })
-
-    # Drop last activity of each person (no outgoing trip)
-    trips = trips[trips["mode"].notna()].copy()
-
-    # Compute trip duration
-    trips["trip_duration"] = trips["arrival_time"] - trips["departure_time"]
-
-    # Build LineString geometry
-    trips["geometry"] = trips.apply(
-        lambda r: LineString([r["geom_origin"], r["geom_destination"]]), axis=1
-    )
-
-    # Drop helper columns and convert to GeoDataFrame
-    trips = trips.drop(columns=["geom_origin", "geom_destination"])
-    trips = gpd.GeoDataFrame(trips, geometry="geometry", crs = "EPSG:2056")
-
-    # Reindex trip index as integer
-    trips["trip_index"] = trips.groupby("person_id").cumcount() + 1
-
-    #trips.to_file(f"{context.config("output_path")}/trips_crossborder.shp")
-
     return df_activities

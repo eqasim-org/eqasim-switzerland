@@ -17,7 +17,7 @@ def configure(context):
 
 BORDER_MATCH_COLUMNS = [
     "cross_border_person_id", "destination_country_raw",
-    "border_crossing_point", "border_crossing_trip_mode", "interview_point_id",
+    "interview_geometry_point", "border_crossing_trip_mode", "interview_point_id",
 ]
 
 
@@ -120,8 +120,8 @@ def execute(context):
     # and with the location synthesis.population.spatial.locations assigns.
     df_trips_noncb = df_trips[~df_trips["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)].copy()
     df_trips_noncb["destination_country_raw"] = None
-    df_trips_noncb["border_crossing_point"]   = None
-    df_trips_noncb["interview_point_id"]      = None
+    df_trips_noncb["interview_geometry_point"] = None
+    df_trips_noncb["interview_point_id"]       = None
 
     is_cb_person = df_persons["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)
     is_cb_person &= ~df_persons["is_truck_driver"].astype("boolean").fillna(False).astype(bool)
@@ -137,7 +137,7 @@ def execute(context):
         "following_purpose",
         "trip_duration",
         "mode",
-        "destination_country_raw", "border_crossing_point", "interview_point_id",
+        "destination_country_raw", "interview_geometry_point", "interview_point_id",
     ]
 
     if len(df_cb_persons) == 0:
@@ -162,7 +162,7 @@ def execute(context):
         "following_purpose": np.where(is_leaving, "border", "home"),
         "mode": df_cb_persons["border_crossing_trip_mode"].values,
         "destination_country_raw": df_cb_persons["destination_country_raw"].values,
-        "border_crossing_point": df_cb_persons["border_crossing_point"].values,
+        "interview_geometry_point": df_cb_persons["interview_geometry_point"].values,
         "interview_point_id": df_cb_persons["interview_point_id"].values,
     })
     df_trips_cb["trip_duration"] = df_trips_cb["arrival_time"] - df_trips_cb["departure_time"]

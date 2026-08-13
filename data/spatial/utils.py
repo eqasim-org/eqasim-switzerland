@@ -57,6 +57,41 @@ def to_gpd(context, df, x="x", y="y", crs="epsg:2056", coord_type="", chunk_size
     return df
 
 
+def keep_one_zone_per_point(df_points, point_id_field, zone_id_field, zone_type="", point_type=""):
+    """
+    Reduces the result of the spatial join to one zone per point.
+
+    The join returns one row per (zone, point) match, so overlapping zones
+    silently multiply the rows and, through the merge at the end of impute(),
+    the caller's own data frame. This happens as soon as an external-population
+    region is configured: data.spatial.cantons and data.spatial.municipalities
+    lay that region over the real zones as an extra one, so every point inside
+    it matches twice.
+
+    The real zone wins. The external region is the only zone carrying a
+    negative id (see data.external_population.constants), which is what
+    identifies it here.
+    """
+
+    duplicates = df_points[point_id_field].duplicated(keep=False)
+
+    if not duplicates.any():
+        return df_points
+
+    logger.info("  %d %s points fall into several %s zones; keeping the real zone for each."
+          % (df_points.loc[duplicates, point_id_field].nunique(), point_type, zone_type))
+
+    # Sorting is stable, so points matching several real zones (overlapping
+    # boundaries) keep the zone the join reported first, as before.
+    zone_ids     = pd.to_numeric(df_points[zone_id_field], errors="coerce")
+    is_last_resort = zone_ids.isna() | (zone_ids < 0)
+
+    df_points = df_points.assign(_is_last_resort=is_last_resort).sort_values("_is_last_resort", kind="stable")
+    df_points = df_points.drop_duplicates(point_id_field, keep="first").drop(columns=["_is_last_resort"])
+
+    return df_points
+
+
 def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_distance=True, chunk_size=10000,
            zone_type="", point_type=""):
     assert (type(df_points) == gpd.GeoDataFrame)
@@ -87,6 +122,8 @@ def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_d
 
     if "left_index" in df_points: del df_points["left_index"]
     if "right_index" in df_points: del df_points["right_index"]
+
+    df_points = keep_one_zone_per_point(df_points, point_id_field, zone_id_field, zone_type, point_type)
 
     invalid_mask = pd.isnull(df_points[zone_id_field])
 

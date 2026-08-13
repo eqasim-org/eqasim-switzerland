@@ -11,8 +11,10 @@ def execute(context):
     crossings = gpd.read_file(crossings)
 
     # The source file no longer provides a stable identifier per point, so we derive one
-    # from the row order instead. "label" (road/pt) indicates which mode a point serves and
-    # is used downstream (data.cross_border.generate_od / swiss_residents_od) to match
+    # from the row order instead. These ids are used as MATSim facility ids (through
+    # synthesis.population.destinations) and as the location of the border activities in
+    # data.cross_border.activities. "label" (road/pt) indicates which mode a point serves
+    # and is used downstream (data.cross_border.generate_od / swiss_residents_od) to match
     # car trips to "road" points and pt trips to "pt" points.
     crossings = crossings.reset_index(drop=True)
     crossings["border_crossing_point_id"] = "BCP_" + crossings.index.astype(str)

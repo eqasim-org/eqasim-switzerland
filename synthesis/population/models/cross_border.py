@@ -1,60 +1,38 @@
 """
 Stage: synthesis.population.models.cross_border
 
-Learns two border-crossing models from data.microcensus.persons — one for
-workdays (Mon–Fri) and one for weekends (Sat–Sun) — then applies the model
-that matches the current ``specific_day_scenario`` to the synthetic population
-from synthesis.population.models.students.
+Fits a weighted border-crossing classifier on the data.microcensus.persons
+subset selected by ``specific_day_scenario`` and applies it to
+synthesis.population.models.students. Each predicted crosser is then matched
+to a data.cross_border.swiss_residents_od record, the single source of truth
+for their destination country, crossing point and trip mode.
 
-For each day-type subset two classifiers are fitted:
-  1. Weighted logistic regression (statsmodels GLM) — odds ratios, 95 % CI,
-       and p-values are written to the pipeline log.
-  2. Weighted CatBoost.
-
-MZ has very few border-crossing observations per municipality, so its spatial
-signal is weak. data.cross_border.swiss_residents_od (built from on-site
-border-crossing interviews) has a much more reliable spatial distribution but
-no individual covariates. To combine both sources:
-  1. A canton-level theoretical crossing rate (from swiss_residents_od,
-     scaled by canton resident population) is added as a model feature, both
-     in training and at prediction time.
-  2. After prediction, a post-hoc spatial calibration alternates rescaling
-     individual probabilities to match canton totals, then municipality
-     totals (raking), until both are within tolerance of swiss_residents_od
-     or a max iteration count is reached. Municipalities with little OD
-     evidence are shrunk back toward their canton's calibration ratio rather
-     than over-corrected on a noisy small-sample target. A single canton-then-
-     municipality pass isn't enough on its own, since the shrunk municipality
-     step can drift the canton totals away from what the canton step just
-     achieved — alternating re-fits each margin against the other.
-This stage runs before synthesis.population.sampled (where input_downsampling
-is applied), so the population here is the full StatPop population — no
-downsampling correction is needed when using it as a rate denominator.
+MZ has too few crossers per municipality for a usable spatial signal, so
+swiss_residents_od (reliable spatially, but without individual covariates) is
+used twice: as a canton-level crossing-rate feature, and as the target of the
+post-hoc raking in _iterative_spatial_calibration. This stage runs before
+synthesis.population.sampled, so the population is the full StatPop one and
+needs no downsampling correction as a rate denominator.
 
 Pipeline config keys
 --------------------
 specific_day_scenario   (inherited, default "workday")
-    Controls which day-type model is applied to the population.
-    "workday" | individual weekday name → uses the workday model.
-    "weekend" | "Saturday" | "Sunday"  → uses the weekend model.
-
-cross_border_model_type (default "catboost")
-    Which classifier to use for the stochastic population assignment.
-    "catboost" — higher predictive accuracy.
-    "logit"    — interpretable, calibrated probabilities.
-
+    "workday" | "weekend" | a weekday name; selects the survey subset.
+cross_border_model_type (default "logit")
+    "logit" — interpretable, odds ratios logged | "catboost" — more accurate.
 cross_border_use_spatial_calibration (default True)
-    Whether to add the canton crossing-rate feature and apply the post-hoc
-    spatial calibration described above. When False, behavior matches the
-    original individual-covariates-only model.
+    Adds the canton crossing-rate feature and the raking step. When False,
+    behavior matches the original individual-covariates-only model.
+cross_border_exclude_shapefiles (default None)
+    Region(s) covered by the external population, as in
+    data.cross_border.generate_od. Survey observations and agents living
+    inside are left out of training and prediction, and the swiss_residents_od
+    records starting there are dropped from the calibration targets.
 
-Features used (available in both MZ and the synthetic population):
-  age, sex, is_swiss, income_class, municipality_type (ordinal),
-  log(dist_home_to_border + 1), employment_status one-hot dummies,
-  and (if spatial calibration is enabled) canton_crossing_rate.
-
-Note: highest_education is present in the MZ but not in StatPop, so it is
-excluded from the feature set.
+Features (available in both MZ and the synthetic population): age, sex,
+is_swiss, income_class, municipality_type (ordinal), log(dist_home_to_border
++ 1), employment_status dummies, and canton_crossing_rate when calibration is
+enabled. highest_education is in the MZ but not in StatPop, so it is excluded.
 """
 
 import numpy as np
@@ -62,6 +40,7 @@ import pandas as pd
 import geopandas as gpd
 import statsmodels.api as sm
 from catboost import CatBoostClassifier
+from data.osm.clean import read_outside_region
 import logging
 
 logger = logging.getLogger("synpp")
@@ -108,6 +87,44 @@ def _weighted_mean(x, w):
     return np.average(x[m], weights=w[m]) if m.sum() > 0 else np.nan
 
 
+def _read_exclude_region(context):
+    """
+    Region(s) given by cross_border_exclude_shapefiles, or None when the config
+    key is unset. Everyone living there is covered by the external population,
+    which brings its own border-crossing behaviour, so this stage must neither
+    learn from nor predict for them.
+    """
+
+    exclude_file = context.config("cross_border_exclude_shapefiles")
+
+    if exclude_file is None:
+        return None
+
+    return read_outside_region(exclude_file)
+
+
+def _is_within_region(df, exclude_region, x_col="home_x", y_col="home_y"):
+    """
+    Boolean array flagging the rows of df whose x_col/y_col point (EPSG:2056)
+    falls inside exclude_region. df must have a unique index.
+    """
+
+    points = gpd.GeoDataFrame(
+        df[[x_col, y_col]].copy(),
+        geometry=gpd.points_from_xy(df[x_col], df[y_col]),
+        crs="EPSG:2056",
+    )
+
+    joined = gpd.sjoin(points, exclude_region[["geometry"]], how="left", predicate="within")
+
+    # A home inside several overlapping polygons of the region comes back once
+    # per match, so keep one row per person before realigning on df.
+    within = joined["index_right"].notna()
+    within = within[~within.index.duplicated(keep="first")]
+
+    return within.reindex(df.index, fill_value=False).to_numpy()
+
+
 def _add_survey_features(df):
     """Add derived model columns to MZ persons data (in-place)."""
     df["is_swiss"]        = df["is_swiss"].astype(int)
@@ -123,10 +140,10 @@ def _add_survey_features(df):
 # Theoretical (swiss_residents_od) spatial counts and rates
 # ---------------------------------------------------------------------------
 
-def _compute_od_tables(context, pop_df: pd.DataFrame):
+def _compute_od_tables(context, pop_df: pd.DataFrame, od_df: pd.DataFrame):
     """
-    Loads data.cross_border.swiss_residents_od and the spatial reference
-    layers, and derives:
+    From the (possibly region-filtered) swiss_residents_od records and the
+    spatial reference layers, derives:
       - od_muni:   theoretical border-crosser count per municipality_id
       - od_canton: theoretical border-crosser count per canton_id
       - canton_crossing_rate: od_canton count / canton resident population
@@ -138,7 +155,6 @@ def _compute_od_tables(context, pop_df: pd.DataFrame):
     (the survey weight was consumed during sampling in swiss_residents_od.py),
     so a plain row count per area is the theoretical population-scale count.
     """
-    od_df                = context.stage("data.cross_border.swiss_residents_od")
     df_municipalities, _ = context.stage("data.spatial.municipalities")
     df_cantons           = context.stage("data.spatial.cantons")
 
@@ -197,14 +213,18 @@ def _match_border_crossings(pop_df: pd.DataFrame, od_df: pd.DataFrame, crossers_
     refer to the same underlying record.
 
     Returns a DataFrame aligned with pop_df.index with columns
-    cross_border_person_id, destination_country_raw, border_crossing_point,
+    cross_border_person_id, destination_country_raw, interview_geometry_point,
     border_crossing_trip_mode, interview_point_id -- all pd.NA outside of crossers_mask.
+
+    interview_point_id and interview_geometry_point are the id and the coordinates
+    of one and the same surveyed crossing, so the border activity ends up exactly
+    on the facility it refers to (MATSim's ScenarioValidator rejects anything else).
     """
     od = od_df.copy()
     od["origin_canton_id"] = pd.to_numeric(od["origin_canton_id"], errors="coerce")
     od_by_canton = {canton: group for canton, group in od.groupby("origin_canton_id")}
 
-    match_cols = ["cross_border_person_id", "destination_country_raw", "border_crossing_point", "trip_mode", "interview_point_id"]
+    match_cols = ["cross_border_person_id", "destination_country_raw", "interview_geometry_point", "trip_mode", "interview_point_id"]
     result = pd.DataFrame({
         col: pd.Series(pd.NA, index=pop_df.index, dtype="object") for col in match_cols
     })
@@ -445,6 +465,7 @@ def configure(context):
     context.config("specific_day_scenario", default="workday")
     context.config("cross_border_model_type", default="logit")
     context.config("cross_border_use_spatial_calibration", default=True)
+    context.config("cross_border_exclude_shapefiles", default=None)
     context.stage("data.microcensus.persons")
     context.stage("synthesis.population.models.students")
     context.stage("data.spatial.swiss_border")
@@ -475,16 +496,61 @@ def execute(context):
         feature_labels.update(_CANTON_RATE_LABELS)
     feature_cols = list(feature_labels.keys())
 
+    exclude_region = _read_exclude_region(context)
+
     # -------------------------------------------------------------------
     # 1. SYNTHETIC POPULATION (loaded early — needed as the OD-rate denominator)
     # -------------------------------------------------------------------
-    pop_df = context.stage("synthesis.population.models.students").copy()
+    pop_df = context.stage("synthesis.population.models.students").copy().reset_index(drop=True)
+    pop_df["_row_order"] = np.arange(len(pop_df))
+
+    # Agents living in the excluded region are set aside before anything else,
+    # so they count neither in the canton rate denominators nor in the
+    # calibration margins. They are added back as non-crossers in step 12.
+    if exclude_region is None:
+        df_excluded = pop_df.iloc[:0].copy()
+    else:
+        is_excluded = _is_within_region(pop_df, exclude_region)
+        df_excluded = pop_df[is_excluded].copy()
+        pop_df      = pop_df[~is_excluded].copy().reset_index(drop=True)
+
+        logger.info(
+            "Excluded region: %d of %d agents live inside it and are kept out of the model.",
+            len(df_excluded), len(df_excluded) + len(pop_df),
+        )
+
+        assert len(pop_df) > 0, "cross_border_exclude_shapefiles covers the entire population."
 
     # -------------------------------------------------------------------
     # 2. THEORETICAL SPATIAL DISTRIBUTION (data.cross_border.swiss_residents_od)
     # -------------------------------------------------------------------
+    od_df = context.stage("data.cross_border.swiss_residents_od")
+
+    # The crossings starting in the excluded region belong to the agents we
+    # just set aside, so they have to go as well: otherwise the calibration
+    # would keep their counts in the target while the agents that produced
+    # them are no longer there to be scaled up, and the residents remaining in
+    # a partly excluded municipality would be pushed up to cover them.
+    # origin_municipality is too coarse for this — the region cuts through
+    # municipalities — hence the point test on the OD origin coordinates.
+    if exclude_region is not None:
+        assert "origin_x" in od_df.columns, (
+            "data.cross_border.swiss_residents_od does not provide origin_x/origin_y; "
+            "re-run that stage so the excluded region can be applied to its records."
+        )
+
+        od_df       = od_df.reset_index(drop=True)
+        is_excluded = _is_within_region(od_df, exclude_region, "origin_x", "origin_y")
+
+        logger.info(
+            "Excluded region: %d of %d swiss_residents_od records start inside it and are dropped from the calibration targets.",
+            int(is_excluded.sum()), len(od_df),
+        )
+
+        od_df = od_df[~is_excluded].copy()
+
     od_muni, od_canton, canton_crossing_rate, df_municipalities, df_cantons = (
-        _compute_od_tables(context, pop_df)
+        _compute_od_tables(context, pop_df, od_df)
     )
 
     # -------------------------------------------------------------------
@@ -494,6 +560,19 @@ def execute(context):
 
     # Exclude persons fully outside Switzerland
     survey_df = survey_df[~survey_df["is_outside_of_switzerland"]]
+
+    # ... and those living in the region covered by the external population,
+    # whose crossings are not the ones this model should learn from.
+    if exclude_region is not None:
+        survey_df   = survey_df.reset_index(drop=True)
+        is_excluded = _is_within_region(survey_df, exclude_region)
+
+        logger.info(
+            "Excluded region: %d of %d microcensus observations have their home inside it and are dropped from training.",
+            int(is_excluded.sum()), len(survey_df),
+        )
+
+        survey_df = survey_df[~is_excluded]
 
     survey_df["income_class"] = pd.to_numeric(survey_df["income_class"], errors="coerce")
     survey_df = survey_df[survey_df["income_class"] >= 0].copy()
@@ -622,8 +701,9 @@ def execute(context):
     # 9b. MATCH EACH CROSSER TO A SPECIFIC data.cross_border.swiss_residents_od
     #     RECORD (destination country, crossing point, trip mode)
     # -------------------------------------------------------------------
+    # od_df is the region-filtered set from step 2, so a modeled crosser can
+    # only be matched to a crossing that starts outside the excluded region.
     crossers_mask = pop_df["is_crossing_the_border"] == 1
-    od_df         = context.stage("data.cross_border.swiss_residents_od")
     border_match  = _match_border_crossings(pop_df, od_df, crossers_mask, seed=SEED_CB + 1)
     for col in border_match.columns:
         pop_df[col] = border_match[col].values
@@ -634,8 +714,8 @@ def execute(context):
     n_pop   = len(pop_df)
     n_cross = int(pop_df["is_crossing_the_border"].sum())
     logger.info(
-        "[CROSS BORDER | %s | %s] Population: %d | Crossers: %d (%.2f%%)",
-        day_scenario, model_type, n_pop, n_cross, n_cross / n_pop * 100,
+        "[CROSS BORDER | %s | %s] Modeled population: %d (+%d excluded) | Crossers: %d (%.2f%%)",
+        day_scenario, model_type, n_pop, len(df_excluded), n_cross, n_cross / n_pop * 100,
     )
 
     logger.info("\n[CROSS BORDER] By municipality_type  (pop vs. survey %s):", day_scenario)
@@ -729,5 +809,17 @@ def execute(context):
         drop_cols.append("canton_crossing_rate")
 
     pop_df = pop_df.drop(columns=drop_cols, errors="ignore")
+
+    # Put the excluded agents back as non-crossers, in the order they arrived
+    # in. They never went through step 5, so dist_home_to_border stays empty
+    # for them, and they get the same empty match columns as any non-crosser.
+    if len(df_excluded) > 0:
+        df_excluded["is_crossing_the_border"] = 0
+        for col in border_match.columns:
+            df_excluded[col] = pd.NA
+
+        pop_df = pd.concat([pop_df, df_excluded], ignore_index=True)
+
+    pop_df = pop_df.sort_values("_row_order").drop(columns="_row_order").reset_index(drop=True)
 
     return pop_df

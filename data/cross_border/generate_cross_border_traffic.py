@@ -15,9 +15,11 @@ def configure(context):
 
 def execute(context):
     if context.config("include_cross_border"):
-        population = context.stage("data.cross_border.population")
-        activities = context.stage("data.cross_border.activities")
-        vehicles   = context.stage("data.cross_border.vehicles")
+        # Copies: the id renumbering below rewrites these frames in place, and
+        # they are the objects the upstream stages returned.
+        population = context.stage("data.cross_border.population").copy()
+        activities = context.stage("data.cross_border.activities").copy()
+        vehicles   = context.stage("data.cross_border.vehicles").copy()
 
         # Fix IDs
         id_person_max    = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
@@ -43,6 +45,12 @@ def execute(context):
         vehicles["vehicle_id"]  = vehicles["owner_id"].astype(str) + ":" + vehicles["mode"]
         vehicles = vehicles[["owner_id", "vehicle_id", "age", "euro", "mode"]]
 
-        activities["person_id"] = activities["person_id"].map(person_id_map)#.fillna(activities["person_id"])
+        activities["person_id"] = activities["person_id"].map(person_id_map)
+
+        assert activities["person_id"].notna().all(), (
+            "Some cross-border activities belong to a person that is not in data.cross_border.population."
+        )
+
+        population = population.drop(columns = ["new_person_id"])
 
         return population, activities, vehicles

@@ -53,19 +53,20 @@ def execute(context):
                                       on="person_id")
     df_education_locations = df_education_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
-    # Border locations: the point comes straight from the same
+    # Border locations: the crossing comes straight from the same
     # data.cross_border.swiss_residents_od record synthesis.population.trips
-    # already matched each crosser to. interview_point_id is that record's
-    # real border-crossing-point facility id (already written as a facility
-    # via data.cross_border.interview_places/synthesis.population.destinations),
-    # so the location is guaranteed to be consistent with the
-    # destination_country_raw carried on that same trip.
+    # already matched each crosser to, so the location is consistent with the
+    # destination_country_raw carried on that same trip. Id and geometry are the
+    # two halves of that one surveyed interview place -- the id is written as a
+    # facility via data.cross_border.interview_places /
+    # synthesis.population.destinations, and MATSim's ScenarioValidator requires
+    # the activity to sit exactly on the facility it names.
     df_border_locations = df_locations[df_locations["purpose"] == "border"]
 
     df_cb_trips = context.stage("synthesis.population.trips")
     df_cb_trips = df_cb_trips[(df_cb_trips["preceding_purpose"] == "border") | (df_cb_trips["following_purpose"] == "border")]
-    df_cb_trips = df_cb_trips[["person_id", "interview_point_id", "border_crossing_point"]].drop_duplicates("person_id")
-    df_cb_trips = df_cb_trips.rename(columns={"interview_point_id": "destination_id", "border_crossing_point": "geometry"})
+    df_cb_trips = df_cb_trips[["person_id", "interview_point_id", "interview_geometry_point"]].drop_duplicates("person_id")
+    df_cb_trips = df_cb_trips.rename(columns={"interview_point_id": "destination_id", "interview_geometry_point": "geometry"})
 
     df_border_locations = pd.merge(df_border_locations, df_cb_trips, on="person_id", how="left")
     df_border_locations = df_border_locations[["person_id", "activity_index", "destination_id", "geometry"]]

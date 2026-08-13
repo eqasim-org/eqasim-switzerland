@@ -3,57 +3,25 @@ import numpy as np
 from shapely.geometry import Point
 import geopandas as gpd
 
-from data.cross_border.generate_od import project_point_series_close_to_border
+# expand_and_sample / sample_rows_by_weight are shared with generate_od rather
+# than duplicated here: the two copies had already drifted apart (see the
+# country swap in process_from_to_trips).
+from data.cross_border.generate_od import (
+    expand_and_sample,
+    sjoin_within_unique,
+)
 
 def configure(context):
     context.config("data_path")
+    context.config("random_seed")
     context.config("specific_day_scenario", default = "workday")
 
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.cantons")
-    context.stage("data.spatial.swiss_border")
     context.stage("data.cross_border.interview_places")
 
 
-def sample_rows_by_weight(df2, weight_col="weight"):
-    df = df2.copy()
-    
-    # Separate integer and fractional parts
-    df["int_part"]  = df[weight_col].astype(int)
-    df["frac_part"] = df[weight_col] - df["int_part"]
-    
-    # Repeat rows according to integer part
-    repeated = df.iloc[np.repeat(np.arange(len(df)), df["int_part"])].copy().drop(columns=["int_part", "frac_part"])
-    
-    # Handle fractional part with Bernoulli sampling
-    fractional_mask = np.random.rand(len(df)) < df["frac_part"]
-    fractional = df[fractional_mask].drop(columns=["int_part", "frac_part"])
-    
-    # Combine both
-    sampled_df = pd.concat([repeated, fractional], ignore_index=True)
-    return sampled_df
-
-
-def expand_and_sample(df, expand_column, weight_column):
-    df = df.copy()
-
-    # Expand
-    df_expanded = df.loc[df.index.repeat(df[expand_column])].copy()
-    df_expanded["passenger_index"] = df_expanded.groupby(df_expanded.index).cumcount() + 1
-    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]==1), "trip_mode"] = "car"
-    df_expanded.loc[(df_expanded["trip_mode"]=="MIV") & (df_expanded["passenger_index"]>1), "trip_mode"]  = "car_passenger"
-    
-    del df_expanded[expand_column]
-    del df_expanded["passenger_index"]
-
-    # Sample
-    df_sampled = sample_rows_by_weight(df_expanded, weight_col = weight_column)
-    del df_sampled[weight_column]
-
-    return df_sampled.copy().reset_index()
-
-
-def process_from_to_trips(df_trips, context):
+def process_from_to_trips(df_trips, context, rng):
     # Load municipalities
     df_municipalities, _ = context.stage("data.spatial.municipalities")
     df_cantons           = context.stage("data.spatial.cantons")
@@ -81,25 +49,39 @@ def process_from_to_trips(df_trips, context):
     origins = df.copy().apply(lambda row: Point(row["start_x"], row["start_y"]), axis = 1)
     origins = gpd.GeoSeries(origins, crs = "EPSG:4326").to_crs("EPSG:2056")
 
-    joined         = gpd.sjoin(gpd.GeoDataFrame(geometry = origins), df_municipalities, how = "left", predicate = "within")
-    joined_cantons = gpd.sjoin(gpd.GeoDataFrame(geometry = origins), df_cantons, how = "left", predicate = "within")
+    # These origins are the Swiss end of the trip, so they always belong to a
+    # real canton. data.spatial.cantons also carries the external-population
+    # region as a pseudo canton (negative id) laid over the real ones, which
+    # would match them a second time.
+    df_cantons = df_cantons[pd.to_numeric(df_cantons["canton_id"], errors = "coerce") >= 0]
+
+    joined         = sjoin_within_unique(origins, df_municipalities)
+    joined_cantons = sjoin_within_unique(origins, df_cantons)
 
     df["origin_municipality"] = joined["municipality_id"].values
     df["origin_canton_id"]    = joined_cantons["canton_id"].values
     df["origin_canton_name"]  = joined_cantons["canton_name"].values
+
+    # Kept in the output so that consumers can test the Swiss-side origin
+    # against a region, e.g. synthesis.population.models.cross_border filtering
+    # out the area covered by the external population. The municipality id is
+    # not enough for that: the excluded region cuts through municipalities.
+    df["origin_x"] = origins.x.values
+    df["origin_y"] = origins.y.values
+
     df = df[df["origin_municipality"].notna()].copy()
 
-    df = expand_and_sample(df.copy(), "nb_passengers", "weight")
+    df = expand_and_sample(df.copy(), "nb_passengers", "weight", rng)
 
     df["cross_border_person_id"] = range(len(df))
     df["cross_border_person_id"] = "CBS_CH_" + df["cross_border_person_id"].astype(str)
 
-    # Project the foreign destination point onto/near the border, the same way
-    # generate_od.py derives the foreign population's home point: kept as-is if
-    # already close to the border, otherwise projected onto the nearest surveyed
-    # interview point. This ties the resulting point directly to this record's
-    # own destination_country_raw, rather than to a generically-sampled interview place.
-    df = project_point_series_close_to_border(df.copy(), "end_x", "end_y", 20, "other", "other", "border_crossing", context)
+    # No projection of the foreign destination point here: the border activity of a
+    # Swiss resident is placed on interview_geometry_point, the crossing this record
+    # was actually surveyed at, so that it matches the interview_point_id facility
+    # (see synthesis.population.spatial.locations). Projecting end_x/end_y gave a
+    # second, different point -- either the untouched destination abroad or the
+    # nearest crossing -- which is what made the activity and its facility disagree.
 
     # --- Maps: border crossers by municipality and canton ---
     muni_counts = (
@@ -131,8 +113,8 @@ def process_from_to_trips(df_trips, context):
     gdf_canton.to_file(f"{context.path()}/crossers_by_canton.gpkg", driver="GPKG")
 
     df = df[["cross_border_person_id",
-        "origin_municipality", "origin_canton_id", "destination_country", "destination_country_raw",
-        "border_crossing_point",
+        "origin_municipality", "origin_canton_id", "origin_x", "origin_y",
+        "destination_country", "destination_country_raw",
         "trip_mode", "trip_purpose",
         "interview_place", "interview_point_id", "interview_geometry_point"]]
 
@@ -245,9 +227,14 @@ def read_2021_data(context):
     elif day == "workday":
         day_key = "Mo-Fr"
     elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
-        day_key = "Mo-FR"
+        # The survey only distinguishes Mo-Fr from the weekend, so a single
+        # weekday gets the regular workday demand (and a single weekend day
+        # the regular weekend demand).
+        day_key = "Mo-Fr"
     elif day in ["Saturday", "Sunday"]:
         day_key = "WE"
+    else:
+        raise ValueError(f"Unsupported specific_day_scenario: '{day}'")
 
     day_value = days[day_key]
     df_days   = df2021[df2021["day_cat"]==day_key].copy()
@@ -284,11 +271,15 @@ def read_2021_data(context):
 
     grouped_points = {k: v for k, v in points.groupby(["interview_place", "label"])}
 
+    # Shared, seeded RNG: passing it to every .sample() call keeps the draws
+    # reproducible while still giving each row its own draw.
+    point_rng = np.random.RandomState(context.config("random_seed"))
+
     def sample_point(row):
         label = mode_to_label.get(row["trip_mode"])
         candidates = grouped_points.get((row["interview_place"], label))
         if candidates is not None and "importance" in candidates.columns:
-            sampled = candidates.sample(n=1, weights=candidates["importance"])
+            sampled = candidates.sample(n=1, weights=candidates["importance"], random_state=point_rng)
             return sampled.iloc[0][["geometry", "importance", "interview_point_id"]]
 
         # Fall back to the closest point that still matches the trip's mode, if any exist
@@ -302,7 +293,7 @@ def read_2021_data(context):
         return closest[["geometry", "importance", "interview_point_id"]]
 
     result = borders[["interview_place", "start_x", "start_y", "trip_mode"]].apply(sample_point, axis=1)
-    borders[["interview_geometry_point", "candidate_label", "interview_point_id"]] = result
+    borders[["interview_geometry_point", "importance", "interview_point_id"]] = result
 
     return borders
 
@@ -387,9 +378,14 @@ def read_2015_data(context):
     elif day == "workday":
         day_key = "Mo-Fr"
     elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
-        day_key = "Mo-FR"
+        # The survey only distinguishes Mo-Fr from the weekend, so a single
+        # weekday gets the regular workday demand (and a single weekend day
+        # the regular weekend demand).
+        day_key = "Mo-Fr"
     elif day in ["Saturday", "Sunday"]:
         day_key = "WE"
+    else:
+        raise ValueError(f"Unsupported specific_day_scenario: '{day}'")
 
     day_value = days[day_key]
     df_days   = df2015[df2015["day_cat"]==day_key].copy()
@@ -418,7 +414,9 @@ def read_2015_data(context):
 
 
 def execute(context):
-    borders2021 = read_2021_data(context)    
+    rng = np.random.RandomState(context.config("random_seed"))
+
+    borders2021 = read_2021_data(context)
     borders2015 = read_2015_data(context)
 
     grouped2021 = borders2021.groupby(["trip_mode", "trip_purpose", "origin_country", "destination_country"], as_index = False)["group_weight"].sum().rename(columns = {"group_weight": "group_weight_2021"})
@@ -447,6 +445,6 @@ def execute(context):
     )
 
     trips = borders[borders["travel_cat"].isin(["From CH", "To CH"])]   
-    from_to_trips = process_from_to_trips(trips, context)
+    from_to_trips = process_from_to_trips(trips, context, rng)
 
     return from_to_trips
