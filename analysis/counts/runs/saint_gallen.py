@@ -1,7 +1,7 @@
 from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
-from ..matching.utils.merge import Merge
+from ..matching.results import save_count_results
 import os
 
 def configure(context):
@@ -38,14 +38,11 @@ def execute(context):
                 columns_to_keep={'flow':"flow"}, context = context)
         
     # Match the data with the network
-    matcher = TrafficDataMatcher(city, cache = context.path())
+    matcher = TrafficDataMatcher()
     matched = matcher.match(network = network,
                             counts = counts,
-                            search_radius=2,
-                            get_pairs= True,
-                            by_highway_order=False,
-                            direction_from_osm=False,
-                            only_two_link_ids=True)
+                            mode="bidirectional",
+                            search_radius=2)
 
     # Compare the with simulation
     cmp     = context.stage("analysis.counts.matching.compare")    
@@ -76,11 +73,7 @@ def execute(context):
     flows = flows[~flows['id'].isin(stations_to_drop)].reset_index(drop=True)
     matched = matched[~matched['id'].isin(stations_to_drop)].reset_index(drop=True)
 
-    path_to_results = Merge(city = city, 
-                            matched = matched, 
-                            flows = flows, 
-                            cache=context.path()
-                            ).run(return_path = True)
+    path_to_results = save_count_results(city, matched, flows, context.path())
 
     # Plot statistics
     plotter.plot_flow(flows = flows, 

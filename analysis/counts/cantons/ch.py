@@ -15,5 +15,6 @@ def execute(context):
     ### the reason why is ... historical
     ### I started with this, so all the code as based on these data
     #TODO: refactor later (process these files here)
+    # maybe I need to correct these locations by some data, like from this open data portail
     
     return (count_stations_file, counts_data_file, year)

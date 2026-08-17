@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Mon May  5 11:35:11 2025
-
-@author: dabdelkader
-"""
 import pandas as pd
 from typing import Optional, Union, List
 import numpy as np

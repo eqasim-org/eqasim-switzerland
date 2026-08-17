@@ -19,7 +19,8 @@ import pydeck as pdk
 import folium
 from typing import Union
 from sklearn.metrics import r2_score
-from .matcher_utils import MatcherUtils
+from .road_matching import ROAD_TYPE_PRIORITY
+from shapely.ops import unary_union
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -160,7 +161,7 @@ class Plotter:
                     ).merge(network.links[["link_id","highway"]], on="link_id",how="left")
         flows = flows[flows.highway.notna()]
         
-        highway_to_plot = list(MatcherUtils.get_link_types())[:14]
+        highway_to_plot = ROAD_TYPE_PRIORITY[:14]
         flows = flows[flows.highway.isin(highway_to_plot)]
         
         if counts is not None and distance_to_border>0:
@@ -295,14 +296,31 @@ class Plotter:
                    point_gdf: Union[gpd.GeoDataFrame,list] = None,
                    point_data_to_show:list=[],
                    border: gpd.GeoDataFrame =  None,
-                   path_to_save=None):
+                   path_to_save=None, 
+                   cut_network = False):
         
         #Make points as list
         if not isinstance(point_gdf, list):
             point_gdf = [point_gdf]
         if not isinstance(df, list):
             df = [df]            
-            
+
+        # cut df to point gdf (just plot the regional network
+        if cut_network:
+            geo_union = []
+            for points in point_gdf:
+                if points is not None and not points.empty:
+                    geo_union.extend(points.geometry)
+
+            if geo_union:
+                geo_union = (gpd.GeoSeries([unary_union(geo_union)],crs="EPSG:4326")
+                            .to_crs("EPSG:2056")
+                            .buffer(1_000)
+                            .to_crs("EPSG:4326"))
+                xmin, ymin, xmax, ymax = geo_union.total_bounds
+                for i in range(len(df)):
+                    df[i] = df[i].cx[xmin:xmax, ymin:ymax]
+
         # Copy and reset index
         df = [dfi.copy().reset_index(drop=True) for dfi in df]
         

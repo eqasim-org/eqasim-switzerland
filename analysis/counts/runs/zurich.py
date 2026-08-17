@@ -1,7 +1,7 @@
 from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
-from ..matching.utils.merge import Merge
+from ..matching.results import save_count_results
 import os
 import geopandas as gpd
 
@@ -33,18 +33,13 @@ def execute(context):
 
     # load counts
     counts = Counts(file_path=zurich_counts_data, id_column="id",
-                columns_to_keep={'flow':"flow", 'flow_w':"flow_w"},
+                columns_to_keep={'flow':"flow", 'flow_w':"flow_w",
+                                 "osm_id":"osm_id", "angle":"angle"},
                 context = context)
             
-    # Match the data with the network
-    matcher = TrafficDataMatcher(city, cache = context.path())
-    matched = matcher.match(network = network,
-                            counts = counts,
-                            search_radius=10,
-                            get_pairs= True,
-                            by_highway_order=False,
-                            direction_from_osm=False,
-                            only_two_link_ids=True)
+    # Match the manually identified OSM way and use its angle for direction.
+    matcher = TrafficDataMatcher()
+    matched = matcher.match(network=network, counts=counts)
 
     # Compare the with simulation    
     cmp     = context.stage("analysis.counts.matching.compare")    
@@ -76,11 +71,7 @@ def execute(context):
     flows = flows[~flows['id'].isin(stations_to_drop)].reset_index(drop=True)
     matched = matched[~matched['id'].isin(stations_to_drop)].reset_index(drop=True)
 
-    path_to_results = Merge(city = city, 
-                            matched = matched, 
-                            flows = flows, 
-                            cache=context.path()
-                            ).run(return_path = True)
+    path_to_results = save_count_results(city, matched, flows, context.path())
 
     # Plot statistics
     plotter.plot_flow(flows = flows, 
@@ -97,16 +88,16 @@ def execute(context):
     
 
     border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))  
-    roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link']      
+    roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary','secondary_link','tertiary']      
     Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
                         matched_links.to_crs(epsg=4326)], 
                         data_to_show=["link_id"], 
                         point_gdf=[counts.counts[['id','geometry']].merge(
-                                   flows[["id","pdiff"]], on="id", how="left").to_crs(epsg=4326)],
-                        point_data_to_show=['id',"pdiff"],
+                                   flows[["id","pdiff", "adiff"]], on="id", how="left").to_crs(epsg=4326)],
+                        point_data_to_show=['id',"pdiff", "adiff"],
                         border = border,
+                        cut_network = True,
                         path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
-    
     return path_to_results
    
 
