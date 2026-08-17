@@ -5,6 +5,7 @@ import joblib
 import numpy as np
 import pandas as pd
 import torch
+import matplotlib.pyplot as plt
 
 from .h3 import H3_LEVEL_NAMES
 from .hierarchical_utils import (
@@ -21,6 +22,7 @@ from .feature_encoding import (
     ACTIVITY_CHAIN_N,
     fit_candidate_tensor,
     fit_person_trip_matrix,
+    add_detour_factor_feature,
 )
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import ShortRangeChoiceWrapper
@@ -33,6 +35,7 @@ SHORT_RANGE_MODEL_THRESHOLD = 1500.0
 
 def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.h3")
+    context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
@@ -47,6 +50,12 @@ def configure(context):
     context.config("short_range_model_batch_size", 256)
     context.config("short_range_model_epochs", 60)
     context.config("short_range_model_learning_rate", 4e-3)
+    context.config("short_range_model_dropout_rate", 0.35)
+    context.config("short_range_model_weight_decay", 1e-2)
+    context.config("short_range_model_validation_folds", 5)
+    context.config("short_range_model_validation_every", 2)
+    context.config("short_range_model_early_stopping_patience", 5)
+    context.config("short_range_model_early_stopping_min_delta", 1e-3)
     context.config("short_range_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
     context.config("short_range_trip_min_m", DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION)
     context.config("secondary_nn_distance_loss_weight", 0.07)
@@ -333,6 +342,10 @@ def execute(context):
         cand_outside_fraction,
         valid_mask,
     )
+    candidate_tensor = add_detour_factor_feature(
+        candidate_tensor, origin_x, origin_y, cand_x, cand_y, valid_mask,
+        context.stage("synthesis.population.spatial.secondary.detour_factors.factors"),
+    )
     candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
     candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)
@@ -350,6 +363,7 @@ def execute(context):
         candidate_input_dim=candidate_tensor.shape[2],
         person_hidden_dim=32,
         hidden_dim=32,
+        dropout_rate=float(context.config("short_range_model_dropout_rate")),
     )
     train_choice_model(
         model=model,
@@ -364,8 +378,16 @@ def execute(context):
         epochs=int(context.config("short_range_model_epochs")),
         batch_size=int(context.config("short_range_model_batch_size")),
         lr=float(context.config("short_range_model_learning_rate")),
+        weight_decay=float(context.config("short_range_model_weight_decay")),
         num_threads=int(context.config("threads")),
         path=context.path(),
+        n_val_folds=int(context.config("short_range_model_validation_folds")),
+        val_every=int(context.config("short_range_model_validation_every")),
+        validation_groups=df["person_id"].to_numpy(),
+        rotate_validation=False,
+        early_stopping_patience=int(context.config("short_range_model_early_stopping_patience")),
+        early_stopping_min_delta=float(context.config("short_range_model_early_stopping_min_delta")),
+        restore_best_weights=True,
         distance_candidates=candidate_dist_last_m,
         distance_targets=target_distance.astype(np.float32),
         distance_candidates_home=candidate_dist_home_m,
@@ -400,5 +422,102 @@ def execute(context):
     )
     wrapper.save(model_path)
 
+    plot_distance_analysis(
+        context=context,
+        wrapper=wrapper,
+        person_trip_matrix=person_trip_matrix,
+        candidate_tensor=candidate_tensor,
+        valid_mask=valid_mask,
+        df=df,
+        children_by_level1=children_by_level1,
+        centroid_x_by_l2=centroid_x_by_l2,
+        centroid_y_by_l2=centroid_y_by_l2,
+    )
+
     logger.info("Short-range model saved to %s", model_path)
     return (model_path,)
+
+
+def plot_distance_analysis(context, wrapper, person_trip_matrix, candidate_tensor,
+                           valid_mask, df, children_by_level1,
+                           centroid_x_by_l2, centroid_y_by_l2):
+    """Plot real and predicted short-range distances without count maps."""
+    logger.info("Plotting short-range distance distributions...")
+    pred_idx = wrapper.predict_from_inputs(
+        person_trip_matrix,
+        candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:],
+        candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC],
+        valid_mask,
+        rng=None,
+        return_probabilities=False,
+    )
+
+    predicted_level2 = []
+    hierarchy_columns = [
+        f"destination_{H3_LEVEL_NAMES[0]}",
+        f"destination_{H3_LEVEL_NAMES[1]}",
+    ]
+    for i, (level0, level1) in enumerate(df[hierarchy_columns].itertuples(index=False)):
+        children = children_by_level1[(level0, level1)]
+        predicted_level2.append(children[int(pred_idx[i])])
+
+    real_level2 = df[f"destination_{H3_LEVEL_NAMES[-1]}"].astype(str).to_numpy()
+    predicted_level2 = np.asarray(predicted_level2, dtype=str)
+    origin_x = df["origin_x"].to_numpy(dtype=np.float64)
+    origin_y = df["origin_y"].to_numpy(dtype=np.float64)
+    home_x = df["home_x"].to_numpy(dtype=np.float64)
+    home_y = df["home_y"].to_numpy(dtype=np.float64)
+
+    real_dist_origin = []
+    pred_dist_origin = []
+    real_dist_home = []
+    pred_dist_home = []
+    for i, (real_h3, pred_h3) in enumerate(zip(real_level2, predicted_level2)):
+        real_cx = centroid_x_by_l2.get(real_h3)
+        real_cy = centroid_y_by_l2.get(real_h3)
+        pred_cx = centroid_x_by_l2.get(pred_h3)
+        pred_cy = centroid_y_by_l2.get(pred_h3)
+        if real_cx is None or real_cy is None or pred_cx is None or pred_cy is None:
+            continue
+
+        real_dist_origin.append(np.hypot(real_cx - origin_x[i], real_cy - origin_y[i]))
+        pred_dist_origin.append(np.hypot(pred_cx - origin_x[i], pred_cy - origin_y[i]))
+        real_dist_home.append(np.hypot(real_cx - home_x[i], real_cy - home_y[i]))
+        pred_dist_home.append(np.hypot(pred_cx - home_x[i], pred_cy - home_y[i]))
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    _plot_distance_histogram(
+        axes[0], real_dist_origin, pred_dist_origin,
+        "Distance from Previous Location",
+    )
+    _plot_distance_histogram(
+        axes[1], real_dist_home, pred_dist_home,
+        "Distance from Home",
+    )
+    plt.tight_layout()
+    output_path = os.path.join(context.path(), "short_range_distance_distributions.png")
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    logger.info("Short-range distance plot saved to %s", output_path)
+
+
+def _plot_distance_histogram(axis, real_distances, predicted_distances, title):
+    real_distances = np.asarray(real_distances, dtype=np.float64)
+    predicted_distances = np.asarray(predicted_distances, dtype=np.float64)
+    real_distances = real_distances[np.isfinite(real_distances)]
+    predicted_distances = predicted_distances[np.isfinite(predicted_distances)]
+
+    if len(real_distances) == 0 or len(predicted_distances) == 0:
+        axis.text(0.5, 0.5, "No valid distances", ha="center", va="center", transform=axis.transAxes)
+    else:
+        maximum = max(float(real_distances.max()), float(predicted_distances.max()), 1.0)
+        bins = np.linspace(0.0, maximum, 51)
+        axis.hist(real_distances, bins=bins, color="black", linewidth=2,
+                  label="Real", density=True, histtype="step")
+        axis.hist(predicted_distances, bins=bins, color="red", linewidth=1,
+                  label="Predicted", density=True, histtype="step", linestyle="dashed")
+        axis.legend()
+
+    axis.set_title(title)
+    axis.set_xlabel("Distance (m)")
+    axis.set_ylabel("Density")

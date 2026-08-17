@@ -134,7 +134,6 @@ def execute(context):
 
     # Adapt the config
     eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.scenario.RunAdaptConfig", [
-    # eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunAdaptConfig", [
         "--input-path", config_path,
         "--output-path", config_path,
         "--downsamplingRate", context.config("input_downsampling"),

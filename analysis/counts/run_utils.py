@@ -12,9 +12,11 @@ import json
 
 logger = logging.getLogger("synpp")
 
-IDS_TO_DROP = [ # these are in very complexe intersections, very probably will not be correctly matched
-    "283","321","277","278","70","221","240","847","845","846","123","598","35","537","68","69"
-]
+IDS_TO_DROP = set([ # these are in very complexe intersections, very probably will not be correctly matched
+    "540", "164", "69", "257", "283", "278", "297", "847", "845", "846","123", "598", "605",
+    "35", "157", "507", "852", "851", "83", "68", "285", "221", "296", "690", "296", "311", 
+    "618", "112", "675", "799", "277", "6", "760", "577", 
+])
 
 
 def filter_data(df, network, require_simulated=True):
@@ -576,19 +578,21 @@ def get_average_flow_veh_h_by_category(df, output_path=None):
     plt.close()
 
 def save_as_target(network, df, path_to_output):
-    df = df[['link_id','obs_vphpl']]
+    if 'weight' not in df.columns:
+        df['weight'] = 1.0
+
+    df = df[['link_id', 'obs_vphpl', 'weight']].copy()
     df = df.explode("link_id")
-    df = df.rename(columns={"link_id":"linkId",
-                            "obs_vphpl":"count"})
+    df = df.rename(columns={"link_id": "linkId", "obs_vphpl": "count"})
 
     # links that are duplicates of others, we give them the original link id
-    replicated_links = network.links[network.links.replicate_of.notna()][["link_id","replicate_of"]]
-    df = df.merge(replicated_links.rename(columns={"link_id":"linkId", "replicate_of":"original_linkId"}), on="linkId", how="left")
+    replicated_links = network.links[network.links.replicate_of.notna()][["link_id", "replicate_of"]]
+    df = df.merge(replicated_links.rename(columns={"link_id": "linkId", "replicate_of": "original_linkId"}), on="linkId", how="left")
     df["linkId"] = df["original_linkId"].fillna(df["linkId"])
     df = df.drop(columns=["original_linkId"])
-    
-    # If multiple link ids, we average the counts
-    df = df.groupby("linkId", as_index=False)["count"].mean()
+
+    # If multiple link ids, we average the counts and keep the contribution weight
+    df = df.groupby("linkId", as_index=False).agg({"count": "mean", "weight": "mean"})
 
     # save it as csv file
     file_path = os.path.join(path_to_output, "target_flow.csv")

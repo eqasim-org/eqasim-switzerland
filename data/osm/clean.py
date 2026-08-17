@@ -6,7 +6,7 @@ import pandas as pd
 from pathlib import Path
 from shapely.ops import unary_union
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.spatial.swiss_border")
@@ -17,6 +17,9 @@ def configure(context):
     # we include the network of this region, i don't know if this is the right config param to use, to check later!
     context.config("cross_border_exclude_shapefiles", default=None)
     context.config("include_external_population", default = False)
+    context.config("correct_osm_speeds", default = True)
+    if context.config("correct_osm_speeds"):
+        context.stage("data.osm.speed_corrections")
 
 
 def execute(context):
@@ -25,9 +28,14 @@ def execute(context):
     output_file = '%s/osm_network.osm.gz' % context.path()
     osm_file = context.config("osm_file")
 
+    speed_corrections = None
+    if context.config("correct_osm_speeds"):
+        speed_corrections = context.stage("data.osm.speed_corrections")
+        logger.info(f"Speed corrections will be applied to {len(speed_corrections)} ways in the OSM network.")
+
     if not isinstance(osm_file,list):
         osm_file = '%s/osm/%s' % (context.config("data_path"), osm_file)
-        return cf.from_pbf_to_osm_gz(context, osm_file, output_file)
+        return cf.from_pbf_to_osm_gz(context, osm_file, output_file, speed_corrections)
     
     else:
         osm_files = ['%s/osm/%s' % (context.config("data_path"), f) for f in osm_file]
@@ -36,7 +44,7 @@ def execute(context):
         border = get_region(context)
         border = border.to_crs("EPSG:4326") # because osm in in wgs84       
         # Merge and cut to the area
-        return mf.merge_files(context, osm_files, border, output_file)
+        return mf.merge_files(context, osm_files, border, output_file, speed_corrections)
 
 
 

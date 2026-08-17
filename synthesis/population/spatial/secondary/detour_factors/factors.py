@@ -9,7 +9,7 @@ EPSILON = 500 # meters -> detour_factor = shortest_distances / (euclidean_distan
 MAX_DISTANCE_THRESHOLD_M = 40_000  # route only OD pairs closer than this euclidean distance (set None to disable)
 MIN_DISTANCE_THRESHOLD_M = 900  # route only OD pairs further than this euclidean distance (set None to disable)
 FAR_DETOUR_FACTOR = 1.4  # assigned when euclidean distance is above DISTANCE_THRESHOLD_M
-NEAR_DETOUR_FACTOR = 1.7  # assigned when euclidean distance is below MIN_DISTANCE_THRESHOLD_M
+NEAR_DETOUR_FACTOR = 1.6  # assigned when euclidean distance is below MIN_DISTANCE_THRESHOLD_M
 ADAPTIVE_H3_RESOLUTION = True
 RESOLUTIONS = {"dense": 8,"sparse": 7,"out": 5}
 DENSE_CELL_MIN_NODES = 40

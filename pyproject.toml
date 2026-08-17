@@ -10,6 +10,7 @@ dependencies = [
     "catboost>=1.2.8",
     "cma>=4.2.0",
     "contextily>=1.7.0",
+    "dash>=3.0.0",
     "fiona>=1.9.2",
     "geopandas>=1.1.3",
     "h3>=4.4.2",

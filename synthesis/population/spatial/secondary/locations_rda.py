@@ -226,7 +226,7 @@ def process(context, arguments):
         bike=240.0, walk=200.0,
         bike_loop=200.0, walk_loop=200.0,
         car_loop=300.0, pt_loop=300.0,
-        remote_walk = 200.0, detour_factor = 1.6
+        remote_walk = 200.0, detour_factor = 1.65
     )
 
     detour_factor = context.data("detour_factor")

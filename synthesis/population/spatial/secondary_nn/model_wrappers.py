@@ -724,6 +724,13 @@ class ShortRangeChoiceWrapper:
             has_work=has_work,
             candidate_indices=candidate_indices,
         )
+        if not hasattr(self, "_detour_factor") or self._current_origin_detour_index is None:
+            raise RuntimeError("Short-range detour-factor cache has not been initialized")
+        detour_factors = self._detour_factor.get_detour_factor_by_index(
+            self._current_origin_detour_index,
+            self._detour_candidate_indices[candidate_indices],
+        )
+        candidate_dynamic = np.column_stack([candidate_dynamic, detour_factors]).astype(np.float32)
         if self.candidate_dynamic_scaler is not None:
             candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.candidate_dynamic_scaler)[None, :, :]
         else:
@@ -781,6 +788,10 @@ class HierarchicalLocationChoiceModel:
         self.destination_fallback_xy = None  # {purpose: {level1_h3: np.ndarray [N,2]}} — company (x,y) per L1 fallback pool
         self.l1_siblings = None  # {level1_h3: [sibling_level1_h3s]} — built once, used for O(1) fallback widening
         self.short_destination_support_masks = None
+        self.detour_factor = None
+        self._current_origin_detour_index = None
+        self._coarse_detour_indices = None
+        self._short_detour_indices = None
         self._purpose_categories = [str(p) for p in self.c.purpose_categories]
         self._purpose_identity = np.eye(len(self._purpose_categories), dtype=np.float32)
         self._purpose_index = {p: i for i, p in enumerate(self._purpose_categories)}
@@ -838,6 +849,38 @@ class HierarchicalLocationChoiceModel:
             self.destination_fallback_xy) = _prepare_destination_level2_index(context, h3_data, h3_geo)
         self.l1_siblings = _reverse_tree(h3_tree)  # {level1: [sibling_level1s]} — built once for O(1) fallback widening
         self._build_short_destination_support_masks()
+        self._build_detour_factor_cache(
+            context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
+        )
+
+    def _build_detour_factor_cache(self, detour_factor):
+        """Snap all fixed candidate centroids once for fast prediction lookups."""
+        self.detour_factor = detour_factor
+        self._coarse_detour_indices = detour_factor.get_cell_indices(
+            self.c.centroid_x, self.c.centroid_y
+        )
+        for attrs in self.m.level1_candidate_attributes_by_level0.values():
+            attrs["detour_cell_indices"] = detour_factor.get_cell_indices(attrs["x"], attrs["y"])
+        for attrs in self.d.level2_candidate_attributes_by_level1.values():
+            attrs["detour_cell_indices"] = detour_factor.get_cell_indices(attrs["x"], attrs["y"])
+        if self.s is not None:
+            self._short_detour_indices = detour_factor.get_cell_indices(
+                self.s.centroid_x, self.s.centroid_y
+            )
+            self.s._detour_factor = detour_factor
+            self.s._detour_candidate_indices = self._short_detour_indices
+            self.s._current_origin_detour_index = None
+
+    def _add_cached_detour_feature(self, candidate_dynamic, destination_indices, n_children=None):
+        if self.detour_factor is None or self._current_origin_detour_index is None:
+            raise RuntimeError("Detour-factor cache has not been initialized")
+        factors = self.detour_factor.get_detour_factor_by_index(
+            self._current_origin_detour_index, destination_indices
+        )
+        if n_children is not None and int(n_children) < len(factors):
+            factors = factors.copy()
+            factors[int(n_children):] = 0.0
+        return np.column_stack([candidate_dynamic, factors]).astype(np.float32)
 
     def _build_short_destination_support_masks(self):
         self.short_destination_support_masks = None
@@ -1028,7 +1071,8 @@ class HierarchicalLocationChoiceModel:
         return transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, self.c.person_dynamic_scaler)
 
     def _predict_level0_from_person(self, person_matrix, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work, rng, purpose):
-        candidate_dynamic        = self.c._build_candidate_dynamic(home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
+        candidate_dynamic = self.c._build_candidate_dynamic(home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
+        candidate_dynamic = self._add_cached_detour_feature(candidate_dynamic, self._coarse_detour_indices)
         candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.c.candidate_dynamic_scaler)[None, :, :]
         candidate_static_scaled  = self.c.scaled_static_features_torch
         indices = self.c.predict_from_inputs(person_matrix, candidate_static_scaled, candidate_dynamic_scaled, rng=rng, return_probabilities=False, internal_mask=True, purpose=purpose)
@@ -1042,7 +1086,8 @@ class HierarchicalLocationChoiceModel:
         n_children = attrs["n_children"]
         if n_children == 0:
             raise RuntimeError(f"No level1 candidates available for level0_h3 '{level0_h3}'")
-        candidate_dynamic        = self.m._build_candidate_dynamic(attrs, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
+        candidate_dynamic = self.m._build_candidate_dynamic(attrs, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
+        candidate_dynamic = self._add_cached_detour_feature(candidate_dynamic, attrs["detour_cell_indices"], n_children)
         candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.m.candidate_dynamic_scaler)[None, :, :]
         candidate_static_scaled  = attrs["scaled_static_features_torch"]
         idx = self.m.predict_from_inputs(person_matrix, candidate_static_scaled, candidate_dynamic_scaled, rng=rng, return_probabilities=False, internal_mask=True, purpose=purpose, level0_h3=level0_h3)
@@ -1058,7 +1103,8 @@ class HierarchicalLocationChoiceModel:
         n_children = attrs["n_children"]
         if n_children == 0:
             raise RuntimeError(f"No level2 candidates available for key {key}")
-        candidate_dynamic        = self.d._build_candidate_dynamic(attrs, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
+        candidate_dynamic = self.d._build_candidate_dynamic(attrs, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
+        candidate_dynamic = self._add_cached_detour_feature(candidate_dynamic, attrs["detour_cell_indices"], n_children)
         candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.d.candidate_dynamic_scaler)[None, :, :]
         candidate_static_scaled  = attrs["scaled_static_features_torch"]
         idx = self.d.predict_from_inputs(person_matrix, candidate_static_scaled, candidate_dynamic_scaled, rng=rng, return_probabilities=False, internal_mask=True, purpose=purpose, level0_h3=level0_h3, level1_h3=level1_h3)
@@ -1099,6 +1145,11 @@ class HierarchicalLocationChoiceModel:
         person_static  = self._get_cached_person_static(person_id, age, income_class, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work, activity_chain_vector, sex, employed, car_availability)
         person_dynamic = self._build_person_dynamic(crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, target_distance, purpose, origin_purpose)
         person_matrix  = np.concatenate([person_static, person_dynamic], axis=1)
+        self._current_origin_detour_index = int(
+            self.detour_factor.get_cell_indices(origin_x, origin_y)[0]
+        )
+        if self.s is not None:
+            self.s._current_origin_detour_index = self._current_origin_detour_index
 
         safe_target_distance = float(target_distance) if np.isfinite(target_distance) and float(target_distance) >= 0.0 else np.inf
         use_short = self.s is not None and safe_target_distance <= float(self.short_trip_threshold_m)

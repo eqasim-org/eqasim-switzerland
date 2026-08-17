@@ -1,17 +1,7 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Wed May  7 09:31:06 2025
-
-@author: dabdelkader
-"""
-
-
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
 import logging
-from .utils.osm import Osm
 from pathlib import Path
 from typing import Union, List
 
@@ -67,7 +57,6 @@ class Counts:
         if context:
             self.ch_border = context.stage("data.spatial.swiss_border")
         else:
-            # I can use the Osm class here to load the swiss border
             raise ValueError("Context must be provided to load Swiss border data.")
   
             

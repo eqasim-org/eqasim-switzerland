@@ -10,6 +10,7 @@ import matsim.writers
 from matsim.writers import backlog_iterator
 import logging
 from data.external_population.constants import ExternalPopulationConstants
+from synthesis.population.departure_times.trips_departures import get_best_departue_time
 
 logger = logging.getLogger("synpp")
 
@@ -88,6 +89,10 @@ def configure(context):
         context.stage("data.external_population.read_outputs")
         context.stage("data.external_population.constants")
         context.stage("synthesis.population.destinations")
+
+    context.config("correct_departure_time", default=True)
+    if context.config("correct_departure_time"):
+        context.stage("synthesis.population.departure_times.trips_departures")
 
 
 VEHICLE_FIELDS = ["mode", "vehicle_id", "owner_id"]
@@ -355,15 +360,19 @@ def execute(context):
     df_trips.columns = ["person_id", "activity_index", "following_mode"]
     df_activities    = pd.merge(df_activities, df_trips, on=["person_id", "activity_index"], how="left")
 
+    # correct departure times
+    if context.config("correct_departure_time"):
+        df = df_activities[["person_id","activity_index", "end_time"]]
+        df.columns = ['person_id', 'trip_index', 'end_time']
+        df['new_end_time'] = get_best_departue_time(context, df)
+        df['new_end_time'] = df['new_end_time'].fillna(df['end_time'])
+        df_activities['end_time'] = df['new_end_time']
+        del df
+
     # Attach locations to activities
     df_locations  = context.stage("synthesis.population.spatial.locations")
     df_activities = pd.merge(df_activities, df_locations, on=["person_id", "activity_index"], how="left")
-
-    # Replace the primary-secondary purposes with normal ones
-    #df_activities["purpose"] = df_activities["purpose"].replace({"home_secondary":"other",
-    #                                                             "work_secondary": "work",
-    #                                                             "education_secondary":"education"})
-    
+        
     # Find the loop attribute in the following_modes
     loop_modes = ["walk_loop", "car_loop", "car_passenger_loop", "pt_loop", "bike_loop"]
 

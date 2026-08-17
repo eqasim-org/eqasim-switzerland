@@ -38,11 +38,8 @@ def _load_counts_and_match(context, network, city):
             context=context,
         )
         match_kwargs = dict(
+            mode="bidirectional",
             search_radius=10,
-            get_pairs=True,
-            by_highway_order=False,
-            direction_from_osm=False,
-            only_two_link_ids=True,
         )
     elif city == "bern":
         file_path = context.stage("analysis.counts.cantons.bern")
@@ -53,11 +50,8 @@ def _load_counts_and_match(context, network, city):
             context=context,
         )    
         match_kwargs = dict(
+            mode="bidirectional",
             search_radius=15,
-            get_pairs=True,
-            by_highway_order=False,
-            direction_from_osm=False,
-            only_two_link_ids=True,
         )
     elif city == "ch":
         count_stations_file, counts_data_file, year = context.stage("analysis.counts.cantons.ch")
@@ -70,25 +64,19 @@ def _load_counts_and_match(context, network, city):
             year=year,
         )
         match_kwargs = dict(
+            mode="bidirectional",
             search_radius=80,
-            get_pairs=True,
-            by_highway_order=True,
-            direction_from_osm=False,
-            only_two_link_ids=True,
+            prioritize_road_types=True,
         )
     elif city == "geneva":
         file_path = context.stage("analysis.counts.cantons.geneva")
         counts = Counts(file_path=file_path,  
                         id_column="OBJECTID",
-                        columns_to_keep={'mean_flow_2025':"flow", "median_flow_2025":"median_flow"},
+                        columns_to_keep={'mean_flow_2025':"flow", "median_flow_2025":"median_flow",
+                                         "osm_id":"osm_id", "angle":"angle"},
                         context = context)
-        match_kwargs = dict(
-            search_radius=20,
-            get_pairs=False,
-            by_highway_order=False,
-            direction_from_osm=False,
-            only_two_link_ids = True,
-        )
+        # TrafficDataMatcher detects osm_id/angle and uses the manual match.
+        match_kwargs = {}
     elif city == "luzern":
         if context.config("only_weekday"):
             return None
@@ -100,11 +88,8 @@ def _load_counts_and_match(context, network, city):
             context=context,
         )
         match_kwargs = dict(
+            mode="bidirectional",
             search_radius=10,
-            get_pairs=True,
-            by_highway_order=False,
-            direction_from_osm=False,
-            only_two_link_ids=True,
         )
     elif city == "saint_gallen":
         if context.config("only_weekday"):
@@ -117,11 +102,8 @@ def _load_counts_and_match(context, network, city):
             context=context,
         )
         match_kwargs = dict(
+            mode="bidirectional",
             search_radius=2,
-            get_pairs=True,
-            by_highway_order=False,
-            direction_from_osm=False,
-            only_two_link_ids=True,
         )
     elif city == "vaud":
         file_path = context.stage("analysis.counts.cantons.vaud")
@@ -132,27 +114,20 @@ def _load_counts_and_match(context, network, city):
             context=context,
         )
         match_kwargs = dict(
+            mode="bidirectional",
             search_radius=10,
-            get_pairs=True,
-            by_highway_order=False,
-            direction_from_osm=False,
-            only_two_link_ids=True,
         )
     elif city == "zurich":
         file_path = context.stage("analysis.counts.cantons.zurich")
         counts = Counts(
             file_path=file_path,
             id_column="id",
-            columns_to_keep={"flow": "flow", "flow_w": "flow_w"},
+            columns_to_keep={"flow": "flow", "flow_w": "flow_w",
+                             "osm_id": "osm_id", "angle": "angle"},
             context=context,
         )
-        match_kwargs = dict(
-            search_radius=10,
-            get_pairs=True,
-            by_highway_order=False,
-            direction_from_osm=False,
-            only_two_link_ids=True,
-        )
+        # TrafficDataMatcher detects osm_id/angle and uses the manual match.
+        match_kwargs = {}
     elif city == "annemasse":
         file_path = context.stage("analysis.counts.cantons.annemasse")
         counts = Counts(
@@ -162,16 +137,13 @@ def _load_counts_and_match(context, network, city):
             context=context,
         )
         match_kwargs = dict(
+            mode="bidirectional",
             search_radius=20,
-            get_pairs=True,
-            by_highway_order=False,
-            direction_from_osm=False,
-            only_two_link_ids=True,
         )
     else:
         raise ValueError(f"Unsupported city {city}")
 
-    matcher = TrafficDataMatcher(city, cache=context.path())
+    matcher = TrafficDataMatcher()
     matched = matcher.match(network=network, counts=counts, **match_kwargs)
 
     flow_col = "flow_w" if context.config("only_weekday") and "flow_w" in counts.counts.columns else "flow"
@@ -192,16 +164,9 @@ def execute(context):
     network = context.stage("analysis.counts.matching.network_from_prepare")
 
     # Get prepared count data
-    city_order = [
-        "aargau",
-        "bern",
-        "ch",
-        "geneva",
-        "luzern",
-        "saint_gallen",
-        "vaud",
-        "zurich"
-    ]
+    city_order = ["aargau", "bern", "ch", "geneva", "luzern", "saint_gallen", "vaud", "zurich"]
+    weights = {"aargau": 1, "bern": 1, "ch": 1, "geneva": 1.2, "luzern": 1, "saint_gallen": 1, "vaud": 0.3, "zurich": 1.2}
+
     if context.config("include_external_population"):
         city_order.append("annemasse")
 
@@ -212,6 +177,7 @@ def execute(context):
             logger.info(f"\t - {city}: No usable records, skipping.")
             continue
         logger.info(f"\t - {city}: {len(city_df)} matched stations")
+        city_df["weight"] = weights.get(city, 1)
         dfs.append(city_df)
     if not dfs:
         raise RuntimeError("No counts could be matched to the prepared network.")

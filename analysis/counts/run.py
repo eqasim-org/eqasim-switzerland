@@ -1,10 +1,12 @@
 import logging
 import os
 import pandas as pd
+import geopandas as gpd
 import json
 from .run_utils import (filter_data, compute_statistics, save_as_target,
                         create_comprehensive_plot, create_simple_scatter_plot, plot_by_road_cat,
                         print_detailed_statistics, get_average_flow_veh_h_by_category)
+from .matching.plots import Plotter
 
 
 logger = logging.getLogger("synpp")
@@ -12,6 +14,7 @@ runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not i.sta
 
 def configure(context):    
     context.stage("analysis.counts.matching.network")
+    context.stage("data.spatial.swiss_border")
     context.config("output_path")
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")
@@ -76,6 +79,20 @@ def execute(context):
     
     # save the data (this can be used as target for network calibration)
     save_as_target(network, df, path_to_output)
+
+    # Plot the map with the remaining stations (after filters), showing absolute and relative differences
+    roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link']
+    border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))
+    network_ways = network.get_ways(road_types = roads_to_show).to_crs(epsg=4326)
+    points = gpd.GeoDataFrame(df[['id', 'geometry', 'pdiff', 'adiff']], geometry='geometry', crs='EPSG:2056').to_crs(epsg=4326)
+
+    Plotter.create_map([network_ways],
+                        data_to_show=["link_id"],
+                        point_gdf=[points[['id', 'geometry', 'pdiff', 'adiff']]],
+                        point_data_to_show=['id', 'pdiff','adiff'],
+                        border=border,
+                        path_to_save=os.path.join(path_to_output, "Switzerland_counts_comparaison.html"))
+
 
     logger.info("\n Analysis completed successfully!")
     return dict(done=True, path = path_to_output)

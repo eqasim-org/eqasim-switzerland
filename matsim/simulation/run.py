@@ -29,12 +29,13 @@ def configure(context):
     context.config("network_calibration.activate", default=False)
     context.config("network_calibration.calibrate_disutilities", default=True)
     context.config("network_calibration.calibrate_freespeed", default=True)
+    context.config("network_calibration.calibrate_agents_ascs", default=True)
+    context.config("network_calibration.calibrate_crossborder_population", default=True)
     
     if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_disutilities"):
         context.stage("analysis.counts.target")
         context.stage("calibration.road_regions.penalty_calibration")
-        context.config("network_calibration.calibrate_agents_ascs", default=True)
-        context.config("network_calibration.calibrate_crossborder_population", default=True)
+        
     
     if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
         context.stage("analysis.travel_times.APIs.target")
@@ -88,14 +89,14 @@ def execute(context):
             "--config-path", config_path,
             "--config:controler.lastIteration", str(last_iteration),
             "--config:controler.writeEventsInterval", str(max(int(last_iteration/2),1)),
-            "--config:controler.writePlansInterval", str(last_iteration),
-            "--config:qsim.numberOfThreads", str(min(context.config("threads"),16)),
+            "--config:controler.writePlansInterval", str(max(int(last_iteration/2),1)),
+            "--config:qsim.numberOfThreads", str(min(context.config("threads"),12)),
             "--config:linkStats.writeLinkStatsInterval", str(max(int(last_iteration/2),1)),
             "--config:linkStats.averageLinkStatsOverIterations", str(8),
             "--config:controller.writeTripsInterval", str(max(int(last_iteration/2),1)),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
             "--preventwaitingtoentertraffic", preventwaitingtoentertraffic,
-            "--config:scoring.writeExperiencedPlans", writeExperiencedPlans
+            "--config:scoring.writeExperiencedPlans", writeExperiencedPlans,
         ] + additional_args)
     else:
         # Run simulation with vdf
@@ -104,7 +105,7 @@ def execute(context):
             "--generateNetworkEvents", "true",
             "--config:controler.lastIteration", str(last_iteration),
             "--config:controler.writeEventsInterval", str(max(int(last_iteration/2),1)),
-            "--config:controler.writePlansInterval", str(last_iteration),
+            "--config:controler.writePlansInterval", str(max(int(last_iteration/2),1)),
             "--config:qsim.numberOfThreads", str(min(context.config("threads"),16)),
             "--config:linkStats.writeLinkStatsInterval", str(last_iteration),
             "--config:linkStats.averageLinkStatsOverIterations", str(8),

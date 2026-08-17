@@ -25,9 +25,47 @@ CANDIDATE_STATIC_PASSTHROUGH_FEATURES = [
 ]
 STATIC_CANDIDATE_FEATURES = CANDIDATE_STATIC_SCALED_FEATURES + CANDIDATE_STATIC_PASSTHROUGH_FEATURES
 N_CANDIDATE_STATIC_SCALED = len(CANDIDATE_STATIC_SCALED_FEATURES)   # = 9; static[:N_CANDIDATE_STATIC_SCALED] scaled, [N_CANDIDATE_STATIC_SCALED:] passthrough
-DYNAMIC_CANDIDATE_FEATURES = ["dist_home", "dist_work", "dist_last"]
+DYNAMIC_CANDIDATE_FEATURES = ["dist_home", "dist_work", "dist_last", "detour_factor"]
 CANDIDATE_FEATURES = DYNAMIC_CANDIDATE_FEATURES + STATIC_CANDIDATE_FEATURES
-N_CANDIDATE_DYNAMIC = len(DYNAMIC_CANDIDATE_FEATURES)  # = 3; split index: candidate_vector[:N_CANDIDATE_DYNAMIC] is dynamic
+N_CANDIDATE_DYNAMIC = len(DYNAMIC_CANDIDATE_FEATURES)  # = 4; split index: candidate_vector[:N_CANDIDATE_DYNAMIC] is dynamic
+
+
+def add_detour_factor_feature(candidate_tensor, origin_x, origin_y, candidate_x,
+                              candidate_y, valid_mask, detour_factor):
+    """Insert the origin-to-candidate detour factor after the distance features.
+
+    Candidate coordinates are snapped in vectorized batches. For a shared 1-D
+    candidate set (the regional model), destination cells are snapped only once;
+    hierarchical 2-D choice sets snap valid entries only.
+    """
+    candidate_tensor = np.asarray(candidate_tensor)
+    valid_mask = np.asarray(valid_mask, dtype=bool)
+    origin_indices = detour_factor.get_cell_indices(origin_x, origin_y)
+    factors = np.zeros(valid_mask.shape, dtype=np.float64)
+
+    candidate_x = np.asarray(candidate_x, dtype=np.float64)
+    candidate_y = np.asarray(candidate_y, dtype=np.float64)
+    if candidate_x.ndim == 1:
+        destination_indices = detour_factor.get_cell_indices(candidate_x, candidate_y)
+        factors[:, :] = detour_factor.get_detour_factor_by_index(
+            origin_indices[:, None], destination_indices[None, :]
+        )
+        factors[~valid_mask] = 0.0
+    else:
+        rows, columns = np.nonzero(valid_mask)
+        destination_indices = detour_factor.get_cell_indices(
+            candidate_x[rows, columns], candidate_y[rows, columns]
+        )
+        factors[rows, columns] = detour_factor.get_detour_factor_by_index(
+            origin_indices[rows], destination_indices
+        )
+
+    # The Numba builders emit three distances followed by all static columns.
+    return np.concatenate(
+        [candidate_tensor[:, :, :3], factors[:, :, None], candidate_tensor[:, :, 3:]],
+        axis=2,
+    )
+
 
 def _make_quantile_transformer(n_rows):
     """All scalable features in this model are non-negative by construction (distances, counts,
@@ -107,7 +145,7 @@ def transform_person_trip_vector(age, income_class, daily_longest, daily_total, 
 def fit_candidate_tensor(candidate_tensor, valid_mask, max_fit_rows=1000000, random_state=123, candidate_static_scaler=None, candidate_dynamic_scaler=None):
     candidate_tensor = np.asarray(candidate_tensor, dtype=np.float64)
     valid_mask = np.asarray(valid_mask, dtype=bool)
-    flat = candidate_tensor.reshape(-1, candidate_tensor.shape[-1])   # [N*M, 16]
+    flat = candidate_tensor.reshape(-1, candidate_tensor.shape[-1])
     valid_flat = valid_mask.reshape(-1)
     def _fit_or_transform(cols_flat, scaler):
         if scaler is not None:
@@ -122,8 +160,8 @@ def fit_candidate_tensor(candidate_tensor, valid_mask, max_fit_rows=1000000, ran
         sc = _make_quantile_transformer(fit_vals.shape[0]); sc.fit(fit_vals)
         return sc, sc.transform(cols_flat)
 
-    # Dynamic features (distances): always non-negative → uniform scaler keeps output in [0, 1].
-    candidate_dynamic_scaler, scaled_dyn = _fit_or_transform(flat[:, :N_CANDIDATE_DYNAMIC], candidate_dynamic_scaler)    # [N*M, 3]
+    # Dynamic features (distances and detour factor) are non-negative.
+    candidate_dynamic_scaler, scaled_dyn = _fit_or_transform(flat[:, :N_CANDIDATE_DYNAMIC], candidate_dynamic_scaler)
     # Static features: scaled block first (contiguous slice), passthrough block kept as-is.
     flat_stat = flat[:, N_CANDIDATE_DYNAMIC:]                                                                              # [N*M, 17]
     candidate_static_scaler, scaled_stat_cols = _fit_or_transform(flat_stat[:, :N_CANDIDATE_STATIC_SCALED], candidate_static_scaler)  # [N*M, 9]
@@ -146,5 +184,5 @@ def transform_candidate_static_matrix(static_matrix, scaler):
     return result
 
 def transform_candidate_dynamic_matrix(dynamic_matrix, scaler):
-    """Scale per-trip dynamic candidate columns [N, 3]."""
+    """Scale per-trip dynamic candidate columns [N, 4]."""
     return scaler.transform(np.asarray(dynamic_matrix, dtype=np.float64)).astype(np.float32)

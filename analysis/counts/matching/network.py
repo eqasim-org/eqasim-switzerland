@@ -2,8 +2,7 @@ from matsim.readers import read_network
 import numpy as np
 import geopandas as gpd
 import pandas as pd
-from .utils.geometry_utils import safe_wkt_load
-from .utils import Functions as F
+from .geometry_io import safe_wkt_load
 from shapely.geometry import LineString
 import logging
 import os
@@ -120,7 +119,11 @@ class RoadNetwork:
     
     def get_bearing(self, link_id, in_simulation_link=False):
         geo = self.get_link_geometry(link_id, in_simulation_link)
-        return F.compute_bearing(geo)
+        if geo is None or geo.is_empty:
+            return np.nan
+        start = geo.coords[0]
+        end = geo.coords[-1]
+        return (np.degrees(np.arctan2(end[0] - start[0], end[1] - start[1])) + 360) % 360
                        
     def plot(self, *args, **kwargs):
         return self.get_geometry().plot(*args, **kwargs)
@@ -147,12 +150,16 @@ class RoadNetwork:
                 .reset_index(name='attributes')
             net.links = net.links.merge(link_attrs, on="link_id", how="left")
             net.links.loc[net.links["attributes"].isna(), "attributes"] = None
-        net.links = net.links[net.links["modes"].str.split(",").apply(lambda x: "car" in x)]
+
+        net.filter_car_links(inplace=True)
+
         net.links["highway"] = net.links.attributes.apply(
             lambda x: x["osm:way:highway"] if (isinstance(x,dict) and "osm:way:highway" in x) else np.nan
         )
-        
-        net.links["link_id"] = net.links["link_id"].astype(str)        
+        net.links["osm_id"] = net.links.attributes.apply(
+                    lambda x: x['osm:way:id'] if (isinstance(x,dict) and 'osm:way:id' in x) else np.nan
+                )
+        net.links["link_id"] = net.links["link_id"].astype(str)
         return net
 
     def get_ways(self, geo_df: gpd.GeoDataFrame=None, road_types=None):

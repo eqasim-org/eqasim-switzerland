@@ -35,13 +35,7 @@ def execute(context):
     df = df[["identifier", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time","travel_time","traveled_distance"]]
 
     # save file
-    api = context.config("travel_times_from").lower().replace("all","tomtom")
-    path_to_output = os.path.join(context.config("output_path"), 
-                                context.config("output_id"), 
-                                context.config("simulation_directory"),
-                                "travel_times_"+api,
-                                f"calibration_target_travel_times.csv") 
-    os.makedirs(os.path.dirname(path_to_output), exist_ok=True)
+    path_to_output = os.path.join(context.path(), f"calibration_target_travel_times.csv") 
     
     df.to_csv(path_to_output, index=False, sep=",")
     logger.info(f"Saved calibration target travel times to {path_to_output}")

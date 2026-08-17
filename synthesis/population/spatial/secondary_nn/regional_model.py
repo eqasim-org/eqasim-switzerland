@@ -9,7 +9,7 @@ import joblib
 
 from .h3 import within_ch, H3_LEVEL_NAMES
 from .hierarchical_utils import SECONDARY_ACTIVITIES, build_coarse_candidate_batch_numba
-from .feature_encoding import CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix
+from .feature_encoding import CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix, add_detour_factor_feature
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import RegionalChoiceWrapper
 
@@ -20,6 +20,7 @@ MODEL_NAME = "regional_model.pt"
 
 def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.h3")
+    context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
@@ -188,9 +189,13 @@ def execute(context):
                                                           urban_core_per_h3, urban_per_h3, education_per_h3, shop_per_h3, leisure_per_h3, sport_per_h3, gastronomy_per_h3,
                                                           accommodation_per_h3, cultural_per_h3, ovgk_share_a_per_h3, ovgk_share_b_per_h3,
                                                           ovgk_share_c_per_h3, ovgk_share_d_per_h3, ovgk_share_none_per_h3, outside_fraction)
+    valid_mask = np.ones((n_trips, num_h3), dtype=bool)
+    candidate_tensor = add_detour_factor_feature(
+        candidate_tensor, origin_x, origin_y, centroid_x, centroid_y, valid_mask,
+        context.stage("synthesis.population.spatial.secondary.detour_factors.factors"),
+    )
     candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
     candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
-    valid_mask = np.ones((n_trips, num_h3), dtype=bool)
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask, random_state=int(context.config("random_seed")))
 
     ################ Training the models ################
@@ -199,8 +204,8 @@ def execute(context):
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    candidate_static_x  = candidate_tensor[0:1, :, N_CANDIDATE_DYNAMIC:]  # [1, num_h3, 13] — static cols are identical for all rows; broadcast avoids redundant storage
-    candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]    # [n_trips, num_h3, 3] — per-trip distances
+    candidate_static_x  = candidate_tensor[0:1, :, N_CANDIDATE_DYNAMIC:]  # [1, num_h3, 17] — static cols are identical for all rows; broadcast avoids redundant storage
+    candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]    # [n_trips, num_h3, 4] — per-trip distances and detour factor
 
     model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dim=64)
     train_choice_model(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,

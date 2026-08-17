@@ -6,20 +6,26 @@ import numpy as np
 import pandas as pd
 import torch
 import matplotlib.pyplot as plt
+from pyproj import Transformer
 
 from .h3 import H3_LEVEL_NAMES
 from .hierarchical_utils import SECONDARY_ACTIVITIES, build_level2_children_by_level1, build_level2_candidate_attributes_by_level1, sanitize_work_coordinates, build_hierarchical_candidate_batch_numba
-from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix
+from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix, add_detour_factor_feature
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import LocalChoiceWrapper
 
 logger = logging.getLogger("synpp: local_model")
 
 MODEL_NAME = "local_model.pt"
+COUNT_ZOOM_AREAS = {
+    "zurich": {"center_wgs84": (8.5417, 47.3769), "radius_m": 20_000.0},
+    "geneva": {"center_wgs84": (6.1432, 46.2044), "radius_m": 15_000.0},
+}
 
 
 def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.h3")
+    context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
@@ -35,6 +41,12 @@ def configure(context):
     context.config("local_model_batch_size", 256)
     context.config("local_model_epochs", 50)
     context.config("local_model_learning_rate", 4e-3)
+    context.config("local_model_dropout_rate", 0.30)
+    context.config("local_model_weight_decay", 1e-2)
+    context.config("local_model_validation_folds", 5)
+    context.config("local_model_validation_every", 2)
+    context.config("local_model_early_stopping_patience", 5)
+    context.config("local_model_early_stopping_min_delta", 1e-3)
     context.config("secondary_nn_distance_loss_weight", 0.07)
     context.config("secondary_nn_distance_loss_short_floor_m", 100.0)
 
@@ -251,6 +263,10 @@ def execute(context):
                                                                 cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_sport, cand_gastronomy,
                                                                 cand_accommodation, cand_cultural, cand_ovgk_share_a, cand_ovgk_share_b,
                                                                 cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask)
+    candidate_tensor = add_detour_factor_feature(
+        candidate_tensor, origin_x, origin_y, cand_x, cand_y, valid_mask,
+        context.stage("synthesis.population.spatial.secondary.detour_factors.factors"),
+    )
     candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
     candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)
@@ -264,14 +280,28 @@ def execute(context):
     candidate_static_x  = candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:]
     candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]
 
-    model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dim=32)
+    model = NeuralChoiceModel(
+        person_input_dim=person_trip_matrix.shape[1],
+        candidate_input_dim=candidate_tensor.shape[2],
+        person_hidden_dim=32,
+        hidden_dim=32,
+        dropout_rate=float(context.config("local_model_dropout_rate")),
+    )
     train_choice_model(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
         y=y, valid_mask=valid_mask, logger_instance=logger, weights=weights,
         epochs=int(context.config("local_model_epochs")),
         batch_size=int(context.config("local_model_batch_size")),
         lr=float(context.config("local_model_learning_rate")),
+        weight_decay=float(context.config("local_model_weight_decay")),
         num_threads=int(context.config("threads")),
         path=context.path(),
+        n_val_folds=int(context.config("local_model_validation_folds")),
+        val_every=int(context.config("local_model_validation_every")),
+        validation_groups=df["person_id"].to_numpy(),
+        rotate_validation=False,
+        early_stopping_patience=int(context.config("local_model_early_stopping_patience")),
+        early_stopping_min_delta=float(context.config("local_model_early_stopping_min_delta")),
+        restore_best_weights=True,
         distance_candidates=candidate_dist_last_m,
         distance_targets=target_distance.astype(np.float32),
         distance_candidates_home=candidate_dist_home_m,
@@ -309,15 +339,18 @@ def plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, valid_
     counts_df = pd.DataFrame({"real_count": real_counts, "pred_count": pred_counts}).fillna(0)
     h3_geo_counts = h3_geo_level2.set_index("h3_index").join(counts_df, how="left").fillna(0)
 
-    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-    h3_geo_counts.plot(column="real_count", ax=axes[0], legend=True, cmap="viridis", legend_kwds={"shrink": 0.5})
-    axes[0].set_title("Real Level2 H3 Counts")
-    h3_geo_counts.plot(column="pred_count", ax=axes[1], legend=True, cmap="viridis", legend_kwds={"shrink": 0.5})
-    axes[1].set_title("Predicted Level2 H3 Counts")
-    plt.tight_layout()
-    plot_path = os.path.join(context.path(), "detailed_level2_counts_comparison.png")
-    plt.savefig(plot_path, dpi=200, bbox_inches="tight")
-    plt.close(fig)
+    _plot_level2_count_comparison(
+        h3_geo_counts,
+        os.path.join(context.path(), "detailed_level2_counts_comparison.png"),
+    )
+    for area_name, area in COUNT_ZOOM_AREAS.items():
+        _plot_level2_count_comparison(
+            h3_geo_counts,
+            os.path.join(context.path(), f"detailed_level2_counts_comparison_{area_name}.png"),
+            area_name=area_name,
+            center_wgs84=area["center_wgs84"],
+            radius_m=area["radius_m"],
+        )
 
     logger.info("Plotting distance distributions for level2...")
     home_x = df["home_x"].to_numpy(dtype=np.float64)
@@ -384,3 +417,45 @@ def plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, valid_
     plt.savefig(dist_plot_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return h3_geo_counts
+
+
+def _plot_level2_count_comparison(h3_geo_counts, output_path, area_name=None,
+                                  center_wgs84=None, radius_m=None):
+    plot_data = h3_geo_counts
+    bounds = None
+    title_suffix = ""
+
+    if center_wgs84 is not None:
+        if h3_geo_counts.crs is None:
+            raise ValueError("Cannot create city zoom plots without a CRS")
+        if radius_m is None or float(radius_m) <= 0.0:
+            raise ValueError("radius_m must be positive for a city zoom plot")
+
+        transformer = Transformer.from_crs("EPSG:4326", h3_geo_counts.crs, always_xy=True)
+        center_x, center_y = transformer.transform(*center_wgs84)
+        radius_m = float(radius_m)
+        bounds = (
+            center_x - radius_m,
+            center_x + radius_m,
+            center_y - radius_m,
+            center_y + radius_m,
+        )
+        plot_data = h3_geo_counts.cx[bounds[0]:bounds[1], bounds[2]:bounds[3]]
+        if len(plot_data) == 0:
+            raise RuntimeError(f"No level-2 H3 cells found in the {area_name} zoom area")
+        title_suffix = f" — {str(area_name).title()}"
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    plot_data.plot(column="real_count", ax=axes[0], legend=True, cmap="viridis", legend_kwds={"shrink": 0.5})
+    axes[0].set_title(f"Real Level2 H3 Counts{title_suffix}")
+    plot_data.plot(column="pred_count", ax=axes[1], legend=True, cmap="viridis", legend_kwds={"shrink": 0.5})
+    axes[1].set_title(f"Predicted Level2 H3 Counts{title_suffix}")
+
+    if bounds is not None:
+        for axis in axes:
+            axis.set_xlim(bounds[0], bounds[1])
+            axis.set_ylim(bounds[2], bounds[3])
+
+    plt.tight_layout()
+    fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
