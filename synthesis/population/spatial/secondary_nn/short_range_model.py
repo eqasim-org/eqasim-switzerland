@@ -21,6 +21,7 @@ from .feature_encoding import (
     ACTIVITY_CHAIN_N,
     fit_candidate_tensor,
     fit_person_trip_matrix,
+    add_detour_factor_feature,
 )
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import ShortRangeChoiceWrapper
@@ -33,6 +34,7 @@ SHORT_RANGE_MODEL_THRESHOLD = 1500.0
 
 def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.h3")
+    context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
@@ -332,6 +334,10 @@ def execute(context):
         cand_ovgk_share_none,
         cand_outside_fraction,
         valid_mask,
+    )
+    candidate_tensor = add_detour_factor_feature(
+        candidate_tensor, origin_x, origin_y, cand_x, cand_y, valid_mask,
+        context.stage("synthesis.population.spatial.secondary.detour_factors.factors"),
     )
     candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
     candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)

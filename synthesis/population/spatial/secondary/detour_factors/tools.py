@@ -406,23 +406,49 @@ class DetourFactorMatrix:
         self.h3_to_index = h3_to_index
         self.h3_centers = h3_centers
         self.h3_tree = h3_tree
+        # Cache the KD-tree row -> matrix row mapping once. Coordinate lookups
+        # can then stay fully vectorized without Python dictionary work.
+        self._tree_cell_indices = np.fromiter(
+            (h3_to_index[h3_id] for h3_id in h3_tree.id_lookup),
+            dtype=np.int64,
+            count=len(h3_tree.id_lookup),
+        )
+
+    def get_cell_indices(self, x, y):
+        """Snap coordinates to matrix cells and return their integer indices."""
+        # Older cached stage objects predate this derived lookup; initialize it
+        # lazily so they remain usable after the code upgrade.
+        if not hasattr(self, "_tree_cell_indices"):
+            self._tree_cell_indices = np.fromiter(
+                (self.h3_to_index[h3_id] for h3_id in self.h3_tree.id_lookup),
+                dtype=np.int64,
+                count=len(self.h3_tree.id_lookup),
+            )
+        _, tree_indices, _ = self.h3_tree.nearest_node(x, y)
+        return self._tree_cell_indices[np.asarray(tree_indices, dtype=np.int64)]
+
+    def get_detour_factor_by_index(self, origin_index, destination_index):
+        """Return clipped factors for already-snapped matrix indices.
+
+        This hot-path API lets callers cache candidate cell indices instead of
+        repeating a KD-tree lookup for every prediction.
+        """
+        factors = np.asarray(self.matrix[origin_index, destination_index], dtype=float)
+        factors = np.where(np.isfinite(factors), factors, 10.0)
+        return np.clip(factors, 1.0, 10.0)
 
     def get_detour_factor(self, x_origin, y_origin, x_destination, y_destination):
         """
         Accepts either scalars (single OD pair) or equal-length array-likes
         (batch of OD pairs) and returns the corresponding detour factor(s).
         """
-        _, _, h3_origin = self.h3_tree.nearest_node(x_origin, y_origin)
-        _, _, h3_destination = self.h3_tree.nearest_node(x_destination, y_destination)
-
-        idx_origin = np.array([self.h3_to_index[h] for h in h3_origin])
-        idx_destination = np.array([self.h3_to_index[h] for h in h3_destination])
-
+        idx_origin = self.get_cell_indices(x_origin, y_origin)
+        idx_destination = self.get_cell_indices(x_destination, y_destination)
         factors = self.matrix[idx_origin, idx_destination]
 
         if np.isscalar(x_origin) or np.ndim(x_origin) == 0:
             return float(factors[0])
-        return np.clip(factors, 1.0, 10.0) 
+        return np.clip(factors, 1.0, 10.0)
 
 
 def plot_long_detours_html(

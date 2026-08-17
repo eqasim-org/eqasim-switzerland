@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from .h3 import H3_LEVEL_NAMES
 from .hierarchical_utils import SECONDARY_ACTIVITIES, build_level2_children_by_level1, build_level2_candidate_attributes_by_level1, sanitize_work_coordinates, build_hierarchical_candidate_batch_numba
-from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix
+from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix, add_detour_factor_feature
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import LocalChoiceWrapper
 
@@ -20,6 +20,7 @@ MODEL_NAME = "local_model.pt"
 
 def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.h3")
+    context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
@@ -251,6 +252,10 @@ def execute(context):
                                                                 cand_urban_core, cand_urban, cand_education, cand_shop, cand_leisure, cand_sport, cand_gastronomy,
                                                                 cand_accommodation, cand_cultural, cand_ovgk_share_a, cand_ovgk_share_b,
                                                                 cand_ovgk_share_c, cand_ovgk_share_d, cand_ovgk_share_none, cand_outside_fraction, valid_mask)
+    candidate_tensor = add_detour_factor_feature(
+        candidate_tensor, origin_x, origin_y, cand_x, cand_y, valid_mask,
+        context.stage("synthesis.population.spatial.secondary.detour_factors.factors"),
+    )
     candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
     candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)

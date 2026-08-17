@@ -28,6 +28,7 @@ def configure(context):
     context.stage("synthesis.population.destinations")
 
     context.stage("synthesis.population.spatial.secondary_nn.h3")
+    context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
     context.stage("synthesis.population.spatial.secondary_nn.regional_model")
     context.stage("synthesis.population.spatial.secondary_nn.subregional_model")
@@ -81,6 +82,9 @@ def execute(context):
 
     # get the trips and enrich them
     df_trips = context.stage("synthesis.population.trips").copy()
+    df_trips = df_trips[['person_id', 'mz_person_id', 'trip_id', 'trip_index', 'departure_time','arrival_time', 
+                         'preceding_purpose', 'following_purpose', 'trip_duration', 'mode']]
+    
     if "mz_person_id" not in df_trips.columns or "trip_id" not in df_trips.columns:
         raise RuntimeError("synthesis.population.trips must provide mz_person_id and trip_id for mz_chains feature lookup")
 
