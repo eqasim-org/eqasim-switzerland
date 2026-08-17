@@ -106,14 +106,17 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
                        valid_mask, epochs=50, batch_size=256, lr=1e-3, weight_decay=4e-3, num_threads=None,
                        logger_instance=None, weights=None, grad_clip=5.0, lr_step_size=10, lr_gamma=0.5,
                        path=None, n_val_folds=5, val_every=5,
+                       validation_groups=None, rotate_validation=True,
+                       early_stopping_patience=None, early_stopping_min_delta=0.0,
+                       restore_best_weights=False,
                        distance_candidates=None, distance_targets=None,
                        distance_candidates_home=None, distance_targets_home=None,
                        distance_loss_weight=0.0, distance_loss_short_floor_m=100.0):
-    """Train the choice model with rotating-fold validation.
+    """Train the choice model with rotating or fixed-fold validation.
 
-    Every ``val_every`` epochs the current hold-out fold rotates to the next one,
-    so every sample spends roughly (n_val_folds-1)/n_val_folds of the time in
-    training and 1/n_val_folds in validation — no data is permanently discarded.
+    ``validation_groups`` keeps related samples (for example, trips belonging to
+    one person) in the same fold. Early stopping requires a fixed validation fold,
+    because losses from different rotating folds are not directly comparable.
 
     If ``path`` is given, loss history is saved to ``path/loss_history.json``
     and a plot to ``path/lossevolution.png``.
@@ -179,19 +182,54 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
     n_samples   = person_static_tensor.shape[0]
     n_val_folds = max(2, int(n_val_folds))
     val_every   = max(1, int(val_every))
+    rotate_validation = bool(rotate_validation)
+    restore_best_weights = bool(restore_best_weights)
+    if rotate_validation and restore_best_weights:
+        raise ValueError("Best-weight restoration requires rotate_validation=False")
+    if early_stopping_patience is not None:
+        early_stopping_patience = max(1, int(early_stopping_patience))
+        if rotate_validation:
+            raise ValueError("Early stopping requires rotate_validation=False")
+    early_stopping_min_delta = max(0.0, float(early_stopping_min_delta))
 
-    # Build rotating folds once, with a fixed random permutation.
-    perm = np.random.permutation(n_samples)
+    # Build folds once. With groups, split unique groups first so related
+    # observations cannot leak between training and validation.
+    if validation_groups is None:
+        perm = np.random.permutation(n_samples)
+        fold_arrays = np.array_split(perm, n_val_folds)
+    else:
+        validation_groups = np.asarray(validation_groups)
+        if validation_groups.ndim != 1 or len(validation_groups) != n_samples:
+            raise ValueError("validation_groups must be a 1D array with one value per sample")
+        unique_groups = np.unique(validation_groups)
+        if len(unique_groups) < 2:
+            raise ValueError("validation_groups must contain at least two distinct groups")
+        n_val_folds = min(n_val_folds, len(unique_groups))
+        group_folds = np.array_split(np.random.permutation(unique_groups), n_val_folds)
+        fold_arrays = [np.flatnonzero(np.isin(validation_groups, groups)) for groups in group_folds]
+
     fold_indices = [
         torch.tensor(chunk.copy(), dtype=torch.long, device=device)
-        for chunk in np.array_split(perm, n_val_folds)
+        for chunk in fold_arrays
     ]
+    if any(len(indices) == 0 for indices in fold_indices):
+        raise ValueError("Validation split produced an empty fold")
 
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
 
     local_logger = logger_instance or logger
-    local_logger.info("\tStarting training (rotating %d-fold validation every %d epochs)", n_val_folds, val_every)
+    validation_mode = "rotating" if rotate_validation else "fixed"
+    validation_description = (
+        f"rotating {n_val_folds}-fold"
+        if rotate_validation
+        else f"fixed 1/{n_val_folds} holdout"
+    )
+    group_label = "grouped" if validation_groups is not None else "sample-level"
+    local_logger.info(
+        "\tStarting training (%s, %s, validation every %d epochs)",
+        validation_description, group_label, val_every,
+    )
     if float(distance_loss_weight) > 0.0:
         if use_distance_last_loss or use_distance_home_loss:
             local_logger.info(
@@ -208,10 +246,15 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
     train_losses: list[float] = []
     val_losses:   list[float] = []
     val_epochs:   list[int]   = []
+    best_val_loss = np.inf
+    best_epoch = None
+    best_state = None
+    checks_without_improvement = 0
+    stopped_early = False
 
     for epoch in range(int(epochs)):
         # Which fold is held out this epoch?
-        val_fold_idx = (epoch // val_every) % n_val_folds
+        val_fold_idx = (epoch // val_every) % n_val_folds if rotate_validation else 0
         val_idx      = fold_indices[val_fold_idx]
         train_idx    = torch.cat([fold_indices[i] for i in range(n_val_folds) if i != val_fold_idx])
 
@@ -344,9 +387,28 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
 
             val_losses.append(val_loss)
             val_epochs.append(epoch + 1)
+            # A best epoch is meaningful only when every check uses the same
+            # untouched validation fold.
+            improved = (
+                not rotate_validation
+                and val_loss < (best_val_loss - early_stopping_min_delta)
+            )
+            if improved:
+                best_val_loss = val_loss
+                best_epoch = epoch + 1
+                checks_without_improvement = 0
+                if restore_best_weights or early_stopping_patience is not None:
+                    best_state = {
+                        name: value.detach().cpu().clone()
+                        for name, value in model.state_dict().items()
+                    }
+            elif not rotate_validation:
+                checks_without_improvement += 1
+
             local_logger.info(
-                "\tEpoch %s/%s | Train: %.4f | Val (fold %d): %.4f | Time: %.1fmin",
-                epoch + 1, epochs, train_loss, val_fold_idx, val_loss, (time.time() - t0) / 60.0,
+                "\tEpoch %s/%s | Train: %.4f | Val (fold %d): %.4f%s | Time: %.1fmin",
+                epoch + 1, epochs, train_loss, val_fold_idx, val_loss,
+                " | best" if improved else "", (time.time() - t0) / 60.0,
             )
         else:
             local_logger.info(
@@ -356,20 +418,59 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
 
         scheduler.step()
 
+        if (
+            early_stopping_patience is not None
+            and checks_without_improvement >= early_stopping_patience
+        ):
+            stopped_early = True
+            local_logger.info(
+                "\tEarly stopping at epoch %d after %d validation checks without improvement",
+                epoch + 1, checks_without_improvement,
+            )
+            break
+
+    if restore_best_weights and best_state is not None:
+        model.load_state_dict(best_state)
+        model.eval()
+        local_logger.info(
+            "\tRestored best model weights from epoch %d (validation loss %.4f)",
+            best_epoch, best_val_loss,
+        )
+
     # ── Save history & plot ───────────────────────────────────────────────────
     if path is not None:
-        history = {"train_losses": train_losses, "val_losses": val_losses, "val_epochs": val_epochs}
+        history = {
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "val_epochs": val_epochs,
+            "validation_mode": validation_mode,
+            "validation_fraction": 1.0 / n_val_folds,
+            "validation_grouped": validation_groups is not None,
+            "validation_every": val_every,
+            "early_stopping_patience": early_stopping_patience,
+            "early_stopping_min_delta": early_stopping_min_delta,
+            "restore_best_weights": restore_best_weights,
+            "dropout_rate": model.dropout_rate,
+            "weight_decay": float(weight_decay),
+            "best_epoch": best_epoch,
+            "best_val_loss": None if best_epoch is None else best_val_loss,
+            "stopped_early": stopped_early,
+            "epochs_completed": len(train_losses),
+        }
         with open(os.path.join(path, "loss_history.json"), "w") as f:
             json.dump(history, f, indent=2)
             fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(range(1, epochs + 1), train_losses,
+            ax.plot(range(1, len(train_losses) + 1), train_losses,
                     label="Train loss", color="steelblue", linewidth=1.5)
             if val_epochs:
                 ax.plot(val_epochs, val_losses,
-                        label=f"Val loss (rotating {n_val_folds}-fold)",
+                        label=f"Val loss ({validation_description})",
                         color="darkorange", linewidth=1.5, marker="o", markersize=4)
+            if best_epoch is not None:
+                ax.axvline(best_epoch, color="forestgreen", linestyle="--", linewidth=1.2,
+                           label=f"Best epoch ({best_epoch})")
             ax.set_xlabel("Epoch")
-            ax.set_ylabel("Weighted cross-entropy")
+            ax.set_ylabel("Weighted training objective")
             ax.set_title("Training and validation loss evolution")
             ax.legend()
             ax.grid(True, alpha=0.3)
