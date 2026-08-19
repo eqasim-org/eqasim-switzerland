@@ -224,16 +224,29 @@ def execute(context):
     persons["subscriptions_strecke"] = False
     persons["subscriptions_verbund"] = persons["has_pt_subscription"]
 
-    for column in ["has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip"]:
-        persons[column] = False
-
-    persons = persons[PERSON_FIELDS]
-
     acts.loc[acts["is_first"], "start_time"] = 0
     acts.loc[acts["is_last"], "end_time"]    = 30*3600
     acts.loc[:, "duration"] = acts["end_time"] - acts["start_time"]
     acts = acts.merge(trips.rename(columns = {"preceding_activity_index": "activity_index", "mode": "following_mode"}),  on = ["person_id", "activity_index"], how = "left")
 
+    # correct loop modes attributes in persons dataframe
+    loop_flags = (acts[acts["following_mode"].str.contains("loop", na=False)]
+                    .assign(value=True)
+                    .pivot_table(
+                            index="person_id",
+                            columns="following_mode",
+                            values="value",
+                            aggfunc="any",
+                            fill_value=False,
+                        )
+                     .rename(columns=lambda x: f"has_{x}_trip")
+                     )
+
+    persons = persons.merge(loop_flags,left_on="person_id", right_index=True, how="left",)
+    persons[loop_flags.columns] = persons[loop_flags.columns].fillna(False)
+    persons = persons[PERSON_FIELDS]
+    
+    # continue
     valid_ids = acts.groupby("person_id")["geometry"].apply(
         lambda g: g.notna().all()
     )

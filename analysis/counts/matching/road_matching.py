@@ -71,6 +71,10 @@ def match_points_to_opposite_links(counts, roads, search_radius, tolerance=15.0)
     if counts.empty or roads.empty:
         return _empty_matches(counts.crs)
 
+    # `id` is the station key, so duplicate ids must not generate a non-unique
+    # pandas index when we map geometries back to the matched rows.
+    counts = counts.drop_duplicates(subset=["id"], keep="first").copy()
+
     buffered = counts[["id", "geometry"]].copy()
     buffered = buffered.set_geometry(buffered.geometry.buffer(search_radius))
     joined = gpd.sjoin(buffered, roads[["link_id", "geometry"]],
