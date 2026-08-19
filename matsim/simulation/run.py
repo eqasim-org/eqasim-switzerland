@@ -31,15 +31,6 @@ def configure(context):
     context.config("network_calibration.calibrate_freespeed", default=True)
     context.config("network_calibration.calibrate_agents_ascs", default=True)
     context.config("network_calibration.calibrate_crossborder_population", default=True)
-    
-    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_disutilities"):
-        context.stage("analysis.counts.target")
-        context.stage("calibration.road_regions.penalty_calibration")
-        
-    
-    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
-        context.stage("analysis.travel_times.APIs.target")
-        context.stage("calibration.road_regions.freespeed_calibration")
 
     context.config("correct_links_capacity", True)
     context.config("minimum_speed", 1.0)

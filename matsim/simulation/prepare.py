@@ -32,6 +32,20 @@ def configure(context):
     context.config("car_cost_model", dmc_constants.CAR_COST_MODEL)
     context.config("route_bike", True)
 
+    # network calibration
+    context.config("network_calibration.activate", default=False)
+    context.config("network_calibration.calibrate_disutilities", default=True)
+    context.config("network_calibration.calibrate_freespeed", default=True)
+    
+    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_disutilities"):
+        context.stage("analysis.counts.target")
+        context.stage("calibration.road_regions.penalty_calibration")
+        
+    
+    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
+        context.stage("analysis.travel_times.APIs.target")
+        context.stage("calibration.road_regions.freespeed_calibration")
+
 
 def execute(context):
     # Some files we just copy
@@ -143,7 +157,9 @@ def execute(context):
         "--carCostModel", context.config("car_cost_model").lower(),
         "--routingDistanceUtility", context.stage("calibration.car_routing_vot.optimal_value"),
         "--routeBikeInNetwork", str(context.config("route_bike")).lower()
-        ])
+        ]
+        + config_utils.network_calibration_files_paths(context)
+        )
     
     assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
 
