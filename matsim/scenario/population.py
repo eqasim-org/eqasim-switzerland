@@ -24,8 +24,8 @@ def _require_cols(df, cols, df_name):
         raise KeyError(f"{df_name} is missing required columns: {missing}")
 
 
-def _na_to_none(x):
-    return None if pd.isna(x) else x
+def _na_to(x, to=None):
+    return to if pd.isna(x) else x
 
 
 def snap_to_shared_facilities(external_activities, df_destinations):
@@ -130,16 +130,16 @@ class PersonWriter:
             else writer.location(int(geometry.x), int(geometry.y), destination_id if isinstance(destination_id, str) else int(destination_id))
         )
 
-        start_time = _na_to_none(activity.start_time)
-        end_time = _na_to_none(activity.end_time)
+        start_time = _na_to(activity.start_time, None)
+        end_time = _na_to(activity.end_time, None)
 
         attributes = {
-            "municipalityType": activity.municipality_type,
-            "municipalityId": activity.municipality_id,
-            "employeeDensity": activity.employee_density,
-            "companiesDensity": activity.companies_density,
-            "populationDensity": activity.population_density,
-            "ovgk": activity.ovgk,
+            "municipalityType": _na_to(activity.municipality_type, "other"),
+            "municipalityId": _na_to(activity.municipality_id, -1),
+            "employeeDensity": _na_to(activity.employee_density, 0.0),
+            "companiesDensity": _na_to(activity.companies_density,0.0),
+            "populationDensity": _na_to(activity.population_density,0.0),
+            "ovgk": _na_to(activity.ovgk, None),
         }
 
         writer.add_activity(activity.purpose, location, start_time, end_time, attributes=attributes)
