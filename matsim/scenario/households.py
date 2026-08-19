@@ -2,6 +2,9 @@ import gzip
 import io
 import pandas as pd
 import matsim.writers
+import logging
+
+logger = logging.getLogger("synpp")
 
 FIELDS = ["household_id", "person_id", "income_class", "age", "number_of_cars_class","municipality_type", "sp_region", "canton_id", "ovgk", "canton_name", "income_per_capita"]
 INCOME_VALUES = [2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]
@@ -52,7 +55,7 @@ def execute(context):
 
         external_persons["canton_name"] = ex_constants.canton_name
         if "income_per_capita" not in external_persons.columns or 'income' not in external_persons.columns:
-            external_persons[['income','income_per_capita']] = get_income(external_persons, c)
+            external_persons[['income','income_per_capita']] = get_income(external_persons, c, "French")
 
         external_persons = external_persons[[c for c in FIELDS if c in external_persons.columns]]
         df_persons = pd.concat([df_persons, external_persons])
@@ -147,7 +150,7 @@ def write_number_of_cars_class(value, c):
     else:
         return str(value)
     
-def get_income(df_persons, cst):
+def get_income(df_persons, cst, population="Swiss"):
     cols = ["household_id", "income_class", "age"]
     cols = cols+['household_size'] if 'household_size' in df_persons.columns else cols
     df = df_persons[cols].copy()
@@ -157,6 +160,7 @@ def get_income(df_persons, cst):
        
     # Calculate income per capita using the OECD equivalence scale: https://ec.europa.eu/eurostat/statistics-explained/index.php?title=Glossary:Equivalised_income
     if len(df)==df['household_id'].nunique():
+        logger.warning(f"There is no household structure for this population:{population}")
         # If household structure is not kept, we use an average household structure (average is also very near to median here)
         num_children = 1
         num_adults = 2
@@ -167,8 +171,13 @@ def get_income(df_persons, cst):
 
         df["is_child"] = df["age"] < 14
         num_children = df.groupby("household_id")["is_child"].transform("sum")
-        num_adults   = df['household_size'] - num_children
-        assert (num_adults >= 1).all(), "All households should have at least one adult."
+        num_adults   = (df['household_size'] - num_children).clip(0,8)
+        if not ((num_adults >= 1).all()):
+            sel = (num_adults<1)
+            logger.warning(f"There are {sel.sum()} households with no adult in this population: {population}")
+            logger.warning(f"\t Minimum age in these households is: { df[sel].age.min() }")
+            num_adults[sel] = 1
+            num_children[sel] -= 1
 
     equvalent_size =  1 + 0.5 * (num_adults - 1) + 0.3 * num_children
     df["income_per_capita"] = df["income"] / equvalent_size
