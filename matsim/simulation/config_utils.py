@@ -215,17 +215,6 @@ def get_network_calibration_args(context):
     additional_args.extend(
             ["--config:eqasim:networkCalibration.activate", "true",
             "--config:eqasim:networkCalibration.calibrate", str(calibrate_network).lower(),
-            "--config:eqasim:networkCalibration.updateInterval", "5",                
-            "--config:eqasim:networkCalibration.minCapacity", "600",
-            "--config:eqasim:networkCalibration.maxCapacity", "2000",
-            "--config:eqasim:networkCalibration.rampFactor", "1.1",
-            "--config:eqasim:networkCalibration.trunkFactor", "1.3",
-            "--config:eqasim:networkCalibration.minPenalty", "-0.1",
-            "--config:eqasim:networkCalibration.maxPenalty", "0.4",
-            "--config:eqasim:networkCalibration.maxFreespeedFactor", "1.4",
-            "--config:eqasim:networkCalibration.minFreespeedFactor", "0.5",
-            "--config:eqasim:networkCalibration.penaltiesWarmupIterations", "44",
-            "--config:eqasim:networkCalibration.freespeedWarmupIterations", "31",
             "--config:eqasim:networkCalibration.correctCapacities", str(context.config("correct_links_capacity")).lower(),
             "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed"))]
     )
@@ -237,28 +226,41 @@ def get_network_calibration_args(context):
             objective.append("agent")
         if context.config("network_calibration.calibrate_crossborder_population"):        
             objective.append("subpopulations")
-            
-        calibration_counts_file = context.stage("analysis.counts.target")
-        calibration_regions = context.stage("calibration.road_regions.penalty_calibration")
-        additional_args.extend([
-            "--config:eqasim:networkCalibration.countsFile", calibration_counts_file,
-            "--config:eqasim:networkCalibration.penaltiesSpecialRegionPath", calibration_regions
-        ])
-    
+             
     if calibrate_freespeed:
         objective.append("freespeed")
-        calibration_travel_times = context.stage("analysis.travel_times.APIs.target")
-        calibration_freespeed = context.stage("calibration.road_regions.freespeed_calibration")
-        additional_args.extend([
-            "--config:eqasim:networkCalibration.observedSpeedTripsFile", calibration_travel_times,
-            "--config:eqasim:networkCalibration.freespeedSpecialRegionPath", calibration_freespeed
-        ])
-
+        
     additional_args.extend([
         "--config:eqasim:networkCalibration.objective", ",".join(objective)
         ])
        
     return additional_args
+
+def network_calibration_files_paths(context):
+    calibrate_network = context.config("network_calibration.activate")
+    calibrate_counts = context.config("network_calibration.calibrate_disutilities")
+    calibrate_freespeed = context.config("network_calibration.calibrate_freespeed")
+
+    args = []
+    if calibrate_network and calibrate_counts:
+        calibration_counts_file = context.stage("analysis.counts.target")
+        calibration_regions = context.stage("calibration.road_regions.penalty_calibration")
+        args.extend([
+            "--countsFile", calibration_counts_file,
+            "--countSpecialRegionPath", calibration_regions
+        ])
+
+    if calibrate_network and calibrate_freespeed:
+        calibration_travel_times = context.stage("analysis.travel_times.APIs.target")
+        calibration_freespeed = context.stage("calibration.road_regions.freespeed_calibration")
+        args.extend([
+            "--speedsFile", calibration_travel_times,
+            "--speedsSpecialRegionPath", calibration_freespeed
+        ])
+
+    return args
+
+
 
 
 def get_dmc_parameters_args(context):
