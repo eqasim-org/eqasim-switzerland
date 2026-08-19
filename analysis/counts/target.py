@@ -165,7 +165,8 @@ def execute(context):
 
     # Get prepared count data
     city_order = ["aargau", "bern", "ch", "geneva", "luzern", "saint_gallen", "vaud", "zurich"]
-    weights = {"aargau": 1, "bern": 1, "ch": 1, "geneva": 1.2, "luzern": 1, "saint_gallen": 1, "vaud": 0.3, "zurich": 1.2}
+    weights = {"aargau": 1, "bern": 1, "ch": 1, "geneva": 1.2, "luzern": 1, "saint_gallen": 1, 
+               "vaud": 0.3, "zurich": 1.2, "annemasse":0.3}
 
     if context.config("include_external_population"):
         city_order.append("annemasse")
