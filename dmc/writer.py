@@ -18,7 +18,7 @@ class writer:
         self.betas = betas
         self.mode_output_path = os.path.join(context.path(), mode_parameters_file)
         self.cost_output_path = os.path.join(context.path(), cost_parameters_file)
-        self.params = biogeme_model.getEstimatedParameters()["Value"].to_dict()
+        self.params = biogeme_model.get_beta_values()
 
     def write(self):
         self.write_mode_parameters()
@@ -123,7 +123,9 @@ class writer:
 
             beta = self.betas.get(old_name)
             if beta is not None:
-                init_value = getattr(beta, "initValue", None)
+                init_value = getattr(beta, "init_value", None)
+                if init_value is None:
+                    init_value = getattr(beta, "initValue", None)
                 if init_value is None:
                     init_value = getattr(beta, "_initValue", None)
                 if init_value is not None:

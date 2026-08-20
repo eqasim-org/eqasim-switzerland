@@ -7,7 +7,8 @@ from dmc.vot.functions import vot_utils
 import biogeme.database as db
 import biogeme.biogeme as bio
 from biogeme import models
-from biogeme.expressions import Beta, Variable, bioMax, bioMin, log
+from biogeme.expressions import Beta, BinaryMax, Variable
+from biogeme.results_processing import get_pandas_estimated_parameters
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -115,85 +116,85 @@ def preprocess_data(df, ignore_car_passenger):
 
 def define_variables(database, ignore_car_passenger):
     variables = {
-        "mode": db.Variable("mode"),
-        "weight": db.Variable("person_weight"),
-        "euclidean_distance_km": db.Variable("euclidean_distance_km"),
-        "age": db.Variable("age"),
-        "income": db.Variable("income"),
-        "low_income": db.Variable("low_income"),
-        "high_income": db.Variable("high_income"),
-        "sex": db.Variable("sex"),
-        "driving_license": db.Variable("driving_license"),
-        "parking_cost_CHF": db.Variable("parking_cost_CHF"),        
-        "car_ownership_ratio": db.Variable("car_ownership_ratio"),
-        "has_car": db.Variable("has_car"),
-        "num_adults": db.Variable("num_adults"),
-        "is_retired": db.Variable("is_retired"),
-        "is_junior": db.Variable("is_junior"),
+        "mode": Variable("mode"),
+        "weight": Variable("person_weight"),
+        "euclidean_distance_km": Variable("euclidean_distance_km"),
+        "age": Variable("age"),
+        "income": Variable("income"),
+        "low_income": Variable("low_income"),
+        "high_income": Variable("high_income"),
+        "sex": Variable("sex"),
+        "driving_license": Variable("driving_license"),
+        "parking_cost_CHF": Variable("parking_cost_CHF"),
+        "car_ownership_ratio": Variable("car_ownership_ratio"),
+        "has_car": Variable("has_car"),
+        "num_adults": Variable("num_adults"),
+        "is_retired": Variable("is_retired"),
+        "is_junior": Variable("is_junior"),
         # densities
-        "destination_employee_density": db.Variable("destination_employee_density"),
-        "destination_population_density": db.Variable("destination_population_density"),
-        "destination_companies_density": db.Variable("destination_companies_density"),
+        "destination_employee_density": Variable("destination_employee_density"),
+        "destination_population_density": Variable("destination_population_density"),
+        "destination_companies_density": Variable("destination_companies_density"),
         # cities destinations
-        "destination_zurich": db.Variable("destination_zurich"),
-        "destination_geneva": db.Variable("destination_geneva"),
-        "destination_basel": db.Variable("destination_basel"),
-        "destination_lausanne": db.Variable("destination_lausanne"),
-        "destination_luzern": db.Variable("destination_luzern"),
-        "destination_bern": db.Variable("destination_bern"),
+        "destination_zurich": Variable("destination_zurich"),
+        "destination_geneva": Variable("destination_geneva"),
+        "destination_basel": Variable("destination_basel"),
+        "destination_lausanne": Variable("destination_lausanne"),
+        "destination_luzern": Variable("destination_luzern"),
+        "destination_bern": Variable("destination_bern"),
         # regions       
-        "region_1": db.Variable("region_1"),
-        "region_2": db.Variable("region_2"),
+        "region_1": Variable("region_1"),
+        "region_2": Variable("region_2"),
         # distances dummies
-        "elevation": db.Variable("elevation_difference"),
-        "short_distance": db.Variable("short_distance"),
-        "long_distance": db.Variable("long_distance"),
-        "very_long_distance": db.Variable("very_long_distance"),
+        "elevation": Variable("elevation_difference"),
+        "short_distance": Variable("short_distance"),
+        "long_distance": Variable("long_distance"),
+        "very_long_distance": Variable("very_long_distance"),
         # destination urbanisation
-        "urban_destination": db.Variable("urban_destination"),
-        "urbancore_destination": db.Variable("urbancore_destination"),
-        "destination_municipality": db.Variable("destination_municipality"),
+        "urban_destination": Variable("urban_destination"),
+        "urbancore_destination": Variable("urbancore_destination"),
+        "destination_municipality": Variable("destination_municipality"),
         # purposes
-        "destination_work": db.Variable("destination_work"),
-        "destination_home": db.Variable("destination_home"),
-        "destination_education": db.Variable("destination_education"),
-        "destination_shopping": db.Variable("destination_shopping"),
-        "destination_leisure": db.Variable("destination_leisure"),
-        "destination_other": db.Variable("destination_other"),
-        "origin_home": db.Variable("origin_home"),
+        "destination_work": Variable("destination_work"),
+        "destination_home": Variable("destination_home"),
+        "destination_education": Variable("destination_education"),
+        "destination_shopping": Variable("destination_shopping"),
+        "destination_leisure": Variable("destination_leisure"),
+        "destination_other": Variable("destination_other"),
+        "origin_home": Variable("origin_home"),
         # car
-        "car_availability": db.Variable("car_availability"),
-        "car_travel_time_min": db.Variable("car_travel_time_min"),
-        "car_distance_km": db.Variable("car_distance_km"),
-        "car_cost_CHF": db.Variable("car_cost_CHF"),
-        "parking_searching_duration_min": db.Variable("parking_searching_duration_min"),
+        "car_availability": Variable("car_availability"),
+        "car_travel_time_min": Variable("car_travel_time_min"),
+        "car_distance_km": Variable("car_distance_km"),
+        "car_cost_CHF": Variable("car_cost_CHF"),
+        "parking_searching_duration_min": Variable("parking_searching_duration_min"),
         # pt
-        "pt_availability": db.Variable("pt_availability"),
-        "pt_access_egress_time_min": db.Variable("pt_access_egress_time_min"),
-        "pt_in_vehicle_time_min": db.Variable("pt_in_vehicle_time_min"),        
-        "pt_transfers": db.Variable("pt_transfers"),
-        "pt_transfer_time_min": db.Variable("pt_transfer_time_min"),
-        "pt_in_vehicle_distance_km": db.Variable("pt_in_vehicle_distance_km"),
-        "pt_cost_CHF": db.Variable("pt_cost_CHF"),
-        "good_pt_service": db.Variable("good_pt_service"),
-        "medium_pt_service": db.Variable("medium_pt_service"),
-        "destination_good_pt_service": db.Variable("destination_good_pt_service"),
-        "destination_medium_pt_service": db.Variable("destination_medium_pt_service"),
+        "pt_availability": Variable("pt_availability"),
+        "pt_access_egress_time_min": Variable("pt_access_egress_time_min"),
+        "pt_in_vehicle_time_min": Variable("pt_in_vehicle_time_min"),
+        "pt_transfers": Variable("pt_transfers"),
+        "pt_transfer_time_min": Variable("pt_transfer_time_min"),
+        "pt_in_vehicle_distance_km": Variable("pt_in_vehicle_distance_km"),
+        "pt_cost_CHF": Variable("pt_cost_CHF"),
+        "good_pt_service": Variable("good_pt_service"),
+        "medium_pt_service": Variable("medium_pt_service"),
+        "destination_good_pt_service": Variable("destination_good_pt_service"),
+        "destination_medium_pt_service": Variable("destination_medium_pt_service"),
         # bike
-        "bike_availability": db.Variable("bike_availability"),
-        "bike_travel_time_min": db.Variable("bike_travel_time_min"),
-        "bike_distance_km": db.Variable("bike_distance_km"),
+        "bike_availability": Variable("bike_availability"),
+        "bike_travel_time_min": Variable("bike_travel_time_min"),
+        "bike_distance_km": Variable("bike_distance_km"),
         # walk
-        "walk_availability": db.Variable("walk_availability"),
-        "walk_travel_time_min": db.Variable("walk_travel_time_min"),
-        "walk_distance_km": db.Variable("walk_distance_km"),
+        "walk_availability": Variable("walk_availability"),
+        "walk_travel_time_min": Variable("walk_travel_time_min"),
+        "walk_distance_km": Variable("walk_distance_km"),
     }
     if not ignore_car_passenger:
         variables.update({
-            "car_passenger_availability": db.Variable("car_passenger_availability"),
-            "car_passenger_travel_time_min": db.Variable("car_passenger_travel_time_min"),
-            "is_car_passenger": db.Variable("is_car_passenger"),
-            "car_passenger_distance_km": db.Variable("car_passenger_distance_km"),
+            "car_passenger_availability": Variable("car_passenger_availability"),
+            "car_passenger_travel_time_min": Variable("car_passenger_travel_time_min"),
+            "is_car_passenger": Variable("is_car_passenger"),
+            "car_passenger_distance_km": Variable("car_passenger_distance_km"),
         })
     return variables
 
@@ -219,7 +220,7 @@ def define_betas(ignore_car_passenger, use_exponents, use_income):
         "lambda_pt_in_vehicle_time": Beta("lambda_pt_in_vehicle_time", 1.5 if trainable else 1.0, min_lambda, max_lambda, trainable),
         "lambda_pt_access_egress_time": Beta("lambda_pt_access_egress_time", 0.593 if trainable else 1.0, min_lambda, max_lambda, trainable),
         "lambda_pt_transfers": Beta("lambda_pt_transfers", 1.187 if trainable else 1.0, min_lambda, max_lambda, trainable),
-        "lambda_pt_transfer_time": Beta("lambda_pt_transfer_time", 1.0 if trainable else 1.0, min_lambda, max_lambda, 1), # doesn't converge
+        "lambda_pt_transfer_time": Beta("lambda_pt_transfer_time", 1.0, min_lambda, max_lambda, 1), # doesn't converge
         "lambda_pt_distance": Beta("lambda_pt_distance", 0.521, min_lambda, max_lambda, 0),
         "lambda_car_passenger_travel_time": Beta("lambda_car_passenger_travel_time", 0.832 if trainable else 1.0, min_lambda, max_lambda, trainable),        
         "lambda_bike": Beta("lambda_bike", 0.561 if trainable else 1.0, min_lambda, max_lambda, trainable),
@@ -443,7 +444,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_car_destination_urban"] * vars["urban_destination"]
         + betas["beta_car_destination_urbancore"] * vars["urbancore_destination"]
         + betas["beta_car_sex"] * vars["sex"]
-        + betas["beta_car_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
+        + betas["beta_car_age"] * BinaryMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
         + betas["beta_car_retired"] * vars["is_retired"]
         + betas["beta_car_junior"] * vars["is_junior"]
         + betas["beta_car_ownership_ratio"] * vars["car_ownership_ratio"]
@@ -466,11 +467,14 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
     transformed_pt_in_vehicle_time = (vars["pt_in_vehicle_time_min"] / TIME_SCALE_MIN) ** betas["lambda_pt_in_vehicle_time"]
     transformed_pt_transfers      = vars["pt_transfers"] ** betas["lambda_pt_transfers"]
     transformed_access_egress_time = (vars["pt_access_egress_time_min"] / TIME_SCALE_MIN) ** betas["lambda_pt_access_egress_time"]
-    transformed_pt_transfer_time = (vars["pt_transfer_time_min"] / TIME_SCALE_MIN) ** betas["lambda_pt_transfer_time"]
+    # lambda_pt_transfer_time is fixed to 1.0. Keeping this transformation
+    # linear is mathematically identical and allows negative transfer-time
+    # corrections to be evaluated by Biogeme's numerically safe JAX backend.
+    transformed_pt_transfer_time = vars["pt_transfer_time_min"] / TIME_SCALE_MIN
     
     pt_distance = (vars["euclidean_distance_km"] / DISTANCE_SCALE_KM)
     distance_correction_limit = PT_REGIONAL_RADIUS_KM / DISTANCE_SCALE_KM
-    cost_correction = betas["beta_pt_distance_km"] * bioMax(distance_correction_limit-pt_distance, 0.0)**betas["lambda_pt_distance"]
+    cost_correction = betas["beta_pt_distance_km"] * BinaryMax(distance_correction_limit-pt_distance, 0.0)**betas["lambda_pt_distance"]
     pt_cost = vars["pt_cost_CHF"] + cost_correction
 
     pt_utility = (
@@ -482,7 +486,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_cost_CHF"] * pt_cost * cost_interaction
 
         + betas["beta_pt_sex"] * vars["sex"]
-        + betas["beta_pt_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
+        + betas["beta_pt_age"] * BinaryMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
         + betas["beta_pt_retired"] * vars["is_retired"]
         + betas["beta_pt_junior"] * vars["is_junior"]
         + betas["beta_pt_low_income"] * vars["low_income"]
@@ -513,7 +517,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         betas["beta_bike_asc"]
         + betas["beta_bike_travel_time_min"] * (bike_travel_time**betas["lambda_bike"])
 
-        + betas["beta_bike_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
+        + betas["beta_bike_age"] * BinaryMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
         + betas["beta_bike_sex"] * vars["sex"]
         + betas["beta_bike_retired"] * vars["is_retired"]
         + betas["beta_bike_junior"] * vars["is_junior"]
@@ -541,7 +545,7 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         betas["beta_walk_asc"]
         + betas["beta_walk_travel_time_min"] * (walk_travel_time**betas["lambda_walk"])
 
-        + betas["beta_walk_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
+        + betas["beta_walk_age"] * BinaryMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
         + betas["beta_walk_sex"] * vars["sex"]
         + betas["beta_walk_retired"] * vars["is_retired"]
         + betas["beta_walk_junior"] * vars["is_junior"]
@@ -569,9 +573,9 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         car_passenger_utility = (
             betas["beta_car_passenger_asc"]            
             + betas["beta_car_passenger_travel_time_min"] * (car_passenger_travel_time**betas["lambda_car_passenger_travel_time"])            
-            + betas["beta_car_passenger_distance_km"] * bioMax(0,(vars["car_passenger_distance_km"]-50.0)/DISTANCE_SCALE_KM)
+            + betas["beta_car_passenger_distance_km"] * BinaryMax(0,(vars["car_passenger_distance_km"]-50.0)/DISTANCE_SCALE_KM)
             + betas["beta_car_passenger_driving_permit"] * vars["driving_license"]
-            + betas["beta_car_passenger_age"] * bioMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
+            + betas["beta_car_passenger_age"] * BinaryMax(0, vars["age"] - 17)/AGE_SCALE_YEAR
             + betas["beta_car_passenger_sex"] * vars["sex"]
             + betas["beta_car_passenger_retired"] * vars["is_retired"]
             + betas["beta_car_passenger_junior"] * vars["is_junior"]
@@ -625,6 +629,21 @@ def log_trip_stats(df, modes):
     logger.info("The average euclidean distance is: %.2f km, for pt and car is %.2f km", df.euclidean_distance_km.mean(), df[pt_or_car].euclidean_distance_km.mean())
     logger.info("The average income is: %.2f CHF", df.income.mean())
 
+
+def create_biogeme(database, log_probability, weight):
+    estimator = bio.BIOGEME(
+        database,
+        {"log_like": log_probability, "weight": weight},
+        number_of_threads=8,
+        optimization_algorithm="simple_bounds_BFGS",
+        numerically_safe=True,
+        generate_html=True,
+        generate_yaml=True,
+    )
+    estimator.model_name = "DMC_model"
+    return estimator
+
+
 def execute(context):
     df = context.stage("dmc.data.training_data")
     ignore_car_passenger = context.config("ignore_car_passenger")
@@ -643,26 +662,24 @@ def execute(context):
     logprob = models.loglogit(utilities, availability, vars["mode"])
     cwd = os.getcwd()
     os.chdir(context.working_directory)
-    biogeme = bio.BIOGEME(database, {"loglike": logprob, "weight": vars["weight"]},
-                          numberOfThreads= 8,
-                          number_of_jobs = 8)
-    biogeme.modelName = "DMC_model"
-    biogeme.generate_html = True
-    biogeme.generate_pickle = True
+    biogeme = create_biogeme(database, logprob, vars["weight"])
     
-    null_loglikelihood = biogeme.calculateNullLoglikelihood(availability)
+    biogeme.calculate_null_loglikelihood(availability)
     result = biogeme.estimate()
     os.chdir(cwd)
     
     # Print summary of the results
-    logger.info(result.shortSummary())
+    logger.info(result.short_summary())
 
     # write the optimal parameters to a yaml file in MATSim input format    
     mode_params_path, cost_params_path = writer(context, result, betas).write()
 
     # write the optimal parameters to a csv file
     csv_params_path = os.path.join(context.path(), "dmc_model_parameters.csv")
-    result.getEstimatedParameters().to_csv(csv_params_path)
+    estimated_parameters = get_pandas_estimated_parameters(
+        estimation_results=result
+    )["Estimated parameters"].set_index("Name")
+    estimated_parameters.to_csv(csv_params_path)
     logger.info("The estimated parameters are saved to %s", csv_params_path)
 
     # Compute the VOT for car users

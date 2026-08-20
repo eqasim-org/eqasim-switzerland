@@ -1,8 +1,5 @@
 import numpy as np
-import pandas as pd
 import seaborn as sns
-import biogeme.database as db
-import biogeme.biogeme as bio
 import matplotlib.pyplot as plt
 from dmc.constants import constants
 
@@ -24,7 +21,7 @@ class vot_utils:
         Note: The division by TIME_SCALE_MIN accounts for the fact that car_time is scaled in the utility function.
         """
         # Extract estimated parameters
-        params = res.getEstimatedParameters()["Value"].to_dict()
+        params = res.get_beta_values()
         
         beta_car_time = params.get("beta_car_travel_time_min")
         lambda_car_time = params.get("lambda_car_travel_time", 1.0)
@@ -79,7 +76,7 @@ class vot_utils:
         so we must account for this when calculating marginal utilities.
         """
         # Extract estimated parameters
-        params = res.getEstimatedParameters()["Value"].to_dict()
+        params = res.get_beta_values()
         
         beta_pt_in_vehicle = params.get("beta_pt_in_vehicle_time_min")
         lambda_pt_in_vehicle = params.get("lambda_pt_in_vehicle_time", 1.0)
