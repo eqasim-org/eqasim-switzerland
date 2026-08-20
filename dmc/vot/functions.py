@@ -1,5 +1,4 @@
 import numpy as np
-import seaborn as sns
 import matplotlib.pyplot as plt
 from dmc.constants import constants
 
@@ -7,12 +6,45 @@ from dmc.constants import constants
 class vot_utils:
 
     @staticmethod
+    def _weighted_mean(values, weights):
+        """Population-weighted mean with aligned pandas indices."""
+        return float(np.average(values, weights=weights.loc[values.index]))
+
+    @staticmethod
+    def _power_marginal_utility(beta, exponent, scaled_time, time_scale):
+        """Derivative of ``beta * scaled_time**exponent`` per minute.
+
+        The explicit cases at zero avoid the indeterminate ``0 * inf`` that
+        otherwise appears for power transformations.
+        """
+        scaled_time = scaled_time.astype(float)
+        result = scaled_time.copy() * np.nan
+        positive = scaled_time > 0
+        result.loc[positive] = (
+            beta
+            * exponent
+            * scaled_time.loc[positive] ** (exponent - 1)
+            / time_scale
+        )
+        if np.isclose(exponent, 1.0):
+            result.loc[~positive] = beta / time_scale
+        elif exponent > 1.0:
+            result.loc[scaled_time == 0] = 0.0
+        return result
+
+    @staticmethod
     def get_car_vot(context, df, res, modes):
         """
-        Return the average VOT for car users (CHF per hour).
+        Return model-implied marginal WTP for car-time savings (CHF/hour).
         
         VOT is calculated as the marginal rate of substitution between time and cost:
-        VOT = -(∂U/∂time) / (∂U/∂cost) * 60 (to convert from minutes to hours)
+        For a time reduction and compensating cost increase, the WTP is:
+        WTP = (∂U/∂time) / (∂U/∂cost) * 60.
+
+        Both marginal utilities are normally negative, so their ratio is
+        positive. The distribution is restricted to observed car trips and
+        its mean uses the survey person weights. It is therefore a weighted
+        trip-level distribution, not a distribution of unique people.
         
         For car:
         - ∂U/∂car_time_min = beta_car_travel_time_min * lambda_car_travel_time * car_time^(lambda-1) / TIME_SCALE_MIN
@@ -31,7 +63,7 @@ class vot_utils:
         
         # Calculate cost interaction terms
         ref_euclidean_distance_km = context.config("reference_euclidean_distance_km")
-        ref_income_chf = constants.REF_INCOME_CHF
+        ref_income_chf = context.config("reference_income_chf")
         TIME_SCALE_MIN = constants.TIME_SCALE_MIN
         
         euclidean_interaction_cost = (df["euclidean_distance_km"] / ref_euclidean_distance_km) ** lambda_cost_distance
@@ -44,33 +76,48 @@ class vot_utils:
         # Calculate marginal utilities
         # ∂U/∂car_time_min = beta_car_time * lambda * car_time^(lambda-1) / TIME_SCALE_MIN
         # The division by TIME_SCALE_MIN comes from the chain rule: d(car_time)/d(car_time_min) = 1/TIME_SCALE_MIN
-        marginal_utility_time = beta_car_time * lambda_car_time * (car_time ** (lambda_car_time - 1)) / TIME_SCALE_MIN
+        marginal_utility_time = vot_utils._power_marginal_utility(
+            beta_car_time, lambda_car_time, car_time, TIME_SCALE_MIN
+        )
         marginal_utility_cost = beta_cost * cost_interaction
         
         # VOT in CHF per minute, then convert to CHF per hour
         vot_car = (marginal_utility_time / marginal_utility_cost) * 60
         
-        # Filter for car users only and with a positive cost
-        # sel = ((df["mode"] == modes.index('car')) & (df["car_cost_CHF"] > 0) & (vot_car.notna()) & (vot_car > 0) & np.isfinite(vot_car))
-        sel = ((df["car_cost_CHF"] > 0) & (vot_car.notna()) & np.isfinite(vot_car))
+        # Marginal WTP is defined even when the observed trip cost is zero: it
+        # evaluates a hypothetical one-CHF cost increase. Do not condition the
+        # sample on positive observed cost.
+        sel = (
+            (df["mode"] == modes.index("car"))
+            & (df["car_availability"] > 0)
+            & vot_car.notna()
+            & (vot_car > 0)
+            & np.isfinite(vot_car)
+        )
         vot_car = vot_car[sel]
+        vot_car.name = "car_wtp_chf_h"
         
         # compute the average overall
-        mean_vot_car = np.average(vot_car) #, weights=df["person_weight"][sel])
+        mean_vot_car = vot_utils._weighted_mean(vot_car, df["person_weight"])
 
         return vot_car, mean_vot_car
 
     @staticmethod
     def get_pt_vot(context, df, res, modes):
         """
-        Return the average VOT for public transport users (CHF per hour).
+        Return model-implied marginal WTP for PT-time savings (CHF/hour).
         
         For PT, we calculate VOT for multiple time components:
         - In-vehicle time: main component of travel
         - Access/egress time: time to reach/leave PT
         - Transfer time: waiting time between connections
         
-        We return the weighted average VOT based on the time composition.
+        The trip-level PT value is the WTP for saving one minute distributed
+        proportionally across the trip's non-negative in-vehicle,
+        access/egress and transfer durations. Component-specific WTP values are
+        returned as well. Only observed PT trips enter the distribution and its
+        mean uses the survey person weights. It is therefore a weighted
+        trip-level distribution, not a distribution of unique people.
         
         Note: All time components are scaled by TIME_SCALE_MIN in the utility function,
         so we must account for this when calculating marginal utilities.
@@ -93,7 +140,7 @@ class vot_utils:
         
         # Calculate cost interaction terms
         ref_euclidean_distance_km = context.config("reference_euclidean_distance_km")
-        ref_income_chf = constants.REF_INCOME_CHF
+        ref_income_chf = context.config("reference_income_chf")
         TIME_SCALE_MIN = constants.TIME_SCALE_MIN
         
         euclidean_interaction_cost = (df["euclidean_distance_km"] / ref_euclidean_distance_km) ** lambda_cost_distance
@@ -106,66 +153,146 @@ class vot_utils:
         # Calculate VOT for each time component
         # In-vehicle time VOT
         pt_in_vehicle_time = df["pt_in_vehicle_time_min"] / TIME_SCALE_MIN
-        marginal_utility_in_vehicle = beta_pt_in_vehicle * lambda_pt_in_vehicle * (pt_in_vehicle_time ** (lambda_pt_in_vehicle - 1)) / TIME_SCALE_MIN
+        marginal_utility_in_vehicle = vot_utils._power_marginal_utility(
+            beta_pt_in_vehicle,
+            lambda_pt_in_vehicle,
+            pt_in_vehicle_time,
+            TIME_SCALE_MIN,
+        )
         vot_in_vehicle = (marginal_utility_in_vehicle / marginal_utility_cost) * 60
         
         # Access/egress time VOT
         pt_access_egress_time = df["pt_access_egress_time_min"] / TIME_SCALE_MIN
-        marginal_utility_access_egress = beta_pt_access_egress * lambda_pt_access_egress * (pt_access_egress_time ** (lambda_pt_access_egress - 1)) / TIME_SCALE_MIN
+        marginal_utility_access_egress = vot_utils._power_marginal_utility(
+            beta_pt_access_egress,
+            lambda_pt_access_egress,
+            pt_access_egress_time,
+            TIME_SCALE_MIN,
+        )
         vot_access_egress = (marginal_utility_access_egress / marginal_utility_cost) * 60
         
         # Transfer time VOT
         pt_transfer_time = df["pt_transfer_time_min"] / TIME_SCALE_MIN
-        marginal_utility_transfer = beta_pt_transfer_time * lambda_pt_transfer_time * (pt_transfer_time ** (lambda_pt_transfer_time - 1)) / TIME_SCALE_MIN
+        marginal_utility_transfer = vot_utils._power_marginal_utility(
+            beta_pt_transfer_time,
+            lambda_pt_transfer_time,
+            pt_transfer_time,
+            TIME_SCALE_MIN,
+        )
         vot_transfer = (marginal_utility_transfer / marginal_utility_cost) * 60
         
-        # Calculate weighted average VOT based on time composition
-        total_time = df["pt_in_vehicle_time_min"] + df["pt_access_egress_time_min"] + df["pt_transfer_time_min"]
-        
-        # Avoid division by zero
-        total_time = total_time.replace(0, np.nan)
-        
-        weight_in_vehicle = df["pt_in_vehicle_time_min"] / total_time
-        weight_access_egress = df["pt_access_egress_time_min"] / total_time
-        weight_transfer = df["pt_transfer_time_min"] / total_time
-        
-        # Weighted average VOT
-        vot_pt = (weight_in_vehicle * vot_in_vehicle + 
-                  weight_access_egress * vot_access_egress + 
-                  weight_transfer * vot_transfer)
+        # WTP for a one-minute total PT saving allocated proportionally over
+        # physical component durations. Negative transfer-time corrections in
+        # the estimation data are not physical time shares and are clipped to
+        # zero for this aggregation.
+        in_vehicle_duration = df["pt_in_vehicle_time_min"].clip(lower=0)
+        access_egress_duration = df["pt_access_egress_time_min"].clip(lower=0)
+        transfer_duration = df["pt_transfer_time_min"].clip(lower=0)
+        total_time = (
+            in_vehicle_duration + access_egress_duration + transfer_duration
+        ).replace(0, np.nan)
 
-        # Filter for PT users only and with a positive cost
-        # sel = ((df["mode"] == modes.index('pt')) & (df["pt_cost_CHF"] > 0) & (vot_pt.notna()) & (vot_pt > 0) & np.isfinite(vot_pt))
-        sel = ((df["pt_cost_CHF"] > 0) & (vot_pt.notna()) & (vot_pt > 0) & np.isfinite(vot_pt))
+        # Compute time-share contributions directly. This remains finite when
+        # a component is zero even if its power exponent is below one.
+        composite_marginal_utility_time = (
+            beta_pt_in_vehicle
+            * lambda_pt_in_vehicle
+            * (in_vehicle_duration / TIME_SCALE_MIN) ** lambda_pt_in_vehicle
+            + beta_pt_access_egress
+            * lambda_pt_access_egress
+            * (access_egress_duration / TIME_SCALE_MIN) ** lambda_pt_access_egress
+            + beta_pt_transfer_time
+            * lambda_pt_transfer_time
+            * (transfer_duration / TIME_SCALE_MIN) ** lambda_pt_transfer_time
+        ) / total_time
+        vot_pt = (composite_marginal_utility_time / marginal_utility_cost) * 60
+
+        sel = (
+            (df["mode"] == modes.index("pt"))
+            & (df["pt_availability"] > 0)
+            & vot_pt.notna()
+            & (vot_pt > 0)
+            & np.isfinite(vot_pt)
+        )
         vot_pt = vot_pt[sel]
         vot_in_vehicle = vot_in_vehicle[sel]
         vot_access_egress = vot_access_egress[sel]
         vot_transfer = vot_transfer[sel]
+        vot_pt.name = "pt_composite_wtp_chf_h"
         
         # compute the average overall        
-        mean_vot_pt = np.average(vot_pt) #, weights=df["person_weight"][sel])
+        mean_vot_pt = vot_utils._weighted_mean(vot_pt, df["person_weight"])
 
         return (vot_pt, mean_vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer)
 
     @staticmethod
-    def plot_vot(car_data, pt_data, figure_path, return_figure=False):
+    def plot_vot(
+        car_data,
+        pt_data,
+        figure_path,
+        car_weights=None,
+        pt_weights=None,
+        return_figure=False,
+    ):
+        """Plot survey-weighted model-implied marginal WTP distributions."""
+
+        def prepare(values, weights):
+            values = np.asarray(values, dtype=float)
+            weights = (
+                np.ones(len(values), dtype=float)
+                if weights is None
+                else np.asarray(weights, dtype=float)
+            )
+            selected = np.isfinite(values) & np.isfinite(weights) & (values > 0) & (weights > 0)
+            return values[selected], weights[selected]
+
+        def weighted_quantile(values, weights, quantile):
+            order = np.argsort(values)
+            values, weights = values[order], weights[order]
+            cumulative = np.cumsum(weights) - 0.5 * weights
+            return float(np.interp(quantile, cumulative / cumulative[-1], values))
+
+        car_values, car_weights = prepare(car_data, car_weights)
+        pt_values, pt_weights = prepare(pt_data, pt_weights)
 
         plt.style.use('seaborn-v0_8-darkgrid')
         fig, ax = plt.subplots(figsize=(8, 5))
 
-        sns.histplot(car_data, bins=50, color="#3c116a", label='Car', stat='density', alpha=0.6, ax=ax)
-        sns.histplot(pt_data, bins=50, color="#b0691c", label='PT', stat='density', alpha=0.6, ax=ax)
+        upper_limit = 5 * np.ceil(max(car_values.max(), pt_values.max()) / 5)
+        bins = np.linspace(0, upper_limit, 51)
+        ax.hist(
+            car_values,
+            weights=car_weights,
+            bins=bins,
+            color="#3c116a",
+            label="Observed car trips",
+            density=True,
+            alpha=0.6,
+            edgecolor="black",
+        )
+        ax.hist(
+            pt_values,
+            weights=pt_weights,
+            bins=bins,
+            color="#b0691c",
+            label="Observed PT trips (composite time)",
+            density=True,
+            alpha=0.6,
+            edgecolor="black",
+        )
 
-        car_mean = car_data.mean()
-        pt_mean = pt_data.mean()
-        ax.text(0.98, 0.95, f"Car Mean: {car_mean:.2f}", transform=ax.transAxes, ha='right', va='top', fontsize=11, color='#1f77b4', weight='bold')
-        ax.text(0.98, 0.88, f"PT Mean: {pt_mean:.2f}", transform=ax.transAxes, ha='right', va='top', fontsize=11, color='#ff7f0e', weight='bold')
+        car_mean = np.average(car_values, weights=car_weights)
+        pt_mean = np.average(pt_values, weights=pt_weights)
+        car_median = weighted_quantile(car_values, car_weights, 0.5)
+        pt_median = weighted_quantile(pt_values, pt_weights, 0.5)
+        ax.text(0.98, 0.95, f"Car — mean: {car_mean:.2f}, median: {car_median:.2f}", transform=ax.transAxes, ha='right', va='top', fontsize=10, color='#3c116a', weight='bold')
+        ax.text(0.98, 0.88, f"PT — mean: {pt_mean:.2f}, median: {pt_median:.2f}", transform=ax.transAxes, ha='right', va='top', fontsize=10, color='#b0691c', weight='bold')
 
         ax.legend()
-        ax.set_xlim([0, 60])
-        ax.set_xlabel("VoT [CHF/h]", fontsize=12)
-        ax.set_ylabel("Density", fontsize=12)
-        ax.set_title("Value of Time Distribution", fontsize=14, weight='bold')
+        ax.set_xlim([0, upper_limit])
+        ax.set_xlabel("Marginal WTP [CHF per hour of travel time saved]", fontsize=11)
+        ax.set_ylabel("Survey-weighted trip density", fontsize=11)
+        ax.set_title("Model-implied marginal WTP for travel-time savings", fontsize=13, weight='bold')
 
         plt.tight_layout()    
         

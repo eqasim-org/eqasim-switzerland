@@ -686,11 +686,17 @@ def execute(context):
     vot_car, mean_vot_car = vot_utils.get_car_vot(context, df, result, MODES)
     vot_pt, mean_vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer = vot_utils.get_pt_vot(context, df, result, MODES)    
 
-    logger.info("The average VOT for car users is %.2f CHF/hour", mean_vot_car)
-    logger.info("The average VOT for pt users is %.2f CHF/hour", mean_vot_pt)
+    logger.info("Mean marginal WTP for observed car trips: %.2f CHF/hour", mean_vot_car)
+    logger.info("Mean marginal WTP for observed PT trips: %.2f CHF/hour", mean_vot_pt)
 
     path_to_figure = os.path.join(context.path(),"vot_distribution.png")
-    vot_utils.plot_vot(vot_car, vot_pt, figure_path = path_to_figure)
+    vot_utils.plot_vot(
+        vot_car,
+        vot_pt,
+        figure_path=path_to_figure,
+        car_weights=df.loc[vot_car.index, "person_weight"],
+        pt_weights=df.loc[vot_pt.index, "person_weight"],
+    )
     logger.info("The VOT distribution figure is saved to %s", path_to_figure)
     
     return (result, 
