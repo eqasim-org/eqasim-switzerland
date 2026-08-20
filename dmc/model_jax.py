@@ -47,6 +47,7 @@ def configure(context):
     context.config("income_cost_interaction", True)
     context.config("use_exponents", True)
     context.config("use_income_in_dmc", True)
+    context.config("use_weights_for_vot", False)
     context.config("dmc_jax_max_iterations", 2000)
     context.config("dmc_jax_gradient_tolerance", 1e-5)
 
@@ -94,12 +95,17 @@ def execute(context):
     logger.info("Mean marginal WTP for observed PT trips: %.2f CHF/hour", mean_vot_pt)
 
     figure_path = os.path.join(context.path(), "vot_distribution.png")
+    use_vot_weights = context.config("use_weights_for_vot")
+    logger.info(
+        "WTP summaries and histogram use %s trip observations",
+        "survey-weighted" if use_vot_weights else "unweighted",
+    )
     vot_utils.plot_vot(
         vot_car,
         vot_pt,
         figure_path=figure_path,
-        car_weights=df.loc[vot_car.index, "person_weight"],
-        pt_weights=df.loc[vot_pt.index, "person_weight"],
+        car_weights=df.loc[vot_car.index, "person_weight"] if use_vot_weights else None,
+        pt_weights=df.loc[vot_pt.index, "person_weight"] if use_vot_weights else None,
     )
     return (
         result,

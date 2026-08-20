@@ -6,8 +6,10 @@ from dmc.constants import constants
 class vot_utils:
 
     @staticmethod
-    def _weighted_mean(values, weights):
-        """Population-weighted mean with aligned pandas indices."""
+    def _mean(values, weights, use_weights):
+        """Mean with optional survey weights and aligned pandas indices."""
+        if not use_weights:
+            return float(np.mean(values))
         return float(np.average(values, weights=weights.loc[values.index]))
 
     @staticmethod
@@ -43,8 +45,9 @@ class vot_utils:
 
         Both marginal utilities are normally negative, so their ratio is
         positive. The distribution is restricted to observed car trips and
-        its mean uses the survey person weights. It is therefore a weighted
-        trip-level distribution, not a distribution of unique people.
+        its mean optionally uses the survey person weights, controlled by
+        ``use_weights_for_vot``. It is a trip-level distribution, not a
+        distribution of unique people.
         
         For car:
         - ∂U/∂car_time_min = beta_car_travel_time_min * lambda_car_travel_time * car_time^(lambda-1) / TIME_SCALE_MIN
@@ -98,7 +101,11 @@ class vot_utils:
         vot_car.name = "car_wtp_chf_h"
         
         # compute the average overall
-        mean_vot_car = vot_utils._weighted_mean(vot_car, df["person_weight"])
+        mean_vot_car = vot_utils._mean(
+            vot_car,
+            df["person_weight"],
+            context.config("use_weights_for_vot"),
+        )
 
         return vot_car, mean_vot_car
 
@@ -116,8 +123,9 @@ class vot_utils:
         proportionally across the trip's non-negative in-vehicle,
         access/egress and transfer durations. Component-specific WTP values are
         returned as well. Only observed PT trips enter the distribution and its
-        mean uses the survey person weights. It is therefore a weighted
-        trip-level distribution, not a distribution of unique people.
+        mean optionally uses the survey person weights, controlled by
+        ``use_weights_for_vot``. It is a trip-level distribution, not a
+        distribution of unique people.
         
         Note: All time components are scaled by TIME_SCALE_MIN in the utility function,
         so we must account for this when calculating marginal utilities.
@@ -221,7 +229,11 @@ class vot_utils:
         vot_pt.name = "pt_composite_wtp_chf_h"
         
         # compute the average overall        
-        mean_vot_pt = vot_utils._weighted_mean(vot_pt, df["person_weight"])
+        mean_vot_pt = vot_utils._mean(
+            vot_pt,
+            df["person_weight"],
+            context.config("use_weights_for_vot"),
+        )
 
         return (vot_pt, mean_vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer)
 
@@ -234,7 +246,7 @@ class vot_utils:
         pt_weights=None,
         return_figure=False,
     ):
-        """Plot survey-weighted model-implied marginal WTP distributions."""
+        """Plot optionally weighted model-implied marginal WTP distributions."""
 
         def prepare(values, weights):
             values = np.asarray(values, dtype=float)
@@ -252,6 +264,7 @@ class vot_utils:
             cumulative = np.cumsum(weights) - 0.5 * weights
             return float(np.interp(quantile, cumulative / cumulative[-1], values))
 
+        use_weights = car_weights is not None or pt_weights is not None
         car_values, car_weights = prepare(car_data, car_weights)
         pt_values, pt_weights = prepare(pt_data, pt_weights)
 
@@ -291,7 +304,8 @@ class vot_utils:
         ax.legend()
         ax.set_xlim([0, upper_limit])
         ax.set_xlabel("Marginal WTP [CHF per hour of travel time saved]", fontsize=11)
-        ax.set_ylabel("Survey-weighted trip density", fontsize=11)
+        density_label = "Survey-weighted trip density" if use_weights else "Unweighted trip density"
+        ax.set_ylabel(density_label, fontsize=11)
         ax.set_title("Model-implied marginal WTP for travel-time savings", fontsize=13, weight='bold')
 
         plt.tight_layout()    
