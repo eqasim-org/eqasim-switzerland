@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import logging
 
+from data.utils import coerce_boolean_series
+
 logger = logging.getLogger("synpp")
 
 """
@@ -62,7 +64,9 @@ def execute(context):
     assert (len(np.unique(df_persons["person_id"])) == len(np.unique(df_activities["person_id"])))
 
     # Truck drivers
-    truck_drivers = list(set(np.unique(df_persons[df_persons["is_truck_driver"]][["person_id"]].astype(int))))
+    truck_driver_mask = coerce_boolean_series(
+        df_persons["is_truck_driver"], name="is_truck_driver")
+    truck_drivers = df_persons.loc[truck_driver_mask, "person_id"].astype(int).unique().tolist()
 
     initial_length   = len(df_activities)
     df_activities    = df_activities[~df_activities["person_id"].isin(truck_drivers)]
@@ -83,7 +87,8 @@ def execute(context):
     assert (len(np.unique(df_persons["person_id"])) == len(np.unique(df_activities["person_id"])))
 
     # International
-    mask = df_persons["is_outside_of_switzerland"].astype("boolean").fillna(False).astype(bool)
+    mask = coerce_boolean_series(
+        df_persons["is_outside_of_switzerland"], name="is_outside_of_switzerland")
     international = df_persons.loc[mask, "person_id"].astype(int).unique().tolist()
 
     initial_length   = len(df_activities)

@@ -79,7 +79,7 @@ def execute(context):
     cat_cols = ['age_bin', 'sex', 'home_municipality_id', 'district_id', 'canton_id', 'municipality_type']
     for df in (survey_df, pop_df):
         for col in cat_cols:
-            df[col] = df[col].astype(str).fillna('Missing')
+            df[col] = df[col].astype("string").fillna("Missing").astype(str)
 
     # -------------------------------------------------------------------
     # 2. ONE-HOT DESIGN MATRIX FOR SURVEY

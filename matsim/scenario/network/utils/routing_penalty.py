@@ -89,7 +89,7 @@ class RoutingPenaltyProvider:
         for path_i in poly_path:
             gdf = gpd.read_file(path_i)
             geometries.extend(gdf.geometry.tolist())
-        unioned = gpd.GeoSeries(geometries).unary_union
+        unioned = gpd.GeoSeries(geometries).union_all()
 
         return unioned
         

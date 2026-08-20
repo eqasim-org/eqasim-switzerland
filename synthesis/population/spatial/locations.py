@@ -25,17 +25,25 @@ def configure(context):
 
 
 def execute(context):
-    df_home = context.stage("synthesis.population.spatial.home.locations")
+    df_home = context.stage("synthesis.population.spatial.home.locations").copy()
     df_work, df_education = context.stage("synthesis.population.spatial.primary.locations")
-    df_secondary = context.stage("synthesis.population.spatial.secondary.locations")[0]
+    df_work = df_work.copy()
+    df_education = df_education.copy()
+    df_secondary = context.stage("synthesis.population.spatial.secondary.locations")[0].copy()
 
     df_persons = context.stage("synthesis.population.sampled")[["person_id", "household_id"]]
     df_locations = context.stage("synthesis.population.activities")[["person_id", "activity_index", "purpose"]]
 
     # Home locations
     df_home_locations = df_locations[df_locations["purpose"] == "home"]
-    df_home_locations = pd.merge(df_home_locations, df_persons, on="person_id")
-    df_home_locations = pd.merge(df_home_locations, df_home[["household_id", "geometry"]], on="household_id")
+    df_home_locations = pd.merge(
+        df_home_locations, df_persons, on="person_id", validate="many_to_one")
+    df_home_locations = pd.merge(
+        df_home_locations,
+        df_home[["household_id", "geometry"]],
+        on="household_id",
+        validate="many_to_one",
+    )
     df_home_locations["destination_id"] = HOME_DESTINATION_ID
     df_home_locations = df_home_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
@@ -43,14 +51,14 @@ def execute(context):
     df_work_locations = df_locations[df_locations["purpose"] == "work"]
     df_work_locations = pd.merge(df_work_locations,
                                  df_work[["person_id", "destination_id", "geometry"]],
-                                 on="person_id")
+                                 on="person_id", validate="many_to_one")
     df_work_locations = df_work_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
     # Education locations
     df_education_locations = df_locations[df_locations["purpose"] == "education"]
     df_education_locations = pd.merge(df_education_locations,
                                       df_education[["person_id", "destination_id", "geometry"]],
-                                      on="person_id")
+                                      on="person_id", validate="many_to_one")
     df_education_locations = df_education_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
     # Border locations: the crossing comes straight from the same
@@ -68,7 +76,13 @@ def execute(context):
     df_cb_trips = df_cb_trips[["person_id", "interview_point_id", "interview_geometry_point"]].drop_duplicates("person_id")
     df_cb_trips = df_cb_trips.rename(columns={"interview_point_id": "destination_id", "interview_geometry_point": "geometry"})
 
-    df_border_locations = pd.merge(df_border_locations, df_cb_trips, on="person_id", how="left")
+    df_border_locations = pd.merge(
+        df_border_locations,
+        df_cb_trips,
+        on="person_id",
+        how="left",
+        validate="many_to_one",
+    )
     df_border_locations = df_border_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
     # Secondary locations
@@ -76,7 +90,8 @@ def execute(context):
     df_secondary["activity_index"] = df_secondary["trip_index"]
     df_secondary_locations = pd.merge(df_secondary_locations,
                                       df_secondary[["person_id", "activity_index", "destination_id", "geometry"]],
-                                      on=["person_id", "activity_index"], how="left")
+                                      on=["person_id", "activity_index"], how="left",
+                                      validate="one_to_one")
     df_secondary_locations = df_secondary_locations[["person_id", "activity_index", "destination_id", "geometry"]]
 
     # Validation
@@ -96,7 +111,11 @@ def execute(context):
     # 1. Attach municipality to activities (TODO: Maybe this can be done in previous stages by keeping track of municipality id)
     df_municipality_type = context.stage("data.spatial.municipality_types")
     df_municipalities,_ = context.stage("data.spatial.municipalities")
-    df_municipalities = df_municipalities.merge(df_municipality_type)[["municipality_type","municipality_id", "geometry"]]
+    df_municipalities = df_municipalities.merge(
+        df_municipality_type,
+        on="municipality_id",
+        validate="one_to_one",
+    )[["municipality_type", "municipality_id", "geometry"]]
     assert df_locations_unique.crs == df_municipalities.crs
     df_locations_unique = gpd.sjoin_nearest(df_locations_unique, df_municipalities, how="left").drop(columns=["index_right"])
     
@@ -126,6 +145,16 @@ def execute(context):
     
     # atache columns back to the main dataframe
     computed_columns = ['municipality_type', 'municipality_id', 'employee_density', 'companies_density', 'population_density','ovgk']
-    df_locations = df_locations.merge(df_locations_unique[['geometry'] + computed_columns], on='geometry', how='left')    
+    df_locations = df_locations.merge(
+        df_locations_unique[["geometry"] + computed_columns],
+        on="geometry",
+        how="left",
+        validate="many_to_one",
+    )
+
+    if df_locations.duplicated(["person_id", "activity_index"]).any():
+        raise ValueError("Spatial locations contain duplicate person/activity keys")
+    if len(df_locations) != initial_count:
+        raise ValueError("Attaching spatial attributes changed the number of activities")
     
     return df_locations

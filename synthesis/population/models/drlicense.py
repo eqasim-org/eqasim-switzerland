@@ -134,7 +134,7 @@ def execute(context):
 
     for df in (survey_df, pop_df):
         for col in cat_cols:
-            df[col] = df[col].astype(str).fillna("Missing")
+            df[col] = df[col].astype("string").fillna("Missing").astype(str)
 
     for df in (survey_df, pop_df):
         df["household_size"] = df["household_size"].astype(float)

@@ -1,5 +1,5 @@
 import geopandas as gpd
-from shapely import vectorized
+from shapely import contains_xy
 import numpy as np
 import logging
 
@@ -57,12 +57,12 @@ def execute(context):
     y_values = net.nodes["y"].values
 
     # nodes in urban municipalities
-    urban_nodes = vectorized.contains(urban_municipalities.unary_union.simplify(500), x_values, y_values)
-    urbancore_nodes = vectorized.contains(urbancore_municipalities.unary_union.simplify(500), x_values, y_values)
+    urban_nodes = contains_xy(urban_municipalities.geometry.union_all().simplify(500), x_values, y_values)
+    urbancore_nodes = contains_xy(urbancore_municipalities.geometry.union_all().simplify(500), x_values, y_values)
 
     # include nodes that are close to urban municipalities using a positive outward buffer
-    near_urban_geometry = urban_or_urbancore.unary_union.simplify(500).buffer(near_buffer_m)
-    near_urban_nodes = vectorized.contains(near_urban_geometry, x_values, y_values)
+    near_urban_geometry = urban_or_urbancore.geometry.union_all().simplify(500).buffer(near_buffer_m)
+    near_urban_nodes = contains_xy(near_urban_geometry, x_values, y_values)
 
     # get swiss border
     border = context.stage("data.spatial.swiss_border").geometry.simplify(2000).iloc[0]
@@ -73,7 +73,7 @@ def execute(context):
     if buffered_border.is_empty:
         raise ValueError("Buffered border is empty; cannot filter nodes using a -2km border buffer")
 
-    nodes_within_buffered_border = vectorized.contains(buffered_border, x_values, y_values)
+    nodes_within_buffered_border = contains_xy(buffered_border, x_values, y_values)
     urban_nodes = urban_nodes & nodes_within_buffered_border
     urbancore_nodes = urbancore_nodes & nodes_within_buffered_border
     near_urban_nodes = (near_urban_nodes | urban_nodes | urbancore_nodes) & nodes_within_buffered_border

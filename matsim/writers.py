@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from xml.sax.saxutils import escape
 from typing import Dict, Union
 
@@ -53,8 +54,12 @@ class XmlWriter:
         return "%02d:%02d:%02d" % (hours, minutes, seconds)
 
     def location(self, x, y, facility_id = None):
-        return (x, y,
-                None if facility_id is None or (type(facility_id) == float and np.isnan(facility_id)) else facility_id)
+        try:
+            missing_facility = bool(pd.isna(facility_id))
+        except (TypeError, ValueError):
+            missing_facility = False
+
+        return (x, y, None if missing_facility else facility_id)
     
     @staticmethod
     def get_java_type(python_type: type):

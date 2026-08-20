@@ -3,6 +3,7 @@ import geopandas as gpd
 import osmium
 from pathlib import Path
 from multiprocessing import get_context
+from data.utils import coerce_boolean_series
 
 logger = logging.getLogger("synpp")
 
@@ -71,7 +72,7 @@ def process_geojson_file(file_path):
 
 def process_geogeojson_type1(df, file_path):
     df = df[df["modified_speed"].notnull()]
-    df = df[df["modified_speed"].astype(bool)]
+    df = df[coerce_boolean_series(df["modified_speed"], name="modified_speed")]
     df = df[df["maxspeed"].notnull()]
     df = df[df["maxspeed"]>0].reset_index(drop=True)
 
@@ -125,4 +126,3 @@ class OSMSpeedReader(osmium.SimpleHandler):
     def way(self, w):
         if "maxspeed" in w.tags:
             self.speeds[w.id] = w.tags["maxspeed"]
-

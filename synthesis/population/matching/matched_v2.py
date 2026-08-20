@@ -84,7 +84,7 @@ def _fit_feature_processors(df_source, df_population):
 	mappings = {}
 	for col in cat_cols:
 		merged = pd.concat([df_source[col], df_population[col]], axis=0)
-		vals = merged.astype(str).fillna("<na>").unique().tolist()
+		vals = merged.astype("string").fillna("<na>").astype(str).unique().tolist()
 		vals = sorted(vals)
 		mappings[col] = {v: i + 1 for i, v in enumerate(vals)}
 
@@ -97,7 +97,7 @@ def _transform_model_inputs(df, scaler, mappings, cont_cols):
 	}
 
 	for col, mapping in mappings.items():
-		s = df[col].astype(str).fillna("<na>")
+		s = df[col].astype("string").fillna("<na>").astype(str)
 		out[col] = s.map(lambda v: mapping.get(v, 0)).astype(np.int64).values
 
 	out["cardinalities"] = {k: len(v) + 1 for k, v in mappings.items()}  # +1 for unknown index 0
@@ -476,7 +476,7 @@ def _prepare_common_features(df_source, df_population, const):
 	for df in (df_source, df_population):
 		if "municipality_type" not in df.columns:
 			df["municipality_type"] = "unknown"
-		df["municipality_type"] = df["municipality_type"].astype(str).fillna("unknown")
+		df["municipality_type"] = df["municipality_type"].astype("string").fillna("unknown").astype(str)
 
 		if "sex" in df.columns:
 			df["sex"] = pd.to_numeric(df["sex"], errors="coerce").fillna(-1).astype(int)
@@ -488,7 +488,7 @@ def _prepare_common_features(df_source, df_population, const):
 
 		if "ovgk" not in df.columns:
 			df["ovgk"] = "none"
-		df["ovgk"] = df["ovgk"].astype(str).fillna("none").str.lower()
+		df["ovgk"] = df["ovgk"].astype("string").fillna("none").astype(str).str.lower()
 
 		if "N_children_under_12" not in df.columns:
 			if "N_children_under_18" in df.columns:

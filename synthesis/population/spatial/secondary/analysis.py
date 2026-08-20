@@ -276,7 +276,7 @@ def _by_attribute(df, attr):
     x["distance_prev"] = df.get("distance_prev", np.nan)
     x["distance_home"] = df.get("distance_home", np.nan)
     x["distance_work"] = df.get("distance_work", np.nan)
-    x[attr] = x[attr].astype(str).fillna("nan")
+    x[attr] = x[attr].astype("string").fillna("nan").astype(str)
 
     rows = []
     for g, part in x.groupby(attr):

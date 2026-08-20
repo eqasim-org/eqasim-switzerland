@@ -1,6 +1,7 @@
 import os.path
 import shutil
 import matsim.runtime.eqasim as eqasim
+from matsim.simulation.config_utils import java_boolean, parse_boolean
 import logging
 logger = logging.getLogger("synpp")
 
@@ -13,8 +14,8 @@ def configure(context):
     context.config("output_prefix", "switzerland_")
 
     context.config("useScheduleBasedTransport", default=True)
-    context.config("preventwaitingtoentertraffic", default = "no")
-    context.config("writeexperiencedplans", default = "no")
+    context.config("preventwaitingtoentertraffic", default=False)
+    context.config("writeexperiencedplans", default=False)
 
     context.config("simulation_inputs_path", default = "")
     context.config("experiment_name", default = "experiment")
@@ -23,18 +24,18 @@ def configure(context):
 
 def execute(context):
 
-    scheduleBasedPTconfig = "false"
-    if context.config("useScheduleBasedTransport"):
-        scheduleBasedPTconfig = "true"
+    scheduleBasedPTconfig = java_boolean(
+        context.config("useScheduleBasedTransport"), "useScheduleBasedTransport")
+    if parse_boolean(context.config("useScheduleBasedTransport"), "useScheduleBasedTransport"):
         logger.info("Schedule-based PT: %s", scheduleBasedPTconfig)
 
     preventwaitingtoentertraffic = "n"
-    if context.config("preventwaitingtoentertraffic"):
+    if parse_boolean(context.config("preventwaitingtoentertraffic"), "preventwaitingtoentertraffic"):
         preventwaitingtoentertraffic = "y"
         logger.info("Prevent waiting to enter traffic: %s", preventwaitingtoentertraffic)
 
     writeExperiencedPlans = "false"
-    if context.config("writeexperiencedplans"):
+    if parse_boolean(context.config("writeexperiencedplans"), "writeexperiencedplans"):
         writeExperiencedPlans = "true"
         logger.info("Write experienced plans: %s", writeExperiencedPlans)
 

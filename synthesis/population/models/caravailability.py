@@ -6,6 +6,17 @@ import logging
 
 logger = logging.getLogger("synpp")
 
+CANONICAL_CODE_DTYPES = {
+    "canton_id": "int64",
+    "sex": "int64",
+    "nationality": "int64",
+    "age_class": "int64",
+    "employment_status": "int64",
+    "sp_region": "int64",
+    "income_class": "int64",
+    "marital_status": "int64",
+}
+
 # ---------------------------------------------------------
 # helper: stochastic draw from class probabilities (binary ok)
 # ---------------------------------------------------------
@@ -268,7 +279,7 @@ def execute(context):
     for df in (persons_df, pop_df):
         for col in cat_cols:
             if col in df.columns:
-                df[col] = df[col].astype(str).fillna("Missing")
+                df[col] = df[col].astype("string").fillna("Missing").astype(str)
 
     num_cols = [
         "age", "age_sq",
@@ -377,9 +388,9 @@ def execute(context):
     # ensure key cols are string typed
     for col in ["canton_id", "sex", "municipality_type", "income_class", "marital_status", "sp_region"]:
         if col in persons_df.columns:
-            persons_df[col] = persons_df[col].astype(str).fillna("Missing")
+            persons_df[col] = persons_df[col].astype("string").fillna("Missing").astype(str)
         if col in pop_df.columns:
-            pop_df[col] = pop_df[col].astype(str).fillna("Missing")
+            pop_df[col] = pop_df[col].astype("string").fillna("Missing").astype(str)
 
     # diagnostics age groups
     diag_age_bins = [0, 18, 22, 26, 45, 60, 71, 81, 200]
@@ -540,14 +551,14 @@ def execute(context):
         bins=[-0.1, 0.0, 1.0, 2.0, 5.0, 9999],
         labels=["0", "1", "2", "3-5", "6+"],
         right=True
-    ).astype(str).fillna("Missing")
+    ).astype("string").fillna("Missing").astype(str)
 
     persons_df["cars_shortage_bucket"] = pd.cut(
         persons_df["cars_shortage"].astype(float),
         bins=[-0.1, 0.0, 1.0, 2.0, 5.0, 9999],
         labels=["0", "1", "2", "3-5", "6+"],
         right=True
-    ).astype(str).fillna("Missing")
+    ).astype("string").fillna("Missing").astype(str)
 
     shortage_all = compare_pct("cars_shortage_bucket", order=["0", "1", "2", "3-5", "6+", "Missing"])
     logger.info("\n[CARS SHORTAGE BUCKET | ALL] cars_shortage_bucket | survey_weighted_pct_has | pop_pct_has")
@@ -575,5 +586,15 @@ def execute(context):
         "N_children_under_18_exact",
         "cars_shortage_bucket",
     ], errors="ignore")
+
+    # Categorical model preparation uses strings locally. Restore the population
+    # stage contract before IPU and statistical matching consume these codes.
+    for column, dtype in CANONICAL_CODE_DTYPES.items():
+        try:
+            pop_df[column] = pd.to_numeric(pop_df[column], errors="raise").astype(dtype)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"caravailability output column {column!r} cannot be converted to {dtype}"
+            ) from error
 
     return pop_df

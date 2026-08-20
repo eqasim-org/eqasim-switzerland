@@ -10,6 +10,7 @@ import matsim.writers
 from matsim.writers import backlog_iterator
 import logging
 from data.external_population.constants import ExternalPopulationConstants
+from data.utils import coerce_boolean_series
 from synthesis.population.departure_times.trips_departures import get_best_departue_time
 
 logger = logging.getLogger("synpp")
@@ -343,11 +344,22 @@ PERSONS_DTYPES = {
         "person_type": str,
     }
 
+BOOLEAN_PERSON_COLUMNS = [
+    "employed",
+    "driving_license",
+    "is_car_passenger",
+    "has_walk_loop_trip",
+    "has_car_loop_trip",
+    "has_car_passenger_loop_trip",
+    "has_pt_loop_trip",
+    "has_bike_loop_trip",
+]
+
 
 def execute(context):
     cache_path    = context.path()
     cst           = context.stage("data.constants")
-    df_persons    = context.stage("synthesis.population.models.subscriptions")
+    df_persons    = context.stage("synthesis.population.models.subscriptions").copy()
     df_activities = context.stage("synthesis.population.activities")
     df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]  
 
@@ -384,7 +396,7 @@ def execute(context):
         loop_columns.append(col)
 
     df_persons = df_persons.merge(unique_modes_per_agent[loop_columns], on = "person_id", how="left")
-    df_persons[loop_columns] = df_persons[loop_columns].fillna(False)
+    df_persons[loop_columns[1:]] = df_persons[loop_columns[1:]].fillna(False)
     
     # Bring in correct order (although it should already be)
     df_persons    = df_persons.sort_values(by="person_id")
@@ -392,7 +404,10 @@ def execute(context):
     df_vehicles   = df_vehicles.sort_values(by=["owner_id"])
 
     df_persons["person_type"] = "normal"
-    is_crossing_the_border = df_persons["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)
+    is_crossing_the_border = coerce_boolean_series(
+        df_persons["is_crossing_the_border"],
+        name="is_crossing_the_border",
+    )
     df_persons.loc[is_crossing_the_border, "person_type"] = "crossborder"
 
     # For Swiss residents crossing the border, destination_country_raw was already
@@ -497,7 +512,15 @@ def execute(context):
     df_vehicles   = df_vehicles[VEHICLE_FIELDS]
     df_vehicles["owner_id"] = df_vehicles["owner_id"].astype(int)
 
-    # correct types before saving the data    
+    df_activities["is_last"] = coerce_boolean_series(
+        df_activities["is_last"], name="is_last")
+
+    # Normalize logical values before astype: bool("False") is True in Python,
+    # and CSV inference can produce either strings or booleans for the same field.
+    for column in BOOLEAN_PERSON_COLUMNS:
+        df_persons[column] = coerce_boolean_series(df_persons[column], name=column)
+
+    # correct types before saving the data
     df_persons = df_persons.astype(PERSONS_DTYPES)
     df_activities["geometry"] = df_activities["geometry"].apply(lambda g: wkt.loads(g) if isinstance(g, str) else g)
     valid_ids = df_activities.groupby("person_id")["geometry"].apply(

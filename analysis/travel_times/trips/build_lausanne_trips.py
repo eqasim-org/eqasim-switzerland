@@ -1,5 +1,5 @@
 import geopandas as gpd
-from shapely import vectorized
+from shapely import contains_xy
 import numpy as np
 import logging
 
@@ -54,7 +54,7 @@ def execute(context):
     y_values = net.nodes["y"].values
 
     # nodes in canton Lausanne
-    lausanne_nodes_mask = vectorized.contains(lausanne_geom, x_values, y_values)
+    lausanne_nodes_mask = contains_xy(lausanne_geom, x_values, y_values)
     lausanne_nodes = net.nodes.loc[lausanne_nodes_mask, ["node_id", "x", "y"]].reset_index(drop=True)
     if len(lausanne_nodes) < 2:
         raise ValueError("Need at least two network nodes in Lausanne to build OD trips")

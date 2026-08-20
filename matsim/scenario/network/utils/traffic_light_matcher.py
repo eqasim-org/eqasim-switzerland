@@ -2,7 +2,7 @@ import pandas as pd
 import geopandas as gpd
 import networkx as nx 
 from shapely import wkt
-from shapely.errors import WKTReadingError
+from shapely.errors import ShapelyError
 from shapely.geometry import Point
 import numpy as np
 from matsim.readers import Network
@@ -41,7 +41,7 @@ class TrafficLightsMatcher:
         def safe_load_wkt(wkt_str):
             try:
                 return wkt.loads(wkt_str)
-            except (WKTReadingError, ValueError, AttributeError, TypeError):
+            except (ShapelyError, ValueError, AttributeError, TypeError):
                 return None
         detailed_geo["geometry"] = detailed_geo["geometry"].map(safe_load_wkt)
         detailed_geo = gpd.GeoDataFrame(detailed_geo, geometry = "geometry", crs = "EPSG:2056")
@@ -181,5 +181,4 @@ class TrafficLightsMatcher:
             self.links.loc[links_having_traffic_lights, "attributes"].apply(lambda x: {**x, "traffic_light":True})
         
         return self.links
-
 

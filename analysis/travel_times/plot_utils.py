@@ -391,10 +391,10 @@ def plot_link_error_on_network(
 
     # Keep only links inside Swiss border.
     if isinstance(swiss_border, gpd.GeoSeries):
-        border_geom = swiss_border.unary_union
+        border_geom = swiss_border.geometry.union_all()
         border_gdf = gpd.GeoDataFrame(geometry=swiss_border)
     elif isinstance(swiss_border, gpd.GeoDataFrame):
-        border_geom = swiss_border.geometry.unary_union
+        border_geom = swiss_border.geometry.union_all()
         border_gdf = swiss_border[["geometry"]].copy()
     else:
         border_geom = swiss_border

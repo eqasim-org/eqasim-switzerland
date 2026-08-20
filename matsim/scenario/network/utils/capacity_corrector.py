@@ -1,6 +1,6 @@
 import numpy as np
 from matsim.readers import Network
-import shapely.vectorized
+from shapely import contains_xy
 import geopandas as gpd
 from matsim.scenario.network.utils.routing_penalty import RoutingPenaltyProvider
 
@@ -81,7 +81,7 @@ class CapacityCorrector:
         # links outside of switzerland
         centroids = RoutingPenaltyProvider.get_centroids(self.links, self.nodes)
         border = self.get_swiss_border()
-        outside_mask = ~shapely.vectorized.contains(border, centroids.geometry.x.tolist(), centroids.geometry.y.tolist())
+        outside_mask = ~contains_xy(border, centroids.geometry.x.to_numpy(), centroids.geometry.y.to_numpy())
         links_outside_border = set(centroids.loc[outside_mask, "link_id"].unique())
         
         # mask
@@ -93,5 +93,4 @@ class CapacityCorrector:
         self.links.loc[mask, "capacity"] *= factor
         
         return self.links
-
 

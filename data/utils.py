@@ -2,6 +2,33 @@ import numpy as np
 import pandas as pd
 
 BASE62_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+TRUE_VALUES = frozenset({"1", "true", "t", "yes", "y", "on"})
+FALSE_VALUES = frozenset({"0", "false", "f", "no", "n", "off", ""})
+
+
+def coerce_boolean_series(values, *, default=False, name=None):
+    """Return a strict bool Series from bool, 0/1, or common string encodings.
+
+    ``Series.astype(bool)`` treats every non-empty string—including ``"False"``—as
+    true. CSV and GeoJSON readers can infer the same logical field differently
+    depending on whether missing values are present, so pipeline boundaries must
+    parse values rather than rely on their inferred dtype.
+    """
+    series = values.copy() if isinstance(values, pd.Series) else pd.Series(values)
+    result = pd.Series(pd.NA, index=series.index, dtype="boolean", name=series.name)
+
+    non_missing = series.notna()
+    normalized = series.astype("string").str.strip().str.lower()
+    result.loc[non_missing & normalized.isin(TRUE_VALUES)] = True
+    result.loc[non_missing & normalized.isin(FALSE_VALUES)] = False
+
+    invalid = non_missing & result.isna()
+    if invalid.any():
+        examples = series.loc[invalid].drop_duplicates().head(5).tolist()
+        field = name or series.name or "boolean field"
+        raise ValueError(f"{field} contains values that are not boolean: {examples!r}")
+
+    return result.fillna(bool(default)).astype(bool)
 
 
 def to_base62(n):

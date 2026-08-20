@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import cKDTree
 from io import StringIO
-from shapely import vectorized
+from shapely import contains_xy
 import time
 from typing import List, Tuple
 
@@ -63,7 +63,7 @@ class ElevationEstimator:
         
         self.nodes["within_polygone"] = True
         if self.polygone is not None:
-            self.nodes["within_polygone"] = vectorized.contains(self.polygone, self.nodes["x"].values, self.nodes["y"].values)
+            self.nodes["within_polygone"] = contains_xy(self.polygone, self.nodes["x"].values, self.nodes["y"].values)
 
     def run(self):
         nodes = self.nodes
@@ -291,16 +291,3 @@ class ElevationEstimator:
 #     estimator = ElevationEstimator(network, "")
 #     updated_network = estimator.run()
 #     #print(updated_network.nodes.head())
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    

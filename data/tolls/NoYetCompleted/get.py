@@ -207,7 +207,7 @@ def plot_in_html(locations, net, matched_net, save_path, open_system=None, close
     try:
         center = locations.union_all().centroid
     except AttributeError:
-        center = locations.unary_union.centroid
+        center = locations.geometry.union_all().centroid
 
     fig = go.Figure()
 
@@ -434,4 +434,3 @@ def resolve_overlapping_links_problems(open_system, closed_system, network, deta
     """
 
     return open_system, closed_system
-

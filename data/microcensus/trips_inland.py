@@ -3,16 +3,9 @@ import pandas as pd
 import pyproj
 import geopandas as gpd
 from shapely.geometry import LineString
-import warnings
-
-try:
-    from pandas.errors import SettingWithCopyWarning
-except ImportError:
-    from pandas.errors import ChainedAssignmentError as SettingWithCopyWarning
 import logging
 
 logger = logging.getLogger("synpp")
-warnings.filterwarnings("ignore", category=SettingWithCopyWarning)
 
 
 def configure(context):
@@ -861,7 +854,7 @@ def execute(context):
         (df_mz_trips["origin_y"] - df_mz_trips["destination_y"])**2)
     
     # Identify activity chains completely outside of Switzerland
-    swiss_border = context.stage("data.spatial.swiss_border").copy().unary_union
+    swiss_border = context.stage("data.spatial.swiss_border").copy().geometry.union_all()
 
     origins = gpd.GeoDataFrame(df_mz_trips,
                                geometry = gpd.points_from_xy(df_mz_trips["origin_x"], df_mz_trips["origin_y"]),

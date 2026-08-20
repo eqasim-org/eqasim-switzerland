@@ -8,7 +8,7 @@ from typing import List, Tuple, Union
 from tqdm import tqdm
 import plotly.graph_objects as go
 from shapely.ops import unary_union
-from shapely import vectorized
+from shapely import contains_xy
 from data.osm.clean import read_outside_region
 
 logger = logging.getLogger("synpp")
@@ -68,7 +68,7 @@ def build_h3_grid(
         
         # where to use out resolutions
         modeled_region = get_modeled_region(context, border_buffer=border_buffer)
-        use_out_resolution = ~vectorized.contains(modeled_region, x_coord, y_coord) # these coords are in epsg:2056
+        use_out_resolution = ~contains_xy(modeled_region, x_coord, y_coord) # these coords are in epsg:2056
 
         # adaptive h3 resolution
         res = [resolutions["dense"], resolutions["sparse"], resolutions["out"]]

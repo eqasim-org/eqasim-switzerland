@@ -4,6 +4,7 @@ import geopandas as gpd
 import os
 from shapely import wkt
 from shapely.geometry import Point
+from data.utils import coerce_boolean_series
 import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
 import logging
@@ -123,6 +124,8 @@ def execute(context):
                                                                           "is_first", "is_last", "purpose", "location_id", "geometry",
                                                                           "commune_id", "population_density", "employee_density", "companies_density",
                                                                           "municipality_type", "ovgk"]]
+    acts["is_first"] = coerce_boolean_series(acts["is_first"], name="is_first")
+    acts["is_last"] = coerce_boolean_series(acts["is_last"], name="is_last")
     # pd.read_csv treats the literal string "None" (the fallback value written
     # by data.spatial.ovgk for unclassified locations) as a missing value by
     # default - restore it so it doesn't end up as a raw NaN in population.xml.
@@ -287,7 +290,7 @@ def execute(context):
 
     # 2. Destination id
 
-    homes = acts[acts["purpose"] == "home"]
+    homes = acts[acts["purpose"] == "home"].copy()
 
     homes["destination_id"] = ["home" + str(person_id) for person_id in homes["person_id"].values.tolist()]
 
@@ -295,7 +298,7 @@ def execute(context):
     homes["destination_x"] = homes["person_id"].map(home_coords["home_x"])
     homes["destination_y"] = homes["person_id"].map(home_coords["home_y"])
 
-    acts_not_home = acts[acts["purpose"]!="home"]
+    acts_not_home = acts[acts["purpose"] != "home"].copy()
     facility_locations = acts_not_home.groupby("destination_id")[["destination_x", "destination_y"]].first()
     acts_not_home["destination_x"] = acts_not_home["destination_id"].map(facility_locations["destination_x"])
     acts_not_home["destination_y"] = acts_not_home["destination_id"].map(facility_locations["destination_y"])
@@ -323,7 +326,7 @@ def execute(context):
     existing = set(zip(vehicles["owner_id"], vehicles["mode"]))
     df_missing = df_required[~df_required.apply(
         lambda r: (r["owner_id"], r["mode"]) in existing, axis=1
-    )]
+    )].copy()
 
     # Add missing vehicles (age=0 or whatever default)
     df_missing["age"]  = 0
@@ -418,6 +421,5 @@ def plot_income_class_distribution(swiss_shares, income_class_map, output_path =
         return None
 
     return fig, ax
-
 
 

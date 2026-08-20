@@ -7,6 +7,7 @@ import dmc.penalties.parking as parking_penalty
 
 from dmc.data.utils import merge_same_trips, adjust_weights
 from dmc.constants import constants
+from data.utils import coerce_boolean_series
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -82,7 +83,8 @@ def execute(context):
     for mode in ['car', 'car_passenger', 'pt', 'walk', 'bike']:   
         not_routed = df[f"{mode}_travel_time_min"].isna()     
         expectedModeUsed = f"expectedModeUsed_{mode.replace('_passenger','')}"
-        df[expectedModeUsed] = df[expectedModeUsed].astype(bool)        
+        df[expectedModeUsed] = coerce_boolean_series(
+            df[expectedModeUsed], name=expectedModeUsed)
         not_routed|= ~(df[expectedModeUsed])        
         df.loc[not_routed, f"{mode}_availability"] = False        
         logger.info(f"{mode} : removing {not_routed.sum()} availabilities")

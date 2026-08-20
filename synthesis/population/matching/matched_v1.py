@@ -272,7 +272,12 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
         mandatory_columns,
         minimum_observations=minimum_observations)
     
-    df_target = pd.merge(df_target, df_assignment, on=target_identifier)
+    df_target = pd.merge(
+        df_target,
+        df_assignment,
+        on=target_identifier,
+        validate="one_to_one",
+    )
 
     assert len(df_target) == len(df_assignment)
 
@@ -376,12 +381,18 @@ def execute(context):
     df_source              = df_source.rename(columns={"person_id": "mz_id"})
     df_source["canton_id"] = df_source["canton_id"].astype(int)
 
-    df_population        = context.stage("synthesis.population.sampled")
+    df_population        = context.stage("synthesis.population.sampled").copy()
     df_population["sex"] = df_population["sex"].astype(int)
     
     # add commute distance and work location type
     df_work       = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]]
-    df_population = pd.merge(df_population, df_work, on="person_id", how="left")
+    df_population = pd.merge(
+        df_population,
+        df_work,
+        on="person_id",
+        how="left",
+        validate="one_to_one",
+    )
     
     assert df_population.loc[df_population.employed == const.EMPLOYED, "work_location_type"].notna().all(), "Some employed agents are missing commute distance"
 
@@ -408,6 +419,13 @@ def execute(context):
     # this is now necessary to include, to make sure employement is well matched, otherwise we get errors in work location assignement
     df_source["employed"]     = df_source["employed"].astype(int)
     df_population["employed"] = (df_population["employed"] == const.EMPLOYED).astype(int)
+
+    # Model stages use string encodings for categorical features internally.
+    # Statistical matching compares values directly, so normalize both sides.
+    df_source["employment_status"] = pd.to_numeric(
+        df_source["employment_status"], errors="raise").astype("int64")
+    df_population["employment_status"] = pd.to_numeric(
+        df_population["employment_status"], errors="raise").astype("int64")
 
     df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0)  # presence of children under 12
 
@@ -579,7 +597,7 @@ def execute(context):
             df_matching_normal = pd.merge(
                 df_matching_normal,
                 df_target_band[["person_id", "mz_id"]].rename(columns={"mz_id": col}),
-                on="person_id", how="left"
+                on="person_id", how="left", validate="one_to_one"
             )
 
         # Ensure the expected column exists
@@ -599,7 +617,8 @@ def execute(context):
         if (population_selector.any()):
             df_source_center = df_source.merge(
                 context.stage("data.microcensus.activity_chains")[["person_id", "activity_chain"]],
-                how="left", right_on="person_id", left_on="mz_id"
+                how="left", right_on="person_id", left_on="mz_id",
+                validate="one_to_one",
             )
             df_source_center = df_source_center[df_source_center["activity_chain"] == "home"]
 
@@ -618,13 +637,18 @@ def execute(context):
             df_matching_center = pd.merge(
                 df_population_center[["person_id", "household_id"]],
                 df_target_center[["person_id", "mz_id"]],
-                on="person_id", how="left"
+                on="person_id", how="left", validate="one_to_one"
             )
 
             df_matching_center = df_matching_center.rename(columns={"mz_id": "mz_id_center"})
 
             removed_ids_list = removed_ids_list_center + removed_ids_list_normal
-            df_matching      = pd.merge(df_matching_normal, df_matching_center, on=["person_id", "household_id"])
+            df_matching = pd.merge(
+                df_matching_normal,
+                df_matching_center,
+                on=["person_id", "household_id"],
+                validate="one_to_one",
+            )
             df_matching["mz_id"] = df_matching["mz_id_normal"].combine_first(df_matching["mz_id_center"])
             del df_matching["mz_id_center"]
 
@@ -656,7 +680,7 @@ def execute(context):
         df_matching = pd.merge(
             df_population[["person_id"]],
             df_target[["person_id", "mz_id"]],
-            on="person_id", how="left"
+            on="person_id", how="left", validate="one_to_one"
         )
 
     # Wrap up

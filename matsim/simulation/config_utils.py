@@ -1,7 +1,39 @@
 from lxml import etree
+from numbers import Integral, Real
 import os.path
 import pandas as pd
 import gzip
+
+
+TRUE_VALUES = frozenset({"1", "true", "t", "yes", "y", "on"})
+FALSE_VALUES = frozenset({"0", "false", "f", "no", "n", "off", ""})
+
+
+def parse_boolean(value, option_name="value"):
+    """Parse booleans without treating non-empty strings such as ``"no"`` as true."""
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, Integral):
+        if value in (0, 1):
+            return bool(value)
+
+    if isinstance(value, Real):
+        if value in (0.0, 1.0):
+            return bool(value)
+
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in TRUE_VALUES:
+            return True
+        if normalized in FALSE_VALUES:
+            return False
+
+    raise ValueError(f"{option_name} must be a boolean value, got {value!r}")
+
+
+def java_boolean(value, option_name="value"):
+    return "true" if parse_boolean(value, option_name) else "false"
 
 
 def add_SBBPT_module(context):
@@ -141,7 +173,7 @@ def modify_PCEs(transit_vehicles_input_path, transit_vehicles_output_path, scali
 
 def get_mode_shares_calibration_args(context):
     additional_args = []
-    if context.config("calibrate_betas_in_matsim"):
+    if parse_boolean(context.config("calibrate_betas_in_matsim"), "calibrate_betas_in_matsim"):
         cache_path = context.working_directory
         bounds = """car.alpha_u:5.0,
                     walk.alpha_u:5.0,
@@ -165,7 +197,7 @@ def get_mode_shares_calibration_args(context):
                                 "--config:eqasim:termination.threshold", "0.0000001"
                                 ])
     else:
-        if context.config("calibrate_alphas_in_matsim"):
+        if parse_boolean(context.config("calibrate_alphas_in_matsim"), "calibrate_alphas_in_matsim"):
             level = context.config("alphaCalibration.level")
             global_shares_output_path, cantonal_shares_output_path = context.stage("data.microcensus.shares")
             
@@ -189,24 +221,35 @@ def get_mode_shares_calibration_args(context):
 
 
 def get_delays_args(context):
-    activate_tl_delays = context.config("activate_traffic_light_delays")
-    activate_unsignalized_delays = context.config("activate_unsignalized_intersections_delays")
+    activate_tl_delays = parse_boolean(
+        context.config("activate_traffic_light_delays"), "activate_traffic_light_delays")
+    activate_unsignalized_delays = parse_boolean(
+        context.config("activate_unsignalized_intersections_delays"),
+        "activate_unsignalized_intersections_delays",
+    )
     
     additional_args = ["--config:eqasim:flow.writeFlowInterval", "1000",
                        "--config:eqasim:intersectionDelays.writeDelayInterval", "1000"] #it takes too much space
     if activate_tl_delays or activate_unsignalized_delays:
         additional_args.extend([
             "--config:eqasim:intersectionDelays.activate", "true",
-            "--config:eqasim:intersectionDelays.activateTl", str(activate_tl_delays).lower(),
-            "--config:eqasim:intersectionDelays.activateUnsignalized", str(activate_unsignalized_delays).lower()
+            "--config:eqasim:intersectionDelays.activateTl", java_boolean(activate_tl_delays),
+            "--config:eqasim:intersectionDelays.activateUnsignalized", java_boolean(activate_unsignalized_delays)
         ])
     return additional_args  
 
 
 def get_network_calibration_args(context):
-    calibrate_network = context.config("network_calibration.activate")
-    calibrate_counts = context.config("network_calibration.calibrate_disutilities")
-    calibrate_freespeed = context.config("network_calibration.calibrate_freespeed")
+    calibrate_network = parse_boolean(
+        context.config("network_calibration.activate"), "network_calibration.activate")
+    calibrate_counts = parse_boolean(
+        context.config("network_calibration.calibrate_disutilities"),
+        "network_calibration.calibrate_disutilities",
+    )
+    calibrate_freespeed = parse_boolean(
+        context.config("network_calibration.calibrate_freespeed"),
+        "network_calibration.calibrate_freespeed",
+    )
     
     additional_args = []    
     if calibrate_network:
@@ -214,17 +257,22 @@ def get_network_calibration_args(context):
     
     additional_args.extend(
             ["--config:eqasim:networkCalibration.activate", "true",
-            "--config:eqasim:networkCalibration.calibrate", str(calibrate_network).lower(),
-            "--config:eqasim:networkCalibration.correctCapacities", str(context.config("correct_links_capacity")).lower(),
+            "--config:eqasim:networkCalibration.calibrate", java_boolean(calibrate_network),
+            "--config:eqasim:networkCalibration.correctCapacities", java_boolean(
+                context.config("correct_links_capacity"), "correct_links_capacity"),
             "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed"))]
     )
     
     objective = []
     if calibrate_counts:  
         objective.append("penalty")
-        if context.config("network_calibration.calibrate_agents_ascs"):
+        if parse_boolean(
+                context.config("network_calibration.calibrate_agents_ascs"),
+                "network_calibration.calibrate_agents_ascs"):
             objective.append("agent")
-        if context.config("network_calibration.calibrate_crossborder_population"):        
+        if parse_boolean(
+                context.config("network_calibration.calibrate_crossborder_population"),
+                "network_calibration.calibrate_crossborder_population"):
             objective.append("subpopulations")
              
     if calibrate_freespeed:
@@ -237,9 +285,16 @@ def get_network_calibration_args(context):
     return additional_args
 
 def network_calibration_files_paths(context):
-    calibrate_network = context.config("network_calibration.activate")
-    calibrate_counts = context.config("network_calibration.calibrate_disutilities")
-    calibrate_freespeed = context.config("network_calibration.calibrate_freespeed")
+    calibrate_network = parse_boolean(
+        context.config("network_calibration.activate"), "network_calibration.activate")
+    calibrate_counts = parse_boolean(
+        context.config("network_calibration.calibrate_disutilities"),
+        "network_calibration.calibrate_disutilities",
+    )
+    calibrate_freespeed = parse_boolean(
+        context.config("network_calibration.calibrate_freespeed"),
+        "network_calibration.calibrate_freespeed",
+    )
 
     args = []
     if calibrate_network and calibrate_counts:
@@ -270,4 +325,3 @@ def get_dmc_parameters_args(context):
     additional_args.extend(["--config:eqasim.costParametersPath", cost_parameters_path])
     additional_args.extend(["--config:eqasim.modeParametersPath", mode_parameters_path])
     return additional_args
-

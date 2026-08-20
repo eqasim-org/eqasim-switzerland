@@ -86,7 +86,12 @@ def impute_geo(df, df_zones, origin):
     df_geo = gpd.GeoDataFrame(df, crs = {"init" : "epsg:29183"})
     df_geo = df_geo.to_crs({"init" : "epsg:4326"})
     # only take necessary rows into account to speed up process
-    pt_zones = gpd.sjoin(df_geo[["person_id","person_trip_id","geometry"]], df_zones[["c_1_633_","geometry"]], op = "within",how="left")
+    pt_zones = gpd.sjoin(
+        df_geo[["person_id", "person_trip_id", "geometry"]],
+        df_zones[["c_1_633_", "geometry"]],
+        predicate="within",
+        how="left",
+    )
     # we ensure with the sjoin how="left" parameter, that GEOID is in the correct order
     df[target] = pt_zones["c_1_633_"]
 

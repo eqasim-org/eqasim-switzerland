@@ -3,7 +3,7 @@ import numpy as np
 import os
 import geopandas as gpd
 import shapely.geometry as geo
-from shapely import vectorized
+from shapely import contains_xy
 from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
 import logging
 from dmc.constants import constants
@@ -179,8 +179,8 @@ def execute(context):
     # within switzerland
     df_switzerland = context.stage("data.spatial.swiss_border")
     ch_polygon = df_switzerland.buffer(0).iloc[0] 
-    inside_origin = vectorized.contains(ch_polygon, df_trips["origin_x"].values, df_trips["origin_y"].values)
-    inside_destination = vectorized.contains(ch_polygon, df_trips["destination_x"].values, df_trips["destination_y"].values)
+    inside_origin = contains_xy(ch_polygon, df_trips["origin_x"].values, df_trips["origin_y"].values)
+    inside_destination = contains_xy(ch_polygon, df_trips["destination_x"].values, df_trips["destination_y"].values)
     df_trips["inside_ch"] = inside_origin&inside_destination    
     
     ### filter

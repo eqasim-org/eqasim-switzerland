@@ -3,9 +3,6 @@ import pandas as pd
 import geopandas as gpd
 import shapely.geometry as geo
 from sklearn.neighbors import KDTree
-
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning, message=".*GeoDataFrame.swapaxes.*")
 import logging
 
 logger = logging.getLogger("synpp")
@@ -102,8 +99,11 @@ def impute(context, df_points, df_zones, point_id_field, zone_id_field, fix_by_d
     assert (not zone_id_field in df_points.columns)
 
     df_original = df_points
-    df_points = df_points[[point_id_field, "geometry"]]
-    df_zones = df_zones[[zone_id_field, "geometry"]]
+    # GeoPandas 1.x preserves a named right index in the spatial-join output.
+    # These indices are not part of the result contract, so normalize them
+    # before joining instead of relying on the historical ``index_right`` name.
+    df_points = df_points[[point_id_field, "geometry"]].reset_index(drop=True)
+    df_zones = df_zones[[zone_id_field, "geometry"]].reset_index(drop=True)
 
     logger.info("Imputing %d %s zones onto %d %s points by spatial join..." 
           % (len(df_zones), zone_type, len(df_points), point_type))

@@ -47,7 +47,7 @@ def _reduce_to_2d(X, method="pca", random_seed=865836):
 
 
 def _prepare_labels(series, top_n=12):
-	s = series.astype(str).fillna("<na>")
+	s = series.astype("string").fillna("<na>").astype(str)
 	vc = s.value_counts(dropna=False)
 	keep = set(vc.head(int(top_n)).index.tolist())
 	return s.where(s.isin(keep), "other")
@@ -56,8 +56,8 @@ def _prepare_labels(series, top_n=12):
 def _compose_cross_label(df, col_a, col_b):
 	if col_a not in df.columns or col_b not in df.columns:
 		return None
-	a = df[col_a].astype(str).fillna("<na>")
-	b = df[col_b].astype(str).fillna("<na>")
+	a = df[col_a].astype("string").fillna("<na>").astype(str)
+	b = df[col_b].astype("string").fillna("<na>").astype(str)
 	return a + " | " + b
 
 
@@ -150,7 +150,7 @@ def _plot_age_with_category_shading(df, x_col, y_col, age_col, cat_col, out_path
 
 	data = df[[x_col, y_col, age_col, cat_col]].copy()
 	data[age_col] = pd.to_numeric(data[age_col], errors="coerce")
-	data[cat_col] = data[cat_col].astype(str).fillna("<na>")
+	data[cat_col] = data[cat_col].astype("string").fillna("<na>").astype(str)
 	data = data.dropna(subset=[x_col, y_col, age_col])
 	if len(data) == 0:
 		return
@@ -187,7 +187,7 @@ def _plot_age_with_category_shading(df, x_col, y_col, age_col, cat_col, out_path
 
 
 def _categorical_driver_score(Z, series, min_group_size=30):
-	s = series.astype(str).fillna("<na>")
+	s = series.astype("string").fillna("<na>").astype(str)
 	group_counts = s.value_counts(dropna=False)
 	valid_groups = set(group_counts[group_counts >= int(min_group_size)].index.tolist())
 	mask = s.isin(valid_groups).values
@@ -313,7 +313,7 @@ def _compute_activity_influence_table(df_attr, attr_cols, activity_cols, min_gro
 	for attr in attr_cols:
 		if attr not in df_attr.columns:
 			continue
-		s = df_attr[attr].astype(str).fillna("<na>")
+		s = df_attr[attr].astype("string").fillna("<na>").astype(str)
 		group_counts = s.value_counts(dropna=False)
 		valid_groups = group_counts[group_counts >= int(min_group_size)].index.tolist()
 		for g in valid_groups:

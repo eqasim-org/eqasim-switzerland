@@ -2,7 +2,7 @@ import json
 import os
 import shutil
 import pandas as pd
-from shapely import vectorized
+from shapely import contains_xy
 from matsim.readers import read_network
 from matsim.scenario.network.utils.network_attribute_assigner import NetworkAttributeAssigner
 from matsim.scenario.network.utils.capacity_corrector import CapacityCorrector
@@ -76,7 +76,7 @@ class NetworkHandler:
         if only_french_tolls:
             ch_polygon = self.context.stage("data.spatial.swiss_border").geometry.iloc[0].buffer(100)
             centroids = self.net.get_links_centroids()
-            outside_ch = ~vectorized.contains(ch_polygon, centroids.geometry.x.values, centroids.geometry.y.values)
+            outside_ch = ~contains_xy(ch_polygon, centroids.geometry.x.values, centroids.geometry.y.values)
             has_tolls = has_tolls & outside_ch
 
         price_per_km = max(self.context.config("average_tolls_prices_per_km"), 0.0)

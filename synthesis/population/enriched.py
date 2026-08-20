@@ -23,8 +23,8 @@ def configure(context):
 
 def execute(context):
     df_matched, unmatched_ids = context.stage("synthesis.population.matched")
-    df_sampled                = context.stage("synthesis.population.sampled")
-    df_mz                     = context.stage("data.microcensus.persons")
+    df_sampled                = context.stage("synthesis.population.sampled").copy()
+    df_mz                     = context.stage("data.microcensus.persons").copy()
     c                         = context.stage("data.constants")
 
     assert (len(df_matched) == len(df_sampled) - len(unmatched_ids))
@@ -32,7 +32,12 @@ def execute(context):
     if c.census == "statpop":
 
         # Attach matching information
-        df_persons = pd.merge(df_sampled, df_matched, on=["person_id", "household_id"])
+        df_persons = pd.merge(
+            df_sampled,
+            df_matched,
+            on=["person_id", "household_id"],
+            validate="one_to_one",
+        )
         # Attach household attributes through head of household
         # df_mz["mz_head_id"] = df_mz[["person_id"]]
         # df_persons = pd.merge(df_persons,
@@ -45,7 +50,7 @@ def execute(context):
                             df_mz[["mz_person_id",
                                     "bike_availability", "is_car_passenger",
                                     "is_outside_of_switzerland"]],
-                            on="mz_person_id", how="left"
+                            on="mz_person_id", how="left", validate="many_to_one"
                             )
         
         # recode bike availability to two values:
@@ -81,7 +86,8 @@ def execute(context):
     elif c.census == "are_synpop":
 
         # Attach matching information
-        df_persons = pd.merge(df_sampled, df_matched, on=["person_id"])
+        df_persons = pd.merge(
+            df_sampled, df_matched, on=["person_id"], validate="one_to_one")
 
         # Attach person attributes
         df_mz["mz_person_id"] = df_mz[["person_id"]]
@@ -101,7 +107,7 @@ def execute(context):
                                     "subscriptions_strecke_class",
                                     "is_car_passenger",
                                     "is_outside_of_switzerland"]],
-                            on="mz_person_id", how="left"
+                            on="mz_person_id", how="left", validate="many_to_one"
                             )
 
         # Reset children

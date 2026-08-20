@@ -7,6 +7,29 @@ import logging
 
 logger = logging.getLogger("synpp")
 
+IPU_KEY_DTYPES = {
+    "canton_id": "int64",
+    "sex": "int64",
+    "nationality": "int64",
+    "age_class": "int64",
+}
+
+
+def _normalize_ipu_keys(df, dataset_name):
+    missing = [column for column in IPU_KEY_DTYPES if column not in df.columns]
+    if missing:
+        raise KeyError(f"{dataset_name} is missing IPU key columns: {missing}")
+
+    result = df.copy()
+    for column, dtype in IPU_KEY_DTYPES.items():
+        try:
+            result[column] = pd.to_numeric(result[column], errors="raise").astype(dtype)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"{dataset_name}.{column} cannot be converted to {dtype}"
+            ) from error
+    return result
+
 def configure(context):
     context.stage("synthesis.population.models.caravailability")
     context.stage("data.statpop.projections.households")
@@ -21,8 +44,7 @@ def configure(context):
     
 
 def execute(context):
-    df_statpop = context.stage("synthesis.population.models.caravailability")
-    df_statpop = df_statpop.astype({"canton_id": int})
+    df_statpop = context.stage("synthesis.population.models.caravailability").copy()
     
     if context.config("enable_scaling"):
 
@@ -34,8 +56,33 @@ def execute(context):
         df_household_controls, hh_year = context.stage("data.statpop.projections.households")
         df_population_controls, pop_year = context.stage("data.statpop.projections.population")
 
-        assert hh_year == scaling_year
-        assert pop_year == scaling_year
+        df_statpop = _normalize_ipu_keys(df_statpop, "STATPOP")
+        df_population_controls = _normalize_ipu_keys(
+            df_population_controls, "population controls")
+        df_household_controls = df_household_controls.copy()
+        df_household_controls["canton_id"] = pd.to_numeric(
+            df_household_controls["canton_id"], errors="raise").astype("int64")
+
+        population_control_keys = list(IPU_KEY_DTYPES)
+        if df_population_controls.duplicated(population_control_keys).any():
+            raise ValueError("Population controls contain duplicate IPU cells")
+        if df_household_controls["canton_id"].duplicated().any():
+            raise ValueError("Household controls contain duplicate canton rows")
+        for controls, name in [
+            (df_population_controls, "population controls"),
+            (df_household_controls, "household controls"),
+        ]:
+            controls["weight"] = pd.to_numeric(controls["weight"], errors="raise")
+            if controls["weight"].isna().any() or not np.isfinite(controls["weight"]).all():
+                raise ValueError(f"{name} contain non-finite weights")
+        if (df_population_controls["weight"] < 0).any() or (df_household_controls["weight"] < 0).any():
+            raise ValueError("IPU control weights must be non-negative")
+
+        if hh_year != scaling_year or pop_year != scaling_year:
+            raise ValueError(
+                f"Projection years do not match scaling_year={scaling_year}: "
+                f"households={hh_year}, population={pop_year}"
+            )
 
         logger.info("Number of households in household controls : %d", df_household_controls["weight"].sum())
         logger.info("Number of persons in population controls : %d", df_population_controls["weight"].sum())
@@ -81,6 +128,11 @@ def execute(context):
 
         df_households = pd.concat(df_households)
         logger.info("Convergence rate: %f", np.round(np.mean(convergence), 3))
+        if not all(convergence):
+            failed = len(convergence) - sum(convergence)
+            raise RuntimeError(
+                f"IPU did not converge for {failed} of {len(convergence)} canton problems"
+            )
 
         # Generate new unique ids
         logger.info("Generating new household ids.")

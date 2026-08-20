@@ -26,6 +26,15 @@ def compute_group_filters(df, group_controls):
             for c in list(row.drop("weight").index):
                 f &= (df[c] == row[c])
 
+            if not f.any():
+                control_values = row.drop("weight").to_dict()
+                if row["weight"] == 0:
+                    continue
+                raise ValueError(
+                    "Group control has positive weight but no matching groups: "
+                    f"{control_values!r}"
+                )
+
             group_filter.append(f)
             group_filters.append(group_filter)
 
@@ -43,6 +52,15 @@ def compute_individual_filters(df, group_id, individual_controls):
             f_individual = np.ones(df.shape[0], dtype=bool)
             for c in list(row.drop("weight").index):
                 f_individual &= (df[c] == row[c])
+
+            if not f_individual.any():
+                control_values = row.drop("weight").to_dict()
+                if row["weight"] == 0:
+                    continue
+                raise ValueError(
+                    "Individual control has positive weight but no matching individuals: "
+                    f"{control_values!r}"
+                )
 
             individual_filter.append(f_individual)
 
@@ -92,6 +110,12 @@ class IPUSolver:
     def _group_adjust(df, group_filter, group_weight, group_id):
         # rescale expansion factors
         total = np.sum(df[group_filter][[group_id, "expansion_factor"]].drop_duplicates(group_id)["expansion_factor"])
+        if total <= 0:
+            if group_weight == 0:
+                return df
+            raise ValueError(
+                f"Cannot fit group control with weight {group_weight!r}: current support is {total!r}"
+            )
         r = group_weight / total
         df.loc[group_filter, "expansion_factor"] *= r
 
@@ -110,6 +134,12 @@ class IPUSolver:
     def _individual_adjust(df, f_individual, f_group, weight):
         # compute scaling factor
         total = np.sum(df[f_individual]["expansion_factor"])
+        if total <= 0:
+            if weight == 0:
+                return df
+            raise ValueError(
+                f"Cannot fit individual control with weight {weight!r}: current support is {total!r}"
+            )
         r = weight / total
 
         # assign to groups
@@ -141,6 +171,9 @@ class IPUSolver:
 
         if wmape > self.group_rel_tol or wmae > self.group_abs_tol:
             return False
+
+        if len(individual_controls) == 0:
+            return True
 
         # compute WMAPE and WMAE at individual level
         nominator_wmape = 0

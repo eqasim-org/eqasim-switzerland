@@ -1,6 +1,13 @@
 import os.path
 import matsim.runtime.eqasim as eqasim
-from matsim.simulation.config_utils import get_mode_shares_calibration_args, get_delays_args, get_network_calibration_args, get_dmc_parameters_args
+from matsim.simulation.config_utils import (
+    get_mode_shares_calibration_args,
+    get_delays_args,
+    get_network_calibration_args,
+    get_dmc_parameters_args,
+    java_boolean,
+    parse_boolean,
+)
 import logging
 
 logger = logging.getLogger("synpp")
@@ -36,8 +43,8 @@ def configure(context):
     context.config("minimum_speed", 1.0)
 
     context.config("useScheduleBasedTransport", default=True)
-    context.config("preventwaitingtoentertraffic", default = "no")
-    context.config("writeexperiencedplans", default = "no")
+    context.config("preventwaitingtoentertraffic", default=False)
+    context.config("writeexperiencedplans", default=False)
 
 
 def execute(context):
@@ -46,18 +53,16 @@ def execute(context):
         context.stage("matsim.simulation.prepare")
     )
     
-    if context.config("useScheduleBasedTransport"):
-        scheduleBasedPTconfig = "true"
-    else:
-        scheduleBasedPTconfig = "false"
+    scheduleBasedPTconfig = java_boolean(
+        context.config("useScheduleBasedTransport"), "useScheduleBasedTransport")
 
     preventwaitingtoentertraffic = "n"
-    if context.config("preventwaitingtoentertraffic"):
+    if parse_boolean(context.config("preventwaitingtoentertraffic"), "preventwaitingtoentertraffic"):
         preventwaitingtoentertraffic = "y"
         logger.info("Prevent waiting to enter traffic: %s", preventwaitingtoentertraffic)
 
     writeExperiencedPlans = "false"
-    if context.config("writeexperiencedplans"):
+    if parse_boolean(context.config("writeexperiencedplans"), "writeexperiencedplans"):
         writeExperiencedPlans = "true"
         logger.info("Write experienced plans: %s", writeExperiencedPlans)
 

@@ -1,6 +1,6 @@
 import pandas as pd
 import os
-from shapely import vectorized
+from shapely import contains_xy
 import logging 
 
 logger = logging.getLogger("synpp")
@@ -118,8 +118,8 @@ def load_clean_trips(context):
     # keep only trips within switzerland
     df_switzerland = context.stage("data.spatial.swiss_border")
     ch_polygon = df_switzerland.buffer(0).iloc[0] 
-    inside_origin = vectorized.contains(ch_polygon, trips["origin_x"].values, trips["origin_y"].values)
-    inside_destination = vectorized.contains(ch_polygon, trips["destination_x"].values, trips["destination_y"].values)
+    inside_origin = contains_xy(ch_polygon, trips["origin_x"].values, trips["origin_y"].values)
+    inside_destination = contains_xy(ch_polygon, trips["destination_x"].values, trips["destination_y"].values)
     within_ch = inside_origin&inside_destination 
     trips = trips[within_ch].reset_index(drop=True)
 

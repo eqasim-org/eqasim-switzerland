@@ -2,14 +2,6 @@ import numpy as np
 import pandas as pd
 import pyproj
 import logging
-import warnings
-
-try:
-    from pandas.errors import SettingWithCopyWarning
-except ImportError:
-    from pandas.errors import ChainedAssignmentError as SettingWithCopyWarning
-
-warnings.filterwarnings("ignore", category=SettingWithCopyWarning)
 
 logger = logging.getLogger("synpp:Mz21 trips")
 

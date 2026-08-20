@@ -1,5 +1,5 @@
 import geopandas as gpd
-from shapely import vectorized
+from shapely import contains_xy
 import numpy as np
 import logging
 
@@ -50,10 +50,10 @@ def execute(context):
     if buffered_border.is_empty:
         raise ValueError("Buffered border is empty; cannot filter nodes using a -10km border buffer")
 
-    within_buffered_border_origins = vectorized.contains(
+    within_buffered_border_origins = contains_xy(
         buffered_border, origin_nodes_gdf.geometry.x.values, origin_nodes_gdf.geometry.y.values
     )
-    within_buffered_border_destinations = vectorized.contains(
+    within_buffered_border_destinations = contains_xy(
         buffered_border, destination_nodes_gdf.geometry.x.values, destination_nodes_gdf.geometry.y.values
     )
 

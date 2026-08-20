@@ -53,7 +53,7 @@ def execute(context):
 
     elif isinstance(perimeter, str):
         if perimeter.endswith(".shp") or perimeter.endswith(".gpkg"):
-            target_region = gpd.read_file(perimeter).to_crs("epsg:2056").geometry.apply(make_valid).unary_union
+            target_region = gpd.read_file(perimeter).to_crs("epsg:2056").geometry.apply(make_valid).union_all()
         else:
             raise ValueError("Unsupported file format: %s" % perimeter)
 
@@ -61,7 +61,7 @@ def execute(context):
         geometries = []
         for path in perimeter:
             if path.endswith(".shp") or path.endswith(".gpkg"):
-                geometries.append(gpd.read_file(path).to_crs("epsg:2056").geometry.apply(make_valid).unary_union)
+                geometries.append(gpd.read_file(path).to_crs("epsg:2056").geometry.apply(make_valid).union_all())
             else:
                 raise ValueError("Unsupported file format: %s" % path)
         target_region = unary_union(geometries)

@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from data.utils import coerce_boolean_series
 
 class ExternalPopulationConstants:
     canton_name       = "fr"
@@ -29,7 +30,7 @@ class ExternalPopulationConstants:
         for col in subscription_cols:
             if col not in df.columns:
                 df[col] = False
-            df[col] = df[col].astype(bool)
+            df[col] = coerce_boolean_series(df[col], name=col)
 
         df = df[subscription_cols + ["age"]].reset_index(drop = True)
         

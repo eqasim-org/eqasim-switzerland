@@ -279,7 +279,7 @@ def execute(context):
     df_mz_persons.loc[employed & (df_mz_persons["commute_distance"] < 10), "work_location_type"] = "remote" # small errors might come from coordinate conversion
 
     # Compute distance from home to Swiss border using household home coordinates
-    swiss_border = context.stage("data.spatial.swiss_border").copy().unary_union
+    swiss_border = context.stage("data.spatial.swiss_border").copy().geometry.union_all()
     swiss_border = swiss_border.simplify(tolerance=100)
     swiss_border_boundary = swiss_border.boundary
 

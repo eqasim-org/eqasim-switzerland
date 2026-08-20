@@ -651,7 +651,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 5. POPULATION: distance from home to Swiss border
     # -------------------------------------------------------------------
-    swiss_border = context.stage("data.spatial.swiss_border").copy().unary_union
+    swiss_border = context.stage("data.spatial.swiss_border").copy().geometry.union_all()
     swiss_border = swiss_border.simplify(tolerance=100)
     border_line  = swiss_border.boundary
 

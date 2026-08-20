@@ -3,15 +3,9 @@ import pandas as pd
 import pyproj
 import geopandas as gpd
 
-import warnings
-try:
-    from pandas.errors import SettingWithCopyWarning
-except ImportError:
-    from pandas.errors import ChainedAssignmentError as SettingWithCopyWarning
 import logging
 
 logger = logging.getLogger("synpp")
-warnings.filterwarnings("ignore", category=SettingWithCopyWarning)
 
 
 def configure(context):
@@ -842,7 +836,7 @@ def execute(context):
         (df_mz_trips["origin_y"] - df_mz_trips["destination_y"])**2)
     
     # Identify activity chains completely outside of Switzerland
-    swiss_border = context.stage("data.spatial.swiss_border").copy().unary_union
+    swiss_border = context.stage("data.spatial.swiss_border").copy().geometry.union_all()
     swiss_border = swiss_border.simplify(tolerance = 100) # simplify the border's shape to make computations easier
 
     # Compute distance from home to Swiss border for each person

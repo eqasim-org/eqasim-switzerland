@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 import logging 
-from shapely import vectorized
+from shapely import contains_xy
 
 logger = logging.getLogger("synpp")
 
@@ -37,8 +37,8 @@ def execute(context):
     # keep only within switzerland
     df_switzerland = context.stage("data.spatial.swiss_border").geometry.simplify(2000).iloc[0]
     ch_polygon = df_switzerland.buffer(-10_000)  # inward buffer of 10km
-    inside_origin = vectorized.contains(ch_polygon, df_trips["origin_x"].values, df_trips["origin_y"].values)
-    inside_destination = vectorized.contains(ch_polygon, df_trips["destination_x"].values, df_trips["destination_y"].values)
+    inside_origin = contains_xy(ch_polygon, df_trips["origin_x"].values, df_trips["origin_y"].values)
+    inside_destination = contains_xy(ch_polygon, df_trips["destination_x"].values, df_trips["destination_y"].values)
     df_trips = df_trips[inside_origin&inside_destination]
 
     # keep departure time between [0, 23]

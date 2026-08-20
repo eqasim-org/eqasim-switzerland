@@ -259,7 +259,7 @@ def execute(context):
 
         # categorical clean
         for c in cat_cols:
-            df[c] = df[c].astype(str).fillna("Missing")
+            df[c] = df[c].astype("string").fillna("Missing").astype(str)
 
         # clip ratio
         df["N_drivers_license_per_adult"] = df["N_drivers_license_per_adult"].clip(0.0, 1.0)
@@ -370,10 +370,10 @@ def execute(context):
         if canton_id is not None:
             # ensure we can filter by canton even if group_col == canton_id
             if "canton_id" not in s.columns:
-                s["canton_id"] = hh_s["canton_id"].astype(str).fillna("Missing")
+                s["canton_id"] = hh_s["canton_id"].astype("string").fillna("Missing").astype(str)
             s = s[s["canton_id"].astype(str) == str(canton_id)]
 
-        s[group_col] = s[group_col].astype(str).fillna("Missing")
+        s[group_col] = s[group_col].astype("string").fillna("Missing").astype(str)
 
         s_mass = (
             s.groupby([group_col, "HH_CAR_OWN_class"])["hh_weight"]
@@ -398,10 +398,10 @@ def execute(context):
 
         if canton_id is not None:
             if "canton_id" not in p.columns:
-                p["canton_id"] = hh_p["canton_id"].astype(str).fillna("Missing")
+                p["canton_id"] = hh_p["canton_id"].astype("string").fillna("Missing").astype(str)
             p = p[p["canton_id"].astype(str) == str(canton_id)]
 
-        p[group_col] = p[group_col].astype(str).fillna("Missing")
+        p[group_col] = p[group_col].astype("string").fillna("Missing").astype(str)
 
         p_cnt = p.groupby([group_col, pop_ycol]).size().rename("n").reset_index()
         p_tot = p.groupby(group_col).size().rename("n_tot").reset_index()

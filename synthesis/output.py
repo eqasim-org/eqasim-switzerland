@@ -5,6 +5,59 @@ import os
 import sqlite3
 import math
 
+from data.utils import coerce_boolean_series
+
+
+HOUSEHOLD_DTYPES = {
+    "household_id": "int64",
+    "number_of_cars_class": "int64",
+    "income": "int64",
+    "statpop_household_id": "int64",
+}
+
+PERSON_DTYPES = {
+    "person_id": "int64",
+    "household_id": "int64",
+    "age": "int64",
+    "employed": "int64",
+    "sex": "int64",
+    "has_driving_license": "int64",
+    "pt_subscription": "int64",
+    "mz_person_id": "int64",
+    "canton_id": "int64",
+}
+
+ACTIVITY_DTYPES = {
+    "person_id": "int64",
+    "household_id": "int64",
+    "activity_index": "int64",
+    "preceding_trip_index": "int64",
+    "following_trip_index": "int64",
+    "start_time": "float64",
+    "end_time": "float64",
+    "is_last": "bool",
+}
+
+TRIP_DTYPES = {
+    "person_id": "int64",
+    "trip_index": "int64",
+    "preceding_activity_index": "int64",
+    "following_activity_index": "int64",
+    "departure_time": "float64",
+    "arrival_time": "float64",
+}
+
+
+def _cast_export_columns(df, dtypes, dataset_name):
+    missing = [column for column in dtypes if column not in df.columns]
+    if missing:
+        raise KeyError(f"{dataset_name} is missing required export columns: {missing}")
+
+    try:
+        return df.astype(dtypes)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Could not normalize {dataset_name} export dtypes") from error
+
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -56,7 +109,9 @@ def execute(context):
     output_prefix = context.config("output_prefix")
 
     # Prepare households
-    df_households = context.stage("synthesis.population.enriched").rename(columns = { "income_class": "income"}).drop_duplicates("household_id")
+    df_households = (context.stage("synthesis.population.enriched").copy()
+        .rename(columns={"income_class": "income"})
+        .drop_duplicates("household_id"))
     df_households = df_households[[
         "household_id",
         "number_of_cars_class",
@@ -64,32 +119,40 @@ def execute(context):
         "income",
         "statpop_household_id"
     ]]
+    df_households = _cast_export_columns(df_households, HOUSEHOLD_DTYPES, "households")
 
     df_households.to_csv("%s/%shouseholds.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
 
     # Prepare persons
-    df_persons = context.stage("synthesis.population.models.subscriptions").rename(columns = { "driving_license": "has_driving_license" })
+    df_persons = (context.stage("synthesis.population.models.subscriptions").copy()
+        .rename(columns={"driving_license": "has_driving_license"}))
     df_persons = df_persons[[
         "person_id", "household_id",
         "age", "employed", "sex","municipality_type",
         "has_driving_license","pt_subscription",
         "mz_person_id", "canton_id"
     ]]
+    df_persons = _cast_export_columns(df_persons, PERSON_DTYPES, "persons")
+
+    if df_persons["person_id"].duplicated().any():
+        raise ValueError("persons export contains duplicate person_id values")
 
     df_persons.to_csv("%s/%spersons.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
 
     # Prepare activities
-    df_activities = context.stage("synthesis.population.activities")
+    df_activities = context.stage("synthesis.population.activities").copy()
     df_activities["following_trip_index"] = df_activities["activity_index"]
     
-    df_activities = pd.merge(df_activities, df_persons[["person_id", "household_id"]], on = "person_id")
+    df_activities = pd.merge(
+        df_activities,
+        df_persons[["person_id", "household_id"]],
+        on="person_id",
+        validate="many_to_one",
+    )
 
-    df_activities["preceding_trip_index"] = df_activities["following_trip_index"].shift(1)
-    df_activities.loc[df_activities["activity_index"]==0, "preceding_trip_index"] = -1    
-
-    # I add filna(-1) in the next link, because something very rare can happen, which is: one person without any trips (only one activity) 
-    # is located in the first row of the dataframe. this person would have Nan value as proceding_trip_index and thus through an error.
-    df_activities["preceding_trip_index"] = df_activities["preceding_trip_index"].fillna(-1).astype(int) 
+    # Trip/activity indices are local to a person. Deriving this directly avoids
+    # relying on dataframe row order (and on shift's temporary float dtype).
+    df_activities["preceding_trip_index"] = df_activities["activity_index"] - 1
 
     df_activities = df_activities[[
         "person_id", "household_id", "activity_index",
@@ -97,12 +160,16 @@ def execute(context):
         "purpose", "start_time", "end_time",
         "is_last"
     ]]
+    df_activities["is_last"] = coerce_boolean_series(
+        df_activities["is_last"], name="activities.is_last"
+    )
+    df_activities = _cast_export_columns(df_activities, ACTIVITY_DTYPES, "activities")
 
     df_activities.to_csv("%s/%sactivities.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
     print("Finished writing activities!")
 
     # Prepare trips
-    df_trips = context.stage("synthesis.population.trips")
+    df_trips = context.stage("synthesis.population.trips").copy()
 
     df_trips["preceding_activity_index"] = df_trips["trip_index"]
     df_trips["following_activity_index"] = df_trips["trip_index"] + 1
@@ -113,6 +180,7 @@ def execute(context):
         "departure_time", "arrival_time", "mode",
         "preceding_purpose", "following_purpose"
     ]]
+    df_trips = _cast_export_columns(df_trips, TRIP_DTYPES, "trips")
 
     df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
     print("Starting to create activities gpkg data.")
@@ -120,7 +188,10 @@ def execute(context):
     #Prepare spatial data sets
     df_locations = context.stage("synthesis.population.spatial.locations")[[
        "person_id", "activity_index", "geometry"
-    ]]
+    ]].copy()
+
+    if df_locations.duplicated(["person_id", "activity_index"]).any():
+        raise ValueError("locations export contains duplicate person/activity indices")
 
     #Set a MultiIndex on both (avoids reshuffling all columns)
     df_locations  = df_locations.set_index(["person_id", "activity_index"])
@@ -155,6 +226,7 @@ def execute(context):
     df_spatial["geometry"] = [geo.LineString(od) for od in zip(df_spatial["home_geometry"], df_spatial["work_geometry"])]
 
     df_spatial = df_spatial.drop(columns = ["home_geometry", "work_geometry"])
+    df_spatial = gpd.GeoDataFrame(df_spatial, geometry="geometry", crs="EPSG:2056")
     path = "%s/%scommutes.gpkg" % (output_path, output_prefix)
     df_spatial.to_file(path, driver = "GPKG")
     clean_gpkg(path)
@@ -192,5 +264,3 @@ def execute(context):
     path = "%s/%strips.gpkg" % (output_path, output_prefix)
     df_spatial.to_file(path, driver = "GPKG")
     clean_gpkg(path)
-
-

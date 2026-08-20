@@ -4,7 +4,7 @@ import h3
 from shapely.geometry import Polygon
 import logging
 import numpy as np
-from shapely import vectorized
+from shapely import contains_xy
 logger = logging.getLogger("synpp")
 
 """
@@ -142,9 +142,9 @@ def to_geo_levels(df: gpd.GeoDataFrame, geometry_col: str = 'geometry', levels=H
 def within_ch(context, df, cols1=["origin_x", "origin_y"], cols2=None):
     df_switzerland = context.stage("data.spatial.swiss_border")
     ch_polygon = df_switzerland.buffer(0).iloc[0] 
-    inside_ch = vectorized.contains(ch_polygon, df[cols1[0]].values, df[cols1[1]].values)
+    inside_ch = contains_xy(ch_polygon, df[cols1[0]].values, df[cols1[1]].values)
     if cols2 is not None:
-        destination_inside_ch = vectorized.contains(ch_polygon, df[cols2[0]].values, df[cols2[1]].values)
+        destination_inside_ch = contains_xy(ch_polygon, df[cols2[0]].values, df[cols2[1]].values)
         inside_ch = inside_ch & destination_inside_ch
     return inside_ch
 
@@ -262,7 +262,7 @@ def execute(context):
 
     # Merge level geometries across all datasets
     logger.info("H3: \t Merging level geometries across all datasets...")
-    swiss_border = context.stage("data.spatial.swiss_border").to_crs("EPSG:2056").unary_union
+    swiss_border = context.stage("data.spatial.swiss_border").to_crs("EPSG:2056").geometry.union_all()
     merged_level_geoms = {}
     for i in range(len(H3_LEVELS)):        
         all_hex = set()

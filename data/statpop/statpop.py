@@ -52,12 +52,22 @@ def execute(context):
     logger.info("%d persons without permanent residence filtered out.", initial_count - final_count)
 
     # Merge STATPOP persons and households into a list of persons with household attributes
-    df = pd.merge(df_persons, df_link, on=("person_id", "municipality_id"))
-    df = pd.merge(df, df_households, on="household_id") # This removes the great majority of collective housing residents, there are only ~700 left at this point.
+    df = pd.merge(
+        df_persons,
+        df_link,
+        on=("person_id", "municipality_id"),
+        validate="one_to_one",
+    )
+    df = pd.merge(
+        df,
+        df_households,
+        on="household_id",
+        validate="many_to_one",
+    ) # This removes the great majority of collective housing residents, there are only ~700 left at this point.
 
     # Impute the houeshold size for each STATPOP person
     df_size = df.groupby("household_id").size().reset_index(name="household_size")
-    df = pd.merge(df, df_size, on="household_id")
+    df = pd.merge(df, df_size, on="household_id", validate="many_to_one")
 
     # Only allow houesholds under a certain size
     initial_count = len(df)
@@ -69,7 +79,12 @@ def execute(context):
     df_filter = df[["household_id", "age"]].groupby("household_id").max().reset_index()
     df_filter.loc[:, "all_under_age"] = df_filter["age"] < c.MINIMUM_AGE_PER_HOUSEHOLD
 
-    df = pd.merge(df, df_filter[["household_id", "all_under_age"]], on="household_id")
+    df = pd.merge(
+        df,
+        df_filter[["household_id", "all_under_age"]],
+        on="household_id",
+        validate="many_to_one",
+    )
     df = df[~df["all_under_age"]]
 
     # This mapping comes Strukturerhebung (as it is the same as in STATPOP) Codelist
@@ -138,7 +153,8 @@ def execute(context):
     del df["municipality_id"]
     df = pd.merge(
         df, df_spatial[["person_id", "zone_id", "municipality_type", "municipality_id", "quarter_id", "canton_id", "district_id"]],
-        on="person_id"
+        on="person_id",
+        validate="one_to_one",
     )
 
     df["home_zone_id"] = df["zone_id"]
@@ -161,7 +177,13 @@ def execute(context):
     # Impute OV Guteklasse
     df_ovgk = context.stage("data.spatial.ovgk")
     df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
-    df = pd.merge(df, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
+    df = pd.merge(
+        df,
+        df_spatial[["person_id", "ovgk"]],
+        on=["person_id"],
+        how="left",
+        validate="one_to_one",
+    )
 
     # Save original statpop person and household ids
     df["statpop_person_id"]    = df["person_id"].astype(int)
@@ -189,7 +211,8 @@ def execute(context):
     df = df.merge(
         hh[["household_id", "hh_oldest_age"]],
         on="household_id",
-        how="left"
+        how="left",
+        validate="many_to_one",
     )
 
     # Wrap everything up

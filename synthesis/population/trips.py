@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+from data.utils import coerce_boolean_series
+
 """
 This stage attaches all trip relevant information to the synthetic population.
 """
@@ -27,19 +29,26 @@ def execute(context):
     if c.census == "statpop":
         df_persons = context.stage("synthesis.population.enriched")[[
             "person_id", "mz_person_id", "age", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id"
-        ] + BORDER_MATCH_COLUMNS]
+        ] + BORDER_MATCH_COLUMNS].copy()
 
     elif c.census == "are_synpop":
         df_persons = context.stage("synthesis.population.enriched")[[
             "person_id", "mz_person_id", "age_class", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id"
-        ] + BORDER_MATCH_COLUMNS]
+        ] + BORDER_MATCH_COLUMNS].copy()
 
     df_trips = pd.DataFrame(context.stage("data.microcensus.trips")[0], copy=True)[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "purpose", "origin_purpose"
     ]]
     df_trips.columns = ["mz_person_id", "trip_id", "departure_time", "arrival_time", "mode", "following_purpose", "preceding_purpose"]
 
+    if df_persons["person_id"].duplicated().any():
+        raise ValueError("enriched population contains duplicate person_id values")
+    if df_trips.duplicated(["mz_person_id", "trip_id"]).any():
+        raise ValueError("microcensus trips contain duplicate person/trip keys")
+
     df_trips = pd.merge(df_persons, df_trips, on="mz_person_id")
+    if df_trips.duplicated(["person_id", "trip_id"]).any():
+        raise ValueError("trip attachment produced duplicate synthetic person/trip keys")
 
     # Children do not have any trips from the microcensus
     f = np.isnan(df_trips["mz_person_id"])
@@ -97,14 +106,18 @@ def execute(context):
 
     # Delete trips for truck drivers and agents not in Switzerland
     initial_length = len(df_trips)
-    df_trips       = df_trips[~df_trips["is_truck_driver"]]
+    is_truck_driver = coerce_boolean_series(
+        df_trips["is_truck_driver"], name="is_truck_driver")
+    df_trips = df_trips[~is_truck_driver]
     final_length   = len(df_trips)
     share          = round((final_length - initial_length) / initial_length * 100, 2)
 
     print(f"Removed {initial_length - final_length} ({share}%) trips (truck drivers)")
 
     initial_length = len(df_trips)
-    df_trips       = df_trips[~df_trips["is_outside_of_switzerland"].astype("boolean").fillna(False).astype(bool)]
+    is_outside = coerce_boolean_series(
+        df_trips["is_outside_of_switzerland"], name="is_outside_of_switzerland")
+    df_trips = df_trips[~is_outside]
     final_length   = len(df_trips)
     share          = round((final_length - initial_length) / initial_length * 100, 2)
 
@@ -118,14 +131,19 @@ def execute(context):
     # reading that match here instead of sampling independently keeps it
     # consistent with matsim/scenario/population.py's crossBorderOD attribute
     # and with the location synthesis.population.spatial.locations assigns.
-    df_trips_noncb = df_trips[~df_trips["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)].copy()
+    is_crossing = coerce_boolean_series(
+        df_trips["is_crossing_the_border"], name="is_crossing_the_border")
+    df_trips_noncb = df_trips[~is_crossing].copy()
     df_trips_noncb["destination_country_raw"] = None
     df_trips_noncb["interview_geometry_point"] = None
     df_trips_noncb["interview_point_id"]       = None
 
-    is_cb_person = df_persons["is_crossing_the_border"].astype("boolean").fillna(False).astype(bool)
-    is_cb_person &= ~df_persons["is_truck_driver"].astype("boolean").fillna(False).astype(bool)
-    is_cb_person &= ~df_persons["is_outside_of_switzerland"].astype("boolean").fillna(False).astype(bool)
+    is_cb_person = coerce_boolean_series(
+        df_persons["is_crossing_the_border"], name="is_crossing_the_border")
+    is_cb_person &= ~coerce_boolean_series(
+        df_persons["is_truck_driver"], name="is_truck_driver")
+    is_cb_person &= ~coerce_boolean_series(
+        df_persons["is_outside_of_switzerland"], name="is_outside_of_switzerland")
     is_cb_person &= df_persons["cross_border_person_id"].notna()
 
     df_cb_persons = df_persons.loc[is_cb_person, ["person_id"] + BORDER_MATCH_COLUMNS].copy()

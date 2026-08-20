@@ -4,6 +4,8 @@ from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassif
 from catboost import CatBoostClassifier
 import logging
 
+from data.utils import coerce_boolean_series
+
 logger = logging.getLogger("synpp")
 
 # ---------------------------------------------------------
@@ -118,7 +120,8 @@ def commute_from_location_df(pop_loc_df, pop_df, how="min"):
     loc["dest_y"] = [t[1] for t in xy]
 
     home = pop_df[["person_id", "home_x", "home_y"]].copy()
-    loc = loc.merge(home, on="person_id", how="left")
+    loc = loc.merge(
+        home, on="person_id", how="left", validate="many_to_one")
 
     loc["commute_km"] = compute_commute_km_cartesian(
         loc["home_x"].values, loc["home_y"].values,
@@ -188,7 +191,7 @@ def execute(context):
         "subscriptions_other",
     ]
     for c in cols:
-        survey_df[c] = survey_df[c].fillna(False).astype(bool)
+        survey_df[c] = coerce_boolean_series(survey_df[c], name=c)
 
     ga  = survey_df["subscriptions_ga"]
     ht  = survey_df["subscriptions_halbtax"]
@@ -272,8 +275,10 @@ def execute(context):
     else:
         s_edu = pd.DataFrame(columns=["person_id", "commute_edu_raw"])
 
-    survey_df = survey_df.merge(s_work, on="person_id", how="left")
-    survey_df = survey_df.merge(s_edu,  on="person_id", how="left")
+    survey_df = survey_df.merge(
+        s_work, on="person_id", how="left", validate="one_to_one")
+    survey_df = survey_df.merge(
+        s_edu, on="person_id", how="left", validate="one_to_one")
 
     # convert to km
     if SURVEY_COMMUTE_IN_METERS:
@@ -294,8 +299,12 @@ def execute(context):
     pop_work_s = commute_from_location_df(pop_locations_work, pop_df, how="min")
     pop_edu_s  = commute_from_location_df(pop_locations_education, pop_df, how="min")
 
-    pop_df = pop_df.merge(pop_work_s.rename("commute_work_km"), left_on="person_id", right_index=True, how="left")
-    pop_df = pop_df.merge(pop_edu_s.rename("commute_edu_km"),  left_on="person_id", right_index=True, how="left")
+    pop_df = pop_df.merge(
+        pop_work_s.rename("commute_work_km"),
+        left_on="person_id", right_index=True, how="left", validate="one_to_one")
+    pop_df = pop_df.merge(
+        pop_edu_s.rename("commute_edu_km"),
+        left_on="person_id", right_index=True, how="left", validate="one_to_one")
 
     pop_df["commute_work_km"] = pd.to_numeric(pop_df["commute_work_km"], errors="coerce")
     pop_df["commute_edu_km"]  = pd.to_numeric(pop_df["commute_edu_km"], errors="coerce")
@@ -318,7 +327,7 @@ def execute(context):
         )
     else:
         # fallback fixed km cutoffs if too few commuters in training sample
-        q33, q66 = 5.0, 15.0
+        q30, q95 = 5.0, 15.0
 
     def commute_class_from_km(km):
         if not np.isfinite(km) or km <= 0:
@@ -366,7 +375,8 @@ def execute(context):
     # merge onto survey_df by: survey_df.person_id == survey_hh_df.household_id
     survey_df = survey_df.merge(
         hh_agg[["household_id", "N_adults_survey", "N_drivers_license_adults", "N_drivers_license_per_adult"]],
-        left_on="person_id", right_on="household_id", how="left"
+        left_on="person_id", right_on="household_id", how="left",
+        validate="one_to_one",
     ).drop(columns=["household_id"])
 
     # -------------------------------------------------------------------
@@ -503,7 +513,7 @@ def execute(context):
 
     for df in (survey_df, pop_df):
         df["age_bin_16plus"] = pd.cut(df["age"], bins=age_bins_16p, labels=age_labels_16p, right=False)
-        df["age_bin_16plus"] = df["age_bin_16plus"].astype(str).fillna("Missing")
+        df["age_bin_16plus"] = df["age_bin_16plus"].astype("string").fillna("Missing").astype(str)
 
     if "N_children_under_18" in survey_df.columns:
         survey_df["presence_of_children_under_18"] = (pd.to_numeric(survey_df["N_children_under_18"], errors="coerce").fillna(0) > 0).astype(int)
@@ -534,7 +544,7 @@ def execute(context):
     # clean categoricals
     for df in (survey_df, pop_df):
         for c in cat_cols:
-            df[c] = df[c].astype(str).fillna("Missing")
+            df[c] = df[c].astype("string").fillna("Missing").astype(str)
 
     # clean numerics
     for df in (survey_df, pop_df):
@@ -569,7 +579,7 @@ def execute(context):
     # ensure proper types for youth-only cols
     for df in (survey_df, pop_df):
         for c in cat_cols_youth:
-            df[c] = df[c].astype(str).fillna("Missing")
+            df[c] = df[c].astype("string").fillna("Missing").astype(str)
         for c in num_cols_youth:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
 
@@ -742,10 +752,10 @@ def execute(context):
 
         # filter canton if requested (works even if group_col == "canton_id")
         if canton_id is not None:
-            s["canton_id"] = s["canton_id"].astype(str).fillna("Missing")
+            s["canton_id"] = s["canton_id"].astype("string").fillna("Missing").astype(str)
             s = s[s["canton_id"] == str(canton_id)]
 
-        s[group_col] = s[group_col].astype(str).fillna("Missing")
+        s[group_col] = s[group_col].astype("string").fillna("Missing").astype(str)
 
         s_mass = (
             s.groupby([group_col, SURVEY_TARGET_COL])[SURVEY_WEIGHT_COL]
@@ -768,10 +778,10 @@ def execute(context):
         p = pop_df.loc[pop_mask, p_cols].copy()
 
         if canton_id is not None:
-            p["canton_id"] = p["canton_id"].astype(str).fillna("Missing")
+            p["canton_id"] = p["canton_id"].astype("string").fillna("Missing").astype(str)
             p = p[p["canton_id"] == str(canton_id)]
 
-        p[group_col] = p[group_col].astype(str).fillna("Missing")
+        p[group_col] = p[group_col].astype("string").fillna("Missing").astype(str)
 
         p_cnt = p.groupby([group_col, pop_ycol]).size().rename("n").reset_index()
         p_tot = p.groupby(group_col).size().rename("n_tot").reset_index()
@@ -929,5 +939,11 @@ def execute(context):
        'income_class', 'is_crossing_the_border', 'destination_country_raw']
     pop_df = pop_df[keep_columns]
     pop_df = pop_df.rename(columns={"PT_SUB_draw": "pt_subscription"})
+
+    for column in [
+        "person_id", "household_id", "sex", "canton_id", "nationality",
+        "sp_region", "income_class", "marital_status", "mz_person_id",
+    ]:
+        pop_df[column] = pd.to_numeric(pop_df[column], errors="raise").astype("int64")
 
     return pop_df
