@@ -198,7 +198,7 @@ def preprocess_data(df: pd.DataFrame, ignore_car_passenger: bool):
     df["region_2"] = (df["ms_region"] == 2).astype(int)
     for column in ["short_distance", "long_distance", "very_long_distance", "car_ownership_ratio"]:
         df[column] = df[column].astype(float)
-
+    
     return df.drop(columns=[
         "person_id", "trip_id", "home_municipality", "origin_municipality",
         "sp_region", "ms_region", "ovgk", "pt_egress_time_min", "income_class",
@@ -223,7 +223,7 @@ def define_parameters(
         item.name: item for item in [
             p("lambda_cost_distance", -0.08, upper=max_disutility),
             p("lambda_cost_income", 0.0, upper=0.0, fixed=not use_income),
-            p("lambda_car_travel_time", 1.0, min_lambda, max_lambda, fixed=True),
+            p("lambda_car_travel_time",0.7, min_lambda, max_lambda, fixed=False),
             p("lambda_pt_in_vehicle_time", 1.0, min_lambda, max_lambda, fixed=True),
             p("lambda_pt_access_egress_time", 0.593 if exponent_fixed else 1.0, min_lambda, max_lambda, exponent_fixed),
             p("lambda_pt_transfers", 1.187 if exponent_fixed else 1.0, min_lambda, max_lambda, exponent_fixed),
