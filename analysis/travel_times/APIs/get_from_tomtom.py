@@ -3,10 +3,14 @@ import os
 import requests
 import time
 import logging
-import json
 import datetime
 import random
 from data.spatial.utils import convert_crs
+from analysis.travel_times.APIs.tomtom_storage import (
+    ensure_summary_csv,
+    persist_routed_batch,
+    read_routed_ids,
+)
 logger = logging.getLogger("synpp")
 
 def configure(context):
@@ -18,6 +22,7 @@ def configure(context):
                                           "travel_times",
                                           "tomtom_travel_times"))
     context.config("num_tomtom_requests", default=int(1e10))
+    context.config("tomtom_json_batch_size", default=100)
 
 def convert_departure_time_to_iso(departure_time):
     """
@@ -65,6 +70,9 @@ def route_one_trip(origin_x, origin_y, destination_x, destination_y, departure_t
         "key": tomtom_api_key,
         "departAt": departure_time_iso,
         "travelMode": "car",
+        # The analysis only uses route.summary. Omitting the polyline keeps the
+        # raw archive several orders of magnitude smaller for long routes.
+        "routeRepresentation": "summaryOnly",
         "computeTravelTimeFor": "all",
         "traffic": "true"
     }
@@ -81,11 +89,16 @@ def route_one_trip(origin_x, origin_y, destination_x, destination_y, departure_t
             return []
         return None
     
-def route_with_tomtom(df_trips, tomtom_api_key, max_requests):
-    routed_data = {}
+def iter_routes_with_tomtom(df_trips, tomtom_api_key, max_requests):
+    """Yield successful routes, stopping after ``max_requests`` successes."""
+
     skipped = 0
     num_requests = 0
     for i,(index, row) in enumerate(df_trips.iterrows()):
+        if num_requests >= max_requests:
+            logger.info(f"\n\t Reached maximum number of TomTom requests: {max_requests}. Stopping.")
+            break
+
         identifier = row['identifier']
         if i % 100 == 0:
             logger.info(f"\t - TomTom API: Routing trip {i}/{len(df_trips)}")
@@ -105,12 +118,8 @@ def route_with_tomtom(df_trips, tomtom_api_key, max_requests):
             continue
         else:
             num_requests += 1
-            if num_requests >= max_requests:
-                logger.info(f"\n\t Reached maximum number of TomTom requests: {max_requests}. Stopping.")
-                break
 
-        # store routed data
-        routed_data[identifier] = {
+        yield identifier, {
             'origin_x': row['origin_x'],
             'origin_y': row['origin_y'],
             'destination_x': row['destination_x'],
@@ -121,15 +130,23 @@ def route_with_tomtom(df_trips, tomtom_api_key, max_requests):
 
         # To avoid hitting rate limits
         time.sleep(0.1)  
-    
+
+
+def route_with_tomtom(df_trips, tomtom_api_key, max_requests):
+    """Route trips and return them as a dictionary (kept for callers/tests)."""
+
+    routed_data = {}
+    for identifier, data in iter_routes_with_tomtom(df_trips, tomtom_api_key, max_requests):
+        routed_data[identifier] = data
     return routed_data
 
 def execute(context):
-    # prepare output path
-    output_path = context.config("tomtom_travel_times_path")
-    os.makedirs(output_path, exist_ok=True)
-    output_path_100k = os.path.join(output_path, "routed_trips_100k.json")
-    output_path = os.path.join(output_path, "routed_trips.json")
+    output_directory = context.config("tomtom_travel_times_path")
+    os.makedirs(output_directory, exist_ok=True)
+
+    # On the first run this streams the legacy JSON files into a compact index.
+    # Later runs read the CSV and only inspect any unindexed JSON batch.
+    summary_path = ensure_summary_csv(output_directory)
 
     max_requests = context.config("num_tomtom_requests")
     tomtom_api_key = context.config("tomtom_api_key")
@@ -149,21 +166,7 @@ def execute(context):
                                                                             target_crs="EPSG:4326")
         logger.info("Converted coordinates from EPSG:2056 to EPSG:4326.")
 
-        # output_path_100k is static reference data for already routed trips (file too big, we made it static)
-        static_routed_data = {}
-        if os.path.exists(output_path_100k):
-            with open(output_path_100k, 'r') as f:
-                static_routed_data = json.load(f)
-            logger.info(f"Loaded {len(static_routed_data)} routed trips from {output_path_100k}.")
-
-        # output_path stores incremental routed trips and is the only file we write
-        output_routed_data = {}
-        if os.path.exists(output_path):
-            with open(output_path, 'r') as f:
-                output_routed_data = json.load(f)
-            logger.info(f"Loaded {len(output_routed_data)} routed trips from {output_path}.")
-
-        routed_ids = set(static_routed_data.keys()) | set(output_routed_data.keys())
+        routed_ids = read_routed_ids(summary_path)
         if len(routed_ids) == 0:
             logger.info("No existing routed trips found.")
         else:
@@ -173,22 +176,23 @@ def execute(context):
         df_remaining = df_trips[~df_trips['identifier'].isin(routed_ids)]
         logger.info(f"Remaining trips to route: {len(df_remaining)}")
 
-        if (len(df_remaining)>50):
-            # route remaining trips using tomtom
-            new_routed_data = route_with_tomtom(df_remaining, tomtom_api_key, max_requests)
+        if not df_remaining.empty:
+            batch_size = max(1, int(context.config("tomtom_json_batch_size")))
+            batch = {}
+            total_routed = 0
+            for identifier, data in iter_routes_with_tomtom(
+                df_remaining, tomtom_api_key, max_requests
+            ):
+                batch[identifier] = data
+                if len(batch) >= batch_size:
+                    persist_routed_batch(output_directory, batch)
+                    total_routed += len(batch)
+                    batch = {}
 
-            # output_path_100k is static reference data; only write to output_path
-            output_routed_data.update(new_routed_data)
+            if batch:
+                persist_routed_batch(output_directory, batch)
+                total_routed += len(batch)
 
-            output_path_updated = output_path.replace(".json", "_updated.json")
-            with open(output_path_updated, 'w') as f:
-                json.dump(output_routed_data, f, indent=4)
+            logger.info("Saved %s newly routed TomTom trips", total_routed)
 
-            # once successful, replace old file atomically
-            os.replace(output_path_updated, output_path)
-            logger.info(
-                f"Saved {len(new_routed_data)} new routed trips to {output_path}. "
-                f"Total trips in output file: {len(output_routed_data)}"
-            )
-
-    return output_path+"|"+output_path_100k
+    return str(summary_path)
