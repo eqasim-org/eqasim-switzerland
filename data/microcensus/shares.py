@@ -92,7 +92,7 @@ def load_clean_trips(context):
          Filtered trips DataFrame including merged person attributes.
     """
     persons = context.stage("data.microcensus.persons")
-    trips, filterout_ids, _, _ = context.stage("data.microcensus.trips")
+    trips, filterout_ids, persons_outside_ch, persons_crossing_the_border = context.stage("data.microcensus.trips")
 
     # Merge with persons
     persons = persons[['person_id', 'person_weight', 'age', 'sex', 
@@ -104,6 +104,9 @@ def load_clean_trips(context):
     week_end_persons = persons[persons['weekend']]["person_id"].unique()
     filterout_ids = filterout_ids.union(set(week_end_persons))
 
+    # remove these persons crossing the border, because they won't do mode choice anyway
+    filterout_ids = filterout_ids.union(set(persons_outside_ch)).union(set(persons_crossing_the_border))
+    
     # filter trips
     trips = trips[~trips['person_id'].isin(filterout_ids)]
 
