@@ -31,6 +31,9 @@ def execute(context):
     #TODO: this needs to be changes, but for now we take three points per line
     df = sample_points_from_lines(df, 2)
 
+    # object_id is not unique, we make it unique here
+    df["OBJECTID"] = df["OBJECTID"] + "_" + df.index.astype(str)
+
     # finale dataframe
     df = gpd.GeoDataFrame(df.reset_index(drop=True), geometry="geometry", crs="EPSG:2056")
     df.to_file(output_path)
