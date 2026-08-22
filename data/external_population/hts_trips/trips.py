@@ -1,7 +1,9 @@
 import pandas as pd
 import geopandas as gpd
 import numpy as np
+import logging
 
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -197,7 +199,7 @@ def execute(context):
     tripsdiff     = trips_length1 - trips_length2
     tripsreldiff  = tripsdiff / trips_length1 * 100
 
-    print(f"Filtering data based on selected days. Removed {hhldiff} ({round(hhlreldiff, 2)}%) households, {persdiff} ({round(persreldiff, 2)}%) persons, and {tripsdiff} ({round(tripsreldiff, 2)}%) trips.")
+    logger.info(f"Filtering data based on selected days. Removed {hhldiff} ({round(hhlreldiff, 2)}%) households, {persdiff} ({round(persreldiff, 2)}%) persons, and {tripsdiff} ({round(tripsreldiff, 2)}%) trips.")
 
     df_persons = pd.merge(
         df_persons, df_households[["edgt_household_id", "household_id", "departement_id"]],
@@ -221,9 +223,5 @@ def execute(context):
 
     df_trips["trip_weight"] = df_trips["trip_weight"].str.replace(",", ".").astype(float)
 
-    #print(df_trips.groupby("mode")["trip_weight"].sum() / np.sum(df_trips["trip_weight"]) * 100)
-
-    #print("\n")
-    #print(df_trips.head())
 
     return df_trips

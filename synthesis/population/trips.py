@@ -1,8 +1,9 @@
 import numpy as np
 import pandas as pd
-
+import logging
 from data.utils import coerce_boolean_series
 
+logger = logging.getLogger("synpp")
 """
 This stage attaches all trip relevant information to the synthetic population.
 """
@@ -112,7 +113,7 @@ def execute(context):
     final_length   = len(df_trips)
     share          = round((final_length - initial_length) / initial_length * 100, 2)
 
-    print(f"Removed {initial_length - final_length} ({share}%) trips (truck drivers)")
+    logger.info(f"Removed {initial_length - final_length} ({share}%) trips (truck drivers)")
 
     initial_length = len(df_trips)
     is_outside = coerce_boolean_series(
@@ -121,7 +122,7 @@ def execute(context):
     final_length   = len(df_trips)
     share          = round((final_length - initial_length) / initial_length * 100, 2)
 
-    print(f"Removed {initial_length - final_length} ({share}%) trips (people outside of Switzerland)")
+    logger.info(f"Removed {initial_length - final_length} ({share}%) trips (people outside of Switzerland)")
 
     # Adapt trips for agents crossing the border: they get a single trip
     # (home-border or border-home) instead of their regular

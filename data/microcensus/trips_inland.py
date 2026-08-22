@@ -47,8 +47,6 @@ def execute(context):
     del df_mz_persons_work
     del df_mz_persons
 
-    print(len(df_mz_trips))
-
     # First, adjust the modes
     mode_map = {
         -99: "unknown",  # Pseudo stage
@@ -138,7 +136,7 @@ def execute(context):
         (df_mz_trips["mode"] == "unknown") | (df_mz_trips["purpose"] == "unknown")
     ]["person_id"])
 
-    print("  Removed %d persons with trips with unknown mode or unknown purpose" % len(unknown_ids))
+    logger.info("  Removed %d persons with trips with unknown mode or unknown purpose" % len(unknown_ids))
     df_mz_trips = df_mz_trips[~df_mz_trips["person_id"].isin(unknown_ids)]
 
     filterout_ids = unknown_ids
@@ -412,8 +410,6 @@ def execute(context):
     for col in ["origin_x", "origin_y", "destination_x", "destination_y", "home_x", "home_y"]:
         df_mz_trips[col] = df_mz_trips[col].astype(int)
 
-    print(len(df_mz_trips))
-
     df_purpose_home        = df_mz_trips[df_mz_trips["purpose"]=="home"][["person_id", "destination_x", "destination_y", "home_x", "home_y"]]
     df_origin_purpose_home = df_mz_trips[df_mz_trips["origin_purpose"]=="home"][["person_id", "origin_x", "origin_y", "home_x", "home_y"]]
 
@@ -476,8 +472,8 @@ def execute(context):
     # 3rd case: multiple home locations found, one corresponds to the reported home.
     cond3  = (person_summary["home_location_count"] > 1) & (person_summary["has_home_match"])
     share3 = cond3.sum() / len(person_summary) * 100
-    print(f"  INFO for {round(share3, 2)}% of the agents, multiple home locations were found. One corresponds to the reported home location.")
-    print(f"    For these agents, create home_secondary activities.")
+    logger.info(f"  INFO for {round(share3, 2)}% of the agents, multiple home locations were found. One corresponds to the reported home location.")
+    logger.info(f"    For these agents, create home_secondary activities.")
 
     df_home_3rdcase     = person_summary[cond3]
     df_home_3rdcase_ids = df_home_3rdcase["person_id"]
@@ -875,8 +871,6 @@ def execute(context):
     df_mz_trips["trip_crossing_border"] = ((df_mz_trips["origin_in_ch"]) & (~df_mz_trips["dest_in_ch"])) | ((~df_mz_trips["origin_in_ch"]) & (df_mz_trips["dest_in_ch"]))
     persons_crossing_border             = df_mz_trips.groupby("person_id")["trip_crossing_border"].any()
     persons_crossing_the_border         = persons_crossing_border[persons_crossing_border].index
-
-    print(len(df_mz_trips))
 
     df_mz_trips["geometry"] = df_mz_trips.apply(
         lambda r: LineString([

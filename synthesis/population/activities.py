@@ -54,7 +54,7 @@ def execute(context):
     df_persons = context.stage("synthesis.population.enriched")#[["person_id"]]
 
     missing_ids = set(np.unique(df_persons["person_id"])) - set(np.unique(df_activities["person_id"]))
-    print(f"Found {len(missing_ids)} persons without activities")
+    logger.info(f"Found {len(missing_ids)} persons without activities")
 
     df_missing = pd.DataFrame.from_records([
         (person_id, 0, "home", True) for person_id in missing_ids
@@ -82,7 +82,7 @@ def execute(context):
     final_length     = len(df_activities)
     share            = round((final_length - initial_length) / initial_length * 100, 2)
 
-    print(f"Removed {initial_length - final_length} ({share}%) activities (truck drivers)")
+    logger.info(f"Removed {initial_length - final_length} ({share}%) activities (truck drivers)")
 
     assert (len(np.unique(df_persons["person_id"])) == len(np.unique(df_activities["person_id"])))
 
@@ -98,7 +98,7 @@ def execute(context):
     final_length     = len(df_activities)
     share            = round((final_length - initial_length) / initial_length * 100, 2)
 
-    print(f"Removed {initial_length - final_length} ({share}%) activities (people outside of Switzerland)")
+    logger.info(f"Removed {initial_length - final_length} ({share}%) activities (people outside of Switzerland)")
     
     assert (len(np.unique(df_persons["person_id"])) == len(np.unique(df_activities["person_id"])))
 

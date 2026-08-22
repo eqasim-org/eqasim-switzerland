@@ -33,6 +33,4 @@ def execute(context):
 
         df = df[df["cross_border_person_id"].isin(remaining_person_ids)]
 
-    print(df.columns)
-
     return df

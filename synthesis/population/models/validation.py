@@ -222,6 +222,5 @@ def execute(context):
         comparison.to_csv(os.path.join(output_dir, csv_name), index=False)
 
         results[f"{variable_col}_{geography_suffix}"] = comparison
-        print(f"Saved {pdf_path}")
-
+        
     return results

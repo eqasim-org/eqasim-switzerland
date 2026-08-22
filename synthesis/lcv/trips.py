@@ -600,8 +600,6 @@ def execute(context):
     df_mz_trips = df_mz_trips[[
         "HHNR", "f51100", "mode", "WP"
     ]]
-    print(df_mz_trips)
-    
 
     ##NOTE: there are also departure times between 24:00 and 30:00 we currently do not do anything special about it
     ## we treat it the same way as for the movement of people
@@ -652,7 +650,6 @@ def execute(context):
         id_offset = context.stage("synthesis.freight.trips")["agent_id"].max() + 1
         trips_df["trip_id"] += id_offset
 
-    print(trips_df[trips_df["origin_x"]==trips_df["destination_x"]])
     bin_width = 3600
 
     departure_distribution = (
@@ -667,5 +664,4 @@ def execute(context):
     departure_distribution["end_sec"] = departure_distribution["start_sec"] + bin_width
     departure_distribution["share"] = departure_distribution["n_trips"] / departure_distribution["n_trips"].sum()
 
-    print(departure_distribution)
     return trips_df

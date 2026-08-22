@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
 import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("synpp")
 
 AVAILABILITY_MAP = {"none": "never", "all": "always", "some": "always"}
 
@@ -342,8 +342,8 @@ def execute(context):
         logger.warning("The requested sample size for the Swiss population exceeds the sample size used for the generation of the French population. We might find a solution for this at some point but as of now we are keeping the French population unchanged.")
 
     elif ratio < 1:
-        print(f"FR sample rate: {fr_sample_rate}. CH sample rate: {ch_sample_rate}.")
-        print(f"Downsampling with a ratio of {round(ratio, 2)}.")
+        logger.info(f"FR sample rate: {fr_sample_rate}. CH sample rate: {ch_sample_rate}.")
+        logger.info(f"Downsampling with a ratio of {round(ratio, 2)}.")
 
         person_ids  = persons["person_id"].values.tolist()
         sampled_ids = np.random.choice(person_ids, size = int(len(person_ids) * ratio), replace = False).tolist()
