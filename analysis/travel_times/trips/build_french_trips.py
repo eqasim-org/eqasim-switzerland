@@ -8,7 +8,7 @@ logger = logging.getLogger("synpp")
 def configure(context):
     context.stage("data.spatial.cantons")
     
-    context.config("num_french_trips", default=20_000)
+    context.config("num_french_trips", default=25_000)
     context.config("french_trip_distance_min_m", default=4_000)
     context.config("french_trip_distance_max_m", default=30_000)
     context.config("random_seed")
