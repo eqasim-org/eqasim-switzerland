@@ -72,19 +72,21 @@ def filter_data(df, network, require_simulated=True):
     # if the difference in umber of lanes is more than one, then we suspect it, to be removed
     permlanes = df.link_id.apply(lambda x: [link_feat.get(lk, {}).get('permlanes', -1e5) for lk in x])
     df = df[permlanes.apply(lambda x: (max(x)-min(x))<=1)]
-    # filter outliers (comes from matching)
-    def remove_outliers(group, column):
-        Q1 = group[column].quantile(0.25)
-        Q3 = group[column].quantile(0.75)
-        IQR = Q3 - Q1
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
-        return group[(group[column] >= lower_bound) & (group[column] <= upper_bound)]
-    
-    df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'obs_vphpl')).reset_index(drop=True)
+    # Filter outliers (comes from matching) while keeping highway as a column.
+    def remove_outliers(data, column):
+        grouped = data.groupby('highway')[column]
+        q1 = grouped.transform('quantile', q=0.25)
+        q3 = grouped.transform('quantile', q=0.75)
+        iqr = q3 - q1
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+        return data[data[column].between(lower_bound, upper_bound)]
+
+    df = remove_outliers(df, 'obs_vphpl').reset_index(drop=True)
+
     if require_simulated:
-        df = df.groupby('highway').apply(lambda group: remove_outliers(group, 'sim_vphpl')).reset_index(drop=True)
-    
+        df = remove_outliers(df, 'sim_vphpl').reset_index(drop=True)
+        
     # filter the ones located in very complex intersections
     df = df[~df['id'].astype(str).isin(IDS_TO_DROP)].copy().reset_index(drop=True)
 

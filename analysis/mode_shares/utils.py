@@ -137,7 +137,8 @@ class ModeShareAnalyzer:
         trips_file, persons_file, households_file = self.get_paths_matsim(context)
         
         # Load trips and persons data
-        persons = pd.read_csv(persons_file, dtype={0: str}, sep=";", usecols=["person","subpopulation","age","sex", "cantonId","cantonName"])
+        persons = pd.read_csv(persons_file, dtype={0: str}, sep=";", engine="python",
+                              usecols=["person", "subpopulation", "age", "sex", "cantonId", "cantonName"])
         persons = persons.astype({"person":str})
         external_persons = persons.subpopulation.isin(['crossborder', 'freight'])
         logger.info("Excluding %d external persons over %d persons from MATSIM data."%(external_persons.sum(), len(persons)))

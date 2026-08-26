@@ -265,7 +265,7 @@ def plot_distribution(
             raise ValueError(f"No valid data to plot for '{value}' grouped by '{by}'.")
 
         groups = sorted(plot_df[by].unique())
-        cmap = plt.cm.get_cmap("tab10", len(groups))
+        cmap = plt.colormaps.get_cmap("tab10").resampled(len(groups))
 
         for i, group in enumerate(groups):
             vals = plot_df.loc[plot_df[by] == group, value].to_numpy()
