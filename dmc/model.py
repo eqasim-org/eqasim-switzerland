@@ -218,7 +218,7 @@ def define_betas(ignore_car_passenger, use_exponents, use_income):
         "lambda_cost_income": Beta("lambda_cost_income", 0.0, None, 0.0, 0 if use_income else 1),
 
         "lambda_car_travel_time": Beta("lambda_car_travel_time", 0.72 if trainable else 1.0, min_lambda, max_lambda, trainable),
-        "lambda_pt_in_vehicle_time": Beta("lambda_pt_in_vehicle_time", 1.5 if trainable else 1.0, min_lambda, max_lambda, trainable),
+        "lambda_pt_in_vehicle_time": Beta("lambda_pt_in_vehicle_time", 1.0, min_lambda, max_lambda, 1),
         "lambda_pt_access_egress_time": Beta("lambda_pt_access_egress_time", 0.593 if trainable else 1.0, min_lambda, max_lambda, trainable),
         "lambda_pt_transfers": Beta("lambda_pt_transfers", 1.187 if trainable else 1.0, min_lambda, max_lambda, trainable),
         "lambda_pt_transfer_time": Beta("lambda_pt_transfer_time", 1.0, min_lambda, max_lambda, 1), # doesn't converge
@@ -263,12 +263,12 @@ def define_betas(ignore_car_passenger, use_exponents, use_income):
         "beta_car_long_distance": Beta("beta_car_long_distance", 0.086, None, None, 0),
 
         "beta_car_densities": Beta("beta_car_densities", -0.1, None, None, 0),
-        "beta_car_destination_zurich": Beta("beta_car_destination_zurich", 0.0, None, None, 0.0),
-        "beta_car_destination_geneva": Beta("beta_car_destination_geneva", 0.0, None, None, 0.0),
-        "beta_car_destination_basel": Beta("beta_car_destination_basel", 0.0, None, None, 0.0),
-        "beta_car_destination_lausanne": Beta("beta_car_destination_lausanne", 0.0, None, None, 0.0),
-        "beta_car_destination_luzern": Beta("beta_car_destination_luzern", 0.0, None, None, 0.0),
-        "beta_car_destination_bern": Beta("beta_car_destination_bern", 0.0, None, None, 0.0),
+        "beta_car_destination_zurich": Beta("beta_car_destination_zurich", 0.0, None, 0.0, 0.0),
+        "beta_car_destination_geneva": Beta("beta_car_destination_geneva", 0.0, None, 0.0, 0.0),
+        "beta_car_destination_basel": Beta("beta_car_destination_basel", 0.0, None, 0.0, 0.0),
+        "beta_car_destination_lausanne": Beta("beta_car_destination_lausanne", 0.0, None, 0.0, 0.0),
+        "beta_car_destination_luzern": Beta("beta_car_destination_luzern", 0.0, None, 0.0, 0.0),
+        "beta_car_destination_bern": Beta("beta_car_destination_bern", 0.0, None, 0.0, 0.0),
 
         # pt
         "beta_pt_asc": Beta("beta_pt_asc", 0, None, None, 1),

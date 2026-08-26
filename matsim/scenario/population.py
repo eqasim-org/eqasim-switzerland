@@ -19,51 +19,6 @@ logger = logging.getLogger("synpp")
 # This was already there, I just want to make it a variable, to keep consistency in the pipeline in case this is changed somewhere.
 HOME_DESTINATION_ID = -1
 
-def _require_cols(df, cols, df_name):
-    missing = [c for c in cols if c not in df.columns]
-    if missing:
-        raise KeyError(f"{df_name} is missing required columns: {missing}")
-
-
-def _na_to(x, to=None):
-    return to if pd.isna(x) else x
-
-
-def snap_to_shared_facilities(external_activities, df_destinations):
-    """
-    Moves an external activity onto the facility it names whenever that facility
-    is also part of synthesis.population.destinations.
-
-    Both sides describe the same French BPE (or Swiss STATENT) locations, but they
-    reach them through different paths: data.locations_fr.secondary snaps the point
-    to a 1 m grid, while data.external_population.read_outputs reprojects the raw
-    coordinate from EPSG:2154 and lets matsim.scenario.population truncate it. The
-    two disagree by up to a metre. matsim/scenario/facilities.py writes the shared
-    ids only once, from df_destinations, so the activity has to follow -- MATSim's
-    ScenarioValidator rejects an activity that is not exactly on its facility.
-    """
-
-    coordinates = df_destinations[["destination_id", "destination_x", "destination_y"]].drop_duplicates("destination_id")
-    coordinates = coordinates.set_index("destination_id")
-
-    shared = external_activities["destination_id"].isin(coordinates.index)
-
-    if shared.any():
-        x = external_activities.loc[shared, "destination_id"].map(coordinates["destination_x"]).astype(float)
-        y = external_activities.loc[shared, "destination_id"].map(coordinates["destination_y"]).astype(float)
-
-        external_activities.loc[shared, "destination_x"] = x.values
-        external_activities.loc[shared, "destination_y"] = y.values
-        external_activities.loc[shared, "geometry"]      = gpd.points_from_xy(x.values, y.values)
-
-        logger.info(
-            "Moved %d external activities (%d distinct facilities) onto the coordinates written to facilities.xml.gz.",
-            int(shared.sum()), int(external_activities.loc[shared, "destination_id"].nunique()),
-        )
-
-    return external_activities
-
-
 def configure(context):
     context.stage("synthesis.population.models.subscriptions")
     context.stage("synthesis.population.trips")
@@ -95,265 +50,6 @@ def configure(context):
     if context.config("correct_departure_time"):
         context.stage("synthesis.population.departure_times.trips_departures")
 
-
-VEHICLE_FIELDS = ["mode", "vehicle_id", "owner_id"]
-
-ACTIVITY_ATTRIBUTES_TO_SAVE = dict(municipalityType  = "municipality_type", 
-                                   municipalityId    = "municipality_id", 
-                                   employeeDensity   = "employee_density", 
-                                   companiesDensity  = "companies_density", 
-                                   populationDensity = "population_density", 
-                                   ovgk              = "ovgk")
-
-
-class PersonWriter:
-    def __init__(self, person):
-        self.person = person
-        self.activities = []
-        self.vehicles = []
-
-
-    def add_activity(self, activity):
-        self.activities.append(activity)
-    
-
-    def add_vehicles(self, vehicles):
-        self.vehicles = vehicles
-
-
-    def _write_single_activity(self, writer, activity, home_location):
-        geometry = activity.geometry
-        destination_id = activity.destination_id
-
-        location = (
-            home_location
-            if destination_id == HOME_DESTINATION_ID or destination_id==str(HOME_DESTINATION_ID)
-            else writer.location(int(geometry.x), int(geometry.y), destination_id if isinstance(destination_id, str) else int(destination_id))
-        )
-
-        start_time = _na_to(activity.start_time, None)
-        end_time = _na_to(activity.end_time, None)
-
-        attributes = {
-            "municipalityType": _na_to(activity.municipality_type, "other"),
-            "municipalityId": _na_to(activity.municipality_id, -1),
-            "employeeDensity": _na_to(activity.employee_density, 0.0),
-            "companiesDensity": _na_to(activity.companies_density,0.0),
-            "populationDensity": _na_to(activity.population_density,0.0),
-            "ovgk": _na_to(activity.ovgk, None),
-        }
-
-        writer.add_activity(activity.purpose, location, start_time, end_time, attributes=attributes)
-
-
-    def write(self, writer, first_activity=None, activity_iterator=None):
-        p = self.person
-
-        writer.start_person(str(p.person_id))
-
-        # Attributes
-        writer.start_attributes()
-        writer.add_attribute("age", "java.lang.Integer", str(int(p.age)))
-        writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(p.employed))
-        writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(p.driving_license))
-        writer.add_attribute("sex", "java.lang.String", ["m", "f"][p.sex])
-        writer.add_attribute("home_coordinate_x", "java.lang.Double", str(p.home_x))
-        writer.add_attribute("home_coordinate_y", "java.lang.Double", str(p.home_y))
-        writer.add_attribute("carAvail", "java.lang.String", ["never", "always"][int(p.car_availability)])
-
-        writer.add_attribute("subscriptions", "java.lang.String", ["none", "GA", "VA", "HT", "VA+HT"][int(p.pt_subscription)])
-
-        writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(getattr(p, "is_car_passenger", False)))
-
-        # loop trip flags may or may not exist -> default False
-        writer.add_attribute("hasWalkLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_walk_loop_trip", False)))
-        writer.add_attribute("hasCarLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_car_loop_trip", False)))
-        writer.add_attribute("hasCarPassengerLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_car_passenger_loop_trip", False)))
-        writer.add_attribute("hasPtLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_pt_loop_trip", False)))
-        writer.add_attribute("hasBikeLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_bike_loop_trip", False)))
-
-        writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
-
-        person_type = getattr(p, "person_type", "normal")
-        
-        is_crossborder = (person_type == "crossborder")
-        writer.add_attribute("isCrossBorder", "java.lang.Boolean", writer.true_false(is_crossborder))
-        is_french     = (person_type == ExternalPopulationConstants.person_type)
-        writer.add_attribute(ExternalPopulationConstants.is_external, "java.lang.Boolean", writer.true_false(is_french))
-
-        cross_border_od = getattr(p, "cross_border_od", None)
-        if pd.notna(cross_border_od):
-            writer.add_attribute("crossBorderOD", "java.lang.String", str(cross_border_od))
-
-        writer.add_attribute("bikeAvail", "java.lang.String", ["never", "always"][int(p.bike_availability)])
-
-        if is_crossborder:
-            writer.add_attribute("subpopulation", "java.lang.String", "crossborder")
-
-        writer.add_attribute(
-            "vehicles",
-            "org.matsim.vehicles.PersonVehicles",
-            "{{{content}}}".format(content=",".join([
-                "\"{mode}\":\"{id}\"".format(mode=v.mode, id=v.vehicle_id)
-                for v in self.vehicles
-            ]))
-        )
-        writer.end_attributes()
-
-        # Plan
-        writer.start_plan(selected=True)
-
-        home_location = writer.location(p.home_x, p.home_y, "home%s" % getattr(p, "household_id", 0))
-
-        written_activities = 0
-
-        if first_activity is None:
-            for i in range(len(self.activities)):
-                a = self.activities[i]
-                self._write_single_activity(writer, a, home_location)
-                written_activities += 1
-
-                if not a.is_last:
-                    next_a = self.activities[i + 1]
-                    writer.add_leg(a.following_mode, a.end_time, next_a.start_time - a.end_time)
-
-        else:
-            current_activity = first_activity
-            while True:
-                self._write_single_activity(writer, current_activity, home_location)
-                written_activities += 1
-
-                if current_activity.is_last:
-                    break
-
-                next_activity = next(activity_iterator)
-                assert p.person_id == next_activity.person_id
-                writer.add_leg(
-                    current_activity.following_mode,
-                    current_activity.end_time,
-                    next_activity.start_time - current_activity.end_time,
-                )
-                current_activity = next_activity
-
-        writer.end_plan()
-        writer.end_person()
-        return written_activities
-
-
-class FreightWriter:
-    def __init__(self, freight_agent, is_lcv = False):
-        self.freight_agent = freight_agent
-        self.vehicles = []
-        if is_lcv:
-            self.prefix = "lcv_"
-        else:
-            self.prefix = "freight_"
-
-
-    def add_vehicles(self, vehicles):
-        self.vehicles = vehicles
-
-
-    def write(self, writer, truck=True):
-        writer.start_person(self.prefix + str(self.freight_agent[1]))
-        # Attributes
-        writer.start_attributes()
-        writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
-        
-        if (truck):
-            writer.add_attribute("type", "java.lang.String", str(self.freight_agent[7]))
-        else:
-            writer.add_attribute("type", "java.lang.String", "truck")
-
-        writer.add_attribute("subpopulation", "java.lang.String", "freight")
-
-        writer.add_attribute("vehicles", "org.matsim.vehicles.PersonVehicles", "{{{content}}}".format(content = ",".join([
-                "\"{mode}\":\"{id}\"".format(mode = v[VEHICLE_FIELDS.index("mode")], id = v[VEHICLE_FIELDS.index("vehicle_id")])
-                for v in self.vehicles
-            ])))
-
-        writer.end_attributes()
-
-        # Plan
-        writer.start_plan(selected=True)
-        if (truck):
-            start_location = writer.location(self.freight_agent[2], self.freight_agent[3], None)
-            end_location = writer.location(self.freight_agent[4], self.freight_agent[5], None)
-            departure_time = self.freight_agent[6]
-        else:
-            start_location = writer.location(self.freight_agent[4], self.freight_agent[5], None)
-            end_location = writer.location(self.freight_agent[6], self.freight_agent[7], None)
-            departure_time = self.freight_agent[8]
-        arrival_time = departure_time + 3600
-
-        # loading activity
-        writer.start_activity("freight_loading", start_location, 0, departure_time)
-        writer.start_attributes()
-        writer.end_attributes()
-        writer.end_activity()
-
-        # transport leg
-        if (truck):
-            writer.add_leg(str(self.freight_agent[7]), departure_time, arrival_time - departure_time)
-        else:
-            writer.add_leg("truck", departure_time, arrival_time - departure_time)
-
-        # unloading activity
-        writer.start_activity("freight_unloading", end_location, arrival_time, 30 * 3600)
-        writer.start_attributes()
-        writer.end_attributes()
-        writer.end_activity()
-
-        writer.end_plan()
-        writer.end_person()
-
-
-PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", 
-                 "home_x", "home_y",
-                 "pt_subscription", 
-                 "household_id", "is_car_passenger", 
-                 "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",
-                 "income_class", "person_type", "cross_border_od",
-                 "bike_availability"]
-
-
-ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
-                   "geometry", "destination_id", "following_mode", "municipality_type","municipality_id",
-                   "employee_density", "companies_density", "population_density", "ovgk"]
-
-
-PERSONS_DTYPES = {
-        "person_id": int,
-        "age": int,
-        "car_availability": int,
-        "bike_availability": int,
-        "employed": bool,
-        "driving_license": bool,
-        "sex": int,
-        "home_x": float,
-        "home_y": float,
-        "pt_subscription": int,
-        "household_id": int,
-        "is_car_passenger": bool,
-        "has_walk_loop_trip": bool,
-        "has_car_loop_trip": bool,
-        "has_car_passenger_loop_trip": bool,
-        "has_pt_loop_trip": bool,
-        "has_bike_loop_trip": bool,
-        "income_class": int,
-        "person_type": str,
-    }
-
-BOOLEAN_PERSON_COLUMNS = [
-    "employed",
-    "driving_license",
-    "is_car_passenger",
-    "has_walk_loop_trip",
-    "has_car_loop_trip",
-    "has_car_passenger_loop_trip",
-    "has_pt_loop_trip",
-    "has_bike_loop_trip",
-]
 
 
 def execute(context):
@@ -697,3 +393,283 @@ def execute(context):
         ], check=True)
 
     return population_gz_path
+
+
+
+
+
+
+
+
+
+
+
+
+#################### Functions ####################
+VEHICLE_FIELDS = ["mode", "vehicle_id", "owner_id"]
+ACTIVITY_ATTRIBUTES_TO_SAVE = dict(municipalityType  = "municipality_type", 
+                                   municipalityId    = "municipality_id", 
+                                   employeeDensity   = "employee_density", 
+                                   companiesDensity  = "companies_density", 
+                                   populationDensity = "population_density", 
+                                   ovgk              = "ovgk")
+PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "pt_subscription", "household_id", "is_car_passenger", 
+                 "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip", "income_class", "person_type", 
+                 "cross_border_od", "bike_availability"]
+ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last","geometry", "destination_id", "following_mode", 
+                   "municipality_type","municipality_id", "employee_density", "companies_density", "population_density", "ovgk"]
+PERSONS_DTYPES = {"person_id": int, "age": int, "car_availability": int, "bike_availability": int, "employed": bool, "driving_license": bool,
+                  "sex": int, "home_x": float, "home_y": float, "pt_subscription": int, "household_id": int, "is_car_passenger": bool, "has_walk_loop_trip": bool,
+                  "has_car_loop_trip": bool, "has_car_passenger_loop_trip": bool, "has_pt_loop_trip": bool, "has_bike_loop_trip": bool,
+                  "income_class": int, "person_type": str,}
+BOOLEAN_PERSON_COLUMNS = ["employed", "driving_license", "is_car_passenger", "has_walk_loop_trip", "has_car_loop_trip",
+                          "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip",]
+
+def _require_cols(df, cols, df_name):
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise KeyError(f"{df_name} is missing required columns: {missing}")
+
+
+def _na_to(x, to=None):
+    return to if pd.isna(x) else x
+
+
+def snap_to_shared_facilities(external_activities, df_destinations):
+    """
+    Moves an external activity onto the facility it names whenever that facility
+    is also part of synthesis.population.destinations.
+
+    Both sides describe the same French BPE (or Swiss STATENT) locations, but they
+    reach them through different paths: data.locations_fr.secondary snaps the point
+    to a 1 m grid, while data.external_population.read_outputs reprojects the raw
+    coordinate from EPSG:2154 and lets matsim.scenario.population truncate it. The
+    two disagree by up to a metre. matsim/scenario/facilities.py writes the shared
+    ids only once, from df_destinations, so the activity has to follow -- MATSim's
+    ScenarioValidator rejects an activity that is not exactly on its facility.
+    """
+
+    coordinates = df_destinations[["destination_id", "destination_x", "destination_y"]].drop_duplicates("destination_id")
+    coordinates = coordinates.set_index("destination_id")
+
+    shared = external_activities["destination_id"].isin(coordinates.index)
+
+    if shared.any():
+        x = external_activities.loc[shared, "destination_id"].map(coordinates["destination_x"]).astype(float)
+        y = external_activities.loc[shared, "destination_id"].map(coordinates["destination_y"]).astype(float)
+
+        external_activities.loc[shared, "destination_x"] = x.values
+        external_activities.loc[shared, "destination_y"] = y.values
+        external_activities.loc[shared, "geometry"]      = gpd.points_from_xy(x.values, y.values)
+
+        logger.info(
+            "Moved %d external activities (%d distinct facilities) onto the coordinates written to facilities.xml.gz.",
+            int(shared.sum()), int(external_activities.loc[shared, "destination_id"].nunique()),
+        )
+
+    return external_activities
+
+
+
+
+class PersonWriter:
+    def __init__(self, person):
+        self.person = person
+        self.activities = []
+        self.vehicles = []
+
+
+    def add_activity(self, activity):
+        self.activities.append(activity)
+    
+
+    def add_vehicles(self, vehicles):
+        self.vehicles = vehicles
+
+
+    def _write_single_activity(self, writer, activity, home_location):
+        geometry = activity.geometry
+        destination_id = activity.destination_id
+
+        location = (
+            home_location
+            if destination_id == HOME_DESTINATION_ID or destination_id==str(HOME_DESTINATION_ID)
+            else writer.location(int(geometry.x), int(geometry.y), destination_id if isinstance(destination_id, str) else int(destination_id))
+        )
+
+        start_time = _na_to(activity.start_time, None)
+        end_time = _na_to(activity.end_time, None)
+
+        attributes = {
+            "municipalityType": _na_to(activity.municipality_type, "other"),
+            "municipalityId": _na_to(activity.municipality_id, -1),
+            "employeeDensity": _na_to(activity.employee_density, 0.0),
+            "companiesDensity": _na_to(activity.companies_density,0.0),
+            "populationDensity": _na_to(activity.population_density,0.0),
+            "ovgk": _na_to(activity.ovgk, None),
+        }
+
+        writer.add_activity(activity.purpose, location, start_time, end_time, attributes=attributes)
+
+
+    def write(self, writer, first_activity=None, activity_iterator=None):
+        p = self.person
+
+        writer.start_person(str(p.person_id))
+
+        # Attributes
+        writer.start_attributes()
+        writer.add_attribute("age", "java.lang.Integer", str(int(p.age)))
+        writer.add_attribute("employed", "java.lang.Boolean", writer.true_false(p.employed))
+        writer.add_attribute("hasLicense", "java.lang.String", writer.yes_no(p.driving_license))
+        writer.add_attribute("sex", "java.lang.String", ["m", "f"][p.sex])
+        writer.add_attribute("home_coordinate_x", "java.lang.Double", str(p.home_x))
+        writer.add_attribute("home_coordinate_y", "java.lang.Double", str(p.home_y))
+        writer.add_attribute("carAvail", "java.lang.String", ["never", "always"][int(p.car_availability)])
+
+        writer.add_attribute("subscriptions", "java.lang.String", ["none", "GA", "VA", "HT", "VA+HT"][int(p.pt_subscription)])
+
+        writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(getattr(p, "is_car_passenger", False)))
+
+        # loop trip flags may or may not exist -> default False
+        writer.add_attribute("hasWalkLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_walk_loop_trip", False)))
+        writer.add_attribute("hasCarLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_car_loop_trip", False)))
+        writer.add_attribute("hasCarPassengerLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_car_passenger_loop_trip", False)))
+        writer.add_attribute("hasPtLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_pt_loop_trip", False)))
+        writer.add_attribute("hasBikeLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_bike_loop_trip", False)))
+
+        writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(False))
+
+        person_type = getattr(p, "person_type", "normal")
+        
+        is_crossborder = (person_type == "crossborder")
+        writer.add_attribute("isCrossBorder", "java.lang.Boolean", writer.true_false(is_crossborder))
+        is_french     = (person_type == ExternalPopulationConstants.person_type)
+        writer.add_attribute(ExternalPopulationConstants.is_external, "java.lang.Boolean", writer.true_false(is_french))
+
+        cross_border_od = getattr(p, "cross_border_od", None)
+        if pd.notna(cross_border_od):
+            writer.add_attribute("crossBorderOD", "java.lang.String", str(cross_border_od))
+
+        writer.add_attribute("bikeAvail", "java.lang.String", ["never", "always"][int(p.bike_availability)])
+
+        if is_crossborder:
+            writer.add_attribute("subpopulation", "java.lang.String", "crossborder")
+
+        writer.add_attribute(
+            "vehicles",
+            "org.matsim.vehicles.PersonVehicles",
+            "{{{content}}}".format(content=",".join([
+                "\"{mode}\":\"{id}\"".format(mode=v.mode, id=v.vehicle_id)
+                for v in self.vehicles
+            ]))
+        )
+        writer.end_attributes()
+
+        # Plan
+        writer.start_plan(selected=True)
+
+        home_location = writer.location(p.home_x, p.home_y, "home%s" % getattr(p, "household_id", 0))
+
+        written_activities = 0
+
+        if first_activity is None:
+            for i in range(len(self.activities)):
+                a = self.activities[i]
+                self._write_single_activity(writer, a, home_location)
+                written_activities += 1
+
+                if not a.is_last:
+                    next_a = self.activities[i + 1]
+                    writer.add_leg(a.following_mode, a.end_time, next_a.start_time - a.end_time)
+
+        else:
+            current_activity = first_activity
+            while True:
+                self._write_single_activity(writer, current_activity, home_location)
+                written_activities += 1
+
+                if current_activity.is_last:
+                    break
+
+                next_activity = next(activity_iterator)
+                assert p.person_id == next_activity.person_id
+                writer.add_leg(
+                    current_activity.following_mode,
+                    current_activity.end_time,
+                    next_activity.start_time - current_activity.end_time,
+                )
+                current_activity = next_activity
+
+        writer.end_plan()
+        writer.end_person()
+        return written_activities
+
+
+class FreightWriter:
+    def __init__(self, freight_agent, is_lcv = False):
+        self.freight_agent = freight_agent
+        self.vehicles = []
+        if is_lcv:
+            self.prefix = "lcv_"
+        else:
+            self.prefix = "freight_"
+
+
+    def add_vehicles(self, vehicles):
+        self.vehicles = vehicles
+
+
+    def write(self, writer, truck=True):
+        writer.start_person(self.prefix + str(self.freight_agent[1]))
+        # Attributes
+        writer.start_attributes()
+        writer.add_attribute("isFreight", "java.lang.Boolean", writer.true_false(True))
+        
+        if (truck):
+            writer.add_attribute("type", "java.lang.String", str(self.freight_agent[7]))
+        else:
+            writer.add_attribute("type", "java.lang.String", "truck")
+
+        writer.add_attribute("subpopulation", "java.lang.String", "freight")
+
+        writer.add_attribute("vehicles", "org.matsim.vehicles.PersonVehicles", "{{{content}}}".format(content = ",".join([
+                "\"{mode}\":\"{id}\"".format(mode = v[VEHICLE_FIELDS.index("mode")], id = v[VEHICLE_FIELDS.index("vehicle_id")])
+                for v in self.vehicles
+            ])))
+
+        writer.end_attributes()
+
+        # Plan
+        writer.start_plan(selected=True)
+        if (truck):
+            start_location = writer.location(self.freight_agent[2], self.freight_agent[3], None)
+            end_location = writer.location(self.freight_agent[4], self.freight_agent[5], None)
+            departure_time = self.freight_agent[6]
+        else:
+            start_location = writer.location(self.freight_agent[4], self.freight_agent[5], None)
+            end_location = writer.location(self.freight_agent[6], self.freight_agent[7], None)
+            departure_time = self.freight_agent[8]
+        arrival_time = departure_time + 3600
+
+        # loading activity
+        writer.start_activity("freight_loading", start_location, 0, departure_time)
+        writer.start_attributes()
+        writer.end_attributes()
+        writer.end_activity()
+
+        # transport leg
+        if (truck):
+            writer.add_leg(str(self.freight_agent[7]), departure_time, arrival_time - departure_time)
+        else:
+            writer.add_leg("truck", departure_time, arrival_time - departure_time)
+
+        # unloading activity
+        writer.start_activity("freight_unloading", end_location, arrival_time, 30 * 3600)
+        writer.start_attributes()
+        writer.end_attributes()
+        writer.end_activity()
+
+        writer.end_plan()
+        writer.end_person()
+

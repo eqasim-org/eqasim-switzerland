@@ -1,6 +1,6 @@
 import gzip
 import io
-
+from .population import HOME_DESTINATION_ID
 import matsim.writers
 
 
@@ -103,7 +103,7 @@ def execute(context):
                 # Real destinations only: exclude home-labeled ids (written above)
                 # and the home-sentinel ("-1", e.g. cross-perimeter activities that
                 # stay at home without a "home" purpose label).
-                is_home_like = (external_activities["destination_id"].astype(str) == "-1") \
+                is_home_like = (external_activities["destination_id"].astype(str) == str(HOME_DESTINATION_ID)) \
                     | external_activities["destination_id"].astype(str).str.startswith("home")
                 nonhomes = external_activities[~is_home_like]
 
