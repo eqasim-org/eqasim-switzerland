@@ -21,10 +21,10 @@ def configure(context):
     context.config("eqasim_path", "")
 
 
-def run(context, command, arguments):
+def run(context, command, arguments, cwd = None, memory = None):
     jar_path = context.stage("matsim.runtime.eqasim")
     jar_path = "{}/{}".format(context.path("matsim.runtime.eqasim"), jar_path)
-    java.run(context, command, arguments, jar_path)
+    java.run(context, command, arguments, jar_path, cwd=cwd, memory=memory)
 
 
 def execute(context):

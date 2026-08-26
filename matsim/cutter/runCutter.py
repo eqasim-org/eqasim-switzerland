@@ -3,6 +3,7 @@ import shutil
 import glob
 import matsim.runtime.eqasim as eqasim
 import logging
+from .cutter_tools import change_params, cut_csv_to_region, cut_csv_to_network, get_regions_path
 
 logger = logging.getLogger("synpp")
 
@@ -37,7 +38,6 @@ def execute(context):
     if context.config("extent_path") == "" or context.config("extent_prefix") == "":
         return ""
     
-    
     # get the output config from the simulation run in matsim.simulation.run stage
     config_path = "%s/%s" % (context.path("matsim.simulation.run"), "simulation_output/output_config.xml" )
     assert os.path.exists(config_path)
@@ -47,71 +47,44 @@ def execute(context):
 
     # change the path of all input files to point to the output files
     # population, households, facitilies, network, transit_schedule, transit_vehicles, vehicles
-    with open(config_path) as f_read:
-        content = f_read.read()
+    p = context.path("matsim.simulation.run")
+    cutter_config_path = "%s/config_cutter.xml" % context.path()
+    change_params(config_path = config_path, 
+                  output_path = cutter_config_path,
+                  params = [
+                            # First: use the simulation results to cut the scenario
+                            ("plans.inputPlansFile", '%s/%s/output_plans.xml.gz' % (p, "simulation_output")),
+                            ("households.inputFile", '%s/%s/output_households.xml.gz' % (p, "simulation_output")),
+                            ("facilities.inputFacilitiesFile",'%s/%s/output_facilities.xml.gz' % (p, "simulation_output")),
+                            ("network.inputNetworkFile",'%s/%s/output_network.xml.gz' % (p, "simulation_output")),
+                            ("transit.transitScheduleFile", '%s/%s/output_transitSchedule.xml.gz' % (p, "simulation_output")),
+                            ("transit.vehiclesFile", '%s/%s/output_transitVehicles.xml.gz' % (p, "simulation_output")),
+                            ("vehicles.vehiclesFile", '%s/%s/output_vehicles.xml.gz' % (p, "simulation_output")),
+                            # Second: turn off calibration config
+                            ("eqasim:calibration.activate", "false"),
+                            ("eqasim:calibration.runCalibration","false"),
+                            ("eqasim:alphaCalibration.activate","false"),
+                            ("eqasim:alphaCalibration.filePath",""),
+                            ("eqasim:networkCalibration.activate","false"),
+                            ("eqasim:networkCalibration.calibrate","false"),
+                            ("eqasim:networkCalibration.countsFile",""),
+                            ("eqasim:networkCalibration.costCalibration.specialRegionPath",""),
+                            ("eqasim:networkCalibration.freespeedCalibration.observedTripsFile",""),
+                            ("eqasim:networkCalibration.freespeedCalibration.specialRegionPath",""),
+                            ] )
 
-        content = content.replace(
-            'switzerland_population.xml.gz',
-            '%s/%s/output_plans.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
-        )
-
-        content = content.replace(
-            'switzerland_households.xml.gz',
-            '%s/%s/output_households.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
-        )
-
-        content = content.replace(
-            'switzerland_facilities.xml.gz',
-            '%s/%s/output_facilities.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
-        )
-
-        content = content.replace(
-            'switzerland_network.xml.gz',
-            '%s/%s/output_network.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
-        )
-
-        content = content.replace(
-            'switzerland_transit_schedule.xml.gz',
-            '%s/%s/output_transitSchedule.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
-        )
-
-        content = content.replace(
-            'switzerland_transit_vehicles.xml.gz',
-            '%s/%s/output_transitVehicles.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
-        )
-
-        content = content.replace(
-            'switzerland_vehicles.xml.gz',
-            '%s/%s/output_vehicles.xml.gz' % (context.path("matsim.simulation.run"), "simulation_output")
-        )        
-
-        with open("%s/config_cutter.xml" % context.path(), "w+") as f_write:
-            f_write.write(content)
-
-    # some args to avoid errors in the cutter
-    args = [
-    "--config:eqasim:calibration.activate", "false",
-    "--config:eqasim:calibration.runCalibration", "false",
-    "--config:eqasim:alphaCalibration.activate", "false",
-    "--config:eqasim:alphaCalibration.filePath", "",
-    "--config:eqasim:networkCalibration.activate", "false",
-    "--config:eqasim:networkCalibration.calibrate", "false",
-    "--config:eqasim:networkCalibration.countsFile", "",
-    "--config:eqasim:networkCalibration.observedSpeedTripsFile", "",
-    ]
-    
+ 
     # use the new config to run the cutter
-    config_path = "%s/config_cutter.xml" % context.path()
     events_path = "%s/%s/output_events.xml.gz" % (context.path("matsim.simulation.run"), "simulation_output")
     eqasim.run(context, "org.eqasim.core.scenario.cutter.RunScenarioCutter", [
-        "--config-path", config_path,
+        "--config-path", cutter_config_path,
         "--output-path", output_path,
         "--extent-path", context.config("extent_path"),
         "--threads", context.config("threads"),
         "--prefix", context.config("extent_prefix"),
         "--events-path", events_path,
         "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator"
-    ] + args )
+        ] )
 
     # move some parameters files to the output path to be comprehensive for the scenario (self contained)
     # 1. mode parameters
@@ -119,13 +92,14 @@ def execute(context):
                     "%s/dmc_parameters.yml" % output_path)
     shutil.copyfile("%s/cost_parameters.yml" % context.path("matsim.simulation.prepare"),
                     "%s/cost_parameters.yml" % output_path)
-
+    dmc_params = "dmc_parameters.yml"
     if context.config("calibrate_alphas_in_matsim") or context.config("calibrate_betas_in_matsim"):
         calibrated_parameters_path = glob.glob("%s/%s/*_parameters.yml" % (context.path("matsim.simulation.run"), "simulation_output"))
         if len(calibrated_parameters_path) > 0:            
             calibrated_parameters_path = max(calibrated_parameters_path, key=os.path.getctime)
             shutil.copyfile(calibrated_parameters_path, 
                             "%s/calibrated_dmc_parameters.yml" % output_path)
+            dmc_params = "calibrated_dmc_parameters.yml"
 
     # 2.mode shares
     global_shares_output_path, cantonal_shares_output_path = context.stage("data.microcensus.shares")
@@ -139,6 +113,7 @@ def execute(context):
     shutil.copy(pricing_path, f"{output_path}/pricingDescription.xml" )
 
     # 4. calibration files (special regions and target files)
+    regionl_speeds_file = ""
     if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
         freespeed_calibration_path = context.stage("calibration.road_regions.freespeed_calibration")
         region_dir = os.path.join(output_path, "network_calibration_files")
@@ -151,8 +126,13 @@ def execute(context):
 
         target_traveltimes_file = context.stage("analysis.travel_times.APIs.target")
         if target_traveltimes_file!="":
-            shutil.copy(target_traveltimes_file, f"{region_dir}/target_travel_times.csv" )
+            cut_csv_to_region(csv_path= target_traveltimes_file, 
+                              region_path = context.config("extent_path"),
+                              output_path = f"{region_dir}/target_travel_times.csv")
+            if os.path.exists(f"{region_dir}/target_travel_times.csv"):
+                    regionl_speeds_file = "network_calibration_files/target_travel_times.csv"
 
+    regional_counts_file = ""
     if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_disutilities"):
         penalty_calibration_path = context.stage("calibration.road_regions.penalty_calibration")    
         region_dir = os.path.join(output_path, "network_calibration_files")
@@ -165,6 +145,32 @@ def execute(context):
         
         target_counts_file = context.stage("analysis.counts.target")
         if target_counts_file!="":
-            shutil.copy(target_counts_file, f"{region_dir}/target_counts.csv" )
-        
+            cut_csv_to_network(csv_path = target_counts_file, 
+                               network_path = "%s/%snetwork.xml.gz" % (output_path, context.config("extent_prefix")),
+                               output_path = f"{region_dir}/target_counts.csv")
+            if os.path.exists(f"{region_dir}/target_counts.csv"):
+                regional_counts_file = "network_calibration_files/target_counts.csv"
+
+    # 5. modify the regional model config
+    config_file = "%s/%sconfig.xml" % (output_path, context.config("extent_prefix") )
+    assert os.path.exists(config_file), "Config file does not exist: %s" % config_file
+    change_params(config_path = config_file, 
+                  output_path = config_file,
+                  params = [
+                        ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
+                        ("eqasim:networkCalibration.calibrate","true"),
+                        ("eqasim:networkCalibration.objective","agent,subpopulations"),
+                        ("eqasim:networkCalibration.costCalibration.activate","false"),
+                        ("eqasim:networkCalibration.freespeedCalibration.activate","false"),
+                        ("eqasim:alphaCalibration.filePath","cantonal_target_mode_shares.csv"),
+                        ("eqasim.modeParametersPath",dmc_params),
+                        ("eqasim.costParametersPath","cost_parameters.yml"),
+                        ("eqasim:networkCalibration.countsFile",regional_counts_file),
+                        ("eqasim:networkCalibration.freespeedCalibration.observedTripsFile",regionl_speeds_file),
+                        ("eqasim:networkCalibration.costCalibration.specialRegionPath",get_regions_path(output_path, kind="penalty")),
+                        ("eqasim:networkCalibration.freespeedCalibration.specialRegionPath",get_regions_path(output_path, kind="freespeed")),
+                        ("ptZones.ptZonesFilePath", "gtfs_zones.csv"),
+                        ("ptZones.sbbDistancesPath", "SBB_all_distances.csv"),
+                        ("ptZones.pricingDescriptionPath", "pricingDescription.xml")
+                        ] )
     return output_path

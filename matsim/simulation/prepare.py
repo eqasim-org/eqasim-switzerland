@@ -36,10 +36,14 @@ def configure(context):
     context.config("network_calibration.activate", default=False)
     context.config("network_calibration.calibrate_disutilities", default=True)
     context.config("network_calibration.calibrate_freespeed", default=True)
-    
-    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_disutilities"):
+    context.config("network_calibration.calibrate_agents_ascs", default=True)
+    context.config("network_calibration.calibrate_subpopulations", default=True)
+
+    need_counts = config_utils.need_counts_file(context)
+    if context.config("network_calibration.activate") and need_counts:
         context.stage("analysis.counts.target")
-        context.stage("calibration.road_regions.penalty_calibration")
+        if context.config("network_calibration.calibrate_disutilities"):
+            context.stage("calibration.road_regions.penalty_calibration")
         
     
     if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):

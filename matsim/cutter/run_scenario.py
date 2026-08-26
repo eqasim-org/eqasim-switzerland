@@ -1,4 +1,3 @@
-import glob
 import os
 import logging
 import matsim.runtime.eqasim as eqasim
@@ -13,13 +12,17 @@ def configure(context):
     context.config("use_vdf", default=False)
     context.config("extent_path", default="")
     context.config("extent_prefix", default="")
+    context.config("last_iteration", default = 60)
+    context.config("regional_model_last_iteration", default = context.config("last_iteration"))
+    context.config("run_regional_model", default=True)
 
 
 def execute(context):
     # 1. get the regional scenario if exists
     regional_scenario = context.stage("matsim.cutter.scenario")
     if regional_scenario=="":
-        return ("","")
+        return "", ""
+    
     assert os.path.exists(regional_scenario), "Regional scenario does not exist: %s" % regional_scenario
     logger.info("Regional scenario found: %s" % regional_scenario)
 
@@ -33,63 +36,27 @@ def execute(context):
     assert os.path.exists(config_file), "Config file does not exist: %s" % config_file
     logger.info("Config file found: %s" % config_file)
 
-    # 4. run the scenario in eqasim (we do not run any calibration, and all other files are already set in the config from the natioanl model)
-    dmc_param_path = "calibrated_dmc_parameters.yml" if os.path.exists("%s/calibrated_dmc_parameters.yml" % regional_scenario) else "dmc_parameters.yml"
-    freespeed_special_region = get_regions_path(regional_scenario, kind="freespeed")
-    penalty_special_region = get_regions_path(regional_scenario, kind="penalty")
-    args = [
-        "--config:eqasim:calibration.activate", "false",
-        "--config:eqasim:calibration.runCalibration", "false",
-        "--config:eqasim:alphaCalibration.activate", "false",
-        "--config:eqasim:alphaCalibration.filePath", "cantonal_target_mode_shares.csv",
-        "--config:eqasim:networkCalibration.activate", "true", # this will not calibrate, but just activate the module to use penalties and speed factors
-        "--config:eqasim:networkCalibration.calibrate", "false",
-        "--config:eqasim:networkCalibration.countsFile", str(os.path.join("network_calibration_files", "target_counts.csv")),
-        "--config:eqasim:networkCalibration.observedSpeedTripsFile", str(os.path.join("network_calibration_files", "target_travel_times.csv")),
-        "--config:eqasim:networkCalibration.penaltiesSpecialRegionPath", penalty_special_region,
-        "--config:eqasim:networkCalibration.freespeedSpecialRegionPath", freespeed_special_region,
-        "--config:eqasim.costParametersPath", "cost_parameters.yml",
-        "--config:eqasim.modeParametersPath", dmc_param_path,
-        "--config:ptZones.ptZonesFilePath", "gtfs_zones.csv",
-        "--config:ptZones.sbbDistancesPath", "SBB_all_distances.csv",
-        "--config:ptZones.pricingDescriptionPath", "pricingDescription.xml",
-    ]
-
-
-    # run the simulation
+    
+    # 4. run the simulation or return the path
+    if not context.config("run_regional_model"):
+        return regional_scenario, ""
+    
+    last_iteration = int(context.config("regional_model_last_iteration"))
     if not context.config("use_vdf"):
         eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunSimulation", [
             "--config-path", config_file,
-        ] + args)
+            "--config:controler.lastIteration", str(last_iteration),
+            ], cwd = regional_scenario)
     else:
         eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunVDFSimulation", [
             "--config-path", config_file,
+            "--config:controler.lastIteration", str(last_iteration),
             "--generateNetworkEvents", "true",
-        ] + args)        
+            ], cwd = regional_scenario)
 
-    simulation_path = "%s/simulation_output" % context.path()
+    simulation_path = "%s/simulation_output" % regional_scenario
     assert os.path.exists(simulation_path), "Simulation output path does not exist: %s" % simulation_path
     assert os.path.exists("%s/output_events.xml.gz" % simulation_path), "Output events file does not exist: %s" % ("%s/output_events.xml.gz" % simulation_path)
     os.chdir(cwd)
 
-    return simulation_path, regional_scenario
-
-
-
-def get_regions_path(path,kind="freespeed"):
-    regions = []
-    if kind=="freespeed":
-        region_dir = os.path.join(path, "network_calibration_files")
-        if os.path.exists(region_dir):
-            regions = glob.glob(f"{region_dir}/freespeed_special_region_*.yml")
-    elif kind=="penalty":
-        region_dir = os.path.join(path, "network_calibration_files")
-        if os.path.exists(region_dir):
-            regions = glob.glob(f"{region_dir}/penalties_special_region_*.yml")
-    
-    if len(regions)==0:
-        return ""
-    
-    # only keep the region_dir/region.yml part, not the full path
-    regions = [os.path.join("network_calibration_files", os.path.basename(region)) for region in regions]
-    return ";".join(regions)
+    return regional_scenario, simulation_path

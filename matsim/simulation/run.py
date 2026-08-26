@@ -37,7 +37,7 @@ def configure(context):
     context.config("network_calibration.calibrate_disutilities", default=True)
     context.config("network_calibration.calibrate_freespeed", default=True)
     context.config("network_calibration.calibrate_agents_ascs", default=True)
-    context.config("network_calibration.calibrate_crossborder_population", default=True)
+    context.config("network_calibration.calibrate_subpopulations", default=True)
 
     context.config("correct_links_capacity", True)
     context.config("minimum_speed", 1.0)
