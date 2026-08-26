@@ -69,6 +69,7 @@ def drop_duplicate_columns(df, source_name):
 
 def configure(context):
     context.config("include_external_population", default = False)
+    context.config("random_seed")
 
     if context.config("include_external_population"):
         context.config("external_population_folder")
@@ -346,11 +347,28 @@ def execute(context):
         logger.info(f"Downsampling with a ratio of {round(ratio, 2)}.")
 
         person_ids  = persons["person_id"].values.tolist()
-        sampled_ids = np.random.choice(person_ids, size = int(len(person_ids) * ratio), replace = False).tolist()
+
+        random_seed = context.config("random_seed")
+        rng = np.random.default_rng(random_seed)
+        sampled_ids = rng.choice(person_ids, size = int(len(person_ids) * ratio), replace = False).tolist()
 
         persons    = persons[persons["person_id"].isin(sampled_ids)]
         acts       = acts[acts["person_id"].isin(sampled_ids)]
         vehicles   = vehicles[vehicles["owner_id"].isin(sampled_ids)]
+
+        # remove these cross_perimeter activities
+        fallback_home_coords = acts.groupby("person_id")[["destination_x", "destination_y"]].first()
+        persons["home_x"] = persons["home_x"].fillna(persons["person_id"].map(fallback_home_coords["destination_x"]))
+        persons["home_y"] = persons["home_y"].fillna(persons["person_id"].map(fallback_home_coords["destination_y"]))
+
+        sel = (acts.purpose=="cross_perimeter")
+        cp_acts = acts.loc[sel, ["person_id", "destination_x", "destination_y"]]
+        cp_acts = cp_acts.merge(persons[["person_id","home_x","home_y"]], on="person_id", how="left")
+
+        acts.loc[sel, "purpose"] = "home"
+        acts.loc[sel, "geometry"] = gpd.points_from_xy(cp_acts.home_x, cp_acts.home_y)
+        acts.loc[sel, "destination_x"] = cp_acts.home_x.values
+        acts.loc[sel, "destination_y"] = cp_acts.home_y.values
 
     return persons, acts, vehicles
 
