@@ -346,15 +346,18 @@ def execute(context):
         logger.info(f"FR sample rate: {fr_sample_rate}. CH sample rate: {ch_sample_rate}.")
         logger.info(f"Downsampling with a ratio of {round(ratio, 2)}.")
 
-        person_ids  = persons["person_id"].values.tolist()
+        households  = persons["household_id"].unique().tolist()
 
         random_seed = context.config("random_seed")
         rng = np.random.default_rng(random_seed)
-        sampled_ids = rng.choice(person_ids, size = int(len(person_ids) * ratio), replace = False).tolist()
+        sampling_size = int(round(len(households) * ratio))
+        sampled_ids = rng.choice(households, size = sampling_size, replace = False).tolist()
 
-        persons    = persons[persons["person_id"].isin(sampled_ids)]
-        acts       = acts[acts["person_id"].isin(sampled_ids)]
-        vehicles   = vehicles[vehicles["owner_id"].isin(sampled_ids)]
+        persons    = persons[persons["household_id"].isin(sampled_ids)]
+        sampled_persons = persons['person_id'].unique()
+        
+        acts       = acts[acts["person_id"].isin(sampled_persons)]
+        vehicles   = vehicles[vehicles["owner_id"].isin(sampled_persons)]
 
     # remove these cross_perimeter activities
     fallback_home_coords = acts.groupby("person_id")[["destination_x", "destination_y"]].first()
