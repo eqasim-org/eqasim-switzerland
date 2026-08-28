@@ -7,6 +7,7 @@ from shapely.geometry import Point
 from data.utils import coerce_boolean_series
 import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
+from matsim.scenario.population import HOME_DESTINATION_ID
 import logging
 
 logger = logging.getLogger("synpp")
@@ -360,16 +361,22 @@ def execute(context):
         vehicles   = vehicles[vehicles["owner_id"].isin(sampled_persons)]
 
     # remove these cross_perimeter activities
-    fallback_home_coords = acts.groupby("person_id")[["destination_x", "destination_y"]].first()
-    persons["home_x"] = persons["home_x"].fillna(persons["person_id"].map(fallback_home_coords["destination_x"]))
-    persons["home_y"] = persons["home_y"].fillna(persons["person_id"].map(fallback_home_coords["destination_y"]))
+    # Use one fallback coordinate per household. The facilities stage writes
+    # one home facility per household, so members must not derive different
+    # home coordinates from their individual activity chains.
+    fallback_home_coords = (acts.merge(persons[["person_id", "household_id"]], on="person_id", how="inner")
+                            .groupby("household_id")[["destination_x", "destination_y"]]
+                            .first())
+    persons["home_x"] = persons["home_x"].fillna(persons["household_id"].map(fallback_home_coords["destination_x"]))
+    persons["home_y"] = persons["home_y"].fillna(persons["household_id"].map(fallback_home_coords["destination_y"]))
 
     sel = (acts.purpose=="cross_perimeter")
     cp_acts = acts.loc[sel, ["person_id", "destination_x", "destination_y"]]
     cp_acts = cp_acts.merge(persons[["person_id","home_x","home_y"]], on="person_id", how="left")
 
     acts.loc[sel, "purpose"] = "home"
-    acts.loc[sel, "geometry"] = gpd.points_from_xy(cp_acts.home_x, cp_acts.home_y)
+    acts.loc[sel, "destination_id"] = HOME_DESTINATION_ID
+    acts.loc[sel, "geometry"] = gpd.points_from_xy(cp_acts.home_x.values, cp_acts.home_y.values)
     acts.loc[sel, "destination_x"] = cp_acts.home_x.values
     acts.loc[sel, "destination_y"] = cp_acts.home_y.values
 
