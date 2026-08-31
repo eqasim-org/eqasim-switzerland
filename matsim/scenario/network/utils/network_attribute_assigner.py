@@ -13,14 +13,14 @@ class NetworkAttributeAssigner:
     def assign_attributes(self):
         logger.info("Assigning Municipality Types...")
         self.links = self.assign_municipality_type()
-        self.links = self.assign_speed_factor()
+        self.links = self.assign_zeros_speed_factor()
         logger.info("Assigning Routing Penalties...")
         self.links = RoutingPenaltyProvider(self.context, self.links, self.network.nodes).process()
         logger.info("Assigning Speed Factors...")
         self.links = SpeedFactorProvider(self.context, self.links, self.network.nodes).process()
         return self.links
 
-    def assign_speed_factor(self):
+    def assign_zeros_speed_factor(self):
         if "attributes" not in self.links.columns:
             return self.links
 

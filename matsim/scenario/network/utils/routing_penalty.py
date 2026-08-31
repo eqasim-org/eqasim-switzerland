@@ -1,19 +1,18 @@
-import pandas as pd
+from io import StringIO
 import geopandas as gpd
+import pandas as pd
+from shapely import covers
+
 from matsim.scenario.network.utils.speed_factors import SpeedFactorProvider
 
-DEFAULT_PENALTIES = {1 : 0.4000, 2 : 0.1236, 3 :0.0667, 4 :-0.1000, 5 :-0.1000, 11: 0.4000, 12: 0.0179, 13:-0.1000, 
-                     14:-0.1000, 15:-0.1000, 21:0.2743, 22:-0.1000, 23:-0.1000, 24:-0.1000, 25:-0.1000}
-SPECIFIC_FACTORS = {"ramp":1.1, "trunk":1.3, "normal":1.0}
 
 class RoutingPenaltyProvider:
     def __init__(self, context, links, nodes):
         self.context = context
         self.links = links.copy()
-        self.centroids = self.get_centroids(self.links, nodes)
-        self.polygone = self.load_polygone()
-        self.links_in_polygone = set(self.centroids[self.centroids.geometry.within(self.polygone)].link_id.tolist())
-        self.penalties = DEFAULT_PENALTIES
+        self.nodes = nodes
+        self.penalties = self._read_penalties(StringIO(DEFAULT_LINK_PENALTIES_CSV))
+        self.special_region_by_link_id = self._assign_special_regions()
 
     def process(self):
         if "attributes" not in self.links.columns:
@@ -29,78 +28,175 @@ class RoutingPenaltyProvider:
             if isinstance(attr, dict):
                 attr["penalty"] = self._get_penalty_from_values(attr, link_id, link_modes, lanes, speed)
 
-        return self.links          
+        return self.links
 
     def _get_penalty_from_values(self, attributes, link_id, modes, number_of_lanes, freespeed):
         base_category = SpeedFactorProvider._get_link_base_category_from_values(
             attributes, modes, number_of_lanes, freespeed
         )
-        road_type = self._get_link_type_from_attributes(attributes)
-        road_type_factor = SPECIFIC_FACTORS.get(road_type, 1.0)
-
         if base_category is None:
             return 0.0
 
-        if link_id in self.links_in_polygone:
-            penalty = self.penalties.get(base_category + 20, 0.0)
-            if penalty >= 0:
-                return penalty * road_type_factor
+        municipality_type = str(attributes.get("municipalityType", "outside")).strip().lower()
+        if municipality_type == "outside":
+            return 0.0
 
-        municipality_type = attributes.get("municipalityType", "outside")
-        if municipality_type in ["urbancore", "urban"]:
-            return self.penalties.get(base_category + 10, 0.0) * road_type_factor
+        is_urban = municipality_type in ["urbancore", "urban"]
+        special_region = self.special_region_by_link_id.get(link_id, 0)
+        key = (base_category, is_urban, special_region)
 
-        return self.penalties.get(base_category, 0.0) * road_type_factor
-    
+        # The Java calibration merges sparse special-region groups into the
+        # corresponding region-0 group. The exported defaults already contain
+        # the expanded real keys; this fallback also covers combinations that
+        # did not occur in the network used for calibration.
+        return self.penalties.get(
+            key, self.penalties.get((base_category, is_urban, 0), 0.0)
+        )
+
     def read_penalties_from_csv(self, path):
-        # csv has these columns: # category;penalty(%)
-        df = pd.read_csv(path)
-        penalties = dict()
+        self.penalties = self._read_penalties(path)
+
+    @staticmethod
+    def _read_penalties(path_or_buffer):
+        df = pd.read_csv(path_or_buffer, sep=";")
+        required_columns = {
+            "linkCategory",
+            "isUrban",
+            "specialRegion",
+            "penalty(%)",
+        }
+        missing_columns = required_columns.difference(df.columns)
+        if missing_columns:
+            raise ValueError(
+                "Missing routing-penalty CSV columns: "
+                + ", ".join(sorted(missing_columns))
+            )
+
+        penalties = {}
         for _, row in df.iterrows():
-            category = row["category"]
-            penalty = row["penalty(%)"]            
-            penalties[category] = penalty
-        
-        # make sure all penalties are defined, if not, use the parent's penalty or 0 if not defined
-        for cat in range(1, 6):
-            if cat not in penalties:
-                penalties[cat] = 0.0
-            if cat + 10 not in penalties:
-                penalties[cat + 10] = penalties.get(cat, 0.0) # urbans, fall back to the non-urban penalty if not defined
-            if cat + 20 not in penalties:
-                penalties[cat + 20] = -1 # do not consider that case (meaning, will fall back to urban/non-urban penalty)
+            key = ( int(row["linkCategory"]),
+                    str(row["isUrban"]).strip().lower() == "true",
+                    int(row["specialRegion"]))
+            penalties[key] = float(row["penalty(%)"])
+        return penalties
 
-        self.penalties = penalties
-    
+    def _assign_special_regions(self):
+        region_paths = self.context.stage("calibration.road_regions.penalty_calibration")
+        region_paths = [path.strip() for path in region_paths.split(";") if path.strip()]
+        if not region_paths or self.links.empty:
+            return {}
+
+        endpoints = self._get_link_endpoints(self.links, self.nodes)
+        from_points = gpd.points_from_xy(
+            endpoints.x_from_node, endpoints.y_from_node, crs="EPSG:2056"
+        )
+        to_points = gpd.points_from_xy(
+            endpoints.x_to_node, endpoints.y_to_node, crs="EPSG:2056"
+        )
+
+        special_region_by_link_id = {}
+        for special_region, path in enumerate(region_paths, start=1):
+            geometry = gpd.read_file(path).geometry.union_all()
+            in_region = covers(geometry, from_points) & covers(geometry, to_points)
+            for link_id in endpoints.loc[in_region, "link_id"]:
+                # Match Java's putIfAbsent: the first region in the configured
+                # semicolon-separated list wins when regions overlap.
+                special_region_by_link_id.setdefault(link_id, special_region)
+
+        return special_region_by_link_id
+
     @staticmethod
-    def _get_link_type_from_attributes(attributes):
-        osm_highway = attributes.get("osm:way:highway", None)
-        if osm_highway in ["trunk", "trunk_link"]:
-            return "trunk"
-        if osm_highway in ["motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"]:
-            return "ramp"
-        return "normal"
-
-    def load_polygone(self):
-        poly_path = self.context.stage("calibration.road_regions.penalty_calibration")
-        poly_path = poly_path.split(";")
-        
-        geometries = []
-        for path_i in poly_path:
-            gdf = gpd.read_file(path_i)
-            geometries.extend(gdf.geometry.tolist())
-        unioned = gpd.GeoSeries(geometries).union_all()
-
-        return unioned
-        
-    @staticmethod
-    def get_centroids(links, nodes):
-        links_centers = (
+    def _get_link_endpoints(links, nodes):
+        return (
             links[["link_id", "from_node", "to_node"]]
             .merge(nodes, left_on="from_node", right_on="node_id", how="left")
-            .merge(nodes, left_on="to_node", right_on="node_id", suffixes=("_from_node", "_to_node"), how="left")
+            .merge(
+                nodes,
+                left_on="to_node",
+                right_on="node_id",
+                suffixes=("_from_node", "_to_node"),
+                how="left",
+            )
         )
+
+    @staticmethod
+    def get_centroids(links, nodes):
+        links_centers = RoutingPenaltyProvider._get_link_endpoints(links, nodes)
         centroids_x = (links_centers.x_from_node + links_centers.x_to_node) / 2
         centroids_y = (links_centers.y_from_node + links_centers.y_to_node) / 2
-        geometry = gpd.points_from_xy(centroids_x, centroids_y, crs="EPSG:2056")
-        return gpd.GeoDataFrame(links_centers[["link_id"]], geometry=geometry, crs="EPSG:2056")
+        geometry = gpd.points_from_xy(
+            centroids_x, centroids_y, crs="EPSG:2056"
+        )
+        return gpd.GeoDataFrame(
+            links_centers[["link_id"]], geometry=geometry, crs="EPSG:2056"
+        )
+
+
+DEFAULT_LINK_PENALTIES_CSV = """
+linkCategory;isUrban;specialRegion;penalty(%)
+4;true;13;0.0000
+2;true;14;0.0000
+4;true;14;0.0000
+2;false;1;0.3000
+2;false;0;0.0000
+2;false;3;0.0000
+4;false;0;0.3000
+2;false;2;0.0000
+1;true;0;0.0895
+2;false;5;0.0141
+4;false;2;0.0000
+3;true;0;0.0000
+1;true;2;0.0000
+1;true;1;0.0000
+1;true;4;0.0000
+2;false;9;0.3000
+3;true;2;0.0000
+1;true;3;0.0000
+4;false;9;0.0595
+1;true;5;0.0000
+3;true;3;0.0000
+2;false;13;0.0000
+3;true;6;0.0000
+1;true;8;0.3000
+2;false;12;0.0000
+3;true;5;0.0000
+4;false;13;0.0000
+3;true;8;0.0000
+4;false;12;0.1300
+2;false;14;0.0000
+5;true;5;0.0000
+1;true;9;0.0149
+4;false;14;0.1810
+1;true;14;0.0260
+3;true;12;0.0000
+3;true;11;0.0000
+1;true;13;0.0000
+3;true;14;0.0000
+3;true;13;0.0000
+5;true;13;0.0000
+1;false;0;0.0885
+3;false;0;0.2797
+1;false;1;0.0321
+5;false;0;0.0000
+3;false;2;0.0000
+1;false;3;0.0000
+2;true;0;0.0000
+2;true;3;0.0000
+4;true;0;0.0000
+2;true;2;0.0000
+2;true;5;0.0000
+3;false;9;0.0000
+4;true;2;0.0000
+3;false;12;0.3000
+1;false;14;0.0000
+4;true;5;0.0000
+1;false;13;0.0000
+3;false;14;0.0000
+3;false;13;0.0469
+2;true;8;0.3000
+4;true;6;0.0000
+2;true;11;0.3000
+4;true;8;0.0000
+2;true;13;0.1558
+4;true;11;0.0000
+"""
