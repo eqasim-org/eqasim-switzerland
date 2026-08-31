@@ -8,6 +8,7 @@ from matsim.readers import read_network
 import glob
 
 _PATH_SEGMENT = re.compile(r"^(?P<name>.+?)(?:\[(?P<index>\d+)\])?$")
+_DEDUPLICATED_TAGS = {"module", "parameterset", "param"}
 
 ############### changing the config #####################
 def change_params(config_path, params, output_path = None):
@@ -28,6 +29,10 @@ def change_params(config_path, params, output_path = None):
 
     Values are converted to strings. Booleans and ``None`` use MATSim's usual
     XML spellings: ``true``/``false`` and ``null``.
+
+    Before saving, semantically identical sibling modules, parameter sets, and
+    parameters are collapsed to their first occurrence. Parameter sets of the
+    same type that contain different values are preserved.
     """
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"MATSim config file does not exist: {config_path}")
@@ -40,6 +45,11 @@ def change_params(config_path, params, output_path = None):
 
     for param in changes:
         change_param(tree, param)
+
+    # MATSim output configs can contain complete modules or parameter sets more
+    # than once. Apply changes first so all matching copies receive the same
+    # value, then remove only copies whose complete XML content is equivalent.
+    _remove_duplicate_config_elements(tree.getroot())
 
     # Changing one value should not reformat the complete (and often very
     # large) MATSim configuration file.
@@ -151,6 +161,51 @@ def _xml_value(value):
     if value is None:
         return "null"
     return str(value)
+
+
+def _remove_duplicate_config_elements(parent):
+    """Recursively remove equivalent sibling MATSim configuration elements."""
+    removed = 0
+
+    # Work from the leaves upwards. Removing duplicates inside a container may
+    # reveal that the complete container is itself a duplicate of a sibling.
+    for child in parent:
+        if isinstance(child.tag, str):
+            removed += _remove_duplicate_config_elements(child)
+
+    seen = set()
+    for child in list(parent):
+        if _local_name(child) not in _DEDUPLICATED_TAGS:
+            continue
+
+        signature = _semantic_element_signature(child)
+        if signature in seen:
+            parent.remove(child)
+            removed += 1
+        else:
+            seen.add(signature)
+
+    return removed
+
+
+def _semantic_element_signature(element):
+    """Return a hashable XML signature that ignores comments and indentation."""
+    text = element.text
+    if text is not None and not text.strip():
+        text = None
+
+    children = tuple(
+        _semantic_element_signature(child)
+        for child in element
+        if isinstance(child.tag, str)
+    )
+
+    return (
+        element.tag,
+        tuple(sorted(element.attrib.items())),
+        text,
+        children,
+    )
 
 
 
