@@ -361,9 +361,7 @@ def execute(context):
         vehicles   = vehicles[vehicles["owner_id"].isin(sampled_persons)]
 
     # remove these cross_perimeter activities
-    # Use one fallback coordinate per household. The facilities stage writes
-    # one home facility per household, so members must not derive different
-    # home coordinates from their individual activity chains.
+    # This should be done per household otherwise we would have errors from the scenario validator
     fallback_home_coords = (acts.merge(persons[["person_id", "household_id"]], on="person_id", how="inner")
                             .groupby("household_id")[["destination_x", "destination_y"]]
                             .first())

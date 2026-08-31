@@ -77,7 +77,7 @@ def filter_trips(context, df_trips):
     df = df_trips[df_trips["variation_window_min"] > 0].copy()
     # 2. trips with departure time not between 5:00 and 24:00
     df = df[df['departure_time'].notna()]
-    df = df[df['departure_time'].between(5.3*3600, 24*3600)]  # filter trips with departure time between 5:00 and 24:00 (in seconds)
+    df = df[df['departure_time'].between(5.3*3600, 24*3600)]  # filter trips with departure time between 5:18 and 24:00 (in seconds)
     # 3. crossborder trips (these will not be routed)
     cb = (df["preceding_purpose"] == "border") | (df["following_purpose"] == "border")
     df = df[~cb]
@@ -115,20 +115,39 @@ def prepare_trips_for_router(context, df_trips):
 
 def run_pt_router(context, df):
     # output path
-    output_path= os.path.join(context.path(), "pt_routed_trips.csv")
+    output_path= os.path.join(context.working_directory, "pt_routed_trips.csv")
+    initial_ids = df[["identifier"]].astype(str).copy()
     if os.path.exists(output_path):
         logger.info("\t PT routed trips already exist. Checking if they are valid.")
         df_old = pd.read_csv(output_path)
-        if set(df_old["identifier"]) == set(df["identifier"]):
+        required_columns = {
+            "identifier",
+            "access_travel_time_min",
+            "egress_travel_time_min",
+            "transfer_waiting_time_min",
+            "transfer_travel_time_min",
+            "in_vehicle_time_total_min",
+            "in_vehicle_distance_total_km",
+            "transfers",
+            "initial_waiting_time_min",
+        }
+        valid_cache = (
+            required_columns.issubset(df_old.columns)
+            and len(df_old) == len(df)
+            and set(df_old["identifier"].astype(str)) == set(df["identifier"].astype(str))
+        )
+        if valid_cache:
             logger.info("\t  - They are valid. Skipping routing.")
-            return df_old
+            df = initial_ids.merge(df_old, on="identifier", how="left")
+            df = _prepare_routed_output(df)
+            df.loc[df["access_egress_time_min"].isna(), ["access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]] = 1e6
+            return df[["identifier", "access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]]
         else:
             logger.info("\t  - They are not valid. Performing routing.")
             del df_old
 
     # save trips as csv file
-    input_path = os.path.join(context.path(), "pt_trips_to_be_routerd.csv")
-    initial_ids = df[["identifier"]].astype(str).copy()
+    input_path = os.path.join(context.working_directory, "pt_trips_to_be_routerd.csv")
     initial_length = len(df)
     logger.info("\t Saving %d trips to be routed to %s.", initial_length, input_path)
     df.to_csv(input_path, index=False)
@@ -145,6 +164,7 @@ def run_pt_router(context, df):
                 "--input-path", input_path,
                 "--output-trips-path", output_path,
                 "--batch-size", "2048",
+                "--chunk-size", "131072",
                 "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator",
                 "--threads", str(context.config("threads"))
             ]
@@ -155,17 +175,19 @@ def run_pt_router(context, df):
     logger.info(f"\t There are {len(df)} trips after PT routing.")
     logger.info(f"\t There are {initial_length - len(df)} trips lost during PT routing.")
 
-    # relevant variables
+    # we merge to keep all initial trips, and set the nan values to very high number, so they won't be selected anyway
+    df = initial_ids.merge(df, on="identifier", how="left")
+    df = _prepare_routed_output(df)
+    df.loc[df["access_egress_time_min"].isna(), ["access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]] = 1e6
+
+    return df[["identifier", "access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]]
+
+def _prepare_routed_output(df):
     df["access_egress_time_min"] = df["access_travel_time_min"] + df["egress_travel_time_min"]
     df["waiting_time_min"] = df["transfer_waiting_time_min"] + df["transfer_travel_time_min"]
     df["in_vehicle_time_min"] = df["in_vehicle_time_total_min"]
     df["distance_km"] = df["in_vehicle_distance_total_km"]
-
-    # we merge to keep all initial trips, and set the nan values to very high number, so they won't be selected anyway
-    df = initial_ids.merge(df, on="identifier", how="left")
-    df.loc[df["access_egress_time_min"].isna(), ["access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]] = 1e6
-
-    return df[["identifier", "access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]]
+    return df
     
 def compute_utilities(context, df):
     # get and parse the params file
@@ -181,7 +203,8 @@ def compute_utilities(context, df):
         Parameters.pt.betaLineSwitch_u * np.power((df["transfers"]), Parameters.pt.lineSwitchExponent)
     )
     # add very low gumbel randomness
-    noise = np.random.gumbel(0.0, scale=abs(Parameters.pt.betaWaitingTime_u_min), size=len(utility))
+    rng = np.random.default_rng(context.config('random_seed')*2)
+    noise = rng.gumbel(0.0, scale=abs(Parameters.pt.betaWaitingTime_u_min), size=len(utility))
 
     return utility + noise
 
@@ -202,8 +225,9 @@ def find_best_departure_times(context, df, original_departures):
     best_departure_times["person_id"] = best_departure_times["person_id"].astype(car_availability["person_id"].dtype)
     best_departure_times = best_departure_times.merge(car_availability, on="person_id", how="left")
 
-    selection = (best_departure_times["car_availability"] == False) & (best_departure_times["initial_waiting_time_min"] > 5) 
-    random_noise = np.random.uniform(0, 1, size=selection.sum()) * 5 * 60  # random noise between 0 and 5 minutes in seconds
+    selection = (best_departure_times["car_availability"] == False) & (best_departure_times["initial_waiting_time_min"] > 5.1) 
+    rng = np.random.default_rng(context.config('random_seed')*3)
+    random_noise = rng.uniform(0, 1, size=selection.sum()) * 5 * 60 # random noise between 0 and 5 minutes
     best_departure_times.loc[selection, "departure_time"] = (best_departure_times.loc[selection, "departure_time"] + 
                                                             (best_departure_times.loc[selection, "initial_waiting_time_min"] * 60 - random_noise).astype(int)
                                                             )

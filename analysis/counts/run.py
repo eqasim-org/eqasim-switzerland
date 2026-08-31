@@ -10,7 +10,7 @@ from .matching.plots import Plotter
 
 
 logger = logging.getLogger("synpp")
-runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not i.startswith("_")]
+runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not (i.startswith("_") or i.startswith("."))]
 
 def configure(context):    
     context.stage("analysis.counts.matching.network")
@@ -35,7 +35,8 @@ def execute(context):
     # Load all count files
     files = {}
     for run in runs:
-        files[run] = context.stage(f"analysis.counts.runs.{run}")
+        if 'annemasse' not in run.lower():
+            files[run] = context.stage(f"analysis.counts.runs.{run}")
 
     # Combine all count files into a single file
     all_data = []

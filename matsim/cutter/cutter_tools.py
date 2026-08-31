@@ -9,7 +9,7 @@ import glob
 
 _PATH_SEGMENT = re.compile(r"^(?P<name>.+?)(?:\[(?P<index>\d+)\])?$")
 
-
+############### changing the config #####################
 def change_params(config_path, params, output_path = None):
     """Change parameters in a MATSim XML configuration file.
 
@@ -154,6 +154,7 @@ def _xml_value(value):
 
 
 
+############ Other functions for the cutter ######################
 
 def cut_csv_to_region(csv_path, region_path, output_path = None, only_origin=False,
                       origin_x='origin_x', origin_y='origin_y', 
