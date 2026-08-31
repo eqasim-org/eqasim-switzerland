@@ -145,8 +145,8 @@ def execute(context):
                   output_path = config_file,
                   params = [
                         ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
-                        ("eqasim:networkCalibration.calibrate","true"),
-                        ("eqasim:networkCalibration.objective","agent,subpopulations"),
+                        ("eqasim:networkCalibration.objective","freespeed,penalty,agent,subpopulations"),
+                        ("eqasim:networkCalibration.calibrate","agent,subpopulations"),
                         ("eqasim:networkCalibration.costCalibration.activate","false"),
                         ("eqasim:networkCalibration.freespeedCalibration.activate","false"),
                         ("eqasim:alphaCalibration.filePath","cantonal_target_mode_shares.csv"),

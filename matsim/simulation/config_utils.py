@@ -269,26 +269,30 @@ def get_network_calibration_args(context):
     
     additional_args.extend(
             ["--config:eqasim:networkCalibration.activate", "true",
-            "--config:eqasim:networkCalibration.calibrate", java_boolean(calibrate_network),
             "--config:eqasim:networkCalibration.correctCapacities", java_boolean(context.config("correct_links_capacity"), "correct_links_capacity"),
             "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed"))]
     )
     
-    objective = []
-    if calibrate_disutilities:  
-        objective.append("penalty")
+    objective = ["penalty","freespeed"] # to be enabled
+    to_calibrate = [] # to be calibrated
+    if calibrate_network and calibrate_disutilities:  
+        to_calibrate.append("penalty")
 
-    if calibrate_agent_acs:
+    if calibrate_network and calibrate_freespeed:
+        to_calibrate.append("freespeed")
+
+    if calibrate_network and calibrate_agent_acs:
+        to_calibrate.append("agent")
         objective.append("agent")
 
-    if calibrate_subpopulations:        
+    if calibrate_network and calibrate_subpopulations:        
+        to_calibrate.append("subpopulations")
         objective.append("subpopulations")
              
-    if calibrate_freespeed:
-        objective.append("freespeed")
         
     additional_args.extend([
-        "--config:eqasim:networkCalibration.objective", ",".join(objective)
+        "--config:eqasim:networkCalibration.objective", ",".join(objective),
+        "--config:eqasim:networkCalibration.calibrate", ",".join(to_calibrate)
         ])
        
     return additional_args
