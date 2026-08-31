@@ -6,7 +6,7 @@ import matsim.runtime.maven as maven
 
 DEFAULT_EQASIM_VERSION = "2.0.0"
 DEFAULT_EQASIM_BRANCH = "cmdp"
-DEFAULT_EQASIM_COMMIT = "af2dcd6c6f82ace7795eabcc5b91277de4beea6c"
+DEFAULT_EQASIM_COMMIT = "4be93c685153a7a0ef209f38696269a417f90ed2"
 
 
 def configure(context):
