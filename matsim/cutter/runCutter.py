@@ -66,7 +66,7 @@ def execute(context):
                             ("eqasim:alphaCalibration.activate","false"),
                             ("eqasim:alphaCalibration.filePath",""),
                             ("eqasim:networkCalibration.activate","false"),
-                            ("eqasim:networkCalibration.calibrate",""),
+                            ("eqasim:networkCalibration.calibrate","false"),
                             ("eqasim:networkCalibration.countsFile",""),
                             ("eqasim:networkCalibration.costCalibration.specialRegionPath",""),
                             ("eqasim:networkCalibration.freespeedCalibration.observedTripsFile",""),
@@ -159,7 +159,7 @@ def execute(context):
                   params = [
                         ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
                         ("eqasim:networkCalibration.objective","freespeed,penalty,agent,subpopulations"),
-                        ("eqasim:networkCalibration.calibrate","agent,subpopulations"),
+                        ("eqasim:networkCalibration.calibrate","false"),
                         ("eqasim:networkCalibration.costCalibration.activate","false"),
                         ("eqasim:networkCalibration.freespeedCalibration.activate","false"),
                         ("eqasim:alphaCalibration.filePath","cantonal_target_mode_shares.csv"),

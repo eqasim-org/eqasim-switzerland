@@ -94,6 +94,7 @@ def execute(context):
             "--preventwaitingtoentertraffic", preventwaitingtoentertraffic,
             "--config:scoring.writeExperiencedPlans", writeExperiencedPlans,
         ] + additional_args)
+        
     else:
         # Run simulation with vdf
         eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunVDFSimulation", [

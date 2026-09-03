@@ -399,7 +399,7 @@ def execute(context):
     df_population[ "commute_distance"]   = df_population["commute_distance"].fillna(-1)
     df_population[ "work_location_type"] = df_population["work_location_type"].fillna("none")
     
-    # trasform work_location_type to int
+    # transform work_location_type to int
     DICT_WORK_LOCATION_TYPE = {"none": 0, "fixed": 1, "remote": 2, "moving": 3}
 
     df_population["work_location_type"] = df_population["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
@@ -416,7 +416,7 @@ def execute(context):
     df_population["broad_commute_distance_class"] = np.digitize(df_population["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
     df_source["broad_commute_distance_class"]     = np.digitize(df_source["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
 
-    # this is now necessary to include, to make sure employement is well matched, otherwise we get errors in work location assignement
+    # this is now necessary to include, to make sure employement is well matched, otherwise we get errors in work location assignment
     df_source["employed"]     = df_source["employed"].astype(int)
     df_population["employed"] = (df_population["employed"] == const.EMPLOYED).astype(int)
 
