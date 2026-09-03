@@ -259,47 +259,46 @@ def get_network_cal_config_as_bool(context):
             "network_calibration.calibrate_subpopulations",
         )
     return calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations
-    
+
+
+def get_network_calibration_objectives(context):
+    calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = get_network_cal_config_as_bool(context)
+    objective = ["freespeed"] # freespeed is always used
+    if calibrate_network and calibrate_disutilities: objective.append("penalty")
+    if calibrate_network and calibrate_agent_acs: objective.append("agent")
+    if calibrate_network and calibrate_subpopulations: objective.append("subpopulations")
+    return ",".join(objective)
+
+def get_network_calibration_calibrate(context, ignore=None):
+    calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = get_network_cal_config_as_bool(context)
+    calibrate = []
+    ignore = set(ignore) if ignore is not None else set()
+    if calibrate_network and calibrate_disutilities and "penalty" not in ignore: calibrate.append("penalty")
+    if calibrate_network and calibrate_freespeed and "freespeed" not in ignore: calibrate.append("freespeed")
+    if calibrate_network and calibrate_agent_acs and "agent" not in ignore: calibrate.append("agent")
+    if calibrate_network and calibrate_subpopulations and "subpopulations" not in ignore: calibrate.append("subpopulations")
+    return ",".join(calibrate)
+
+
 def get_network_calibration_args(context):
     calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = get_network_cal_config_as_bool(context)
-
-    additional_args = []    
+ 
     if calibrate_network:
         assert (calibrate_disutilities or calibrate_freespeed or calibrate_agent_acs or calibrate_subpopulations), "Network calibration is activated, one of disutilities calibration or freespeed calibration need to be activated"
     
-    additional_args.extend(
-            ["--config:eqasim:networkCalibration.activate", "true",
-            "--config:eqasim:networkCalibration.correctCapacities", java_boolean(context.config("correct_links_capacity"), "correct_links_capacity"),
-            "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed"))]
-    )
-    
-    objective = ["penalty","freespeed"] # to be enabled
-    to_calibrate = [] # to be calibrated
-    if calibrate_network and calibrate_disutilities:  
-        to_calibrate.append("penalty")
-
-    if calibrate_network and calibrate_freespeed:
-        to_calibrate.append("freespeed")
-
-    if calibrate_network and calibrate_agent_acs:
-        to_calibrate.append("agent")
-        objective.append("agent")
-
-    if calibrate_network and calibrate_subpopulations:        
-        to_calibrate.append("subpopulations")
-        objective.append("subpopulations")
-             
-        
-    additional_args.extend([
-        "--config:eqasim:networkCalibration.objective", ",".join(objective),
-        "--config:eqasim:networkCalibration.calibrate", ",".join(to_calibrate)
-        ])
+    additional_args =[
+        "--config:eqasim:networkCalibration.activate", "true",
+        "--config:eqasim:networkCalibration.correctCapacities", java_boolean(context.config("correct_links_capacity"), "correct_links_capacity"),
+        "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed")),
+        "--config:eqasim:networkCalibration.objective", get_network_calibration_objectives(context),
+        "--config:eqasim:networkCalibration.calibrate", get_network_calibration_calibrate(context),
+        ]
        
     return additional_args
 
 def need_counts_file(context):
     calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = get_network_cal_config_as_bool(context)
-    return calibrate_disutilities or calibrate_agent_acs or calibrate_subpopulations
+    return calibrate_network and (calibrate_disutilities or calibrate_agent_acs or calibrate_subpopulations)
 
 def network_calibration_files_paths(context):
     calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = get_network_cal_config_as_bool(context)

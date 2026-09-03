@@ -112,6 +112,13 @@ class Compare:
         # Load and filter simulation flow data
         df_sim = self.get_link_stats(file_path).copy()
         df_counts = counts.counts[['id', flow_col]].copy().rename(columns={flow_col:"flow"})
+        match_summary = matched.groupby("id").agg(
+            directions_represented=("link_id", "size"),
+            matched_link_ids=("link_id", lambda values: [str(value) for value in values]),
+        ).reset_index()
+        match_summary["directions_represented"] = (
+            match_summary["directions_represented"].astype(int)
+        )
     
         # Get unique simulation links for filtering
         all_links = network.get_in_simulation_links(matched.link_id.unique())
@@ -139,7 +146,9 @@ class Compare:
             simulated_flow = _matched.groupby('id')['sim_flow'].sum().reset_index()
     
         # Merge with counts
-        result = df_counts.merge(simulated_flow, on='id', how='left')
+        result = df_counts.merge(simulated_flow, on='id', how='left').merge(
+            match_summary, on='id', how='left'
+        )
         result.rename(columns={'sim_flow': 'simulated_flow'}, inplace=True)
         result = result[result.isna().sum(axis=1)==0].reset_index(drop=True)
         

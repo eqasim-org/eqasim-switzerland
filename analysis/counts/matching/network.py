@@ -3,13 +3,18 @@ import numpy as np
 import geopandas as gpd
 import pandas as pd
 from .geometry_io import safe_wkt_load
-from shapely.geometry import LineString
+from shapely.geometry import LineString, MultiLineString
 import logging
 import os
 import pickle
 import time
 
-from ..paths import SIMULATION_PATH_CONFIG, configure_simulation_path, get_simulation_path
+from ..paths import (
+    DETAILED_NETWORK_PATH_CONFIG,
+    SIMULATION_PATH_CONFIG,
+    configure_simulation_path,
+    get_simulation_path,
+)
 
 logger = logging.getLogger("synpp")
 
@@ -23,7 +28,6 @@ def configure(context):
 def execute(context):  
     simulation_path = get_simulation_path(context)
     network_file = os.path.join(simulation_path, "output_network.xml.gz")
-    network_geometry_file = None
 
     if not os.path.exists(network_file) and not context.config(SIMULATION_PATH_CONFIG):
         network_file = os.path.join(
@@ -32,12 +36,7 @@ def execute(context):
             context.config("output_prefix") + "network.xml.gz",
         )
         
-    if context.config("export_detailed_network") and not context.config(SIMULATION_PATH_CONFIG):
-        network_geometry_file = os.path.join(
-            context.config("output_path"),
-            context.config("output_id"),
-            "%sdetailed_network.csv" % context.config("output_prefix"),
-        )
+    network_geometry_file = _resolve_detailed_network_path(context, simulation_path)
             
     assert os.path.exists(network_file), f"Network file not found at {network_file}"
     logger.info("\t LOADING NETWORK FROM: %s" % network_file)
@@ -46,6 +45,48 @@ def execute(context):
     network = RoadNetwork(network_file, network_geometry_file, overwrite=True, cache_dir= context.path())
 
     return network
+
+
+def _resolve_detailed_network_path(context, simulation_path):
+    """Find the detailed pt2matsim geometry belonging to the simulation network."""
+    configured_path = context.config(DETAILED_NETWORK_PATH_CONFIG)
+    if configured_path:
+        configured_path = os.path.abspath(os.path.expanduser(configured_path))
+        if not os.path.exists(configured_path):
+            raise FileNotFoundError(
+                f"Configured detailed network geometry not found at {configured_path}"
+            )
+        return configured_path
+
+    if not context.config("export_detailed_network"):
+        return None
+
+    filename = f"{context.config('output_prefix')}detailed_network.csv"
+    candidates = [
+        os.path.join(os.path.dirname(simulation_path), filename),
+        os.path.join(simulation_path, filename),
+        os.path.join(os.path.dirname(simulation_path), "detailed_network.csv"),
+    ]
+    if not context.config(SIMULATION_PATH_CONFIG):
+        candidates.append(
+            os.path.join(
+                context.config("output_path"),
+                context.config("output_id"),
+                filename,
+            )
+        )
+    for candidate in dict.fromkeys(candidates):
+        if os.path.exists(candidate):
+            logger.info("\t LOADING DETAILED NETWORK GEOMETRY FROM: %s", candidate)
+            return candidate
+
+    logger.warning(
+        "Detailed network geometry was requested but not found. Counts maps will "
+        "fall back to straight MATSim node-to-node link geometries. Set %s to the "
+        "pt2matsim detailed_network CSV to plot real road shapes.",
+        DETAILED_NETWORK_PATH_CONFIG,
+    )
+    return None
 
 
 class RoadNetwork:
@@ -107,27 +148,138 @@ class RoadNetwork:
         return link
     
     def get_link_geometry(self, link_id, in_simulation_link=False):
-        if not in_simulation_link:
-            geo = self.get_geometry()
-            return geo[geo["link_id"]==link_id].geometry
-        else:
-            link = self.links[self.links["link_id"]==link_id].iloc[0] 
-            replicate_of = link.replicate_of
-            if pd.isna(replicate_of):
-                return self.get_link_geometry(link_id,in_simulation_link=False)
-            else:
-                links = link["attributes"]["old_link_id"].split('_')
-                first_link_geom = self.get_link_geometry(links[0]  ,in_simulation_link=False)
-                last_link_geom  = self.get_link_geometry(links[-1] ,in_simulation_link=False)
-                
-                return LineString([first_link_geom.coords[0], last_link_geom.coords[1]])
-    
+        geometries = self.get_link_geometries(
+            [link_id], expand_merged=in_simulation_link
+        ).geometry.tolist()
+        if not geometries:
+            return None
+
+        parts = []
+        for geometry in geometries:
+            if isinstance(geometry, LineString):
+                parts.append(geometry)
+            elif isinstance(geometry, MultiLineString):
+                parts.extend(geometry.geoms)
+        if not parts:
+            return None
+        return parts[0] if len(parts) == 1 else MultiLineString(parts)
+
+    def get_detailed_link_ids(self, link_ids):
+        """Expand matched IDs to the complete detailed shape of simulation links.
+
+        Network simplification keeps the first old link ID as the MATSim link ID
+        and creates replicate_of rows for the remaining old IDs. Both forms must
+        therefore resolve to the same ordered old_link_id chain.
+        """
+        requested_ids = list(dict.fromkeys(str(link_id) for link_id in link_ids))
+        links = self.links
+        link_ids_as_string = links["link_id"].astype(str)
+        columns = ["link_id", "replicate_of", "attributes"]
+
+        requested_links = links.loc[
+            link_ids_as_string.isin(requested_ids), columns
+        ].copy()
+        requested_links["link_id"] = requested_links["link_id"].astype(str)
+        requested_links = requested_links.drop_duplicates("link_id").set_index("link_id")
+
+        simulation_ids = {
+            str(link["replicate_of"])
+            if pd.notna(link["replicate_of"])
+            else link_id
+            for link_id, link in requested_links.iterrows()
+        }
+        simulation_links = links.loc[
+            link_ids_as_string.isin(simulation_ids), columns
+        ].copy()
+        simulation_links["link_id"] = simulation_links["link_id"].astype(str)
+        simulation_links = (
+            simulation_links.drop_duplicates("link_id").set_index("link_id")
+        )
+
+        detailed_ids = []
+        for link_id in requested_ids:
+            if link_id not in requested_links.index:
+                logger.warning("Link %s is not present in the MATSim network.", link_id)
+                continue
+
+            link = requested_links.loc[link_id]
+            simulation_link_id = (
+                str(link["replicate_of"])
+                if pd.notna(link["replicate_of"])
+                else link_id
+            )
+            simulation_link = simulation_links.loc[simulation_link_id]
+            attributes = simulation_link.get("attributes")
+            old_link_ids = (
+                attributes.get("old_link_id")
+                if isinstance(attributes, dict)
+                else None
+            )
+            detailed_ids.extend(
+                str(old_link_ids).split("_") if old_link_ids else [simulation_link_id]
+            )
+
+        # Keep chain order while avoiding duplicate paths when several stations
+        # are assigned to the same simplified simulation link.
+        return list(dict.fromkeys(detailed_ids))
+
+    def get_link_geometries(self, link_ids, expand_merged=False):
+        """Return real link shapes, optionally expanding simplified MATSim links."""
+        requested_ids = [str(link_id) for link_id in link_ids]
+        geometry_ids = (
+            self.get_detailed_link_ids(requested_ids)
+            if expand_merged
+            else list(dict.fromkeys(requested_ids))
+        )
+
+        geometry = self.get_geometry()
+        link_ids_as_string = geometry["link_id"].astype(str)
+        selected = geometry.loc[link_ids_as_string.isin(geometry_ids)].copy()
+        selected["link_id"] = selected["link_id"].astype(str)
+        selected = selected.drop_duplicates("link_id")
+        geometry_order = {
+            link_id: index for index, link_id in enumerate(geometry_ids)
+        }
+        selected["_geometry_order"] = selected["link_id"].map(geometry_order)
+        selected = selected.sort_values("_geometry_order")
+
+        missing_ids = set(geometry_ids).difference(selected["link_id"])
+        if missing_ids:
+            logger.warning(
+                "%d detailed link geometries are unavailable; using available "
+                "simulation-link geometry as a fallback.",
+                len(missing_ids),
+            )
+            simulation_ids = self.get_in_simulation_links(requested_ids)
+            simulation_ids = [
+                str(link_id) for link_id in simulation_ids if pd.notna(link_id)
+            ]
+            fallback = geometry.loc[
+                link_ids_as_string.isin(simulation_ids)
+                & ~link_ids_as_string.isin(selected["link_id"])
+            ].copy()
+            fallback["link_id"] = fallback["link_id"].astype(str)
+            fallback_order = {
+                link_id: len(geometry_order) + index
+                for index, link_id in enumerate(simulation_ids)
+            }
+            fallback["_geometry_order"] = fallback["link_id"].map(fallback_order)
+            selected = pd.concat([selected, fallback], ignore_index=True)
+
+        selected = selected.sort_values("_geometry_order")
+        selected = selected.drop(columns="_geometry_order", errors="ignore")
+        return gpd.GeoDataFrame(selected, geometry="geometry", crs=geometry.crs)
+
     def get_bearing(self, link_id, in_simulation_link=False):
         geo = self.get_link_geometry(link_id, in_simulation_link)
         if geo is None or geo.is_empty:
             return np.nan
-        start = geo.coords[0]
-        end = geo.coords[-1]
+        if isinstance(geo, MultiLineString):
+            start = geo.geoms[0].coords[0]
+            end = geo.geoms[-1].coords[-1]
+        else:
+            start = geo.coords[0]
+            end = geo.coords[-1]
         return (np.degrees(np.arctan2(end[0] - start[0], end[1] - start[1])) + 360) % 360
                        
     def plot(self, *args, **kwargs):

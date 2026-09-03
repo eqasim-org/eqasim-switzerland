@@ -6,6 +6,9 @@ Created on Tue Apr 29 09:34:19 2025
 @author: dabdelkader
 """
 
+import json
+from html import escape
+from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns        
 import pandas as pd
@@ -21,15 +24,46 @@ from typing import Union
 from sklearn.metrics import r2_score
 from .road_matching import ROAD_TYPE_PRIORITY
 from shapely.ops import unary_union
+from shapely.geometry import GeometryCollection, LineString, MultiLineString
 
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+FLOW_MAP_TOOLTIP_FIELDS = [
+    "id",
+    "matched_link_ids",
+    "flow",
+    "simulated_flow",
+    "pdiff",
+    "adiff",
+    "geh",
+]
+FLOW_MAP_FIELD_LABELS = {
+    "link_id": "Link ID",
+    "id": "Station",
+    "matched_link_ids": "Matched link ID(s)",
+    "flow": "Traffic count (vehicles/day)",
+    "simulated_flow": "Simulated flow (vehicles/day)",
+    "pdiff": "Percentage difference (%)",
+    "adiff": "Absolute difference (vehicles/day)",
+    "geh": "GEH",
+}
 
 
-def GEH(x_d,y_d, return_vector = False):
-    x = (x_d/24)/2
-    y = (y_d/24)/2
+
+def GEH(x_d, y_d, return_vector=False, directions_represented=2):
+    """Compute GEH from daily flows using the represented direction count.
+
+    ``directions_represented`` is 1 for directional observations (for example,
+    Geneva and Zurich) and 2 for observations aggregated across both road
+    directions. It may be either a scalar or one value per observation.
+    """
+    directions = np.asarray(directions_represented, dtype=float)
+    if np.any(~np.isfinite(directions)) or np.any(directions <= 0):
+        raise ValueError("directions_represented must contain positive values")
+
+    x = np.asarray(x_d, dtype=float) / 24 / directions
+    y = np.asarray(y_d, dtype=float) / 24 / directions
     geh_values = np.sqrt(2 * (x - y) ** 2 / (x + y + 1e-6))
     if return_vector:
         return geh_values
@@ -57,8 +91,55 @@ def SGV(x_d,y_d):
     return sqv_09_pct, sqv_085_pct, sqv_08_pct, sqv_07_pct
 
 class Plotter:
+    FLOW_MAP_TOOLTIP_FIELDS = FLOW_MAP_TOOLTIP_FIELDS
+
+    @staticmethod
+    def prepare_flow_map_points(points, flows, directions_represented=None):
+        """Combine station locations and comparison metrics for an HTML map."""
+        required = {"id", "flow", "simulated_flow", "pdiff", "adiff"}
+        missing = required.difference(flows.columns)
+        if missing:
+            raise ValueError(
+                "Flow map data is missing required columns: "
+                + ", ".join(sorted(missing))
+            )
+
+        flow_columns = ["id", "flow", "simulated_flow", "pdiff", "adiff"]
+        for optional_column in ("directions_represented", "matched_link_ids", "link_id"):
+            if optional_column in flows.columns:
+                flow_columns.append(optional_column)
+        result = points[["id", "geometry"]].merge(
+            flows[flow_columns],
+            on="id",
+            how="inner",
+        )
+        if "matched_link_ids" not in result.columns:
+            if "link_id" in result.columns:
+                result["matched_link_ids"] = result["link_id"].map(
+                    lambda value: list(value)
+                    if isinstance(value, (list, tuple, np.ndarray))
+                    else [value]
+                )
+            else:
+                result["matched_link_ids"] = [[] for _ in range(len(result))]
+
+        if directions_represented is None:
+            directions_represented = (
+                result["directions_represented"]
+                if "directions_represented" in result.columns
+                else 2
+            )
+        result["geh"] = GEH(
+            result["flow"],
+            result["simulated_flow"],
+            return_vector=True,
+            directions_represented=directions_represented,
+        ).round(2)
+        return gpd.GeoDataFrame(result, geometry="geometry", crs=points.crs)
+
     def plot_flow(self, flows, counts:Counts=None, output_file:str=None, 
-                        distance_to_border:int=5000, title:str=None, show_range=False, show_geh=False, remove_near_border = False):        
+                        distance_to_border:int=5000, title:str=None, show_range=False, show_geh=False,
+                        remove_near_border=False, directions_represented=None):
         flows = flows.copy()
         flows = flows.sort_values("flow")
         
@@ -122,7 +203,15 @@ class Plotter:
         
         # Add GEH statistics
         if show_geh:
-            geh = GEH(x,y)
+            if directions_represented is None:
+                directions = (
+                    flows.loc[x.index, "directions_represented"]
+                    if "directions_represented" in flows.columns
+                    else 2
+                )
+            else:
+                directions = directions_represented
+            geh = GEH(x, y, directions_represented=directions)
             plt.text( 0.7 * max_val, 0.02 * max_val, 
                     f"GEH ≤ 5: {geh[0]:.1f}%\nGEH ≤ 10: {geh[1]:.1f}%\nGEH ≤ 15: {geh[2]:.1f}%\nGEH ≤ 25: {geh[3]:.1f}%" ,  # text
                     fontsize=14,
@@ -245,25 +334,11 @@ class Plotter:
         fig, ax = plt.subplots(figsize=figsize)
         roads.plot(ax=ax, color='gray', linewidth=lw)
         
-        if not matched is None:
+        if matched is not None:
             matched_ids = matched.link_id.unique()
-            matched_links = network.net_geo[network.net_geo.link_id.isin(matched_ids)]
-            
-            if network is not None:
-                replicates = network.links.loc[ network.links.link_id.isin(matched_ids) & 
-                                                network.links.replicate_of.notna(), 
-                                                "replicate_of"
-                                               ].unique()
-                old_ids = network.links.loc[ network.links.link_id.isin(replicates), 
-                                             "attributes"
-                                            ].map(lambda x: x.get("old_link_id", "")).str.split("_")
-                
-                replicate_ids = pd.Series([item for sublist in old_ids if isinstance(sublist, list) for item in sublist]).unique()
-
-                # Combine original and replicate IDs
-                all_ids = np.union1d(matched_ids, replicate_ids)
-                matched_links = network.net_geo[network.net_geo.link_id.isin(all_ids)]
-                
+            matched_links = network.get_link_geometries(
+                matched_ids, expand_merged=True
+            )
             matched_links.plot(ax=ax, color='blue', linewidth=2*lw)
             
         if counts is not None:
@@ -282,28 +357,471 @@ class Plotter:
     
     @staticmethod
     def extract_coords(geom):
-        if geom.geom_type == "LineString":
+        if isinstance(geom, LineString):
             return list(geom.coords)
-        elif geom.geom_type == "MultiLineString":
-            # Flatten each LineString within the MultiLineString
-            return [coord for line in geom.geoms for coord in line.coords]
+        return []
+
+    @staticmethod
+    def extract_paths(geom):
+        """Return independent paths without drawing connectors between parts."""
+        if isinstance(geom, LineString):
+            return [list(geom.coords)]
+        if isinstance(geom, (MultiLineString, GeometryCollection)):
+            return [
+                path
+                for part in geom.geoms
+                for path in Plotter.extract_paths(part)
+            ]
+        return []
+
+    @staticmethod
+    def _prepare_path_data(data, data_to_show):
+        if "path" in data:
+            prepared = data[["path", *data_to_show]].copy()
+            return prepared[prepared.path.map(len) > 1].reset_index(drop=True)
+        if "geometry" not in data:
+            raise ValueError("Dataframe should contain 'path' or 'geometry'.")
+
+        if data.geometry.geom_type.eq("LineString").all():
+            prepared = data[[*data_to_show]].copy()
+            prepared.insert(
+                0, "path", data.geometry.map(lambda geometry: list(geometry.coords))
+            )
+            return prepared[prepared.path.map(len) > 1].reset_index(drop=True)
+
+        records = []
+        for _, row in data[["geometry", *data_to_show]].iterrows():
+            properties = {field: row[field] for field in data_to_show}
+            for path in Plotter.extract_paths(row.geometry):
+                if len(path) > 1:
+                    records.append({"path": path, **properties})
+        return pd.DataFrame(records, columns=["path", *data_to_show])
+
+    @staticmethod
+    def _tooltip_value(value):
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple, np.ndarray)):
+            formatted = [Plotter._tooltip_value(item) for item in value]
+            formatted = [item for item in formatted if item is not None]
+            return ", ".join(formatted) if formatted else None
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return escape(str(value))
+
+    @staticmethod
+    def _build_tooltip_html(row, fields):
+        rows = []
+        for field in fields:
+            if field not in row:
+                continue
+            value = Plotter._tooltip_value(row[field])
+            if value is None:
+                continue
+            label = FLOW_MAP_FIELD_LABELS.get(
+                field, field.replace("_", " ").title()
+            )
+            rows.append(f"<tr><td><b>{escape(label)}:</b></td><td>{value}</td></tr>")
+        return "<table>" + "".join(rows) + "</table>"
+    @staticmethod
+    def _flow_metric_settings(point_gdf):
+        metric_columns = {"pdiff", "adiff", "geh"}
+        valid_points = [
+            gdf for gdf in point_gdf
+            if gdf is not None and not gdf.empty
+        ]
+        if not valid_points or not all(
+            metric_columns.issubset(gdf.columns) for gdf in valid_points
+        ):
+            return {}
+
+        absolute_differences = pd.concat(
+            [pd.to_numeric(gdf["adiff"], errors="coerce") for gdf in valid_points]
+        ).abs()
+        maximum = absolute_differences.max()
+        if pd.isna(maximum) or maximum <= 0:
+            absolute_bound = 1.0
         else:
-            return []  # fallback
+            magnitude = 10 ** np.floor(np.log10(maximum))
+            absolute_bound = float(np.ceil(maximum / magnitude) * magnitude)
+
+        return {
+            "pdiff": {
+                "label": "Percentage difference (%)",
+                "lower": -100.0,
+                "upper": 100.0,
+                "step": 1,
+                "quality_inner": 10.0,
+                "quality_outer": 20.0,
+                "quality_unit": "%",
+            },
+            "adiff": {
+                "label": "Absolute difference (vehicles/day)",
+                "lower": -absolute_bound,
+                "upper": absolute_bound,
+                "step": max(1.0, absolute_bound / 100),
+                "quality_inner": 1000.0,
+                "quality_outer": 2000.0,
+                "quality_unit": "vehicles/day",
+            },
+            "geh": {
+                "label": "GEH",
+                "lower": 0.0,
+                "upper": 25.0,
+                "step": 0.1,
+                "quality_inner": 5.0,
+                "quality_outer": 10.0,
+                "quality_unit": "",
+            },
+        }
+
+    @staticmethod
+    def _inject_flow_metric_controls(path_to_save, metric_settings):
+        if not metric_settings:
+            return
+
+        controls = """
+<div id="counts-map-controls">
+  <div class="counts-control-title">Count point colors</div>
+  <label for="counts-color-metric">Metric</label>
+  <select id="counts-color-metric">
+    <option value="pdiff">Percentage difference (%)</option>
+    <option value="adiff">Absolute difference (vehicles/day)</option>
+    <option value="geh">GEH</option>
+  </select>
+  <div class="counts-bound-row">
+    <div class="counts-bound-group">
+      <label for="counts-lower-bound">Lower</label>
+      <input id="counts-lower-bound" type="number">
+    </div>
+    <div class="counts-bound-group">
+      <label for="counts-upper-bound">Upper</label>
+      <input id="counts-upper-bound" type="number">
+    </div>
+  </div>
+  <div class="counts-color-ramp"></div>
+  <div class="counts-ramp-labels">
+    <span id="counts-lower-label"></span>
+    <span id="counts-upper-label"></span>
+  </div>
+  <div id="counts-bound-error">Lower bound must be smaller than upper bound.</div>
+  <div class="counts-quality-section">
+    <div class="counts-quality-title">Accuracy centers</div>
+    <label for="counts-quality-metric">Center metric</label>
+    <select id="counts-quality-metric">
+      <option value="pdiff">Absolute percentage difference (%)</option>
+      <option value="adiff">Absolute flow difference (vehicles/day)</option>
+      <option value="geh">GEH</option>
+    </select>
+    <div class="counts-quality-row">
+      <label><input id="counts-show-green" type="checkbox" checked> Green</label>
+      <label for="counts-green-threshold">Below</label>
+      <input id="counts-green-threshold" type="number" min="0">
+      <span id="counts-green-unit"></span>
+    </div>
+    <div class="counts-quality-row">
+      <label><input id="counts-show-gold" type="checkbox" checked> Gold</label>
+      <label for="counts-gold-threshold">Below</label>
+      <input id="counts-gold-threshold" type="number" min="0">
+      <span id="counts-gold-unit"></span>
+    </div>
+    <div id="counts-quality-error">Thresholds must be non-negative numbers.</div>
+  </div>
+</div>
+"""
+        style = """
+<style>
+#counts-map-controls {
+  position: absolute;
+  z-index: 20;
+  top: 12px;
+  right: 12px;
+  width: min(400px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 12px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+  color: #222;
+  font: 13px/1.35 Arial, sans-serif;
+}
+#counts-map-controls .counts-control-title {
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+#counts-map-controls select {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 3px 0 9px;
+  padding: 5px;
+}
+#counts-map-controls .counts-bound-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+#counts-map-controls .counts-bound-group {
+  min-width: 0;
+}
+#counts-map-controls .counts-bound-group label {
+  display: block;
+  margin-bottom: 3px;
+}
+#counts-map-controls input[type="number"] {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px;
+}
+#counts-map-controls .counts-color-ramp {
+  height: 13px;
+  margin-top: 10px;
+  border: 1px solid #777;
+  background: linear-gradient(to right, rgb(33,102,172), rgb(247,247,247), rgb(178,24,43));
+}
+#counts-map-controls .counts-ramp-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+#counts-bound-error {
+  display: none;
+  margin-top: 6px;
+  color: #b2182b;
+  font-size: 11px;
+}
+#counts-map-controls .counts-quality-section {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid #bbb;
+}
+#counts-map-controls .counts-quality-title {
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+#counts-map-controls .counts-quality-row {
+  display: grid;
+  grid-template-columns: minmax(78px, 1fr) auto minmax(58px, 72px) auto;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+}
+#counts-map-controls .counts-quality-row > label:first-child {
+  white-space: nowrap;
+}
+#counts-quality-error {
+  display: none;
+  margin-top: 6px;
+  color: #b2182b;
+  font-size: 11px;
+}
+</style>
+"""
+        script = r"""
+<script>
+(function () {
+  const metricSettings = __METRIC_SETTINGS__;
+  const select = document.getElementById("counts-color-metric");
+  const lowerInput = document.getElementById("counts-lower-bound");
+  const upperInput = document.getElementById("counts-upper-bound");
+  const lowerLabel = document.getElementById("counts-lower-label");
+  const upperLabel = document.getElementById("counts-upper-label");
+  const error = document.getElementById("counts-bound-error");
+  const showGreen = document.getElementById("counts-show-green");
+  const showGold = document.getElementById("counts-show-gold");
+  const greenThresholdInput = document.getElementById("counts-green-threshold");
+  const goldThresholdInput = document.getElementById("counts-gold-threshold");
+  const qualityError = document.getElementById("counts-quality-error");
+  const qualityMetricSelect = document.getElementById("counts-quality-metric");
+  const greenUnit = document.getElementById("counts-green-unit");
+  const goldUnit = document.getElementById("counts-gold-unit");
+  const deck = typeof deckInstance === "undefined" ? null : deckInstance;
+  const bounds = JSON.parse(JSON.stringify(metricSettings));
+  const qualityBounds = JSON.parse(JSON.stringify(metricSettings));
+  let activeMetric = select.value;
+  let activeQualityMetric = qualityMetricSelect.value;
+
+  function interpolate(first, second, fraction) {
+    return first.map(function (value, index) {
+      return Math.round(value + (second[index] - value) * fraction);
+    });
+  }
+
+  function colorFor(value, lower, upper) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return [128, 128, 128, 180];
+    }
+    const clipped = Math.max(lower, Math.min(upper, numeric));
+    const position = (clipped - lower) / (upper - lower);
+    const blue = [33, 102, 172, 230];
+    const white = [247, 247, 247, 230];
+    const red = [178, 24, 43, 230];
+    return position <= 0.5
+      ? interpolate(blue, white, position * 2)
+      : interpolate(white, red, (position - 0.5) * 2);
+  }
+
+  function loadBounds() {
+    const setting = bounds[activeMetric];
+    lowerInput.value = setting.lower;
+    upperInput.value = setting.upper;
+    lowerInput.step = setting.step;
+    upperInput.step = setting.step;
+    lowerLabel.textContent = setting.lower;
+    upperLabel.textContent = setting.upper;
+  }
+
+  function loadQualityBounds() {
+    const setting = qualityBounds[activeQualityMetric];
+    greenThresholdInput.value = setting.quality_outer;
+    goldThresholdInput.value = setting.quality_inner;
+    greenThresholdInput.step = setting.step;
+    goldThresholdInput.step = setting.step;
+    greenUnit.textContent = setting.quality_unit;
+    goldUnit.textContent = setting.quality_unit;
+  }
+
+  function recolor() {
+    if (!deck || !deck.props || !deck.props.layers) {
+      return;
+    }
+    const lower = Number(lowerInput.value);
+    const upper = Number(upperInput.value);
+    const valid = Number.isFinite(lower) && Number.isFinite(upper) && lower < upper;
+    error.style.display = valid ? "none" : "block";
+    if (!valid) {
+      return;
+    }
+
+    bounds[activeMetric].lower = lower;
+    bounds[activeMetric].upper = upper;
+    lowerLabel.textContent = lower;
+    upperLabel.textContent = upper;
+
+    const layers = deck.props.layers.map(function (layer) {
+      if (!layer.id.startsWith("counts-points-")) {
+        return layer;
+      }
+      return layer.clone({
+        getFillColor: function (datum) {
+          return colorFor(datum[activeMetric], lower, upper);
+        },
+        updateTriggers: {
+          getFillColor: [activeMetric, lower, upper]
+        }
+      });
+    });
+    deck.setProps({layers: layers});
+  }
+
+  function updateQualityMarkers() {
+    if (!deck || !deck.props || !deck.props.layers) {
+      return;
+    }
+    const greenThreshold = Number.parseFloat(greenThresholdInput.value);
+    const goldThreshold = Number.parseFloat(goldThresholdInput.value);
+    const valid = Number.isFinite(greenThreshold) && greenThreshold >= 0
+      && Number.isFinite(goldThreshold) && goldThreshold >= 0;
+    qualityError.style.display = valid ? "none" : "block";
+    if (!valid) {
+      return;
+    }
+
+    qualityBounds[activeQualityMetric].quality_outer = greenThreshold;
+    qualityBounds[activeQualityMetric].quality_inner = goldThreshold;
+
+    const layers = deck.props.layers.map(function (layer) {
+      let threshold;
+      let enabled;
+      let color;
+      if (layer.id.startsWith("counts-quality-green-")) {
+        threshold = greenThreshold;
+        enabled = showGreen.checked;
+        color = [0, 170, 90, 255];
+      } else if (layer.id.startsWith("counts-quality-gold-")) {
+        threshold = goldThreshold;
+        enabled = showGold.checked;
+        color = [255, 193, 7, 255];
+      } else {
+        return layer;
+      }
+      return layer.clone({
+        getFillColor: function (datum) {
+          const difference = Number(datum[activeQualityMetric]);
+          return enabled && Number.isFinite(difference)
+            && Math.abs(difference) < threshold
+            ? color
+            : [0, 0, 0, 0];
+        },
+        updateTriggers: {
+          getFillColor: [activeQualityMetric, enabled, threshold]
+        }
+      });
+    });
+    deck.setProps({layers: layers});
+  }
+
+  select.addEventListener("change", function () {
+    activeMetric = select.value;
+    loadBounds();
+    recolor();
+  });
+  qualityMetricSelect.addEventListener("change", function () {
+    activeQualityMetric = qualityMetricSelect.value;
+    loadQualityBounds();
+    updateQualityMarkers();
+  });
+  lowerInput.addEventListener("input", recolor);
+  upperInput.addEventListener("input", recolor);
+  showGreen.addEventListener("change", updateQualityMarkers);
+  showGold.addEventListener("change", updateQualityMarkers);
+  greenThresholdInput.addEventListener("input", updateQualityMarkers);
+  goldThresholdInput.addEventListener("input", updateQualityMarkers);
+
+  loadBounds();
+  loadQualityBounds();
+  recolor();
+  updateQualityMarkers();
+})();
+</script>
+"""
+        script = script.replace(
+            "__METRIC_SETTINGS__", json.dumps(metric_settings, separators=(",", ":"))
+        )
+
+        path = Path(path_to_save)
+        html = path.read_text(encoding="utf-8")
+        html = html.replace("</head>", style + "\n</head>", 1)
+        html = html.replace("</body>", controls + "\n</body>", 1)
+        html = html.replace("</html>", script + "\n</html>", 1)
+        path.write_text(html, encoding="utf-8")
+
     
     @staticmethod    
     def create_map(df:Union[gpd.GeoDataFrame,list],
                    data_to_show=["link_id"], 
                    point_gdf: Union[gpd.GeoDataFrame,list] = None,
-                   point_data_to_show:list=[],
+                   point_data_to_show=None,
                    border: gpd.GeoDataFrame =  None,
                    path_to_save=None, 
                    cut_network = False):
         
-        #Make points as list
-        if not isinstance(point_gdf, list):
+        point_data_to_show = point_data_to_show or []
+
+        # Make points and paths lists.
+        if point_gdf is None:
+            point_gdf = []
+        elif not isinstance(point_gdf, list):
             point_gdf = [point_gdf]
         if not isinstance(df, list):
-            df = [df]            
+            df = [df]
+
+        metric_settings = Plotter._flow_metric_settings(point_gdf)
 
         # cut df to point gdf (just plot the regional network
         if cut_network:
@@ -321,22 +839,16 @@ class Plotter:
                 for i in range(len(df)):
                     df[i] = df[i].cx[xmin:xmax, ymin:ymax]
 
-        # Copy and reset index
-        df = [dfi.copy().reset_index(drop=True) for dfi in df]
-        
-        # Ensure the DataFrame contains either 'path' or 'geometry'
-        for dfi in df:
-            if "path" not in dfi:
-                if "geometry" in dfi:
-                    dfi["path"] = dfi.geometry.apply(Plotter.extract_coords)
-                else:
-                    raise Exception("Dataframe should contain 'path' or 'geometry'.")
-        
-        # Filter the DataFrame to include only relevant columns
+        # Preserve every real vertex and keep multipart geometries as
+        # independent paths rather than joining them with artificial chords.
+        df = [Plotter._prepare_path_data(dfi, data_to_show) for dfi in df]
+        for path_data in df:
+            path_data["_tooltip_html"] = path_data.apply(
+                lambda row: Plotter._build_tooltip_html(row, data_to_show), axis=1
+            )
+
         layers = []
         for i, dfi in enumerate(df):
-            dfi = dfi[["path", *data_to_show]]
-            dfi = dfi[dfi.path.apply(len)>0]
             # Define the PathLayer
             path_layer = pdk.Layer(
                 "PathLayer",
@@ -352,39 +864,91 @@ class Plotter:
             
             layers.append(path_layer)
         
-        # Add optional point layer
-        def color_map(diff,min_diff,max_diff):
-            vmax = max(abs(min_diff), abs(max_diff))
-            vmin = -vmax           
-            diff_clipped = np.clip(diff, vmin, vmax)
-            norm = (diff_clipped - vmin) / (vmax - vmin)
-            colormap = plt.get_cmap('bwr') 
-            color = colormap(norm)
-            return [int(color[0] * 255), int(color[1] * 255), int(color[2] * 255), 255]  # RGBA format
+        # Add optional point layers. The initial view uses percentage
+        # difference and browser controls can switch the accessor dynamically.
+        def color_map(value, lower, upper):
+            clipped = np.clip(value, lower, upper)
+            normalized = (clipped - lower) / (upper - lower)
+            color = plt.get_cmap("bwr")(normalized)
+            return [
+                int(color[0] * 255),
+                int(color[1] * 255),
+                int(color[2] * 255),
+                230,
+            ]
 
-        if point_gdf is not None and len(point_gdf):
+        initial_metric = "pdiff" if metric_settings else None
+        if point_gdf:
             colors = [[255, 0, 0], [0, 102, 51], [128, 0, 128]]
             for i, gdf in enumerate(point_gdf):
                 if not gdf.empty:
                     gdf = gdf.copy().reset_index(drop=True)
-                    gdf["coordinates"] = gdf.geometry.apply(lambda geom: [geom.x, geom.y])
-                    col_to_show = "pdiff" if "pdiff" in gdf else "adiff"
-                    if col_to_show in gdf:
-                        gdf = gdf[gdf[col_to_show].notna()]
-                        min_diff = max(gdf[col_to_show].min(),-100) if col_to_show=="pdiff" else gdf[col_to_show].min()
-                        max_diff = min(gdf[col_to_show].max(),100) if col_to_show=="pdiff" else gdf[col_to_show].max()
-                        
-                        gdf["color"] = gdf[col_to_show].apply(lambda x: color_map(x,min_diff,max_diff))
-                        
-                    point_layer = pdk.Layer("ScatterplotLayer",
-                                            gdf,
-                                            pickable=True,
-                                            get_position="coordinates",
-                                            get_color="color" if "color" in gdf else colors[i],
-                                            get_radius=2,           # meters — adjust as needed                                    
-                                            radius_min_pixels=6       # prevents total disappearance
-                                            )       
+                    gdf["coordinates"] = gdf.geometry.apply(
+                        lambda geometry: [geometry.x, geometry.y]
+                    )
+                    if initial_metric:
+                        gdf = gdf[gdf[initial_metric].notna()].copy()
+                        settings = metric_settings[initial_metric]
+                        gdf["color"] = gdf[initial_metric].apply(
+                            lambda value: color_map(
+                                value, settings["lower"], settings["upper"]
+                            )
+                        )
+
+                    gdf["_tooltip_html"] = gdf.apply(
+                        lambda row: Plotter._build_tooltip_html(row, point_data_to_show), axis=1
+                    )
+                    point_layer = pdk.Layer(
+                        "ScatterplotLayer",
+                        gdf,
+                        id=f"counts-points-{i}",
+                        pickable=True,
+                        get_position="coordinates",
+                        get_fill_color="color" if "color" in gdf else colors[i],
+                        get_radius=2,
+                        radius_min_pixels=6,
+                    )
                     layers.append(point_layer)
+
+                    if "pdiff" in gdf.columns:
+                        absolute_pdiff = pd.to_numeric(
+                            gdf["pdiff"], errors="coerce"
+                        ).abs()
+                        transparent = [0, 0, 0, 0]
+                        gdf["quality_green_color"] = [
+                            [0, 170, 90, 255] if difference < 20 else transparent
+                            for difference in absolute_pdiff
+                        ]
+                        gdf["quality_gold_color"] = [
+                            [255, 193, 7, 255] if difference < 10 else transparent
+                            for difference in absolute_pdiff
+                        ]
+                        layers.append(
+                            pdk.Layer(
+                                "ScatterplotLayer",
+                                gdf,
+                                id=f"counts-quality-green-{i}",
+                                pickable=False,
+                                get_position="coordinates",
+                                get_fill_color="quality_green_color",
+                                get_radius=1,
+                                radius_min_pixels=4,
+                                radius_max_pixels=4,
+                            )
+                        )
+                        layers.append(
+                            pdk.Layer(
+                                "ScatterplotLayer",
+                                gdf,
+                                id=f"counts-quality-gold-{i}",
+                                pickable=False,
+                                get_position="coordinates",
+                                get_fill_color="quality_gold_color",
+                                get_radius=1,
+                                radius_min_pixels=3,
+                                radius_max_pixels=3,
+                            )
+                        )
         
         # plot the border
         if border is not None:            
@@ -399,13 +963,10 @@ class Plotter:
                                         pickable=False)
             layers.append(polygon_layer)
             
-        # Calculate view center (centroid of all paths)
-        if "geometry" in df[0]:
-            mean_y = df[0].geometry.centroid.y.mean()
-            mean_x = df[0].geometry.centroid.x.mean()
-        else:
-            mean_x = df[0].path.apply(lambda x: x[0][0]).mean()
-            mean_y = df[0].path.apply(lambda x: x[0][1]).mean()
+        # Calculate the view center from all real vertices in the first layer.
+        coordinates = [coordinate for path in df[0].path for coordinate in path]
+        mean_x = np.mean([coordinate[0] for coordinate in coordinates])
+        mean_y = np.mean([coordinate[1] for coordinate in coordinates])
     
         view_state = pdk.ViewState(
             longitude=mean_x,
@@ -414,17 +975,9 @@ class Plotter:
             pitch=0,
         )
     
-        # Dynamically construct the tooltip HTML
-        tooltip_html = "<table>"
-        for field in data_to_show:
-            tooltip_html += f"<tr><td><b>{field.capitalize()}:</b></td><td>{{{field}}}</td></tr>"
-        for field in point_data_to_show:
-            tooltip_html += f"<tr><td><b>{field.capitalize()}:</b></td><td>{{{field}}}</td></tr>"
-        tooltip_html += "</table>"
-    
-        # Tooltip configuration
+        # Every layer provides only the rows applicable to its own objects.
         tooltip = {
-            "html": tooltip_html,
+            "html": "{_tooltip_html}",
             "style": {"color": "white", "background-color": "black", "padding": "10px"}
         }
     
@@ -436,9 +989,10 @@ class Plotter:
             map_style="https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"
         )
     
-        # Save the map as an HTML file
+        # Save the map as an HTML file and add browser-side controls.
         if path_to_save:
             r.to_html(path_to_save, notebook_display=False)
+            Plotter._inject_flow_metric_controls(path_to_save, metric_settings)
             logger.info(f"Map saved to {path_to_save}")
         else:
             return r

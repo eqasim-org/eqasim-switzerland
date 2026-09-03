@@ -1,5 +1,6 @@
 import os
 from .matching.network import RoadNetwork
+from .matching.plots import GEH
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -138,9 +139,15 @@ def compute_statistics(df, flow_col='flow', simulated_flow_col='simulated_flow',
     nse = 1 - (np.sum((flow_obs - flow_sim) ** 2) / np.sum((flow_obs - mean_obs) ** 2))
 
     # compute goodness-of-fit: GEH Statistic (Geoffrey E. Havers)
-    obs_veh_h = (flow_obs / 24.0)/2
-    sim_veh_h = (flow_sim / 24.0)/2
-    geh_values = np.sqrt(2 * (sim_veh_h - obs_veh_h) ** 2 / (sim_veh_h + obs_veh_h + 1e-6))
+    directions_represented = (
+        df_clean["directions_represented"].to_numpy()
+        if "directions_represented" in df_clean.columns
+        else 2
+    )
+    geh_values = GEH(
+        flow_obs, flow_sim, return_vector=True,
+        directions_represented=directions_represented,
+    )
     geh_within_5 = int(np.sum(geh_values <= 5))
     geh_within_10 = int(np.sum(geh_values <= 10))
     geh_within_15 = int(np.sum(geh_values <= 15))

@@ -29,7 +29,7 @@ def execute(context):
     df = df.loc[df.TJM>0, ["OBJECTID","TJM","geometry"]].reset_index(drop=True)
 
     #TODO: this needs to be changes, but for now we take three points per line
-    df = sample_points_from_lines(df, 3)
+    df = sample_points_from_lines(df, 10)
 
     # object_id is not unique, we make it unique here
     df["OBJECTID"] = df["OBJECTID"] + "_" + df.index.astype(str)

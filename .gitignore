@@ -28,3 +28,4 @@ ch_cutter
 *.csv
 main*.py
 .claude
+AGENTS.md

@@ -46,7 +46,9 @@ def execute(context):
     matched = matcher.match(network = network,
                             counts = counts,
                             mode="bidirectional",
-                            search_radius=20)
+                            search_radius=50,
+                            prioritize_road_types = True,
+                            road_types_stopping_type = "secondary")
 
     if not matches_found(matched, city):
         return None
@@ -62,10 +64,11 @@ def execute(context):
         return None
 
     # Identify the stations that might be mismatched
-    stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>25000)|
-                                (flows.simulated_flow< 200 * 24)|
-                                (flows.flow< 200 * 24)|
-                                (~flows.pdiff.between(-70,200))]["id"].unique()
+    stations_to_drop = []
+    # stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>25000)|
+    #                             (flows.simulated_flow< 200 * 24)|
+    #                             (flows.flow< 200 * 24)|
+    #                             (~flows.pdiff.between(-70,200))]["id"].unique()
 
     # Plot the network and highligh these links in green  
     plotter = Plotter()
@@ -105,9 +108,12 @@ def execute(context):
     Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
                         matched_links.to_crs(epsg=4326)], 
                         data_to_show=["link_id"], 
-                        point_gdf=[counts.counts[['id','geometry']].merge(
-                                   flows[["id","pdiff", "adiff"]], on="id", how="left").to_crs(epsg=4326)],
-                        point_data_to_show=['id',"pdiff","adiff"],
+                        point_gdf=[
+                            Plotter.prepare_flow_map_points(
+                                counts.counts, flows
+                            ).to_crs(epsg=4326)
+                        ],
+                        point_data_to_show=Plotter.FLOW_MAP_TOOLTIP_FIELDS,
                         border = border,
                         path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
     

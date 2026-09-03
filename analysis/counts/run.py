@@ -92,12 +92,17 @@ def execute(context):
     roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link']
     border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))
     network_ways = network.get_ways(road_types = roads_to_show).to_crs(epsg=4326)
-    points = gpd.GeoDataFrame(df[['id', 'geometry', 'pdiff', 'adiff']], geometry='geometry', crs='EPSG:2056').to_crs(epsg=4326)
+    points = Plotter.prepare_flow_map_points(
+        gpd.GeoDataFrame(
+            df[["id", "geometry"]], geometry="geometry", crs="EPSG:2056"
+        ),
+        df,
+    ).to_crs(epsg=4326)
 
     Plotter.create_map([network_ways],
                         data_to_show=["link_id"],
-                        point_gdf=[points[['id', 'geometry', 'pdiff', 'adiff']]],
-                        point_data_to_show=['id', 'pdiff','adiff'],
+                        point_gdf=[points],
+                        point_data_to_show=Plotter.FLOW_MAP_TOOLTIP_FIELDS,
                         border=border,
                         path_to_save=os.path.join(path_to_output, "Switzerland_counts_comparaison.html"))
 

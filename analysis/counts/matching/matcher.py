@@ -33,7 +33,7 @@ class TrafficDataMatcher:
     """
 
     def match(self, network, counts, mode=None, search_radius=10,
-              prioritize_road_types=False):
+              prioritize_road_types=False, road_types_stopping_type = "secondary"):
         has_manual_direction = {"osm_id", "angle"}.issubset(counts.counts.columns)
         if mode is None:
             if not has_manual_direction:
@@ -53,7 +53,7 @@ class TrafficDataMatcher:
             matched = self._match_directional(network, counts)
         else:
             matched = self._match_bidirectional(
-                network, counts, search_radius, prioritize_road_types
+                network, counts, search_radius, prioritize_road_types, road_types_stopping_type
             )
 
         expected_links = 1 if mode is MatchMode.DIRECTIONAL else 2
@@ -113,7 +113,7 @@ class TrafficDataMatcher:
             crs=counts.counts.crs,
         )
 
-    def _match_bidirectional(self, network, counts, search_radius, prioritize_road_types):
+    def _match_bidirectional(self, network, counts, search_radius, prioritize_road_types, road_types_stopping_type):
         count_data = gpd.GeoDataFrame(
             counts.counts[["id", "geometry"]].copy(),
             geometry="geometry",
@@ -128,14 +128,14 @@ class TrafficDataMatcher:
         if count_data.geom_type.eq("Point").all():
             if prioritize_road_types:
                 return self._match_points_by_road_priority(
-                    network, count_data, search_radius
+                    network, count_data, search_radius, road_types_stopping_type
                 )
             return match_points_to_opposite_links(count_data, roads, search_radius)
         if count_data.geom_type.isin(["LineString", "MultiLineString"]).all():
             return self._match_lines(count_data, roads, search_radius)
         raise ValueError("A count dataset must contain only points or only lines.")
 
-    def _match_points_by_road_priority(self, network, counts, search_radius):
+    def _match_points_by_road_priority(self, network, counts, search_radius, road_types_stopping_type):
         remaining = counts.copy()
         _search_radius = search_radius
         results = []
@@ -146,7 +146,7 @@ class TrafficDataMatcher:
             if not matched.empty:
                 results.append(matched)
                 remaining = remaining[~remaining["id"].isin(matched["id"])]
-            if remaining.empty or road_type=='secondary':
+            if remaining.empty or road_type==road_types_stopping_type:
                 break
             _search_radius = max(search_radius/4,_search_radius*0.7)
 

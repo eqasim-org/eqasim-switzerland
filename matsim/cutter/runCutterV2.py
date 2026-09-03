@@ -4,6 +4,7 @@ import glob
 import matsim.runtime.eqasim as eqasim
 import logging
 from .cutter_tools import change_params, cut_csv_to_region, cut_csv_to_network, get_regions_path
+import matsim.simulation.config_utils as config_utils
 
 logger = logging.getLogger("synpp")
 
@@ -15,8 +16,22 @@ def configure(context):
     context.stage("data.pt_pricing.pt_pricing")
     context.stage("data.microcensus.shares")
 
-    context.stage("calibration.road_regions.freespeed_calibration")
-    context.stage("calibration.road_regions.penalty_calibration")
+    context.config("network_calibration.activate", default=False)
+    context.config("network_calibration.calibrate_disutilities", default=True)
+    context.config("network_calibration.calibrate_freespeed", default=True)
+    context.config("network_calibration.calibrate_agents_ascs", default=True)
+    context.config("network_calibration.calibrate_subpopulations", default=True)
+
+    need_counts = config_utils.need_counts_file(context)
+    if context.config("network_calibration.activate") and need_counts:
+        context.stage("analysis.counts.target")
+        if context.config("network_calibration.calibrate_disutilities"):
+            context.stage("calibration.road_regions.penalty_calibration")
+        
+    
+    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
+        context.stage("analysis.travel_times.APIs.target")
+        context.stage("calibration.road_regions.freespeed_calibration")   
 
     context.config("calibrate_alphas_in_matsim", default=False)
     context.config("calibrate_betas_in_matsim", default=False)
@@ -100,11 +115,15 @@ def execute(context):
     shutil.copy(pricing_path, f"{output_path}/pricingDescription.xml" )
 
     # 4. calibration files (special regions and target files)
+    calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = config_utils.get_network_cal_config_as_bool(context)
+    need_counts = config_utils.need_counts_file(context)
+
     regionl_speeds_file = ""
-    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
-        freespeed_calibration_path = context.stage("calibration.road_regions.freespeed_calibration")
+    if calibrate_network and calibrate_freespeed:
         region_dir = os.path.join(output_path, "network_calibration_files")
         os.makedirs(region_dir, exist_ok=True)
+
+        freespeed_calibration_path = context.stage("calibration.road_regions.freespeed_calibration")
         if freespeed_calibration_path!="":                        
             regions = freespeed_calibration_path.split(";")
             for i,region in enumerate(regions):
@@ -120,16 +139,10 @@ def execute(context):
                     regionl_speeds_file = "network_calibration_files/target_travel_times.csv"
 
     regional_counts_file = ""
-    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_disutilities"):
-        penalty_calibration_path = context.stage("calibration.road_regions.penalty_calibration")    
+    if need_counts:  
         region_dir = os.path.join(output_path, "network_calibration_files")
         os.makedirs(region_dir, exist_ok=True)
-        if penalty_calibration_path!="":            
-            regions = penalty_calibration_path.split(";")
-            for i,region in enumerate(regions):
-                if os.path.exists(region):
-                    shutil.copy(region, f"{region_dir}/penalties_special_region_{i}.yml" )
-        
+
         target_counts_file = context.stage("analysis.counts.target")
         if target_counts_file!="":
             cut_csv_to_network(csv_path = target_counts_file, 
@@ -138,6 +151,14 @@ def execute(context):
             if os.path.exists(f"{region_dir}/target_counts.csv"):
                 regional_counts_file = "network_calibration_files/target_counts.csv"
 
+        if calibrate_network and calibrate_disutilities:
+            penalty_calibration_path = context.stage("calibration.road_regions.penalty_calibration")  
+            if penalty_calibration_path!="":            
+                regions = penalty_calibration_path.split(";")
+                for i,region in enumerate(regions):
+                    if os.path.exists(region):
+                        shutil.copy(region, f"{region_dir}/penalties_special_region_{i}.yml" )
+
     # 5. modify the regional model config
     config_file = "%s/%sconfig.xml" % (output_path, context.config("extent_prefix") )
     assert os.path.exists(config_file), "Config file does not exist: %s" % config_file
@@ -145,8 +166,8 @@ def execute(context):
                   output_path = config_file,
                   params = [
                         ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
-                        ("eqasim:networkCalibration.objective","freespeed,penalty,agent,subpopulations"),
-                        ("eqasim:networkCalibration.calibrate","agent,subpopulations"),
+                        ("eqasim:networkCalibration.objective", config_utils.get_network_calibration_objectives(context)),
+                        ("eqasim:networkCalibration.calibrate", config_utils.get_network_calibration_calibrate(context, ignore=("penalty","freespeed"))), # we do not calibrate penalty and freespeed here
                         ("eqasim:networkCalibration.costCalibration.activate","false"),
                         ("eqasim:networkCalibration.freespeedCalibration.activate","false"),
                         ("eqasim:alphaCalibration.filePath","cantonal_target_mode_shares.csv"),

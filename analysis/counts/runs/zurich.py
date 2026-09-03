@@ -94,9 +94,12 @@ def execute(context):
     Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
                         matched_links.to_crs(epsg=4326)], 
                         data_to_show=["link_id"], 
-                        point_gdf=[counts.counts[['id','geometry']].merge(
-                                   flows[["id","pdiff", "adiff"]], on="id", how="left").to_crs(epsg=4326)],
-                        point_data_to_show=['id',"pdiff", "adiff"],
+                        point_gdf=[
+                            Plotter.prepare_flow_map_points(
+                                counts.counts, flows
+                            ).to_crs(epsg=4326)
+                        ],
+                        point_data_to_show=Plotter.FLOW_MAP_TOOLTIP_FIELDS,
                         border = border,
                         cut_network = True,
                         path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
