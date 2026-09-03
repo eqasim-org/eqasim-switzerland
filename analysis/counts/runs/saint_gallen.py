@@ -3,6 +3,7 @@ from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.results import save_count_results
 import os
+from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
 
 def configure(context):
     context.stage("analysis.counts.cantons.saint_gallen")
@@ -11,9 +12,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
 
     context.config("input_downsampling")
-    context.config("output_path")
-    context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    configure_simulation_path(context)
     context.config("only_weekday", default=False)
 
 def execute(context):       
@@ -24,10 +23,7 @@ def execute(context):
     saint_gallen_counts_data  = context.stage("analysis.counts.cantons.saint_gallen")
     city = "saint_gallen"
     sample_size = context.config("input_downsampling")
-    path_to_images = os.path.join(context.config("output_path"), 
-                                  context.config("output_id"), 
-                                  context.config("simulation_directory"),
-                                  "compare_counts_weekdays" if context.config("only_weekday") else "compare_counts_all_days")
+    path_to_images = get_analysis_output_path(context)
     os.makedirs(path_to_images, exist_ok=True)
 
     # Load the network and the counts
@@ -44,6 +40,9 @@ def execute(context):
                             mode="bidirectional",
                             search_radius=2)
 
+    if not matches_found(matched, city):
+        return None
+
     # Compare the with simulation
     cmp     = context.stage("analysis.counts.matching.compare")    
     flows   = cmp.compare_flow_total_efficient(counts, matched, network, 
@@ -51,6 +50,9 @@ def execute(context):
                                             get_average=False, 
                                             flow_col = "flow")
     
+    if not matches_found(flows, city, source="simulation flow results"):
+        return None
+
     # Identify the stations that might be mismatched
     stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>10000)|
                             (flows.simulated_flow<1000)|

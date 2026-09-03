@@ -4,6 +4,7 @@ from ..matching.plots import Plotter, GEH
 from ..matching.results import save_count_results
 from ..run_utils import IDS_TO_DROP
 import os
+from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
 import geopandas as gpd
 import logging
 
@@ -16,9 +17,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
 
     context.config("input_downsampling")
-    context.config("output_path")
-    context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    configure_simulation_path(context)
     context.config("only_weekday", default=False)
 
 def execute(context):        
@@ -28,10 +27,7 @@ def execute(context):
     sample_size = context.config("input_downsampling")
     minimum_months = 8
     include_incomplete_data = True
-    path_to_images = os.path.join(context.config("output_path"), 
-                                  context.config("output_id"), 
-                                  context.config("simulation_directory"),
-                                  "compare_counts_weekdays" if context.config("only_weekday") else "compare_counts_all_days")
+    path_to_images = get_analysis_output_path(context)
     os.makedirs(path_to_images, exist_ok=True)
 
     # Load the network and the counts
@@ -50,6 +46,9 @@ def execute(context):
                             search_radius=80,
                             prioritize_road_types=True)
 
+    if not matches_found(matched, city):
+        return None
+
     # Compare the with simulation
     cmp     = context.stage("analysis.counts.matching.compare")
     flows   = cmp.compare_flow_total_efficient(counts, matched, network, 
@@ -59,6 +58,9 @@ def execute(context):
     # drop complex intersections
     flows = flows[~flows['id'].astype(str).isin(IDS_TO_DROP)].reset_index(drop=True)
     
+    if not matches_found(flows, city, source="simulation flow results"):
+        return None
+
     # Identify the stations that might be mismatched
     stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>25000)|
                              (flows.simulated_flow< 200 * 24)|

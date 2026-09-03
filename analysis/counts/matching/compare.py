@@ -5,19 +5,17 @@ import logging
 import os
 import glob
 
+from ..paths import configure_simulation_path, get_simulation_path
+
 logger = logging.getLogger("synpp")
 
 def configure(context):
-    context.config("output_path")
-    context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    configure_simulation_path(context)
     context.config("output_prefix", "switzerland_")
 
 def execute(context):        
-    output_path = context.config("output_path")
-    output_id   = context.config("output_id")
-    simulation_directory = context.config("simulation_directory")
-    iterations_directory = os.path.join(output_path, output_id, simulation_directory, "ITERS")
+    simulation_path = get_simulation_path(context)
+    iterations_directory = os.path.join(simulation_path, "ITERS")
     
     # searching for link stats file 
     linkstats_file = glob.glob(os.path.join(iterations_directory, "it.*", f"*.linkstats.txt.gz"))

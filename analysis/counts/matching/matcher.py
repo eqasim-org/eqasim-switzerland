@@ -96,6 +96,8 @@ class TrafficDataMatcher:
             on="_osm_key",
             how="left",
         ).dropna(subset=["link_id", "angle", "road_angle"])
+        if candidates.empty:
+            return self._empty_matches(counts.counts.crs)
         candidates["angle_difference"] = angular_difference(
             candidates["angle"], candidates["road_angle"]
         )

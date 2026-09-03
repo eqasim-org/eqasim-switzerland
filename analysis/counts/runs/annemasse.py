@@ -3,6 +3,7 @@ from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.results import save_count_results
 import os
+from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
 import geopandas as gpd
 import logging
 
@@ -15,9 +16,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
 
     context.config("input_downsampling")
-    context.config("output_path")
-    context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    configure_simulation_path(context)
     context.config("only_weekday", default=False)
     context.config("include_external_population", default = False)
 
@@ -32,10 +31,7 @@ def execute(context):
     annemasse_counts_data  = context.stage("analysis.counts.cantons.annemasse")
     city = "annemasse"
     sample_size = context.config("input_downsampling")
-    path_to_images = os.path.join(context.config("output_path"), 
-                                  context.config("output_id"), 
-                                  context.config("simulation_directory"),
-                                  "compare_counts_weekdays" if context.config("only_weekday") else "compare_counts_all_days")
+    path_to_images = get_analysis_output_path(context)
     os.makedirs(path_to_images, exist_ok=True)
 
     # Load the network and the counts
@@ -52,6 +48,9 @@ def execute(context):
                             mode="bidirectional",
                             search_radius=20)
 
+    if not matches_found(matched, city):
+        return None
+
     # Compare the with simulation    
     cmp     = context.stage("analysis.counts.matching.compare")    
     flows   = cmp.compare_flow_total_efficient(counts, matched, network, 
@@ -59,6 +58,9 @@ def execute(context):
                                             get_average=False, 
                                             flow_col = 'flow')
     
+    if not matches_found(flows, city, source="simulation flow results"):
+        return None
+
     # Identify the stations that might be mismatched
     stations_to_drop = flows[(abs(flows.flow-flows.simulated_flow)>25000)|
                                 (flows.simulated_flow< 200 * 24)|
@@ -104,8 +106,8 @@ def execute(context):
                         matched_links.to_crs(epsg=4326)], 
                         data_to_show=["link_id"], 
                         point_gdf=[counts.counts[['id','geometry']].merge(
-                                   flows[["id","pdiff"]], on="id", how="left").to_crs(epsg=4326)],
-                        point_data_to_show=['id',"pdiff"],
+                                   flows[["id","pdiff", "adiff"]], on="id", how="left").to_crs(epsg=4326)],
+                        point_data_to_show=['id',"pdiff","adiff"],
                         border = border,
                         path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
     

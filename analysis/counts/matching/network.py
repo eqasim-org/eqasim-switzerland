@@ -9,30 +9,35 @@ import os
 import pickle
 import time
 
+from ..paths import SIMULATION_PATH_CONFIG, configure_simulation_path, get_simulation_path
+
 logger = logging.getLogger("synpp")
 
 
 def configure(context):
-    context.config("output_path")
-    context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    configure_simulation_path(context)
     context.config("output_prefix", "switzerland_")
     context.config("export_detailed_network", False)
 
 
 def execute(context):  
-    output_path = context.config("output_path")
-    output_id   = context.config("output_id")
-    simulation_directory = context.config("simulation_directory")
-    
-    network_file = os.path.join(output_path, output_id, simulation_directory, "output_network.xml.gz")
+    simulation_path = get_simulation_path(context)
+    network_file = os.path.join(simulation_path, "output_network.xml.gz")
     network_geometry_file = None
 
-    if not os.path.exists(network_file):
-        network_file = os.path.join(output_path, output_id, context.config("output_prefix") + "network.xml.gz")
+    if not os.path.exists(network_file) and not context.config(SIMULATION_PATH_CONFIG):
+        network_file = os.path.join(
+            context.config("output_path"),
+            context.config("output_id"),
+            context.config("output_prefix") + "network.xml.gz",
+        )
         
-    if context.config("export_detailed_network"):
-        network_geometry_file = os.path.join(output_path, output_id,"%sdetailed_network.csv" % context.config("output_prefix"))
+    if context.config("export_detailed_network") and not context.config(SIMULATION_PATH_CONFIG):
+        network_geometry_file = os.path.join(
+            context.config("output_path"),
+            context.config("output_id"),
+            "%sdetailed_network.csv" % context.config("output_prefix"),
+        )
             
     assert os.path.exists(network_file), f"Network file not found at {network_file}"
     logger.info("\t LOADING NETWORK FROM: %s" % network_file)

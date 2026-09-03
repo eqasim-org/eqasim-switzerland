@@ -7,6 +7,7 @@ from .run_utils import (filter_data, compute_statistics, save_as_target,
                         create_comprehensive_plot, create_simple_scatter_plot, plot_by_road_cat,
                         print_detailed_statistics, get_average_flow_veh_h_by_category)
 from .matching.plots import Plotter
+from .paths import configure_simulation_path, get_analysis_output_path
 
 
 logger = logging.getLogger("synpp")
@@ -15,9 +16,7 @@ runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not (i.st
 def configure(context):    
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
-    context.config("output_path")
-    context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    configure_simulation_path(context)
     context.config("only_weekday", default=False)
     for run in runs:
         logger.info(f"Staging analysis.counts.runs.{run}")
@@ -25,10 +24,7 @@ def configure(context):
 
 def execute(context):
     # Get the path to output
-    path_to_output = os.path.join(context.config("output_path"), 
-                            context.config("output_id"), 
-                            context.config("simulation_directory"),
-                            "compare_counts_weekdays" if context.config("only_weekday") else "compare_counts_all_days")
+    path_to_output = get_analysis_output_path(context)
     
     os.makedirs(path_to_output, exist_ok=True)
 
@@ -52,13 +48,24 @@ def execute(context):
         logger.info(f"\t - {canton}: {len(df)} records ({canton})")
         all_data.append(df)
 
+    if not all_data:
+        logger.warning("No count locations matched the simulation network; skipping combined analysis.")
+        return dict(done=True, path=path_to_output)
+
     df = pd.concat(all_data, ignore_index=True)
+    if df.empty:
+        logger.warning("Matched count result files are empty; skipping combined analysis.")
+        return dict(done=True, path=path_to_output)
+
     logger.info(f"\n\tCombined dataset: {len(df)} total records")
     logger.info(f"\tCities included: {', '.join(df['city'].unique())}")
     
     # filter outliers
     network = context.stage("analysis.counts.matching.network")
     df = filter_data(df, network)
+    if df is None or df.empty:
+        logger.warning("No count records remain after filtering; skipping combined analysis.")
+        return dict(done=True, path=path_to_output)
 
     # Compute statistics
     stats = compute_statistics(df, output_path=path_to_output)
