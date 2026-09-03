@@ -241,9 +241,7 @@ def get_delays_args(context):
 
 def get_network_cal_config_as_bool(context):
     calibrate_network = parse_boolean(
-            context.config("network_calibration.activate"),
-            "network_calibration.activate"
-    )
+            context.config("network_calibration.activate"), "network_calibration.activate")
     calibrate_disutilities = parse_boolean(
         context.config("network_calibration.calibrate_disutilities"),
         "network_calibration.calibrate_disutilities",
@@ -260,9 +258,7 @@ def get_network_cal_config_as_bool(context):
             context.config("network_calibration.calibrate_subpopulations"),
             "network_calibration.calibrate_subpopulations",
         )
-    
     return calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations
-
     
 def get_network_calibration_args(context):
     calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = get_network_cal_config_as_bool(context)
@@ -296,19 +292,17 @@ def get_network_calibration_args(context):
         
     additional_args.extend([
         "--config:eqasim:networkCalibration.objective", ",".join(objective),
-        "--config:eqasim:networkCalibration.calibrate", java_boolean(len(to_calibrate) > 0, "network_calibration.calibrate")
+        "--config:eqasim:networkCalibration.calibrate", ",".join(to_calibrate)
         ])
        
     return additional_args
 
-
 def need_counts_file(context):
-    _, calibrate_disutilities, _, calibrate_agent_acs, calibrate_subpopulations = get_network_cal_config_as_bool(context)
+    calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = get_network_cal_config_as_bool(context)
     return calibrate_disutilities or calibrate_agent_acs or calibrate_subpopulations
 
-
 def network_calibration_files_paths(context):
-    calibrate_network, calibrate_disutilities, calibrate_freespeed, _, _ = get_network_cal_config_as_bool(context)
+    calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = get_network_cal_config_as_bool(context)
     need_counts = need_counts_file(context)
     
     args = []
@@ -328,6 +322,8 @@ def network_calibration_files_paths(context):
         ])
 
     return args
+
+
 
 
 def get_dmc_parameters_args(context):
