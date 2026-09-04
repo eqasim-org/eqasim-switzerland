@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+from shapely import LineString
 
 
 def rename_projected_ends(df_activities, population):
@@ -66,7 +67,9 @@ def execute(context):
                      "destination_x", "destination_y", "destination_id",
                      "is_border_point_projected", "origin_is_projected", "destination_is_projected",
                      "origin_point_id", "destination_point_id",
-                     "interview_place", "interview_point_id", "interview_geometry_point"]]
+                     "interview_place", "interview_point_id", "interview_geometry_point",
+                     "entry_interview_point_id", "entry_interview_geometry_point",
+                     "exit_interview_point_id", "exit_interview_geometry_point"]]
     
     mz_trips   = mz_trips[["person_id", "trip_id", 
                            "departure_time", "arrival_time", 
@@ -82,6 +85,8 @@ def execute(context):
                          "origin_x", "origin_y",
                          "destination_x", "destination_y",
                          "destination_id",
+                         "entry_interview_point_id", "entry_interview_geometry_point",
+                         "exit_interview_point_id", "exit_interview_geometry_point",
                          "departure_time", "arrival_time",
                          "mode",
                          "preceding_purpose", "following_purpose"]].sort_values(by=["cross_border_person_id", "trip_id"])
@@ -168,6 +173,27 @@ def execute(context):
     geometry = gpd.GeoSeries.from_xy(df_activities["location_x"], df_activities["location_y"])
 
     df_activities["geometry"] = geometry
+
+    # Through traffic does not perform a real activity in Switzerland. Its first
+    # and last activities are therefore the two border anchors used for routing
+    # across the country, with direction-specific facility IDs.
+    through_entry = (df_activities["label"] == "Through") & (df_activities["activity_index"] == 1)
+    through_exit = (df_activities["label"] == "Through") & df_activities["following_mode"].isna()
+    df_activities.loc[through_entry, "purpose"] = "border"
+    df_activities.loc[through_entry, "destination_id"] = df_trips.loc[
+        df_trips["label"] == "Through", "entry_interview_point_id"
+    ].values
+    df_activities.loc[through_entry, "geometry"] = df_trips.loc[
+        df_trips["label"] == "Through", "entry_interview_geometry_point"
+    ].values
+    df_activities.loc[through_exit, "purpose"] = "border"
+    df_activities.loc[through_exit, "destination_id"] = df_trips.loc[
+        df_trips["label"] == "Through", "exit_interview_point_id"
+    ].values
+    df_activities.loc[through_exit, "geometry"] = df_trips.loc[
+        df_trips["label"] == "Through", "exit_interview_geometry_point"
+    ].values
+
     df_activities["duration"] = df_activities["end_time"] - df_activities["start_time"]
     df_activities["is_last"]  = df_activities["following_mode"].isna()
 
@@ -246,7 +272,7 @@ def execute(context):
     activities1point5["activity_index"] = 1.5
     activities1point5["duration"]       = 1
     activities1point5["is_last"]        = False
-    activities1point5["destination_id"] = activities1point5["interview_point_id"]
+    activities1point5["destination_id"] = activities1point5["entry_interview_point_id"]
     activities1point5["purpose"]        = "border"
 
     activities1point5 = activities1point5.merge(act1[["person_id", "geom_1", "end_time_1", "trip_duration_12", "following_mode"]], on="person_id", how="left")
@@ -265,12 +291,12 @@ def execute(context):
     activities2point5 = (
         population[population["cross_border_person_id"].isin(persons_with_3_acts) & mask_border_activity]
         .copy()
-        .rename(columns={"cross_border_person_id": "person_id", "interview_geometry_point": "geometry"})
+        .rename(columns={"cross_border_person_id": "person_id", "exit_interview_geometry_point": "geometry"})
     )
     activities2point5["activity_index"] = 2.5
     activities2point5["duration"]       = 1
     activities2point5["is_last"]        = False
-    activities2point5["destination_id"] = activities2point5["interview_point_id"]
+    activities2point5["destination_id"] = activities2point5["exit_interview_point_id"]
     activities2point5["purpose"]        = "border"
 
     activities2point5 = activities2point5.merge(act2[["person_id", "geom_2", "end_time_2", "trip_duration_23", "following_mode"]], on="person_id", how="left")
@@ -304,4 +330,39 @@ def execute(context):
                                    "geometry", "destination_id", "following_mode"
                                    ]]
     
+    df_sorted = df_activities.sort_values(["person_id", "activity_index"])
+
+    # Shift to get origin and destination activity side by side
+    trips = pd.DataFrame({
+        "person_id"       : df_sorted["person_id"],
+        "trip_index"      : df_sorted["activity_index"],
+        "origin_id"       : df_sorted["destination_id"],
+        "departure_time"  : df_sorted["end_time"],
+        "geom_origin"     : df_sorted["geometry"].values,
+        "mode"            : df_sorted["following_mode"],
+        "geom_destination": df_sorted.groupby("person_id")["geometry"].shift(-1).values,
+        "destination_id"  : df_sorted.groupby("person_id")["destination_id"].shift(-1).values,
+        "arrival_time"    : df_sorted.groupby("person_id")["start_time"].shift(-1).values,
+    })
+
+    # Drop last activity of each person (no outgoing trip)
+    trips = trips[trips["mode"].notna()].copy()
+
+    # Compute trip duration
+    trips["trip_duration"] = trips["arrival_time"] - trips["departure_time"]
+
+    # Build LineString geometry
+    trips["geometry"] = trips.apply(
+        lambda r: LineString([r["geom_origin"], r["geom_destination"]]), axis=1
+    )
+
+    # Drop helper columns and convert to GeoDataFrame
+    trips = trips.drop(columns=["geom_origin", "geom_destination"])
+    trips = gpd.GeoDataFrame(trips, geometry="geometry", crs = "EPSG:2056")
+
+    # Reindex trip index as integer
+    trips["trip_index"] = trips.groupby("person_id").cumcount() + 1
+
+    #trips.to_file(f"{context.config("output_path")}/trips_crossborder.shp")
+
     return df_activities

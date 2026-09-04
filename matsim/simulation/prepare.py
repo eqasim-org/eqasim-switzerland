@@ -2,6 +2,7 @@ import shutil
 import os.path
 import matsim.runtime.eqasim as eqasim
 from dmc.constants import constants as dmc_constants
+from matsim.simulation.cross_border_links import patch_directional_border_links
 
 import matsim.simulation.config_utils as config_utils
 
@@ -31,6 +32,12 @@ def configure(context):
     context.config("useScheduleBasedTransport", default = True)
     context.config("car_cost_model", dmc_constants.CAR_COST_MODEL)
     context.config("route_bike", True)
+    context.config("include_cross_border", default=False)
+    context.stage("data.cross_border.swiss_residents_od")
+    context.stage("data.spatial.swiss_border")
+
+    if context.config("include_cross_border"):
+        context.stage("data.cross_border.destinations")
 
     # network calibration
     context.config("network_calibration.activate", default=False)
@@ -125,6 +132,22 @@ def execute(context):
     assert os.path.exists("%s/%sfacilities.xml.gz" % (context.path(), context.config("output_prefix")))
     assert os.path.exists("%s/prepared_population.xml.gz" % context.path())
     assert os.path.exists("%s/%snetwork.xml.gz" % (context.path(), context.config("output_prefix")))
+
+    # Java assigns facility links by nearest coordinate only. For directional
+    # cross-border facilities we patch the prepared files in Python so entry and
+    # exit activities use opposite one-way links before the population is routed.
+    cross_border_destinations = None
+    if context.config("include_cross_border"):
+        cross_border_destinations = context.stage("data.cross_border.destinations")
+
+    patch_directional_border_links(
+        cross_border_destinations,
+        context.stage("data.cross_border.swiss_residents_od"),
+        context.stage("data.spatial.swiss_border"),
+        "%s/%snetwork.xml.gz" % (context.path(), context.config("output_prefix")),
+        "%s/%sfacilities.xml.gz" % (context.path(), context.config("output_prefix")),
+        "%s/prepared_population.xml.gz" % context.path(),
+    )
 
     # Generate the config file
     config_path = "%sconfig.xml" % context.config("output_prefix")
