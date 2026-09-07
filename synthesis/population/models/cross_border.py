@@ -229,11 +229,15 @@ def _match_border_crossings(pop_df: pd.DataFrame, od_df: pd.DataFrame, crossers_
 
     Returns a DataFrame aligned with pop_df.index with columns
     cross_border_person_id, destination_country_raw, interview_geometry_point,
-    border_crossing_trip_mode, interview_point_id -- all pd.NA outside of crossers_mask.
+    border_crossing_trip_mode, interview_point_id, border_crossing_point --
+    all pd.NA outside of crossers_mask.
 
     interview_point_id and interview_geometry_point are the id and the coordinates
     of one and the same surveyed crossing, so the border activity ends up exactly
     on the facility it refers to (MATSim's ScenarioValidator rejects anything else).
+    border_crossing_point is the same geometry again, under the name the
+    directional entry/exit facility scheme downstream expects (see
+    data.cross_border.swiss_residents_od).
 
     The sampled record is constrained to be compatible with the person's age:
     no one at or below the microcensus age threshold can be assigned a crossing,
@@ -243,7 +247,7 @@ def _match_border_crossings(pop_df: pd.DataFrame, od_df: pd.DataFrame, crossers_
     od["origin_canton_id"] = pd.to_numeric(od["origin_canton_id"], errors="coerce")
     od_by_canton = {canton: group for canton, group in od.groupby("origin_canton_id")}
 
-    match_cols = ["cross_border_person_id", "destination_country_raw", "interview_geometry_point", "trip_mode", "interview_point_id"]
+    match_cols = ["cross_border_person_id", "destination_country_raw", "interview_geometry_point", "trip_mode", "interview_point_id", "border_crossing_point"]
     result = pd.DataFrame({
         col: pd.Series(pd.NA, index=pop_df.index, dtype="object") for col in match_cols
     })

@@ -22,6 +22,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("data.cross_border.interview_places")
 
+    context.config("border_offset", default = 20000)
     context.config("cross_border_countries", default = "All")
     context.config("cross_border_exclude_shapefiles", default=None)
 
@@ -156,6 +157,9 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     df[column_name + "_is_projected"]      = points["is_projected"].values
     df[column_name + "_point_id"]          = points["point_id"].values
 
+    share_projected = df[column_name + "_is_projected"].mean() * 100
+    logger.info(f"{column_name}: {share_projected:.1f}% of records reprojected to the closest border crossing point ({df[column_name + '_is_projected'].sum()}/{len(df)})")
+
     del df[x]
     del df[y]
 
@@ -217,6 +221,7 @@ def assign_car_passengers(trip_mode, passenger_index):
 def process_from_to_trips(df_trips, context, rng):
     # Load municipalities
     df_municipalities, _ = context.stage("data.spatial.municipalities")
+    border_offset_km = context.config("border_offset") / 1000
 
     # 1. Remove "through" trips that were not classified properly
     trips    = df_trips[(df_trips["origin_country"]=="CH") | (df_trips["destination_country"]=="CH")].copy()
@@ -257,7 +262,7 @@ def process_from_to_trips(df_trips, context, rng):
     df = expand_and_sample(df.copy(), "nb_passengers", "weight", rng)
 
     # Fix the origins
-    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", 20, "home", "other", "origin", context, rng)
+    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", border_offset_km, "home", "other", "origin", context, rng)
 
     # Re-create the destinations
     destinations = df.copy().apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
@@ -293,6 +298,8 @@ def process_from_to_trips(df_trips, context, rng):
 
 
 def process_through_trips(through_trips, N, context, rng):
+    border_offset_km = context.config("border_offset") / 1000
+
     through_od = through_trips[
         ["origin_country", "destination_country", "origin_country_raw", "destination_country_raw",
         "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
@@ -316,8 +323,8 @@ def process_through_trips(through_trips, N, context, rng):
 
     df = df_sampled.copy().reset_index()
 
-    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", 20, "other", "other", "origin", context, rng)
-    df = project_point_series_close_to_border(df.copy(), "end_x", "end_y", 20, "other", "other", "destination", context, rng)
+    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", border_offset_km, "other", "other", "origin", context, rng)
+    df = project_point_series_close_to_border(df.copy(), "end_x", "end_y", border_offset_km, "other", "other", "destination", context, rng)
 
     df["cross_border_person_id"] = range(N, N + len(df))
     df["cross_border_person_id"] = "CBS_" + df["cross_border_person_id"].astype(str)
@@ -715,7 +722,14 @@ def execute(context):
     through_trips = process_through_trips(through, len(from_to_trips), context, rng)
 
     df = pd.concat([from_to_trips, through_trips])
-        
+
+    is_projected_columns = [c for c in ["origin_is_projected", "destination_is_projected"] if c in df.columns]
+    any_projected = df[is_projected_columns].any(axis = 1)
+    logger.info(
+        f"Overall: {any_projected.mean() * 100:.1f}% of the cross-border population has an origin and/or "
+        f"destination reprojected to the closest border crossing point ({any_projected.sum()}/{len(df)})"
+    )
+
     # Remove people who really live in the spatial file to be excluded. This
     # has to be checked against residence_x/residence_y (the real home
     # location, before project_point_series_close_to_border may have snapped

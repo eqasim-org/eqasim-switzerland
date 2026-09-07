@@ -448,10 +448,10 @@ def execute(context):
         df_population["income_class"] = df_population["income_class"].astype(int)
         df_source["income_class"]     = df_source["income_class"].astype(int)
         
-        INCOME_CLASSIFICATION = {1:1, 2:1, 3:2, 4:2, 5:2, 6:3, 7:3, 8:3} # map 6 income classes to 3 classes (low, medium, high)
+        INCOME_CLASSIFICATION = {0: 1, 1:1, 2:1, 3:2, 4:2, 5:2, 6:3, 7:3, 8:3} # map 6 income classes to 3 classes (low, medium, high)
         
-        df_population['income_class'] = df_population['income_class'].map(INCOME_CLASSIFICATION)
-        df_source['income_class']     = df_source['income_class'].map(INCOME_CLASSIFICATION)
+        df_population["income_class"] = df_population["income_class"].map(INCOME_CLASSIFICATION)
+        df_source["income_class"]     = df_source["income_class"].map(INCOME_CLASSIFICATION)
 
         # further cleaning
         df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)

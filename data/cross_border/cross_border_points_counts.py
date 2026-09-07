@@ -83,7 +83,8 @@ def execute(context):
     df_points      = context.stage("data.cross_border.interview_places").copy()
     df_trips       = context.stage("synthesis.population.trips")
     df_projected   = context.stage("data.cross_border.destinations")[
-        ["cross_border_person_id", "is_border_point_projected"]
+        ["cross_border_person_id", "is_border_point_projected",
+         "interview_point_id", "entry_interview_point_id", "exit_interview_point_id"]
     ].drop_duplicates("cross_border_person_id")
     df_activities  = context.stage("data.cross_border.activities")
 
@@ -141,6 +142,21 @@ def count_cross_border_people(df_activities, df_projected):
         "Some cross-border border-activities belong to a person missing from "
         "data.cross_border.destinations."
     )
+
+    # destination_id is a MATSim facility id, not necessarily a
+    # border_crossing_point_id: for a non-teleported (real, already close
+    # enough) end, data.cross_border.activities stamps the directional
+    # entry_/exit_interview_point_id (see data.cross_border.destinations'
+    # make_entry_border_facility_id / make_exit_border_facility_id -
+    # person-specific for "Through" trips), not the canonical point id.
+    # Only a teleported end already carries the raw, canonical
+    # border_crossing_point_id it was projected onto (data.cross_border.
+    # generate_od.project_point_series_close_to_border). Undo the
+    # directional renaming here so both cases group under the same
+    # border_crossing_point_id the map is keyed on.
+    on_entry = df["destination_id"] == df["entry_interview_point_id"]
+    on_exit  = df["destination_id"] == df["exit_interview_point_id"]
+    df.loc[on_entry | on_exit, "destination_id"] = df.loc[on_entry | on_exit, "interview_point_id"]
 
     df["category"] = df["is_border_point_projected"].map({
         True: "cross_border_teleported", False: "cross_border_not_teleported",
