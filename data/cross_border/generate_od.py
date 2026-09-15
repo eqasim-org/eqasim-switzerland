@@ -57,24 +57,7 @@ def sample_points_in_polygon(polygon, n):
     return points
 
 
-def sample_candidates_by_importance(candidates, n, rng):
-    """
-    Draws n candidates (with replacement), weighted by their importance -
-    same process read_2021_data.sample_point uses to match a non-projected
-    respondent to their interview point. Falls back to a uniform draw when
-    the weights are degenerate (missing/non-finite, or all zero), same as
-    data.cross_border.destinations.sample_destinations.
-    """
-
-    weights = candidates["importance"]
-
-    if not np.isfinite(weights).all() or weights.sum() <= 0:
-        weights = None
-
-    return candidates.sample(n = n, replace = True, weights = weights, random_state = rng)
-
-
-def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context, rng, mode_column = "trip_mode", interview_place_column = "interview_place"):
+def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context, rng, mode_column = "trip_mode", interview_place_column = "interview_place", other_x = None, other_y = None):
     df = df.copy()
     points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df[x], df[y]), crs = "EPSG:4326").to_crs("EPSG:2056")
     points["record"] = range(len(points))
@@ -86,8 +69,18 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     # ... and, where available, at the interview_place the respondent was
     # actually surveyed at (data.cross_border.interview_places can hold
     # several points under the same interview_place, e.g. "Bardonnex (625)"
-    # covers 2 - so this still leaves an importance-weighted choice among those).
+    # covers 2 - so this still leaves a choice among those).
     points["interview_place"] = df[interview_place_column].values if interview_place_column in df.columns else None
+
+    # The other end of the trip (destination when projecting the origin, and
+    # vice-versa), used below to minimize the total origin->crossing->destination
+    # detour - same criterion as read_2021_data.sample_point.
+    if other_x is not None and other_y is not None:
+        points["other_geometry"] = gpd.GeoSeries(
+            gpd.points_from_xy(df[other_x], df[other_y]), crs = "EPSG:4326"
+        ).to_crs("EPSG:2056").values
+    else:
+        points["other_geometry"] = None
 
     ch_borders        = context.stage("data.spatial.swiss_border").copy()[0]
     ch_borders_simple = ch_borders.simplify(50)
@@ -100,55 +93,59 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     close_points = points[close_mask].copy()
 
     # Points too far from the border are projected onto a surveyed interview
-    # place instead of the nearest other observed (and already close) record.
+    # place instead of using their own (real, but far away) coordinate - same
+    # distance+importance selection as read_2021_data.sample_point, minimizing
+    # the origin->crossing->destination detour and drawing (importance-weighted)
+    # among the candidates within 20% of that minimum. This is independently
+    # re-drawn here rather than reusing sample_point's own pick: this function
+    # runs after expand_and_sample/sample_rows_by_weight, so the several expanded
+    # copies of one respondent (occupants, weight duplicates) can each land on a
+    # different, similarly-good crossing instead of collapsing onto a single one.
     interview_points = context.stage("data.cross_border.interview_places").copy()[
         ["geometry", "border_crossing_point_id", "label", "interview_place", "importance"]].reset_index(drop = True)
-    interview_points["record"] = range(len(interview_points))
-    merging_aux_df    = interview_points.copy().rename(columns = {"geometry": "close_point_geometry"})
+    grouped_points = {k: v for k, v in interview_points.groupby(["label", "interview_place"])}
 
-    # A weighted-by-importance draw among the crossings serving the agent's
-    # mode, preferring candidates at the same reported interview_place
-    # (falling back to every point of the right mode, then to every point at
-    # all, if none of those match) - same process read_2021_data.sample_point
-    # uses to match a non-projected respondent to their interview point, so
-    # that a pt agent does not end up projected onto a motorway crossing,
-    # and a respondent surveyed at e.g. "Bardonnex" is projected onto a
-    # Bardonnex point rather than some other, merely closer, crossing.
-    nearest_parts = []
+    def sample_far_point(row):
+        candidates = grouped_points.get((row["label"], row["interview_place"]))
 
-    for (label, interview_place), group in far_points.groupby(["label", "interview_place"], dropna = False):
-        candidates = interview_points[
-            (interview_points["label"] == label) & (interview_points["interview_place"] == interview_place)
-        ]
-
-        if len(candidates) == 0:  # no point at this interview_place for this mode: fall back to mode alone
-            candidates = interview_points[interview_points["label"] == label]
+        if candidates is None or len(candidates) == 0:  # no point at this interview_place for this mode: fall back to mode alone
+            candidates = interview_points[interview_points["label"] == row["label"]]
 
         if len(candidates) == 0:  # unknown mode: fall back to every crossing
             candidates = interview_points
 
-        sampled = sample_candidates_by_importance(candidates, len(group), rng)
+        if row["other_geometry"] is not None:
+            total_dist = candidates["geometry"].apply(lambda g: row["geometry"].distance(g) + row["other_geometry"].distance(g))
+        else:
+            total_dist = candidates["geometry"].apply(lambda g: row["geometry"].distance(g))
 
-        part = group.copy()
-        part["record_left"]  = part["record"]
-        part["record_right"] = sampled["record"].values
-        nearest_parts.append(part)
+        eligible = candidates[total_dist <= total_dist.min() * 1.2]
 
-    nearest = pd.concat(nearest_parts) if len(nearest_parts) > 0 else far_points.assign(record_left = None, record_right = None)
+        weights = eligible["importance"]
+        if not np.isfinite(weights).all() or weights.sum() <= 0:
+            weights = None
 
-    if "index_right" in nearest: del nearest["index_right"]
-    nearest = pd.merge(nearest, merging_aux_df, left_on = "record_right", right_on = "record", how = "left")
-    nearest = nearest[["record_left", "dist_to_border", "close_point_geometry", "geometry", "border_crossing_point_id"]]
-    nearest.columns = ["record", "dist_to_border", "geometry", "geometry_before_projection", "point_id"]
-    nearest["purpose"]      = projected_purpose
-    nearest["is_projected"] = True
+        sampled = eligible.sample(n = 1, weights = weights, random_state = rng)
+        return sampled.iloc[0][["geometry", "border_crossing_point_id"]]
+
+    far_points["geometry_before_projection"] = far_points["geometry"]
+
+    if len(far_points) > 0:
+        sampled = far_points.apply(sample_far_point, axis = 1)
+        far_points["geometry"]  = sampled["geometry"].values
+        far_points["point_id"]  = sampled["border_crossing_point_id"].values
+    else:
+        far_points["point_id"] = None
+
+    far_points["purpose"]      = projected_purpose
+    far_points["is_projected"] = True
 
     close_points["geometry_before_projection"] = close_points["geometry"]
     close_points["purpose"]             = default_purpose
     close_points["is_projected"]        = False
     close_points["point_id"]            = None  # a real location, not a crossing
 
-    points = pd.concat([nearest, close_points])
+    points = pd.concat([far_points, close_points])
     points = points.sort_values(by = "record")
 
     df[column_name + "_point"]             = points["geometry"].values
@@ -156,6 +153,17 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     df[column_name + "_purpose"]           = points["purpose"].values
     df[column_name + "_is_projected"]      = points["is_projected"].values
     df[column_name + "_point_id"]          = points["point_id"].values
+
+    # A projected/teleported person's origin (or destination) IS their
+    # crossing, so keep the "interview point" identity used later to build
+    # their border-crossing pseudo-activity (data.cross_border.activities)
+    # consistent with the point they were actually projected onto here -
+    # otherwise they could end up assigned to two distinct interview places
+    # (one for their location, a different one for that pseudo-activity).
+    if "interview_point_id" in df.columns and "interview_geometry_point" in df.columns:
+        mask = df[column_name + "_is_projected"]
+        df.loc[mask, "interview_point_id"]       = df.loc[mask, column_name + "_point_id"]
+        df.loc[mask, "interview_geometry_point"] = df.loc[mask, column_name + "_point"]
 
     share_projected = df[column_name + "_is_projected"].mean() * 100
     logger.info(f"{column_name}: {share_projected:.1f}% of records reprojected to the closest border crossing point ({df[column_name + '_is_projected'].sum()}/{len(df)})")
@@ -262,7 +270,7 @@ def process_from_to_trips(df_trips, context, rng):
     df = expand_and_sample(df.copy(), "nb_passengers", "weight", rng)
 
     # Fix the origins
-    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", border_offset_km, "home", "other", "origin", context, rng)
+    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", border_offset_km, "home", "other", "origin", context, rng, other_x = "end_x", other_y = "end_y")
 
     # Re-create the destinations
     destinations = df.copy().apply(lambda row: Point(row["end_x"], row["end_y"]), axis = 1)
@@ -323,14 +331,22 @@ def process_through_trips(through_trips, N, context, rng):
 
     df = df_sampled.copy().reset_index()
 
-    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", border_offset_km, "other", "other", "origin", context, rng)
-    df = project_point_series_close_to_border(df.copy(), "end_x", "end_y", border_offset_km, "other", "other", "destination", context, rng)
+    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", border_offset_km, "other", "other", "origin", context, rng, other_x = "end_x", other_y = "end_y")
+    df = project_point_series_close_to_border(df.copy(), "end_x", "end_y", border_offset_km, "other", "other", "destination", context, rng, other_x = "origin_x", other_y = "origin_y")
 
     df["cross_border_person_id"] = range(N, N + len(df))
     df["cross_border_person_id"] = "CBS_" + df["cross_border_person_id"].astype(str)
 
     df["residence_x"] =  df["origin_before_projection"].apply(lambda p: p.x)
     df["residence_y"] =  df["origin_before_projection"].apply(lambda p: p.y)
+
+    # Through trips are the only ones where the DESTINATION (not just the
+    # origin) can also be a real, far-away foreign point that got projected
+    # onto an interview place - exposed here the same way residence_x/y
+    # exposes the origin's, for data.cross_border.network_projection to
+    # refine that end too (see its docstring).
+    df["destination_residence_x"] = df["destination_before_projection"].apply(lambda p: p.x)
+    df["destination_residence_y"] = df["destination_before_projection"].apply(lambda p: p.y)
 
     df["label"] = "Through"
 
@@ -339,7 +355,7 @@ def process_through_trips(through_trips, N, context, rng):
 
     df = df[["cross_border_person_id", "label",
         "origin_x", "origin_y", "destination_x", "destination_y",
-        "residence_x", "residence_y",
+        "residence_x", "residence_y", "destination_residence_x", "destination_residence_y",
         "trip_mode", "trip_purpose",
         "is_border_point_projected", "origin_is_projected", "destination_is_projected",
         "origin_point_id", "destination_point_id",
@@ -500,15 +516,28 @@ def read_2021_data(context):
 
     grouped_points = {k: v for k, v in points.groupby(["interview_place", "label"])}
 
-    # Shared, seeded RNG: passing it to every .sample() call keeps the draws
-    # reproducible while still giving each row its own draw.
     point_rng = np.random.RandomState(context.config("random_seed"))
 
     def sample_point(row):
+        origin      = Point(row["start_x"], row["start_y"])
+        destination = Point(row["end_x"], row["end_y"])
+
         label = mode_to_label.get(row["trip_mode"])
         candidates = grouped_points.get((row["interview_place"], label))
         if candidates is not None and "importance" in candidates.columns:
-            sampled = candidates.sample(n=1, weights=candidates["importance"], random_state=point_rng)
+            # Minimize the detour through the crossing (origin -> point -> destination),
+            # then draw importance-weighted among the candidates within 20% of that
+            # minimum (the minimizing candidate is always included).
+            total_dist = candidates["geometry"].apply(lambda g: origin.distance(g) + destination.distance(g))
+            eligible   = candidates[total_dist <= total_dist.min() * 1.2]
+
+            weights = eligible["importance"]
+            if not np.isfinite(weights).all() or weights.sum() <= 0:
+                weights = None
+
+            sampled = eligible.sample(n = 1,
+                                      weights = weights,
+                                      random_state = point_rng)
             return sampled.iloc[0][["geometry", "importance", "interview_point_id", "label"]]
 
         # Fall back to the closest point that still matches the trip's mode, if any exist
@@ -516,12 +545,11 @@ def read_2021_data(context):
         if len(same_label) == 0:
             same_label = points
 
-        origin    = Point(row["start_x"], row["start_y"])
-        distances = same_label["geometry"].apply(lambda geom: origin.distance(geom))
-        closest   = same_label.loc[distances.idxmin()]
+        total_dist = same_label["geometry"].apply(lambda g: origin.distance(g) + destination.distance(g))
+        closest    = same_label.loc[total_dist.idxmin()]
         return closest[["geometry", "importance", "interview_point_id", "label"]]
 
-    result = borders[["interview_place", "start_x", "start_y", "trip_mode"]].apply(sample_point, axis=1)
+    result = borders[["interview_place", "start_x", "start_y", "end_x", "end_y", "trip_mode"]].apply(sample_point, axis=1)
     borders[["interview_geometry_point", "importance", "interview_point_id", "interview_point_label"]] = result
 
     # The point has to serve the mode the agent travels with, since it becomes

@@ -1,16 +1,20 @@
 import logging
 logger = logging.getLogger("synpp")
 
+
 def configure(context):
     context.stage("analysis.mode_shares.run")
     context.stage("analysis.counts.run")
     context.stage("analysis.travel_times.run")
+    context.stage("analysis.pt.comparison_passenger_counts_geneva")
+
 
 def execute(context):
     runs = {
         "mode_shares" : context.stage("analysis.mode_shares.run")["path"],
         "counts" : context.stage("analysis.counts.run")["path"],
         "travel_times" : context.stage("analysis.travel_times.run")["path"],
+        "pt_comparison_geneva" : context.stage("analysis.pt.comparison_passenger_counts_geneva")["path"],
     }
 
     for stage, out in runs.items():

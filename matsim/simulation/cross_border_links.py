@@ -3,7 +3,7 @@ import logging
 import math
 import os
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import geopandas as gpd
 import numpy as np
@@ -177,6 +177,18 @@ def _point_chunks(count, chunk_size):
         yield start, min(start + chunk_size, count)
 
 
+def _classify_point_chunk(swiss_border, x_chunk, y_chunk, start, end):
+    # Shapely's vectorized GEOS predicate is the expensive part here; the
+    # chunk wrapper lets large network-node batches run concurrently. Runs in
+    # a separate process (not a thread) because calling shapely.intersects_xy
+    # concurrently from multiple threads against the same shared geometry
+    # corrupted the process heap in practice (glibc's "tcache_thread_shutdown():
+    # unaligned tcache chunk detected"), most likely from GEOS not being safe
+    # for that level of thread concurrency.
+    values = shapely.intersects_xy(swiss_border, x_chunk, y_chunk)
+    return start, end, np.asarray(values, dtype=bool)
+
+
 def _points_inside_ch(swiss_border, x, y):
     x = np.asarray(x)
     y = np.asarray(y)
@@ -204,14 +216,11 @@ def _points_inside_ch(swiss_border, x, y):
             workers,
         )
 
-        def classify_chunk(start, end):
-            # Shapely's vectorized GEOS predicate is the expensive part here; the
-            # chunk wrapper lets large network-node batches run concurrently.
-            values = shapely.intersects_xy(swiss_border, x[start:end], y[start:end])
-            return start, end, np.asarray(values, dtype=bool)
-
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [executor.submit(classify_chunk, start, end) for start, end in chunks]
+        with ProcessPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(_classify_point_chunk, swiss_border, x[start:end], y[start:end], start, end)
+                for start, end in chunks
+            ]
 
             for chunk_index, future in enumerate(as_completed(futures), start=1):
                 start, end, values = future.result()
@@ -522,23 +531,45 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
         return facilities.assign(link_id=None, link_geometry=None, distance=None)
 
     border_geometry = swiss_border.unary_union if hasattr(swiss_border, "unary_union") else swiss_border
+
+    # Facility ids are now directional-suffixed and, for "Through" foreign
+    # residents and Swiss residents, person-specific (data.cross_border.
+    # destinations / data.cross_border.swiss_residents_od) - many of them share
+    # the exact same location and direction (e.g. every Swiss resident crossing
+    # at the same surveyed point). Matching a directional link is entirely a
+    # function of (geometry, direction), so dedupe on that before running the
+    # expensive per-facility search, then broadcast each unique match back to
+    # every facility_id that shares it. Coordinates are truncated to whole
+    # metres for the key, matching the int(x)/int(y) truncation MATSim I/O
+    # already applies (synthesis.population.destinations), so this cannot
+    # merge two facilities that would end up at genuinely different positions.
+    facilities["dedup_key"] = list(zip(
+        facilities["direction"],
+        facilities["geometry"].apply(lambda g: (int(g.x), int(g.y))),
+    ))
+    unique_facilities = facilities.drop_duplicates("dedup_key").reset_index(drop=True)
+
     all_links, crossing_links, local_links, inside_cache = _build_candidate_link_sets(
         network_path,
         border_geometry,
-        facilities=facilities,
+        facilities=unique_facilities,
     )
 
     # Build a tabular assignment so preparation can patch XML and analysis stages
     # can export the exact same directional matching result.
-    logger.info("Assigning %d directional border facilities to links ...", len(facilities))
+    logger.info(
+        "Assigning %d directional border facilities to links (%d unique location/direction pairs) ...",
+        len(facilities), len(unique_facilities),
+    )
     rows = []
     link_lookup = all_links.set_index("link_id")
-    for facility_index, facility in enumerate(facilities.itertuples(index=False), start=1):
-        if facility_index == 1 or facility_index % 100 == 0 or facility_index == len(facilities):
+    for facility_index, facility in enumerate(unique_facilities.itertuples(index=False), start=1):
+        if facility_index == 1 or facility_index % 100 == 0 or facility_index == len(unique_facilities):
             logger.info(
-                "Assigning directional border facility %d/%d ...",
+                "Assigning directional border facility %d/%d (%d unique) ...",
                 facility_index,
                 len(facilities),
+                len(unique_facilities),
             )
 
         matched_link = _choose_directional_link(facility, crossing_links, local_links, border_geometry, inside_cache)
@@ -546,8 +577,7 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
         link = link_lookup.loc[link_id]
         link_geometry = LineString([(link.x_from, link.y_from), (link.x_to, link.y_to)])
         rows.append({
-            "facility_id": facility.facility_id,
-            "direction": facility.direction,
+            "dedup_key": facility.dedup_key,
             "geometry": facility.geometry,
             "link_id": link_id,
             "link_geometry": link_geometry,
@@ -562,7 +592,16 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
 
     logger.info("Classified %d unique candidate link endpoints against the Swiss border.", len(inside_cache))
 
-    assignments = gpd.GeoDataFrame(rows, geometry="geometry", crs="EPSG:2056")
+    unique_assignments = pd.DataFrame(rows)
+
+    # Broadcast each unique (geometry, direction) match back to every real,
+    # possibly person-specific facility_id that shares it.
+    assignments = facilities[["facility_id", "direction", "dedup_key"]].merge(
+        unique_assignments, on="dedup_key", how="left"
+    )
+    del assignments["dedup_key"]
+    assignments = gpd.GeoDataFrame(assignments, geometry="geometry", crs="EPSG:2056")
+
     match_types = assignments["match_type"].value_counts().to_dict()
     logger.info("Directional border link match types: %s", match_types)
 
@@ -639,7 +678,12 @@ def patch_directional_border_links(
     network_path,
     facilities_path,
     population_path,
+    max_workers=None,
 ):
+    if max_workers is not None:
+        global POINT_CLASSIFICATION_MAX_WORKERS
+        POINT_CLASSIFICATION_MAX_WORKERS = max_workers
+
     facility_links = assign_directional_border_links(
         df_cross_border_destinations,
         df_swiss_residents_od,

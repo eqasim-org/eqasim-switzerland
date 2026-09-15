@@ -147,6 +147,7 @@ def execute(context):
         "%s/%snetwork.xml.gz" % (context.path(), context.config("output_prefix")),
         "%s/%sfacilities.xml.gz" % (context.path(), context.config("output_prefix")),
         "%s/prepared_population.xml.gz" % context.path(),
+        max_workers=context.config("threads"),
     )
 
     # Generate the config file

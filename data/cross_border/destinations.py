@@ -119,35 +119,29 @@ def execute(context):
         df.loc[df["destination_id"] == -1, "label"] == "Through"
     ).all(), "Found rows with destination_id = -1 and label != 'Through'"
 
-    # From-To agents use the surveyed interview point twice, once in each driving
-    # direction. The separate IDs let the MATSim preparation patch assign distinct
-    # one-way links while preserving the original crossing point as the common base.
+    # Every respondent (From-To and Through alike) is surveyed at exactly one
+    # physical border-crossing point (data.cross_border.interview_places, via
+    # sample_point in generate_od.py) - there is no second, independently
+    # observed crossing point for the way back or the way out. Both "From-To"
+    # directions and both "Through" legs (entering/leaving Switzerland) are
+    # therefore anchored at that same interview_geometry_point; the separate
+    # entry/exit IDs only let the MATSim preparation patch assign distinct
+    # one-way links while preserving the original crossing point as the
+    # common base - they do NOT mean the crossing itself differs.
+    #
+    # (origin_x/origin_y and destination_x/destination_y are NOT border
+    # points here - for "Through" trips they are the trip's real or
+    # projected-onto-interview-place endpoints, which network_projection may
+    # later refine far from this crossing; using them as the entry/exit
+    # geometry would place the "border" activity at the agent's home or
+    # destination instead of at the border.)
     df["entry_interview_point_id"] = df["interview_point_id"].apply(make_entry_border_facility_id)
     df["exit_interview_point_id"] = df["interview_point_id"].apply(make_exit_border_facility_id)
     df["entry_interview_geometry_point"] = df["interview_geometry_point"]
     df["exit_interview_geometry_point"] = df["interview_geometry_point"]
 
-    # Through agents have two real border anchors: where they enter Switzerland and
-    # where they leave it. These are person-specific because the two coordinates can
-    # come from different observed or projected border points.
-    through_mask = df["label"] == "Through"
-    df.loc[through_mask, "entry_interview_point_id"] = (
-        df.loc[through_mask, "cross_border_person_id"].astype(str) + ENTRY_SUFFIX
-    )
-    df.loc[through_mask, "exit_interview_point_id"] = (
-        df.loc[through_mask, "cross_border_person_id"].astype(str) + EXIT_SUFFIX
-    )
-    df.loc[through_mask, "entry_interview_geometry_point"] = gpd.GeoSeries(
-        gpd.points_from_xy(df.loc[through_mask, "origin_x"], df.loc[through_mask, "origin_y"]),
-        crs="EPSG:2056",
-    ).values
-    df.loc[through_mask, "exit_interview_geometry_point"] = gpd.GeoSeries(
-        gpd.points_from_xy(df.loc[through_mask, "destination_x"], df.loc[through_mask, "destination_y"]),
-        crs="EPSG:2056",
-    ).values
-
     df = df[["cross_border_person_id", "mz_person_id", "label",
-             "residence_x", "residence_y",
+             "residence_x", "residence_y", "destination_residence_x", "destination_residence_y",
              "trip_mode", "trip_purpose", "destination_id",
              "origin_x", "origin_y", "destination_x", "destination_y",
              "is_border_point_projected", "origin_is_projected", "destination_is_projected",
