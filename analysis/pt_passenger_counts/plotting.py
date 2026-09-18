@@ -1,5 +1,3 @@
-"""All plotting functions used by the passenger-count comparison stages."""
-
 import base64
 import io
 
@@ -66,7 +64,6 @@ def plot_comparison_for_stop_and_line(counts, option = "boardings", line = "1_H"
 def plot_heatmap_for_line(counts, option = "boardings", line = "1_H", output_path = ""):
     counts2  = counts.copy()
     px_mvmts = counts2[["stop_name", "line_direction", "hour"] + [c for c in counts if option in c]]
-
     px_mvmts = px_mvmts[px_mvmts["line_direction"] == line]
 
     px_mvmts["error_category"] = px_mvmts.apply(categorize_error, axis = 1)
@@ -173,11 +170,6 @@ def plot_comparison_for_stop(counts, option = "boardings", stop = "Genève, gare
 
 
 def plot_global_hourly_comparison(global_hourly_df, output_path):
-    """
-    Total passenger events (boardings + alightings) across all stops in the
-    perimeter, by hour of day: scaled MATSim total vs the 2024 TPG 95% CI.
-    """
-
     df = global_hourly_df.sort_values("hour")
 
     _, ax = plt.subplots(figsize = (12, 6))
@@ -199,14 +191,6 @@ def plot_global_hourly_comparison(global_hourly_df, output_path):
 
 
 def render_hourly_chart_png(hourly_df, title):
-    """
-    Same idea as plot_global_hourly_comparison, but for a single stop or
-    line and returned as a base64-encoded PNG (no file written) - meant to
-    be embedded straight into an HTML popup, e.g. in interactive_map.py's
-    full-day stop map and line map. Only the hours present in hourly_df are
-    plotted.
-    """
-
     df = hourly_df.sort_values("hour")
 
     fig, ax = plt.subplots(figsize = (5, 2.6))
