@@ -1,119 +1,3 @@
-"""
-Stage: data.cross_border.network_projection
-
-Refinement of data.cross_border.generate_od's teleported ("projected")
-cross-border trip ends.
-
-data.cross_border.generate_od handles a real point (a respondent's home for
-"From-To" trips; either end for "Through" trips) that is too far from the
-Swiss border (project_point_series_close_to_border) by snapping it straight
-onto the assigned survey interview place's own coordinate - a real point, but
-not necessarily anywhere near where that person would actually enter the
-road network the MATSim scenario models.
-
-This stage computes a more realistic alternative for each such end: a point
-on the real car network, within the border buffer, close to the buffer's
-outer edge and to a straight line drawn from the real (far) point to the
-interview place, chosen to minimize network travel time to that interview
-place.
-
-Covers BOTH ends that data.cross_border.generate_od can project, for car and
-car_passenger trips only (see below):
-  - The origin, for "From-To" and "Through" trips (residence_x/y ->
-    origin_x/y).
-  - The destination, for "Through" trips only (destination_residence_x/y ->
-    destination_x/y) - "From-To"'s destination is always a real STATENT point
-    inside Switzerland, never projected (see generate_od.process_from_to_trips).
-Both ends are processed by the exact same algorithm below (it only cares
-about a "real point" and the interview place it was projected onto, not
-which logical end that represents), so this stage pools BOTH kinds of
-requests into one combined, deduplicated batch before running it - a
-"From-To" origin and a "Through" destination projected onto the same
-crossing share the same refined point, computed once.
-
-PT trips are deliberately excluded: generate_od.MODE_TO_LABEL already
-projects a PT trip's teleported end onto a PT-specific interview place (a
-border railway/bus point), not a road crossing - refining that onto the CAR
-network here (the whole point of the freespeed/motorway-bias logic below)
-would be meaningless, since a PT rider was never going to drive there.
-Building a real PT-accessibility-aware refinement (e.g. snapping to a
-walkable path to the actual station) is a separate, unimplemented piece of
-work; for now, PT rows simply keep the raw interview place exactly as
-data.cross_border.generate_od already sets it, unrefined - the various
-consumers (data.cross_border.population, data.cross_border.activities) all
-fall back to that raw point whenever no refined match exists here, which for
-PT rows is always (see each consumer's own fallback for details).
-
-This is NOT wired into data.cross_border.generate_od itself (nothing at that
-level changes) - it is consumed downstream, by data.cross_border.population
-(home location for projected "From-To"/"Through" origins) and
-data.cross_border.activities (adds a real origin/destination activity near
-the border buffer for "Through" agents, instead of collapsing straight onto
-the border crossing - see that stage's docstring).
-
-Algorithm, per unique (real_x, real_y, interview_x, interview_y) request:
-  1. Take the straight line from the real point (real_x/y) to the
-     already-assigned interview place point (interview_x/y).
-  2. Find where that line crosses the OUTER edge of the border buffer (the
-     Swiss national polygon expanded by border_offset - matching the extent
-     matsim.scenario.network.convert_osm itself uses that same config option
-     for when extracting OSM data, so the car network actually has real
-     links out there to snap onto). This is the geometry-only "ideal" entry
-     point, ignoring the road network entirely.
-  3. Build a candidate pool for that ideal point from two sources: the
-     CANDIDATE_COUNT nearest car-network nodes touching a link with
-     freespeed >= MIN_ENTRY_FREESPEED_THRESHOLD (small countryside roads are
-     never considered as a refined crossing, regardless of proximity to the
-     ideal point), plus the MOTORWAY_CANDIDATE_COUNT nearest nodes touching
-     a motorway-class link (freespeed >= MOTORWAY_FREESPEED_THRESHOLD)
-     within MOTORWAY_SEARCH_RADIUS of the ideal point, for as many as
-     exist - a second, stronger bias on top of the first restriction,
-     since even among eligible roads a motorway is still preferable to a
-     fast-but-minor one. Considering more than just the closest motorway
-     node lets a slightly farther junction with a faster run-in win if it
-     actually beats the closest one once routed.
-  4. Pick whichever of those candidates has the lowest network travel time
-     to the node nearest the interview place. Minimizing travel time
-     naturally favors a candidate that connects to the interview place via
-     a motorway or other fast road once one is in the pool, since those
-     dominate a shortest-time path.
-
-Deduplicates on (real_x, real_y, interview_x, interview_y) before doing this -
-many rows share an identical real point + assigned interview place,
-particularly from data.cross_border.generate_od's own expand_and_sample - and
-broadcasts the result back afterwards. This is the only way the search stays
-fast against a network with 100k+ nodes.
-
-Config:
-  - cached_network_path (default None): path to an already-converted network
-    XML (e.g. a converted_network.xml.gz left in a past
-    matsim.scenario.network.convert_osm run's cache folder). When set, this
-    stage reads that file directly and does NOT depend on
-    matsim.scenario.network.convert_osm at all - useful since that stage is
-    a heavy conversion that can get SIGKILLed on memory-constrained
-    machines, and this stage never needs to re-run it (read-only use of the
-    network). Leave unset to depend on and use
-    matsim.scenario.network.convert_osm as usual.
-
-Produces, in the stage's cache folder (context.path()):
-  - network_projection_map.html   interactive map (folium, same swisstopo
-                                   basemap as other maps in this package):
-                                   for a sample of up to MAP_SAMPLE_SIZE
-                                   refined requests, the real point (gray
-                                   dot), the interview place (red dot), the
-                                   refined network entry point (blue dot),
-                                   and a line connecting all three.
-
-Returns one row per unique (real_x, real_y, interview_x, interview_y)
-combination that needed projecting, with the geometry-only ideal_crossing_x/y,
-the network-snapped refined_x/y/refined_node_id, the resulting
-travel_time_to_interview_place (seconds), and occurrences (how many
-data.cross_border.generate_od rows this combination covers). Consumers merge
-on (real_x, real_y, interview_x, interview_y) using whichever of their own
-columns hold that pair for the end they care about (e.g.
-data.cross_border.population merges on residence_x/y + origin_x/y).
-"""
-
 import logging
 import os
 
@@ -134,32 +18,14 @@ _TILE_URL = "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/defaul
 CANDIDATE_COUNT = 8   # nearest eligible-road network nodes considered per ideal crossing point
 MAP_SAMPLE_SIZE = 5000  # cap the number of records drawn on the map
 
-# freespeed is a reliable proxy for OSM highway class: pt2matsim assigns
-# motorways/trunk roads a distinctly higher freespeed than residential/
-# tertiary roads, and it's already loaded by matsim.readers with no extra
-# data source needed.
-#
-# Entry-point candidates (CANDIDATE_COUNT, step 3) are restricted to nodes
-# touching a link with freespeed >= MIN_ENTRY_FREESPEED_THRESHOLD - small
-# countryside roads are never considered as a refined crossing, regardless
-# of how close they are to the ideal geometric crossing point.
+
 MIN_ENTRY_FREESPEED_THRESHOLD = 50 / 3.6
 
-# A link is treated as motorway-class (the separate, stronger bias applied
-# on top of the above - see MOTORWAY_SEARCH_RADIUS/MOTORWAY_CANDIDATE_COUNT)
-# if its freespeed is at least this.
+
 MOTORWAY_FREESPEED_THRESHOLD = 75 / 3.6
 
-# How far (meters) from the geometry-only ideal crossing point to look for a
-# motorway-class node, so the candidate pool in step 3 actually contains a
-# motorway option when one exists nearby.
 MOTORWAY_SEARCH_RADIUS = 30000
 
-# How many nearest motorway-class nodes (within MOTORWAY_SEARCH_RADIUS) to
-# add to the candidate pool, not just the single closest one - a farther
-# motorway junction with a faster run-in to the interview place can beat a
-# closer one once actually routed, so it's worth giving travel-time
-# minimization more than one motorway option to choose from.
 MOTORWAY_CANDIDATE_COUNT = 3
 
 RESULT_COLUMNS = [
@@ -177,14 +43,6 @@ def configure(context):
     context.config("border_offset", default = 20000)
     context.config("random_seed")
 
-    # Lets this diagnostic stage reuse an already-converted network (the
-    # converted_network.xml.gz that a PAST matsim.scenario.network.convert_osm
-    # run left in its own cache folder) instead of depending on that stage
-    # directly. convert_osm is a heavy, memory-hungry conversion that can get
-    # SIGKILLed on constrained local machines; since this stage only reads
-    # the network (never re-converts or rewrites it), pointing it at a
-    # cached file sidesteps that entirely. Leave unset to depend on
-    # matsim.scenario.network.convert_osm as usual.
     context.config("cached_network_path", default = None)
     if not context.config("cached_network_path"):
         context.stage("matsim.scenario.network.convert_osm")

@@ -38,8 +38,7 @@ Produces, in the stage's cache folder (context.path()):
 
 Returns one row per entry in international_organizations_switzerland (staff,
 staff_confidence, staff_year, city, lat, lon, source_note, plus an
-is_aggregate flag and an exclude_from_statent flag - see NOTE ON AGGREGATES
-above and data.statent.statent.get_international_organizations).
+is_aggregate flag - see NOTE ON AGGREGATES above).
 """
 
 import logging
@@ -76,10 +75,6 @@ def execute(context):
         df[column] = pd.to_numeric(df[column], errors = "coerce")
 
     df["is_aggregate"] = df["staff_confidence"] == "aggregate"
-
-    if "exclude_from_statent" not in df.columns:
-        df["exclude_from_statent"] = False
-    df["exclude_from_statent"] = df["exclude_from_statent"].fillna(False).astype(bool)
 
     missing_coords = df[df["lat"].isna() | df["lon"].isna()]
     if len(missing_coords) > 0:
@@ -348,11 +343,6 @@ international_organizations_switzerland = {
         "lon": 6.148058584999299,
         "source_note": "LinkedIn company size bracket '11-50 employees' (Sep 2026); using midpoint.",
     },
-    # ATT Secretariat is flagged exclude_from_statent below even though its
-    # own staff count (4) is already far under MIN_STATENT_STAFF and would
-    # be excluded from the merge anyway - the flag is kept for consistency
-    # with the rest of this proximity-check group and in case the threshold
-    # changes later.
     "ATT Secretariat (Arms Trade Treaty Secretariat)": {
         "staff": 4,
         "staff_confidence": "high",
@@ -362,7 +352,6 @@ international_organizations_switzerland = {
         "lon": 6.1380,
         "source_note": "Avenue de France 23, Geneva. ATT's own site lists a team of 4 staff "
                         "members.",
-        "exclude_from_statent": True,
     },
     "OSCE Court of Conciliation and Arbitration": {
         "staff": 10,
@@ -582,15 +571,14 @@ international_organizations_switzerland = {
     # ------------------------------------------------------------------
     # Sports bodies
     #
-    # FIFA, IOC and UEFA are all listed below for mapping purposes, but
-    # flagged "exclude_from_statent": a proximity check against real
-    # STATENT (data/statent/statent.py's get_international_organizations)
-    # found STATENT establishments right next to each of them, classified
-    # under NOGA 931900 ("other sports activities"), with employee counts
-    # in the same order of magnitude (FIFA: 985 vs. our 800 estimate at
-    # 34.7m; IOC: 528 vs. 804 at 29.1m; UEFA: 304 vs. 800 at 11.0m) -
-    # strong evidence STATENT already counts them, so merging them too
-    # would double-count jobs.
+    # FIFA, IOC and UEFA are all listed below for mapping purposes. A
+    # proximity check against real STATENT (data/statent/statent.py's
+    # get_international_organizations) found STATENT establishments right
+    # next to each of them, classified under NOGA 931900 ("other sports
+    # activities"), with employee counts in the same order of magnitude
+    # (FIFA: 985 vs. our 800 estimate at 34.7m; IOC: 528 vs. 804 at 29.1m;
+    # UEFA: 304 vs. 800 at 11.0m) - plausible evidence STATENT already
+    # counts them.
     # ------------------------------------------------------------------
     "IOC (International Olympic Committee)": {
         "staff": 804,
@@ -601,10 +589,8 @@ international_organizations_switzerland = {
         "lon": 6.596912178377091,
         "source_note": " 804 employees (2024) per ZoomInfo; "
                         "some sources cite '630+' at the Lausanne HQ specifically vs. a broader "
-                        "'804' workforce figure. Excluded from the STATENT merge "
-                        "(exclude_from_statent) - a proximity check found a plausible STATENT match "
+                        "'804' workforce figure. A proximity check found a plausible STATENT match "
                         "(528 employees, NOGA 931900) 29.1m away.",
-        "exclude_from_statent": True,
     },
     "FIFA (Federation Internationale de Football Association)": {
         "staff": 800,
@@ -616,10 +602,8 @@ international_organizations_switzerland = {
         "source_note": "FIFA-Strasse 20, Zurich. ~800 FIFA staff have a Swiss employment contract "
                         "(2024); FIFA's global headcount (4,754 in 2024) is spread across Zurich, "
                         "Paris, Miami and regional offices, so the global figure would badly "
-                        "overstate the Zurich site. Excluded from the STATENT merge "
-                        "(exclude_from_statent) - a proximity check found a plausible STATENT match "
-                        "(985 employees, NOGA 931900) 34.7m away.",
-        "exclude_from_statent": True,
+                        "overstate the Zurich site. A proximity check found a plausible STATENT "
+                        "match (985 employees, NOGA 931900) 34.7m away.",
     },
     "UEFA (Union of European Football Associations)": {
         "staff": 800,
@@ -631,10 +615,9 @@ international_organizations_switzerland = {
         "source_note": "House of European Football campus, Route de Geneve 46, Nyon (House of "
                         "European Football + La Clairiere + Bois-Bougy buildings combined, ~800 "
                         "staff); UEFA's total worldwide headcount (2,037 as of March 2026) includes "
-                        "staff outside Nyon and would overstate the campus figure. Excluded from "
-                        "the STATENT merge (exclude_from_statent) - a proximity check found a "
-                        "plausible STATENT match (304 employees, NOGA 931900) 11.0m away.",
-        "exclude_from_statent": True,
+                        "staff outside Nyon and would overstate the campus figure. A proximity "
+                        "check found a plausible STATENT match (304 employees, NOGA 931900) 11.0m "
+                        "away.",
     },
 
     # ------------------------------------------------------------------
@@ -935,11 +918,6 @@ international_organizations_switzerland = {
                         "offices (Nairobi, Panama City, Cairo, Bangkok, Brussels). 9-11 rue de "
                         "Varembe.",
     },
-    # GCSP is flagged exclude_from_statent below: a proximity check against
-    # real STATENT found a NOGA 949901 (membership org) establishment 5.1m
-    # away with 89 employees, a plausible partial match to our 191 estimate -
-    # likely already counted, so kept out of the STATENT merge (it still
-    # shows on the map).
     "GCSP (Geneva Centre for Security Policy)": {
         "staff": 191,
         "staff_confidence": "low",
@@ -949,10 +927,9 @@ international_organizations_switzerland = {
         "lon": 6.1425,
         "source_note": "Maison de la Paix, Chemin Eugene-Rigot 2D, Geneva. Third-party counts "
                         "conflict (124 per one source vs. a LinkedIn bracket implying ~191); "
-                        "higher estimate kept to match the earlier proximity-check note. Excluded "
-                        "from the STATENT merge (exclude_from_statent) - a proximity check found a "
-                        "plausible STATENT match (89 employees, NOGA 949901) 5.1m away.",
-        "exclude_from_statent": True,
+                        "higher estimate kept to match the earlier proximity-check note. A "
+                        "proximity check found a plausible STATENT match (89 employees, NOGA "
+                        "949901) 5.1m away.",
     },
     "DCAF (Geneva Centre for Security Sector Governance)": {
         "staff": 220,
@@ -974,11 +951,6 @@ international_organizations_switzerland = {
         "source_note": "Third-party estimate: ~43 employees (LinkedIn bracket separately shown "
                         "as '11-50'). Based at the Graduate Institute's Maison de la Paix.",
     },
-    # IRU is flagged exclude_from_statent below: a proximity check against
-    # real STATENT found a NOGA 941200 (professional membership org)
-    # establishment 2.6m away with 93 employees - a near-exact match to our
-    # 100 estimate, almost certainly already counted, so kept out of the
-    # STATENT merge (it still shows on the map).
     "IRU (International Road Transport Union)": {
         "staff": 100,
         "staff_confidence": "low",
@@ -988,10 +960,8 @@ international_organizations_switzerland = {
         "lon": 6.1296,
         "source_note": "La Voie-Creuse 16, Geneva. Third-party counts conflict sharply (51-200 "
                         "LinkedIn bracket vs. a separate 245-employee figure); midpoint of the "
-                        "bracket used. Excluded from the STATENT merge (exclude_from_statent) - a "
-                        "proximity check found a near-exact STATENT match (93 employees, NOGA "
-                        "941200) 2.6m away.",
-        "exclude_from_statent": True,
+                        "bracket used. A proximity check found a near-exact STATENT match (93 "
+                        "employees, NOGA 941200) 2.6m away.",
     },
     "World Scout Bureau": {
         "staff": 130,
