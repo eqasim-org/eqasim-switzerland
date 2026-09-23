@@ -40,8 +40,16 @@ def _load_gtfs_and_matched_counts(cfg):
     return gtfs_stops, tpg_stops, line_directions, counts_ge, stops_in_ge
 
 
-def _build_lemanis_mofr(cfg, gtfs_stops, stops_in_ge):
-    lemanis_stats = lemanis.to_tpg_shape(lemanis.expand_to_hourly(lemanis.load_weekday_counts(cfg.lemanis_csv_path)))
+def _build_lemanis_period_mofr(cfg, gtfs_stops, stops_in_ge):
+    """Lemanis comparison table, kept at Lemanis' own period resolution
+    (see lemanis.PERIOD_ORDER) instead of being split down to hourly:
+    MATSim's hourly boardings/alightings are aggregated UP into those same
+    periods here, rather than dividing Lemanis' period totals evenly across
+    their constituent hours (which invented a false hourly precision the
+    source data doesn't have, and - via the "All day" row - used to double
+    count every hour once from its own period and once more from "All
+    day"'s expansion over the same hours)."""
+    lemanis_stats = lemanis.to_period_shape(lemanis.load_weekday_counts(cfg.lemanis_csv_path))
     lemanis_stats["gtfs_code"] = lemanis_stats["gtfs_code"].astype(str)
     lex_lines = sorted(lemanis_stats["line_direction"].unique())
 
@@ -51,14 +59,17 @@ def _build_lemanis_mofr(cfg, gtfs_stops, stops_in_ge):
     matsim_counts["boardings"]  = matsim_counts["boardings"]  / cfg.input_downsampling
     matsim_counts["alightings"] = matsim_counts["alightings"] / cfg.input_downsampling
 
+    matsim_counts["period"] = matsim_counts["hour"].map(lemanis.HOUR_TO_PERIOD)
+    matsim_counts = matsim_counts[matsim_counts["period"].notna()]
+
     matsim_side = matsim_counts.groupby(
-        ["stop_id_gtfs_base", "line_name", "hour"], as_index = False
+        ["stop_id_gtfs_base", "line_name", "period"], as_index = False
     )[["boardings", "alightings"]].sum()
 
     lemanis_mofr = lemanis_stats.merge(
         matsim_side.rename(columns = {"boardings": "boardings_matsim", "alightings": "alightings_matsim"}),
-        left_on  = ["gtfs_code", "line_direction", "hour"],
-        right_on = ["stop_id_gtfs_base", "line_name", "hour"], how = "left",
+        left_on  = ["gtfs_code", "line_direction", "period"],
+        right_on = ["stop_id_gtfs_base", "line_name", "period"], how = "left",
     )
     lemanis_mofr["boardings_matsim"]  = lemanis_mofr["boardings_matsim"].fillna(0)
     lemanis_mofr["alightings_matsim"] = lemanis_mofr["alightings_matsim"].fillna(0)
@@ -117,10 +128,18 @@ def _build_tpg_mofr(cfg, year):
         print(f"Dropping {unmatched}/{len(tpg_mofr)} tpg_mofr rows whose gtfs_code isn't in the current GTFS feed")
         tpg_mofr = tpg_mofr[tpg_mofr["stop_name"].notna()]
 
+    # Lemanis is kept at its own period resolution (see
+    # _build_lemanis_period_mofr) rather than concatenated into tpg_mofr:
+    # tpg_mofr's downstream tables all reindex over the 24 hours of a day
+    # (comparison.build_stop_hour_table etc.), which Lemanis' 3 broad
+    # periods can't be split into without inventing false hourly precision.
+    lemanis_period_mofr = None
     if cfg.include_lemanis:
-        lemanis_mofr = _build_lemanis_mofr(cfg, gtfs_stops, stops_in_ge)
-        print(f"Adding {lemanis_mofr['gtfs_code'].nunique()} Leman Express stop(s) ({len(lemanis_mofr)} rows) to the comparison")
-        tpg_mofr = pd.concat([tpg_mofr, lemanis_mofr], ignore_index = True)
+        lemanis_period_mofr = _build_lemanis_period_mofr(cfg, gtfs_stops, stops_in_ge)
+        print(
+            f"Built a period-level comparison for {lemanis_period_mofr['gtfs_code'].nunique()} "
+            f"Leman Express stop(s) ({len(lemanis_period_mofr)} rows)"
+        )
 
     n_stops_before = tpg_mofr["gtfs_code"].nunique()
     tpg_mofr = comparison.filter_active_stops(
@@ -132,11 +151,11 @@ def _build_tpg_mofr(cfg, year):
         f"during >={cfg.min_stop_active_hours} hours/day): {n_stops_after}/{n_stops_before} stops kept"
     )
 
-    return gtfs_stops, tpg_stops, tpg_mofr, stops_in_ge
+    return gtfs_stops, tpg_stops, tpg_mofr, stops_in_ge, lemanis_period_mofr
 
 
 def run_stop_line_comparison(cfg, output_dir, year, stop = "Genève, gare Cornavin", line = "1_H"):
-    _, _, tpg_mofr, _ = _build_tpg_mofr(cfg, year)
+    _, _, tpg_mofr, _, _ = _build_tpg_mofr(cfg, year)
 
     os.makedirs(output_dir, exist_ok = True)
 
@@ -156,7 +175,7 @@ def run_stop_line_comparison(cfg, output_dir, year, stop = "Genève, gare Cornav
 
 
 def run_global_comparison(cfg, output_dir, year):
-    gtfs_stops, tpg_stops, tpg_mofr, stops_in_ge = _build_tpg_mofr(cfg, year)
+    gtfs_stops, tpg_stops, tpg_mofr, stops_in_ge, lemanis_period_mofr = _build_tpg_mofr(cfg, year)
 
     os.makedirs(output_dir, exist_ok = True)
 
@@ -170,6 +189,17 @@ def run_global_comparison(cfg, output_dir, year):
     windowed_stop_hour_df = stop_hour_df[stop_hour_df["hour"].between(*hour_range)]
     windowed_full_day_df  = comparison.build_full_day_table(windowed_stop_hour_df)
 
+    # Lemanis stops get their own period-level table (see
+    # _build_lemanis_period_mofr) added onto the full-day stop map, with a
+    # period bar chart (not the hourly chart) in their popup - they're left
+    # out of the hourly TimestampedGeoJson map below, which genuinely needs
+    # per-hour data Lemanis' 3 broad periods can't provide.
+    lemanis_stop_period_df   = None
+    lemanis_stop_full_day_df = None
+    if lemanis_period_mofr is not None and not lemanis_period_mofr.empty:
+        lemanis_stop_period_df   = comparison.build_lemanis_stop_period_table(lemanis_period_mofr, gtfs_stops)
+        lemanis_stop_full_day_df = comparison.build_lemanis_stop_full_day_table(lemanis_stop_period_df)
+
     interactive_map.build_hourly_map(
         stop_hour_df, f"{output_dir}/pt_stop_map_by_hour.html",
         perimeter_shapefile = cfg.perimeter_shapefile, hour_range = hour_range,
@@ -177,6 +207,8 @@ def run_global_comparison(cfg, output_dir, year):
     interactive_map.build_full_day_map(
         windowed_stop_hour_df, windowed_full_day_df, f"{output_dir}/pt_stop_map_6am_10pm.html",
         perimeter_shapefile = cfg.perimeter_shapefile,
+        lemanis_stop_period_df = lemanis_stop_period_df,
+        lemanis_stop_full_day_df = lemanis_stop_full_day_df,
     )
 
     line_hour_df = comparison.build_line_hour_table(tpg_mofr)
@@ -184,6 +216,20 @@ def run_global_comparison(cfg, output_dir, year):
     windowed_line_hour_df = line_hour_df[line_hour_df["hour"].between(*hour_range)]
     line_full_day_df = comparison.build_line_full_day_table(windowed_line_hour_df)
     line_base_df = comparison.build_line_base_table(line_full_day_df)
+
+    # Lemanis lines get their own period-level table (see
+    # _build_lemanis_period_mofr) rather than being windowed/reindexed by
+    # hour like the TPG lines above - their route/full-day summary is
+    # merged into line_base_df (same columns) so build_line_map's coloring
+    # and popups treat them uniformly, but build_line_map renders a
+    # separate period bar chart (not the hourly chart) for these lines.
+    lemanis_line_period_df = None
+    if lemanis_period_mofr is not None and not lemanis_period_mofr.empty:
+        lemanis_line_period_df = comparison.build_lemanis_line_period_table(lemanis_period_mofr)
+        lemanis_line_full_day_df = comparison.build_lemanis_line_full_day_table(lemanis_line_period_df)
+        lemanis_line_base_df = comparison.build_line_base_table(lemanis_line_full_day_df)
+        line_base_df = pd.concat([line_base_df, lemanis_line_base_df], ignore_index = True)
+
     line_geometries_df = tpg_data.build_line_route_geometries(cfg.tpg_data_path, tpg_stops, gtfs_stops)
     if cfg.include_lemanis:
         lemanis_geometries_df = lemanis.build_line_route_geometries(gtfs_stops, cfg.lemanis_csv_path)
@@ -192,6 +238,7 @@ def run_global_comparison(cfg, output_dir, year):
     interactive_map.build_line_map(
         windowed_line_hour_df, line_base_df, line_geometries_df, f"{output_dir}/pt_line_map_6am_10pm.html",
         perimeter_shapefile = cfg.perimeter_shapefile,
+        lemanis_line_period_df = lemanis_line_period_df,
     )
 
     return stop_hour_df, full_day_df, global_hourly_df

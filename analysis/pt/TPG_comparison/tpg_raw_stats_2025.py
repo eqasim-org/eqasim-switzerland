@@ -1,6 +1,6 @@
 import argparse
 import pandas as pd
-import tpg_raw_stats
+import tpg_raw_stats_2024
 
 _BANK_HOLIDAYS_2025 = pd.to_datetime([
     "2025-01-01",  # New Year
@@ -61,14 +61,14 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path,
     dates = pd.to_datetime(raw["DExploitCourse"], format = "%Y-%m-%d")
     unique_dates = dates.drop_duplicates()
     day_type_by_date = pd.Series(
-        tpg_raw_stats.classify_day_type(unique_dates, bank_holidays = bank_holidays, school_holidays = school_holidays),
+        tpg_raw_stats_2024.classify_day_type(unique_dates, bank_holidays = bank_holidays, school_holidays = school_holidays),
         index = unique_dates,
     )
     raw = raw[dates.map(day_type_by_date).values == "Weekday"]
     print(f"  -> {len(raw)} rows on Weekday-type days")
 
     print("Mapping stops to GTFS ids...")
-    crosswalk = tpg_raw_stats.load_stop_crosswalk(tpg_data_path)
+    crosswalk = tpg_raw_stats_2024.load_stop_crosswalk(tpg_data_path)
     raw = raw.merge(crosswalk, left_on = "CodeLong", right_on = "stop_code", how = "inner")
     print(f"  -> {len(raw)} rows with a matched GTFS stop")
 

@@ -14,12 +14,9 @@ stage).
 """
 
 import glob
-import json
 import logging
 import os
 from collections import Counter
-from html import escape
-from pathlib import Path
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -32,6 +29,7 @@ import xopen
 from pydeck.data_utils.viewport_helpers import compute_view
 from shapely.ops import unary_union
 
+from .flow_metrics import add_metric_columns, inject_metric_dropdown_legend, share_column
 from .matching.plots import Plotter
 from .paths import configure_simulation_path, get_analysis_output_path, get_simulation_path
 
@@ -41,8 +39,16 @@ CAR_VEHICLE_SUFFIX = ":car"
 LINK_ENTRY_EVENT_TYPES = {"entered link"}
 ROAD_TYPES_FOR_MAP = ["motorway", "trunk", "primary", "motorway_link", "trunk_link", "primary_link"]
 PROGRESS_EVERY = 2_000_000
-MIN_SPEED_KMH_FOR_FLOW_MAP = 30
-SHARE_COLOR_SATURATION_PCT = 20
+MIN_SPEED_KMH_FOR_FLOW_MAP = 50
+
+# Rider-group flow columns produced by count_car_link_entries /
+# build_hourly_dataframe, on top of total_flow. "crossborder_flow" is
+# non-Swiss cross-border residents only (foreign commuters/travelers) -
+# Swiss residents crossing the border for an activity get their own
+# swiss_crossborder_flow instead, so the two never overlap (see execute).
+# Each column gets a matching "<name>_share_pct" column (flow_metrics.share_column)
+# and a pair of METRICS entries - mirrors cross_border_flow_pt.py's layer set.
+RIDER_GROUP_FLOW_COLUMNS = ["crossborder_flow", "swiss_crossborder_flow", "french_flow"]
 
 
 def configure(context):
@@ -64,23 +70,27 @@ def execute(context):
     events_path = _find_output_file(simulation_path, "output_events.xml.gz")
 
     cross_border_ids = load_cross_border_person_ids(persons_path)
-    swiss_resident_ids = load_swiss_resident_cross_border_person_ids(persons_path)
+    swiss_crossborder_ids = load_swiss_resident_cross_border_person_ids(persons_path)
+    french_resident_ids = load_french_resident_cross_border_person_ids(persons_path)
+    foreign_crossborder_ids = cross_border_ids - swiss_crossborder_ids
     logger.info(
-        "Found %d cross-border persons (%d of them Swiss residents) in %s",
-        len(cross_border_ids), len(swiss_resident_ids), persons_path,
+        "Found %d cross-border persons (%d Swiss-resident, %d France-resident) in %s",
+        len(cross_border_ids), len(swiss_crossborder_ids), len(french_resident_ids), persons_path,
     )
 
-    total_counts, crossborder_counts, swiss_resident_counts = count_car_link_entries(
-        events_path, cross_border_ids, swiss_resident_ids,
-    )
+    rider_group_ids = {
+        "crossborder_flow": foreign_crossborder_ids,
+        "swiss_crossborder_flow": swiss_crossborder_ids,
+        "french_flow": french_resident_ids,
+    }
+    total_counts, group_counts = count_car_link_entries(events_path, rider_group_ids)
     logger.info("Counted car entries on %d distinct links", len(total_counts))
 
-    df_hourly = build_hourly_dataframe(total_counts, crossborder_counts, swiss_resident_counts)
+    df_hourly = build_hourly_dataframe(total_counts, group_counts)
 
     sample_size = context.config("input_downsampling")
-    df_hourly["total_flow"] = df_hourly["total_flow"] / sample_size
-    df_hourly["crossborder_flow"] = df_hourly["crossborder_flow"] / sample_size
-    df_hourly["swiss_resident_flow"] = df_hourly["swiss_resident_flow"] / sample_size
+    for column in ["total_flow", *RIDER_GROUP_FLOW_COLUMNS]:
+        df_hourly[column] = df_hourly[column] / sample_size
 
     df_daily = aggregate_daily(df_hourly)
 
@@ -100,8 +110,7 @@ def execute(context):
     #plot_share_map(df_plot, network, output_path)
     swiss_border = context.stage("data.spatial.swiss_border")
     plot_crossborder_flow_map(
-        df_plot, network, context.config("extent_path"), swiss_border,
-        "/home/asallard/Documents/Results/20260914_geneva_10pct/compare_counts_weekdays",
+        df_plot, network, context.config("extent_path"), swiss_border, output_path,
     )
 
     return dict(done=True, path=output_path, daily_csv=daily_csv, hourly_csv=hourly_csv)
@@ -156,20 +165,33 @@ def load_swiss_resident_cross_border_person_ids(persons_path):
     return set(df.loc[is_swiss_resident, "person"])
 
 
+def load_french_resident_cross_border_person_ids(persons_path):
+    """The subset of cross-border persons whose crossBorderOD starts with
+    "FR-CH" (e.g. "FR-CH-FR", "FR-CH-DE") - agents resident in France
+    commuting/traveling into Switzerland, as opposed to Swiss residents
+    making an outbound trip there (load_swiss_resident_cross_border_person_ids)
+    or residents of the other neighboring countries (DE/IT/AT/LI)."""
+    df = pd.read_csv(
+        persons_path, sep=";", usecols=["person", "subpopulation", "crossBorderOD"],
+        dtype={"person": str}, low_memory=False,
+    )
+    is_french_resident = df.subpopulation.eq("crossborder") & df.crossBorderOD.str.startswith("FR-CH", na=False)
+    return set(df.loc[is_french_resident, "person"])
+
+
 # ---------------------------------------------------------------------------
 # Streaming events parsing
 # ---------------------------------------------------------------------------
 
-def count_car_link_entries(events_path, cross_border_ids, swiss_resident_ids):
-    """Single streaming pass over the events file. Returns three Counters
-    keyed by (link_id, hour): all car link entries, the subset made by
-    cross-border agents, and the further subset made by the Swiss-resident
-    cross-border agents (swiss_resident_ids is a subset of cross_border_ids,
-    so swiss_resident_counts <= crossborder_counts at every key)."""
+def count_car_link_entries(events_path, rider_group_ids):
+    """Single streaming pass over the events file. rider_group_ids:
+    {flow_column_name: set_of_person_ids} - e.g. RIDER_GROUP_FLOW_COLUMNS
+    mapped to their id sets (mutually exclusive person sets in practice, but
+    this doesn't assume that). Returns total_counts and {flow_column_name:
+    Counter} (one per rider_group_ids entry), each keyed by (link_id, hour)."""
 
     total_counts = Counter()
-    crossborder_counts = Counter()
-    swiss_resident_counts = Counter()
+    group_counts = {group: Counter() for group in rider_group_ids}
 
     processed = 0
     with xopen.xopen(events_path, "r") as f:
@@ -194,49 +216,45 @@ def count_car_link_entries(events_path, cross_border_ids, swiss_resident_ids):
                     total_counts[key] += 1
 
                     person_id = vehicle[: -len(CAR_VEHICLE_SUFFIX)]
-                    if person_id in cross_border_ids:
-                        crossborder_counts[key] += 1
-                        if person_id in swiss_resident_ids:
-                            swiss_resident_counts[key] += 1
+                    for group, ids in rider_group_ids.items():
+                        if person_id in ids:
+                            group_counts[group][key] += 1
 
             elem.clear()
             if processed % PROGRESS_EVERY == 0:
                 root.clear()
 
     logger.info("Finished streaming %d events from %s", processed, events_path)
-    return total_counts, crossborder_counts, swiss_resident_counts
+    return total_counts, group_counts
 
 
 # ---------------------------------------------------------------------------
 # Aggregation
 # ---------------------------------------------------------------------------
 
-def build_hourly_dataframe(total_counts, crossborder_counts, swiss_resident_counts):
+def build_hourly_dataframe(total_counts, group_counts):
     rows = [
         dict(
             link_id=link_id, hour=hour, total_flow=count,
-            crossborder_flow=crossborder_counts.get((link_id, hour), 0),
-            swiss_resident_flow=swiss_resident_counts.get((link_id, hour), 0),
+            **{group: counts.get((link_id, hour), 0) for group, counts in group_counts.items()},
         )
         for (link_id, hour), count in total_counts.items()
     ]
-    df = pd.DataFrame(rows, columns=["link_id", "hour", "total_flow", "crossborder_flow", "swiss_resident_flow"])
+    df = pd.DataFrame(rows, columns=["link_id", "hour", "total_flow", *RIDER_GROUP_FLOW_COLUMNS])
     return df.sort_values(["link_id", "hour"]).reset_index(drop=True)
 
 
 def aggregate_daily(df_hourly):
     df_daily = df_hourly.groupby("link_id", as_index=False)[
-        ["total_flow", "crossborder_flow", "swiss_resident_flow"]
+        ["total_flow", *RIDER_GROUP_FLOW_COLUMNS]
     ].sum()
-    df_daily["crossborder_share_pct"] = np.where(
-        df_daily.total_flow > 0, 100.0 * df_daily.crossborder_flow / df_daily.total_flow, np.nan
-    )
-    # Share of Swiss residents AMONG cross-border car users on this link (not
-    # among all traffic) - so it's only meaningful, and only defined, where
-    # crossborder_flow > 0.
-    df_daily["swiss_resident_share_pct"] = np.where(
-        df_daily.crossborder_flow > 0, 100.0 * df_daily.swiss_resident_flow / df_daily.crossborder_flow, np.nan
-    )
+    # Share of each rider group AMONG ALL traffic on this link (matches
+    # cross_border_flow_pt.py's convention) - not among cross-border users
+    # only, as an earlier version of this had it for swiss_resident_share_pct.
+    for column in RIDER_GROUP_FLOW_COLUMNS:
+        df_daily[share_column(column)] = np.where(
+            df_daily.total_flow > 0, 100.0 * df_daily[column] / df_daily.total_flow, np.nan
+        )
     return df_daily.sort_values("total_flow", ascending=False).reset_index(drop=True)
 
 
@@ -329,6 +347,41 @@ def plot_share_map(df_daily, network, output_path):
     logger.info("Saved cross-border share map to %s", output_file)
 
 
+# Same set of rider-group layers, keys and colors as cross_border_flow_pt.py's
+# METRICS, for visual consistency between the car and PT flow maps.
+METRICS = [
+    {
+        "key": "total_flow", "label": "Total car flow (vehicles/day)",
+        "low": (225, 225, 225), "high": (35, 139, 69), "gamma": 0.5, "width_basis": "total_flow",
+    },
+    {
+        "key": "crossborder_flow", "label": "Cross-border car flow (vehicles/day, non-Swiss residents)",
+        "low": (225, 225, 225), "high": (8, 29, 225), "gamma": 0.5, "width_basis": "crossborder_flow",
+    },
+    {
+        "key": "crossborder_share_pct", "label": "Cross-border share of car traffic (%, non-Swiss residents)",
+        "low": (225, 225, 225), "high": (230, 85, 13), "gamma": 1.0, "width_basis": "total_flow",
+    },
+    {
+        "key": "swiss_crossborder_flow", "label": "Swiss-resident cross-border car flow (vehicles/day)",
+        "low": (225, 225, 225), "high": (0, 128, 128), "gamma": 0.5, "width_basis": "swiss_crossborder_flow",
+    },
+    {
+        "key": "swiss_crossborder_share_pct", "label": "Swiss-resident cross-border share of car traffic (%)",
+        "low": (225, 225, 225), "high": (166, 86, 40), "gamma": 1.0, "width_basis": "total_flow",
+    },
+    {
+        "key": "french_flow", "label": "France-resident car flow (vehicles/day)",
+        "low": (225, 225, 225), "high": (117, 25, 128), "gamma": 0.5, "width_basis": "french_flow",
+    },
+    {
+        "key": "french_share_pct", "label": "France-resident share of car traffic (%)",
+        "low": (225, 225, 225), "high": (203, 24, 29), "gamma": 1.0, "width_basis": "total_flow",
+    },
+]
+DEFAULT_METRIC = "crossborder_flow"
+
+
 def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, output_path):
 
     if not extent_path:
@@ -392,90 +445,65 @@ def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, outp
         )
         return
 
-    merged = geometry.merge(
-        df_daily[["link_id", "crossborder_flow", "swiss_resident_share_pct"]], on="link_id", how="left",
-    )
-    merged["crossborder_flow"] = merged["crossborder_flow"].fillna(0.0)
+    flow_columns = ["total_flow", *RIDER_GROUP_FLOW_COLUMNS]
+    share_columns = [share_column(c) for c in RIDER_GROUP_FLOW_COLUMNS]
+    merged = geometry.merge(df_daily[["link_id", *flow_columns, *share_columns]], on="link_id", how="left")
+    merged[flow_columns] = merged[flow_columns].fillna(0.0)
     merged = gpd.GeoDataFrame(merged, geometry="geometry", crs=geometry.crs)
 
-    if not (merged.crossborder_flow > 0).any():
-        logger.info("No cross-border flow recorded on qualifying roads inside the scenario extent; skipping map.")
+    # A zero-total_flow link renders as an uninformative gray line either
+    # way (every metric's color_for treats <=0 as gray) - dropping it here
+    # keeps the map's weight down without losing anything visible. This is
+    # the majority of the French-side geometry kept above "as far as the
+    # network extends" regardless of whether it carries any recorded flow.
+    merged = merged[merged.total_flow > 0].copy()
+    if merged.empty:
+        logger.info("No flow recorded on qualifying roads inside the scenario extent; skipping map.")
         return
 
-    path_data = Plotter._prepare_path_data(
-        merged.to_crs(epsg=4326), ["link_id", "crossborder_flow", "swiss_resident_share_pct"],
-    )
+    tooltip_fields = ["link_id", *flow_columns, *share_columns]
+    path_data = Plotter._prepare_path_data(merged.to_crs(epsg=4326), tooltip_fields)
     path_data["_tooltip_html"] = path_data.apply(
-        lambda row: Plotter._build_tooltip_html(row, ["link_id", "crossborder_flow", "swiss_resident_share_pct"]),
-        axis=1,
+        lambda row: Plotter._build_tooltip_html(row, tooltip_fields), axis=1,
     )
 
-    # Color and width both track crossborder_flow, clipped at the 98th
-    # percentile so a handful of very high-flow links don't wash out the
-    # rest of the color scale. A single-hue gray-to-dark-blue ramp (rather
-    # than a multi-hue colormap like viridis/inferno) reads correctly for
-    # colorblind viewers, and doubles as a natural extension of the gray
-    # used for zero-flow links. The normalization uses a square root so the
-    # many moderate-flow interior links - spread across a much denser
-    # network than the few high-volume border corridors - don't get
-    # compressed into a barely-different shade near the gray end.
-    max_flow = max(path_data.loc[path_data.crossborder_flow > 0, "crossborder_flow"].quantile(0.98), 1.0)
+    # Same METRICS-driven color/width scheme as cross_border_flow_pt.py's
+    # map (add_metric_columns), so the two maps' layers read consistently -
+    # a single-hue gray-to-color ramp per metric, width tracking that
+    # metric's width_basis (its own flow for an absolute layer, total_flow
+    # for a share layer), square-root-normalized so moderate-flow interior
+    # links don't get compressed into a barely-different shade/width near
+    # the low end.
+    #
+    # Unlike cross_border_flow_pt.py (a few hundred stop-to-stop segments,
+    # cheap to just duplicate per metric), this map can have 100k+ link
+    # rows - one PathLayer per metric would embed a full independent copy of
+    # the path geometry and tooltip HTML into the HTML per metric (7x the
+    # data for 7 metrics). Instead every metric's *_color/*_size columns
+    # (small numeric columns) are added to the SAME path_data, and a single
+    # set of chunked PathLayers is built once; switching the selected metric
+    # in the browser just re-clones those layers with a different
+    # getColor/getWidth accessor (see inject_metric_dropdown_legend's
+    # mode="accessor") rather than toggling visibility across per-metric
+    # duplicates. The chunking itself is still needed regardless of metric
+    # count: a single PathLayer with this many rows can silently render
+    # incompletely in the browser - deck.gl/WebGL attribute buffers have
+    # practical size limits.
+    metric_maxima = {
+        metric["key"]: add_metric_columns(path_data, metric, size_scale=16, size_base=3) for metric in METRICS
+    }
 
-    def color_for(flow):
-        if flow <= 0:
-            return [*_FLOW_COLOR_LOW, 60]
-        normalized = (min(flow, max_flow) / max_flow) ** 0.5
-        return [*_gray_to_blue(normalized), _flow_alpha(normalized)]
-
-    path_data["color"] = path_data["crossborder_flow"].apply(color_for)
-    # Wider than a typical basemap road line, and scaled up further with flow,
-    # so the colored flow links read clearly over the grayscale basemap.
-    path_data["width"] = np.where(
-        path_data.crossborder_flow > 0,
-        (path_data.crossborder_flow.clip(upper=max_flow) / max_flow) ** 0.5 * 16 + 3,
-        1.0,
-    )
-
-    # Share of Swiss residents among cross-border car users on this link:
-    # gray-to-orange (orange/blue is a colorblind-safe pair, distinct from
-    # the blue flow-magnitude ramp above) so the two metrics aren't
-    # confusable when switching between them. Width still tracks flow
-    # magnitude (not the share itself), so this layer answers "of the
-    # traffic already shown, what fraction is Swiss residents" rather than
-    # introducing an unrelated size encoding. NaN (no cross-border flow on
-    # this link at all, so the share is undefined) gets the same neutral
-    # gray as a 0%-flow link. The scale saturates at SHARE_COLOR_SATURATION_PCT
-    # rather than 100%, since Swiss residents are a small minority of
-    # cross-border car users overall (most links never reach high shares) -
-    # linearly stretching to 100% would leave nearly everything a barely
-    # distinguishable pale gray; any link at or above that threshold gets
-    # the darkest color instead.
-    def share_color_for(share):
-        if pd.isna(share):
-            return [*_FLOW_COLOR_LOW, 60]
-        normalized = min(share, SHARE_COLOR_SATURATION_PCT) / SHARE_COLOR_SATURATION_PCT
-        return [*_gray_to_orange(normalized), _flow_alpha(normalized)]
-
-    path_data["share_color"] = path_data["swiss_resident_share_pct"].apply(share_color_for)
-
-    # A single PathLayer with this many rows (100k+ for a Switzerland-sized
-    # extent) can silently render incompletely in the browser - deck.gl/WebGL
-    # attribute buffers have practical size limits, and large layers can drop
-    # or corrupt part of the geometry without any visible error. Verified
-    # against this exact data that the underlying values were all correct
-    # (colors/widths/positions), so the fix is to split the layer into
-    # chunks small enough to render reliably, not to touch the data itself.
     FLOW_LAYER_CHUNK_SIZE = 20_000
-    flow_layers = [
+    path_layers = [
         pdk.Layer(
             "PathLayer",
             chunk,
-            id=f"crossborder-flow-{start}",
+            id=f"car-path::{start}",
             pickable=True,
             auto_highlight=True,
             get_path="path",
-            get_width="width",
-            get_color="color",
+            get_width=f"{DEFAULT_METRIC}_size",
+            get_color=f"{DEFAULT_METRIC}_color",
             highlight_color=[0, 200, 255],
             # A hard pixel floor, not just a meters-scaled width: interior
             # Swiss links are individually much shorter than France's long,
@@ -484,28 +512,6 @@ def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, outp
             # colored minimum-width segment covers too few pixels to
             # register visually. This keeps every segment visible as a
             # solid mark regardless of its real-world length or zoom level.
-            width_min_pixels=3,
-            width_scale=3,
-        )
-        for start in range(0, len(path_data), FLOW_LAYER_CHUNK_SIZE)
-        for chunk in [path_data.iloc[start:start + FLOW_LAYER_CHUNK_SIZE]]
-    ]
-
-    # Same chunking, same width, different color column - toggled against
-    # flow_layers by the "swiss-share-toggle" checkbox injected below.
-    # Hidden by default so the map opens on the primary flow-magnitude view.
-    share_layers = [
-        pdk.Layer(
-            "PathLayer",
-            chunk,
-            id=f"crossborder-share-{start}",
-            visible=False,
-            pickable=True,
-            auto_highlight=True,
-            get_path="path",
-            get_width="width",
-            get_color="share_color",
-            highlight_color=[0, 200, 255],
             width_min_pixels=3,
             width_scale=3,
         )
@@ -547,7 +553,7 @@ def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, outp
 
     deck = pdk.Deck(
         layers             = [
-            l for l in [swiss_border_layer, extent_layer, *flow_layers, *share_layers] if l is not None
+            l for l in [swiss_border_layer, extent_layer, *path_layers] if l is not None
         ],
         initial_view_state = view_state,
         tooltip            = tooltip,
@@ -556,32 +562,15 @@ def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, outp
 
     output_file = os.path.join(output_path, "cross_border_flow_map.html")
     deck.to_html(output_file, notebook_display=False)
-    _inject_flow_color_legend(output_file, "Cross-border agent flow (vehicles/day)", max_flow, gamma=0.5)
+    inject_metric_dropdown_legend(
+        output_file, METRICS, metric_maxima, DEFAULT_METRIC,
+        layer_prefixes=["car-path::"], dom_id_prefix="car", mode="accessor",
+        extra_legend_lines=[
+            ("Red outline = Swiss national border", "color:#b2182b;"),
+            ("Black outline = scenario extent", "color:#222;"),
+        ],
+    )
     logger.info("Saved cross-border flow map to %s", output_file)
-
-
-
-_FLOW_COLOR_LOW = (225, 225, 225)
-_FLOW_COLOR_HIGH = (8, 29, 225)
-
-
-def _gray_to_blue(t):
-    t = max(0.0, min(1.0, t))
-    return [int(_FLOW_COLOR_LOW[i] + (_FLOW_COLOR_HIGH[i] - _FLOW_COLOR_LOW[i]) * t) for i in range(3)]
-
-
-_SHARE_COLOR_LOW = (225, 225, 225)
-_SHARE_COLOR_HIGH = (230, 85, 13)
-
-
-def _gray_to_orange(t):
-    t = max(0.0, min(1.0, t))
-    return [int(_SHARE_COLOR_LOW[i] + (_SHARE_COLOR_HIGH[i] - _SHARE_COLOR_LOW[i]) * t) for i in range(3)]
-
-
-def _flow_alpha(t, low=80, high=255):
-    t = max(0.0, min(1.0, t))
-    return int(low + (high - low) * t)
 
 
 def _polygon_outline_layer(geometry, crs, color, width):
@@ -609,102 +598,3 @@ def _polygon_outline_layer(geometry, crs, color, width):
     )
 
 
-def _flow_color_stops(gamma):
-    return ", ".join(
-        f"rgba({_gray_to_blue(t ** gamma)[0]},{_gray_to_blue(t ** gamma)[1]},{_gray_to_blue(t ** gamma)[2]},"
-        f"{_flow_alpha(t ** gamma) / 255:.2f}) {t * 100:.0f}%"
-        for t in np.linspace(0, 1, 6)
-    )
-
-
-def _share_color_stops():
-    return ", ".join(
-        f"rgba({_gray_to_orange(t)[0]},{_gray_to_orange(t)[1]},{_gray_to_orange(t)[2]},"
-        f"{_flow_alpha(t) / 255:.2f}) {t * 100:.0f}%"
-        for t in np.linspace(0, 1, 6)
-    )
-
-
-def _inject_flow_color_legend(path_to_save, flow_label, flow_max, gamma=1.0):
-    """Add a legend to a saved pydeck HTML map, plus a checkbox that toggles
-    between the flow-magnitude layers ("crossborder-flow-*") and the
-    Swiss-resident-share layers ("crossborder-share-*") built alongside them
-    in plot_crossborder_flow_map, swapping the visible gradient/legend text
-    to match. pydeck has no built-in legend or layer-visibility control, and
-    Plotter._inject_flow_metric_controls is wired to the "counts-points-*"
-    scatterplot layers used elsewhere (a color-accessor swap on one layer),
-    not this two-layer-set visibility swap, so this is a separate, simpler
-    mechanism. gamma must match the exponent used in color_for so the flow
-    gradient reflects what's really on the map, not a plain linear scale."""
-
-    flow_stops = _flow_color_stops(gamma)
-    share_stops = _share_color_stops()
-
-    legend_html = f"""
-<div id="crossborder-legend" style="position:absolute;z-index:20;bottom:12px;left:12px;padding:10px 12px;
-            border-radius:7px;background:rgba(255,255,255,0.95);
-            box-shadow:0 2px 10px rgba(0,0,0,0.28);color:#222;
-            font:12px/1.3 Arial, sans-serif;">
-  <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;">
-    <input id="crossborder-share-toggle" type="checkbox">
-    Show share of Swiss residents instead
-  </label>
-  <div id="crossborder-legend-title" style="font-weight:700;margin-bottom:6px;">{escape(flow_label)}</div>
-  <div id="crossborder-legend-bar" style="width:180px;height:12px;border:1px solid #777;
-              background:linear-gradient(to right, {flow_stops});"></div>
-  <div style="display:flex;justify-content:space-between;margin-top:3px;">
-    <span>0</span><span id="crossborder-legend-max">{flow_max:.0f}+</span>
-  </div>
-  <div id="crossborder-legend-note" style="margin-top:4px;color:#777;">Gray link = no measured cross-border flow</div>
-  <div style="margin-top:2px;color:#b2182b;">Red outline = Swiss national border</div>
-  <div style="color:#222;">Black outline = scenario extent</div>
-</div>
-"""
-    script = f"""
-<script>
-(function () {{
-  const flowStops = {json.dumps(flow_stops)};
-  const shareStops = {json.dumps(share_stops)};
-  const flowLabel = {json.dumps(flow_label)};
-  const flowMax = {json.dumps(f"{flow_max:.0f}+")};
-  const shareMax = {json.dumps(f"{SHARE_COLOR_SATURATION_PCT:.0f}%+")};
-  const flowNote = "Gray link = no measured cross-border flow";
-  const shareNote = "Share of Swiss residents among cross-border car users on this link (capped at " +
-    {json.dumps(f"{SHARE_COLOR_SATURATION_PCT:.0f}%")} + "); gray = no cross-border flow here";
-
-  const checkbox = document.getElementById("crossborder-share-toggle");
-  const title = document.getElementById("crossborder-legend-title");
-  const bar = document.getElementById("crossborder-legend-bar");
-  const maxLabel = document.getElementById("crossborder-legend-max");
-  const note = document.getElementById("crossborder-legend-note");
-  const deck = typeof deckInstance === "undefined" ? null : deckInstance;
-
-  checkbox.addEventListener("change", function () {{
-    const showShare = checkbox.checked;
-    title.textContent = showShare ? "Share of Swiss residents (%)" : flowLabel;
-    bar.style.background = "linear-gradient(to right, " + (showShare ? shareStops : flowStops) + ")";
-    maxLabel.textContent = showShare ? shareMax : flowMax;
-    note.textContent = showShare ? shareNote : flowNote;
-
-    if (!deck || !deck.props || !deck.props.layers) {{
-      return;
-    }}
-    const layers = deck.props.layers.map(function (layer) {{
-      if (layer.id.startsWith("crossborder-flow-")) {{
-        return layer.clone({{visible: !showShare}});
-      }}
-      if (layer.id.startsWith("crossborder-share-")) {{
-        return layer.clone({{visible: showShare}});
-      }}
-      return layer;
-    }});
-    deck.setProps({{layers: layers}});
-  }});
-}})();
-</script>
-"""
-    path = Path(path_to_save)
-    html = path.read_text(encoding="utf-8")
-    html = html.replace("</body>", legend_html + "\n</body>", 1)
-    html = html.replace("</html>", script + "\n</html>", 1)
-    path.write_text(html, encoding="utf-8")

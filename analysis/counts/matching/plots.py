@@ -50,6 +50,15 @@ FLOW_MAP_FIELD_LABELS = {
     "crossborder_share_pct": "Cross-border share of MATSim car flow (%)",
     "crossborder_flow": "Cross-border agent flow (vehicles/day)",
     "swiss_resident_share_pct": "Swiss residents among cross-border car users (%)",
+    "from_stop_name": "From stop",
+    "to_stop_name": "To stop",
+    "lines": "Line(s)",
+    "crossborder_pt_flow": "Cross-border PT riders/day",
+    "crossborder_pt_share_pct": "Cross-border share of PT riders (%)",
+    "from_stop_total_activity": "MATSim total boardings+alightings, from stop (all agents/day)",
+    "to_stop_total_activity": "MATSim total boardings+alightings, to stop (all agents/day)",
+    "stop_name": "Stop",
+    "official_total_activity": "MATSim total boardings+alightings (all agents/day)",
 }
 
 

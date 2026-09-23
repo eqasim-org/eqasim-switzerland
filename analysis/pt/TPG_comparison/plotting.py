@@ -190,6 +190,43 @@ def plot_global_hourly_comparison(global_hourly_df, output_path):
     plt.close()
 
 
+def render_period_chart_png(period_df, title, period_order):
+    """Bar-chart counterpart to render_hourly_chart_png for Lemanis lines:
+    Lemanis only reports a handful of broad, non-contiguous time periods
+    (see lemanis.PERIOD_ORDER), so a bar per period is representative of
+    the data, whereas an hourly line chart would imply a false hourly
+    precision Lemanis doesn't have."""
+    df = period_df.set_index("period").reindex(period_order).reset_index()
+
+    fig, ax = plt.subplots(figsize = (5, 2.6))
+
+    x     = np.arange(len(period_order))
+    width = 0.35
+
+    tpg_err = np.where(df["tpg_hi"].notna(), (df["tpg_hi"] - df["tpg_lo"]) / 2, 0.0)
+
+    ax.bar(x - width / 2, df["tpg_mean"].fillna(0), width, color = "black", alpha = 0.75, label = "Lemanis (reported)")
+    ax.errorbar(x - width / 2, df["tpg_mean"].fillna(0), yerr = tpg_err, fmt = "none", ecolor = "gray", capsize = 3)
+    ax.bar(x + width / 2, df["matsim_total"].fillna(0), width, color = "steelblue", label = "MATSim (scaled)")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(period_order, fontsize = 7, rotation = 12)
+    ax.set_ylabel("Passenger events", fontsize = 8)
+    ax.set_title(title, fontsize = 9)
+    ax.tick_params(labelsize = 7)
+    ax.legend(fontsize = 6, loc = "upper left")
+    ax.grid(True, axis = "y", alpha = 0.3)
+
+    plt.tight_layout()
+
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format = "png", dpi = 110)
+    plt.close(fig)
+    buffer.seek(0)
+
+    return base64.b64encode(buffer.read()).decode("ascii")
+
+
 def render_hourly_chart_png(hourly_df, title):
     df = hourly_df.sort_values("hour")
 

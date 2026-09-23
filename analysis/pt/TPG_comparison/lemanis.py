@@ -2,18 +2,29 @@ import numpy as np
 import pandas as pd
 
 
-_PERIOD_IS_TOTAL = True
-_OFF_PEAK_HOURS  = [9, 10, 11, 12, 13, 14, 15, 19, 20, 21, 22, 23, 5]
+# The three periods that actually PARTITION Lemanis' reported operating day
+# (a rail line with ~no service 0h-5h). "All day" is Lemanis' own separate
+# full-day total (== the sum of these three) - it is intentionally NOT one
+# of these periods: an earlier version of this module exploded every row
+# (including "All day") to hourly and summed by hour, which double-counted
+# every hour once from its own period row and once more from "All day"'s
+# expansion covering the same hours. See ALL_DAY_LABEL / to_period_shape.
+PERIOD_ORDER = ["6h-9h", "16h-19h", "9h-16h and 19h-6h"]
+ALL_DAY_LABEL = "All day"
 _OPERATING_HOURS = {
     "6h-9h": [6, 7, 8],
     "16h-19h": [16, 17, 18],
-    "9h-16h and 19h-6h": _OFF_PEAK_HOURS,
-    "All day": sorted({6, 7, 8, 16, 17, 18, *_OFF_PEAK_HOURS}),
+    "9h-16h and 19h-6h": [9, 10, 11, 12, 13, 14, 15, 19, 20, 21, 22, 23, 5],
 }
+# {hour: period} - used to bucket MATSim's own hourly counts into the same
+# periods Lemanis reports, instead of splitting Lemanis demand down to an
+# hourly resolution it doesn't actually have.
+HOUR_TO_PERIOD = {hour: period for period, hours in _OPERATING_HOURS.items() for hour in hours}
 
 
 STOP_NAME_TO_GTFS_CODE = {
     "ANNEMASSE": "8774549",
+    "CHAMBESY": "8501020",
     "CHENE BOURG": "8516274",
     "LES TUILERIES": "8501011",
     "VERNIER": "8501007",  
@@ -64,45 +75,29 @@ def load_weekday_counts(path):
     return df.reset_index(drop = True)
 
 
-def expand_to_hourly(weekday_df):
-    records = []
-
-    for _, row in weekday_df.iterrows():
-        hours   = _OPERATING_HOURS[row["time"]]
-        n_hours = len(hours)
-
-        boardings_total  = row["boardings"]  if _PERIOD_IS_TOTAL else row["boardings"]  * n_hours
-        alightings_total = row["alightings"] if _PERIOD_IS_TOTAL else row["alightings"] * n_hours
-
-        for hour in hours:
-            records.append({
-                "operator": row["operator"], "line": row["line"], "sens": row["sens"],
-                "stop": row["stop"], "hour": hour,
-                "boardings": boardings_total / n_hours,
-                "alightings": alightings_total / n_hours,
-            })
-
-    return pd.DataFrame.from_records(records)
-
-
-def to_tpg_shape(hourly_df):
-    df = hourly_df.copy()
+def to_period_shape(weekday_df):
+    """One row per (stop, line, period), aggregating Lemanis' own reported
+    period totals directly - no hourly splitting/expansion. Rows for
+    ALL_DAY_LABEL are dropped: PERIOD_ORDER already partitions the same
+    operating day, so keeping "All day" alongside it would double the
+    total wherever both get summed together."""
+    df = weekday_df[weekday_df["time"].isin(PERIOD_ORDER)].copy()
     df["gtfs_code"] = df["stop"].map(STOP_NAME_TO_GTFS_CODE)
 
     unmatched = sorted(df.loc[df["gtfs_code"].isna(), "stop"].unique())
 
     if unmatched:
-        print(f"lemanis.to_tpg_shape: dropping {len(unmatched)} unmatched stop(s): {unmatched}")
+        print(f"lemanis.to_period_shape: dropping {len(unmatched)} unmatched stop(s): {unmatched}")
 
     df = df[df["gtfs_code"].notna()]
 
     df["line_direction"] = df["line"].astype(str)
 
-    grouped = df.groupby(["gtfs_code", "line_direction", "hour"], as_index = False).agg(
+    grouped = df.groupby(["gtfs_code", "line_direction", "time"], as_index = False).agg(
         boardings = ("boardings", "sum"), alightings = ("alightings", "sum"),
-    )
+    ).rename(columns = {"time": "period"})
 
-    out = grouped[["gtfs_code", "line_direction", "hour"]].copy()
+    out = grouped[["gtfs_code", "line_direction", "period"]].copy()
     out.insert(0, "day_type", "Weekday")
 
     for prefix in ["boardings", "alightings"]:

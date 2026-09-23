@@ -20,6 +20,16 @@ sports_federations_vaud_aggregate) are NOT individual organizations but sums cov
 many organizations/entities. Keep these separate from the per-organization entries when
 allocating jobs to specific coordinates - they cannot be pinned to one location.
 
+TPG SURVEY LAYER: international_organizations_switzerland (the hand-researched dict
+below) is layered with a colleague-provided workplace survey, data_path/statent/
+tpg_OI-ONG_nb-employees_20260921_with_coordinates.xlsx (73 Geneva-area orgs/NGOs,
+address-geocoded, most with a headcount size bracket and some with an exact count).
+See apply_tpg_survey for the merge policy: orgs matched by name (TPG_NAME_TO_KEY) to
+an existing entry get their coordinates replaced by the survey's geocode, and their
+staff figure replaced UNLESS the survey only gives a bracket and the existing entry is
+already "high"/"medium" confidence (in which case the existing better-sourced figure
+is kept). Unmatched survey rows become new entries.
+
 Stage: data.statent.international_organizations
 
 Produces, in the stage's cache folder (context.path()):
@@ -43,6 +53,7 @@ is_aggregate flag - see NOTE ON AGGREGATES above).
 
 import logging
 import os
+import re
 
 import folium
 import pandas as pd
@@ -61,9 +72,175 @@ MAX_EXTRA_RADIUS = 20
 UNKNOWN_STAFF_RADIUS = 4
 UNKNOWN_STAFF_COLOR = "#7f7f7f"
 
+# --- TPG workplace survey (see module docstring, TPG SURVEY LAYER) ---
+
+TPG_SURVEY_PATH = "statent/tpg_OI-ONG_nb-employees_20260921_with_coordinates.xlsx"
+
+# The sheet's headcount size brackets, mapped to a point estimate (bracket
+# midpoint; "(A) >= 1000" is open-ended so a judgment-call value is used).
+TPG_BRACKET_MIDPOINT = {
+    "(E) moins de 50": 25,
+    "(D) 50 à 99": 75,
+    "(C) 100 à 199": 150,
+    "(B) 200 à 999": 600,
+    "(A) >= 1000": 1200,
+}
+
+# Rows that duplicate another row in the SAME sheet (the same organization
+# surveyed twice under a different name/address) - dropped, keeping the row
+# with the exact employee count.
+TPG_DUPLICATE_NAMES = (
+    "Foundation for Innovative New Diagnostics (FIND)",  # dup of "FIND"
+    "Organisation Internationale du Travail (OIT)",       # dup of "Bureau international du Travail"
+)
+
+# TPG sheet name -> key in international_organizations_switzerland, for the
+# ~30 organizations that are already in that hand-researched dict (under a
+# different, usually English, name). Matched by hand against name + address;
+# anything not listed here becomes a new entry - see apply_tpg_survey.
+TPG_NAME_TO_KEY = {
+    "Bureau international du Travail": "ILO (International Labour Organization)",
+    "Centre Henri Dunant pour le Dialogue Humanitaire": "HD Centre (Centre for Humanitarian Dialogue)",
+    "Centre international de déminage humanitaire - Genève": "GICHD (Geneva International Centre for Humanitarian Demining)",
+    "CERN": "CERN",
+    "Commission Electrotechnique Internationale": "IEC (International Electrotechnical Commission)",
+    "Conseil oecuménique des Eglises": "World Council of Churches (WCC)",
+    "Drugs for Neglected Diseases initiative (DNDi)": "DNDi (Drugs for Neglected Diseases initiative)",
+    "Fédération internationale des Sociétés de la Croix-Rouge et du Croissant-Rouge - FISCR":
+        "IFRC (International Federation of Red Cross and Red Crescent Societies)",
+    "FIND": "FIND (Foundation for Innovative New Diagnostics)",
+    "GAVI Alliance": "Gavi, the Vaccine Alliance",
+    "GCERF": "GCERF",
+    "Haut Commissariat des Nations unies pour les réfugiés (UNHCR)": "UNHCR (UN Refugee Agency)",
+    "International Air Transport Association (IATA)": "IATA (International Air Transport Association)",
+    "International Trade Center": "ITC (International Trade Centre)",
+    "Le Comité international de la Croix-Rouge (CICR)": "ICRC (International Committee of the Red Cross)",
+    "Médecins Sans Frontières": "MSF (Medecins Sans Frontieres) - Switzerland section & International Office",
+    "MMV Medicines for Malaria Venture": "MMV (Medicines for Malaria Venture)",
+    "ONUG": "UN Office at Geneva (UNOG secretariat)",
+    "Organisation internationale de normalisation (ISO)": "ISO (International Organization for Standardization)",
+    "Organisation internationale des migrations": "IOM (International Organization for Migration)",
+    "Organisation météréologique mondiale": "WMO (World Meteorological Organization)",
+    "Organisation mondiale de la propriété intellectuelle": "WIPO (World Intellectual Property Organization)",
+    "Organisation Mondiale de la Santé": "WHO (World Health Organization)",
+    "Organisation mondiale du commerce": "WTO (World Trade Organization)",
+    "The Global Alliance for Improved Nutrition": "GAIN (Global Alliance for Improved Nutrition)",
+    "The Global Fund": "Global Fund (GFATM)",
+    "UNAIDS": "UNAIDS (Joint UN Programme on HIV/AIDS)",
+    "Union internationale de télécommunicationee": "ITU (International Telecommunication Union)",
+    "Union Internationale des Transports Routiers (IRU)": "IRU (International Road Transport Union)",
+    "World Economic Forum": "WEF (World Economic Forum)",
+}
+
 
 def configure(context):
-    pass
+    context.config("data_path")
+
+
+def _tpg_city(address):
+    """Best-effort municipality from the sheet's free-text address field."""
+    parts = [part.strip() for part in str(address).split(",") if part.strip()]
+    if not parts:
+        return None
+    city = parts[-2] if parts[-1].upper() == "FRANCE" and len(parts) >= 2 else parts[-1]
+    return re.sub(r"^\d+\s*", "", city).title()
+
+
+def load_tpg_survey(context):
+    """Reads and cleans the TPG survey sheet - see module docstring."""
+    path = os.path.join(context.config("data_path"), TPG_SURVEY_PATH)
+    df = pd.read_excel(path)
+
+    df = df[~df["Nom"].isin(TPG_DUPLICATE_NAMES)]
+
+    missing_coords = df[df["coordinates"].isna()]
+    if len(missing_coords) > 0:
+        logger.warning(
+            "%d TPG survey entries have no coordinates and are dropped: %s",
+            len(missing_coords), missing_coords["Nom"].tolist(),
+        )
+    df = df[df["coordinates"].notna()].copy()
+
+    coordinates = df["coordinates"].str.split(",", expand = True).astype(float)
+    df["lat"] = coordinates[0]
+    df["lon"] = coordinates[1]
+
+    df["staff_exact"] = pd.to_numeric(df["Nombre d'employés"], errors = "coerce")
+    df["staff_bracket"] = df["Taille de l'organisation"]
+    df["staff_bracket_midpoint"] = df["staff_bracket"].map(TPG_BRACKET_MIDPOINT)
+    df["city"] = df["Adresse principale"].apply(_tpg_city)
+
+    return df
+
+
+def apply_tpg_survey(context, df):
+    """
+    Layers the TPG survey (load_tpg_survey) on top of df (built from
+    international_organizations_switzerland) - see module docstring's TPG
+    SURVEY LAYER section for the merge policy.
+    """
+    df_tpg = load_tpg_survey(context)
+
+    matched_names = []
+    for _, row in df_tpg.iterrows():
+        key = TPG_NAME_TO_KEY.get(row["Nom"])
+        if key is None:
+            continue
+        matched_names.append(row["Nom"])
+
+        matches = df.index[df["name"] == key]
+        if len(matches) == 0:
+            logger.warning("TPG survey entry '%s' maps to unknown key '%s' - skipped.", row["Nom"], key)
+            continue
+        i = matches[0]
+
+        has_exact = pd.notna(row["staff_exact"])
+        keep_existing_estimate = not has_exact and df.loc[i, "staff_confidence"] in ("high", "medium")
+
+        if not keep_existing_estimate:
+            if has_exact:
+                df.loc[i, "staff"] = row["staff_exact"]
+                df.loc[i, "staff_confidence"] = "high"
+                note = f"{row['staff_exact']:.0f} employees (exact)."
+            else:
+                df.loc[i, "staff"] = row["staff_bracket_midpoint"]
+                df.loc[i, "staff_confidence"] = "low"
+                note = f"size bracket {row['staff_bracket']}, bracket midpoint used."
+            df.loc[i, "staff_year"] = 2026
+            df.loc[i, "source_note"] = (
+                str(df.loc[i, "source_note"])
+                + " | Updated per colleague's TPG workplace survey (Sep 2026): " + note
+            )
+
+        # The survey's coordinates come from geocoding the org's actual
+        # address, so they're preferred over the original dict's hand
+        # estimates even when the staff figure itself is kept.
+        df.loc[i, "lat"] = row["lat"]
+        df.loc[i, "lon"] = row["lon"]
+
+    df_new = df_tpg[~df_tpg["Nom"].isin(matched_names)]
+    has_exact = df_new["staff_exact"].notna()
+
+    detail = pd.Series("Exact employee count.", index = df_new.index).where(
+        has_exact,
+        "No exact count given; bracket (" + df_new["staff_bracket"].astype(str) + ") midpoint used.",
+    )
+
+    df_new_rows = pd.DataFrame({
+        "name": df_new["Nom"],
+        "staff": df_new["staff_exact"].where(has_exact, df_new["staff_bracket_midpoint"]),
+        "staff_confidence": pd.Series("high", index = df_new.index).where(has_exact, "low"),
+        "staff_year": 2026,
+        "city": df_new["city"],
+        "lat": df_new["lat"],
+        "lon": df_new["lon"],
+        "source_note": (
+            "Colleague's TPG workplace survey (Sep 2026). Address: " + df_new["Adresse principale"]
+            + ". " + detail
+        ),
+    })
+
+    return pd.concat([df, df_new_rows], ignore_index = True)
 
 
 def execute(context):
@@ -73,6 +250,8 @@ def execute(context):
 
     for column in ("staff", "staff_year", "lat", "lon"):
         df[column] = pd.to_numeric(df[column], errors = "coerce")
+
+    df = apply_tpg_survey(context, df)
 
     df["is_aggregate"] = df["staff_confidence"] == "aggregate"
 

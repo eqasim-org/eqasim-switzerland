@@ -8,6 +8,7 @@ import geopandas as gpd
 import pandas as pd
 from folium.plugins import TimestampedGeoJson
 
+import lemanis
 import plotting
 
 
@@ -40,13 +41,13 @@ def _is_low_data(tpg_mean, matsim_total, min_events):
     return max(tpg_mean, matsim_total) < min_events
 
 
-def _popup_html(row):
+def _popup_html(row, reference_label = "TPG mean"):
     return (
         f"<b>{row['stop_name']}</b><br>"
         f"MATSim (scaled): {row['matsim_total']:.0f}<br>"
-        f"TPG mean: {row['tpg_mean']:.0f} "
+        f"{reference_label}: {row['tpg_mean']:.0f} "
         f"(95% CI {row['tpg_lo']:.0f}-{row['tpg_hi']:.0f})<br>"
-        f"MATSim reaches {row['pct_of_mean']:.0f}% of the TPG mean"
+        f"MATSim reaches {row['pct_of_mean']:.0f}% of the {reference_label}"
     )
 
 
@@ -152,27 +153,43 @@ def build_hourly_map(stop_hour_df, output_path, perimeter_shapefile = None, colo
 
 
 def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefile = None,
-                        color_half_range_pct = 100, low_data_min_events = 5):
+                        color_half_range_pct = 100, low_data_min_events = 5,
+                        lemanis_stop_period_df = None, lemanis_stop_full_day_df = None):
 
-    global_max    = max(full_day_df[["tpg_mean", "matsim_total"]].max().max(), 1)
-    colormap      = _build_colormap(color_half_range_pct)
-    hours_by_stop = {code: df for code, df in stop_hour_df.groupby("gtfs_code")}
-    center        = [full_day_df["stop_lat"].mean(), full_day_df["stop_lon"].mean()]
+    combined_full_day_df = full_day_df
+    if lemanis_stop_full_day_df is not None and not lemanis_stop_full_day_df.empty:
+        combined_full_day_df = pd.concat([full_day_df, lemanis_stop_full_day_df], ignore_index = True)
+
+    global_max      = max(combined_full_day_df[["tpg_mean", "matsim_total"]].max().max(), 1)
+    colormap        = _build_colormap(color_half_range_pct)
+    hours_by_stop   = {code: df for code, df in stop_hour_df.groupby("gtfs_code")}
+    periods_by_stop = (
+        {code: df for code, df in lemanis_stop_period_df.groupby("gtfs_code")}
+        if lemanis_stop_period_df is not None else {}
+    )
+    center          = [combined_full_day_df["stop_lat"].mean(), combined_full_day_df["stop_lon"].mean()]
 
     m = _base_map(center, perimeter_shapefile)
 
-    for _, row in full_day_df.iterrows():
+    for _, row in combined_full_day_df.iterrows():
         low_data = _is_low_data(row["tpg_mean"], row["matsim_total"], low_data_min_events)
 
-        chart_html = ""
-        stop_hours = hours_by_stop.get(row["gtfs_code"])
+        chart_html   = ""
+        stop_periods = periods_by_stop.get(row["gtfs_code"])
+        is_lemanis   = stop_periods is not None and not stop_periods.empty
 
-        if stop_hours is not None and not stop_hours.empty:
-            chart_b64  = plotting.render_hourly_chart_png(stop_hours, row["stop_name"])
+        if is_lemanis:
+            chart_b64  = plotting.render_period_chart_png(stop_periods, row["stop_name"], lemanis.PERIOD_ORDER)
             chart_html = f'<br><img src="data:image/png;base64,{chart_b64}" width="320">'
+        else:
+            stop_hours = hours_by_stop.get(row["gtfs_code"])
+            if stop_hours is not None and not stop_hours.empty:
+                chart_b64  = plotting.render_hourly_chart_png(stop_hours, row["stop_name"])
+                chart_html = f'<br><img src="data:image/png;base64,{chart_b64}" width="320">'
 
-        popup = _popup_html(row) + (
-            f"<br><i>Low data: TPG mean and MATSim both under {low_data_min_events:.0f} events - "
+        reference_label = "Lemanis mean" if is_lemanis else "TPG mean"
+        popup = _popup_html(row, reference_label) + (
+            f"<br><i>Low data: {reference_label} and MATSim both under {low_data_min_events:.0f} events - "
             "comparison not meaningful</i>" if low_data else ""
         ) + chart_html
 
@@ -220,11 +237,15 @@ def _offset_coords(coords, seed, magnitude_m = 12):
 
 
 def build_line_map(line_hour_df, line_base_df, line_geometries_df, output_path, perimeter_shapefile = None,
-                    color_half_range_pct = 100, low_data_min_events = 5):
+                    color_half_range_pct = 100, low_data_min_events = 5, lemanis_line_period_df = None):
 
     colormap = _build_colormap(color_half_range_pct)
 
-    hours_by_line_base = {line: df for line, df in line_hour_df.groupby("line_base")}
+    hours_by_line_base   = {line: df for line, df in line_hour_df.groupby("line_base")}
+    periods_by_line_base = (
+        {line: df for line, df in lemanis_line_period_df.groupby("line_base")}
+        if lemanis_line_period_df is not None else {}
+    )
     geometries_by_line = {line: df for line, df in line_geometries_df.groupby("line")}
 
     all_coords = [c for coords in line_geometries_df["coords"] for c in coords]
@@ -246,20 +267,28 @@ def build_line_map(line_hour_df, line_base_df, line_geometries_df, output_path, 
         weight   = 2 if low_data else 4
         opacity  = 0.25 if low_data else 0.85
 
-        chart_html = ""
-        line_hours = hours_by_line_base.get(line_base)
+        chart_html   = ""
+        line_periods = periods_by_line_base.get(line_base)
+        line_hours   = hours_by_line_base.get(line_base)
+        is_lemanis   = line_periods is not None
 
-        if line_hours is not None:
+        if is_lemanis:
+            for direction_letter, direction_periods in line_periods.groupby("direction_letter", dropna = False):
+                title       = f"Line {line_base}" + (f" ({direction_letter})" if pd.notna(direction_letter) else "")
+                chart_b64   = plotting.render_period_chart_png(direction_periods, title, lemanis.PERIOD_ORDER)
+                chart_html += f'<br><img src="data:image/png;base64,{chart_b64}" width="320">'
+        elif line_hours is not None:
             for direction_letter, direction_hours in line_hours.groupby("direction_letter", dropna = False):
                 title       = f"Line {line_base}" + (f" ({direction_letter})" if pd.notna(direction_letter) else "")
                 chart_b64   = plotting.render_hourly_chart_png(direction_hours, title)
                 chart_html += f'<br><img src="data:image/png;base64,{chart_b64}" width="320">'
 
+        reference_label = "Lemanis mean" if is_lemanis else "TPG mean"
         popup_text = (
             f"<b>Line {line_base}</b><br>"
             f"MATSim (scaled): {row['matsim_total']:.0f}<br>"
-            f"TPG mean: {row['tpg_mean']:.0f}<br>"
-            f"MATSim reaches {row['pct_of_mean']:.0f}% of the TPG mean"
+            f"{reference_label}: {row['tpg_mean']:.0f}<br>"
+            f"MATSim reaches {row['pct_of_mean']:.0f}% of the {reference_label}"
         ) + (
             f"<br><i>Low data: TPG mean and MATSim both under {low_data_min_events:.0f} events - "
             "comparison not meaningful</i>" if low_data else ""
