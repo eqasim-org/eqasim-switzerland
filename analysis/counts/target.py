@@ -6,15 +6,22 @@ from .matching.network import RoadNetwork
 from .matching.counts import Counts
 from .matching.matcher import TrafficDataMatcher
 from .run_utils import filter_data, save_as_target
+from .runs.transcality import aggregate_counts_by_link
 
 logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    geneva_source = context.config("analysis.counts.geneva_source", default="geneva")
+    if geneva_source not in ("geneva", "transcality"):
+        raise ValueError("analysis.counts.geneva_source must be 'geneva' or 'transcality'")
     context.stage("analysis.counts.cantons.aargau")
     context.stage("analysis.counts.cantons.bern")
     context.stage("analysis.counts.cantons.ch")
-    context.stage("analysis.counts.cantons.geneva")
+    context.stage("analysis.counts.cantons.geneva",
+                  alias="geneva_counts" if geneva_source == "geneva" else None)
+    context.stage("analysis.counts.cantons.transcality",
+                  alias="geneva_counts" if geneva_source == "transcality" else None)
     context.stage("analysis.counts.cantons.luzern")
     context.stage("analysis.counts.cantons.saint_gallen")
     context.stage("analysis.counts.cantons.vaud")
@@ -29,6 +36,11 @@ def configure(context):
 
 
 def _load_counts_and_match(context, network, city):
+    if city in ("geneva", "transcality"):
+        file_path = context.stage("geneva_counts")
+        # The two sources have different columns and aggregation requirements.
+        city = context.config("analysis.counts.geneva_source")
+
     if city == "aargau":
         file_path = context.stage("analysis.counts.cantons.aargau")
         counts = Counts(
@@ -69,7 +81,6 @@ def _load_counts_and_match(context, network, city):
             prioritize_road_types=True,
         )
     elif city == "geneva":
-        file_path = context.stage("analysis.counts.cantons.geneva")
         counts = Counts(file_path=file_path,  
                         id_column="OBJECTID",
                         columns_to_keep={'mean_flow_2025':"flow", "median_flow_2025":"median_flow",
@@ -77,6 +88,17 @@ def _load_counts_and_match(context, network, city):
                         context = context)
         # TrafficDataMatcher detects osm_id/angle and uses the manual match.
         match_kwargs = {}
+    elif city == "transcality":
+        counts = Counts(
+            file_path=file_path,
+            id_column="OBJECTID",
+            columns_to_keep={column: column for column in (
+                "flow", "flow_lower", "flow_upper", "osm_id", "angle",
+                "source", "detector_ids", "profile_json",
+            )},
+            context=context,
+        )
+        match_kwargs = {"mode": "directional"}
     elif city == "luzern":
         if context.config("only_weekday"):
             return None
@@ -145,6 +167,8 @@ def _load_counts_and_match(context, network, city):
 
     matcher = TrafficDataMatcher()
     matched = matcher.match(network=network, counts=counts, **match_kwargs)
+    if city == "transcality" and not matched.empty:
+        counts, matched = aggregate_counts_by_link(counts, matched, network)
 
     flow_col = "flow_w" if context.config("only_weekday") and "flow_w" in counts.counts.columns else "flow"
     station_flows = counts.counts[["id", flow_col]].rename(columns={flow_col: "flow"})
@@ -168,8 +192,8 @@ def execute(context):
     weights = {"aargau": 1, "bern": 1, "ch": 1, "geneva": 1.2, "luzern": 1, "saint_gallen": 1, 
                "vaud": 0.3, "zurich": 1.2, "annemasse":0.3}
 
-    if context.config("include_external_population"):
-        city_order.append("annemasse")
+    # if context.config("include_external_population"):
+    #     city_order.append("annemasse")
 
     dfs = []
     for city in city_order:

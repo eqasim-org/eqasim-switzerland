@@ -1,10 +1,12 @@
 import geopandas as gpd
 import os
+
 from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.results import save_count_results
 from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
+
 
 def configure(context):
     context.stage("analysis.counts.cantons.geneva")
@@ -13,8 +15,8 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
 
     context.config("input_downsampling")
-    configure_simulation_path(context)
     context.config("only_weekday", default=False)
+    configure_simulation_path(context)
 
 def execute(context):        
     if not context.config("only_weekday"):
