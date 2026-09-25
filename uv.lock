@@ -781,7 +781,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "shapely", specifier = ">=2.1.2" },
     { name = "statsmodels", specifier = ">=0.14.6" },
-    { name = "synpp", specifier = ">=1.6.2" },
+    { name = "synpp", specifier = "==1.7.3" },
     { name = "tables", specifier = ">=3.7.0" },
     { name = "torch", specifier = ">=2.11.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "tqdm", specifier = ">=4.67.3" },
@@ -3542,16 +3542,16 @@ wheels = [
 
 [[package]]
 name = "synpp"
-version = "1.6.2"
+version = "1.7.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "networkx" },
     { name = "pyyaml" },
     { name = "pyzmq" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/42/ea/c5a3c900c5d3e477a2f9f2917185ab0159df5756d60d3860d6be74f3fddb/synpp-1.6.2.tar.gz", hash = "sha256:73618a81f65745adb37c759ec4c36de74097602ff7cf0bb67593f96e2ccdf271", size = 34421, upload-time = "2026-05-31T19:46:27.386Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b0/3d/45b18847f3eadc192d4351d61f7523a6d49b290c853d1af3d791aa655b60/synpp-1.7.3.tar.gz", hash = "sha256:91a91622e81e8def4d9013636020fc927e53ee7778a7a5a1e2a33d8f91927a56", size = 34972, upload-time = "2026-09-23T13:52:54.28Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/b0/644e6517bd6adf61b65a7aecf472e7953bd2d1cbc149b1b4a027acf519bd/synpp-1.6.2-py3-none-any.whl", hash = "sha256:c6ad8408d9c3757e11f8a5b45d79e47d5d9d53029f915a32f2cee108361165f7", size = 22521, upload-time = "2026-05-31T19:46:26.012Z" },
+    { url = "https://files.pythonhosted.org/packages/47/37/80253ab3c98709e43a658365fd16ab018096a37e099a5b3e225be7a22e4c/synpp-1.7.3-py3-none-any.whl", hash = "sha256:1abb462015f1f95776f5b4dce6a901f85a572beed9f8e62eadb03ec942a3fc0f", size = 22757, upload-time = "2026-09-23T13:52:51.74Z" },
 ]
 
 [[package]]
