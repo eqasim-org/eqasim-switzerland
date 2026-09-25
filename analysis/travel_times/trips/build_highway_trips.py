@@ -12,13 +12,13 @@ def configure(context):
     context.config("random_seed")
     
     # here we check if any of the stages that require the network from prepare are requested, to avoid unnecessary dependencies and re-running prepare when not needed
-    #stages_to_check = [ "matsim.output", "matsim.simulation.run", "matsim.simulation.prepare"]
-    #get_network_from_prepare = any(requested_stage.__name__ in stages_to_check for requested_stage in context.config_requested_stages)
+    stages_to_check = [ "matsim.output", "matsim.simulation.run", "matsim.simulation.prepare"]
+    get_network_from_prepare = any(requested_stage.__name__ in stages_to_check for requested_stage in context.config_requested_stages)
 
-    #if get_network_from_prepare:
-    #    context.stage("analysis.counts.matching.network_from_prepare", alias="network")
-    #else:
-    context.stage("analysis.counts.matching.network", alias="network")
+    if get_network_from_prepare:
+       context.stage("analysis.counts.matching.network_from_prepare", alias="network")
+    else:
+        context.stage("analysis.counts.matching.network", alias="network")
     
 
 def execute(context):
