@@ -27,6 +27,9 @@ def configure(context):
     context.config("export_detailed_network", True)
     context.config("add_traffic_lights", True)
     context.config("parseTurnRestrictions", True)
+    context.config("pt2matsim.respectVehicleAccess", True)
+    context.config("pt2matsim.allowPtRoutesOnPrivateRoads", True)
+    context.config("pt2matsim.maxLinkLength", 1000.0)
 
 
 def execute(context):
@@ -92,16 +95,17 @@ def execute(context):
                     way_speed = get_param("freespeed", way)
                     way_speed.set("value", str(freespeed))
 
-    # --- 3. Set scalar parameters -------------------------------------
+    # --- 3.1 Set scalar parameters -------------------------------------
     set_param("osmFile", network_file)
     set_param("outputCoordinateSystem", "epsg:2056")
     set_param("outputNetworkFile", "%s/converted_network.xml.gz" % context.path())
-    set_param("maxLinkLength", "1000.0")
+    set_param("maxLinkLength", str(round(context.config("pt2matsim.maxLinkLength"),1)))
     set_param("parseTurnRestrictions", str(context.config("parseTurnRestrictions")).lower())
+    set_param("respectVehicleAccess", str(context.config("pt2matsim.respectVehicleAccess")).lower())
+    set_param("allowPtRoutesOnPrivateRoads", str(context.config("pt2matsim.allowPtRoutesOnPrivateRoads")).lower())
 
     if export_detailed_network:
         set_param("outputDetailedLinkGeometryFile", detailed_network_file)
-        
     # --- 4. Add new routableSubnetworks safely ------------------------
     new_subnetworks = [
         {"allowedTransportModes": "car", "subnetworkMode": "car_passenger"},

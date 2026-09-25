@@ -11,9 +11,9 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.maven")
 
-    context.config("pt2matsim_version", "25.8")
-    context.config("pt2matsim_branch", "v25.8")
-    context.config("pt2matsim_path", "") 
+    context.config("pt2matsim_version", "26.6.1-SNAPSHOT")
+    context.config("pt2matsim_branch", "feat/option-remove-private-roads")
+    context.config("pt2matsim_path", "")
 
 
 def run(context, command, arguments, vm_arguments):
