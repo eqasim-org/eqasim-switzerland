@@ -12,6 +12,7 @@ logger = logging.getLogger("synpp")
 def configure(context):
     configure_simulation_path(context)
     context.config("output_prefix", "switzerland_")
+    context.config("analysis.counts.flow_aggregation_window", default= 10)
 
 def execute(context):        
     simulation_path = get_simulation_path(context)
@@ -26,9 +27,10 @@ def execute(context):
         raise FileNotFoundError(f"No counts nor link stats files found in {iterations_directory}")
     else:
         if files == counts_file:
-            logger.info(f"Found {len(files)} counts files for comparison. Considering the last 10 iterations.")
-            # Sort files by modification time and take the last 10
-            files = sorted(files, key=os.path.getmtime)[-10:]
+            aggregation_window = int(context.config("analysis.counts.flow_aggregation_window"))
+            logger.info(f"Found {len(files)} counts files for comparison. Considering the last {aggregation_window} iterations.")
+            # Sort files by modification time and take the last aggregation_window
+            files = sorted(files, key=os.path.getmtime)[-aggregation_window:]
             logger.info(f"Using the following files for averaging: {files}")
             
             # Read and average the data
