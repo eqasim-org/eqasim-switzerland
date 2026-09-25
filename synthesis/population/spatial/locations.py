@@ -3,6 +3,7 @@ import pandas as pd
 from data.statent.density import impute_parallel as impute_statent
 from data.statpop.density import impute_parallel as impute_statpop
 from data.spatial.ovgk import impute_parallel as impute_ovgk
+from data.cross_border.destinations import make_entry_border_facility_id, make_exit_border_facility_id
 from dmc.constants import constants
 from matsim.scenario.population import HOME_DESTINATION_ID
 
@@ -73,8 +74,19 @@ def execute(context):
 
     df_cb_trips = context.stage("synthesis.population.trips")
     df_cb_trips = df_cb_trips[(df_cb_trips["preceding_purpose"] == "border") | (df_cb_trips["following_purpose"] == "border")]
-    df_cb_trips = df_cb_trips[["person_id", "interview_point_id", "interview_geometry_point"]].drop_duplicates("person_id")
-    df_cb_trips = df_cb_trips.rename(columns={"interview_point_id": "destination_id", "interview_geometry_point": "geometry"})
+    df_cb_trips = df_cb_trips[[
+        "person_id", "mz_person_id", "preceding_purpose", "following_purpose", "border_crossing_point"
+    ]].drop_duplicates("person_id")
+
+    # Swiss-resident border crossers only have one border activity in their day.
+    # If the trip is home -> border, that activity exits Switzerland; if it is
+    # border -> home, it enters Switzerland.
+    leaving_ch = df_cb_trips["following_purpose"] == "border"
+    df_cb_trips["destination_id"] = df_cb_trips["mz_person_id"].astype(str).apply(make_entry_border_facility_id)
+    df_cb_trips.loc[leaving_ch, "destination_id"] = (
+        df_cb_trips.loc[leaving_ch, "mz_person_id"].astype(str).apply(make_exit_border_facility_id)
+    )
+    df_cb_trips = df_cb_trips.rename(columns={"border_crossing_point": "geometry"})
 
     df_border_locations = pd.merge(
         df_border_locations,

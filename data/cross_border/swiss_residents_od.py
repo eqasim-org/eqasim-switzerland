@@ -112,11 +112,21 @@ def process_from_to_trips(df_trips, context, rng):
     gdf_canton["n_crossers"] = gdf_canton["n_crossers"].fillna(0).astype(int)
     gdf_canton.to_file(f"{context.path()}/crossers_by_canton.gpkg", driver="GPKG")
 
+    # Duplicated under the name the directional entry/exit facility scheme
+    # expects (synthesis.population.destinations, synthesis.population.trips
+    # -> synthesis.population.spatial.locations, matsim.simulation.cross_border_links):
+    # Swiss residents use the same surveyed crossing in both directions, so
+    # there is only one geometry here, unlike the foreign cross-border
+    # population's separate entry_/exit_interview_geometry_point (which can
+    # differ for "Through" trips) - see data.cross_border.destinations.
+    df["border_crossing_point"] = df["interview_geometry_point"]
+
     df = df[["cross_border_person_id",
         "origin_municipality", "origin_canton_id", "origin_x", "origin_y",
         "destination_country", "destination_country_raw",
         "trip_mode", "trip_purpose",
-        "interview_place", "interview_point_id", "interview_geometry_point"]]
+        "interview_place", "interview_point_id", "interview_geometry_point",
+        "border_crossing_point"]]
 
     return df
 

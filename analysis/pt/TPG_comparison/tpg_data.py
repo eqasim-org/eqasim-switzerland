@@ -1,16 +1,7 @@
-"""
-TPG stop/line loading and MATSim<->TPG line-direction matching.
-
-The direction-matching logic is shared verbatim between the 2024 and 2025
-comparison stages in the original synpp pipeline.
-"""
-
 import pandas as pd
 
 
 def load_tpg_stops(tpg_data_path, gtfs_stops):
-    """Load TPG stop metadata and attach the matching GTFS stop_name/geometry."""
-
     tpg_stops = pd.read_csv(f"{tpg_data_path}/TPG_stops_info/tpg_Arrets.csv", encoding = "latin1", sep = ";")
 
     tpg_stops.columns = ["stop_code", "lon", "lat", "country", "name", "municipality", "gtfs_code", "date1", "date2"]
@@ -24,8 +15,6 @@ def load_tpg_stops(tpg_data_path, gtfs_stops):
 
 
 def load_matsim_counts(matsim_output_folder, stops_in_ge):
-    """Load MATSim pt_passenger_counts.csv.gz, aggregate by hour, and keep only stops within the perimeter."""
-
     matsim_pxcounts_path = f"{matsim_output_folder}/pt_passenger_counts.csv.gz"
 
     counts = pd.read_csv(matsim_pxcounts_path, sep = ";")
@@ -44,14 +33,6 @@ def load_matsim_counts(matsim_output_folder, stops_in_ge):
 
 
 def match_line_directions(tpg_data_path, tpg_stops, counts_ge):
-    """
-    Match TPG line/direction labels ("H"/"R") to MATSim's line_main_direction strings.
-
-    Returns (line_directions, counts_ge) where counts_ge has been filtered to
-    only the stop/line/hour rows whose direction could be matched, and enriched
-    with stop_id_gtfs_base and line_direction columns.
-    """
-
     tpg_lines = pd.read_csv(f"{tpg_data_path}/TPG_stops_info/tpg_Lignes-arrêts_2024.csv")
     tpg_lines = tpg_lines.merge(tpg_stops[["stop_code", "gtfs_code", "stop_name"]], left_on = "Code", right_on = "stop_code", how = "left")
     tpg_lines = tpg_lines[tpg_lines["stop_code"].notna()]
@@ -142,9 +123,6 @@ def match_line_directions(tpg_data_path, tpg_stops, counts_ge):
         right_on = ["line_name", "MATSim_direction"], left_on = ["line_name", "line_main_direction"], how = "left"
     )
 
-    # Direction-stripped line id, for years whose TPG stats have no
-    # direction field (e.g. 2025 - see tpg_raw_stats_2025.py) and so can
-    # only be compared against MATSim aggregated over both directions.
     counts_ge["line_alone"] = counts_ge["line_name"]
 
     return line_directions, counts_ge
@@ -154,25 +132,6 @@ _DIRECTION_LETTER = {"Aller": "H", "Retour": "R"}
 
 
 def build_line_route_geometries(tpg_data_path, tpg_stops, gtfs_stops):
-    """
-    Route polyline (ordered stop coordinates) per (line, direction), for
-    drawing an actual line shape on the line map.
-
-    tpg_Lignes-arrêts_2024.csv is the only source of stop *sequence* in this
-    pipeline (GTFS trips/stop_times are never loaded - read_gtfs only keeps
-    stops), and it's already rows-in-route-order per (Ligne, Sens), which is
-    what lets "first"/"last" work in match_line_directions above. This is
-    independent of which year's passenger-count stats are being compared -
-    it's just the physical route shape, assumed unchanged since 2024.
-
-    Rows flagged Occasionnel=1 are rarely-served detour stops (not every
-    trip of that line/direction serves them) - dropped so the polyline
-    follows the line's regular/most-frequent routing instead of zigzagging
-    out to occasional variants.
-
-    Returns a DataFrame: line, direction_letter, first_stop, last_stop,
-    coords (coords = list of (lat, lon) tuples in stop order).
-    """
 
     tpg_lines = pd.read_csv(f"{tpg_data_path}/TPG_stops_info/tpg_Lignes-arrêts_2024.csv")
     tpg_lines = tpg_lines[tpg_lines["Occasionnel"] == 0]

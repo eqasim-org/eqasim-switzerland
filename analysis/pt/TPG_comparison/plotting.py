@@ -1,5 +1,3 @@
-"""All plotting functions used by the passenger-count comparison stages."""
-
 import base64
 import io
 
@@ -66,7 +64,6 @@ def plot_comparison_for_stop_and_line(counts, option = "boardings", line = "1_H"
 def plot_heatmap_for_line(counts, option = "boardings", line = "1_H", output_path = ""):
     counts2  = counts.copy()
     px_mvmts = counts2[["stop_name", "line_direction", "hour"] + [c for c in counts if option in c]]
-
     px_mvmts = px_mvmts[px_mvmts["line_direction"] == line]
 
     px_mvmts["error_category"] = px_mvmts.apply(categorize_error, axis = 1)
@@ -173,11 +170,6 @@ def plot_comparison_for_stop(counts, option = "boardings", stop = "Genève, gare
 
 
 def plot_global_hourly_comparison(global_hourly_df, output_path):
-    """
-    Total passenger events (boardings + alightings) across all stops in the
-    perimeter, by hour of day: scaled MATSim total vs the 2024 TPG 95% CI.
-    """
-
     df = global_hourly_df.sort_values("hour")
 
     _, ax = plt.subplots(figsize = (12, 6))
@@ -198,15 +190,44 @@ def plot_global_hourly_comparison(global_hourly_df, output_path):
     plt.close()
 
 
-def render_hourly_chart_png(hourly_df, title):
-    """
-    Same idea as plot_global_hourly_comparison, but for a single stop or
-    line and returned as a base64-encoded PNG (no file written) - meant to
-    be embedded straight into an HTML popup, e.g. in interactive_map.py's
-    full-day stop map and line map. Only the hours present in hourly_df are
-    plotted.
-    """
+def render_period_chart_png(period_df, title, period_order):
+    """Bar-chart counterpart to render_hourly_chart_png for Lemanis lines:
+    Lemanis only reports a handful of broad, non-contiguous time periods
+    (see lemanis.PERIOD_ORDER), so a bar per period is representative of
+    the data, whereas an hourly line chart would imply a false hourly
+    precision Lemanis doesn't have."""
+    df = period_df.set_index("period").reindex(period_order).reset_index()
 
+    fig, ax = plt.subplots(figsize = (5, 2.6))
+
+    x     = np.arange(len(period_order))
+    width = 0.35
+
+    tpg_err = np.where(df["tpg_hi"].notna(), (df["tpg_hi"] - df["tpg_lo"]) / 2, 0.0)
+
+    ax.bar(x - width / 2, df["tpg_mean"].fillna(0), width, color = "black", alpha = 0.75, label = "Lemanis (reported)")
+    ax.errorbar(x - width / 2, df["tpg_mean"].fillna(0), yerr = tpg_err, fmt = "none", ecolor = "gray", capsize = 3)
+    ax.bar(x + width / 2, df["matsim_total"].fillna(0), width, color = "steelblue", label = "MATSim (scaled)")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(period_order, fontsize = 7, rotation = 12)
+    ax.set_ylabel("Passenger events", fontsize = 8)
+    ax.set_title(title, fontsize = 9)
+    ax.tick_params(labelsize = 7)
+    ax.legend(fontsize = 6, loc = "upper left")
+    ax.grid(True, axis = "y", alpha = 0.3)
+
+    plt.tight_layout()
+
+    buffer = io.BytesIO()
+    fig.savefig(buffer, format = "png", dpi = 110)
+    plt.close(fig)
+    buffer.seek(0)
+
+    return base64.b64encode(buffer.read()).decode("ascii")
+
+
+def render_hourly_chart_png(hourly_df, title):
     df = hourly_df.sort_values("hour")
 
     fig, ax = plt.subplots(figsize = (5, 2.6))

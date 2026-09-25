@@ -21,6 +21,7 @@ def configure(context):
 BORDER_MATCH_COLUMNS = [
     "cross_border_person_id", "destination_country_raw",
     "interview_geometry_point", "border_crossing_trip_mode", "interview_point_id",
+    "border_crossing_point",
 ]
 
 
@@ -138,6 +139,7 @@ def execute(context):
     df_trips_noncb["destination_country_raw"] = None
     df_trips_noncb["interview_geometry_point"] = None
     df_trips_noncb["interview_point_id"]       = None
+    df_trips_noncb["border_crossing_point"]    = None
 
     is_cb_person = coerce_boolean_series(
         df_persons["is_crossing_the_border"], name="is_crossing_the_border")
@@ -157,6 +159,7 @@ def execute(context):
         "trip_duration",
         "mode",
         "destination_country_raw", "interview_geometry_point", "interview_point_id",
+        "border_crossing_point",
     ]
 
     if len(df_cb_persons) == 0:
@@ -183,6 +186,7 @@ def execute(context):
         "destination_country_raw": df_cb_persons["destination_country_raw"].values,
         "interview_geometry_point": df_cb_persons["interview_geometry_point"].values,
         "interview_point_id": df_cb_persons["interview_point_id"].values,
+        "border_crossing_point": df_cb_persons["border_crossing_point"].values,
     })
     df_trips_cb["trip_duration"] = df_trips_cb["arrival_time"] - df_trips_cb["departure_time"]
 

@@ -62,6 +62,18 @@ FLOW_MAP_FIELD_LABELS = {
     "source": "Source",
     "detector_ids": "Detector ID(s)",
     "daily_profile": "Observed daily profile",
+    "crossborder_share_pct": "Cross-border share of MATSim car flow (%)",
+    "crossborder_flow": "Cross-border agent flow (vehicles/day)",
+    "swiss_resident_share_pct": "Swiss residents among cross-border car users (%)",
+    "from_stop_name": "From stop",
+    "to_stop_name": "To stop",
+    "lines": "Line(s)",
+    "crossborder_pt_flow": "Cross-border PT riders/day",
+    "crossborder_pt_share_pct": "Cross-border share of PT riders (%)",
+    "from_stop_total_activity": "MATSim total boardings+alightings, from stop (all agents/day)",
+    "to_stop_total_activity": "MATSim total boardings+alightings, to stop (all agents/day)",
+    "stop_name": "Stop",
+    "official_total_activity": "MATSim total boardings+alightings (all agents/day)",
 }
 
 
@@ -621,55 +633,81 @@ class Plotter:
 
     @staticmethod
     def _flow_metric_settings(point_gdf):
-        metric_columns = {"pdiff", "adiff", "geh"}
+        """Color-metric dropdown entries for create_map's point layer. Each
+        metric needs 'label'/'lower'/'upper'/'step'; a metric additionally
+        carrying quality_inner/quality_outer/quality_unit also appears in the
+        "Accuracy centers" dropdown (see _inject_flow_metric_controls) - that
+        only makes sense for metrics that represent an error against a known
+        target, so metrics without it (e.g. crossborder_share_pct, which
+        isn't compared against a ground truth here) are colorable but are
+        left out of the accuracy-center dropdown."""
+
         valid_points = [
             gdf for gdf in point_gdf
             if gdf is not None and not gdf.empty
         ]
-        if not valid_points or not all(
-            metric_columns.issubset(gdf.columns) for gdf in valid_points
-        ):
+        if not valid_points:
             return {}
 
-        absolute_differences = pd.concat(
-            [pd.to_numeric(gdf["adiff"], errors="coerce") for gdf in valid_points]
-        ).abs()
-        maximum = absolute_differences.max()
-        if pd.isna(maximum) or maximum <= 0:
-            absolute_bound = 1.0
-        else:
-            magnitude = 10 ** np.floor(np.log10(maximum))
-            absolute_bound = float(np.ceil(maximum / magnitude) * magnitude)
+        settings = {}
 
-        return {
-            "pdiff": {
-                "label": "Percentage difference (%)",
-                "lower": -100.0,
-                "upper": 100.0,
-                "step": 1,
-                "quality_inner": 10.0,
-                "quality_outer": 20.0,
-                "quality_unit": "%",
-            },
-            "adiff": {
-                "label": "Absolute difference (vehicles/day)",
-                "lower": -absolute_bound,
-                "upper": absolute_bound,
-                "step": max(1.0, absolute_bound / 100),
-                "quality_inner": 1000.0,
-                "quality_outer": 2000.0,
-                "quality_unit": "vehicles/day",
-            },
-            "geh": {
-                "label": "GEH",
+        accuracy_columns = {"pdiff", "adiff", "geh"}
+        if all(accuracy_columns.issubset(gdf.columns) for gdf in valid_points):
+            absolute_differences = pd.concat(
+                [pd.to_numeric(gdf["adiff"], errors="coerce") for gdf in valid_points]
+            ).abs()
+            maximum = absolute_differences.max()
+            if pd.isna(maximum) or maximum <= 0:
+                absolute_bound = 1.0
+            else:
+                magnitude = 10 ** np.floor(np.log10(maximum))
+                absolute_bound = float(np.ceil(maximum / magnitude) * magnitude)
+
+            settings.update({
+                "pdiff": {
+                    "label": "Percentage difference (%)",
+                    "lower": -100.0,
+                    "upper": 100.0,
+                    "step": 1,
+                    "quality_inner": 10.0,
+                    "quality_outer": 20.0,
+                    "quality_unit": "%",
+                },
+                "adiff": {
+                    "label": "Absolute difference (vehicles/day)",
+                    "lower": -absolute_bound,
+                    "upper": absolute_bound,
+                    "step": max(1.0, absolute_bound / 100),
+                    "quality_inner": 1000.0,
+                    "quality_outer": 2000.0,
+                    "quality_unit": "vehicles/day",
+                },
+                "geh": {
+                    "label": "GEH",
+                    "lower": 0.0,
+                    "upper": 25.0,
+                    "step": 0.1,
+                    "quality_inner": 5.0,
+                    "quality_outer": 10.0,
+                    "quality_unit": "",
+                },
+            })
+
+        if all("crossborder_share_pct" in gdf.columns for gdf in valid_points):
+            share_values = pd.concat(
+                [pd.to_numeric(gdf["crossborder_share_pct"], errors="coerce") for gdf in valid_points]
+            )
+            maximum = share_values.max()
+            upper = 100.0 if pd.isna(maximum) or maximum <= 0 else float(min(100.0, np.ceil(maximum / 10.0) * 10.0))
+
+            settings["crossborder_share_pct"] = {
+                "label": FLOW_MAP_FIELD_LABELS["crossborder_share_pct"],
                 "lower": 0.0,
-                "upper": 25.0,
-                "step": 0.1,
-                "quality_inner": 5.0,
-                "quality_outer": 10.0,
-                "quality_unit": "",
-            },
-        }
+                "upper": upper,
+                "step": 1,
+            }
+
+        return settings
 
     @staticmethod
     def _inject_flow_metric_controls(path_to_save, metric_settings):
@@ -680,11 +718,7 @@ class Plotter:
 <div id="counts-map-controls">
   <div class="counts-control-title">Count point colors</div>
   <label for="counts-color-metric">Metric</label>
-  <select id="counts-color-metric">
-    <option value="pdiff">Percentage difference (%)</option>
-    <option value="adiff">Absolute difference (vehicles/day)</option>
-    <option value="geh">GEH</option>
-  </select>
+  <select id="counts-color-metric"></select>
   <div class="counts-bound-row">
     <div class="counts-bound-group">
       <label for="counts-lower-bound">Lower</label>
@@ -704,11 +738,7 @@ class Plotter:
   <div class="counts-quality-section">
     <div class="counts-quality-title">Accuracy centers</div>
     <label for="counts-quality-metric">Center metric</label>
-    <select id="counts-quality-metric">
-      <option value="pdiff">Absolute percentage difference (%)</option>
-      <option value="adiff">Absolute flow difference (vehicles/day)</option>
-      <option value="geh">GEH</option>
-    </select>
+    <select id="counts-quality-metric"></select>
     <div class="counts-quality-row">
       <label><input id="counts-show-green" type="checkbox" checked> Green</label>
       <label for="counts-green-threshold">Below</label>
@@ -835,6 +865,25 @@ class Plotter:
   const deck = typeof deckInstance === "undefined" ? null : deckInstance;
   const bounds = JSON.parse(JSON.stringify(metricSettings));
   const qualityBounds = JSON.parse(JSON.stringify(metricSettings));
+
+  function addOption(target, key, label) {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = label;
+    target.appendChild(option);
+  }
+
+  Object.keys(metricSettings).forEach(function (key) {
+    addOption(select, key, metricSettings[key].label);
+  });
+  Object.keys(metricSettings).forEach(function (key) {
+    const setting = metricSettings[key];
+    if (setting.quality_inner === undefined || setting.quality_outer === undefined) {
+      return;
+    }
+    addOption(qualityMetricSelect, key, metricSettings[key].label);
+  });
+
   let activeMetric = select.value;
   let activeQualityMetric = qualityMetricSelect.value;
 

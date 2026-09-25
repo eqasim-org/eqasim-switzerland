@@ -1,31 +1,7 @@
-"""
-Rebuilds tpg_counts_agg_workdays.csv from TPG's raw daily passenger counts.
-
-This reproduces a day-type classification, then a groupby/agg into
-min/max/mean/p10/p20/p50/p80/p90, to match the schema consumed by
-comparison_passenger_counts_geneva.py / stages._build_tpg_mofr (via
-config.Config.tpg_processed_counts_path) and used for the TPG confidence
-interval in comparison.py: std is included alongside the percentiles
-(comparison.py's CI is mean +/- 1.96*std), and both count variants present
-in the raw file are aggregated - "Brut" (raw, observed counts -> the
-*_raw_* columns) and the plain one (TPG's own corrected/expanded estimate
--> the columns without _raw_).
-
-Source data: one row per (date, line+direction, theoretical hour slot,
-stop), covering a full year. This is on the order of tens of millions of
-rows / ~1GB - expect this to take a few minutes and a few GB of memory. It
-is NOT run as a pipeline stage; run it separately (e.g. once, to
-regenerate/verify the aggregated file) via:
-
-    python tpg_raw_stats.py --raw-counts-path ... --tpg-data-path ... --out PATH
-"""
-
 import argparse
-
 import numpy as np
 import pandas as pd
 
-# Same calendar as TPGstops.ipynb's classify_day() (hardcoded for 2024).
 _BANK_HOLIDAYS_2024 = pd.to_datetime([
     "01.01.2024",
     "29.03.2024",
@@ -54,7 +30,6 @@ _SCHOOL_HOLIDAYS_2024 = [
 
 _DIRECTION_LETTER = {"Aller": "H", "Retour": "R"}
 
-# (raw_column, adjusted_column, output_prefix)
 _COUNT_COLUMNS = [
     ("Nb Montées Brut", "Nb Montées", "boardings"),
     ("Nb Descentes Brut", "Nb Descentes", "alightings"),
@@ -62,14 +37,6 @@ _COUNT_COLUMNS = [
 
 
 def classify_day_type(dates, bank_holidays = _BANK_HOLIDAYS_2024, school_holidays = _SCHOOL_HOLIDAYS_2024):
-    """
-    Vectorized version of TPGstops.ipynb's classify_day(): for each date,
-    priority (highest wins) is Sunday > Saturday > Bank holiday >
-    School holiday > Weekday. `bank_holidays`/`school_holidays` default to
-    the 2024 calendar above; pass a different year's calendar to reuse this
-    for another year (see tpg_raw_stats_2025.py).
-    """
-
     dates   = pd.DatetimeIndex(dates)
     weekday = dates.weekday
 
@@ -88,8 +55,6 @@ def classify_day_type(dates, bank_holidays = _BANK_HOLIDAYS_2024, school_holiday
 
 
 def load_stop_crosswalk(tpg_data_path):
-    """TPG stop_code ("Arrêt Code Long" in the raw file) -> GTFS stop id."""
-
     df = pd.read_csv(f"{tpg_data_path}/TPG_stops_info/tpg_Arrets.csv", encoding = "latin1", sep = ";")
     df.columns = ["stop_code", "lon", "lat", "country", "name", "municipality", "gtfs_code", "date1", "date2"]
     df = df[["stop_code", "gtfs_code"]]
@@ -100,21 +65,12 @@ def load_stop_crosswalk(tpg_data_path):
 
 
 def parse_line_direction(ligne_sens):
-    """"15 - Retour" -> "15_R", "15 - Aller" -> "15_H" (same H/R convention as tpg_data.match_line_directions)."""
-
     parts = ligne_sens.astype(str).str.partition(" - ")
     line, direction = parts[0], parts[2]
     return line.str.strip() + "_" + direction.str.strip().map(_DIRECTION_LETTER)
 
 
 def aggregate_workday_stats(raw_counts_path, tpg_data_path):
-    """
-    Returns a DataFrame with the same schema as tpg_counts_agg_workdays.csv:
-    one row per (gtfs_code, line_direction, hour) on "Weekday"-type days in
-    2024, with min/max/mean/std/q10/q20/q50/q80/q90 of boardings and
-    alightings, in both their raw and TPG-adjusted variants.
-    """
-
     print(f"Reading raw TPG counts from {raw_counts_path} (this is large, ~1GB)...")
     raw = pd.read_csv(
         raw_counts_path, sep = ";",

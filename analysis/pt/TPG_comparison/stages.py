@@ -1,39 +1,6 @@
-"""
-The MATSim-vs-TPG comparison stages, ported from eqasim-switzerland's
-analysis/pt/2024 synpp stage. Each stage takes a config.Config, an output
-directory, and a `year` (which TPG_processed_counts file to compare against)
-and writes its plots there - no synpp `context` object is used anywhere.
-
-`year` only selects the TPG stats file (see _resolve_tpg_stats_path); the
-GTFS feed, MATSim output, and the stop/line crosswalk used to match MATSim
-lines to TPG lines are not year-dependent here and still come from
-cfg.tpg_data_path's TPG_stops_info/ files (see tpg_data.py) regardless of `year`.
-
-Direction: 2024's TPG stats have a direction ("{line}_H"/"{line}_R" in
-line_direction); 2025's don't (bare line number - the 2025 raw source has
-no direction field, see tpg_raw_stats_2025.py's docstring). _build_tpg_mofr
-detects which case it's in and merges accordingly: per line+direction when
-available, or with MATSim boardings/alightings summed across both
-directions per line (counts_ge's line_alone column, from
-tpg_data.match_line_directions) when it isn't. So a year=2025 comparison is
-real, but direction-blind - two lines sharing a stop in opposite directions
-are compared as one combined total, not separately. 2025-specific
-directions can be derived later to get a like-for-like comparison with 2024.
-
-Leman Express (LEX): folded into the comparison and maps only when
-cfg.include_lemanis is True (default False, pending confirmation of the
-source CSV's time-bin/value assumptions - see lemanis.py's module
-docstring). When on, _build_lemanis_mofr's rows are concatenated onto
-tpg_mofr and lemanis.build_line_route_geometries's onto the line map's
-route geometries - both regardless of `year`, since LEX is a single 2022
-snapshot, not a per-year TPG file.
-"""
-
 import glob
 import os
-
 import pandas as pd
-
 import comparison
 import gtfs_utils
 import interactive_map
@@ -53,12 +20,10 @@ def _resolve_tpg_stats_path(processed_counts_dir, year):
             f"`python tpg_raw_stats_2025.py --out ...` (2025) first."
         )
 
-    return candidates[-1]  # filenames are date-suffixed, so the last one sorts most recent
+    return candidates[-1]  
 
 
 def _load_gtfs_and_matched_counts(cfg):
-    """Common setup shared by the MATSim-vs-TPG comparisons, independent of `year`."""
-
     gtfs_stops = gtfs_utils.read_gtfs(cfg.gtfs_zip)
     gtfs_stops = gtfs_utils.add_missing_base_stops(gtfs_stops)
 
@@ -75,32 +40,16 @@ def _load_gtfs_and_matched_counts(cfg):
     return gtfs_stops, tpg_stops, line_directions, counts_ge, stops_in_ge
 
 
-def _build_lemanis_mofr(cfg, gtfs_stops, stops_in_ge):
-    """
-    Same idea as _build_tpg_mofr, but for the Leman Express (LEX) stats
-    from lemanis.py instead of a TPG_processed_counts file - a single-year
-    (2022) point estimate, not day-by-day raw data, so there's no year
-    argument and no active-stop filtering here (that happens once, after
-    concatenation with the TPG side, in _build_tpg_mofr).
-
-    Direction-blind on BOTH sides, deliberately: lemanis.to_tpg_shape()
-    already sums LEX's own sens 1/2 into one line total (see its
-    docstring), and here MATSim's L1-L6 boardings/alightings are likewise
-    summed across every route_direction/line_main_direction before
-    joining - unlike _build_tpg_mofr's TPG lines, LEX's MATSim direction
-    labels are free-text endpoints ("Coppet->Annemasse") with no clean way
-    to line up against LEX's numeric sens, so this doesn't attempt
-    tpg_data.match_line_directions's fuzzy endpoint matching at all; it
-    just compares whole-line, both-directions-combined totals.
-
-    Also unlike _build_tpg_mofr, MATSim counts are pulled straight from
-    tpg_data.load_matsim_counts (not the `counts_ge` produced by
-    tpg_data.match_line_directions), because match_line_directions only
-    ever looks at TPG bus/tram lines (from tpg_Lignes-arrêts_2024.csv) and
-    would silently drop every LEX row.
-    """
-
-    lemanis_stats = lemanis.to_tpg_shape(lemanis.expand_to_hourly(lemanis.load_weekday_counts(cfg.lemanis_csv_path)))
+def _build_lemanis_period_mofr(cfg, gtfs_stops, stops_in_ge):
+    """Lemanis comparison table, kept at Lemanis' own period resolution
+    (see lemanis.PERIOD_ORDER) instead of being split down to hourly:
+    MATSim's hourly boardings/alightings are aggregated UP into those same
+    periods here, rather than dividing Lemanis' period totals evenly across
+    their constituent hours (which invented a false hourly precision the
+    source data doesn't have, and - via the "All day" row - used to double
+    count every hour once from its own period and once more from "All
+    day"'s expansion over the same hours)."""
+    lemanis_stats = lemanis.to_period_shape(lemanis.load_weekday_counts(cfg.lemanis_csv_path))
     lemanis_stats["gtfs_code"] = lemanis_stats["gtfs_code"].astype(str)
     lex_lines = sorted(lemanis_stats["line_direction"].unique())
 
@@ -110,14 +59,17 @@ def _build_lemanis_mofr(cfg, gtfs_stops, stops_in_ge):
     matsim_counts["boardings"]  = matsim_counts["boardings"]  / cfg.input_downsampling
     matsim_counts["alightings"] = matsim_counts["alightings"] / cfg.input_downsampling
 
+    matsim_counts["period"] = matsim_counts["hour"].map(lemanis.HOUR_TO_PERIOD)
+    matsim_counts = matsim_counts[matsim_counts["period"].notna()]
+
     matsim_side = matsim_counts.groupby(
-        ["stop_id_gtfs_base", "line_name", "hour"], as_index = False
+        ["stop_id_gtfs_base", "line_name", "period"], as_index = False
     )[["boardings", "alightings"]].sum()
 
     lemanis_mofr = lemanis_stats.merge(
         matsim_side.rename(columns = {"boardings": "boardings_matsim", "alightings": "alightings_matsim"}),
-        left_on  = ["gtfs_code", "line_direction", "hour"],
-        right_on = ["stop_id_gtfs_base", "line_name", "hour"], how = "left",
+        left_on  = ["gtfs_code", "line_direction", "period"],
+        right_on = ["stop_id_gtfs_base", "line_name", "period"], how = "left",
     )
     lemanis_mofr["boardings_matsim"]  = lemanis_mofr["boardings_matsim"].fillna(0)
     lemanis_mofr["alightings_matsim"] = lemanis_mofr["alightings_matsim"].fillna(0)
@@ -131,21 +83,11 @@ def _build_lemanis_mofr(cfg, gtfs_stops, stops_in_ge):
         print(f"Dropping {unmatched}/{len(lemanis_mofr)} lemanis_mofr rows whose gtfs_code isn't in the current GTFS feed")
         lemanis_mofr = lemanis_mofr[lemanis_mofr["stop_name"].notna()]
 
-    # Drop the MATSim-side join helper columns only - keep stop_id (and
-    # everything else) so this has the exact same column set as
-    # _build_tpg_mofr's tpg_mofr, which it gets concatenated onto.
     return lemanis_mofr[[c for c in lemanis_mofr.columns if c not in ("stop_id_gtfs_base", "line_name")]]
 
 
 def _build_tpg_mofr(cfg, year):
-    """
-    Merges the `year` TPG stop/line/hour counts (from TPG_processed_counts,
-    see _resolve_tpg_stats_path) with the matched, downsampling-scaled
-    MATSim boardings and alightings. Shared by the stop/line stage and the
-    global/map stages.
-    """
-
-    gtfs_stops, tpg_stops, _line_directions, counts_ge, stops_in_ge = _load_gtfs_and_matched_counts(cfg)
+    gtfs_stops, tpg_stops, _, counts_ge, stops_in_ge = _load_gtfs_and_matched_counts(cfg)
 
     counts_ge = counts_ge.copy()
     counts_ge["boardings"]  = counts_ge["boardings"]  / cfg.input_downsampling
@@ -158,17 +100,12 @@ def _build_tpg_mofr(cfg, year):
 
     counts_ge["stop_id_gtfs_base"] = counts_ge["stop_id_gtfs_base"].astype(str)
 
-    # Not every year's TPG stats have a direction: 2024's line_direction is
-    # "{line}_H"/"{line}_R", but 2025's is a bare line number (no direction
-    # field in that raw source - see tpg_raw_stats_2025.py). Detect which
-    # case this is and merge MATSim accordingly: per line+direction when
-    # direction is available, or aggregated across both directions
-    # (counts_ge's line_alone column) when it isn't.
     has_direction = tpg_mofr["line_direction"].astype(str).str.endswith(("_H", "_R")).all()
 
     if has_direction:
         matsim_side = counts_ge[["stop_id_gtfs_base", "line_direction", "hour", "boardings", "alightings"]]
         merge_right = ["stop_id_gtfs_base", "line_direction", "hour"]
+
     else:
         print("TPG stats have no direction field - aggregating MATSim boardings/alightings across both directions per line")
         matsim_side = counts_ge.groupby(["stop_id_gtfs_base", "line_alone", "hour"], as_index = False)[["boardings", "alightings"]].sum()
@@ -182,23 +119,27 @@ def _build_tpg_mofr(cfg, year):
 
     tpg_mofr["boardings_matsim"]  = tpg_mofr["boardings_matsim"].fillna(0)
     tpg_mofr["alightings_matsim"] = tpg_mofr["alightings_matsim"].fillna(0)
-    tpg_mofr["gtfs_code"] = tpg_mofr["gtfs_code"].astype(str)
+    tpg_mofr["gtfs_code"]         = tpg_mofr["gtfs_code"].astype(str)
 
     tpg_mofr = tpg_mofr.merge(gtfs_stops[["stop_id", "stop_name"]], left_on = "gtfs_code", right_on = "stop_id", how = "left")
 
     unmatched = tpg_mofr["stop_name"].isna().sum()
     if unmatched:
-        # A TPG stop_code can resolve (via the crosswalk) to a GTFS id that
-        # isn't in this particular GTFS snapshot - e.g. when the stats were
-        # rebuilt from the raw counts (tpg_raw_stats.py), which doesn't apply
-        # whatever extra filtering produced the precomputed CSV.
         print(f"Dropping {unmatched}/{len(tpg_mofr)} tpg_mofr rows whose gtfs_code isn't in the current GTFS feed")
         tpg_mofr = tpg_mofr[tpg_mofr["stop_name"].notna()]
 
+    # Lemanis is kept at its own period resolution (see
+    # _build_lemanis_period_mofr) rather than concatenated into tpg_mofr:
+    # tpg_mofr's downstream tables all reindex over the 24 hours of a day
+    # (comparison.build_stop_hour_table etc.), which Lemanis' 3 broad
+    # periods can't be split into without inventing false hourly precision.
+    lemanis_period_mofr = None
     if cfg.include_lemanis:
-        lemanis_mofr = _build_lemanis_mofr(cfg, gtfs_stops, stops_in_ge)
-        print(f"Adding {lemanis_mofr['gtfs_code'].nunique()} Leman Express stop(s) ({len(lemanis_mofr)} rows) to the comparison")
-        tpg_mofr = pd.concat([tpg_mofr, lemanis_mofr], ignore_index = True)
+        lemanis_period_mofr = _build_lemanis_period_mofr(cfg, gtfs_stops, stops_in_ge)
+        print(
+            f"Built a period-level comparison for {lemanis_period_mofr['gtfs_code'].nunique()} "
+            f"Leman Express stop(s) ({len(lemanis_period_mofr)} rows)"
+        )
 
     n_stops_before = tpg_mofr["gtfs_code"].nunique()
     tpg_mofr = comparison.filter_active_stops(
@@ -210,26 +151,23 @@ def _build_tpg_mofr(cfg, year):
         f"during >={cfg.min_stop_active_hours} hours/day): {n_stops_after}/{n_stops_before} stops kept"
     )
 
-    return gtfs_stops, tpg_stops, tpg_mofr, stops_in_ge
+    return gtfs_stops, tpg_stops, tpg_mofr, stops_in_ge, lemanis_period_mofr
 
 
 def run_stop_line_comparison(cfg, output_dir, year, stop = "Genève, gare Cornavin", line = "1_H"):
-    """
-    Stop/line-level comparison of MATSim boardings against the `year` TPG
-    counts (mean/std/percentiles), producing an error-category heatmap and a
-    min-max/percentile plot for one stop and line.
-    """
-
-    _gtfs_stops, _tpg_stops, tpg_mofr, _stops_in_ge = _build_tpg_mofr(cfg, year)
+    _, _, tpg_mofr, _, _ = _build_tpg_mofr(cfg, year)
 
     os.makedirs(output_dir, exist_ok = True)
 
     plotting.plot_comparison_for_stop_and_line(
-        tpg_mofr, option = "boardings", line = line, stop = stop,
+        tpg_mofr, 
+        option = "boardings", line = line, stop = stop,
         output_path = f"{output_dir}/comparison_{stop}_{line}.pdf",
     )
+
     plotting.plot_heatmap_for_line(
-        tpg_mofr, option = "boardings", line = line,
+        tpg_mofr, 
+        option = "boardings", line = line,
         output_path = f"{output_dir}/heatmap_{line}.pdf",
     )
 
@@ -237,16 +175,7 @@ def run_stop_line_comparison(cfg, output_dir, year, stop = "Genève, gare Cornav
 
 
 def run_global_comparison(cfg, output_dir, year):
-    """
-    Perimeter-wide comparison of MATSim vs the `year` TPG counts, aggregated
-    across all stops and lines: total passenger events (boardings +
-    alightings) by hour of day, plus three interactive maps - one per-stop
-    with an hour slider, one per-stop with a fixed 6AM-10PM aggregate and a
-    per-stop hourly chart in each popup, and one per-line (route polylines,
-    both directions combined) with a per-direction hourly chart per popup.
-    """
-
-    gtfs_stops, tpg_stops, tpg_mofr, stops_in_ge = _build_tpg_mofr(cfg, year)
+    gtfs_stops, tpg_stops, tpg_mofr, stops_in_ge, lemanis_period_mofr = _build_tpg_mofr(cfg, year)
 
     os.makedirs(output_dir, exist_ok = True)
 
@@ -260,6 +189,17 @@ def run_global_comparison(cfg, output_dir, year):
     windowed_stop_hour_df = stop_hour_df[stop_hour_df["hour"].between(*hour_range)]
     windowed_full_day_df  = comparison.build_full_day_table(windowed_stop_hour_df)
 
+    # Lemanis stops get their own period-level table (see
+    # _build_lemanis_period_mofr) added onto the full-day stop map, with a
+    # period bar chart (not the hourly chart) in their popup - they're left
+    # out of the hourly TimestampedGeoJson map below, which genuinely needs
+    # per-hour data Lemanis' 3 broad periods can't provide.
+    lemanis_stop_period_df   = None
+    lemanis_stop_full_day_df = None
+    if lemanis_period_mofr is not None and not lemanis_period_mofr.empty:
+        lemanis_stop_period_df   = comparison.build_lemanis_stop_period_table(lemanis_period_mofr, gtfs_stops)
+        lemanis_stop_full_day_df = comparison.build_lemanis_stop_full_day_table(lemanis_stop_period_df)
+
     interactive_map.build_hourly_map(
         stop_hour_df, f"{output_dir}/pt_stop_map_by_hour.html",
         perimeter_shapefile = cfg.perimeter_shapefile, hour_range = hour_range,
@@ -267,6 +207,8 @@ def run_global_comparison(cfg, output_dir, year):
     interactive_map.build_full_day_map(
         windowed_stop_hour_df, windowed_full_day_df, f"{output_dir}/pt_stop_map_6am_10pm.html",
         perimeter_shapefile = cfg.perimeter_shapefile,
+        lemanis_stop_period_df = lemanis_stop_period_df,
+        lemanis_stop_full_day_df = lemanis_stop_full_day_df,
     )
 
     line_hour_df = comparison.build_line_hour_table(tpg_mofr)
@@ -274,6 +216,20 @@ def run_global_comparison(cfg, output_dir, year):
     windowed_line_hour_df = line_hour_df[line_hour_df["hour"].between(*hour_range)]
     line_full_day_df = comparison.build_line_full_day_table(windowed_line_hour_df)
     line_base_df = comparison.build_line_base_table(line_full_day_df)
+
+    # Lemanis lines get their own period-level table (see
+    # _build_lemanis_period_mofr) rather than being windowed/reindexed by
+    # hour like the TPG lines above - their route/full-day summary is
+    # merged into line_base_df (same columns) so build_line_map's coloring
+    # and popups treat them uniformly, but build_line_map renders a
+    # separate period bar chart (not the hourly chart) for these lines.
+    lemanis_line_period_df = None
+    if lemanis_period_mofr is not None and not lemanis_period_mofr.empty:
+        lemanis_line_period_df = comparison.build_lemanis_line_period_table(lemanis_period_mofr)
+        lemanis_line_full_day_df = comparison.build_lemanis_line_full_day_table(lemanis_line_period_df)
+        lemanis_line_base_df = comparison.build_line_base_table(lemanis_line_full_day_df)
+        line_base_df = pd.concat([line_base_df, lemanis_line_base_df], ignore_index = True)
+
     line_geometries_df = tpg_data.build_line_route_geometries(cfg.tpg_data_path, tpg_stops, gtfs_stops)
     if cfg.include_lemanis:
         lemanis_geometries_df = lemanis.build_line_route_geometries(gtfs_stops, cfg.lemanis_csv_path)
@@ -282,6 +238,7 @@ def run_global_comparison(cfg, output_dir, year):
     interactive_map.build_line_map(
         windowed_line_hour_df, line_base_df, line_geometries_df, f"{output_dir}/pt_line_map_6am_10pm.html",
         perimeter_shapefile = cfg.perimeter_shapefile,
+        lemanis_line_period_df = lemanis_line_period_df,
     )
 
     return stop_hour_df, full_day_df, global_hourly_df

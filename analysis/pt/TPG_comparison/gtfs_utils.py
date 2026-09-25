@@ -1,5 +1,3 @@
-"""GTFS loading helpers, extracted from eqasim-switzerland's synpp stages."""
-
 from zipfile import ZipFile
 
 import geopandas as gpd
@@ -75,27 +73,8 @@ def read_gtfs(gtfs_path):
 
 
 def add_missing_base_stops(gtfs_stops):
-    """
-    Some GTFS station families have no row for their own bare base id
-    (the part of stop_id before the first ":") - only per-platform child
-    rows like "8501013:0:1"/"8501013:0:2" exist, with no plain "8501013"
-    row alongside them (unlike most families, which do have one). Checked
-    against this feed: ~2100 base ids feed-wide are affected, including
-    several Leman Express stations (Pont-Cearl, Mies, Tannay, Chambesy,
-    Versoix, Coppet, Lancy-Pont-Rouge, Geneve-Champel, Geneve-Eaux-Vives,
-    Chene-Bourg, Lancy-Bachet - see lemanis.py).
-
-    Anything that joins on gtfs_code == stop_id (this whole pipeline's
-    convention, e.g. tpg_data.py's crosswalks, lemanis.py's
-    STOP_NAME_TO_GTFS_CODE, MATSim's stop_id_gtfs_base) silently fails to
-    resolve a stop_name/coordinate for those ids. This adds one synthetic
-    row per missing base id, copied from its first child (same
-    name/coordinates - good enough for labeling and map placement; not
-    meant to represent an exact platform location).
-    """
-
     base_ids = gtfs_stops["stop_id"].str.split(":").str[0]
-    missing = ~base_ids.isin(set(gtfs_stops["stop_id"]))
+    missing  = ~base_ids.isin(set(gtfs_stops["stop_id"]))
 
     if not missing.any():
         return gtfs_stops

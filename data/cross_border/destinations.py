@@ -7,6 +7,20 @@ from data.cross_border.generate_od import sjoin_within_unique
 
 logger = logging.getLogger("synpp")
 
+
+ENTRY_SUFFIX = "_entry"
+EXIT_SUFFIX = "_exit"
+
+
+def make_entry_border_facility_id(border_crossing_point_id):
+    # Directional suffixes keep one logical crossing point but expose two MATSim facilities.
+    return f"{border_crossing_point_id}{ENTRY_SUFFIX}"
+
+
+def make_exit_border_facility_id(border_crossing_point_id):
+    # The exit facility is separate so MATSim can attach it to the opposite one-way link.
+    return f"{border_crossing_point_id}{EXIT_SUFFIX}"
+
 def configure(context):
     context.config("random_seed")
 
@@ -105,13 +119,36 @@ def execute(context):
         df.loc[df["destination_id"] == -1, "label"] == "Through"
     ).all(), "Found rows with destination_id = -1 and label != 'Through'"
 
+    # Every respondent (From-To and Through alike) is surveyed at exactly one
+    # physical border-crossing point (data.cross_border.interview_places, via
+    # sample_point in generate_od.py) - there is no second, independently
+    # observed crossing point for the way back or the way out. Both "From-To"
+    # directions and both "Through" legs (entering/leaving Switzerland) are
+    # therefore anchored at that same interview_geometry_point; the separate
+    # entry/exit IDs only let the MATSim preparation patch assign distinct
+    # one-way links while preserving the original crossing point as the
+    # common base - they do NOT mean the crossing itself differs.
+    #
+    # (origin_x/origin_y and destination_x/destination_y are NOT border
+    # points here - for "Through" trips they are the trip's real or
+    # projected-onto-interview-place endpoints, which network_projection may
+    # later refine far from this crossing; using them as the entry/exit
+    # geometry would place the "border" activity at the agent's home or
+    # destination instead of at the border.)
+    df["entry_interview_point_id"] = df["interview_point_id"].apply(make_entry_border_facility_id)
+    df["exit_interview_point_id"] = df["interview_point_id"].apply(make_exit_border_facility_id)
+    df["entry_interview_geometry_point"] = df["interview_geometry_point"]
+    df["exit_interview_geometry_point"] = df["interview_geometry_point"]
+
     df = df[["cross_border_person_id", "mz_person_id", "label",
-             "residence_x", "residence_y",
+             "residence_x", "residence_y", "destination_residence_x", "destination_residence_y",
              "trip_mode", "trip_purpose", "destination_id",
              "origin_x", "origin_y", "destination_x", "destination_y",
              "is_border_point_projected", "origin_is_projected", "destination_is_projected",
              "origin_point_id", "destination_point_id",
              "interview_place", "interview_point_id", "interview_geometry_point",
+             "entry_interview_point_id", "entry_interview_geometry_point",
+             "exit_interview_point_id", "exit_interview_geometry_point",
              "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]]
     
     # destination_id is a canonical id string for real destinations (e.g.
