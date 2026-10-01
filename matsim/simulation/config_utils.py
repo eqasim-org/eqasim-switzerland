@@ -287,7 +287,7 @@ def get_network_calibration_args(context):
         assert (calibrate_disutilities or calibrate_freespeed or calibrate_agent_acs or calibrate_subpopulations), "Network calibration is activated, one of disutilities calibration or freespeed calibration need to be activated"
     
     additional_args =[
-        "--config:eqasim:networkCalibration.activate", "true",
+        "--config:eqasim:networkCalibration.activate", str(calibrate_network).lower(),
         "--config:eqasim:networkCalibration.correctCapacities", java_boolean(context.config("correct_links_capacity"), "correct_links_capacity"),
         "--config:eqasim:networkCalibration.minSpeed", str(context.config("minimum_speed")),
         "--config:eqasim:networkCalibration.objective", get_network_calibration_objectives(context),
