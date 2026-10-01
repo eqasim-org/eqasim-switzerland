@@ -10,26 +10,24 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-# Columns the webmap's person panels need. A parquet missing any of these is a
-# stale/partial leftover, not a synthesis.output product - see _pick_persons_parquet.
-REQUIRED_PERSON_COLUMNS = frozenset({
-    "person_id", "household_id", "age", "sex",
-    "car_availability", "has_driving_license", "employed",
-    "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
-    "subscriptions_strecke", "subscriptions_gleis7", "subscriptions_junior",
-    "subscriptions_other",
+# Columns synthesis.output writes to <output_path>/switzerland_persons.csv. A CSV
+# missing any of these is from an older pipeline version - see _pick_persons_csv.
+SYNTHESIS_PERSON_COLUMNS = frozenset({
+    "person_id", "household_id", "age", "sex", "employed",
+    "has_driving_license", "pt_subscription", "mz_person_id", "canton_id",
 })
 
 
 @dataclass
 class SyntheticSources:
     """Inputs needed for the synthetic.duckdb build."""
-    persons_parquet: Path
+    persons_csv: Path
     statpop_persons_pickle: Optional[Path]
     households_pickle: Optional[Path]
     enriched_pickle: Optional[Path]
     output_trips_csv: Optional[Path]
     output_activities_csv: Optional[Path]
+    output_persons_csv: Optional[Path]
     output_plans_xml: Optional[Path]
     output_events_xml: Optional[Path]
     output_network_xml: Optional[Path]
@@ -53,7 +51,8 @@ class MicrocensusSources:
     swisstopo_gemeinde_shp: Optional[Path]
 
 
-DEFAULT_CACHE_DIR = Path("/cluster/work/ivt_vpl/anding/cache")
+# synpp working_directory (config_andrew.yml); stages use the run cache's parent instead
+DEFAULT_CACHE_DIR = Path("/cluster/work/ivt_vpl/anding/cache_uv")
 DEFAULT_DATA_PATH = Path("/cluster/project/cmdp/ch_data/pipeline")
 DEFAULT_HOME_PIPE = Path("/cluster/home/anding/ch")
 
@@ -67,8 +66,7 @@ def _newest_cache(name_prefix: str, cache_dir: Path) -> Optional[Path]:
 def _config_output_paths(home_pipe: Path) -> list[Path]:
     """Every absolute `output_path:` declared in the repo's config*.yml files.
 
-    synthesis/output.py writes its parquets to <output_path>/webmap_data/synthetic/,
-    so this is where the genuine persons artifact lives.
+    synthesis/output.py writes switzerland_*.csv directly into <output_path>/.
     """
     out: list[Path] = []
     repo = home_pipe / "ch-zh-synpop"
@@ -85,25 +83,24 @@ def _config_output_paths(home_pipe: Path) -> list[Path]:
     return out
 
 
-def _parquet_columns(path: Path) -> Optional[set[str]]:
-    """Column names from the parquet footer only (no data read); None if unreadable."""
+def _csv_columns(path: Path) -> Optional[set[str]]:
+    """Header of a ';'-separated CSV; None if unreadable."""
     try:
-        import pyarrow.parquet as pq
-        return set(pq.ParquetFile(path).schema_arrow.names)
-    except Exception as exc:  # noqa: BLE001 - a bad candidate must not kill discovery
-        log.warning("could not read parquet schema of %s: %s", path, exc)
+        with path.open(errors="ignore") as f:
+            return set(f.readline().strip().split(";"))
+    except OSError as exc:
+        log.warning("could not read header of %s: %s", path, exc)
         return None
 
 
-def _pick_persons_parquet(candidates: list[Path], fallback: Path) -> Path:
-    """Newest candidate that carries the full expected column set.
+def _pick_persons_csv(candidates: list[Path]) -> Path:
+    """Newest candidate carrying the current synthesis.output persons columns.
 
-    Selecting on mtime alone once silently picked a 10-column leftover over the
-    real 21-column artifact, so completeness is the primary key and mtime only
-    breaks ties among complete files.
+    The legacy webmap_data/synthetic/*.parquet files are no longer written by
+    synthesis.output and belong to older populations, so they are not candidates.
     """
     seen: set[Path] = set()
-    existing: list[Path] = []
+    complete: list[Path] = []
     for c in candidates:
         try:
             if not c.exists():
@@ -115,36 +112,22 @@ def _pick_persons_parquet(candidates: list[Path], fallback: Path) -> Path:
         if key in seen:
             continue
         seen.add(key)
-        existing.append(c)
-
-    if not existing:
-        log.error("no persons parquet found; falling back to %s (does not exist)", fallback)
-        return fallback
-
-    complete: list[Path] = []
-    for c in existing:
-        cols = _parquet_columns(c)
+        cols = _csv_columns(c)
         if cols is None:
             continue
-        missing = REQUIRED_PERSON_COLUMNS - cols
+        missing = SYNTHESIS_PERSON_COLUMNS - cols
         if missing:
-            log.warning(
-                "skipping persons parquet %s: missing %d expected column(s): %s",
-                c, len(missing), ", ".join(sorted(missing)),
-            )
+            log.warning("skipping persons CSV %s: missing column(s): %s",
+                        c, ", ".join(sorted(missing)))
             continue
         complete.append(c)
 
-    pool = complete or existing
-    chosen = max(pool, key=lambda p: p.stat().st_mtime)
     if not complete:
-        log.error(
-            "NO persons parquet has the full expected column set - falling back to %s; "
-            "subscriptions/car_availability panels in the webmap will be NULL", chosen,
-        )
-    else:
-        log.info("persons parquet -> %s (%d on disk, %d complete)",
-                 chosen, len(existing), len(complete))
+        raise FileNotFoundError(
+            "No synthesis.output persons CSV found (looked for switzerland_persons.csv in: "
+            + ", ".join(str(c.parent) for c in candidates) + ")")
+    chosen = max(complete, key=lambda p: p.stat().st_mtime)
+    log.info("persons CSV -> %s (%d candidate(s))", chosen, len(complete))
     return chosen
 
 
@@ -171,33 +154,23 @@ def discover_synthetic(
     cache_dir: Path = DEFAULT_CACHE_DIR,
     data_path: Path = DEFAULT_DATA_PATH,
     home_pipe: Path = DEFAULT_HOME_PIPE,
+    output_path: Optional[Path] = None,
 ) -> SyntheticSources:
-    """Best-effort discovery - missing inputs become None."""
+    """Best-effort discovery - missing inputs become None.
+
+    output_path is the synpp `output_path` config (where synthesis.output writes);
+    without it every absolute output_path in the repo's config*.yml is tried.
+    """
     sim_out = matsim_dir / "simulation_output"
 
-    # The genuine artifact first: synthesis/output.py writes to
-    # <output_path>/webmap_data/synthetic/ and never into its own synpp cache dir
-    # (those .cache dirs stay empty), so anything found under synthesis.output__*.cache
-    # is a leftover. Candidates are ranked by column completeness, then mtime.
-    _persons_candidates = [
-        p / "webmap_data" / "synthetic" / "switzerland_persons.parquet"
-        for p in _config_output_paths(home_pipe)
-    ]
-    _persons_candidates.append(
-        cache_dir / "synthesis_output" / "webmap_data" / "synthetic" / "switzerland_persons.parquet"
-    )
-    _persons_candidates.append(home_pipe / "switzerland_persons.parquet")
-    _persons_candidates.extend(
-        sorted(cache_dir.glob("synthesis.output__*.cache/switzerland_persons.parquet"))
-    )
-    persons_parquet = _pick_persons_parquet(
-        _persons_candidates, home_pipe / "switzerland_persons.parquet"
-    )
+    output_paths = [output_path] if output_path else _config_output_paths(home_pipe)
+    persons_csv = _pick_persons_csv(
+        [Path(p) / "switzerland_persons.csv" for p in output_paths])
 
     canton_shp, bezirk_shp, gemeinde_shp = _swisstopo_paths(data_path)
 
     return SyntheticSources(
-        persons_parquet=persons_parquet,
+        persons_csv=persons_csv,
         statpop_persons_pickle=_newest_cache("data.statpop.persons", cache_dir),
         households_pickle=_newest_cache("data.statpop.households", cache_dir),
         enriched_pickle=_newest_cache("synthesis.population.enriched", cache_dir),
@@ -210,6 +183,8 @@ def discover_synthetic(
             sim_out / "eqasim_activities.csv",
             sim_out / "output_activities.csv.gz", sim_out / "output_activities.csv",
         ),
+        output_persons_csv=_pick_existing(
+            sim_out / "output_persons.csv.gz", sim_out / "output_persons.csv"),
         output_plans_xml=_pick_existing(sim_out / "output_plans.xml.gz", sim_out / "output_plans.xml"),
         output_events_xml=_pick_existing(sim_out / "output_events.xml.gz", sim_out / "output_events.xml"),
         output_network_xml=_pick_existing(sim_out / "output_network.xml.gz", sim_out / "output_network.xml"),

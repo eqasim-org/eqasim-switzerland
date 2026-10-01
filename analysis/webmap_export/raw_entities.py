@@ -16,7 +16,6 @@ import pandas as pd
 import pyarrow as pa
 
 from .hilbert import CH_BBOX_LV95, hilbert_2d
-from .sources import REQUIRED_PERSON_COLUMNS
 
 log = logging.getLogger(__name__)
 
@@ -28,25 +27,127 @@ _PURPOSE_BUCKETS = {"home", "work", "education", "shop", "leisure"}
 _MODE_BUCKETS = {"car", "pt", "walk", "bike", "car_passenger"}
 
 
+# Legacy synthetic persons schema (the former webmap_data/synthetic/
+# switzerland_persons.parquet). Both synthetic.duckdb and the download bundle's
+# persons.parquet keep this layout; build_synthetic_persons_frame produces it.
+LEGACY_PERSON_COLUMNS = [
+    "person_id", "household_id", "car_availability", "age", "employed", "sex",
+    "has_driving_license",
+    "subscriptions_ga", "subscriptions_halbtax", "subscriptions_verbund",
+    "subscriptions_strecke", "subscriptions_gleis7", "subscriptions_junior",
+    "subscriptions_other",
+    "subscriptions_ga_class", "subscriptions_verbund_class", "subscriptions_strecke_class",
+    "statpop_person_id", "mz_person_id", "mz_head_id", "canton_id",
+]
+
+# synthesis.population.models.subscriptions draws one category per person:
+# 0 none, 1 GA (incl. junior GA < 16), 2 Verbund (incl. Strecke), 3 Halbtax,
+# 4 Verbund + Halbtax.
+_PT_SUBSCRIPTION_FLAGS = {
+    "subscriptions_ga": (1,),
+    "subscriptions_halbtax": (3, 4),
+    "subscriptions_verbund": (2, 4),
+}
+# No longer modelled separately - always NULL.
+_UNMODELLED_SUBSCRIPTIONS = (
+    "subscriptions_strecke", "subscriptions_gleis7", "subscriptions_junior",
+    "subscriptions_other",
+    "subscriptions_ga_class", "subscriptions_verbund_class", "subscriptions_strecke_class",
+)
+
+_EMPLOYED = 1  # data.constants: 1 employed, 2 unemployed, 3 inactive
+
+
+def build_synthetic_persons_frame(persons_csv: Path, enriched_pickle: Optional[Path]) -> pd.DataFrame:
+    """synthesis.output's switzerland_persons.csv mapped onto LEGACY_PERSON_COLUMNS.
+
+    car_availability and statpop_person_id are not exported by synthesis.output
+    and come from the synthesis.population.enriched cache (same person_ids).
+    """
+    df = pd.read_csv(persons_csv, sep=";")
+    log.info("Reading %d synthetic persons from %s", len(df), persons_csv)
+
+    out = pd.DataFrame({
+        "person_id": df["person_id"].astype("int64"),
+        "household_id": df["household_id"].astype("int64"),
+        "age": df["age"].astype("int64"),
+        "employed": df["employed"] == _EMPLOYED,
+        "sex": df["sex"].astype("int64"),
+        "has_driving_license": df["has_driving_license"].astype(bool),
+        "mz_person_id": df["mz_person_id"].astype("int64"),
+        "mz_head_id": pd.array([pd.NA] * len(df), dtype="Int64"),
+        "canton_id": df["canton_id"].astype("int64"),
+    })
+
+    # Unmatched persons (mz_person_id == -1, the age 0-5 children) have no survey
+    # subscriptions; keep them NULL rather than the model's default "none".
+    unmatched = (df["mz_person_id"] == -1).to_numpy()
+    sub = df["pt_subscription"].astype("int64")
+    for col, codes in _PT_SUBSCRIPTION_FLAGS.items():
+        flag = sub.isin(codes).astype(object)
+        flag[unmatched] = None
+        out[col] = flag
+    for col in _UNMODELLED_SUBSCRIPTIONS:
+        out[col] = pd.Series([None] * len(df), dtype=object)
+
+    out["car_availability"] = np.nan
+    out["statpop_person_id"] = pd.array([pd.NA] * len(df), dtype="Int64")
+    if enriched_pickle is not None and enriched_pickle.exists():
+        with open(enriched_pickle, "rb") as f:
+            enriched = pickle.load(f)
+        enriched = enriched.drop_duplicates("person_id").set_index("person_id")
+        idx = out["person_id"]
+        # car_availability is binary now (1 available, 0 not); legacy float
+        # codes are 0 always / 1 sometimes / 2 never.
+        car = pd.to_numeric(enriched["car_availability"], errors="coerce").reindex(idx)
+        out["car_availability"] = car.map({1: 0.0, 0: 2.0}).to_numpy()
+        sp_ids = pd.array(enriched["statpop_person_id"].reindex(idx).to_numpy(), dtype="Int64")
+        out["statpop_person_id"] = sp_ids.astype("int64") if not sp_ids.isna().any() else sp_ids
+        n_miss = int(out["car_availability"].isna().sum())
+        if n_miss:
+            log.warning("persons: %d not in enriched cache %s - car_availability NULL",
+                        n_miss, enriched_pickle)
+    else:
+        log.warning("persons: enriched cache missing - car_availability/statpop_person_id NULL")
+
+    return out[LEGACY_PERSON_COLUMNS]
+
+
+def simulated_person_ids(output_persons_csv: Optional[Path]) -> Optional[pd.Index]:
+    """Numeric agent ids of the run (output_persons.csv[.gz]); None if unavailable."""
+    if output_persons_csv is None or not output_persons_csv.exists():
+        return None
+    ids = pd.read_csv(output_persons_csv, sep=";", usecols=["person"], dtype=str)["person"]
+    return pd.Index(pd.to_numeric(ids, errors="coerce").dropna().astype("int64").unique())
+
+
+def check_persons_match_run(persons: pd.DataFrame, run_ids: Optional[pd.Index],
+                            min_share: float = 0.95) -> None:
+    """Fail when the persons file belongs to another population than the run.
+
+    A stale persons file once shared only ~2% of its ids with the simulated
+    agents and still produced a plausible-looking webmap. Checked persons ->
+    agents: the run also has cross-border agents that are not in the file."""
+    if run_ids is None:
+        log.warning("persons: no output_persons for the run - population match not checked")
+        return
+    share = float(persons["person_id"].isin(run_ids).mean())
+    log.info("persons: %.1f%% of persons file found among simulated agents", 100 * share)
+    if share < min_share:
+        raise ValueError(
+            f"only {share:.1%} of the persons file are simulated agents - it is "
+            "from a different synthesis run than the MATSim output")
+
+
 def load_persons_synthetic(
     db: duckdb.DuckDBPyConnection,
-    persons_parquet: Path,
+    persons: pd.DataFrame,
     statpop_persons_pickle: Optional[Path],
     activities_for_home_pt: Optional[pd.DataFrame] = None,
     activities_for_n_acts: Optional[pd.DataFrame] = None,
 ) -> int:
-    """Load synthetic persons. Returns row count."""
-    df = pd.read_parquet(persons_parquet)
-    df = df.rename(columns={"person_id": "person_id"}).copy()
-
-    missing = [c for c in sorted(REQUIRED_PERSON_COLUMNS) if c not in df.columns]
-    if missing:
-        log.warning(
-            "persons parquet %s is missing %d expected column(s): %s - these stay NULL "
-            "and the webmap panels that use them will render empty",
-            persons_parquet, len(missing), ", ".join(missing),
-        )
-    log.info("Reading %d synthetic persons from %s", len(df), persons_parquet)
+    """Load synthetic persons (build_synthetic_persons_frame output). Returns row count."""
+    df = persons.copy()
 
     df["car_availability"] = df["car_availability"].map(_CAR_AVAIL_MAP)
     for col in ("has_driving_license", "employed",
@@ -296,6 +397,40 @@ def _insert_persons(db: duckdb.DuckDBPyConnection, df: pd.DataFrame) -> None:
     db.unregister("_tmp_persons")
 
 
+def build_synthetic_households_frame(enriched_pickle: Path) -> pd.DataFrame:
+    """One row per household: household_id, income_class, n_cars_class, n_bikes_class, ovgk."""
+    with open(enriched_pickle, "rb") as f:
+        enriched = pickle.load(f)
+
+    # statpop enrichment no longer attaches household bike classes, only
+    # person-level bike_availability (0/1). Derive the class as the number of
+    # members with bike access, capped like the MZ class (MAX_NUMBER_OF_BIKES_CLASS).
+    if "number_of_bikes_class" not in enriched.columns and "bike_availability" in enriched.columns:
+        n_bikes = (pd.to_numeric(enriched["bike_availability"], errors="coerce")
+                   .fillna(0).groupby(enriched["household_id"]).transform("sum"))
+        enriched = enriched.assign(number_of_bikes_class=n_bikes.clip(upper=3).astype("int64"))
+        log.info("synthetic households: n_bikes_class derived from person bike_availability")
+
+    # Tolerate any remaining missing attribute columns (left NULL).
+    attr_cols = ["income_class", "number_of_cars_class", "number_of_bikes_class", "ovgk"]
+    missing = [c for c in attr_cols if c not in enriched.columns]
+    if missing:
+        log.warning("synthetic households: enriched cache lacks %s - left NULL", missing)
+    df = (enriched[["household_id"] + [c for c in attr_cols if c not in missing]]
+          .drop_duplicates("household_id")
+          .copy())
+    for col in missing:
+        df[col] = pd.NA
+    df = df.rename(columns={
+        "number_of_cars_class": "n_cars_class",
+        "number_of_bikes_class": "n_bikes_class",
+    })
+    df["household_id"] = df["household_id"].astype("int64")
+    for col in ("income_class", "n_cars_class", "n_bikes_class", "ovgk"):
+        df[col] = df[col].astype("string")
+    return df[["household_id", "income_class", "n_cars_class", "n_bikes_class", "ovgk"]]
+
+
 def load_households_synthetic(
     db: duckdb.DuckDBPyConnection,
     enriched_pickle: Optional[Path],
@@ -303,21 +438,7 @@ def load_households_synthetic(
 ) -> int:
     """Insert one row per household with attribute fields."""
     if enriched_pickle is not None and enriched_pickle.exists():
-        with open(enriched_pickle, "rb") as f:
-            enriched = pickle.load(f)
-
-        df = (enriched[["household_id", "income_class",
-                        "number_of_cars_class", "number_of_bikes_class", "ovgk"]]
-              .drop_duplicates("household_id")
-              .copy())
-        df = df.rename(columns={
-            "number_of_cars_class": "n_cars_class",
-            "number_of_bikes_class": "n_bikes_class",
-        })
-        df["household_id"] = df["household_id"].astype("int64")
-
-        for col in ("income_class", "n_cars_class", "n_bikes_class", "ovgk"):
-            df[col] = df[col].astype("string")
+        df = build_synthetic_households_frame(enriched_pickle)
         db.register("_tmp_hh", df[["household_id", "income_class",
                                     "n_cars_class", "n_bikes_class", "ovgk"]])
         db.execute("""
@@ -408,10 +529,14 @@ def parse_activities_csv(path: Path) -> pd.DataFrame:
     """
     df = pd.read_csv(path, sep=";", dtype={"person_id": str, "person": str},
                      na_values=["", "NA", "NaN", "-Infinity", "Infinity"])
-    if "person_id" not in df.columns and "person" in df.columns:
+    matsim_native = "person_id" not in df.columns and "person" in df.columns
+    if matsim_native:
         df = df.rename(columns=_MATSIM_ACTIVITY_RENAMES)
     df = _filter_numeric_person_id(df, "activities")
     df["activity_index"] = pd.to_numeric(df["activity_index"], errors="coerce").astype("int32")
+    if matsim_native:
+        # MATSim numbers from 1, eqasim (and the webmap schema) from 0
+        df["activity_index"] -= 1
     for tcol in ("start_time", "end_time"):
         if tcol in df.columns:
             df[tcol] = pd.to_numeric(df[tcol], errors="coerce")
@@ -505,7 +630,8 @@ def parse_trips_csv(path: Path) -> pd.DataFrame:
     MATSim-native one (person/trip_number/main_mode with HH:MM:SS times)."""
     df = pd.read_csv(path, sep=";", dtype={"person_id": str, "person": str},
                      na_values=["", "NA", "NaN"])
-    if "person_id" not in df.columns and "person" in df.columns:
+    matsim_native = "person_id" not in df.columns and "person" in df.columns
+    if matsim_native:
         df = df.rename(columns=_MATSIM_TRIP_RENAMES)
         for tcol in ("departure_time", "travel_time"):
             df[tcol] = _hhmmss_to_seconds(df[tcol])
@@ -519,10 +645,61 @@ def parse_trips_csv(path: Path) -> pd.DataFrame:
         "destination_x": "dest_x", "destination_y": "dest_y",
     })
     df["trip_index"] = pd.to_numeric(df["trip_index"], errors="coerce").astype("int32")
+    if matsim_native:
+        # 0-based like eqasim and spider_link_index (events trip counter)
+        df["trip_index"] -= 1
     df["main_mode"] = df["main_mode"].apply(_canonical_mode)
     df["preceding_purpose"] = df["preceding_purpose"].apply(_canonical_purpose)
     df["following_purpose"] = df["following_purpose"].apply(_canonical_purpose)
     return df
+
+
+# Columns of eqasim's trips/activities CSVs, the layout the webapp ingests
+# (matsim/eqasim_{trips,activities}.csv in the download bundle).
+_EQASIM_TRIP_COLUMNS = {
+    "person": "person_id", "trip_number": "person_trip_id",
+    "start_x": "origin_x", "start_y": "origin_y",
+    "end_x": "destination_x", "end_y": "destination_y",
+    "dep_time": "departure_time", "trav_time": "travel_time",
+    "traveled_distance": "routed_distance", "euclidean_distance": "euclidean_distance",
+    "main_mode": "mode",
+    "start_activity_type": "preceding_purpose", "end_activity_type": "following_purpose",
+}
+_EQASIM_ACTIVITY_COLUMNS = {
+    "person": "person_id", "activity_number": "activity_index",
+    "activity_type": "purpose", "start_time": "start_time", "end_time": "end_time",
+    "coord_x": "x", "coord_y": "y",
+}
+
+
+def write_eqasim_trips_csv(src: Path, dst: Path) -> Path:
+    """MATSim-native output_trips.csv[.gz] -> eqasim trips layout (0-based
+    person_trip_id, times in seconds, raw mode/purpose values)."""
+    df = pd.read_csv(src, sep=";", dtype={"person": str, "person_id": str}, low_memory=False)
+    if "person" not in df.columns:  # already eqasim layout
+        df.to_csv(dst, sep=";", index=False)
+        return dst
+    df = df[list(_EQASIM_TRIP_COLUMNS)].rename(columns=_EQASIM_TRIP_COLUMNS)
+    df["person_trip_id"] = df["person_trip_id"].astype("int64") - 1
+    for tcol in ("departure_time", "travel_time"):
+        df[tcol] = _hhmmss_to_seconds(df[tcol])
+    df.to_csv(dst, sep=";", index=False)
+    log.info("wrote %d trips in eqasim layout -> %s", len(df), dst)
+    return dst
+
+
+def write_eqasim_activities_csv(src: Path, dst: Path) -> Path:
+    """MATSim-native output_activities.csv[.gz] -> eqasim activities layout
+    (0-based activity_index, x/y)."""
+    df = pd.read_csv(src, sep=";", dtype={"person": str, "person_id": str}, low_memory=False)
+    if "person" not in df.columns:
+        df.to_csv(dst, sep=";", index=False)
+        return dst
+    df = df[list(_EQASIM_ACTIVITY_COLUMNS)].rename(columns=_EQASIM_ACTIVITY_COLUMNS)
+    df["activity_index"] = df["activity_index"].astype("int64") - 1
+    df.to_csv(dst, sep=";", index=False)
+    log.info("wrote %d activities in eqasim layout -> %s", len(df), dst)
+    return dst
 
 
 def load_trips_synthetic(

@@ -25,7 +25,6 @@ from .schema import (
     create_all_tables,
 )
 from .sources import (
-    DEFAULT_CACHE_DIR,
     DEFAULT_DATA_PATH,
     DEFAULT_HOME_PIPE,
     discover_microcensus,
@@ -42,6 +41,7 @@ _VALID_MODES = {"both", "synthetic", "microcensus"}
 def configure(context):
     context.config("webmap_export", "both")
     context.config("scale_pt_to_full_population", False)
+    context.config("output_path")
     context.stage("matsim.simulation.run")
 
 
@@ -58,7 +58,8 @@ def execute(context):
     output_dir = matsim_dir / "simulation_output" / "webmap"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    cache_dir = DEFAULT_CACHE_DIR
+    # the run's own synpp working directory, not a hardcoded one
+    cache_dir = matsim_dir.parent
     data_path = DEFAULT_DATA_PATH
     home_pipe = DEFAULT_HOME_PIPE
 
@@ -81,6 +82,7 @@ def execute(context):
             cache_dir=cache_dir,
             data_path=data_path,
             home_pipe=home_pipe,
+            output_path=Path(context.config("output_path")),
             sample_rate=sample_rate,
             run_name=run_name,
             scale_pt=scale_pt,
@@ -108,13 +110,15 @@ def execute(context):
 
 def _build_synthetic(
     *, output_db: Path, matsim_dir: Path, cache_dir: Path, data_path: Path,
-    home_pipe: Path, sample_rate: float | None = None, run_name: str = "",
-    scale_pt: bool = True,
+    home_pipe: Path, output_path: Path | None = None,
+    sample_rate: float | None = None, run_name: str = "", scale_pt: bool = True,
 ) -> None:
     import duckdb
     log.info("=== synthetic.duckdb build START (sample_rate=%s, scale_pt=%s, run=%s)",
              sample_rate, scale_pt, run_name)
-    src = discover_synthetic(matsim_dir, cache_dir=cache_dir, data_path=data_path, home_pipe=home_pipe)
+    src = discover_synthetic(matsim_dir, cache_dir=cache_dir, data_path=data_path,
+                             home_pipe=home_pipe, output_path=output_path)
+    persons_df = raw_entities.build_synthetic_persons_frame(src.persons_csv, src.enriched_pickle)
     _unlink_db(output_db)
 
     db = duckdb.connect(str(output_db))
@@ -125,9 +129,11 @@ def _build_synthetic(
         acts_df = None
         if src.output_activities_csv is not None and src.output_activities_csv.exists():
             acts_df = raw_entities.parse_activities_csv(src.output_activities_csv)
+        run_ids = raw_entities.simulated_person_ids(src.output_persons_csv)
+        raw_entities.check_persons_match_run(persons_df, run_ids)
         n_acts = raw_entities.insert_activities_df(db, acts_df)
         n_persons = raw_entities.load_persons_synthetic(
-            db, src.persons_parquet, src.statpop_persons_pickle,
+            db, persons_df, src.statpop_persons_pickle,
             activities_for_home_pt=acts_df,
             activities_for_n_acts=acts_df,
         )

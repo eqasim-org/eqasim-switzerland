@@ -1,30 +1,34 @@
-"""Bundle webmap inputs from a MATSim run into a single zip for download.
+"""Bundle a MATSim run's raw outputs into a single zip for the webmap upload.
 
-Produces a self-contained zip with no dependency on /cluster paths or synpp
-cache hashes. Raw pickles are not bundled; instead persons.parquet and
-households.parquet are built at export time with home coords and household
-attributes baked in.
+The zip only collects files; it converts nothing. The webmap's own ingest
+(webmap repo, dataset-backend/ingest.py) reads MATSim's output_*.csv.gz and
+the synthesis CSVs directly and does all the processing there. The bundle has
+no dependency on /cluster paths or synpp cache hashes.
 
 Contents:
 
-  Required (synthetic.duckdb build fails without these):
-    matsim/eqasim_trips.csv
-    matsim/eqasim_activities.csv
+  Required (the webmap build fails without these):
+    matsim/output_trips.csv.gz
+    matsim/output_activities.csv.gz
+    matsim/output_persons.csv.gz
     matsim/output_network.xml.gz
     matsim/output_events.xml.gz
     matsim/output_transitSchedule.xml.gz
-    persons.parquet
 
-  Optional (build succeeds, features degrade):
-    matsim/output_plans.xml.gz   — without it: ~15% of agents get NULL home
-                                   coordinates in the webapp preprocessor
-    households.parquet            — without it: income, cars, bikes, OV-
-                                   Gueteklasse charts all empty
+  Optional, tier "full" only (build succeeds, features degrade):
+    matsim/output_plans.xml.gz           - without it: Spider, Node Flows and
+                                           Zone Flows are empty
+    synthesis/<prefix>_persons.csv       - person -> household link
+    synthesis/<prefix>_households.csv    - without these two: income, cars,
+                                           bikes, OV-Gueteklasse charts empty
+
+  manifest.json carries the run name, sample rate and a sha256 per file.
 
 Usage:
     python3 -m analysis.export_for_webmap [--matsim-dir <run-cache.cache>]
         [--out <dir-or-zip>] [--tier full|minimal] [--dry-run]
         [--cache-dir <synpp-cache>] [--data-path <pipeline-data>] [--home-pipe <root>]
+        [--output-path <synthesis output_path>]
 
 Also usable as a synpp stage (`analysis.export_for_webmap` in config `run:`).
 """
@@ -34,16 +38,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import pickle
 import sys
-import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-
-import numpy as np
-import pandas as pd
 
 from analysis.webmap_export.sources import (
     DEFAULT_CACHE_DIR,
@@ -72,93 +71,6 @@ def _newest_run_cache(cache_dir: Path) -> Optional[Path]:
         return None
     candidates.sort(reverse=True)
     return candidates[0][1]
-
-
-def _build_persons_parquet(
-    persons_parquet: Path,
-    activities_csv: Optional[Path],
-    statpop_pickle: Optional[Path],
-    scratch: Path,
-) -> Path:
-    """Read the synthesis persons parquet, merge in home coords from activities
-    (and optionally statpop fallback), write a self-contained parquet."""
-    df = pd.read_parquet(persons_parquet)
-    log.info("persons: %d rows from %s", len(df), persons_parquet)
-
-    home_x = pd.Series(np.nan, index=df.index, dtype="float64")
-    home_y = pd.Series(np.nan, index=df.index, dtype="float64")
-
-    if activities_csv is not None and activities_csv.exists():
-        acts = pd.read_csv(activities_csv, sep=";",
-                           usecols=["person_id", "activity_index", "purpose", "x", "y"])
-        acts["person_id"] = pd.to_numeric(acts["person_id"], errors="coerce")
-        acts = acts.dropna(subset=["person_id"])
-        acts["person_id"] = acts["person_id"].astype("int64")
-        homes = (acts[acts["purpose"] == "home"]
-                 .sort_values(["person_id", "activity_index"])
-                 .drop_duplicates("person_id", keep="first")[["person_id", "x", "y"]])
-        merged = df[["person_id"]].merge(homes, on="person_id", how="left")
-        home_x = merged["x"].to_numpy()
-        home_y = merged["y"].to_numpy()
-        home_x = pd.Series(home_x, index=df.index, dtype="float64")
-        home_y = pd.Series(home_y, index=df.index, dtype="float64")
-        n_from_acts = int(home_x.notna().sum())
-        log.info("persons: %d/%d home coords from activities", n_from_acts, len(df))
-
-    needs_statpop = home_x.isna()
-    if needs_statpop.any() and statpop_pickle is not None and statpop_pickle.exists():
-        if "statpop_person_id" in df.columns:
-            with open(statpop_pickle, "rb") as f:
-                sp = pickle.load(f)
-            sp = sp[["person_id", "home_x", "home_y"]].rename(
-                columns={"person_id": "statpop_person_id"})
-            merged = df[["statpop_person_id"]].merge(sp, on="statpop_person_id", how="left")
-            home_x = home_x.where(~needs_statpop, merged["home_x"].to_numpy())
-            home_y = home_y.where(~needs_statpop, merged["home_y"].to_numpy())
-            n_filled = int(needs_statpop.sum() - home_x.isna().sum())
-            log.info("persons: %d more home coords from statpop fallback", n_filled)
-        else:
-            log.warning("persons: parquet has no statpop_person_id column, cannot use statpop fallback")
-
-    bad = (home_x < 2_000_000) | (home_y < 1_000_000)
-    home_x = home_x.where(~bad, other=np.nan)
-    home_y = home_y.where(~bad, other=np.nan)
-    df["home_x"] = home_x
-    df["home_y"] = home_y
-
-    n_with_home = int(df["home_x"].notna().sum())
-    n_without = len(df) - n_with_home
-    log.info("persons: %d with home coords, %d without (%.1f%%)",
-             n_with_home, n_without, 100 * n_without / len(df) if len(df) else 0)
-
-    out = scratch / "persons.parquet"
-    df.to_parquet(out, index=False)
-    log.info("persons: wrote %s (%.1f MB)", out, out.stat().st_size / 1e6)
-    return out
-
-
-def _build_households_parquet(enriched_pickle: Path, scratch: Path) -> Path:
-    """Extract household attributes from the enriched pickle into a clean parquet."""
-    with open(enriched_pickle, "rb") as f:
-        enriched = pickle.load(f)
-
-    df = (enriched[["household_id", "income_class",
-                    "number_of_cars_class", "number_of_bikes_class", "ovgk"]]
-          .drop_duplicates("household_id")
-          .copy())
-    df = df.rename(columns={
-        "number_of_cars_class": "n_cars_class",
-        "number_of_bikes_class": "n_bikes_class",
-    })
-    df["household_id"] = df["household_id"].astype("int64")
-    for col in ("income_class", "n_cars_class", "n_bikes_class", "ovgk"):
-        df[col] = df[col].astype("string")
-
-    out = scratch / "households.parquet"
-    df.to_parquet(out, index=False)
-    log.info("households: %d rows, wrote %s (%.1f MB)",
-             len(df), out, out.stat().st_size / 1e6)
-    return out
 
 
 def _add_file(zf: zipfile.ZipFile, arcname: str, path: Path, level: int) -> dict:
@@ -196,25 +108,36 @@ def build_bundle(
     cache_dir: Path = DEFAULT_CACHE_DIR,
     data_path: Path = DEFAULT_DATA_PATH,
     home_pipe: Path = DEFAULT_HOME_PIPE,
+    output_path: Optional[Path] = None,
     dry_run: bool = False,
 ) -> Path:
     if tier not in TIERS:
         raise ValueError(f"tier must be one of {TIERS}, got {tier!r}")
 
     syn = discover_synthetic(matsim_dir, cache_dir=cache_dir, data_path=data_path,
-                             home_pipe=home_pipe)
+                             home_pipe=home_pipe, output_path=output_path)
 
-    required = {
-        "matsim/eqasim_trips.csv": syn.output_trips_csv,
-        "matsim/eqasim_activities.csv": syn.output_activities_csv,
-        "matsim/output_network.xml.gz": syn.output_network_xml,
-        "matsim/output_events.xml.gz": syn.output_events_xml,
-        "matsim/output_transitSchedule.xml.gz": syn.output_transit_schedule_xml,
-    }
+    # Archived under their own names: the webmap recognises the files by name
+    # (and the trips/activities layout by header).
+    def matsim(path: Optional[Path], default: str) -> tuple[str, Optional[Path]]:
+        return f"matsim/{path.name if path else default}", path
 
-    optional = {
-        "matsim/output_plans.xml.gz": syn.output_plans_xml,
-    }
+    required = dict([
+        matsim(syn.output_trips_csv, "output_trips.csv.gz"),
+        matsim(syn.output_activities_csv, "output_activities.csv.gz"),
+        matsim(syn.output_persons_csv, "output_persons.csv.gz"),
+        matsim(syn.output_network_xml, "output_network.xml.gz"),
+        matsim(syn.output_events_xml, "output_events.xml.gz"),
+        matsim(syn.output_transit_schedule_xml, "output_transitSchedule.xml.gz"),
+    ])
+
+    households_csv = syn.persons_csv.with_name(
+        syn.persons_csv.name.replace("_persons.csv", "_households.csv"))
+    optional = dict([
+        matsim(syn.output_plans_xml, "output_plans.xml.gz"),
+        (f"synthesis/{syn.persons_csv.name}", syn.persons_csv),
+        (f"synthesis/{households_csv.name}", households_csv),
+    ])
 
     run_name = matsim_dir.name.replace(".cache", "")
     short = run_name.split("__")[-1][:8] or "run"
@@ -222,90 +145,47 @@ def build_bundle(
         out = out / f"webmap_inputs_{short}_{tier}.zip"
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    missing_required = {k: v for k, v in required.items()
-                        if v is None or not v.exists()}
+    missing_required = [k for k, v in required.items() if v is None or not v.exists()]
     if missing_required:
-        for arc, _ in missing_required.items():
+        for arc in missing_required:
             log.error("  ! REQUIRED MISSING: %s", arc)
         raise FileNotFoundError(
             f"Cannot build bundle: {len(missing_required)} required file(s) missing: "
             + ", ".join(missing_required))
 
-    has_enriched = (syn.enriched_pickle is not None and syn.enriched_pickle.exists())
+    files = dict(required)
+    if tier == "full":
+        for arc, path in optional.items():
+            if path is not None and path.exists():
+                files[arc] = path
+            else:
+                log.warning("  ! MISSING optional: %s", arc)
 
     if dry_run:
-        log.info("DRY RUN — tier=%s  matsim_dir=%s", tier, matsim_dir)
-        for arc, path in required.items():
-            log.info("  . %-46s %8.1f MB  (required)", arc, path.stat().st_size / 1e6)
-        log.info("  . %-46s     (built from %s + activities)", "persons.parquet",
-                 syn.persons_parquet.name)
-        if tier == "full":
-            for arc, path in optional.items():
-                if path and path.exists():
-                    log.info("  . %-46s %8.1f MB  (optional)", arc, path.stat().st_size / 1e6)
-                else:
-                    log.warning("  ! %-46s MISSING (optional)", arc)
-            if has_enriched:
-                log.info("  . %-46s     (built from enriched pickle)", "households.parquet")
-            else:
-                log.warning("  ! %-46s enriched pickle not found", "households.parquet")
+        log.info("DRY RUN - tier=%s  matsim_dir=%s", tier, matsim_dir)
+        for arc, path in files.items():
+            log.info("  . %-46s %8.1f MB", arc, path.stat().st_size / 1e6)
         return out
 
-    sample_rate = discover_sample_rate(matsim_dir, home_pipe=home_pipe)
-    scale_pt = discover_scale_pt(home_pipe=home_pipe)
+    manifest = {
+        "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "tier": tier,
+        "run_name": run_name,
+        "sample_rate": discover_sample_rate(matsim_dir, home_pipe=home_pipe),
+        "scale_pt_to_full_population": discover_scale_pt(home_pipe=home_pipe),
+        "files": [],
+    }
 
-    with tempfile.TemporaryDirectory(prefix="webmap_export_") as scratch_str:
-        scratch = Path(scratch_str)
-
-        persons_path = _build_persons_parquet(
-            syn.persons_parquet, syn.output_activities_csv,
-            syn.statpop_persons_pickle, scratch)
-
-        households_path = None
-        if tier == "full" and has_enriched:
-            households_path = _build_households_parquet(syn.enriched_pickle, scratch)
-        elif tier == "full":
-            log.warning("households.parquet skipped: enriched pickle not found at %s",
-                        syn.enriched_pickle)
-
-        manifest = {
-            "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "tier": tier,
-            "run_name": run_name,
-            "sample_rate": sample_rate,
-            "scale_pt_to_full_population": scale_pt,
-            "files": [],
-        }
-
-        tmp = out.with_suffix(".zip.part")
-        total_raw = 0
-        with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED,
-                             compresslevel=level, allowZip64=True) as zf:
-            for arc, path in required.items():
-                row = _add_file(zf, arc, path, level)
-                manifest["files"].append(row)
-                total_raw += row["bytes"]
-
-            row = _add_file(zf, "persons.parquet", persons_path, level)
+    tmp = out.with_suffix(".zip.part")
+    total_raw = 0
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED,
+                         compresslevel=level, allowZip64=True) as zf:
+        for arc, path in files.items():
+            row = _add_file(zf, arc, path, level)
             manifest["files"].append(row)
             total_raw += row["bytes"]
-
-            if tier == "full":
-                for arc, path in optional.items():
-                    if path and path.exists():
-                        row = _add_file(zf, arc, path, level)
-                        manifest["files"].append(row)
-                        total_raw += row["bytes"]
-                    else:
-                        log.warning("  ! MISSING optional: %s", arc)
-
-                if households_path:
-                    row = _add_file(zf, "households.parquet", households_path, level)
-                    manifest["files"].append(row)
-                    total_raw += row["bytes"]
-
-            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
-        tmp.replace(out)
+        zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+    tmp.replace(out)
 
     size = out.stat().st_size
     log.info("bundle DONE -> %s (%.2f GB, %.0f%% of raw)",
@@ -315,10 +195,9 @@ def build_bundle(
 
 def configure(context):
     context.stage("matsim.simulation.run")
-    context.stage("synthesis.population.enriched")
-    context.stage("data.statpop.persons")
     context.config("webmap_bundle_tier", "full")
     context.config("webmap_bundle_path", "")
+    context.config("output_path")
 
 
 def execute(context):
@@ -326,7 +205,8 @@ def execute(context):
     tier = str(context.config("webmap_bundle_tier")).strip().lower()
     configured = str(context.config("webmap_bundle_path")).strip()
     out = Path(configured) if configured else matsim_dir / "simulation_output" / "webmap"
-    zip_path = build_bundle(matsim_dir, out, tier=tier)
+    zip_path = build_bundle(matsim_dir, out, tier=tier, cache_dir=matsim_dir.parent,
+                            output_path=Path(context.config("output_path")))
     return {"bundle": str(zip_path), "bytes": zip_path.stat().st_size, "tier": tier}
 
 
@@ -337,6 +217,7 @@ def main(argv: list[str]) -> int:
     out: Optional[Path] = None
     tier, level, dry_run = "full", 6, False
     cache_dir, data_path, home_pipe = DEFAULT_CACHE_DIR, DEFAULT_DATA_PATH, DEFAULT_HOME_PIPE
+    output_path: Optional[Path] = None
 
     i = 0
     while i < len(argv):
@@ -353,6 +234,8 @@ def main(argv: list[str]) -> int:
             cache_dir = Path(argv[i + 1]); i += 2; continue
         if a == "--data-path":
             data_path = Path(argv[i + 1]); i += 2; continue
+        if a == "--output-path":
+            output_path = Path(argv[i + 1]); i += 2; continue
         if a == "--home-pipe":
             home_pipe = Path(argv[i + 1]); i += 2; continue
         if a in ("--dry-run", "-n"):
@@ -373,7 +256,8 @@ def main(argv: list[str]) -> int:
     if out is None:
         out = matsim_dir / "simulation_output" / "webmap"
     build_bundle(matsim_dir, out, tier=tier, level=level, cache_dir=cache_dir,
-                 data_path=data_path, home_pipe=home_pipe, dry_run=dry_run)
+                 data_path=data_path, home_pipe=home_pipe, output_path=output_path,
+                 dry_run=dry_run)
     return 0
 
 
