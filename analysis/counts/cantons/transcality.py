@@ -134,6 +134,17 @@ def _read_matches(path):
     if missing:
         raise ValueError(f"matched_points.csv is missing: {sorted(missing)}")
 
+    # A detector ID shared by different sources is ambiguous: discard every
+    # occurrence, rather than choosing one source or double-counting it.
+    source_counts = matched.groupby("detid")["source"].nunique()
+    ambiguous_ids = source_counts.index[source_counts > 1]
+    if len(ambiguous_ids):
+        logger.warning(
+            "Dropping %d Transcality detector IDs shared across sources (%d matches).",
+            len(ambiguous_ids), matched["detid"].isin(ambiguous_ids).sum(),
+        )
+        matched = matched[~matched["detid"].isin(ambiguous_ids)].copy()
+
     matched["matched_at"] = pd.to_datetime(
         matched.get("matched_at"), errors="coerce", utc=True
     )
@@ -160,12 +171,24 @@ def _read_matches(path):
 
 
 def _read_measurements(directory, matched):
+    # Check the raw files before restricting to matched stations. An ID is
+    # ambiguous even if only one of its sources has a network match.
+    # Edge/lane loop sources share a file: read and count that file only once.
+    raw = {
+        filename: pd.read_csv(os.path.join(directory, filename), dtype={"detid": str})
+        for filename in dict.fromkeys(SOURCE_FILES.values())
+    }
+    occurrences = pd.concat([data["detid"].drop_duplicates() for data in raw.values()])
+    ambiguous_ids = set(occurrences[occurrences.duplicated(keep=False)])
+    if ambiguous_ids:
+        logger.warning(
+            "Dropping %d Transcality detector IDs shared across measurement files.",
+            len(ambiguous_ids),
+        )
     frames = []
     for source, filename in SOURCE_FILES.items():
-        source_ids = set(matched.loc[matched["source"] == source, "detid"])
-        data = pd.read_csv(
-            os.path.join(directory, filename), dtype={"detid": str}
-        )
+        source_ids = set(matched.loc[matched["source"] == source, "detid"]) - ambiguous_ids
+        data = raw[filename]
         if "type" in data.columns:
             data = data[data["type"].eq("all")]
         data = data[data["detid"].isin(source_ids)].copy()

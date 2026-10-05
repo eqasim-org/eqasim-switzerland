@@ -3,6 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from analysis.counts.paths import get_simulation_path
 
 logger = logging.getLogger("synpp")
 
@@ -31,18 +32,15 @@ def configure(context):
     context.stage("analysis.mode_shares.simulated")
     context.stage("data.spatial.cantons")
 
+    context.config("group_income_classes_in_analysis", default=False)
+    context.config("analysis.counts.simulation_path", default="")
     context.config("output_path")
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")
 
 
 def execute(context):
-    figures_dir = os.path.join(
-        context.config("output_path"),
-        context.config("output_id"),
-        context.config("simulation_directory"),
-        "mode_shares",
-    )
+    figures_dir = os.path.join(get_simulation_path(context), "mode_shares")
     os.makedirs(figures_dir, exist_ok = True)
 
     # load data
@@ -199,10 +197,13 @@ def execute(context):
     plt.savefig(os.path.join(figures_dir, "mode_shares_by_age.png"), bbox_inches = "tight")
     plt.close()
 
-    # by income class (low, medium, high - see INCOME_CLASSIFICATION in utils.py)
+    # by income class: original nine classes or optional low/medium/high groups
     fig, ax        = plt.subplots(figsize = (11, 5))
     income_classes = sorted(target_mode_shares["income"].index.unique())
-    income_labels  = {1: "Low", 2: "Medium", 3: "High"}
+    income_labels = (
+        {1: "Low", 2: "Medium", 3: "High"}
+        if context.config("group_income_classes_in_analysis") else {}
+    )
 
     for i, mode in enumerate(MODE_ORDER):
         color     = MODE_COLORS[i]

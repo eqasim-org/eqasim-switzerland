@@ -5,13 +5,12 @@ import numpy as np
 import logging
 import glob
 from .readers import houshold_reader
+from analysis.counts.paths import get_simulation_path
 
 logger = logging.getLogger("synpp")
 
-# Must match the mapping applied in synthesis/population/matching/matched_v1.py,
-# which collapses the 9 microcensus income classes into 3 categories (low, medium, high)
-# before matching. The simulated population's income_class is already in this 3-category
-# scheme, so the microcensus (target) side needs the same remapping to stay comparable.
+# Optional grouping used locally by synthesis/population/matching/matched_v1.py.
+# Survey and exported Swiss population incomes otherwise retain classes 0-8.
 INCOME_CLASSIFICATION = {0: 1, 1: 1, 2: 1, 3: 2, 4: 2, 5: 2, 6: 3, 7: 3, 8: 3}
 
 
@@ -28,7 +27,12 @@ class ModeShareAnalyzer:
         ModeShareAnalyzer.age_bins = bins
 
 
-    def __init__(self, context, from_matsim = False):
+    def __init__(self, context, from_matsim=False, *, group_income_classes=False):
+        """Load trips, optionally grouping incomes into low/medium/high (1-3).
+
+        Grouping applies to either data source; enable it on both analyzers when
+        comparing survey and simulation data. By default, retain classes 0-8.
+        """
         self.from_matsim = from_matsim
         self.ex_cst      = context.stage("data.external_population.constants")
 
@@ -36,7 +40,10 @@ class ModeShareAnalyzer:
             self.load_matsim_data(context)
 
         else:
-            self.load_microcensus_data(context)        
+            self.load_microcensus_data(context)
+
+        if group_income_classes:
+            self.trips["income_class"] = self.trips["income_class"].map(INCOME_CLASSIFICATION)
 
 
     def load_microcensus_data(self, context):
@@ -44,7 +51,7 @@ class ModeShareAnalyzer:
 
         # Ensure correct data types
         trips["canton_id"]             = trips["canton_id"].astype(int)
-        trips["income_class"]          = trips["income_class"].astype(int).map(INCOME_CLASSIFICATION)
+        trips["income_class"]          = trips["income_class"].astype(int)
         trips["euclidean_distance_km"] = trips["crowfly_distance"] / 1000
 
         # Define distance bins for mode shares distributions    
@@ -59,48 +66,52 @@ class ModeShareAnalyzer:
 
 
     def get_paths_matsim(self, context):
-        output_path          = context.config("output_path")
-        output_id            = context.config("output_id")
-        simulation_directory = context.config("simulation_directory")
+        simulation_path = get_simulation_path(context)
+        # Never take population files from another run when a specific
+        # simulation directory was requested. Keep the legacy fallback otherwise.
+        population_search_path = (
+            simulation_path if context.config("analysis.counts.simulation_path")
+            else os.path.join(context.config("output_path"), context.config("output_id"))
+        )
         
         # get the trips file, if simulation not finished, get one from the intermediate iterations
-        trips_path_matsim = f"{output_path}/{output_id}/{simulation_directory}/output_trips.csv.gz"
+        trips_path_matsim = os.path.join(simulation_path, "output_trips.csv.gz")
 
         if not os.path.exists(trips_path_matsim):
-            candidate_files = glob.glob(f"{output_path}/{output_id}/{simulation_directory}/ITERS/**/*.trips.csv.gz")
+            candidate_files = glob.glob(os.path.join(simulation_path, "ITERS", "**", "*.trips.csv.gz"), recursive=True)
 
             if candidate_files:
                 trips_path_matsim = max(candidate_files, key=os.path.getctime)  # Get the most recently created file
                 logger.warning(f"MATSIM trips file not found as an output file. Using {trips_path_matsim} instead.")
 
             else:
-                raise FileNotFoundError(f"MATSIM trips file not found as an output file and no candidate files found in {output_path}/{output_id}/{simulation_directory}/ITERS/")
+                raise FileNotFoundError(f"MATSIM trips file not found as an output file and no candidate files found in {simulation_path}/ITERS/")
         
         # get the persons file
-        persons_path_matsim = f"{output_path}/{output_id}/{simulation_directory}/output_persons.csv.gz"
+        persons_path_matsim = os.path.join(simulation_path, "output_persons.csv.gz")
 
         if not os.path.exists(persons_path_matsim):
-            candidate_files = glob.glob(f"{output_path}/{output_id}/**/output_persons.csv.gz")
+            candidate_files = glob.glob(os.path.join(population_search_path, "**", "output_persons.csv.gz"), recursive=True)
 
             if candidate_files:
                 persons_path_matsim = max(candidate_files, key=os.path.getctime)  # Get the most recently created file
                 logger.warning(f"MATSIM persons file not found as an output file. Using {persons_path_matsim} instead.")
 
             else:
-                raise FileNotFoundError(f"MATSIM persons file not found as an output file and no candidate files found in {output_path}/{output_id}/{simulation_directory}")
+                raise FileNotFoundError(f"MATSIM persons file not found as an output file and no candidate files found in {population_search_path}")
 
         # get the households file
-        households_path_matsim = f"{output_path}/{output_id}/{simulation_directory}/output_households.xml.gz"
+        households_path_matsim = os.path.join(simulation_path, "output_households.xml.gz")
 
         if not os.path.exists(households_path_matsim):
-            candidate_files = glob.glob(f"{output_path}/{output_id}/**/output_households.xml.gz")
+            candidate_files = glob.glob(os.path.join(population_search_path, "**", "output_households.xml.gz"), recursive=True)
 
             if candidate_files:
                 households_path_matsim = max(candidate_files, key=os.path.getctime)  # Get the most recently created file
                 logger.warning(f"MATSIM households file not found as an output file. Using {households_path_matsim} instead.")
 
             else:
-                raise FileNotFoundError(f"MATSIM households file not found as an output file and no candidate files found in {output_path}/{output_id}")
+                raise FileNotFoundError(f"MATSIM households file not found as an output file and no candidate files found in {population_search_path}")
             
         assert os.path.exists(trips_path_matsim), f"MATSIM trips file not found at {trips_path_matsim}"
         assert os.path.exists(persons_path_matsim), f"MATSIM persons file not found at {persons_path_matsim}"

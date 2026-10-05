@@ -43,14 +43,21 @@ def configure(context):
     configure_simulation_path(context)
 
 
-def execute(context):
-    city = "transcality"
+def execute(context, *, counts_stage="analysis.counts.cantons.transcality",
+            comparison_stage="analysis.counts.matching.compare", peak_hours=None):
+    city = "transcality" if peak_hours is None else "transcality_peak_hour"
+    period_hours = 24 if peak_hours is None else peak_hours[1] - peak_hours[0]
+    period = "daily" if peak_hours is None else f"{peak_hours[0]:02d}:00–{peak_hours[1]:02d}:00"
+    label = "Transcality" if peak_hours is None else f"Transcality {period}"
+    flow_unit = "vehicles/day" if peak_hours is None else f"vehicles/{period}"
     sample_size = context.config("input_downsampling")
     output_directory = get_analysis_output_path(context)
+    if peak_hours is not None:
+        output_directory = os.path.join(output_directory, f"transcality_peak_hour_{peak_hours[0]:02d}-{peak_hours[1]:02d}")
     os.makedirs(output_directory, exist_ok=True)
 
     counts = Counts(
-        file_path=context.stage("analysis.counts.cantons.transcality"),
+        file_path=context.stage(counts_stage),
         id_column="OBJECTID",
         columns_to_keep={
             "flow": "flow",
@@ -77,7 +84,7 @@ def execute(context):
     ).to_csv(os.path.join(context.path(), "detector_matches.csv"), index=False)
     counts, matched = aggregate_counts_by_link(counts, matched, network)
 
-    comparison = context.stage("analysis.counts.matching.compare")
+    comparison = context.stage(comparison_stage)
     flows = comparison.compare_flow_total_efficient(
         counts,
         matched,
@@ -100,6 +107,9 @@ def execute(context):
         "detector_count",
     ]
     flows = flows.merge(counts.counts[metadata_columns], on="id", how="left")
+    flows["period_hours"] = period_hours
+    if peak_hours is not None:
+        flows["flow_period"] = period
     flows["bounds_status"] = np.select(
         [
             flows["simulated_flow"] < flows["flow_lower"],
@@ -129,9 +139,25 @@ def execute(context):
         flows=flows,
         counts=counts,
         distance_to_border=2000,
-        title="Observed vs Simulated Traffic Flows (Transcality)",
-        output_file=os.path.join(output_directory, "flow_comparaison_transcality.png"),
+        title=f"Observed vs Simulated Traffic Flows ({label})",
+        output_file=os.path.join(output_directory, f"flow_comparaison_{city}.png"),
         show_range=True,
+        show_geh=True,
+        directions_represented=1,
+        period_hours=period_hours,
+        flow_unit=flow_unit,
+    )
+    plotter.plot_flow(
+        flows=closest_counts_within_bounds(flows),
+        counts=counts,
+        distance_to_border=2000,
+        title=f"Closest Counts Within Bounds vs Simulation\n({label}, optimistic comparison)",
+        output_file=os.path.join(output_directory, f"flow_comparaison_{city}_closest_bounds.png"),
+        show_range=True,
+        show_geh=True,
+        directions_represented=1,
+        period_hours=period_hours,
+        flow_unit=flow_unit,
     )
     plotter.plot_flow_by_road_type(
         flows,
@@ -139,18 +165,20 @@ def execute(context):
         matched,
         counts,
         distance_to_border=0,
-        title="Average Observed vs Simulated Flow by Highway Type (Transcality)",
-        output_file=os.path.join(output_directory, "flow_by_road_type_transcality.png"),
+        title=f"Average Observed vs Simulated Flow by Highway Type\n({label}, {flow_unit})",
+        output_file=os.path.join(output_directory, f"flow_by_road_type_{city}.png"),
     )
     plotter.plot_flow_by_source(
         flows,
-        output_file=os.path.join(output_directory, "flow_by_source_transcality.png"),
-        title="Observed vs Simulated Daily Flow by Counting Source (Transcality)",
+        output_file=os.path.join(output_directory, f"flow_by_source_{city}.png"),
+        title=f"Observed vs Simulated Flow by Counting Source ({label})",
+        flow_unit=flow_unit,
     )
     plotter.plot_flow_bounds(
         flows,
-        output_file=os.path.join(output_directory, "flow_bounds_transcality.png"),
-        title="Transcality simulated flows relative to observed Q25–Q75 bounds",
+        output_file=os.path.join(output_directory, f"flow_bounds_{city}.png"),
+        title=f"{label} simulated flows relative to observed Q25–Q75 bounds",
+        flow_unit=flow_unit,
     )
 
     points = Plotter.prepare_flow_map_points(counts.counts, flows).merge(
@@ -179,21 +207,40 @@ def execute(context):
         sample_size,
         ROAD_TYPES_TO_SHOW,
     )
+    if peak_hours is not None:
+        colored_links["flow_period"] = period
+        legend["label"] = f"Simulated link flow ({flow_unit}; colors clipped at P95)"
     border = gpd.GeoDataFrame(
         context.stage("data.spatial.swiss_border").to_crs(epsg=4326)
     )
     Plotter.create_map(
         colored_links.to_crs(epsg=4326),
-        data_to_show=["link_id", "simulated_flow"],
+        data_to_show=["link_id", "simulated_flow"] + (["flow_period"] if peak_hours is not None else []),
         point_gdf=[points],
         point_data_to_show=Plotter.TRANSCALITY_FLOW_MAP_TOOLTIP_FIELDS,
         border=border,
         cut_network=True,
         path_color_column="_flow_color",
         path_color_legend=legend,
-        path_to_save=os.path.join(output_directory, "counts_on_network_transcality.html"),
+        path_to_save=os.path.join(output_directory, f"counts_on_network_{city}.html"),
     )
     return result_path
+
+
+def closest_counts_within_bounds(flows):
+    """Return a plot-only copy with the count closest to simulation in its envelope.
+
+    This is an optimistic comparison, not a replacement for observed counts.
+    """
+    adjusted = flows.copy()
+    columns = ["simulated_flow", "flow_lower", "flow_upper"]
+    values = adjusted[columns].to_numpy(dtype=float)
+    if not np.isfinite(values).all() or (adjusted["flow_lower"] > adjusted["flow_upper"]).any():
+        raise ValueError("Closest-bound comparison requires finite flows and ordered bounds.")
+    adjusted["flow"] = adjusted["simulated_flow"].clip(
+        lower=adjusted["flow_lower"], upper=adjusted["flow_upper"]
+    )
+    return adjusted
 
 
 def prepare_flow_colored_links(network, link_stats, sample_size, road_types):

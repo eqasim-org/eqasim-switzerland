@@ -15,13 +15,17 @@ def configure(context):
     if context.config("include_external_population"):
         context.stage("data.external_population.hts_trips.trips")
 
+    context.config("group_income_classes_in_analysis", default=False)
     context.config("output_path")
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")      
 
 
 def execute(context):
-    mode_shares_analyzer = ModeShareAnalyzer(context)
+    mode_shares_analyzer = ModeShareAnalyzer(
+        context,
+        group_income_classes=context.config("group_income_classes_in_analysis"),
+    )
     
     # Compute mode shares
     mode_shares = dict()

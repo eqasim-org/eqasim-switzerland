@@ -198,15 +198,17 @@ def adjust_weights(context, df):
     # --------------------------------------------------
     # 5. Feasibility checks (CRITICAL)
     # --------------------------------------------------
-    def check_missing(col):
-        missing = set(df_target[col]) - set(df_actual[col])
-        if missing:
-            raise ValueError(f"Infeasible raking: missing categories in {col}: {missing}")
-
-    check_missing("distance_bin_mode")
-    check_missing("bin_sex")
-    check_missing("bin_income")
-    check_missing("bin_purpose")
+    for (col,) in dimensions:
+        target_categories = set(df_target[col])
+        actual_categories = set(df_actual[col])
+        missing_actual = target_categories - actual_categories
+        missing_target = actual_categories - target_categories
+        if missing_actual or missing_target:
+            raise ValueError(
+                f"Infeasible raking: category mismatch in {col}: "
+                f"missing from training data={sorted(missing_actual)}, "
+                f"missing from target={sorted(missing_target)}"
+            )
 
     # --------------------------------------------------
     # 6. RAKING with trim + rerake

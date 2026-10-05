@@ -12,7 +12,7 @@ logger = logging.getLogger("synpp")
 
 
 def configure(context):
-    geneva_source = context.config("analysis.counts.geneva_source", default="geneva")
+    geneva_source = context.config("analysis.counts.geneva_source", default="transcality")
     if geneva_source not in ("geneva", "transcality"):
         raise ValueError("analysis.counts.geneva_source must be 'geneva' or 'transcality'")
     context.stage("analysis.counts.cantons.aargau")

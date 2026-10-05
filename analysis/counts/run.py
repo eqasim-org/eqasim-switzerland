@@ -11,10 +11,11 @@ from .paths import configure_simulation_path, get_analysis_output_path
 
 
 logger = logging.getLogger("synpp")
-runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not (i.startswith("_") or i.startswith("."))]
+# Peak totals must never be mixed into the daily comparison.
+runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not (i.startswith("_") or i.startswith(".") or i == "transcality_peak_hour.py")]
 
 def configure(context):    
-    geneva_source = context.config("analysis.counts.geneva_source", default="geneva")
+    geneva_source = context.config("analysis.counts.geneva_source", default="transcality")
     if geneva_source not in ("geneva", "transcality"):
         raise ValueError("analysis.counts.geneva_source must be 'geneva' or 'transcality'")
     context.stage("analysis.counts.matching.network")
