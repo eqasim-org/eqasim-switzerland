@@ -12,7 +12,7 @@ logger = logging.getLogger("synpp")
 def configure(context):
     configure_simulation_path(context)
     context.config("output_prefix", "switzerland_")
-    context.config("analysis.counts.flow_aggregation_window", default= 10)
+    context.config("analysis.counts.flow_aggregation_window", default= 1)
 
 def execute(context):        
     simulation_path = get_simulation_path(context)
@@ -158,12 +158,11 @@ class Compare:
         if sample_size is not None:
             result['simulated_flow'] *= 1 / sample_size
     
-        result['pdiff'] = ((result['simulated_flow'] - result['flow']) / result['flow'] * 100).astype(int)
+        # Zero observed totals can occur in a peak window. Their percentage
+        # error is undefined unless simulation is also zero; do not fail int conversion.
+        result['pdiff'] = np.trunc((result['simulated_flow'] - result['flow']) / result['flow'] * 100)
+        result['pdiff'] = result['pdiff'].replace([np.inf, -np.inf], np.nan)
+        result.loc[result['flow'].eq(0) & result['simulated_flow'].eq(0), 'pdiff'] = 0
         result['adiff'] = (result['simulated_flow'] - result['flow']).astype(int)
     
         return result
-                
-            
-            
-            
-            

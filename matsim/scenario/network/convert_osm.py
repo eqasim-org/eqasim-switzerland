@@ -44,6 +44,11 @@ def configure(context):
     context.config("average_tolls_prices_per_km", default = 0.12)
     context.config("only_french_tolls", True)
 
+    # we include the network of this region, i don't know if this is the right config param to use, to check later!
+    context.config("cross_border_exclude_shapefiles", default=None)
+    context.config("include_external_population", default = False)
+
+
 def execute(context):
     # move the osm network to this stage
     network_path, detailed_network_file = context.stage("matsim.scenario.network.convert_osm_pt2matsim")

@@ -21,6 +21,7 @@ def collect_ids(args):
 
     processor = (
         osmium.FileProcessor(osm_file)
+        .with_filter(osmium.filter.EntityFilter(osmium.osm.WAY))
         .with_filter(osmium.filter.KeyFilter("highway", "railway"))
         .with_locations()
         .with_filter(osmium.filter.GeoInterfaceFilter())
@@ -38,6 +39,33 @@ def collect_ids(args):
                 node_ids.update(node.ref for node in item.nodes)
 
     return (way_ids, node_ids)
+
+def collect_restriction_ids(osm_files, way_ids, node_ids):
+    """Keep restrictions whose members survive clipping across all input files.
+
+    Use the same first-file precedence as the writer for overlapping extracts.
+    Relations must be checked after merging the node/way ID sets: their members
+    can be distributed across different input files.
+    """
+    processors = [
+        osmium.FileProcessor(path, entities=osmium.osm.RELATION)
+        for path in osm_files
+    ]
+    retained_ids = {"w": way_ids, "n": node_ids}
+    relation_ids = set()
+    for items in osmium.zip_processors(*processors):
+        relation = next(item for item in items if item is not None)
+        relation_type = relation.tags.get("type", "")
+        if relation_type != "restriction" and not relation_type.startswith("restriction:"):
+            continue
+        # Do not emit dangling references at the edge of the clipped network.
+        if relation.members and all(
+            member.ref in retained_ids.get(member.type, ())
+            for member in relation.members
+        ):
+            relation_ids.add(relation.id)
+    return relation_ids
+
 
 def merge_using_pyosmium(context, osm_files, border, output_path, speed_corrections=None):
     # Geometry that defines the region of interest
@@ -61,12 +89,18 @@ def merge_using_pyosmium(context, osm_files, border, output_path, speed_correcti
     all_way_ids = set().union(*(r[0] for r in results))
     all_node_ids = set().union(*(r[1] for r in results))
 
+    logger.info("Collecting turn restrictions for the merged network ...")
+    all_relation_ids = collect_restriction_ids(osm_files, all_way_ids, all_node_ids)
+    logger.info("Keeping %d turn restrictions.", len(all_relation_ids))
+
     # Build tracker for Phase 2
     tracker = osmium.IdTracker()
     for wid in all_way_ids:
         tracker.add_way(wid)
     for nid in all_node_ids:
         tracker.add_node(nid)
+    for rid in all_relation_ids:
+        tracker.add_relation(rid)
 
     # PHASE 2: SERIAL WRITE
     logger.info("Starting Phase 2: Writing merged OSM file ...")
@@ -77,7 +111,7 @@ def merge_using_pyosmium(context, osm_files, border, output_path, speed_correcti
         for osm_file in osm_files
     ]
 
-    total = len(tracker.way_ids()) + len(tracker.node_ids())
+    total = len(all_way_ids) + len(all_node_ids) + len(all_relation_ids)
     write_item = _write_item if speed_corrections is None else _write_item_with_speed_corrections
     with osmium.SimpleWriter(output_path) as writer:
         for items in context.progress(
