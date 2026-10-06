@@ -2,7 +2,8 @@ import os
 import sys
 import osmium
 import logging
-import osmium
+
+from data.osm.utils import write_with_speed_correction
 logger = logging.getLogger(__name__)
 
 """
@@ -14,45 +15,14 @@ class OSMHandler(osmium.SimpleHandler):
         self.writer = writer
         self.speed_corrections = speed_corrections
 
-        # Decide once which implementation to use.
-        self.way = (
-            self._way_with_corrections
-            if speed_corrections is not None
-            else self._way_without_corrections
-        )
-
     def node(self, n):
         self.writer.add_node(n)
 
     def relation(self, r):
         self.writer.add_relation(r)
 
-    def _way_without_corrections(self, w):
-        self.writer.add_way(w)
-
-    def _way_with_corrections(self, w):
-        new_speed = self.speed_corrections.get(w.id)
-
-        if new_speed is None:
-            self.writer.add_way(w)
-            return
-
-        tags = dict(w.tags)
-        tags["maxspeed"] = str(new_speed)
-
-        self.writer.add_way(
-            osmium.osm.mutable.Way(
-                id=w.id,
-                version=w.version,
-                visible=w.visible,
-                changeset=w.changeset,
-                uid=w.uid,
-                user=w.user,
-                timestamp=w.timestamp,
-                nodes=list(w.nodes),
-                tags=tags,
-            )
-        )
+    def way(self, way):
+        write_with_speed_correction(self.writer, way, self.speed_corrections)
 
 
 def convert_pbf_to_osm_pyosmium(input_file, output_file, speed_corrections=None):      

@@ -5,6 +5,8 @@ from multiprocessing import Pool
 from shapely.prepared import prep
 import logging
 
+from data.osm.utils import is_restriction, members_exist, relation_members, write_with_speed_correction
+
 logger = logging.getLogger("synpp")
 
 """
@@ -51,18 +53,13 @@ def collect_restriction_ids(osm_files, way_ids, node_ids):
         osmium.FileProcessor(path, entities=osmium.osm.RELATION)
         for path in osm_files
     ]
-    retained_ids = {"w": way_ids, "n": node_ids}
     relation_ids = set()
     for items in osmium.zip_processors(*processors):
         relation = next(item for item in items if item is not None)
-        relation_type = relation.tags.get("type", "")
-        if relation_type != "restriction" and not relation_type.startswith("restriction:"):
+        if not is_restriction(relation):
             continue
         # Do not emit dangling references at the edge of the clipped network.
-        if relation.members and all(
-            member.ref in retained_ids.get(member.type, ())
-            for member in relation.members
-        ):
+        if members_exist(relation_members(relation), way_ids, node_ids):
             relation_ids.add(relation.id)
     return relation_ids
 
@@ -107,12 +104,10 @@ def merge_using_pyosmium(context, osm_files, border, output_path, speed_correcti
     processors = [
         osmium.FileProcessor(osm_file)
         .with_filter(tracker.id_filter())
-        .with_locations()
         for osm_file in osm_files
     ]
 
     total = len(all_way_ids) + len(all_node_ids) + len(all_relation_ids)
-    write_item = _write_item if speed_corrections is None else _write_item_with_speed_corrections
     with osmium.SimpleWriter(output_path) as writer:
         for items in context.progress(
             osmium.zip_processors(*processors),
@@ -121,41 +116,11 @@ def merge_using_pyosmium(context, osm_files, border, output_path, speed_correcti
         ):
             for item in items:
                 if item:
-                    write_item(writer, item, speed_corrections)
+                    write_with_speed_correction(writer, item, speed_corrections)
                     break
 
     return output_path
 
-
-def _write_item(writer, item, speed_corrections):
-    writer.add(item)
-
-def _write_item_with_speed_corrections(writer, item, speed_corrections):
-    if item.type_str() == "w":
-        new_speed = speed_corrections.get(item.id)
-        if new_speed is None:
-            writer.add_way(item)
-            return
-        
-        tags = dict(item.tags)
-        tags["maxspeed"] = str(new_speed)
-
-        writer.add_way(
-            osmium.osm.mutable.Way(
-                id=item.id,
-                version=item.version,
-                visible=item.visible,
-                changeset=item.changeset,
-                uid=item.uid,
-                user=item.user,
-                timestamp=item.timestamp,
-                nodes=list(item.nodes),
-                tags=tags,
-            )
-        )
-    else:
-        writer.add(item)
-        
 
 def merge_files(context, osm_files, border, output_file, speed_corrections=None):
     new_file_path = output_file.replace(".osm.gz","-pyosmium.osm")
