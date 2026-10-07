@@ -11,17 +11,22 @@ from .paths import configure_simulation_path, get_analysis_output_path
 
 
 logger = logging.getLogger("synpp")
-runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not (i.startswith("_") or i.startswith("."))]
+# Peak totals must never be mixed into the daily comparison.
+runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not (i.startswith("_") or i.startswith(".") or i == "transcality_peak_hour.py")]
 
 
 def configure(context):    
+    geneva_source = context.config("analysis.counts.geneva_source", default="transcality")
+    if geneva_source not in ("geneva", "transcality"):
+        raise ValueError("analysis.counts.geneva_source must be 'geneva' or 'transcality'")
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
     configure_simulation_path(context)
     context.config("only_weekday", default=False)
     for run in runs:
         logger.info(f"Staging analysis.counts.runs.{run}")
-        context.stage(f"analysis.counts.runs.{run}")
+        context.stage(f"analysis.counts.runs.{run}",
+                      alias="geneva_counts" if run == geneva_source else None)
 
 
 def execute(context):
@@ -31,9 +36,9 @@ def execute(context):
     os.makedirs(path_to_output, exist_ok=True)
 
     # Load all count files
-    files = {}
+    files = {"geneva": context.stage("geneva_counts")}
     for run in runs:
-        if 'annemasse' not in run.lower():
+        if run not in ("geneva", "transcality") and 'annemasse' not in run.lower():
             files[run] = context.stage(f"analysis.counts.runs.{run}")
 
     # Combine all count files into a single file

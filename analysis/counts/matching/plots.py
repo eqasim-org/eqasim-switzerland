@@ -38,6 +38,15 @@ FLOW_MAP_TOOLTIP_FIELDS = [
     "adiff",
     "geh",
 ]
+TRANSCALITY_FLOW_MAP_TOOLTIP_FIELDS = [
+    *FLOW_MAP_TOOLTIP_FIELDS,
+    "flow_lower",
+    "flow_upper",
+    "bounds_status",
+    "source",
+    "detector_ids",
+    "daily_profile",
+]
 FLOW_MAP_FIELD_LABELS = {
     "link_id": "Link ID",
     "id": "Station",
@@ -47,6 +56,12 @@ FLOW_MAP_FIELD_LABELS = {
     "pdiff": "Percentage difference (%)",
     "adiff": "Absolute difference (vehicles/day)",
     "geh": "GEH",
+    "flow_lower": "Daily lower bound (vehicles/day)",
+    "flow_upper": "Daily upper bound (vehicles/day)",
+    "bounds_status": "Simulation vs. observed bounds",
+    "source": "Source",
+    "detector_ids": "Detector ID(s)",
+    "daily_profile": "Observed daily profile",
     "crossborder_share_pct": "Cross-border share of MATSim car flow (%)",
     "crossborder_flow": "Cross-border agent flow (vehicles/day)",
     "swiss_resident_share_pct": "Swiss residents among cross-border car users (%)",
@@ -63,8 +78,8 @@ FLOW_MAP_FIELD_LABELS = {
 
 
 
-def GEH(x_d, y_d, return_vector=False, directions_represented=2):
-    """Compute GEH from daily flows using the represented direction count.
+def GEH(x_d, y_d, return_vector=False, directions_represented=2, period_hours=24):
+    """Compute hourly GEH from period totals and represented direction count.
 
     ``directions_represented`` is 1 for directional observations (for example,
     Geneva and Zurich) and 2 for observations aggregated across both road
@@ -74,8 +89,11 @@ def GEH(x_d, y_d, return_vector=False, directions_represented=2):
     if np.any(~np.isfinite(directions)) or np.any(directions <= 0):
         raise ValueError("directions_represented must contain positive values")
 
-    x = np.asarray(x_d, dtype=float) / 24 / directions
-    y = np.asarray(y_d, dtype=float) / 24 / directions
+    duration = np.asarray(period_hours, dtype=float)
+    if np.any(~np.isfinite(duration)) or np.any(duration <= 0):
+        raise ValueError("period_hours must contain positive values")
+    x = np.asarray(x_d, dtype=float) / duration / directions
+    y = np.asarray(y_d, dtype=float) / duration / directions
     geh_values = np.sqrt(2 * (x - y) ** 2 / (x + y + 1e-6))
     if return_vector:
         return geh_values
@@ -104,6 +122,7 @@ def SGV(x_d,y_d):
 
 class Plotter:
     FLOW_MAP_TOOLTIP_FIELDS = FLOW_MAP_TOOLTIP_FIELDS
+    TRANSCALITY_FLOW_MAP_TOOLTIP_FIELDS = TRANSCALITY_FLOW_MAP_TOOLTIP_FIELDS
 
     @staticmethod
     def prepare_flow_map_points(points, flows, directions_represented=None):
@@ -117,7 +136,7 @@ class Plotter:
             )
 
         flow_columns = ["id", "flow", "simulated_flow", "pdiff", "adiff"]
-        for optional_column in ("directions_represented", "matched_link_ids", "link_id"):
+        for optional_column in ("directions_represented", "matched_link_ids", "link_id", "period_hours", "flow_period"):
             if optional_column in flows.columns:
                 flow_columns.append(optional_column)
         result = points[["id", "geometry"]].merge(
@@ -141,22 +160,30 @@ class Plotter:
                 if "directions_represented" in result.columns
                 else 2
             )
+        result["directions_represented"] = directions_represented
         result["geh"] = GEH(
             result["flow"],
             result["simulated_flow"],
             return_vector=True,
             directions_represented=directions_represented,
+            period_hours=result.get("period_hours", 24),
         ).round(2)
         return gpd.GeoDataFrame(result, geometry="geometry", crs=points.crs)
 
     def plot_flow(self, flows, counts:Counts=None, output_file:str=None, 
                         distance_to_border:int=5000, title:str=None, show_range=False, show_geh=False,
-                        remove_near_border=False, directions_represented=None):
+                        remove_near_border=False, directions_represented=None,
+                        period_hours=24, flow_unit="vehicles/day"):
         flows = flows.copy()
         flows = flows.sort_values("flow")
         
         if show_range:
-            flows = flows.merge(counts.counts[['id', 'flow_lower', 'flow_upper']], on="id",how="left")
+            if not {"flow_lower", "flow_upper"}.issubset(flows.columns):
+                flows = flows.merge(
+                    counts.counts[["id", "flow_lower", "flow_upper"]],
+                    on="id",
+                    how="left",
+                )
             flow_lower = flows.flow_lower
             flow_upper = flows.flow_upper
                             
@@ -170,6 +197,10 @@ class Plotter:
             y = flows.simulated_flow
             logger.info(f"Points within {distance_to_border} meters to borders are removed from flow comparison plot!")
 
+        if flows.empty:
+            logger.warning("No count stations remain for the flow comparison plot; skipping it.")
+            return
+
         # Create the figure
         plt.figure(figsize=(8, 8))
         
@@ -177,7 +208,15 @@ class Plotter:
         plt.scatter(x, y, alpha=0.6, edgecolor='k', linewidth=0.5, s=60, c='steelblue', label='Count stations')
         if show_range:
             xerr = [np.maximum(x - flow_lower,0), np.maximum(flow_upper - x,0)]
-            plt.errorbar(x, y, xerr=xerr, fmt='o', ecolor='gray', alpha=0.6, label='IQR (10-90%)')
+            plt.errorbar(
+                x,
+                y,
+                xerr=xerr,
+                fmt="o",
+                ecolor="gray",
+                alpha=0.6,
+                label=f"Observed Q25–Q75 envelope ({flow_unit})",
+            )
             
         # Plot 1:1 line
         max_val = max(x.max(), y.max()) * 1.05
@@ -188,7 +227,7 @@ class Plotter:
         plt.plot(x, slope * x, color='crimson', lw=2, linestyle='-', label=f'Trend: y={slope:.2f} x')
         
         # Get R2
-        r2 = r2_score(x,y)
+        r2 = r2_score(x,y) if len(x) >= 2 else np.nan
         
         include_border = False
         if counts is not None and distance_to_border>0:
@@ -199,11 +238,12 @@ class Plotter:
                             alpha=0.6, s=10, c='orange', label=f"Within {distance_to_border} m to borders")            
                 # Optional: linear trend line (regression)
                 in_flow = flows[~flows["id"].isin(border_points["id"])].reset_index(drop=True)
-                slope = np.sum(in_flow.flow * in_flow.simulated_flow) / np.sum(in_flow.flow * in_flow.flow) 
-                
-                plt.plot(x, slope * x, color='darkmagenta', lw=2, linestyle='-', label=f'Trend without borders: y={slope:.2f} x')
-                r2_in = r2_score(in_flow.flow, in_flow.simulated_flow)
-                include_border = True
+                if len(in_flow) >= 2:
+                    slope = np.sum(in_flow.flow * in_flow.simulated_flow) / np.sum(in_flow.flow * in_flow.flow)
+
+                    plt.plot(x, slope * x, color='darkmagenta', lw=2, linestyle='-', label=f'Trend without borders: y={slope:.2f} x')
+                    r2_in = r2_score(in_flow.flow, in_flow.simulated_flow)
+                    include_border = True
             
         # Add R2 Score
         plt.text( 0.02 * max_val, 0.6 * max_val, 
@@ -223,7 +263,7 @@ class Plotter:
                 )
             else:
                 directions = directions_represented
-            geh = GEH(x, y, directions_represented=directions)
+            geh = GEH(x, y, directions_represented=directions, period_hours=period_hours)
             plt.text( 0.7 * max_val, 0.02 * max_val, 
                     f"GEH ≤ 5: {geh[0]:.1f}%\nGEH ≤ 10: {geh[1]:.1f}%\nGEH ≤ 15: {geh[2]:.1f}%\nGEH ≤ 25: {geh[3]:.1f}%" ,  # text
                     fontsize=14,
@@ -231,17 +271,17 @@ class Plotter:
                     bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3')  # white box
                     )
             
-            sqv = SGV(x,y)
-            plt.text( 0.7 * max_val, 0.25 * max_val, 
-                    f"SQV ≥ 0.9: {sqv[0]}%\nSQV ≥ 0.85: {sqv[1]}%\nSQV ≥ 0.8: {sqv[2]}%\nSQV ≥ 0.7: {sqv[3]}%" ,  # text
-                    fontsize=14,
-                    color='darkmagenta',
-                    bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3')  # white box
-                    )
+            # SQV here is calibrated for daily totals, not peak-period totals.
+            if period_hours == 24:
+                sqv = SGV(x,y)
+                plt.text(0.7 * max_val, 0.25 * max_val,
+                         f"SQV ≥ 0.9: {sqv[0]}%\nSQV ≥ 0.85: {sqv[1]}%\nSQV ≥ 0.8: {sqv[2]}%\nSQV ≥ 0.7: {sqv[3]}%",
+                         fontsize=14, color='darkmagenta',
+                         bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3'))
         
         # Axis labels and title
-        plt.xlabel("Observed Flow (Weekday Avg)", fontsize=15, labelpad=13)
-        plt.ylabel("Simulated Flow (MATSim, 10%)", fontsize=15, labelpad=13)
+        plt.xlabel(f"Observed Flow ({flow_unit})", fontsize=15, labelpad=13)
+        plt.ylabel(f"Simulated Flow ({flow_unit}, full population)", fontsize=15, labelpad=13)
         plt.title("Observed vs Simulated Traffic Flows" if title is None else title, fontsize=17)
         
         # Add grid, legend        
@@ -252,6 +292,102 @@ class Plotter:
         if output_file is not None:
             plt.savefig(output_file, dpi=100, bbox_inches="tight")
         plt.close()
+
+    def plot_flow_by_source(self, flows, output_file=None, title=None, flow_unit="vehicles/day"):
+        """Compare daily totals with a separate color for each counting source."""
+        data = flows.dropna(subset=["flow", "simulated_flow", "source"])
+        # Exclude this mixed-source link aggregate from the source scatter only.
+        data = data[~data["source"].eq("ASTRA_LOOPS + CANTON_LOOPS_EDGE_BASED")]
+        if data.empty:
+            return
+        source_colors = {
+            "CAMERA": "#0072B2",
+            "ASTRA_LOOPS": "#D55E00",
+            "CANTON_LOOPS_EDGE_BASED": "#009E73",
+            "CANTON_LOOPS_LANE_BASED": "#CC79A7",
+        }
+        palette = plt.get_cmap("tab20")
+        figure, axis = plt.subplots(figsize=(11, 9))
+        for index, (source, group) in enumerate(data.groupby("source", sort=True)):
+            axis.scatter(
+                group["flow"], group["simulated_flow"],
+                color=source_colors.get(source, palette(index % 20)),
+                marker="D" if " + " in source else "o",
+                s=35, alpha=0.75, edgecolors="white", linewidths=0.4,
+                label=f"{source} (n={len(group)})",
+            )
+        maximum = max(data["flow"].max(), data["simulated_flow"].max(), 1) * 1.05
+        axis.plot([0, maximum], [0, maximum], "k--", linewidth=1, label="1:1 reference")
+        axis.set(xlim=(0, maximum), ylim=(0, maximum),
+                 xlabel=f"Observed flow ({flow_unit})",
+                 ylabel=f"Simulated flow ({flow_unit}, scaled to full population)",
+                 title=title or "Observed vs Simulated Flow by Counting Source")
+        axis.grid(linestyle="--", alpha=0.3)
+        axis.legend(fontsize=9, loc="upper left")
+        figure.tight_layout()
+        if output_file:
+            figure.savefig(output_file, dpi=150, bbox_inches="tight")
+        plt.close(figure)
+
+    def plot_flow_bounds(self, flows, output_file=None, title=None, flow_unit="vehicles/day"):
+        """Plot observed daily envelopes and classify simulated totals."""
+        required = {"flow", "flow_lower", "flow_upper", "simulated_flow"}
+        missing = required.difference(flows.columns)
+        if missing:
+            raise ValueError(
+                "Flow-bound plot is missing columns: " + ", ".join(sorted(missing))
+            )
+
+        data = flows.dropna(subset=list(required)).sort_values("flow").reset_index(drop=True)
+        if data.empty:
+            logger.warning("No complete observations are available for the flow-bound plot.")
+            return
+        data["bounds_status"] = np.select(
+            [
+                data["simulated_flow"] < data["flow_lower"],
+                data["simulated_flow"] > data["flow_upper"],
+            ],
+            ["Below lower bound", "Above upper bound"],
+            default="Within bounds",
+        )
+        colors = {
+            "Within bounds": "#009E73",
+            "Below lower bound": "#0072B2",
+            "Above upper bound": "#D55E00",
+        }
+
+        x = np.arange(len(data))
+        figure, axis = plt.subplots(figsize=(16, 8))
+        axis.fill_between(
+            x,
+            data["flow_lower"].to_numpy(),
+            data["flow_upper"].to_numpy(),
+            color="lightgray",
+            alpha=0.65,
+            label=f"Observed Q25–Q75 envelope ({flow_unit})",
+        )
+        axis.plot(x, data["flow"], color="black", linewidth=1.2, label="Observed")
+        for status, subset in data.groupby("bounds_status"):
+            axis.scatter(
+                subset.index,
+                subset["simulated_flow"],
+                s=18,
+                alpha=0.8,
+                color=colors[status],
+                label=f"{status} (n={len(subset)})",
+            )
+        within_share = data["bounds_status"].eq("Within bounds").mean() * 100
+        axis.set_title(
+            title or f"Simulated flow relative to observed bounds ({within_share:.1f}% within)"
+        )
+        axis.set_xlabel("Count observations sorted by observed flow")
+        axis.set_ylabel(flow_unit)
+        axis.grid(axis="y", linestyle="--", alpha=0.35)
+        axis.legend()
+        figure.tight_layout()
+        if output_file:
+            figure.savefig(output_file, dpi=150, bbox_inches="tight")
+        plt.close(figure)
         
     def plot_flow_by_road_type(self, flows, network, matched, counts = None,
                                      distance_to_border = 0, 
@@ -430,14 +566,88 @@ class Plotter:
         for field in fields:
             if field not in row:
                 continue
+            if field == "daily_profile":
+                profile = row[field]
+                if isinstance(profile, str) and profile:
+                    rows.append(
+                        '<tr><td colspan="2"><b>Observed daily profile:</b><br>'
+                        + profile
+                        + "</td></tr>"
+                    )
+                continue
             value = Plotter._tooltip_value(row[field])
             if value is None:
                 continue
             label = FLOW_MAP_FIELD_LABELS.get(
                 field, field.replace("_", " ").title()
             )
+            if "flow_period" in row and pd.notna(row["flow_period"]):
+                label = label.replace("vehicles/day", f"vehicles/{row['flow_period']}")
+                if field in ("flow_lower", "flow_upper"):
+                    label = label.replace("Daily", str(row["flow_period"]))
             rows.append(f"<tr><td><b>{escape(label)}:</b></td><td>{value}</td></tr>")
         return "<table>" + "".join(rows) + "</table>"
+
+    @staticmethod
+    def flow_profile_svg(profile):
+        """Render a trusted Transcality hourly profile as compact tooltip SVG."""
+        if isinstance(profile, str):
+            try:
+                profile = json.loads(profile)
+            except json.JSONDecodeError:
+                return ""
+        if not isinstance(profile, dict):
+            return ""
+
+        hours = np.asarray(profile.get("hour", []), dtype=float)
+        flow = np.asarray(profile.get("flow", []), dtype=float)
+        lower = np.asarray(profile.get("lower", []), dtype=float)
+        upper = np.asarray(profile.get("upper", []), dtype=float)
+        if not (len(hours) and len(hours) == len(flow) == len(lower) == len(upper)):
+            return ""
+        finite = np.isfinite(hours) & np.isfinite(flow) & np.isfinite(lower) & np.isfinite(upper)
+        hours, flow, lower, upper = hours[finite], flow[finite], lower[finite], upper[finite]
+        if not len(hours):
+            return ""
+
+        width, height = 300, 135
+        left, right, top, bottom = 36, 8, 10, 24
+        plot_width = width - left - right
+        plot_height = height - top - bottom
+        maximum = max(float(np.max(upper)), float(np.max(flow)), 1.0)
+
+        def point(hour, value):
+            x = left + ((hour + 0.5) / 24) * plot_width
+            y = top + (1 - value / maximum) * plot_height
+            return f"{x:.1f},{y:.1f}"
+
+        band = " ".join(
+            [point(hour, value) for hour, value in zip(hours, upper)]
+            + [point(hour, value) for hour, value in zip(hours[::-1], lower[::-1])]
+        )
+        line = " ".join(point(hour, value) for hour, value in zip(hours, flow))
+        ticks = "".join(
+            f'<text x="{left + hour / 24 * plot_width:.1f}" y="{height - 7}" '
+            f'text-anchor="middle" font-size="9" fill="#333">{hour}</text>'
+            for hour in (0, 6, 12, 18, 24)
+        )
+        return (
+            f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+            'style="background:white;border-radius:3px">'
+            f'<line x1="{left}" y1="{top}" x2="{left}" y2="{height-bottom}" stroke="#555"/>'
+            f'<line x1="{left}" y1="{height-bottom}" x2="{width-right}" y2="{height-bottom}" stroke="#555"/>'
+            f'<polygon points="{band}" fill="#bdbdbd" fill-opacity="0.65"/>'
+            f'<polyline points="{line}" fill="none" stroke="#2166ac" stroke-width="2"/>'
+            f'<text x="3" y="{top+7}" font-size="9" fill="#333">{maximum:.0f}</text>'
+            f'<text x="3" y="{height-bottom+3}" font-size="9" fill="#333">0</text>'
+            f'{ticks}'
+            '<rect x="170" y="4" width="12" height="7" fill="#bdbdbd" fill-opacity="0.65"/>'
+            '<text x="185" y="11" font-size="9" fill="#333">Q25–Q75</text>'
+            '<line x1="235" y1="8" x2="247" y2="8" stroke="#2166ac" stroke-width="2"/>'
+            '<text x="250" y="11" font-size="9" fill="#333">flow</text>'
+            "</svg>"
+        )
+
     @staticmethod
     def _flow_metric_settings(point_gdf):
         """Color-metric dropdown entries for create_map's point layer. Each
@@ -514,15 +724,65 @@ class Plotter:
                 "step": 1,
             }
 
+        periods = {str(value) for gdf in valid_points if "flow_period" in gdf
+                   for value in gdf["flow_period"].dropna().unique()}
+        if len(periods) == 1 and "adiff" in settings:
+            unit = "vehicles/" + next(iter(periods))
+            settings["adiff"]["label"] = f"Absolute difference ({unit})"
+            settings["adiff"]["quality_unit"] = unit
         return settings
 
     @staticmethod
-    def _inject_flow_metric_controls(path_to_save, metric_settings):
+    def _prepare_count_modes(points, tooltip_fields):
+        """Precompute reversible map-only count choices using the shared GEH."""
+        points = points.copy()
+        required = {"flow", "simulated_flow", "flow_lower", "flow_upper", "pdiff", "adiff", "geh"}
+        if not required.issubset(points.columns):
+            return points, False
+        values = points[["flow", "simulated_flow", "flow_lower", "flow_upper"]].apply(
+            pd.to_numeric, errors="coerce"
+        )
+        valid = np.isfinite(values).all(axis=1) & (values >= 0).all(axis=1)
+        valid &= values.flow_lower <= values.flow_upper
+        if not valid.any():
+            return points, False
+        originals, closest = [], []
+        for index, row in points.iterrows():
+            fields = ["flow", "pdiff", "adiff", "geh", "_tooltip_html"]
+            originals.append({field: row[field] for field in fields})
+            if not valid.loc[index]:
+                closest.append(None)
+                continue
+            adjusted = row.copy()
+            adjusted["flow"] = float(np.clip(row.simulated_flow, row.flow_lower, row.flow_upper))
+            adjusted["adiff"] = float(row.simulated_flow - adjusted["flow"])
+            adjusted["pdiff"] = (
+                adjusted["adiff"] / adjusted["flow"] * 100 if adjusted["flow"] > 0
+                else (0.0 if row.simulated_flow == 0 else None)
+            )
+            adjusted["geh"] = float(GEH(
+                [adjusted["flow"]], [row.simulated_flow], return_vector=True,
+                directions_represented=row.get("directions_represented", 2),
+                period_hours=row.get("period_hours", 24),
+            )[0])
+            adjusted["_tooltip_html"] = (
+                "<b>Closest count within bounds (optimistic comparison)</b><br>"
+                + Plotter._build_tooltip_html(adjusted, tooltip_fields)
+                + "<br><b>Original traffic count:</b> " + escape(str(row["flow"]))
+            )
+            closest.append({field: adjusted[field] for field in fields})
+        points["_original_count"] = originals
+        points["_closest_count"] = closest
+        return points, True
+
+    @staticmethod
+    def _inject_flow_metric_controls(path_to_save, metric_settings, has_count_bounds=False):
         if not metric_settings:
             return
 
         controls = """
 <div id="counts-map-controls">
+  __COUNT_MODE_CONTROL__
   <div class="counts-control-title">Count point colors</div>
   <label for="counts-color-metric">Metric</label>
   <select id="counts-color-metric"></select>
@@ -562,6 +822,14 @@ class Plotter:
   </div>
 </div>
 """
+        controls = controls.replace("__COUNT_MODE_CONTROL__", """
+  <label for="counts-count-mode">Traffic counts</label>
+  <select id="counts-count-mode">
+    <option value="original">Original counts</option>
+    <option value="closest">Closest within bounds (optimistic)</option>
+  </select>
+  <div>Points without valid bounds remain unchanged. Daily profiles show original observations.</div>
+""" if has_count_bounds else "")
         style = """
 <style>
 #counts-map-controls {
@@ -656,6 +924,7 @@ class Plotter:
 (function () {
   const metricSettings = __METRIC_SETTINGS__;
   const select = document.getElementById("counts-color-metric");
+  const countMode = document.getElementById("counts-count-mode");
   const lowerInput = document.getElementById("counts-lower-bound");
   const upperInput = document.getElementById("counts-upper-bound");
   const lowerLabel = document.getElementById("counts-lower-label");
@@ -702,7 +971,7 @@ class Plotter:
 
   function colorFor(value, lower, upper) {
     const numeric = Number(value);
-    if (!Number.isFinite(numeric)) {
+    if (value === null || value === undefined || !Number.isFinite(numeric)) {
       return [128, 128, 128, 180];
     }
     const clipped = Math.max(lower, Math.min(upper, numeric));
@@ -802,7 +1071,7 @@ class Plotter:
       return layer.clone({
         getFillColor: function (datum) {
           const difference = Number(datum[activeQualityMetric]);
-          return enabled && Number.isFinite(difference)
+          return enabled && datum[activeQualityMetric] != null && Number.isFinite(difference)
             && Math.abs(difference) < threshold
             ? color
             : [0, 0, 0, 0];
@@ -813,6 +1082,25 @@ class Plotter:
       });
     });
     deck.setProps({layers: layers});
+  }
+
+  if (countMode) {
+    countMode.addEventListener("change", function () {
+      if (!deck || !deck.props || !deck.props.layers) return;
+      const layers = deck.props.layers.map(function (layer) {
+        if (!layer.id.startsWith("counts-points-") && !layer.id.startsWith("counts-quality-")) {
+          return layer;
+        }
+        return layer.clone({data: layer.props.data.map(function (datum) {
+          const state = countMode.value === "closest"
+            ? (datum._closest_count || datum._original_count) : datum._original_count;
+          return state ? Object.assign({}, datum, state) : datum;
+        })});
+      });
+      deck.setProps({layers: layers});
+      recolor();
+      updateQualityMarkers();
+    });
   }
 
   select.addEventListener("change", function () {
@@ -850,6 +1138,40 @@ class Plotter:
         html = html.replace("</html>", script + "\n</html>", 1)
         path.write_text(html, encoding="utf-8")
 
+    @staticmethod
+    def _inject_path_color_legend(path_to_save, settings):
+        if not settings:
+            return
+        colors = settings.get(
+            "colors", ["#440154", "#31688e", "#35b779", "#fde725"]
+        )
+        gradient = ", ".join(colors)
+        label = escape(str(settings.get("label", "Link color")))
+        lower = escape(f"{settings.get('lower', 0):,.0f}")
+        upper = escape(f"{settings.get('upper', 0):,.0f}")
+        legend = f"""
+<div id="counts-link-flow-legend">
+  <div class="counts-link-flow-title">{label}</div>
+  <div class="counts-link-flow-ramp" style="background:linear-gradient(to right,{gradient})"></div>
+  <div class="counts-link-flow-labels"><span>{lower}</span><span>{upper}</span></div>
+</div>
+<style>
+#counts-link-flow-legend {{
+  position:absolute; z-index:20; left:12px; bottom:24px; width:260px;
+  box-sizing:border-box; padding:10px; border-radius:7px;
+  background:rgba(255,255,255,0.95); box-shadow:0 2px 10px rgba(0,0,0,0.28);
+  color:#222; font:12px/1.3 Arial,sans-serif;
+}}
+.counts-link-flow-title {{ margin-bottom:6px; font-weight:700; }}
+.counts-link-flow-ramp {{ height:12px; border:1px solid #777; }}
+.counts-link-flow-labels {{ display:flex; justify-content:space-between; margin-top:2px; }}
+</style>
+"""
+        path = Path(path_to_save)
+        html = path.read_text(encoding="utf-8")
+        html = html.replace("</body>", legend + "\n</body>", 1)
+        path.write_text(html, encoding="utf-8")
+
     
     @staticmethod    
     def create_map(df:Union[gpd.GeoDataFrame,list],
@@ -858,7 +1180,9 @@ class Plotter:
                    point_data_to_show=None,
                    border: gpd.GeoDataFrame =  None,
                    path_to_save=None, 
-                   cut_network = False):
+                   cut_network = False,
+                   path_color_column=None,
+                   path_color_legend=None):
         
         point_data_to_show = point_data_to_show or []
 
@@ -890,7 +1214,13 @@ class Plotter:
 
         # Preserve every real vertex and keep multipart geometries as
         # independent paths rather than joining them with artificial chords.
-        df = [Plotter._prepare_path_data(dfi, data_to_show) for dfi in df]
+        prepared_paths = []
+        for dfi in df:
+            path_fields = list(data_to_show)
+            if path_color_column and path_color_column in dfi.columns:
+                path_fields.append(path_color_column)
+            prepared_paths.append(Plotter._prepare_path_data(dfi, path_fields))
+        df = prepared_paths
         for path_data in df:
             path_data["_tooltip_html"] = path_data.apply(
                 lambda row: Plotter._build_tooltip_html(row, data_to_show), axis=1
@@ -906,7 +1236,11 @@ class Plotter:
                 auto_highlight=True,      
                 get_path="path",
                 get_width=1.5,
-                get_color=[0,0,255] if i==0 else [199, 21, 133],  
+                get_color=(
+                    path_color_column
+                    if path_color_column and path_color_column in dfi.columns
+                    else ([0,0,255] if i==0 else [199, 21, 133])
+                ),
                 highlight_color=[255, 0, 0],      
                 width_min_pixels=1 if i==0 else 2,
             )
@@ -916,6 +1250,8 @@ class Plotter:
         # Add optional point layers. The initial view uses percentage
         # difference and browser controls can switch the accessor dynamically.
         def color_map(value, lower, upper):
+            if pd.isna(value) or not np.isfinite(value):
+                return [128, 128, 128, 180]
             clipped = np.clip(value, lower, upper)
             normalized = (clipped - lower) / (upper - lower)
             color = plt.get_cmap("bwr")(normalized)
@@ -926,7 +1262,8 @@ class Plotter:
                 230,
             ]
 
-        initial_metric = "pdiff" if metric_settings else None
+        initial_metric = next(iter(metric_settings), None)
+        has_count_bounds = False
         if point_gdf:
             colors = [[255, 0, 0], [0, 102, 51], [128, 0, 128]]
             for i, gdf in enumerate(point_gdf):
@@ -936,7 +1273,6 @@ class Plotter:
                         lambda geometry: [geometry.x, geometry.y]
                     )
                     if initial_metric:
-                        gdf = gdf[gdf[initial_metric].notna()].copy()
                         settings = metric_settings[initial_metric]
                         gdf["color"] = gdf[initial_metric].apply(
                             lambda value: color_map(
@@ -947,6 +1283,8 @@ class Plotter:
                     gdf["_tooltip_html"] = gdf.apply(
                         lambda row: Plotter._build_tooltip_html(row, point_data_to_show), axis=1
                     )
+                    gdf, layer_has_bounds = Plotter._prepare_count_modes(gdf, point_data_to_show)
+                    has_count_bounds |= layer_has_bounds
                     point_layer = pdk.Layer(
                         "ScatterplotLayer",
                         gdf,
@@ -1041,7 +1379,8 @@ class Plotter:
         # Save the map as an HTML file and add browser-side controls.
         if path_to_save:
             r.to_html(path_to_save, notebook_display=False)
-            Plotter._inject_flow_metric_controls(path_to_save, metric_settings)
+            Plotter._inject_flow_metric_controls(path_to_save, metric_settings, has_count_bounds)
+            Plotter._inject_path_color_legend(path_to_save, path_color_legend)
             logger.info(f"Map saved to {path_to_save}")
         else:
             return r

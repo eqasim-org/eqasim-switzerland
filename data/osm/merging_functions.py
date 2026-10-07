@@ -5,6 +5,8 @@ from multiprocessing import Pool
 from shapely.prepared import prep
 import logging
 
+from data.osm.utils import is_restriction, members_exist, relation_members, write_with_speed_correction
+
 logger = logging.getLogger("synpp")
 
 """
@@ -21,6 +23,7 @@ def collect_ids(args):
 
     processor = (
         osmium.FileProcessor(osm_file)
+        .with_filter(osmium.filter.EntityFilter(osmium.osm.WAY))
         .with_filter(osmium.filter.KeyFilter("highway", "railway"))
         .with_locations()
         .with_filter(osmium.filter.GeoInterfaceFilter())
@@ -38,6 +41,28 @@ def collect_ids(args):
                 node_ids.update(node.ref for node in item.nodes)
 
     return (way_ids, node_ids)
+
+def collect_restriction_ids(osm_files, way_ids, node_ids):
+    """Keep restrictions whose members survive clipping across all input files.
+
+    Use the same first-file precedence as the writer for overlapping extracts.
+    Relations must be checked after merging the node/way ID sets: their members
+    can be distributed across different input files.
+    """
+    processors = [
+        osmium.FileProcessor(path, entities=osmium.osm.RELATION)
+        for path in osm_files
+    ]
+    relation_ids = set()
+    for items in osmium.zip_processors(*processors):
+        relation = next(item for item in items if item is not None)
+        if not is_restriction(relation):
+            continue
+        # Do not emit dangling references at the edge of the clipped network.
+        if members_exist(relation_members(relation), way_ids, node_ids):
+            relation_ids.add(relation.id)
+    return relation_ids
+
 
 def merge_using_pyosmium(context, osm_files, border, output_path, speed_corrections=None):
     # Geometry that defines the region of interest
@@ -61,24 +86,28 @@ def merge_using_pyosmium(context, osm_files, border, output_path, speed_correcti
     all_way_ids = set().union(*(r[0] for r in results))
     all_node_ids = set().union(*(r[1] for r in results))
 
+    logger.info("Collecting turn restrictions for the merged network ...")
+    all_relation_ids = collect_restriction_ids(osm_files, all_way_ids, all_node_ids)
+    logger.info("Keeping %d turn restrictions.", len(all_relation_ids))
+
     # Build tracker for Phase 2
     tracker = osmium.IdTracker()
     for wid in all_way_ids:
         tracker.add_way(wid)
     for nid in all_node_ids:
         tracker.add_node(nid)
+    for rid in all_relation_ids:
+        tracker.add_relation(rid)
 
     # PHASE 2: SERIAL WRITE
     logger.info("Starting Phase 2: Writing merged OSM file ...")
     processors = [
         osmium.FileProcessor(osm_file)
         .with_filter(tracker.id_filter())
-        .with_locations()
         for osm_file in osm_files
     ]
 
-    total = len(tracker.way_ids()) + len(tracker.node_ids())
-    write_item = _write_item if speed_corrections is None else _write_item_with_speed_corrections
+    total = len(all_way_ids) + len(all_node_ids) + len(all_relation_ids)
     with osmium.SimpleWriter(output_path) as writer:
         for items in context.progress(
             osmium.zip_processors(*processors),
@@ -87,41 +116,11 @@ def merge_using_pyosmium(context, osm_files, border, output_path, speed_correcti
         ):
             for item in items:
                 if item:
-                    write_item(writer, item, speed_corrections)
+                    write_with_speed_correction(writer, item, speed_corrections)
                     break
 
     return output_path
 
-
-def _write_item(writer, item, speed_corrections):
-    writer.add(item)
-
-def _write_item_with_speed_corrections(writer, item, speed_corrections):
-    if item.type_str() == "w":
-        new_speed = speed_corrections.get(item.id)
-        if new_speed is None:
-            writer.add_way(item)
-            return
-        
-        tags = dict(item.tags)
-        tags["maxspeed"] = str(new_speed)
-
-        writer.add_way(
-            osmium.osm.mutable.Way(
-                id=item.id,
-                version=item.version,
-                visible=item.visible,
-                changeset=item.changeset,
-                uid=item.uid,
-                user=item.user,
-                timestamp=item.timestamp,
-                nodes=list(item.nodes),
-                tags=tags,
-            )
-        )
-    else:
-        writer.add(item)
-        
 
 def merge_files(context, osm_files, border, output_file, speed_corrections=None):
     new_file_path = output_file.replace(".osm.gz","-pyosmium.osm")

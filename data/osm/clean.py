@@ -1,5 +1,6 @@
 import data.osm.conversion_functions as cf
 import data.osm.merging_functions as mf
+from data.osm.update_osm_latest import update_osm_latest
 import logging
 import geopandas as gpd
 import pandas as pd
@@ -21,6 +22,11 @@ def configure(context):
     if context.config("correct_osm_speeds"):
         context.stage("data.osm.speed_corrections")
 
+    context.config("use_latest_osm_for_correction", default = False)
+    context.config("latest_osm_for_correction", default = None)
+    if context.config("use_latest_osm_for_correction") and not context.config("latest_osm_for_correction"):
+        raise ValueError("If use_latest_osm_for_correction is True, latest_osm_for_correction must be provided.")
+
 
 def execute(context):
     # if the path is not a list, treat it as a single file, else treat it as a list of files, merge them, and keep only
@@ -35,7 +41,7 @@ def execute(context):
 
     if not isinstance(osm_file,list):
         osm_file = '%s/osm/%s' % (context.config("data_path"), osm_file)
-        return cf.from_pbf_to_osm_gz(context, osm_file, output_file, speed_corrections)
+        cleaned_file = cf.from_pbf_to_osm_gz(context, osm_file, output_file, speed_corrections)
     
     else:
         osm_files = ['%s/osm/%s' % (context.config("data_path"), f) for f in osm_file]
@@ -44,8 +50,15 @@ def execute(context):
         border = get_region(context)
         border = border.to_crs("EPSG:4326") # because osm in in wgs84       
         # Merge and cut to the area
-        return mf.merge_files(context, osm_files, border, output_file, speed_corrections)
+        cleaned_file = mf.merge_files(context, osm_files, border, output_file, speed_corrections)
 
+    if context.config("use_latest_osm_for_correction"):
+        latest_file = Path(context.config("data_path")) / "osm" / context.config("latest_osm_for_correction")
+        cleaned_file = update_osm_latest(
+            context, cleaned_file, latest_file,
+            Path(context.path()) / "osm_network_updated.osm", speed_corrections,
+        )
+    return cleaned_file
 
 
 ################### helper functions ####################

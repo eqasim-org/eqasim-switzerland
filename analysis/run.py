@@ -8,9 +8,9 @@ def configure(context):
     context.stage("analysis.counts.cross_border_flow_cars")
     context.stage("analysis.counts.cross_border_flow_pt")
     context.stage("analysis.counts.pt_stop_agent_trips")
-    #context.stage("analysis.travel_times.run")
     context.stage("analysis.pt.TPG_comparison.comparison_passenger_counts_geneva")
     context.stage("analysis.pt.transit_schedule.visualize")
+    context.stage("analysis.travel_times.run")
 
 
 def execute(context):
@@ -20,7 +20,7 @@ def execute(context):
         "cross_border_flow_cars" : context.stage("analysis.counts.cross_border_flow_cars")["path"],
         "cross_border_flow_pt" : context.stage("analysis.counts.cross_border_flow_pt")["path"],
         "pt_stop_agent_trips" : context.stage("analysis.counts.pt_stop_agent_trips")["path"],
-        #"travel_times" : context.stage("analysis.travel_times.run")["path"],
+        "travel_times" : context.stage("analysis.travel_times.run")["path"],
         "pt_comparison_geneva" : context.stage("analysis.pt.TPG_comparison.comparison_passenger_counts_geneva")["path"],
         "transit_schedule_map" : context.stage("analysis.pt.transit_schedule.visualize")["path"],
     }

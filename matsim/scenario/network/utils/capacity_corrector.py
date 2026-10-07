@@ -3,6 +3,8 @@ from matsim.readers import Network
 from shapely import contains_xy
 import geopandas as gpd
 from matsim.scenario.network.utils.routing_penalty import RoutingPenaltyProvider
+from data.osm.clean import read_outside_region
+from shapely.ops import unary_union
 
 class CapacityCorrector:
     """
@@ -77,10 +79,36 @@ class CapacityCorrector:
         border = border.reset_index()[["geometry"]].to_crs(epsg=2056)
         return border.geometry.iloc[0]
 
+    def get_region_border(self):
+        """
+        This method retrieves the geometry of the area that is simulated
+        """
+        # Bounding Area
+        border = self.context.stage("data.spatial.swiss_border")
+        border = border.reset_index()[["geometry"]].to_crs(epsg=2056)
+        
+        # Collect all geometries to combine
+        geometries = [unary_union(border.geometry)]
+        
+        # outside CH region
+        out_region_file = self.context.config("cross_border_exclude_shapefiles")
+        include_external_population = self.context.config("include_external_population")
+        if out_region_file is not None and include_external_population:
+            out_region = read_outside_region(out_region_file)
+            geometries.append(unary_union(out_region.geometry))
+        
+        # Combine border + outside regions into one geometry
+        combined = unary_union(geometries)
+        
+        # Apply buffer just in case geometries are not perfect (I don't want to have holes in the geometry)
+        buffer = 100.0
+        combined = combined.buffer(buffer)
+        return combined
+
     def reduce_capacity_outside_border(self):
         # links outside of switzerland
         centroids = RoutingPenaltyProvider.get_centroids(self.links, self.nodes)
-        border = self.get_swiss_border()
+        border = self.get_region_border()
         outside_mask = ~contains_xy(border, centroids.geometry.x.to_numpy(), centroids.geometry.y.to_numpy())
         links_outside_border = set(centroids.loc[outside_mask, "link_id"].unique())
         

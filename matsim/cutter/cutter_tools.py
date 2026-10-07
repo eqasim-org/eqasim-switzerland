@@ -271,6 +271,11 @@ def get_regions_path(path,kind="freespeed", subfolder = "network_calibration_fil
     if len(regions)==0:
         return ""
     
+    # Keep regions in numeric suffix order (e.g. _2.yml before _10.yml).
+    regions = sorted(
+        regions,
+        key=lambda region: int(os.path.splitext(region)[0].rsplit("_", 1)[-1]),
+    )
     # only keep the region_dir/region.yml part, not the full path
     regions = [os.path.join(subfolder, os.path.basename(region)) for region in regions]
     return ";".join(regions)

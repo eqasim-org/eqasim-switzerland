@@ -10,6 +10,8 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("data.external_population.constants")
 
+    context.config("group_income_classes_in_analysis", default=False)
+    context.config("analysis.counts.simulation_path", default="")
     context.config("output_path")
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output") 
@@ -19,7 +21,10 @@ def execute(context):
     # ensure dependency
     # _ = context.stage("matsim.output")
 
-    mode_shares_analyzer = ModeShareAnalyzer(context, from_matsim = True)
+    mode_shares_analyzer = ModeShareAnalyzer(
+        context, from_matsim=True,
+        group_income_classes=context.config("group_income_classes_in_analysis"),
+    )
     
     # Compute mode shares
     mode_shares = dict()
