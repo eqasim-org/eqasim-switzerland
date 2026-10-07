@@ -125,6 +125,12 @@ config:
     # num_mapbox_requests: 0
     travel_times_from: tomtom
 
+    # Re-route PT lines along official line routes (shapefile with columns LIGNE and DIRECTION,
+    # relative to data_path). Run matsim.scenario.network.route_check for a report only.
+    # pt_route_correction: false
+    # pt_line_routes_path: TPG_line_routes/TPG_LIGNES-SHP/TPG_LIGNES.shp
+    # pt_route_add_links: true # add bus-only links along the official route where the network has no connection
+
     # This is to run the cutter
     # extent_path: ...
     # extent_prefix: ...

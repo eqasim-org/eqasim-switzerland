@@ -15,7 +15,7 @@ from shapely.ops import unary_union
 
 from .cross_border_flow_cars import (
     _find_output_file, _polygon_outline_layer,
-    load_cross_border_person_ids, load_french_resident_cross_border_person_ids,
+    load_cross_border_person_ids, load_french_resident_person_ids,
     load_swiss_resident_cross_border_person_ids,
 )
 from .flow_metrics import add_metric_columns, inject_metric_dropdown_legend, share_column
@@ -62,10 +62,10 @@ def execute(context):
 
     cross_border_ids = load_cross_border_person_ids(persons_path)
     swiss_crossborder_ids = load_swiss_resident_cross_border_person_ids(persons_path)
-    french_resident_ids = load_french_resident_cross_border_person_ids(persons_path)
+    french_resident_ids = load_french_resident_person_ids(persons_path)
     foreign_crossborder_ids = cross_border_ids - swiss_crossborder_ids
     logger.info(
-        "Found %d cross-border persons (%d Swiss-resident, %d France-resident) in %s",
+        "Found %d cross-border persons (%d Swiss-resident) and %d non-cross-border France-resident persons in %s",
         len(cross_border_ids), len(swiss_crossborder_ids), len(french_resident_ids), persons_path,
     )
 

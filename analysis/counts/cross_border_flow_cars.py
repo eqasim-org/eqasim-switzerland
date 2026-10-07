@@ -71,10 +71,10 @@ def execute(context):
 
     cross_border_ids = load_cross_border_person_ids(persons_path)
     swiss_crossborder_ids = load_swiss_resident_cross_border_person_ids(persons_path)
-    french_resident_ids = load_french_resident_cross_border_person_ids(persons_path)
+    french_resident_ids = load_french_resident_person_ids(persons_path)
     foreign_crossborder_ids = cross_border_ids - swiss_crossborder_ids
     logger.info(
-        "Found %d cross-border persons (%d Swiss-resident, %d France-resident) in %s",
+        "Found %d cross-border persons (%d Swiss-resident) and %d non-cross-border France-resident persons in %s",
         len(cross_border_ids), len(swiss_crossborder_ids), len(french_resident_ids), persons_path,
     )
 
@@ -165,17 +165,15 @@ def load_swiss_resident_cross_border_person_ids(persons_path):
     return set(df.loc[is_swiss_resident, "person"])
 
 
-def load_french_resident_cross_border_person_ids(persons_path):
-    """The subset of cross-border persons whose crossBorderOD starts with
-    "FR-CH" (e.g. "FR-CH-FR", "FR-CH-DE") - agents resident in France
-    commuting/traveling into Switzerland, as opposed to Swiss residents
-    making an outbound trip there (load_swiss_resident_cross_border_person_ids)
-    or residents of the other neighboring countries (DE/IT/AT/LI)."""
+def load_french_resident_person_ids(persons_path):
+    """Non-cross-border agents living in France: the external population
+    (isExternalFR, person_type "FR", cantonId -1), whose plans are simulated
+    like ordinary residents rather than as border-crossing commuters."""
     df = pd.read_csv(
-        persons_path, sep=";", usecols=["person", "subpopulation", "crossBorderOD"],
+        persons_path, sep=";", usecols=["person", "isExternalFR"],
         dtype={"person": str}, low_memory=False,
     )
-    is_french_resident = df.subpopulation.eq("crossborder") & df.crossBorderOD.str.startswith("FR-CH", na=False)
+    is_french_resident = df.isExternalFR.astype(str).str.lower().eq("true")
     return set(df.loc[is_french_resident, "person"])
 
 

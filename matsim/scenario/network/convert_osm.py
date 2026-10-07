@@ -7,6 +7,7 @@ import shutil
 
 def configure(context):
     context.stage("matsim.scenario.network.convert_osm_pt2matsim")
+    context.stage("matsim.scenario.network.convert_pt_schedule")
     context.stage("data.osm.traffic_lights")
     context.stage("data.spatial.municipality_types") # used in speed correction
     context.stage("data.spatial.municipalities") # used in speed correction
@@ -38,6 +39,11 @@ def configure(context):
     context.config("capacity_factor_outside_border", 0.5)
     # whether to route the bike in the network or not
     context.config("route_bike", True)
+    # Whether network nodes close to PT stops are protected from being merged away
+    # by remove_nodes_with_no_intersection (only relevant if that option is true).
+    context.config("protect_pt_stop_nodes", True)
+    # Radius (in meters) around a PT stop within which a network node is protected.
+    context.config("network_stop_protection_radius", 100.0)
     # Tools (in France)
     context.stage("data.tolls.osm_links")
     context.config("include_tolls", True)
@@ -50,10 +56,11 @@ def execute(context):
 
     # move teh detailed network to this stage if it exists
     detailed_network_path = "%s/detailed_network.csv" % context.path()
-    if os.path.exists(detailed_network_file):     
+    if os.path.exists(detailed_network_file):
         shutil.copy(detailed_network_file, detailed_network_path)
 
+    schedule_path = context.stage("matsim.scenario.network.convert_pt_schedule")["schedule"]
 
     network_pickle = "%s/network.pkl" % context.path() # faster to read if we need it in the pipeline, it should be read from this file from now on
 
-    return NetworkHandler(context, network_path, detailed_network_path).process_network(save_as_pickle = True, network_pickle = network_pickle)
+    return NetworkHandler(context, network_path, detailed_network_path, schedule_path = schedule_path).process_network(save_as_pickle = True, network_pickle = network_pickle)

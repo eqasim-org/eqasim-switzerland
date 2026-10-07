@@ -82,6 +82,17 @@ def to_period_shape(weekday_df):
     operating day, so keeping "All day" alongside it would double the
     total wherever both get summed together."""
     df = weekday_df[weekday_df["time"].isin(PERIOD_ORDER)].copy()
+
+    if df.empty:
+        raise RuntimeError(
+            f"No Lemanis row has a period in {PERIOD_ORDER}; periods found: "
+            f"{sorted(weekday_df['time'].astype(str).unique())}"
+        )
+
+    missing_periods = [p for p in PERIOD_ORDER if p not in set(df["time"])]
+    if missing_periods:
+        print(f"lemanis.to_period_shape: WARNING no Lemanis rows for period(s) {missing_periods}")
+
     df["gtfs_code"] = df["stop"].map(STOP_NAME_TO_GTFS_CODE)
 
     unmatched = sorted(df.loc[df["gtfs_code"].isna(), "stop"].unique())

@@ -5,6 +5,8 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 
+import lemanis
+
 
 def categorize_error(row):
     sim  = row["boardings_matsim"]
@@ -167,6 +169,103 @@ def plot_comparison_for_stop(counts, option = "boardings", stop = "Genève, gare
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
+
+
+def plot_stop_all_lines(line_hour_df, stop_label, output_path, n_cols = 3, lemanis_df = None):
+    """MATSim boardings and alightings at one stop: a first panel with the daily total of every
+    line, then one hourly panel per line (most used first). line_hour_df has the columns
+    line_name, hour, boardings, alightings.
+
+    lemanis_df (optional) has one row per Lemanis (line_name, period) at this stop with the columns
+    line_name, period, boardings, alightings. Lemanis only reports 3 broad periods, so it is drawn
+    as period bars next to the MATSim counts aggregated into the same periods (instead of the hourly
+    MATSim bars) in the panel of each line it covers, and as a daily total marker in the first panel."""
+    totals = line_hour_df.groupby("line_name")[["boardings", "alightings"]].sum()
+
+    lemanis_days = None
+    if lemanis_df is not None and not lemanis_df.empty:
+        lemanis_days = lemanis_df.groupby("line_name")[["boardings", "alightings"]].sum()
+        # Lemanis lines that MATSim has no passengers for are compared against 0
+        totals = totals.reindex(totals.index.union(lemanis_days.index), fill_value = 0)
+
+    totals["total"] = totals["boardings"] + totals["alightings"]
+    totals = totals.sort_values("total", ascending = False)
+    lines  = totals.index.tolist()
+
+    hours = np.arange(0, 25)
+    color_boardings, color_alightings = "#2a7ab0", "#d9822b"
+
+    n_panels = len(lines) + 1
+    n_cols   = min(n_cols, n_panels)
+    n_rows   = int(np.ceil(n_panels / n_cols))
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize = (5.5 * n_cols, 3.2 * n_rows), squeeze = False)
+    flat = axes.flatten()
+
+    ax = flat[0]
+    x  = np.arange(len(lines))
+    ax.bar(x - 0.2, totals["boardings"],  0.4, color = color_boardings,  label = "Boardings")
+    ax.bar(x + 0.2, totals["alightings"], 0.4, color = color_alightings, label = "Alightings")
+    ax.set_xticks(x)
+    ax.set_xticklabels(lines, rotation = 90, fontsize = 7)
+    ax.set_title(f"Entire day, all lines (total {totals['total'].sum():,.0f})", fontsize = 10, fontweight = "bold")
+    ax.set_ylabel("Passengers (scaled)")
+    if lemanis_days is not None:
+        ld = lemanis_days.reindex(lines)
+        ax.scatter(x - 0.2, ld["boardings"],  marker = "D", color = "black", zorder = 5, label = "Lemanis")
+        ax.scatter(x + 0.2, ld["alightings"], marker = "D", color = "black", zorder = 5)
+    ax.legend(fontsize = 8)
+    ax.grid(True, axis = "y", alpha = 0.3)
+
+    lemanis_lines = set(lemanis_df["line_name"]) if lemanis_df is not None else set()
+
+    for ax, line in zip(flat[1:], lines):
+        title = (f"Line {line} ({totals.loc[line, 'boardings']:,.0f} boardings / "
+                 f"{totals.loc[line, 'alightings']:,.0f} alightings)")
+        line_hours = line_hour_df[line_hour_df["line_name"] == line]
+
+        if line in lemanis_lines:
+            # MATSim aggregated into the periods Lemanis reports, next to the Lemanis values
+            matsim_periods = line_hours.assign(period = line_hours["hour"].map(lemanis.HOUR_TO_PERIOD))
+            matsim_periods = matsim_periods.groupby("period")[["boardings", "alightings"]].sum()
+            matsim_periods = matsim_periods.reindex(lemanis.PERIOD_ORDER, fill_value = 0)
+            lemanis_periods = lemanis_df[lemanis_df["line_name"] == line].groupby("period")[["boardings", "alightings"]].sum()
+            lemanis_periods = lemanis_periods.reindex(lemanis.PERIOD_ORDER, fill_value = 0)
+
+            x, w = np.arange(len(lemanis.PERIOD_ORDER)), 0.2
+            ax.bar(x - 1.5 * w, matsim_periods["boardings"],   w, color = color_boardings,  label = "MATSim boardings")
+            ax.bar(x - 0.5 * w, lemanis_periods["boardings"],  w, color = color_boardings,  hatch = "//", edgecolor = "black", label = "Lemanis boardings")
+            ax.bar(x + 0.5 * w, matsim_periods["alightings"],  w, color = color_alightings, label = "MATSim alightings")
+            ax.bar(x + 1.5 * w, lemanis_periods["alightings"], w, color = color_alightings, hatch = "//", edgecolor = "black", label = "Lemanis alightings")
+            ax.set_xticks(x)
+            ax.set_xticklabels(lemanis.PERIOD_ORDER, fontsize = 8)
+            ax.set_ylim(0, max(ax.get_ylim()[1], 1) * 1.3)
+            ax.legend(fontsize = 6, loc = "upper right", ncol = 2)
+            title += " - Lemanis periods"
+        else:
+            df = line_hours.set_index("hour")[["boardings", "alightings"]]
+            df = df[~df.index.duplicated()].reindex(hours, fill_value = 0)
+            ax.bar(hours - 0.2, df["boardings"].fillna(0),  0.4, color = color_boardings)
+            ax.bar(hours + 0.2, df["alightings"].fillna(0), 0.4, color = color_alightings)
+            ax.set_xticks(range(0, 25, 3))
+            ax.set_xlim(-1, 25)
+
+        ax.set_title(title, fontsize = 9)
+        ax.grid(True, axis = "y", alpha = 0.3)
+
+    for ax in flat[n_panels:]:
+        ax.axis("off")
+
+    for i, ax in enumerate(flat[:n_panels]):
+        if (i >= (n_rows - 1) * n_cols or i + n_cols >= n_panels) and i > 0 and lines[i - 1] not in lemanis_lines:
+            ax.set_xlabel("Hour of day")
+        if i % n_cols == 0:
+            ax.set_ylabel("Passengers (scaled)")
+
+    fig.suptitle(f"MATSim passenger movements at {stop_label}", fontsize = 13)
+    plt.tight_layout(rect = (0, 0, 1, 0.97))
+    plt.savefig(output_path, dpi = 150, bbox_inches = "tight")
+    plt.close(fig)
 
 
 def plot_global_hourly_comparison(global_hourly_df, output_path):

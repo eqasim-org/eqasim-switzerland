@@ -1,13 +1,16 @@
 import json
 import os
 import shutil
+import numpy as np
 import pandas as pd
+from scipy.spatial import cKDTree
 from shapely import contains_xy
 from matsim.readers import read_network
 from matsim.scenario.network.utils.network_attribute_assigner import NetworkAttributeAssigner
 from matsim.scenario.network.utils.capacity_corrector import CapacityCorrector
 from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
 from matsim.scenario.network.utils.network_cleaner import networkCleaner
+from matsim.scenario.network.utils.pt_stop_reader import read_stop_coordinates
 from matsim.scenario.network.utils.speed_corrector import SpeedCorrector
 from matsim.scenario.network.utils.traffic_light_matcher import TrafficLightsMatcher
 
@@ -15,9 +18,10 @@ import logging
 logger = logging.getLogger("synpp:\t\t NetworkHandler")
 
 class NetworkHandler:
-    def __init__(self, context, network_path: str, detailed_network_path:str):
+    def __init__(self, context, network_path: str, detailed_network_path:str, schedule_path: str = None):
         self.network_path = network_path
         self.detailed_network_path = detailed_network_path
+        self.schedule_path = schedule_path
         self.net = read_network(network_path)
         self.context = context
 
@@ -95,16 +99,48 @@ class NetworkHandler:
             return
 
         logger.info("Simplifying Network...")
+        protected_nodes = self._compute_pt_stop_protected_nodes()
+
         self.net, stats = networkCleaner(self.net).run(
             remove_network_loops=self.context.config("remove_network_loops"),
             remove_replicate_links=self.context.config("remove_replicate_links"),
             remove_nodes_with_no_intersection=self.context.config("remove_nodes_with_no_intersection"),
             correct_speeds=self.context.config("correct_speed"),
             ensure_network_connectivity=self.context.config("ensure_network_connectivity"),
+            protected_nodes=protected_nodes,
         )
 
         with open("%s/statistics_of_cleaning_network.json" % self.context.path(), "w") as f:
             json.dump(stats, f, indent=4)
+
+    def _compute_pt_stop_protected_nodes(self):
+        """
+        Find the network nodes closest to each PT stop facility, so that
+        remove_nodes_with_no_intersection does not merge them away. Otherwise,
+        two nearby stops on the same straight-and-uniform road (no real
+        intersection between them) can end up snapped to the same merged
+        link by pt2matsim, effectively collapsing them into one stop.
+        """
+        if (not self.schedule_path
+                or not self.context.config("remove_nodes_with_no_intersection")
+                or not self.context.config("protect_pt_stop_nodes")):
+            return set()
+
+        stop_coordinates = read_stop_coordinates(self.schedule_path)
+        if not stop_coordinates:
+            return set()
+
+        node_ids = self.net.nodes["node_id"].values
+        node_coordinates = self.net.nodes[["x", "y"]].values
+
+        tree = cKDTree(node_coordinates)
+        radius = self.context.config("network_stop_protection_radius")
+        distances, indices = tree.query(stop_coordinates, distance_upper_bound=radius)
+
+        return {
+            node_ids[index] for distance, index in zip(distances, indices)
+            if np.isfinite(distance)
+        }
 
     def _correct_link_capacity_if_requested(self):
         if self.context.config("correct_links_capacity"):

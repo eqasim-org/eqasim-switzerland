@@ -1,4 +1,5 @@
 import glob
+import html
 import json
 import math
 import os
@@ -8,8 +9,10 @@ from collections import Counter, defaultdict
 
 import folium
 import geopandas as gpd
+import shapely
 import xopen
 from shapely.geometry import LineString, Point
+from shapely.ops import unary_union
 
 NETWORK_CRS = "epsg:2056"
 
@@ -32,6 +35,8 @@ MODE_COLORS = {
 DEFAULT_MODE_COLOR    = "#888888"
 BUS_LANE_COLOR        = "#190387"
 DEFAULT_VISIBLE_MODES = {"bus"}
+LINE_ROUTE_COLOR      = "#ff8c00"
+DEFAULT_LINE_ROUTES   = "TPG_line_routes/TPG_LIGNES-SHP/TPG_LIGNES.shp"
 
 
 def configure(context):
@@ -40,29 +45,67 @@ def configure(context):
     context.config("simulation_directory", default = "simulation_output")
     context.config("analysis.pt.transit_schedule_modes", default = [])
     context.config("analysis.pt.transit_schedule_show_schedules", default = True)
+    context.config("extent_path", default = "")
+    context.config("data_path")
+    # Optional shapefile of the official line routes (e.g. SITG TPG_LIGNES, columns LIGNE and
+    # DIRECTION); shown in another color when a line is selected. Defaults to
+    # <data_path>/TPG_line_routes/TPG_LIGNES-SHP/TPG_LIGNES.shp if that file exists.
+    context.config("analysis.pt.transit_schedule_line_routes_path", default = "")
+    # "simulation" reads output_transitSchedule.xml.gz / output_network.xml.gz from a MATSim
+    # run's simulation_directory; "mapped" reads directly from the pt2matsim-mapped network
+    # and schedule cached by the matsim.scenario.network.mapped stage (no simulation needed);
+    # "corrected" does the same for the routes re-routed by matsim.scenario.network.corrected.
+    context.config("analysis.pt.transit_schedule_source", default = "simulation")
+
+    source = context.config("analysis.pt.transit_schedule_source")
+    if source in ("mapped", "corrected"):
+        context.stage("matsim.scenario.network.%s" % source)
+    elif source != "simulation":
+        raise RuntimeError(
+            "analysis.pt.transit_schedule_source must be 'simulation', 'mapped' or 'corrected', got: %s" % source
+        )
 
 
 def execute(context):
-    matsim_output_folder = os.path.join(
-        context.config("output_path"),
-        context.config("output_id"),
-        context.config("simulation_directory"),
-    )
-
-    if not os.path.isdir(matsim_output_folder):
-        raise FileNotFoundError(
-            f"MATSim output not found at {matsim_output_folder} - "
-            "has the simulation been run for this output_id?"
-        )
-
     modes = set(context.config("analysis.pt.transit_schedule_modes")) or None
     show_schedules = context.config("analysis.pt.transit_schedule_show_schedules")
+    source = context.config("analysis.pt.transit_schedule_source")
 
-    output_dir = os.path.join(matsim_output_folder, "pt_transit_schedule")
+    if source in ("mapped", "corrected"):
+        mapped = context.stage("matsim.scenario.network.%s" % source)
+        schedule_path = mapped["schedule"]
+        network_path = mapped["network"]
+        output_dir = context.path()
+    else:
+        matsim_output_folder = os.path.join(
+            context.config("output_path"),
+            context.config("output_id"),
+            context.config("simulation_directory"),
+        )
+
+        if not os.path.isdir(matsim_output_folder):
+            raise FileNotFoundError(
+                f"MATSim output not found at {matsim_output_folder} - "
+                "has the simulation been run for this output_id?"
+            )
+
+        schedule_path = _find_output_file(matsim_output_folder, "output_transitSchedule.xml.gz")
+        network_path = _find_output_file(matsim_output_folder, "output_network.xml.gz")
+        output_dir = os.path.join(matsim_output_folder, "pt_transit_schedule")
+
+    line_routes_path = context.config("analysis.pt.transit_schedule_line_routes_path")
+    if not line_routes_path:
+        default_path = os.path.join(context.config("data_path"), DEFAULT_LINE_ROUTES)
+        line_routes_path = default_path if os.path.exists(default_path) else None
+
     os.makedirs(output_dir, exist_ok = True)
     output_file = os.path.join(output_dir, "transit_schedule_map.html")
 
-    plot_transit_schedule(matsim_output_folder, output_path = output_file, modes = modes, show_schedules = show_schedules)
+    plot_transit_schedule(
+        schedule_path = schedule_path, network_path = network_path,
+        output_path = output_file, modes = modes, show_schedules = show_schedules,
+        extent_path = context.config("extent_path"), line_routes_path = line_routes_path,
+    )
 
     return dict(done = True, path = output_file)
 
@@ -111,7 +154,50 @@ def load_network_geometry(network_path):
 
 def is_bus_reserved_link(modes_string):
     modes = set(modes_string.split(","))
+    # pt2matsim "artificial" links only connect stops that could not be mapped to the road
+    # network (they can be kilometres long); they are not real bus lanes.
+    if modes & {"artificial", "stopFacilityLink"}:
+        return False
     return bool(modes & {"bus", "pt"}) and "car" not in modes
+
+
+def load_extent(extent_path):
+    if not extent_path:
+        return None
+    if not os.path.exists(extent_path):
+        raise FileNotFoundError(f"extent_path {extent_path} does not exist")
+
+    boundary = gpd.read_file(extent_path)
+    if boundary.crs is not None and boundary.crs != NETWORK_CRS:
+        boundary = boundary.to_crs(NETWORK_CRS)
+    return shapely.force_2d(unary_union(boundary.geometry))
+
+
+def _normalize_line(name):
+    name = str(name).strip().upper()
+    return name.lstrip("0") or name
+
+
+def load_line_routes(line_routes_path, region = None):
+    """Official line routes by normalized line name: list of dicts with the terminus names
+    the route runs towards ("DIRECTION", possibly several separated by "/") and its paths."""
+    gdf = gpd.read_file(line_routes_path)
+    gdf = gdf.to_crs(epsg = 4326) if gdf.crs is not None else gdf.set_crs(epsg = 4326)
+
+    if region is not None:
+        region_4326 = gpd.GeoSeries([region], crs = NETWORK_CRS).to_crs(epsg = 4326).iloc[0]
+        gdf = gdf[gdf.intersects(region_4326)]
+
+    line_routes = defaultdict(list)
+    for line, direction, geometry in zip(gdf["LIGNE"], gdf["DIRECTION"], gdf.geometry):
+        if geometry is None or geometry.is_empty:
+            continue
+        parts = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
+        line_routes[_normalize_line(line)].append({
+            "directions": {d.strip().casefold() for d in str(direction).split("/")},
+            "paths": [[[lat, lon] for lon, lat in part.coords] for part in parts],
+        })
+    return line_routes
 
 
 def _parse_hms(value):
@@ -251,10 +337,10 @@ def build_stop_schedules(stops, routes, group_key_of = None):
             times = []
             for base_time in departure_times:
                 here_time = base_time + offset
-                parts = [f"{origin_name} {_format_hms(base_time + origin_offset)}"]
+                parts = [f"{html.escape(origin_name)} {_format_hms(base_time + origin_offset)}"]
                 if here_name not in (origin_name, dest_name):
-                    parts.append(f"{here_name} {_format_hms(here_time)}")
-                parts.append(f"{dest_name} {_format_hms(base_time + dest_offset)}")
+                    parts.append(f"{html.escape(here_name)} {_format_hms(here_time)}")
+                parts.append(f"{html.escape(dest_name)} {_format_hms(base_time + dest_offset)}")
                 times.append((_format_hms(here_time), " &rarr; ".join(parts)))
 
             existing = schedules[group_key].get(line_key)
@@ -271,7 +357,9 @@ def build_stop_schedules(stops, routes, group_key_of = None):
 
 
 def _extract_station_code(stop_id):
-    matches = re.findall(r"\d{7,8}", str(stop_id))
+    # pt2matsim appends ".link:<linkId>" to stop ids; the link id can itself be a 7-8 digit
+    # number and must not be mistaken for the station code (it would merge unrelated stops).
+    matches = re.findall(r"\d{7,8}", str(stop_id).split(".link:")[0])
     if not matches:
         return None
     code = matches[-1]
@@ -315,7 +403,19 @@ def _bearing_deg(from_latlon, to_latlon):
     return (math.degrees(math.atan2(x, y)) + 360) % 360
 
 
+MIN_VARIANT_SHARE = 0.25  # keep a branch if it has at least this share of the busiest branch's departures
+
+
 def select_representative_routes(routes, stops):
+    """One route per line + direction + branch.
+
+    Routes of a line are grouped by (line, origin, destination); inside a group, routes are
+    split into branches by their sequence of stations. A branch is kept when it carries at
+    least MIN_VARIANT_SHARE of the departures of the busiest branch, so that real branches
+    (e.g. TPG line 1 via Belle-Terre or via Belle-Idée) are all selectable while rare
+    variants (night or one-off services) are ignored. Kept branches beyond the first get a
+    "via" hint naming a stop the other branches do not serve.
+    """
     groups = defaultdict(list)
     for route in routes:
         if len(route["stop_ids"]) < 2:
@@ -325,14 +425,40 @@ def select_representative_routes(routes, stops):
         key = (route["line_name"] or route["line_id"], origin_name, dest_name)
         groups[key].append(route)
 
+    def stop_name(stop_id):
+        return stops.get(stop_id, {}).get("name") or stop_id
+
     representatives = []
     for group_routes in groups.values():
-        signature_freq = Counter(tuple(r["stop_ids"]) for r in group_routes)
-        best = max(
-            group_routes,
-            key = lambda r: (len(set(r["stop_ids"])), signature_freq[tuple(r["stop_ids"])]),
+        branches = defaultdict(list)
+        for route in group_routes:
+            branches[tuple(_extract_station_code(sid) or sid for sid in route["stop_ids"])].append(route)
+
+        ranked = sorted(
+            branches.items(),
+            key = lambda item: -sum(len(r["departure_times"]) for r in item[1]),
         )
-        representatives.append(best)
+        top_departures = sum(len(r["departure_times"]) for r in ranked[0][1])
+        kept = [
+            item for item in ranked
+            if sum(len(r["departure_times"]) for r in item[1]) >= MIN_VARIANT_SHARE * top_departures
+        ]
+
+        for signature, branch_routes in kept:
+            signature_freq = Counter(tuple(r["stop_ids"]) for r in branch_routes)
+            best = dict(max(
+                branch_routes,
+                key = lambda r: (len(r["departure_times"]), signature_freq[tuple(r["stop_ids"])]),
+            ))
+
+            if len(kept) > 1:
+                others = set()
+                for other_signature, other_routes in kept:
+                    if other_signature != signature:
+                        others.update(_extract_station_code(sid) or sid for sid in other_routes[0]["stop_ids"])
+                own_stops = [sid for sid in best["stop_ids"] if (_extract_station_code(sid) or sid) not in others]
+                best["via"] = stop_name(own_stops[len(own_stops) // 2]) if own_stops else "fewer stops"
+            representatives.append(best)
     return representatives
 
 
@@ -341,18 +467,44 @@ def select_representative_routes(routes, stops):
 # ---------------------------------------------------------------------------
 
 def plot_transit_schedule(
-    simulation_path,
+    simulation_path = None,
+    schedule_path = None,
+    network_path = None,
     output_path = "transit_schedule_map.html",
     modes = None,
     show_schedules = True,
+    extent_path = None,
+    line_routes_path = None,
 ):
-    
-    schedule_path = _find_output_file(simulation_path, "output_transitSchedule.xml.gz")
-    network_path  = _find_output_file(simulation_path, "output_network.xml.gz")
+    if schedule_path is None or network_path is None:
+        if simulation_path is None:
+            raise ValueError(
+                "Either simulation_path, or both schedule_path and network_path, must be provided."
+            )
+
+    if schedule_path is None:
+        schedule_path = _find_output_file(simulation_path, "output_transitSchedule.xml.gz")
+    if network_path is None:
+        network_path = _find_output_file(simulation_path, "output_network.xml.gz")
 
     print(f"Reading transit schedule from {schedule_path} ...")
     stops, routes = load_transit_schedule(schedule_path)
     print(f"  -> {len(stops)} stops, {len(routes)} transit routes")
+
+    region = load_extent(extent_path)
+    if region is not None:
+        shapely.prepare(region)
+        print(f"Restricting to extent {extent_path} ...")
+        # Stops outside the extent lose their coordinates (so they are not plotted) but keep
+        # their names, which are still needed for the origin/destination labels of schedules.
+        for info in stops.values():
+            if info["x"] is not None and not region.contains(Point(info["x"], info["y"])):
+                info["x"] = info["y"] = None
+        routes = [
+            route for route in routes
+            if any(stops.get(sid, {}).get("x") is not None for sid in route["stop_ids"])
+        ]
+        print(f"  -> {sum(info['x'] is not None for info in stops.values())} stops and {len(routes)} routes within the extent")
 
     if modes is not None:
         routes = [route for route in routes if route["mode"] in modes]
@@ -366,6 +518,11 @@ def plot_transit_schedule(
 
     print(f"Reading network geometry from {network_path} ...")
     link_geometry, link_modes = load_network_geometry(network_path)
+    if region is not None:
+        link_geometry = {
+            link_id: endpoints for link_id, endpoints in link_geometry.items()
+            if region.intersects(LineString(endpoints))
+        }
     print(f"  -> {len(link_geometry)} links")
 
     bus_lane_link_ids = [
@@ -374,9 +531,18 @@ def plot_transit_schedule(
     ]
     print(f"  -> {len(bus_lane_link_ids)} link(s) reserved for bus/PT (excluded from car)")
 
-    stop_ids_with_coords = [sid for sid, info in stops.items() if info["x"] is not None]
+    # Only plot stops served by the retained routes (drops unused pt2matsim stop copies, which
+    # would otherwise skew the station position, and stops of modes excluded by `modes`).
+    used_stop_ids = {sid for route in routes for sid in route["stop_ids"]}
+    stop_ids_with_coords = [
+        sid for sid, info in stops.items() if info["x"] is not None and sid in used_stop_ids
+    ]
+    lines_of_stop = defaultdict(set)
+    for route in routes:
+        for sid in route["stop_ids"]:
+            lines_of_stop[sid].add(route["line_name"] or route["line_id"])
     if not stop_ids_with_coords:
-        raise RuntimeError("No stop coordinates found in the transit schedule; nothing to plot.")
+        raise RuntimeError("No stop coordinates found in the transit schedule (within the extent); nothing to plot.")
 
     print("Grouping stops across sources by station code...")
     group_key_of = {sid: (_extract_station_code(sid) or sid) for sid in stop_ids_with_coords}
@@ -404,7 +570,7 @@ def plot_transit_schedule(
         group_name[key] = Counter(names).most_common(1)[0][0] if names else key
         lines = set()
         for m in members:
-            lines |= stops[m]["lines"]
+            lines |= lines_of_stop[m]
         group_lines[key] = lines
     print(f"  -> {len(group_keys)} station(s) after grouping ({len(stop_ids_with_coords)} platform(s)/stop id(s) before)")
 
@@ -445,6 +611,13 @@ def plot_transit_schedule(
     line_routes = select_representative_routes(routes, stops)
     print(f"  -> {len(line_routes)} representative route(s) selectable (from {len(routes)} total patterns)")
 
+    official_routes = {}
+    if line_routes_path:
+        print(f"Reading official line routes from {line_routes_path} ...")
+        official_routes = load_line_routes(line_routes_path, region)
+        print(f"  -> routes for {len(official_routes)} line(s)")
+    reference_paths = {}  # feature id -> paths, only for features some selectable route refers to
+
     print("Building per-line paths for the selector menu...")
     route_index = []
     skipped = 0
@@ -467,10 +640,22 @@ def plot_transit_schedule(
                 stop_group_keys.append(key)
 
         line_label = route["line_name"] or route["line_id"]
+        reference_ids = []
+        features = official_routes.get(_normalize_line(line_label), [])
+        # Routes are matched on the terminus; if none matches (e.g. a short-turn service),
+        # every route of the line is shown rather than none.
+        matching = [f for f in features if to_name.strip().casefold() in f["directions"]] or features
+        for feature in matching:
+            feature_id = id(feature)
+            reference_paths[feature_id] = feature["paths"]
+            reference_ids.append(feature_id)
+
         route_index.append({
+            "reference_ids": reference_ids,
             "route_id": route["route_id"],
             "mode": route["mode"],
-            "label": f"{line_label} ({route['mode']}): {from_name} → {to_name}",
+            "label": f"{line_label} ({route['mode']}): {from_name} → {to_name}"
+                     + (f" [via {route['via']}]" if route.get("via") else ""),
             "path": [[lat, lon] for lon, lat in path_4326],
             "stop_group_keys": stop_group_keys,
         })
@@ -555,7 +740,7 @@ def plot_transit_schedule(
     print("Adding stops layer...")
     stops_layer = folium.FeatureGroup(name = f"Stops ({len(group_keys)})", show = True)
     for key, point in zip(group_keys, group_points_2056):
-        stop_name = group_name[key]
+        stop_name = html.escape(group_name[key])
         groups = stop_schedules.get(key)
 
         if groups:
@@ -568,13 +753,14 @@ def plot_transit_schedule(
                 color = MODE_COLORS.get(line_to_mode.get(line_name), DEFAULT_MODE_COLOR)
                 label = "Arrivals" if is_terminal else "Departures"
                 time_header = "Arrival" if is_terminal else "Departure"
-                direction = f"&larr; from {label_place}" if is_terminal else f"&rarr; {label_place}"
+                place = html.escape(label_place)
+                direction = f"&larr; from {place}" if is_terminal else f"&rarr; {place}"
                 rows_html = "".join(
                     f"<tr><td>{time}</td><td>{summary}</td></tr>" for time, summary in times
                 )
                 popup_html += (
                     f'<div style="margin-bottom:8px;">'
-                    f'<b style="color:{color};">{line_name}</b> {direction}<br>'
+                    f'<b style="color:{color};">{html.escape(str(line_name))}</b> {direction}<br>'
                     f'<button onclick="var t=this.nextElementSibling;'
                     f"t.style.display=(t.style.display==='none'?'table':'none');\""
                     f'style="font-size:11px; margin:2px 0; cursor:pointer;">'
@@ -628,6 +814,9 @@ def plot_transit_schedule(
   var routeIndex = {json.dumps(route_index)};
   var mapVarName = {json.dumps(map_var_name)};
   var groupLatLon = {json.dumps(group_latlon)};
+  var referencePaths = {json.dumps({str(k): v for k, v in reference_paths.items()})};
+  var referenceColor = {json.dumps(LINE_ROUTE_COLOR)};
+  var referenceLayers = [];
   var highlightLine = null;
   var highlightStopMarkers = [];
   var selectedRouteId = null;
@@ -641,6 +830,8 @@ def plot_transit_schedule(
     }}
     highlightStopMarkers.forEach(function (marker) {{ map.removeLayer(marker); }});
     highlightStopMarkers = [];
+    referenceLayers.forEach(function (layer) {{ map.removeLayer(layer); }});
+    referenceLayers = [];
   }}
 
   function selectRoute(route, rowEl) {{
@@ -655,6 +846,16 @@ def plot_transit_schedule(
       selectedRouteId = null;
       return;
     }}
+
+    // Official line route (underneath, wider so it stays visible where it differs from the
+    // modelled route).
+    (route.reference_ids || []).forEach(function (id) {{
+      (referencePaths[id] || []).forEach(function (path) {{
+        var layer = L.polyline(path, {{color: referenceColor, weight: 11, opacity: 0.55}}).addTo(map);
+        layer.bindTooltip("Official line route");
+        referenceLayers.push(layer);
+      }});
+    }});
 
     highlightLine = L.polyline(route.path, {{color: "#e34948", weight: 6, opacity: 1}}).addTo(map);
     highlightLine.bringToFront();
@@ -717,6 +918,8 @@ def plot_transit_schedule(
         legend_html += f'<span style="color:{color};">&#9644;</span> {mode}<br>'
     if bus_lane_link_ids:
         legend_html += f'<span style="color:{BUS_LANE_COLOR};">&#9644;&#9658;</span> reserved bus/PT lane (arrow = direction)<br>'
+    if reference_paths:
+        legend_html += f'<span style="color:{LINE_ROUTE_COLOR};">&#9644;</span> official line route (shown when a line is selected)<br>'
     legend_html += '<div style="margin-top:6px;color:#666;">Use the line menu (top right) to highlight a line and its stops</div>'
     legend_html += "</div>"
     m.get_root().html.add_child(folium.Element(legend_html))
@@ -731,16 +934,30 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description = __doc__)
-    parser.add_argument("simulation_path", help = "MATSim simulation_output directory")
+    parser.add_argument("simulation_path", nargs = "?", default = None,
+                         help = "MATSim simulation_output directory (omit if using --schedule/--network)")
+    parser.add_argument("--schedule", default = None,
+                         help = "Explicit path to a transitSchedule.xml.gz (e.g. the pt2matsim-mapped schedule), "
+                                "instead of reading it from simulation_path")
+    parser.add_argument("--network", default = None,
+                         help = "Explicit path to a network.xml.gz (e.g. the pt2matsim-mapped network), "
+                                "instead of reading it from simulation_path")
     parser.add_argument("--output", default = "transit_schedule_map.html", help = "Output HTML path")
     parser.add_argument("--modes", nargs = "*", default = None,
                          help = "Restrict to these transportMode values (default: all modes)")
+    parser.add_argument("--extent", default = None,
+                         help = "Path to a polygon file; only the PT schedule within it is plotted")
+    parser.add_argument("--line-routes", default = None,
+                         help = "Shapefile of official line routes (columns LIGNE, DIRECTION) shown when a line is selected")
     parser.add_argument("--no-schedules", action = "store_true",
                          help = "Skip building per-stop departure-time popups (faster, smaller output)")
     args = parser.parse_args()
 
     plot_transit_schedule(
-        args.simulation_path, output_path = args.output,
+        simulation_path = args.simulation_path,
+        schedule_path = args.schedule, network_path = args.network,
+        output_path = args.output,
         modes = set(args.modes) if args.modes else None,
         show_schedules = not args.no_schedules,
+        extent_path = args.extent, line_routes_path = args.line_routes,
     )

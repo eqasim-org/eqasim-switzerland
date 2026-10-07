@@ -16,16 +16,16 @@ class networkCleaner():
 
     def run(self, remove_network_loops= True, remove_replicate_links= True,
                   remove_nodes_with_no_intersection= True, correct_speeds= True,
-                  ensure_network_connectivity= True):
-        stats = self.clean_network(remove_network_loops, remove_replicate_links, remove_nodes_with_no_intersection, 
-                                   correct_speeds, ensure_network_connectivity)
+                  ensure_network_connectivity= True, protected_nodes= None):
+        stats = self.clean_network(remove_network_loops, remove_replicate_links, remove_nodes_with_no_intersection,
+                                   correct_speeds, ensure_network_connectivity, protected_nodes)
         self.network.nodes = self.nodes
         self.network.links = self.links
         return self.network, stats
 
     def clean_network(self, remove_network_loops= True, remove_replicate_links= True,
                             remove_nodes_with_no_intersection= True, correct_speeds= True,
-                            ensure_network_connectivity= True):
+                            ensure_network_connectivity= True, protected_nodes= None):
         stats = dict()
 
         """All network should be considered, because intersections could be with (pt) and (pt,car)"""
@@ -49,7 +49,7 @@ class networkCleaner():
         # Removing nodes with no intersection
         if remove_nodes_with_no_intersection:
             logger.info("Removing nodes that do not represent an intersection.")
-            df, stats2 = self.merge_link_chains(df)
+            df, stats2 = self.merge_link_chains(df, protected_nodes=protected_nodes)
             stats.update(stats2)
         
         # Removed links that are not connected to the whole graph
@@ -166,17 +166,20 @@ class networkCleaner():
         removed_count = len(df) - len(connected_links)
         return df_final, removed_count
 
-    def merge_link_chains(self, df):        
+    def merge_link_chains(self, df, protected_nodes= None):
+        protected_nodes = protected_nodes or set()
+
         stats = {"number_of_nodes":0,
                  "number_of_links":0,
                  "attributes_change":0,
                  "skiped_loop":0,
                  "successful_merge":0,
-                 "degree_is_2":0,  
-                 "one_in_one_out":0,                        
+                 "degree_is_2":0,
+                 "one_in_one_out":0,
                  "ignored_no_car":0,
                  "break_no_car":0,
-                 "already_visited":0, 
+                 "already_visited":0,
+                 "protected_stop_break":0,
                     }
                         
         # Step 1: Build directed graph
@@ -241,6 +244,16 @@ class networkCleaner():
                                              'oneway', 'modes']].to_dict()
 
                 while is_degree2(current_node):
+                    if current_node in protected_nodes:
+                        # A PT stop is snapped near this node: keep it as a break point
+                        # so it isn't merged away, and force it to be revisited as a
+                        # chain-start on its own (degree-2 nodes are otherwise skipped
+                        # as start candidates by the outer loop).
+                        attribute_consistency = False
+                        new_start_node = current_node
+                        stats["protected_stop_break"] += 1
+                        break
+
                     next_nodes = list(G.successors(current_node))
                     if len(next_nodes) != 1:
                         break

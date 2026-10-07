@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -27,3 +27,9 @@ class Config:
     include_lemanis:  bool           = False
     lemanis_csv_path: Optional[str]  = None
 
+
+    # Stops of the simulated schedule (output_transitSchedule.xml.gz) that the GTFS does not
+    # know, e.g. the French stops of the Leman Express, are matched to GTFS stops by name and
+    # position or added, so that their passengers are not dropped.
+    use_schedule_stops: bool = True
+    stop_alias: dict = field(default_factory = dict)  # filled by stages: schedule stop id -> GTFS stop id

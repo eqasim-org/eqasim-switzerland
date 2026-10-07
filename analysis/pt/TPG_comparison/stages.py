@@ -27,11 +27,18 @@ def _load_gtfs_and_matched_counts(cfg):
     gtfs_stops = gtfs_utils.read_gtfs(cfg.gtfs_zip)
     gtfs_stops = gtfs_utils.add_missing_base_stops(gtfs_stops)
 
+    if cfg.use_schedule_stops:
+        schedule_path = gtfs_utils.find_schedule_file(cfg.matsim_output_folder)
+        if schedule_path is None:
+            print("No output_transitSchedule.xml.gz in the MATSim output: only the GTFS stops are used")
+        else:
+            gtfs_stops, cfg.stop_alias = gtfs_utils.supplement_with_schedule_stops(gtfs_stops, schedule_path)
+
     gtfs_stops_wgs = gtfs_stops.to_crs("EPSG:4326")
     filtered_stops = gtfs_utils.filter_stops_in_shapefile(gtfs_stops_wgs, cfg.perimeter_shapefile)
     stops_in_ge    = filtered_stops["stop_id"].values
 
-    counts_ge = tpg_data.load_matsim_counts(cfg.matsim_output_folder, stops_in_ge)
+    counts_ge = tpg_data.load_matsim_counts(cfg.matsim_output_folder, stops_in_ge, cfg.stop_alias)
 
     tpg_stops = tpg_data.load_tpg_stops(cfg.tpg_data_path, gtfs_stops)
 
@@ -53,7 +60,21 @@ def _build_lemanis_period_mofr(cfg, gtfs_stops, stops_in_ge):
     lemanis_stats["gtfs_code"] = lemanis_stats["gtfs_code"].astype(str)
     lex_lines = sorted(lemanis_stats["line_direction"].unique())
 
-    matsim_counts = tpg_data.load_matsim_counts(cfg.matsim_output_folder, stops_in_ge)
+    # Leman Express stops (Annecy, Evian, Coppet ...) are largely outside the Geneva perimeter, so
+    # the perimeter stops (stops_in_ge) must not be used here: every stop of the gtfs feed whose
+    # base id is a Lemanis stop is kept instead.
+    lemanis_codes = set(lemanis_stats["gtfs_code"])
+    all_stop_ids  = gtfs_stops["stop_id"].astype(str)
+    lemanis_stop_ids = all_stop_ids[all_stop_ids.str.split(":").str[0].isin(lemanis_codes)].values
+
+    matsim_counts = tpg_data.load_matsim_counts(cfg.matsim_output_folder, lemanis_stop_ids, cfg.stop_alias)
+
+    matsim_lines = set(matsim_counts["line_name"])
+    missing_lines = [line for line in lex_lines if line not in matsim_lines]
+    if missing_lines:
+        print(f"WARNING: Lemanis line(s) with no MATSim counterpart (compared against 0): {missing_lines}")
+    print(f"Lemanis lines matched to MATSim line names: {sorted(set(lex_lines) - set(missing_lines))}")
+
     matsim_counts = matsim_counts[matsim_counts["line_name"].isin(lex_lines)].copy()
     matsim_counts["stop_id_gtfs_base"] = matsim_counts["stop_id_gtfs"].str.split(":").str[0]
     matsim_counts["boardings"]  = matsim_counts["boardings"]  / cfg.input_downsampling
@@ -172,6 +193,66 @@ def run_stop_line_comparison(cfg, output_dir, year, stop = "Genève, gare Cornav
     )
 
     return tpg_mofr
+
+
+def run_stop_all_lines(cfg, output_dir, stop = "Annemasse"):
+    """All MATSim passenger movements (boardings and alightings) of every line at one stop over
+    the entire day. Works for any stop of the schedule, also outside the perimeter or TPG network
+    (e.g. Annemasse). The stop is matched on its name, ignoring case, accents and punctuation: an
+    exact match is preferred, otherwise every stop whose name contains the given text is used."""
+    gtfs_stops = gtfs_utils.read_gtfs(cfg.gtfs_zip)
+    gtfs_stops = gtfs_utils.add_missing_base_stops(gtfs_stops)
+
+    if cfg.use_schedule_stops:
+        schedule_path = gtfs_utils.find_schedule_file(cfg.matsim_output_folder)
+        if schedule_path is not None:
+            gtfs_stops, cfg.stop_alias = gtfs_utils.supplement_with_schedule_stops(gtfs_stops, schedule_path)
+
+    query      = gtfs_utils._normalize_stop_name(stop)
+    names      = gtfs_stops["stop_name"].astype(str)
+    normalized = names.map(gtfs_utils._normalize_stop_name)
+
+    selected = gtfs_stops[normalized == query]
+    if selected.empty:
+        selected = gtfs_stops[normalized.str.contains(query, regex = False)]
+    if selected.empty:
+        raise ValueError(f"No stop whose name matches {stop!r} in the GTFS / simulated schedule")
+
+    stop_names = sorted(selected["stop_name"].astype(str).unique())
+    print(f"Stop {stop!r} matched {len(selected)} stop id(s) with name(s): {stop_names}")
+
+    counts = tpg_data.load_matsim_counts(cfg.matsim_output_folder, selected["stop_id"].astype(str).values, cfg.stop_alias)
+    if counts.empty:
+        raise ValueError(f"No MATSim passenger counts at stop {stop!r}")
+
+    counts = counts.groupby(["line_name", "hour"], as_index = False)[["boardings", "alightings"]].sum()
+    counts["boardings"]  = counts["boardings"]  / cfg.input_downsampling
+    counts["alightings"] = counts["alightings"] / cfg.input_downsampling
+
+    os.makedirs(output_dir, exist_ok = True)
+    slug = gtfs_utils._normalize_stop_name(stop)
+
+    counts.to_csv(f"{output_dir}/stop_all_lines_{slug}.csv", index = False)
+    lemanis_df = None
+    if cfg.include_lemanis:
+        stop_bases = set(selected["stop_id"].astype(str).str.split(":").str[0])
+        lemanis_stats = lemanis.to_period_shape(lemanis.load_weekday_counts(cfg.lemanis_csv_path))
+        lemanis_stats = lemanis_stats[lemanis_stats["gtfs_code"].astype(str).isin(stop_bases)]
+
+        if lemanis_stats.empty:
+            print(f"No Lemanis data at stop {stop!r}")
+        else:
+            lemanis_df = lemanis_stats.rename(columns = {"line_direction": "line_name",
+                                                        "boardings_raw_mean": "boardings",
+                                                        "alightings_raw_mean": "alightings"})
+            lemanis_df = lemanis_df[["line_name", "period", "boardings", "alightings"]]
+            lemanis_df.to_csv(f"{output_dir}/stop_all_lines_{slug}_lemanis.csv", index = False)
+            print(f"Lemanis comparison available for line(s): {sorted(lemanis_df['line_name'].unique())}")
+
+    plotting.plot_stop_all_lines(counts, ", ".join(stop_names), f"{output_dir}/stop_all_lines_{slug}.png",
+                                 lemanis_df = lemanis_df)
+
+    return counts
 
 
 def run_global_comparison(cfg, output_dir, year):

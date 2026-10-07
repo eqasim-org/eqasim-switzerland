@@ -14,7 +14,7 @@ def load_tpg_stops(tpg_data_path, gtfs_stops):
     return tpg_stops
 
 
-def load_matsim_counts(matsim_output_folder, stops_in_ge):
+def load_matsim_counts(matsim_output_folder, stops_in_ge, stop_alias = None):
     matsim_pxcounts_path = f"{matsim_output_folder}/pt_passenger_counts.csv.gz"
 
     counts = pd.read_csv(matsim_pxcounts_path, sep = ";")
@@ -26,6 +26,8 @@ def load_matsim_counts(matsim_output_folder, stops_in_ge):
     )[["boardings", "alightings"]].agg("sum").reset_index()
 
     counts["stop_id_gtfs"] = counts["stop_id"].str.split(".").str[0].astype(str)
+    if stop_alias:
+        counts["stop_id_gtfs"] = counts["stop_id_gtfs"].replace(stop_alias)
 
     counts_ge = counts[counts["stop_id_gtfs"].isin(stops_in_ge)]
 
@@ -110,9 +112,15 @@ def match_line_directions(tpg_data_path, tpg_stops, counts_ge):
         (direction_comparison_df["MATSim_direction"] != "missing")
     ].copy()
     line_directions["line_direction"] = line_directions["line"] + "_" + line_directions["direction"]
-    line_directions_names = line_directions["MATSim_direction"].values
 
-    counts_ge = counts_ge[counts_ge["line_main_direction"].isin(line_directions_names)]
+    # MATSim counts of lines or directions without a TPG direction (e.g. lines operated by
+    # others or missing from the TPG line file: M, 272) are kept: they get no line_direction,
+    # so only comparisons that do not need one (the per-line, both directions) use them.
+    unmatched_lines = sorted(set(counts_ge["line_name"]) - set(line_directions["line"]))
+    if unmatched_lines:
+        print(f"{len(unmatched_lines)} MATSim line(s) without TPG direction information are kept "
+              f"for per-line comparisons: {unmatched_lines[:15]}{' ...' if len(unmatched_lines) > 15 else ''}")
+
     counts_ge = counts_ge[["stop_id_gtfs", "line_name", "line_main_direction", "hour", "boardings", "alightings"]]
 
     counts_ge = counts_ge.copy()

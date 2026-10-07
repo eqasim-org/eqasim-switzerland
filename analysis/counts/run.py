@@ -13,6 +13,7 @@ from .paths import configure_simulation_path, get_analysis_output_path
 logger = logging.getLogger("synpp")
 runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not (i.startswith("_") or i.startswith("."))]
 
+
 def configure(context):    
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
@@ -21,6 +22,7 @@ def configure(context):
     for run in runs:
         logger.info(f"Staging analysis.counts.runs.{run}")
         context.stage(f"analysis.counts.runs.{run}")
+
 
 def execute(context):
     # Get the path to output
