@@ -68,10 +68,10 @@ def execute(context):
             '<param name="modesToKeepOnCleanUp" value="%s" />' % modesToKeep
         )
 
-        content = content.replace(
-            '<param name="networkRouter" value="SpeedyALT" />',
-            '<param name="networkRouter" value="AStarLandmarks" />'
-        )
+        # content = content.replace(
+            # '<param name="networkRouter" value="SpeedyALT" />',
+            # '<param name="networkRouter" value="AStarLandmarks" />'
+        # )
 
         content = content.replace(
             '<param name="networkModes" value="car,bus" />',

@@ -1,9 +1,11 @@
 import warnings
 import pandas as pd
 import networkx as nx
-from tqdm import tqdm
-import os
 import numpy as np
+
+from matsim.scenario.network.utils.connectivity import (
+    clean_restriction_references, largest_connected_links, restricted_link_ids,
+)
 
 import logging
 logger = logging.getLogger(__name__)
@@ -31,9 +33,13 @@ class networkCleaner():
         """All network should be considered, because intersections could be with (pt) and (pt,car)"""
         df = self.links
 
-        # Removing loops
+        protected = restricted_link_ids(zip(df.link_id, df.attributes)) if (
+            remove_network_loops or remove_replicate_links or remove_nodes_with_no_intersection
+        ) else set()
+
+        # Removing loops (restriction identities must remain valid).
         if remove_network_loops:
-            sel = (df['from_node'] == df['to_node'])
+            sel = (df['from_node'] == df['to_node']) & ~df.link_id.isin(protected)
             stats["removed_loops"] = int(sel.sum())
             logger.info("There are %d loops in the network that are removed." % stats["removed_loops"] )
             df = df[~sel].reset_index(drop=True)
@@ -41,24 +47,28 @@ class networkCleaner():
         # Remove replicated links
         if remove_replicate_links:            
             len_df = len(df)
-            df = df.drop_duplicates(subset=['length','modes','from_node', 'to_node', 'capacity'],
-                                    ignore_index=True)
+            duplicates = df.duplicated(subset=['length', 'modes', 'from_node', 'to_node', 'capacity'])
+            df = df.loc[~(duplicates & ~df.link_id.isin(protected))].reset_index(drop=True)
             stats["removed_link_duplicates"] = len_df-len(df)
             logger.info("There are %d link duplicates in the network that are removed." % stats["removed_link_duplicates"] )                
             
         # Removing nodes with no intersection
         if remove_nodes_with_no_intersection:
             logger.info("Removing nodes that do not represent an intersection.")
-            df, stats2 = self.merge_link_chains(df)
+            df, stats2 = self.merge_link_chains(df, protected=protected)
             stats.update(stats2)
         
         # Removed links that are not connected to the whole graph
         if ensure_network_connectivity:
             logger.info("Remove unconnected links")
-            cond = "disallowedNextLinks" in self.network.link_attrs["name"].unique()
-            func = self.remove_unconnected_links_with_turns_restrictions if cond else self.remove_unconnected_links
+            func = self.remove_unconnected_links_with_turns_restrictions
             df, num_removed = func(df)        
-            stats["removed_unconnected_links"] = num_removed            
+            stats["removed_unconnected_links"] = num_removed
+            logger.info("Remove truck access from disconnected truck components")
+            df, num_removed = func(df, mode="truck", remove_mode_only=True)
+            stats["removed_truck_mode_from_unconnected_links"] = num_removed
+            logger.info("Removed truck access from %d disconnected links; links retained.", num_removed)
+            df = clean_restriction_references(df)
 
         self.links = df        
         
@@ -79,225 +89,134 @@ class networkCleaner():
         
         return stats
         
-    def remove_unconnected_links(self, df):        
+    @staticmethod
+    def _apply_connectivity_filter(df, selected, connected, mode, remove_mode_only):
+        """Either remove disconnected links or only revoke the selected mode."""
+        disconnected = selected & ~connected
+        count = int(disconnected.sum())
+        if remove_mode_only:
+            df = df.copy()
+            df.loc[disconnected, "modes"] = df.loc[disconnected, "modes"].map(
+                lambda modes: ",".join(m for m in modes.split(",") if m != mode)
+            )
+            return df, count
+        return df.loc[~disconnected].reset_index(drop=True), count
+
+    def remove_unconnected_links(self, df, mode="car", remove_mode_only=False):
+        """Use directed, mode-specific connectivity even without restrictions."""
+        return self.remove_unconnected_links_with_turns_restrictions(df, mode, remove_mode_only)
+
+    def remove_unconnected_links_with_turns_restrictions(self, df, mode="car", remove_mode_only=False):
+        """Keep the largest strong component respecting complete restrictions."""
+        selected = df["modes"].str.split(",").map(lambda modes: mode in modes)
+        mode_links = df.loc[selected]
+        if mode_links.empty:
+            return df.copy(), 0
+        logger.info("    Building sequence-aware connectivity graph for %s ...", mode)
+        connected_ids = largest_connected_links(mode_links, mode)
+        connected = df["link_id"].isin(connected_ids)
+        logger.info("    %s: keeping %d of %d links in the largest component.",
+                    mode, len(connected_ids), len(mode_links))
+        return self._apply_connectivity_filter(df, selected, connected, mode, remove_mode_only)
+
+    def merge_link_chains(self, df, protected=None):
+        """Contract road chains between intersections or attribute boundaries.
+
+        Two-way roads are checked in both directions. A node is retained if
+        either direction changes speed, capacity or modes. Lanes are deliberately
+        not a merge condition. Parallel links, loops and restriction identities
+        are preserved rather than choosing an arbitrary path through them.
         """
-        Removes links that are not part of the largest connected component of the road network.
-        
-        Parameters:
-            df (pd.DataFrame): DataFrame with road network links. Required columns:
-                               ['from_node', 'to_node', 'link_id']
-        
-        Returns:
-            pd.DataFrame: Filtered DataFrame with only the connected links.
-        """        
-        
-        df = df.copy()
-        sel = df["modes"].str.split(',').map(lambda x: "car" in x)
-        df_other = df[~sel].copy()
-        df       = df[sel].reset_index(drop=True) #don't include pt links because maybe disconencted from the network (rail for example)
-        
-        logger.info("    Converting network to networkx ...")
-        G = nx.Graph()    
-        G.add_edges_from(zip(df['from_node'], 
-                             df['to_node'], 
-                            ({'idx': idx, 'link_id': lid} for idx, lid in zip(df.index, df['link_id']))))
-    
-        # Get the largest connected component
-        largest_cc = max(nx.connected_components(G), key=len)
-    
-        # Keep only edges where both nodes are in the largest component
-        connected_links = df[df['from_node'].isin(largest_cc) | df['to_node'].isin(largest_cc)]
-        
-        df = pd.concat([connected_links, df_other], ignore_index=True)
-        return df, len(sel)-len(df)
-        
-    def remove_unconnected_links_with_turns_restrictions(self, df):
-        """
-        Removes links not part of the largest connected component for cars, considering turn restrictions.
-        In this case, the links are the nodes of the created graph.
-        Parameters:
-            df (pd.DataFrame): Road network with columns ['from_node', 'to_node', 'link_id', 'modes', 'disallowedNextLinks']
-        
-        Returns:
-            pd.DataFrame: Filtered DataFrame with connected car links only.
-        """        
-        df = df.copy()
-        
-        # Filter to car-accessible links
-        sel = df["modes"].str.split(',').map(lambda x: "car" in x)
-        df_other = df[~sel].copy()
-        df = df[sel].reset_index(drop=True)
+        if protected is None:
+            protected = restricted_link_ids(zip(df.link_id, df.attributes))
+        stats = dict(number_of_nodes=0, number_of_links=len(df), attributes_change=0,
+                     skiped_loop=0, successful_merge=0, degree_is_2=0,
+                     one_in_one_out=0, ignored_no_car=0, break_no_car=0,
+                     already_visited=0, ambiguous_nodes=0)
+        if df.empty:
+            return df.copy(), stats
 
-        logger.info("    Building turn-aware connectivity graph...")
+        from collections import defaultdict
+        incoming, outgoing = defaultdict(list), defaultdict(list)
+        sources = df.from_node.to_numpy()
+        targets = df.to_node.to_numpy()
+        ids = df.link_id.to_numpy()
+        speeds = df.freespeed.to_numpy()
+        capacities = df.capacity.to_numpy()
+        # Compare modes as sets: ordering in a comma-separated string is immaterial.
+        mode_sets = {value: frozenset(value.split(",")) for value in df.modes.unique()}
+        modes = [mode_sets[value] for value in df.modes]
+        for i, (source, target) in enumerate(zip(sources, targets)):
+            outgoing[source].append(i)
+            incoming[target].append(i)
+        nodes = set(incoming) | set(outgoing)
+        stats["number_of_nodes"] = len(nodes)
+        following, preceding = {}, {}
+        road_modes = {"car", "car_passenger", "truck", "taxi", "bus"}
 
-        # Create a mapping from to_node to list of incoming links
-        links_from_node = df.groupby('from_node')['link_id'].apply(list).to_dict()
-        link_info = df.set_index('link_id')
-
-        # Build a graph where nodes are link_ids, and edges represent allowed turns
-        G = nx.DiGraph()
-        for link_id, row in link_info.iterrows():
-            to_node = row['to_node']
-            disallowed = set()          
-            disallowed_links = eval(row.attributes.get("disallowedNextLinks", "{}"))
-            if "car" in disallowed_links:                
-                disallowed.update([j for i in disallowed_links["car"] for j in i])
-
-            # Get all links starting from this to_node (i.e., possible successors)
-            next_links = links_from_node.get(to_node, [])
-            for next_link_id in next_links:
-                if next_link_id not in disallowed:
-                    G.add_edge(link_id, next_link_id)
-
-        # Get largest strongly connected component
-        strongly_connected_components = list(nx.strongly_connected_components(G))
-        largest_scc = max(strongly_connected_components, key=len)
-
-        # Filter to only links part of the largest component
-        connected_links = df[df['link_id'].isin(largest_scc)]
-        
-        # print number of unconnected links
-        disconnected_components = [c for c in strongly_connected_components if len(c) < len(largest_scc)]
-        logger.info(f"{len(disconnected_components)} small disconnected components found. These are their sizes: {[len(c) for c in disconnected_components]}")   
-        
-        # Add back non-car links
-        df_final = pd.concat([connected_links, df_other], ignore_index=True)
-
-        removed_count = len(df) - len(connected_links)
-        return df_final, removed_count
-
-    def merge_link_chains(self, df):        
-        stats = {"number_of_nodes":0,
-                 "number_of_links":0,
-                 "attributes_change":0,
-                 "skiped_loop":0,
-                 "successful_merge":0,
-                 "degree_is_2":0,  
-                 "one_in_one_out":0,                        
-                 "ignored_no_car":0,
-                 "break_no_car":0,
-                 "already_visited":0, 
-                    }
-                        
-        # Step 1: Build directed graph
-        logger.info("    Converting network to networkx ...")
-        G = nx.MultiDiGraph()    
-        G.add_edges_from(zip(df['from_node'], 
-                             df['to_node'], 
-                            ({'idx': idx, 'link_id': lid} for idx, lid in zip(df.index, df['link_id']))))
-            
-        stats['number_of_links'] = G.number_of_edges()
-        stats['number_of_nodes'] = G.number_of_nodes()
-        
-        visited_links = set()
-        merged_links = []
-        attribute_consistency = True
-        new_start_node = None
-        
-        # Step 2: Identify nodes that are NOT degree-2 (start/end points)
-        def is_degree2(node):
-            return G.in_degree(node) == 1 and G.out_degree(node) == 1
-        
-        
-        logger.info("    Searching for nodes to remove")
-        node_iterator = G.__iter__()
-        iteration = 0
-        progress_bar = tqdm(total=len(G), desc="Finding nodes to remove ", 
-                            disable= not os.isatty(1) )
-        
-        while iteration < len(G):   
-            if attribute_consistency:
-                node = next(node_iterator)
-                iteration+=1            
-                progress_bar.update(1) # Updtae the bar only here (follow the iterator)
-                
-                stats['degree_is_2']+=int(G.degree(node)==2)
-                stats['one_in_one_out']+=int(is_degree2(node))
-            else:
-                node = new_start_node            
-            
-            #Skip if not potential chain start            
-            if (G.degree(node) <= 2 or G.out_degree(node) == 0) and attribute_consistency:        
+        for node in nodes:
+            ins, outs = incoming.get(node, []), outgoing.get(node, [])
+            stats["one_in_one_out"] += int(len(ins) == len(outs) == 1)
+            # At most two directions, with exactly one link per direction.
+            if not ins or not outs or len(ins) + len(outs) > 4:
                 continue
-            
-            attribute_consistency = True
-            # Potential chain start point
-            for succ in G.successors(node):
-                edge_data = G.get_edge_data(node, succ)[0]
-                idx = edge_data['idx']
-                
-                if idx in visited_links:
-                    stats["already_visited"]+=1
-                    continue
+            neighbours = {sources[i] for i in ins} | {targets[i] for i in outs}
+            if node in neighbours or len(neighbours) != 2:
+                continue
+            stats["degree_is_2"] += 1
+            incident = ins + outs
+            if any(ids[i] in protected for i in incident):
+                continue
+            if any(not modes[i].intersection(road_modes) for i in incident):
+                stats["ignored_no_car"] += 1
+                continue
+            # Straight-through continuation goes to the other physical neighbour,
+            # never immediately back to the neighbour from which the link arrived.
+            pairs = [(i, [j for j in outs if targets[j] != sources[i]]) for i in ins]
+            if (any(len(candidates) != 1 for _, candidates in pairs)
+                    or len({candidates[0] for _, candidates in pairs}) != len(outs)
+                    or len(ins) != len(outs)):
+                stats["ambiguous_nodes"] += 1
+                continue
+            pairs = [(i, candidates[0]) for i, candidates in pairs]
+            if any(speeds[i] != speeds[j] or capacities[i] != capacities[j]
+                   or modes[i] != modes[j] for i, j in pairs):
+                stats["attributes_change"] += 1
+                continue
+            for i, j in pairs:
+                following[i] = j
+                preceding[j] = i
 
-                if not "car" in df.loc[idx,"modes"].split(','):
-                    stats["ignored_no_car"]+=1
-                    continue
-                
-                # Start building the chain
-                current_chain = [idx]
-                current_node = succ
-                current_attrs = df.loc[idx, ['link_id', 'freespeed', 'capacity', 'permlanes',
-                                             'oneway', 'modes']].to_dict()
+        removed, replacements = set(), []
+        # A chain can start at an intersection, dead end or attribute boundary.
+        # Closed rings have no start and are deliberately left intact.
+        for first in following:
+            if first in preceding:
+                continue
+            chain = [first]
+            while chain[-1] in following:
+                chain.append(following[chain[-1]])
+            last = chain[-1]
+            if sources[first] == targets[last]:
+                stats["skiped_loop"] += 1
+                continue
+            row = df.iloc[first].to_dict()
+            row["to_node"] = targets[last]
+            row["length"] = df.iloc[chain].length.sum()
+            # Preserve destination attributes without mutating the input dict.
+            row["attributes"] = dict(df.iloc[last].attributes)
+            row["attributes"]["old_link_id"] = "_".join(
+                str(df.iloc[i].attributes.get("old_link_id", ids[i])) for i in chain
+            )
+            replacements.append(row)
+            removed.update(chain)
+            stats["successful_merge"] += 1
 
-                while is_degree2(current_node):
-                    next_nodes = list(G.successors(current_node))
-                    if len(next_nodes) != 1:
-                        break
-
-                    next_node = next_nodes[0]
-                    edge_data = G.get_edge_data(current_node, next_node)[0]                    
-
-                    next_idx = edge_data['idx']
-                    next_row = df.loc[next_idx]
-
-                    if not "car" in next_row['modes'].split(','):
-                        stats["break_no_car"]+=1
-                        break
-
-                    # Check attribute consistency
-                    if not ((next_row["modes"] == current_attrs["modes"])&
-                            (next_row["capacity"] == current_attrs["capacity"])&
-                            (abs(next_row["freespeed"]-current_attrs["freespeed"])<1)):   
-                        attribute_consistency = False
-                        new_start_node = current_node
-                        stats['attributes_change']+=1
-                        break
-                    else:
-                        attribute_consistency = True 
-
-                    current_chain.append(next_idx)
-                    current_node = next_node
-
-                if len(current_chain) > 1:
-                    # Merge the chain
-                    chain_rows = df.loc[current_chain]
-                    first_node = df.loc[current_chain[0], 'from_node']
-                    last_node  = df.loc[current_chain[-1], 'to_node']
-                    if first_node!=last_node:
-                        # Otherwise, it would just create a loop               
-                        new_link = {
-                            'from_node': first_node,
-                            'to_node': last_node,                            
-                            'length': chain_rows['length'].sum(),
-                            **current_attrs #we use the link_id of the first link
-                        }
-                        new_link["attributes"] = df.loc[current_chain[-1], 'attributes'] #should keep the attributes of last link, in case of turn restrictions
-                        new_link["attributes"]["old_link_id"] = "_".join(chain_rows['link_id'].tolist())
-                        merged_links.append(new_link)
-                        visited_links.update(current_chain)
-                        stats["successful_merge"]+=1
-                    else:
-                        stats["skiped_loop"]+=1
-
-        # Step 3: Build final DataFrame
-        links_to_remove = visited_links
-        df_cleaned = df[~df.index.isin(links_to_remove)]
-        df_merged = pd.DataFrame(merged_links)
-        final_df = pd.concat([df_cleaned, df_merged], ignore_index=True)
-        
-        progress_bar.close()
-        return final_df, stats
+        if not replacements:
+            return df.copy().reset_index(drop=True), stats
+        retained = df.iloc[[i for i in range(len(df)) if i not in removed]]
+        result = pd.concat([retained, pd.DataFrame(replacements, columns=df.columns)], ignore_index=True)
+        return result, stats
 
     def add_bike_to_network(self):
         car_links = self.links.modes.str.split(',').map(lambda x: "car" in x)
