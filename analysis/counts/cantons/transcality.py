@@ -1,4 +1,7 @@
-"""Prepare matched Transcality detector profiles for count comparison."""
+"""
+This data is sent by Lukas to Milos. The counts are already processes by Transcality.
+Prepare matched Transcality detector profiles for count comparison.
+"""
 
 import json
 import logging

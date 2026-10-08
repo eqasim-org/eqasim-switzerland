@@ -5,10 +5,12 @@ from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.results import save_count_results
+from ..construction_sites import configure_filter, filter_counts
 from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
 
 
 def configure(context):
+    configure_filter(context)
     context.stage("analysis.counts.cantons.geneva")
     context.stage("analysis.counts.matching.network")
     context.stage("analysis.counts.matching.compare")
@@ -41,6 +43,7 @@ def execute(context):
     # Match the manually identified OSM way and use its angle for direction.
     matcher = TrafficDataMatcher()
     matched = matcher.match(network=network, counts=counts)
+    counts, matched = filter_counts(context, counts, matched, network, city)
 
     if not matches_found(matched, city):
         return None
@@ -114,7 +117,6 @@ def execute(context):
     
     return path_to_results
    
-
 
 
 

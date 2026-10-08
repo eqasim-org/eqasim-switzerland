@@ -161,12 +161,17 @@ class Plotter:
                 else 2
             )
         result["directions_represented"] = directions_represented
+        # Combining daily authorities with Transcality creates NaNs for stages
+        # that do not provide duration metadata. Preserve explicit peak windows.
+        result["period_hours"] = (
+            result["period_hours"].fillna(24) if "period_hours" in result else 24
+        )
         result["geh"] = GEH(
             result["flow"],
             result["simulated_flow"],
             return_vector=True,
             directions_represented=directions_represented,
-            period_hours=result.get("period_hours", 24),
+            period_hours=result["period_hours"],
         ).round(2)
         return gpd.GeoDataFrame(result, geometry="geometry", crs=points.crs)
 

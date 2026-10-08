@@ -14,6 +14,7 @@ from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.results import save_count_results
+from ..construction_sites import configure_filter, filter_counts
 from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
 
 
@@ -34,6 +35,7 @@ ROAD_TYPES_TO_SHOW = [
 
 
 def configure(context):
+    configure_filter(context)
     context.stage("analysis.counts.cantons.transcality")
     context.stage("analysis.counts.matching.network")
     context.stage("analysis.counts.matching.compare")
@@ -73,6 +75,7 @@ def execute(context, *, counts_stage="analysis.counts.cantons.transcality",
     )
     network = context.stage("analysis.counts.matching.network")
     matched = TrafficDataMatcher().match(network=network, counts=counts, mode="directional")
+    counts, matched = filter_counts(context, counts, matched, network, city)
     if not matches_found(matched, city):
         return None
 
