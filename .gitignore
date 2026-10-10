@@ -29,3 +29,4 @@ ch_cutter
 main*.py
 .claude
 AGENTS.md
+run.sh.myenv.bak

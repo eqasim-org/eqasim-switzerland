@@ -55,6 +55,7 @@ dependencies = [
     "xlwt>=1.3.0",
     "zstandard>=0.25.0",
     "folium",
+    "duckdb>=1.5.5",
 ]
 
 [tool.uv]
