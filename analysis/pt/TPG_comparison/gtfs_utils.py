@@ -136,6 +136,29 @@ def read_schedule_stops(schedule_path):
     return gpd.GeoDataFrame(df, geometry = gpd.points_from_xy(df["x"], df["y"]), crs = "EPSG:2056").drop(columns = ["x", "y"])
 
 
+def read_schedule_route_stops(schedule_path):
+    """{(transit line id, transit route id): [stop facility refIds in the order of the route]}"""
+    opener = gzip.open if schedule_path.endswith(".gz") else open
+    routes = {}
+    line_id = route_id = stops = None
+
+    with opener(schedule_path, "rb") as f:
+        for event, element in ET.iterparse(f, events = ("start", "end")):
+            if event == "start":
+                if element.tag == "transitLine":
+                    line_id = element.attrib["id"]
+                elif element.tag == "transitRoute":
+                    route_id, stops = element.attrib["id"], []
+            elif element.tag == "stop" and stops is not None and "refId" in element.attrib:
+                stops.append(element.attrib["refId"])
+            elif element.tag == "transitRoute":
+                routes[(line_id, route_id)] = stops
+                route_id = stops = None
+                element.clear()
+
+    return routes
+
+
 def supplement_with_schedule_stops(gtfs_stops, schedule_path, max_distance = 300.0):
     """The simulated schedule can contain stops that the GTFS used here does not have under the
     same id (e.g. the French stops of the Leman Express come from another feed and have other

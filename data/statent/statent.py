@@ -24,16 +24,12 @@ def configure(context):
     context.stage("data.spatial.postal_codes")
     context.stage("data.spatial.cantons")
 
-    context.config("include_international_organizations", default = False)
+    context.config("include_international_organizations", default = True)
     if context.config("include_international_organizations"):
         context.stage("data.statent.international_organizations")
 
 
 def load_raw_statent(context):
-    """The raw STATENT extract, before international-organization rows are
-    appended. Factored out of execute() so
-    find_statent_matches_for_international_organizations can reuse it.
-    """
     data_path = context.config("data_path")
 
     df = pd.DataFrame(pd.read_csv(
@@ -174,11 +170,6 @@ MIN_STATENT_STAFF = 100
 
 
 def get_international_organizations(context):
-    """
-    Builds STATENT-shaped rows for international organizations not covered
-    by STATENT itself. Excludes organizations with a plausible STATENT
-    match (see find_statent_matches_for_international_organizations).
-    """
     df = context.stage("data.statent.international_organizations")
     df = df[
         df["lat"].notna() & df["lon"].notna()
@@ -210,11 +201,6 @@ def get_international_organizations(context):
 
 
 def snap_to_switzerland(context, x, y):
-    """
-    A few organizations' coordinates sit right on the border (e.g. CERN) and
-    can fall just outside Switzerland, which breaks execute()'s zone
-    imputation. Snaps any such point onto the nearest municipality edge.
-    """
     df_municipalities = context.stage("data.spatial.municipalities")[0]
     df_municipalities = df_municipalities[df_municipalities["municipality_id"] >= 0]
     switzerland       = shapely.ops.unary_union(df_municipalities.geometry.values)
@@ -263,12 +249,6 @@ REVIEW_CANTON_NAMES_EN = ("geneva", "vaud")
 
 
 def find_statent_matches_for_international_organizations(context):
-    """
-    Checks whether a STATENT establishment already covers an international
-    organization's jobs (distance/NOGA/employee-ratio criteria above), so
-    get_international_organizations can exclude it from the STATENT merge.
-    Also writes a CSV/map for review - see build_statent_duplicate_check_outputs.
-    """
     df_statent  = load_raw_statent(context)
     gdf_statent = data.spatial.utils.to_gpd(
         context, df_statent, "x", "y", coord_type = "enterprise")
@@ -323,15 +303,11 @@ def find_statent_matches_for_international_organizations(context):
 
 
 def _review_cantons(context):
-    """The REVIEW_CANTON_NAMES_EN rows of data.spatial.cantons."""
     df_cantons = context.stage("data.spatial.cantons")
     return df_cantons[df_cantons["canton_name_en"].isin(REVIEW_CANTON_NAMES_EN)]
 
 
 def _assign_canton_names(gdf, df_cantons):
-    """Per-row canton_name for gdf's points, via point-in-polygon (only a
-    couple of cantons - a simple loop beats a spatial join here since gdf's
-    index may have duplicate labels from an earlier sjoin)."""
     canton = pd.Series(pd.NA, index = gdf.index, dtype = "object")
     for _, row in df_cantons.iterrows():
         canton[gdf.geometry.within(row.geometry).values] = row["canton_name"]
@@ -351,11 +327,6 @@ STATENT_MATCH_COLOR  = "#08306b"
 
 
 def _spread_overlapping_points(gdf, offset_m = MARKER_SPREAD_OFFSET_M):
-    """
-    Nudges points sharing the same (rounded) coordinate into a small circle
-    around it, so each gets its own visible marker instead of one hiding
-    the rest. Purely a display adjustment.
-    """
     # Reset the index first: duplicate labels (from an earlier sjoin) make
     # index.get_loc() return a slice/array instead of a plain position.
     gdf = gdf.reset_index(drop = True)
@@ -382,11 +353,6 @@ def _spread_overlapping_points(gdf, offset_m = MARKER_SPREAD_OFFSET_M):
 
 
 def build_statent_duplicate_check_outputs(context, gdf_orgs, candidates, kept_mask):
-    """
-    Writes a review CSV and an interactive folium map (STATENT candidates in
-    blue, kept organizations green, removed ones red) to this stage's cache
-    folder, restricted to REVIEW_CANTON_NAMES_EN for legibility.
-    """
     df_cantons = _review_cantons(context)
     region = shapely.ops.unary_union(df_cantons.geometry.values)
 

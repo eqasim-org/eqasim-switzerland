@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-import lemanis
+import lemanis_2022
 
 CONFIDENCE_Z = 1.96  # ~95% CI assuming a normal distribution
 
@@ -141,10 +141,6 @@ def build_line_full_day_table(line_hour_df):
 
 
 def build_lemanis_stop_period_table(lemanis_mofr, gtfs_stops):
-    """Same idea as build_stop_hour_table, but keyed by Lemanis' own period
-    (see lemanis.to_period_shape) instead of hour, and without the
-    perimeter-stop restriction: lemanis_mofr is already limited to
-    Lemanis' own matched stops (see stages._build_lemanis_period_mofr)."""
     df = _with_totals(lemanis_mofr)
 
     grouped = df.groupby(["gtfs_code", "stop_name", "period"], as_index = False).agg(
@@ -162,7 +158,7 @@ def build_lemanis_stop_period_table(lemanis_mofr, gtfs_stops):
     )
 
     full_index = pd.MultiIndex.from_product(
-        [stop_info["gtfs_code"], lemanis.PERIOD_ORDER], names = ["gtfs_code", "period"]
+        [stop_info["gtfs_code"], lemanis_2022.PERIOD_ORDER], names = ["gtfs_code", "period"]
     )
 
     grouped = grouped.set_index(["gtfs_code", "period"]).reindex(full_index).drop(columns = "stop_name").reset_index()
@@ -191,11 +187,6 @@ def build_lemanis_stop_full_day_table(stop_period_df):
 
 
 def build_lemanis_line_period_table(lemanis_mofr):
-    """Same shape/purpose as build_line_hour_table, but keyed by Lemanis'
-    own reported period (see lemanis.to_period_shape) instead of hour -
-    MATSim is aggregated into those same periods rather than Lemanis being
-    split down to an hourly resolution it doesn't have (see
-    stages._build_lemanis_period_mofr)."""
     df = _with_totals(lemanis_mofr)
 
     grouped = df.groupby(["line_direction", "period"], as_index = False).agg(
@@ -205,7 +196,7 @@ def build_lemanis_line_period_table(lemanis_mofr):
     )
 
     full_index = pd.MultiIndex.from_product(
-        [grouped["line_direction"].unique(), lemanis.PERIOD_ORDER], names = ["line_direction", "period"]
+        [grouped["line_direction"].unique(), lemanis_2022.PERIOD_ORDER], names = ["line_direction", "period"]
     )
     grouped = grouped.set_index(["line_direction", "period"]).reindex(full_index).reset_index()
     grouped = grouped.fillna({"tpg_mean": 0, "tpg_var": 0, "matsim_total": 0})

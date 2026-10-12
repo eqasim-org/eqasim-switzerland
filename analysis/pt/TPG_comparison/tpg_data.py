@@ -1,4 +1,9 @@
+import os
+
 import pandas as pd
+
+import gtfs_utils
+import matsim_events
 
 
 def load_tpg_stops(tpg_data_path, gtfs_stops):
@@ -14,13 +19,49 @@ def load_tpg_stops(tpg_data_path, gtfs_stops):
     return tpg_stops
 
 
-def load_matsim_counts(matsim_output_folder, stops_in_ge, stop_alias = None):
-    matsim_pxcounts_path = f"{matsim_output_folder}/pt_passenger_counts.csv.gz"
+COUNTS_SOURCES = ("auto", "file", "events")
 
-    counts = pd.read_csv(matsim_pxcounts_path, sep = ";")
+
+def counts_source_available(matsim_output_folder, counts_source = "auto"):
+    """The counts source to use: 'file' (pt_passenger_counts.csv.gz) or 'events' (output_events.xml.gz). With 'auto'
+    the file is used when it exists, the events otherwise."""
+    if counts_source not in COUNTS_SOURCES:
+        raise ValueError(f"counts_source must be one of {COUNTS_SOURCES}, not {counts_source!r}")
+
+    has_file   = os.path.exists(os.path.join(matsim_output_folder, matsim_events.COUNTS_FILE))
+    has_events = os.path.exists(os.path.join(matsim_output_folder, matsim_events.EVENTS_FILE))
+
+    source = ("file" if has_file else "events") if counts_source == "auto" else counts_source
+    if not (has_file if source == "file" else has_events):
+        missing = matsim_events.COUNTS_FILE if source == "file" else matsim_events.EVENTS_FILE
+        raise FileNotFoundError(f"{missing} not found in the MATSim output folder {matsim_output_folder}")
+
+    return source
+
+
+def read_matsim_counts(matsim_output_folder, stop_alias = None, night_hours = 0, counts_source = "auto"):
+    """MATSim passenger counts per stop, line, vehicle and hour.
+
+    night_hours = n > 0: the counts of the hours 0 to n-1 of the simulated day are replaced by the ones of the hours
+    24 to 24+n-1 (the runs after midnight of the same service day), like the real counts where the hours 0-5 are the
+    ones after midnight. The hours 24-29 are all moved to 0-5, so that with n < 6 the hours n-5 add up to the ones
+    of the morning. With n = 0 the hours are kept as they are (up to 24)."""
+    if counts_source_available(matsim_output_folder, counts_source) == "file":
+        counts = pd.read_csv(os.path.join(matsim_output_folder, matsim_events.COUNTS_FILE), sep = ";")
+    else:
+        schedule_path = gtfs_utils.find_schedule_file(matsim_output_folder)
+        if schedule_path is None:
+            raise FileNotFoundError(f"output_transitSchedule.xml.gz not found in {matsim_output_folder}: it is needed to count the passengers of the events")
+        counts = matsim_events.read_counts_from_events(matsim_output_folder, schedule_path)
+
     counts.loc[:, "hour"] = counts["time_bin"].str.extract(r"^(\d{1,2})").astype(int)
 
-    counts = counts[counts["hour"] < 25]
+    if night_hours > 0:
+        counts = counts[(counts["hour"] >= night_hours) & (counts["hour"] < 30)].copy()
+        counts["hour"] = counts["hour"] % 24
+    else:
+        counts = counts[counts["hour"] < 25]
+
     counts = counts.groupby(
         ["stop_id", "line_id", "line_name", "route_id", "vehicle_id", "hour", "route_direction", "line_main_direction"]
     )[["boardings", "alightings"]].agg("sum").reset_index()
@@ -29,9 +70,7 @@ def load_matsim_counts(matsim_output_folder, stops_in_ge, stop_alias = None):
     if stop_alias:
         counts["stop_id_gtfs"] = counts["stop_id_gtfs"].replace(stop_alias)
 
-    counts_ge = counts[counts["stop_id_gtfs"].isin(stops_in_ge)]
-
-    return counts_ge
+    return counts
 
 
 def match_line_directions(tpg_data_path, tpg_stops, counts_ge):

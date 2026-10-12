@@ -47,14 +47,7 @@ def configure(context):
     context.config("analysis.pt.transit_schedule_show_schedules", default = True)
     context.config("extent_path", default = "")
     context.config("data_path")
-    # Optional shapefile of the official line routes (e.g. SITG TPG_LIGNES, columns LIGNE and
-    # DIRECTION); shown in another color when a line is selected. Defaults to
-    # <data_path>/TPG_line_routes/TPG_LIGNES-SHP/TPG_LIGNES.shp if that file exists.
     context.config("analysis.pt.transit_schedule_line_routes_path", default = "")
-    # "simulation" reads output_transitSchedule.xml.gz / output_network.xml.gz from a MATSim
-    # run's simulation_directory; "mapped" reads directly from the pt2matsim-mapped network
-    # and schedule cached by the matsim.scenario.network.mapped stage (no simulation needed);
-    # "corrected" does the same for the routes re-routed by matsim.scenario.network.corrected.
     context.config("analysis.pt.transit_schedule_source", default = "simulation")
 
     source = context.config("analysis.pt.transit_schedule_source")
@@ -188,14 +181,20 @@ def load_line_routes(line_routes_path, region = None):
         region_4326 = gpd.GeoSeries([region], crs = NETWORK_CRS).to_crs(epsg = 4326).iloc[0]
         gdf = gdf[gdf.intersects(region_4326)]
 
+    # SITG TPG_LIGNES: LIGNE and DIRECTION. TL (Lausanne): CODE_LIGNE and SENS_TXT = "origin -> destination"
+    if "LIGNE" in gdf.columns:
+        lines, directions = gdf["LIGNE"], gdf["DIRECTION"]
+    else:
+        lines, directions = gdf["CODE_LIGNE"], gdf["SENS_TXT"].astype(str).str.split("->").str[-1]
+
     line_routes = defaultdict(list)
-    for line, direction, geometry in zip(gdf["LIGNE"], gdf["DIRECTION"], gdf.geometry):
+    for line, direction, geometry in zip(lines, directions, gdf.geometry):
         if geometry is None or geometry.is_empty:
             continue
         parts = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
         line_routes[_normalize_line(line)].append({
             "directions": {d.strip().casefold() for d in str(direction).split("/")},
-            "paths": [[[lat, lon] for lon, lat in part.coords] for part in parts],
+            "paths": [[[c[1], c[0]] for c in part.coords] for part in parts],
         })
     return line_routes
 
