@@ -10,6 +10,7 @@ def configure(context):
     context.stage("contracts.contracts")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.scenario.network.convert_osm")
+    context.stage("matsim.scenario.network.mapped")
     context.stage("matsim.cutter.run_scenario")
 
     context.config("output_path")
@@ -47,7 +48,7 @@ def execute(context):
     output_id = context.config("output_id")
 
     if not os.path.isdir(output_path):
-        raise RuntimeError("Output path does not exist:", output_path)
+        os.makedirs(output_path, exist_ok=True)
 
     # create target path
     target_path = "%s/%s" % (output_path, output_id)
@@ -86,8 +87,9 @@ def execute(context):
 
     # copy the detailed geometry
     if context.config("export_detailed_network"):
+        geometry_file = context.stage("matsim.scenario.network.mapped")["geometry"]
         shutil.copy(
-            "%s/%s" % (context.path("matsim.scenario.network.convert_osm"), "detailed_network.csv"),
+            geometry_file,
             "%s/%s" % (target_path, "%sdetailed_network.csv" % context.config("output_prefix"))
         )
     
@@ -98,10 +100,10 @@ def execute(context):
             "%s/%srun.jar" % (target_path, context.config("output_prefix"))
         )
     
-    # move the results to the output
+    # Copy results while preserving the simulation stage's cached files.
     path_to_results =  "%s/simulation_output" % context.path("matsim.simulation.run")
     new_path_to_results = "%s/%s" % (target_path, context.config("simulation_directory"))
-    shutil.move(path_to_results, new_path_to_results)
+    shutil.copytree(path_to_results, new_path_to_results)
     
     # if calibration is activated, copy the calibrated parameters
     dmc_params = "dmc_parameters.yml"
@@ -181,14 +183,14 @@ def execute(context):
 
     if len(regional_model_scenario_path) and context.config("extent_prefix") != "":
         target_regional_model_path = "%s/%s%s" % (target_path, context.config("extent_prefix"), context.config("simulation_directory"))
-        shutil.move(regional_model_scenario_path, target_regional_model_path)
+        shutil.copytree(regional_model_scenario_path, target_regional_model_path)
 
-        # If the simulation output is not in the regional_model directory, we move it to the output
+        # Copy separately stored regional results into the exported scenario.
         target_regional_results_path = "%s/simulation_output" % target_regional_model_path
         if (len(regional_model_results_path) and 
             not os.path.exists(target_regional_results_path) and 
             os.path.exists(regional_model_results_path)):
-            shutil.move(regional_model_results_path, target_regional_results_path)
+            shutil.copytree(regional_model_results_path, target_regional_results_path)
 
         # replace the config file (output_config contains all the parameters used in the simulation)
         config_file = "%s/%sconfig.xml" % (target_regional_model_path, context.config("extent_prefix") )
