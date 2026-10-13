@@ -115,3 +115,16 @@ WEISS_DISTANCE_EXPONENT = 0.33
 def execute(context):
     """Synpp dependency: changing defaults invalidates mode-choice stages."""
     return {**RUN_DEFAULTS, **CALIBRATION_DEFAULTS}
+
+ROUTER_SERVER_CLASS = "org.eqasim.switzerland.ch_cmdp.utils.routing.MultiModeRouterServer"
+ROUTER_SERVER_MODES = ("car", "pt", "walk", "bike")
+SERVER_DEFAULTS = {
+    "mode_choice_server_startup_timeout": 1800.0,
+    "mode_choice_server_request_timeout": 7200.0,
+    "mode_choice_server_shutdown_timeout": 30.0,
+    "mode_choice_server_poll_interval": 0.5,
+    "mode_choice_server_chunk_size": 65536,
+}
+SERVER_HEALTH_TIMEOUT = 2.0
+
+SERVER_LOG_FILENAME_FORMAT = "server_logs_starting_at_%Y-%m-%d_%H-%M-%S_%f_UTC.logs"

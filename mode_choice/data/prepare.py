@@ -12,13 +12,14 @@ from mode_choice.tours.build import assign_tours
 
 
 def configure(context):
+    context.stage("mode_choice.routing.server")
     context.stage("mode_choice.defaults")
     for stage in ("synthesis.population.trips_with_departures", "synthesis.population.spatial.locations",
                   "synthesis.population.models.subscriptions", "data.constants", "dmc.params",
                   "data.spatial.municipalities", "data.spatial.municipality_types",
                   "data.spatial.cantons", "data.statent.density", "data.statpop.density", "data.spatial.ovgk"):
         context.stage(stage)
-    context.config("threads")
+    context.config("threads", volatile=True)
 
 
 def prepare_persons(persons, c, p, cantons):
@@ -78,6 +79,17 @@ def spatial_features(context, coordinates):
 
 
 def execute(context):
+    from mode_choice.routing.server import ensure_started
+    from mode_choice.routing.RoutingServer import RoutingServer
+    ensure_started(context)
+    try:
+        return _execute(context)
+    except BaseException:
+        RoutingServer.stop_server()
+        raise
+
+
+def _execute(context):
     p = load(context)
     trips = pl.from_pandas(context.stage("synthesis.population.trips_with_departures")[[
         "person_id", "trip_index", "departure_time", "preceding_purpose", "following_purpose", "mode",

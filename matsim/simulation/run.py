@@ -20,7 +20,7 @@ def configure(context):
     context.stage("data.microcensus.shares")
     
     context.config("use_vdf", default=False)
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("last_iteration", 60)
     context.config("java_memory", "50G", volatile=True)
 

@@ -1,20 +1,23 @@
-"""Java PT routing/fares with selectable Java or Pandana car routing."""
+"""Persistent multimodal server, or Pandana cars with Java public transport."""
 from pathlib import Path
 import polars as pl
 import matsim.runtime.eqasim as eqasim
+from mode_choice.routing.server import ensure_started
+from mode_choice.routing.RoutingServer import RoutingServer
 from mode_choice.model.parameters import load
 from mode_choice.routing.congestion import input_path
 from mode_choice.defaults import ROUTING_DEFAULTS, CAR_ROUTING_BACKENDS, PT_GA, PT_HALBTAX, PT_VERBUND
 
 
 def configure(context):
+    context.stage("mode_choice.routing.server")
     context.stage("mode_choice.defaults")
     context.stage("mode_choice.data.prepare")
     context.stage("dmc.params")
     context.stage("calibration.pt_pricing.generate_config")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
-    context.config("threads")
+    context.config("threads", volatile=True)
     for name, default in ROUTING_DEFAULTS.items():
         context.config(name, default)
     if car_backend(context) == "pandana":
@@ -22,7 +25,7 @@ def configure(context):
 
 
 def car_backend(context):
-    backend = context.config("mode_choice_car_routing_backend", ROUTING_DEFAULTS["mode_choice_car_routing_backend"])
+    backend = context.config("mode_choice_car_routing_backend")
     if backend not in CAR_ROUTING_BACKENDS:
         raise ValueError(f"mode_choice_car_routing_backend must be one of {CAR_ROUTING_BACKENDS}")
     return backend
@@ -46,6 +49,14 @@ def read_results(path, identifier, mapping):
 
 
 def execute(context):
+    try:
+        return _execute(context)
+    except BaseException:
+        RoutingServer.stop_server()
+        raise
+
+
+def _execute(context):
     trips = context.stage("mode_choice.data.prepare")
     if trips.is_empty():
         return trips
@@ -53,26 +64,39 @@ def execute(context):
     if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
         raise ValueError("mode_choice_routing_batch_size must be a positive integer")
     backend = car_backend(context)
-    congestion_path = input_path(context, backend)
     p = load(context)
     directory = Path(context.path())
     config = context.stage("calibration.pt_pricing.generate_config")
-    car_input, car_output = directory / "car_requests.csv", directory / "car_routes.csv"
+    car_input = directory / "routing_requests.csv"
     trips.select("identifier", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time").write_csv(car_input)
+    ensure_started(context)
+    modes = ("pt",) if backend == "pandana" else ("car", "pt", "walk", "bike")
+    routed = {}
+    for mode in modes:
+        output = directory / f"server_{mode}_routes.csv"
+        RoutingServer.route_csv(car_input, output, mode)
+        frame = read_results(output, "identifier", {
+            "travel_time": f"{mode}_travel_time_min",
+            "travel_distance": f"{mode}_distance_km",
+        }).with_columns(pl.col(f"{mode}_travel_time_min") / 60, pl.col(f"{mode}_distance_km") / 1000)
+        if frame.height != trips.height or not frame["identifier"].is_in(trips["identifier"].implode()).all():
+            raise ValueError(f"Server {mode} routing did not return exactly the requested trip identifiers")
+        for column in (f"{mode}_travel_time_min", f"{mode}_distance_km"):
+            if frame[column].null_count() or not frame[column].is_finite().all() or (frame[column] < 0).any():
+                raise ValueError(f"Invalid server routing values in {column}")
+        routed[mode] = frame
     if backend == "pandana":
         from mode_choice.routing.pandana import route
         car = route(context, trips, batch_size)
     else:
-        eqasim.run(context, "org.eqasim.core.tools.routing.RunBatchRoadRouter", [
-            "--config-path", config, "--input-path", str(car_input), "--output-path", str(car_output),
-            "--threads", str(context.config("threads")),
-            "--batch-size", str(batch_size),
-            "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator",
-        ] + (["--events-path", str(congestion_path)] if congestion_path is not None else []))
-        car = read_results(car_output, "identifier", {
-            "in_vehicle_time_min": "car_travel_time_min",
-            "in_vehicle_distance_km": "car_distance_km",
-        })
+        car = routed["car"]
+        for mode in ("walk", "bike"):
+            trips = trips.join(routed[mode], on="identifier", how="left", validate="1:1")
+    # Keep the server's PT totals for diagnostics. They cannot substitute for
+    # DMC's separately weighted in-vehicle/access/transfer components.
+    trips = trips.join(routed["pt"].rename({"pt_travel_time_min": "pt_total_travel_time_min",
+                                         "pt_distance_km": "pt_total_distance_km"}),
+                       on="identifier", how="left", validate="1:1")
 
     pt_routes_path = directory / "pt_routes.csv"
     eqasim.run(context, "org.eqasim.core.tools.routing.RunBatchPublicTransportRouter", [

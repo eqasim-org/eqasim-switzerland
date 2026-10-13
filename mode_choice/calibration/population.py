@@ -16,7 +16,7 @@ from mode_choice.calibration.cantons import calibrate_cantons
 
 
 def calibration_level(context):
-    level = context.config("mode_choice_calibration_level", CALIBRATION_DEFAULTS["mode_choice_calibration_level"])
+    level = context.config("mode_choice_calibration_level")
     if level not in CALIBRATION_LEVELS:
         raise ValueError(f"mode_choice_calibration_level must be one of {CALIBRATION_LEVELS}")
     return level

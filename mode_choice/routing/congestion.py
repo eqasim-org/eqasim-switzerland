@@ -4,14 +4,14 @@ from pathlib import Path
 import polars as pl
 
 from mode_choice.defaults import (
-    ROUTING_DEFAULTS, HOURS_PER_DAY, SECONDS_PER_HOUR,
+    HOURS_PER_DAY, SECONDS_PER_HOUR,
     LINKSTATS_TIME_COLUMNS, LINKSTATS_MIN_SPEED_M_PER_S,
 )
 
 
 def input_path(context, backend):
     key = "mode_choice_car_linkstats_path" if backend == "pandana" else "mode_choice_car_events_path"
-    value = context.config(key, ROUTING_DEFAULTS[key])
+    value = context.config(key)
     if not value:
         return None
     path = Path(value).expanduser().resolve()

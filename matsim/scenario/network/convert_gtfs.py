@@ -8,6 +8,7 @@ def configure(context):
     context.stage("data.gtfs.cleaned")
 
     context.config("gtfs_date", "dayWithMostServices")
+    context.config("java_memory", "50G", volatile=True)
 
 def execute(context):
     gtfs_path = "%s/output" % context.path("data.gtfs.cleaned")

@@ -40,7 +40,7 @@ def configure(context):
     context.config("scaling_year", default=2050)
     
     context.config("random_seed")
-    context.config("threads")    
+    context.config("threads", volatile=True)    
     
 
 def execute(context):

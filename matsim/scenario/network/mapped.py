@@ -10,9 +10,10 @@ def configure(context):
     context.stage("matsim.scenario.network.convert_osm")
     context.stage("matsim.scenario.network.convert_pt_schedule")
 
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("route_bike", True)
     context.config("export_detailed_network", True)
+    context.config("java_memory", "50G", volatile=True)
 
 def execute(context):
     unmapped_network_path = context.stage("matsim.scenario.network.convert_osm")

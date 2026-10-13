@@ -22,7 +22,7 @@ def configure(context):
     context.stage("data.statpop.density")
     context.stage("data.spatial.ovgk")
 
-    context.config("threads")
+    context.config("threads", volatile=True)
 
 
 def execute(context):

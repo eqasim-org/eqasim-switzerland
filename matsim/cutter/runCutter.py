@@ -11,7 +11,7 @@ def configure(context):
     context.config("extent_prefix", default="")
     context.config("use_vdf", default=False)
     context.config("cutterVersion", default="v2" if context.config("use_vdf") else "v1")
-    context.config("threads")
+    context.config("threads", volatile=True)
     if not context.config("extent_path") or not context.config("extent_prefix"):
         return
     

@@ -36,7 +36,7 @@ def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.short_range_model")
 
     context.config("random_seed")
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("secondary_nn_short_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
     context.config("secondary_nn_short_query_radius_m", 200.0)
     context.config("secondary_nn_short_min_candidates", 6)

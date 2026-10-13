@@ -6,6 +6,7 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.pt2matsim")
     context.stage("matsim.scenario.network.mapped")
+    context.config("java_memory", "50G", volatile=True)
 
 
 def execute(context):

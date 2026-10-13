@@ -37,6 +37,14 @@ def apply_choices(original, choices):
 
 
 def execute(context):
+    from mode_choice.routing.RoutingServer import RoutingServer
+    try:
+        return _execute(context)
+    finally:
+        RoutingServer.stop_server()
+
+
+def _execute(context):
     original = context.stage("synthesis.population.trips_with_departures")
     trips = context.stage("mode_choice.routing.java")
     if trips.is_empty():

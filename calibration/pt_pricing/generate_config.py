@@ -19,7 +19,7 @@ def configure(context):
     context.config("input_downsampling")
     context.config("output_prefix", "switzerland_")
     context.config("random_seed")
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("useScheduleBasedTransport")
 
 

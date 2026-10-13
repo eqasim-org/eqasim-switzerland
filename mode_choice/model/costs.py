@@ -48,6 +48,8 @@ def prepare(trips, p, *, car_cost_model, walk_speed, walk_factor, bike_speed, bi
         pl.lit(True).alias("walk_availability"),
         pl.col("car_travel_time_min").alias("car_passenger_travel_time_min"),
         pl.col("car_distance_km").alias("car_passenger_distance_km"),
-        (pl.col("euclidean_distance_km") * walk_factor * 1000 / walk_speed / 60).alias("walk_travel_time_min"),
-        (pl.col("euclidean_distance_km") * bike_factor * 1000 / bike_speed / 60).alias("bike_travel_time_min"),
+        (pl.col("walk_travel_time_min") if "walk_travel_time_min" in trips.columns else
+         pl.col("euclidean_distance_km") * walk_factor * 1000 / walk_speed / 60).alias("walk_travel_time_min"),
+        (pl.col("bike_travel_time_min") if "bike_travel_time_min" in trips.columns else
+         pl.col("euclidean_distance_km") * bike_factor * 1000 / bike_speed / 60).alias("bike_travel_time_min"),
     )

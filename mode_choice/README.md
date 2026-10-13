@@ -137,21 +137,28 @@ original `dmc_cost_parameters_path`, and disable population calibration.
 
 ## Routing and features
 
-- Car: `mode_choice_car_routing_backend: java` (default) uses
-  `org.eqasim.core.tools.routing.RunBatchRoadRouter`. Set it to `pandana` to use
-  the Python Pandana backend described below.
-- PT: `org.eqasim.core.tools.routing.RunBatchPublicTransportRouter`, preserving
-  the source branch's separation of access, egress, transfer walking and transfer
-  waiting. Initial waiting is not counted as transfer time.
-- PT fares: `org.eqasim.switzerland.ch_cmdp.utils.pricing.RunComputeTransitPrices`.
-  Subscription coding matches the generated MATSim population. This Java fare
-  calculator performs its own routing; its aggregated waiting time is not used
-  as the DMC transfer-time variable.
-- The Java tools use the pipeline's Java runtime, eqasim JAR, mapped network, transit
-  schedule, and `calibration.pt_pricing.generate_config`.
-- Walk and bike use the source module's crow-fly factors and speeds. Parameters
+- `mode_choice_car_routing_backend: java` (default) uses the persistent
+  `org.eqasim.switzerland.ch_cmdp.utils.routing.MultiModeRouterServer` for car,
+  PT, walk and bike. Seconds/metres from the server are converted to minutes/km.
+  Car passengers reuse car routes. Walk/bike routing follows the supplied MATSim
+  config (network routing or teleportation); the Python cost stage preserves its times.
+- `mode_choice_car_routing_backend: pandana` uses Pandana for car and car
+  passengers, Java for PT, and Euclidean distance factors for walk/bike.
   `walk_speed_m_per_s`, `walk_distance_factor`, `bike_speed_m_per_s`, and
-  `bike_distance_factor` override defaults of 1.3, 1.3, 4.0, and 1.4 respectively.
+  `bike_distance_factor` override defaults of 1.3, 1.3, 4.0, and 1.4 for this backend.
+- **Current Java API limitation:** the cached multimodal server returns only PT
+  total travel time and distance. Those totals are retained as
+  `pt_total_travel_time_min` and `pt_total_distance_km`, but cannot replace DMC's
+  separately weighted in-vehicle, access/egress and transfer components.
+  `RunBatchPublicTransportRouter` therefore still supplies those components,
+  excluding initial waiting. `RunComputeTransitPrices` still calculates fares
+  using each synthetic person's subscriptions. This compatibility path duplicates
+  PT routing and loads separate Java processes; it can be removed once the server
+  exposes the same component semantics and subscription-aware fares. Its totals
+  are not substituted for in-vehicle times or used to invent transfer times.
+- Java uses the pipeline's runtime, eqasim JAR, mapped network, transit schedule,
+  and `calibration.pt_pricing.generate_config`. Events are passed to the server
+  for Java car routing; Pandana retains its optional hourly linkstats input.
 - Costs, income equivalence, destination densities, PT quality, age, purposes,
   municipality effects, and utility exponents follow the current DMC model.
   Polars utility equations are tested numerically against JAX. Tabular work uses
@@ -285,12 +292,50 @@ reside in memory. A single person's trips are never split to satisfy this limit.
 Tour sampling converts each batch to arrays once instead of constructing Polars
 frames for every tour.
 
-`mode_choice_routing_batch_size` defaults to 2,048 and sets the Java road/PT
-worker batch size. It is **not a routing memory limit**: the current road router
-reads all requests, the PT router streams chunks of 65,536 requests, and the
-fare calculator loads all requests separately. All load the full scenario. The
-pipeline invokes each Java tool once, avoiding expensive repeated network loads.
-Routing CSV reads load only columns needed for choice.
+`mode_choice_routing_batch_size` defaults to 2,048 and controls Java worker
+batches. `mode_choice_server_chunk_size` defaults to 65,536 requests per CSV
+chunk. The server loads the network and routing data once; these options do not
+bound the loaded scenario size. CSV parsing reads only the columns needed downstream.
+
+### Server lifecycle
+
+`mode_choice.routing.server` is an early dependency of feature preparation and
+routing. Its execution launches Java immediately and returns serializable settings;
+it does not wait for data loading. Loading can overlap subsequent Python work once
+the mapped network and routing config dependencies have finished. Synpp controls
+stage ordering, so overlap with every upstream synthesis stage is not guaranteed.
+
+The process binds to loopback on an automatically assigned port. The client discovers
+the endpoint in `server_logs_starting_at_<UTC timestamp>.logs` in the server
+stage's cache directory (`context.path()`). Both Java stdout and stderr go only
+to this file. Each actual launch creates a new file, including restarts from cached
+settings, so previous launch logs are not overwritten. Synpp can still remove old
+files when it rebuilds a stage cache directory. Feature
+preparation and routing both ensure that the process is running: cached Synpp settings
+from another invocation never count as a live server. Readiness is checked only when
+routing is needed; initialization failures and timeouts give explicit errors.
+
+`mode_choice.run` stops the owned server in `finally`, including on selection errors
+or empty populations. Preparation/routing errors also stop it. An `atexit` fallback
+covers normal Python exit, including standalone preparation/routing runs. A forced
+process kill cannot execute Python cleanup. Only the process created by this client
+is stopped; it never attaches to an arbitrary server at a configured port.
+
+Optional settings (seconds except chunk size):
+
+```yaml
+mode_choice_server_startup_timeout: 1800.0
+mode_choice_server_request_timeout: 7200.0
+mode_choice_server_shutdown_timeout: 30.0
+mode_choice_server_poll_interval: 0.5
+mode_choice_server_chunk_size: 65536
+```
+
+`mode_choice.routing.RoutingServer.RoutingServer` also provides `route_csv`,
+`route_batch` and `route` for other Python consumers. Coordinate-pair helpers accept
+departure times in seconds; their result dictionaries retain Java's seconds/metres.
+Only the population routing adapter converts units. Java request failures propagate;
+the client does not silently substitute another mode or a zero-length route.
 
 ## In-memory caching and layout
 
@@ -415,3 +460,16 @@ alpha vector. These are selection measurements on repeated visit patterns, not
 full-pipeline speedups. Tests additionally cover bounded/no random retention,
 independent draw indices, preparation reuse, exception cleanup, and agreement with
 sequential seeded draws and exact tour probabilities for both samplers.
+
+Server integration checks:
+
+```sh
+uv run python -m pytest tests/test_routing_server.py -q
+EQASIM_TEST_JAR=/path/to/switzerland.jar uv run python -m pytest tests/test_routing_server_java.py -q
+```
+
+The optional smoke test starts the actual cached Java server on a small generated
+network and transit timetable, routes car/PT/walk/bike through one process, and
+verifies shutdown. Python tests cover asynchronous loading, reuse, restart from
+cached settings, loading failure, process exit, timeout, both backends, units,
+corrected departure requests, retained walk/bike times and cleanup after failures.

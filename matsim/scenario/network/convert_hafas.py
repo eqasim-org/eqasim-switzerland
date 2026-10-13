@@ -9,7 +9,7 @@ def configure(context):
     
     context.config("data_path")
     context.config("hafas_date")
-
+    context.config("java_memory", "50G", volatile=True)
 
 def execute(context):
     hafas_path = "%s/hafas" % context.config("data_path")
