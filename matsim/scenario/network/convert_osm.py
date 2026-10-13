@@ -17,11 +17,13 @@ def configure(context):
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 20000)
     context.config("correct_links_capacity", True)
+    context.config("correct_capacities_from_manual_list", True)
     context.config("minimum_speed", 1.0) #in km/h
     context.config("input_downsampling")
     context.config("add_traffic_lights", True)
     context.config("assign_elevations", True)
     context.config("simplify_network_in_eqasim", True)
+    context.config("only_important_roads_outside_border", True)
     # only if simplify network is true
     context.config("remove_network_loops", True)
     context.config("remove_replicate_links", False)
@@ -53,7 +55,8 @@ def execute(context):
     # move the osm network to this stage
     network_path, detailed_network_file = context.stage("matsim.scenario.network.convert_osm_pt2matsim")
 
-    # move teh detailed network to this stage if it exists
+    # Work on a local copy: NetworkHandler merges/filters its geometries along
+    # with the links and saves the matching export here for the PT mapper.
     detailed_network_path = "%s/detailed_network.csv" % context.path()
     if os.path.exists(detailed_network_file):     
         shutil.copy(detailed_network_file, detailed_network_path)

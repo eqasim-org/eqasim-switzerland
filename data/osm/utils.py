@@ -7,6 +7,23 @@ def is_restriction(relation):
     return kind == "restriction" or kind.startswith("restriction:")
 
 
+def is_transport_relation(relation):
+    """Relations carrying routing rules, routes, or transport infrastructure.
+
+    Keep all route modes (including ferry, bicycle and walking), rather than
+    maintaining a mode whitelist which would discard useful feeder routes.
+    Generic sites/areas qualify only when explicitly tagged for transport.
+    """
+    tags = relation.tags
+    kind = tags.get("type", "")
+    return (is_restriction(relation)
+            or kind in {"route", "route_master", "public_transport", "connectivity", "destination_sign"}
+            or (kind in {"site", "multipolygon"}
+                and (any(key in tags for key in ("public_transport", "highway", "railway", "aeroway"))
+                     or tags.get("amenity") in {"bus_station", "ferry_terminal", "parking"}
+                     or tags.get("site") in {"public_transport", "railway"})))
+
+
 def relation_members(relation):
     """Copy member values so they outlive the streaming OSM object."""
     return [(member.type, member.ref, member.role) for member in relation.members]

@@ -10,6 +10,9 @@ from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
 from matsim.scenario.network.utils.network_cleaner import networkCleaner
 from matsim.scenario.network.utils.speed_corrector import SpeedCorrector
 from matsim.scenario.network.utils.traffic_light_matcher import TrafficLightsMatcher
+from matsim.scenario.network.utils.link_geometry import (
+    GEOMETRY_COLUMN, attach_link_geometries, write_link_geometries,
+)
 
 import logging
 logger = logging.getLogger("synpp:\t\t NetworkHandler")
@@ -26,6 +29,9 @@ class NetworkHandler:
         self._assign_elevations_if_requested()
         self._add_traffic_lights_if_requested()
         self._add_tolls_if_requested()
+        if os.path.exists(self.detailed_network_path):
+            logger.info("Loading detailed geometries before network cleaning...")
+            attach_link_geometries(self.net, self.detailed_network_path)
         self._simplify_network_if_requested()
         self._correct_link_capacity_if_requested()
         self._adjust_capacity_outside_border_if_requested()
@@ -91,16 +97,19 @@ class NetworkHandler:
 
 
     def _simplify_network_if_requested(self):
-        if not self.context.config("simplify_network_in_eqasim"):
+        simplify = self.context.config("simplify_network_in_eqasim")
+        filter_roads = self.context.config("only_important_roads_outside_border")
+        if not simplify and not filter_roads:
             return
 
         logger.info("Simplifying Network...")
-        self.net, stats = networkCleaner(self.net).run(
-            remove_network_loops=self.context.config("remove_network_loops"),
-            remove_replicate_links=self.context.config("remove_replicate_links"),
-            remove_nodes_with_no_intersection=self.context.config("remove_nodes_with_no_intersection"),
-            correct_speeds=self.context.config("correct_speed"),
-            ensure_network_connectivity=self.context.config("ensure_network_connectivity"),
+        self.net, stats = networkCleaner(self.net, self.context).run(
+            remove_network_loops=simplify and self.context.config("remove_network_loops"),
+            remove_replicate_links=simplify and self.context.config("remove_replicate_links"),
+            remove_nodes_with_no_intersection=simplify and self.context.config("remove_nodes_with_no_intersection"),
+            correct_speeds=simplify and self.context.config("correct_speed"),
+            ensure_network_connectivity=simplify and self.context.config("ensure_network_connectivity"),
+            only_important_roads_outside_border=filter_roads,
         )
 
         with open("%s/statistics_of_cleaning_network.json" % self.context.path(), "w") as f:
@@ -151,9 +160,15 @@ class NetworkHandler:
         self.net.links["freespeed"] = self.net.links["freespeed"].fillna(0).clip(lower=15/3.6, upper=135/3.6)
         self.net.links["capacity"] = self.net.links["capacity"].fillna(0).clip(lower=300)
         self.net.links["permlanes"] = self.net.links["permlanes"].fillna(0).clip(lower=1, upper=10)
+        # Manual upper bounds take precedence over generic minimums and corrections.
+        if self.context.config("correct_capacities_from_manual_list"):
+            self.net.links = CapacityCorrector(self.context, self.net).correct_from_manual_list()
 
     def _save_processed_network(self, save_as_pickle: bool = False, network_pickle: str = None):
         logger.info("Saving Processed Network...")
+        if GEOMETRY_COLUMN in self.net.links.columns:
+            write_link_geometries(self.net, self.detailed_network_path)
+            self.net.links = self.net.links.drop(columns=[GEOMETRY_COLUMN])
         # uncleaned_network_path = self.network_path.replace("converted_network", "converted_network_uncleaned")
         # shutil.move(self.network_path, uncleaned_network_path)
         new_network_path = "%s/converted_network.xml.gz" % self.context.path()

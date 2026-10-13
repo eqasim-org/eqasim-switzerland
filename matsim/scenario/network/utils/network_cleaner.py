@@ -2,6 +2,9 @@ import warnings
 import pandas as pd
 import networkx as nx
 import numpy as np
+from shapely import intersects, linestrings
+from matsim.scenario.network.utils.capacity_corrector import CapacityCorrector
+from matsim.scenario.network.utils.link_geometry import GEOMETRY_COLUMN, merge_link_geometries
 
 from matsim.scenario.network.utils.connectivity import (
     clean_restriction_references, largest_connected_links, restricted_link_ids,
@@ -11,27 +14,35 @@ import logging
 logger = logging.getLogger(__name__)
 
 class networkCleaner():
-    def __init__(self, network):
+    def __init__(self, network, context=None):
+        self.context = context
         self.links = network.links.copy()
         self.nodes = network.nodes.copy()        
         self.network = network
 
     def run(self, remove_network_loops= True, remove_replicate_links= True,
                   remove_nodes_with_no_intersection= True, correct_speeds= True,
-                  ensure_network_connectivity= True):
+                  ensure_network_connectivity= True, only_important_roads_outside_border=False):
         stats = self.clean_network(remove_network_loops, remove_replicate_links, remove_nodes_with_no_intersection, 
-                                   correct_speeds, ensure_network_connectivity)
+                                   correct_speeds, ensure_network_connectivity, only_important_roads_outside_border)
         self.network.nodes = self.nodes
         self.network.links = self.links
         return self.network, stats
 
     def clean_network(self, remove_network_loops= True, remove_replicate_links= True,
                             remove_nodes_with_no_intersection= True, correct_speeds= True,
-                            ensure_network_connectivity= True):
+                            ensure_network_connectivity= True, only_important_roads_outside_border=False):
         stats = dict()
 
         """All network should be considered, because intersections could be with (pt) and (pt,car)"""
         df = self.links
+        if only_important_roads_outside_border:
+            before = len(df)
+            df = self.remove_unimportant_links_outside_border(df)
+            stats["removed_unimportant_links_outside_border"] = before - len(df)
+            logger.info("Removed %d minor-road links outside the buffered region.", before - len(df))
+            df = clean_restriction_references(df)
+
 
         protected = restricted_link_ids(zip(df.link_id, df.attributes)) if (
             remove_network_loops or remove_replicate_links or remove_nodes_with_no_intersection
@@ -59,7 +70,7 @@ class networkCleaner():
             stats.update(stats2)
         
         # Removed links that are not connected to the whole graph
-        if ensure_network_connectivity:
+        if ensure_network_connectivity or only_important_roads_outside_border:
             logger.info("Remove unconnected links")
             func = self.remove_unconnected_links_with_turns_restrictions
             df, num_removed = func(df)        
@@ -89,6 +100,26 @@ class networkCleaner():
         
         return stats
         
+    def remove_unimportant_links_outside_border(self, df):
+        """Keep minor roads that intersect the region, including its 2 km buffer."""
+        border = CapacityCorrector.get_region_border(self.context, buffer=2000.0)
+        minor = df.attributes.map(
+            lambda attrs: attrs.get("osm:way:highway") if isinstance(attrs, dict) else None
+        ).isin(["residential", "unclassified", "living_street", "service", "track",
+                "tertiary", "tertiary_link"])
+        candidates = df.loc[minor]
+        if candidates.empty:
+            return df
+        if GEOMETRY_COLUMN in candidates:
+            geometries = candidates[GEOMETRY_COLUMN].to_numpy()
+        else:
+            nodes = self.nodes.set_index("node_id")
+            starts = nodes.loc[candidates.from_node, ["x", "y"]].to_numpy()
+            ends = nodes.loc[candidates.to_node, ["x", "y"]].to_numpy()
+            geometries = linestrings(np.stack([starts, ends], axis=1))
+        outside_ids = candidates.loc[~intersects(geometries, border), "link_id"]
+        return df.loc[~df.link_id.isin(outside_ids)].reset_index(drop=True)
+
     @staticmethod
     def _apply_connectivity_filter(df, selected, connected, mode, remove_mode_only):
         """Either remove disconnected links or only revoke the selected mode."""
@@ -203,11 +234,27 @@ class networkCleaner():
             row = df.iloc[first].to_dict()
             row["to_node"] = targets[last]
             row["length"] = df.iloc[chain].length.sum()
+            if GEOMETRY_COLUMN in df.columns:
+                row[GEOMETRY_COLUMN] = merge_link_geometries(df.iloc[chain][GEOMETRY_COLUMN])
             # Preserve destination attributes without mutating the input dict.
             row["attributes"] = dict(df.iloc[last].attributes)
             row["attributes"]["old_link_id"] = "_".join(
                 str(df.iloc[i].attributes.get("old_link_id", ids[i])) for i in chain
             )
+            old_osm_ids = [
+                attrs.get("old_osm_id", attrs.get("osm:way:id"))
+                for attrs in df.iloc[chain].attributes
+            ]
+            old_osm_ids = [str(osm_id) for osm_id in old_osm_ids if osm_id is not None and osm_id != ""]
+            if old_osm_ids:
+                row["attributes"]["old_osm_id"] = "_".join(old_osm_ids)
+            street_names = []
+            for attrs in df.iloc[chain].attributes:
+                for key in ("old_street_names", "osm:way:name"):
+                    if isinstance(attrs.get(key), str):
+                        street_names.extend(name.strip() for name in attrs[key].split(";") if name.strip())
+            if street_names:
+                row["attributes"]["old_street_names"] = ";".join(dict.fromkeys(street_names))
             replacements.append(row)
             removed.update(chain)
             stats["successful_merge"] += 1
