@@ -11,7 +11,7 @@ from matsim.writers import backlog_iterator
 import logging
 from data.external_population.constants import ExternalPopulationConstants
 from data.utils import coerce_boolean_series
-from synthesis.population.departure_times.trips_departures import get_best_departue_time
+from synthesis.population.trips_with_departures import align_activities
 
 logger = logging.getLogger("synpp")
 
@@ -21,7 +21,9 @@ HOME_DESTINATION_ID = -1
 
 def configure(context):
     context.stage("synthesis.population.models.subscriptions")
-    context.stage("synthesis.population.trips")
+    context.config("enable_mode_choice", False)
+    context.stage("mode_choice.run" if context.config("enable_mode_choice") else "synthesis.population.trips_with_departures",
+                  alias="population_trips")
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.spatial.locations")
     context.stage("data.spatial.cantons")
@@ -46,17 +48,13 @@ def configure(context):
         context.stage("data.external_population.constants")
         context.stage("synthesis.population.destinations")
 
-    context.config("correct_departure_time", default=True)
-    if context.config("correct_departure_time"):
-        context.stage("synthesis.population.departure_times.trips_departures")
-
 
 
 def execute(context):
     cache_path    = context.path()
     cst           = context.stage("data.constants")
     df_persons    = context.stage("synthesis.population.models.subscriptions").copy()
-    df_activities = context.stage("synthesis.population.activities")
+    df_activities = align_activities(context.stage("synthesis.population.activities"), context.stage("population_trips"))
     df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]  
 
     # Correct employement if required
@@ -64,18 +62,9 @@ def execute(context):
         df_persons["employed"] = (pd.to_numeric(df_persons["employed"], errors="coerce").fillna(0) == cst.EMPLOYED).astype(int)
 
     # Attach following modes to activities
-    df_trips         = pd.DataFrame(context.stage("synthesis.population.trips"), copy=True)[["person_id", "trip_index", "mode"]]
+    df_trips         = pd.DataFrame(context.stage("population_trips"), copy=True)[["person_id", "trip_index", "mode"]]
     df_trips.columns = ["person_id", "activity_index", "following_mode"]
     df_activities    = pd.merge(df_activities, df_trips, on=["person_id", "activity_index"], how="left")
-
-    # correct departure times
-    if context.config("correct_departure_time"):
-        df = df_activities[["person_id","activity_index", "end_time"]]
-        df.columns = ['person_id', 'trip_index', 'end_time']
-        df['new_end_time'] = get_best_departue_time(context, df)
-        df['new_end_time'] = df['new_end_time'].fillna(df['end_time'])
-        df_activities['end_time'] = df['new_end_time']
-        del df
 
     # Attach locations to activities
     df_locations  = context.stage("synthesis.population.spatial.locations")

@@ -192,6 +192,7 @@ def execute(context):
     global_modal_shares.to_csv(global_shares_output_path, index=False)
 
     # Save cantonal modal shares
+    cantonal_modal_shares.index.name = "canton_name"
     cantonal_modal_shares.to_csv(cantonal_shares_output_path, index=True)
 
     return global_shares_output_path, cantonal_shares_output_path
