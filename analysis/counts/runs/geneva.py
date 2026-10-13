@@ -5,12 +5,12 @@ from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.results import save_count_results
-from ..construction_sites import configure_filter, filter_counts
+from ..construction_sites import configure_filter, filter_counts, annotate_counts
 from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
 
 
 def configure(context):
-    configure_filter(context)
+    configure_filter(context, for_map=True)
     context.stage("analysis.counts.cantons.geneva")
     context.stage("analysis.counts.matching.network")
     context.stage("analysis.counts.matching.compare")
@@ -43,7 +43,7 @@ def execute(context):
     # Match the manually identified OSM way and use its angle for direction.
     matcher = TrafficDataMatcher()
     matched = matcher.match(network=network, counts=counts)
-    counts, matched = filter_counts(context, counts, matched, network, city)
+    counts = annotate_counts(context, counts, matched, network, city)
 
     if not matches_found(matched, city):
         return None
@@ -56,6 +56,12 @@ def execute(context):
                                             flow_col = 'flow')
     
     if not matches_found(flows, city, source="simulation flow results"):
+        return None
+    flows = flows.merge(counts.counts[["id", "construction_affected", "construction_reason"]], on="id")
+    save_map(context, counts, flows, network, matched, path_to_images, city)
+    counts, matched = filter_counts(context, counts, matched, network, city)
+    flows = flows[flows.id.isin(counts.counts.id)].copy()
+    if not matches_found(flows, city, source="construction-filtered observations"):
         return None
 
     # Identify the stations that might be mismatched
@@ -100,7 +106,12 @@ def execute(context):
     
 
     
-    border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))  
+    return path_to_results
+
+
+def save_map(context, counts, flows, network, matched, path_to_images, city):
+    matched_links = network.get_link_geometries(matched.link_id.tolist())
+    border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))
     roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary','secondary_link','tertiary']      
     Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
                         matched_links.to_crs(epsg=4326)], 
@@ -113,13 +124,5 @@ def execute(context):
                         point_data_to_show=Plotter.FLOW_MAP_TOOLTIP_FIELDS,
                         border = border,
                         cut_network = True,
+                        show_construction=not context.config("analysis.counts.exclude_construction_sites"),
                         path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
-    
-    return path_to_results
-   
-
-
-
-
-
-

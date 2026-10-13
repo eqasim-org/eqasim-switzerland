@@ -101,7 +101,7 @@ def attach_crossborder_share(df_stations, network, total_flow_by_link, crossbord
 
     exploded = df_stations[["id", "link_id"]].explode("link_id")
     exploded["link_id"] = exploded["link_id"].astype(str)
-    exploded["sim_link"] = network.get_in_simulation_links(exploded["link_id"].tolist())
+    exploded["sim_link"] = exploded["link_id"]
 
     exploded["matsim_car_flow"] = exploded["sim_link"].map(total_flow_by_link).fillna(0.0)
     exploded["matsim_crossborder_flow"] = exploded["sim_link"].map(crossborder_flow_by_link).fillna(0.0)
@@ -132,7 +132,7 @@ def build_comparison_map(df_stations, network, border, output_path):
     df_stations = gpd.GeoDataFrame(df_stations, geometry="geometry", crs="EPSG:2056")
 
     matched_ids = df_stations["link_id"].explode().dropna().astype(str).unique().tolist()
-    matched_links = network.get_link_geometries(matched_ids, expand_merged=True)
+    matched_links = network.get_link_geometries(matched_ids)
 
     point_gdf = Plotter.prepare_flow_map_points(df_stations, df_stations).to_crs(epsg=4326)
     point_gdf = point_gdf.merge(df_stations[["id", *CROSSBORDER_TOOLTIP_FIELDS]], on="id", how="left")

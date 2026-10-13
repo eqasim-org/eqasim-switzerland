@@ -4,6 +4,7 @@ from shapely.geometry import Point
 import logging
 from pathlib import Path
 from typing import Union, List
+from .matcher import MATCH_ENDPOINT_COLUMNS
 
 logger = logging.getLogger("synpp")
         
@@ -63,6 +64,16 @@ class Counts:
     def from_file(self, file_path, id_column="OBJECTID", columns_to_keep=['TJM', 'TJOM'], projection="EPSG:2056"):
         # Load the file
         df = gpd.read_file(file_path)
+        # Preserve manual-match endpoints when available, including for callers
+        # loading older count files whose requested fields predate this metadata.
+        if isinstance(columns_to_keep, dict):
+            columns_to_keep = {**columns_to_keep, **{
+                column: column for column in MATCH_ENDPOINT_COLUMNS if column in df.columns
+            }}
+        elif isinstance(columns_to_keep, list):
+            columns_to_keep = list(dict.fromkeys([
+                *columns_to_keep, *[column for column in MATCH_ENDPOINT_COLUMNS if column in df.columns]
+            ]))
         
         if isinstance(columns_to_keep,list):
             df = df[[id_column,*columns_to_keep,'geometry']]

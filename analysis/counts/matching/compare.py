@@ -123,13 +123,13 @@ class Compare:
         )
     
         # Get unique simulation links for filtering
-        all_links = network.get_in_simulation_links(matched.link_id.unique())
+        all_links = matched.link_id.unique()
         assert all(pd.notna(all_links)), "Not all links are found in the network"
         df_sim = df_sim[df_sim.link_id.isin(all_links)]
     
-        # Expand matched with real simulation links
+        # Match IDs already refer to simulated links.
         _matched = matched.copy()
-        _matched['sim_link'] = network.get_in_simulation_links(_matched['link_id'])
+        _matched['sim_link'] = _matched['link_id']
     
         # Merge simulated flow values
         df_sim = df_sim[['link_id', 'flow']].rename(columns={'link_id': 'sim_link', 'flow': 'sim_flow'})

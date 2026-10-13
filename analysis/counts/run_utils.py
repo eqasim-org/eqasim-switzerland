@@ -594,11 +594,10 @@ def save_as_target(network, df, path_to_output):
     df = df.explode("link_id")
     df = df.rename(columns={"link_id": "linkId", "obs_vphpl": "count"})
 
-    # links that are duplicates of others, we give them the original link id
-    replicated_links = network.links[network.links.replicate_of.notna()][["link_id", "replicate_of"]]
-    df = df.merge(replicated_links.rename(columns={"link_id": "linkId", "replicate_of": "original_linkId"}), on="linkId", how="left")
-    df["linkId"] = df["original_linkId"].fillna(df["linkId"])
-    df = df.drop(columns=["original_linkId"])
+    df["linkId"] = df["linkId"].astype(str)
+    unknown = set(df["linkId"]) - set(network.links.link_id.astype(str))
+    if unknown:
+        raise ValueError(f"Count targets reference links outside the network: {sorted(unknown)[:10]}")
 
     # If multiple link ids, we average the counts and keep the contribution weight
     df = df.groupby("linkId", as_index=False).agg({"count": "mean", "weight": "mean"})

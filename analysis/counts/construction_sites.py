@@ -26,8 +26,9 @@ def configure(context):
         raise ValueError(f"{"analysis.counts.construction_scope"} must be current, past, or current_or_past")
 
 
-def configure_filter(context):
-    if context.config("analysis.counts.exclude_construction_sites", default=False):
+def configure_filter(context, for_map=False):
+    exclude = context.config("analysis.counts.exclude_construction_sites", default=False)
+    if exclude or for_map:
         radius = context.config("analysis.counts.construction_radius_m", default=15.0)
         if not np.isfinite(radius) or radius < 0:
             raise ValueError(f"{"analysis.counts.construction_radius_m"} must be a finite non-negative distance in metres")
@@ -117,16 +118,14 @@ def identify_affected(counts, sites, city, radius):
     return pd.DataFrame(records, columns=["id", "reason", "distance_m", "construction_ids"])
 
 
-def filter_counts(context, counts, matched, network, city):
-    if not context.config("analysis.counts.exclude_construction_sites"):
-        return counts, matched
-    
+def annotate_counts(context, counts, matched, network, city):
+    """Retain all observations, marking whole affected comparison groups."""
     sites = context.stage("analysis.counts.construction_sites")
     evidence = identify_affected(counts.counts, sites, city, context.config("analysis.counts.construction_radius_m"))
     excluded = set(evidence.id)
 
     if city.startswith("transcality") and not matched.empty:
-        links = pd.Series(network.get_in_simulation_links(matched.link_id), index=matched.index)
+        links = matched.link_id
         affected_links = set(links[matched.id.isin(excluded)])
         shared_ids = set(matched.loc[links.isin(affected_links), "id"]) - excluded
         if shared_ids:
@@ -137,9 +136,22 @@ def filter_counts(context, counts, matched, network, city):
             excluded.update(shared_ids)
 
     evidence.to_csv(os.path.join(context.path(), "construction_exclusions.csv"), index=False)
-    logger.info("%s: excluded %d/%d count observations due to construction", city, len(excluded), len(counts.counts))
+    logger.info("%s: flagged %d/%d count observations due to construction", city, len(excluded), len(counts.counts))
+    result = copy.copy(counts)
+    result.count_data = counts.counts.copy()
+    result.count_data["construction_affected"] = result.count_data.id.isin(excluded)
+    reasons = evidence.set_index("id")["reason"]
+    result.count_data["construction_reason"] = result.count_data.id.map(reasons).fillna("")
+    return result
+
+
+def filter_counts(context, counts, matched, network, city):
+    if not context.config("analysis.counts.exclude_construction_sites"):
+        return counts, matched
+    if "construction_affected" not in counts.counts:
+        counts = annotate_counts(context, counts, matched, network, city)
+    excluded = set(counts.counts.loc[counts.counts.construction_affected, "id"])
     result = copy.copy(counts)
     result.count_data = counts.counts[~counts.counts.id.isin(excluded)].copy()
     result.count_stations = counts.count_stations[~counts.count_stations.id.isin(excluded)].copy()
-    
     return result, matched[~matched.id.isin(excluded)].copy()

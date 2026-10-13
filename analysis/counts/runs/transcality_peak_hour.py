@@ -7,7 +7,7 @@ from ..construction_sites import configure_filter
 
 
 def configure(context):
-    configure_filter(context)
+    configure_filter(context, for_map=True)
     context.stage("analysis.counts.cantons.transcality_peak_hour")
     context.stage("analysis.counts.matching.compare_peak_hour")
     context.stage("analysis.counts.matching.network")
