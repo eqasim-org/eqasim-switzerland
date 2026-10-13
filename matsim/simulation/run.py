@@ -22,6 +22,7 @@ def configure(context):
     context.config("use_vdf", default=False)
     context.config("threads")
     context.config("last_iteration", 60)
+    context.config("java_memory", "50G", volatile=True)
 
     # mode shares calibration
     context.config("calibrate_alphas_in_matsim", default=False)

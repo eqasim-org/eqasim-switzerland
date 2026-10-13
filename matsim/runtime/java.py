@@ -1,6 +1,7 @@
 import subprocess as sp
 import os, shutil
 import logging
+import re
 logger = logging.getLogger("synpp")
 
 
@@ -25,9 +26,11 @@ def run(context, entry_point, arguments = [], class_path = None, vm_arguments = 
         os.mkdir(temp_path)
 
     # Prepare arguments
-    memory = settings["memory"] if memory is None else memory
+    xmx, xms = get_memories(context, settings, memory)
     vm_arguments = [
-        "-Xmx" + memory,
+        "-Xmx" + xmx,
+        "-Xms" + xms,
+        "-XX:+UseParallelGC",
         "-Djava.io.tmpdir=%s" % temp_path,
         "-Dmatsim.useLocalDtds=true",
         "-Djava.awt.headless=true"
@@ -70,11 +73,40 @@ def validate(context):
     if shutil.which(context.config("java_binary")) in ["", None]:
         raise RuntimeError("Cannot find Java binary at: %s" % context.config("java_binary"))
 
-    if not b"17" in sp.check_output([
-        shutil.which(context.config("java_binary")),
-        "-version"
-    ], stderr = sp.STDOUT):
-        logger.warning("A Java JDK of at least version 17 is recommended.")
+    version_output = sp.check_output([
+            shutil.which(context.config("java_binary")),
+            "-version"
+        ], stderr = sp.STDOUT)
+    version_match = re.search(rb'version\s+"(\d+)(?:\.(\d+))?', version_output)
+    if version_match is None:
+        raise RuntimeError("Cannot determine Java version from: %r" % version_output)
+
+    version = int(version_match.group(1))
+    if version == 1 and version_match.group(2) is not None:
+        version = int(version_match.group(2))
+
+    if version < 21:
+        raise RuntimeError("Java version 21 or later is required; found version %d." % version)
+    if version < 25:
+        logger.warning("A Java JDK of at least version 25 is recommended.")
+
+
+def get_memories(context, settings, memory):
+    if memory is None:
+        try:
+            memory = context.config("java_memory")
+        except:
+            memory = settings["memory"]
+
+    # getting the memory as integer
+    if isinstance(memory, str):
+        if memory.lower().endswith("g"):
+            memory = memory[:-1]
+    
+    memory_value = int(memory)
+    xmx = str(memory_value)+'G'
+    xms = str(int(0.7 * memory_value))+'G'
+    return xmx, xms
 
 
 def execute(context):
