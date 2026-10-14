@@ -1,41 +1,21 @@
-"""Shared evaluator for global ASCs or one residence canton's offsets."""
-from contextlib import ExitStack
-import numpy as np
-import polars as pl
-
+"""Calibration evaluates the same public ModeChoice.run used for selection."""
 from mode_choice.defaults import MODES
 from mode_choice.calibration.optimizer import calibrate, share_vector
-from mode_choice.tours.prepared import PreparedBatch
 
 
-def calibrate_batches(context, batches, initial, targets, sampler):
-    seed = context.config("random_seed")
-    # Retain preparation for every iteration, but release random reservations
-    # after each calibrated population/canton, including on failures.
-    with ExitStack() as stack:
-        prepared = [stack.enter_context(PreparedBatch(batch, seed, sampler, assume_sorted=True)) for batch in batches]
+def calibrate_model(context, model, initial, targets, *, canton=None):
+    def evaluate(alphas):
+        choices = model.run(alphas - initial, canton=canton)
+        if not model.last_counts.sum():
+            raise ValueError("No trips longer than the minimum distance for ASC calibration")
+        return share_vector(model.last_counts), choices
 
-        def evaluate(alphas):
-            counts = np.zeros(len(MODES), dtype=np.int64)
-            codes = []
-            delta = alphas - initial
-            for batch in prepared:
-                selected = batch.sample_codes(delta)
-                counts += batch.counts(selected)
-                codes.append(selected)
-            if not counts.sum():
-                raise ValueError("No trips longer than the minimum distance for ASC calibration")
-            # The optimizer retains only the best evaluated int8 arrays. No
-            # per-iteration Polars frames, string modes, groupbys or joins.
-            return share_vector(counts), codes
-
-        result = calibrate(
-            evaluate, initial, targets,
-            max_evaluations=context.config("mode_choice_calibration_max_evaluations"),
-            tolerance=context.config("mode_choice_calibration_tolerance"),
-        )
-        result.choices = pl.concat([batch.materialize(codes) for batch, codes in zip(prepared, result.choices)])
-        return result
+    try:
+        return calibrate(evaluate, initial, targets,
+                         max_evaluations=context.config("mode_choice_calibration_max_evaluations"),
+                         tolerance=context.config("mode_choice_calibration_tolerance"))
+    finally:
+        model.clear_cache()
 
 
 def result_report(result, targets):

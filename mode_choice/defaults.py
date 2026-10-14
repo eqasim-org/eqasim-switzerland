@@ -33,6 +33,7 @@ RUN_DEFAULTS = {
     "mode_choice_cache_max_entries": CACHE_MAX_ENTRIES,
     "mode_choice_cache_max_edges": CACHE_MAX_EDGES,
     "mode_choice_random_cache_max_values": RANDOM_CACHE_MAX_VALUES,
+    "mode_choice_cache_prepared_batches": True,
 }
 # Population ASC calibration; independent of MATSim's own calibration.
 CALIBRATION_DEFAULTS = {
@@ -128,3 +129,14 @@ SERVER_DEFAULTS = {
 SERVER_HEALTH_TIMEOUT = 2.0
 
 SERVER_LOG_FILENAME_FORMAT = "server_logs_starting_at_%Y-%m-%d_%H-%M-%S_%f_UTC.logs"
+
+# Stage output contracts.
+SOURCE_TRIP_ID = "source_trip_id"
+TOUR_BATCH_FILENAME = "tours_batch_num{i}.parquet"
+ROUTING_VARIABLE_STAGES = tuple(f"mode_choice.routing_variables.{mode}" for mode in MODES)
+COST_STAGES = ("mode_choice.costs.car", "mode_choice.costs.pt")
+TOUR_BATCH_COLUMNS = ("trip_id", *CALIBRATION_COLUMNS, CALIBRATION_CANTON_COLUMN)
+PT_ROUTING_COLUMNS = (
+    "pt_total_travel_time_min", "pt_total_distance_km", "pt_in_vehicle_time_min", "pt_in_vehicle_distance_km",
+    "pt_access_egress_time_min", "pt_transfer_time_min", "pt_transfers",
+)

@@ -8,13 +8,12 @@ import polars as pl
 from dmc.constants import constants
 from mode_choice import defaults as D
 from mode_choice.model.parameters import load
-from mode_choice.tours.build import assign_tours
 
 
 def configure(context):
     context.stage("mode_choice.routing.server")
     context.stage("mode_choice.defaults")
-    for stage in ("synthesis.population.trips_with_departures", "synthesis.population.spatial.locations",
+    for stage in ("mode_choice.data.trips", "mode_choice.tours.build", "synthesis.population.spatial.locations",
                   "synthesis.population.models.subscriptions", "data.constants", "dmc.params",
                   "data.spatial.municipalities", "data.spatial.municipality_types",
                   "data.spatial.cantons", "data.statent.density", "data.statpop.density", "data.spatial.ovgk"):
@@ -91,21 +90,10 @@ def execute(context):
 
 def _execute(context):
     p = load(context)
-    trips = pl.from_pandas(context.stage("synthesis.population.trips_with_departures")[[
-        "person_id", "trip_index", "departure_time", "preceding_purpose", "following_purpose", "mode",
-    ]])
-    trips = assign_tours(trips)
-    # Loop and international chains have dedicated downstream semantics. Preserve
-    # their entire tour, rather than changing only its domestic/ordinary legs.
-    trips = trips.with_columns(
-        (pl.col("mode").str.ends_with("_loop") | pl.col("mode").eq("remote_walk")
-         | pl.col("preceding_purpose").eq("border") | pl.col("following_purpose").eq("border"))
-        .any().over(["person_id", "tour_index"]).alias("preserve"),
-        pl.col("preceding_purpose").first().over(["person_id", "tour_index"]).is_in(D.HOME_PURPOSES).alias("starts_home"),
-        pl.col("following_purpose").last().over(["person_id", "tour_index"]).is_in(D.HOME_PURPOSES).alias("ends_home"),
-    ).filter(~pl.col("preserve") & pl.col("starts_home") & pl.col("ends_home"))
-    trips = trips.drop("mode", "preserve", "starts_home", "ends_home")
-    trips = trips.with_columns(pl.concat_str("person_id", "trip_index", separator="_").alias("identifier"))
+    trips = (context.stage("mode_choice.data.trips")
+             .select("trip_id", "person_id", "trip_index", "departure_time", "preceding_purpose", "following_purpose")
+             .join(context.stage("mode_choice.tours.build"), on="trip_id", how="left", validate="1:1")
+             .filter(pl.col("mode_choice_eligible")).drop("mode_choice_eligible"))
     if trips.is_empty():
         return trips
     locations = context.stage("synthesis.population.spatial.locations")

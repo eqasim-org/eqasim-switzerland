@@ -30,7 +30,8 @@ def run(context, entry_point, arguments = [], class_path = None, vm_arguments = 
     vm_arguments = [
         "-Xmx" + xmx,
         "-Xms" + xms,
-        "-XX:+UseParallelGC",
+        "-XX:+UseG1GC",
+        "-XX:+UseStringDeduplication",
         "-Djava.io.tmpdir=%s" % temp_path,
         "-Dmatsim.useLocalDtds=true",
         "-Djava.awt.headless=true"

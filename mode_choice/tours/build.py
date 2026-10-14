@@ -21,3 +21,22 @@ def choose(trips, seed, *, assume_sorted=False, sampler=None):
     sampler = sampler if sampler is not None else TourSampler()
     with PreparedBatch(trips, seed, sampler, assume_sorted=assume_sorted) as prepared:
         return prepared.materialize(prepared.sample_codes())
+
+
+def configure(context):
+    context.stage("mode_choice.data.trips")
+    context.stage("mode_choice.defaults")
+
+
+def execute(context):
+    """Identify tours before routing, preserving special/open chains unchanged."""
+    trips = assign_tours(context.stage("mode_choice.data.trips"))
+    group = ["person_id", "tour_index"]
+    special = (pl.col("mode").str.ends_with("_loop") | pl.col("mode").eq("remote_walk")
+               | pl.col("preceding_purpose").eq("border") | pl.col("following_purpose").eq("border"))
+    return trips.select(
+        "trip_id", "tour_index",
+        (~special.any().over(group)
+         & pl.col("preceding_purpose").first().over(group).is_in(HOME_PURPOSES)
+         & pl.col("following_purpose").last().over(group).is_in(HOME_PURPOSES)).alias("mode_choice_eligible"),
+    )

@@ -1,5 +1,6 @@
 import geopandas as gpd
 import pandas as pd
+import polars as pl
 import shapely.geometry as geo
 import os
 import sqlite3
@@ -108,6 +109,10 @@ def clean_gpkg(path):
 
 
 def execute(context):
+    population_trips = context.stage("population_trips")
+    if isinstance(population_trips, pl.DataFrame):
+        population_trips = population_trips.to_pandas()
+
     output_path   = context.config("output_path")
     output_prefix = context.config("output_prefix")
 
@@ -143,7 +148,7 @@ def execute(context):
     df_persons.to_csv("%s/%spersons.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
 
     # Prepare activities
-    df_activities = align_activities(context.stage("synthesis.population.activities"), context.stage("population_trips"))
+    df_activities = align_activities(context.stage("synthesis.population.activities"), population_trips)
     df_activities["following_trip_index"] = df_activities["activity_index"]
     
     df_activities = pd.merge(
@@ -172,7 +177,7 @@ def execute(context):
     print("Finished writing activities!")
 
     # Prepare trips
-    df_trips = context.stage("population_trips").copy()
+    df_trips = population_trips.copy()
 
     df_trips["preceding_activity_index"] = df_trips["trip_index"]
     df_trips["following_activity_index"] = df_trips["trip_index"] + 1

@@ -3,6 +3,7 @@ import io
 import shutil
 import subprocess
 import pandas as pd
+import polars as pl
 import geopandas as gpd
 from shapely import wkt
 
@@ -51,10 +52,14 @@ def configure(context):
 
 
 def execute(context):
+    population_trips = context.stage("population_trips")
+    if isinstance(population_trips, pl.DataFrame):
+        population_trips = population_trips.to_pandas()
+
     cache_path    = context.path()
     cst           = context.stage("data.constants")
     df_persons    = context.stage("synthesis.population.models.subscriptions").copy()
-    df_activities = align_activities(context.stage("synthesis.population.activities"), context.stage("population_trips"))
+    df_activities = align_activities(context.stage("synthesis.population.activities"), population_trips)
     df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]  
 
     # Correct employement if required
@@ -62,7 +67,7 @@ def execute(context):
         df_persons["employed"] = (pd.to_numeric(df_persons["employed"], errors="coerce").fillna(0) == cst.EMPLOYED).astype(int)
 
     # Attach following modes to activities
-    df_trips         = pd.DataFrame(context.stage("population_trips"), copy=True)[["person_id", "trip_index", "mode"]]
+    df_trips         = pd.DataFrame(population_trips, copy=True)[["person_id", "trip_index", "mode"]]
     df_trips.columns = ["person_id", "activity_index", "following_mode"]
     df_activities    = pd.merge(df_activities, df_trips, on=["person_id", "activity_index"], how="left")
 
