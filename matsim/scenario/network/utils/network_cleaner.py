@@ -154,7 +154,7 @@ class networkCleaner():
         """Contract road chains between intersections or attribute boundaries.
 
         Two-way roads are checked in both directions. A node is retained if
-        either direction changes speed, capacity or modes. Lanes are deliberately
+        either direction changes speed, capacity, modes or toll status. Lanes are deliberately
         not a merge condition. Parallel links, loops and restriction identities
         are preserved rather than choosing an arbitrary path through them.
         """
@@ -174,6 +174,7 @@ class networkCleaner():
         ids = df.link_id.to_numpy()
         speeds = df.freespeed.to_numpy()
         capacities = df.capacity.to_numpy()
+        tolled = df.attributes.map(lambda attrs: "toll" in attrs).to_numpy()
         # Compare modes as sets: ordering in a comma-separated string is immaterial.
         mode_sets = {value: frozenset(value.split(",")) for value in df.modes.unique()}
         modes = [mode_sets[value] for value in df.modes]
@@ -211,7 +212,7 @@ class networkCleaner():
                 continue
             pairs = [(i, candidates[0]) for i, candidates in pairs]
             if any(speeds[i] != speeds[j] or capacities[i] != capacities[j]
-                   or modes[i] != modes[j] for i, j in pairs):
+                   or modes[i] != modes[j] or tolled[i] != tolled[j] for i, j in pairs):
                 stats["attributes_change"] += 1
                 continue
             for i, j in pairs:
@@ -238,6 +239,8 @@ class networkCleaner():
                 row[GEOMETRY_COLUMN] = merge_link_geometries(df.iloc[chain][GEOMETRY_COLUMN])
             # Preserve destination attributes without mutating the input dict.
             row["attributes"] = dict(df.iloc[last].attributes)
+            if tolled[first]:
+                row["attributes"]["toll"] = sum(float(df.iloc[i].attributes["toll"]) for i in chain)
             row["attributes"]["old_link_id"] = "_".join(
                 str(df.iloc[i].attributes.get("old_link_id", ids[i])) for i in chain
             )

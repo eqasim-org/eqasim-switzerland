@@ -2,7 +2,6 @@ import json
 import os
 import shutil
 import pandas as pd
-from shapely import contains_xy
 from matsim.readers import read_network
 from matsim.scenario.network.utils.network_attribute_assigner import NetworkAttributeAssigner
 from matsim.scenario.network.utils.capacity_corrector import CapacityCorrector
@@ -77,18 +76,10 @@ class NetworkHandler:
         has_tolls_func = lambda x: x.get("osm:way:id", None) in tolls_links if isinstance(x, dict) else False
         has_tolls = links["attributes"].apply(has_tolls_func)
 
-        # if we want to filter out links within switzerland (no tolls inside switzerlan)
-        only_french_tolls = self.context.config("only_french_tolls")
-        if only_french_tolls:
-            ch_polygon = self.context.stage("data.spatial.swiss_border").geometry.iloc[0].buffer(100)
-            centroids = self.net.get_links_centroids()
-            outside_ch = ~contains_xy(ch_polygon, centroids.geometry.x.values, centroids.geometry.y.values)
-            has_tolls = has_tolls & outside_ch
-
         price_per_km = max(self.context.config("average_tolls_prices_per_km"), 0.0)
         def add_toll_func(row):
             l = max(row['length'], 1.0) / 1000.0 #convert m to km
-            x = row['attributes']
+            x = dict(row['attributes'])
             x["toll"] = price_per_km * l
             return x
 
