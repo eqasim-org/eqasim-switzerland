@@ -44,3 +44,7 @@ class Config:
     # know, e.g. the French stops of the Leman Express, are matched to GTFS stops by name and
     # position or added, so that their passengers are not dropped.
     use_schedule_stops: bool = True
+
+    # GTFS (zip) whose trip ids are the route ids of the simulation, e.g. the merged Swiss and French feed. The stop order
+    # of the routes of the counts that are missing from the transit schedule is read there.
+    route_gtfs_zip: Optional[str] = None

@@ -59,14 +59,75 @@ class PtData:
         not modify, use counts_in or copy."""
         return tpg_data.read_matsim_counts(self.cfg.matsim_output_folder, self.stop_alias, self.cfg.night_hours, self.cfg.counts_source)
 
-    def counts_in(self, stop_ids):
-        """Copy of the MATSim counts of the given GTFS stop ids."""
-        return self.matsim_counts[self.matsim_counts["stop_id_gtfs"].isin(stop_ids)].copy()
+    def counts_in(self, stop_ids, own_lines_only = False):
+        """Copy of the MATSim counts of the given GTFS stop ids.
+
+        The comparisons match MATSim and the observed counts by line name, and names are shared by the lines of different
+        cities (13 and 17 are trams in Geneva and buses in Lausanne, N1 exists in both). own_lines_only drops, among the
+        names that several transit lines (line_id) have, the lines with less than OWN_LINE_SHARE of their passengers at the
+        given stops: they belong to another network and only touch these stops (e.g. long-distance trains)."""
+        counts = self.matsim_counts[self.matsim_counts["stop_id_gtfs"].isin(stop_ids)].copy()
+
+        if own_lines_only:
+            ids_per_name = self.matsim_counts.groupby("line_name")["line_id"].nunique()
+            shared = ids_per_name[ids_per_name > 1].index
+
+            passengers = (self.matsim_counts["boardings"] + self.matsim_counts["alightings"]).groupby(self.matsim_counts["line_id"]).sum()
+            inside     = (counts["boardings"] + counts["alightings"]).groupby(counts["line_id"]).sum()
+            share      = (inside / passengers).reindex(passengers.index).fillna(0)
+
+            foreign = counts["line_name"].isin(shared) & (counts["line_id"].map(share) < self.OWN_LINE_SHARE)
+            if foreign.any():
+                dropped = counts[foreign].groupby(["line_name", "line_id"])["boardings"].sum()
+                print(f"{len(dropped)} transit line(s) sharing a name with another line, mostly outside this perimeter, left out: "
+                      + ", ".join(f"{name} ({line_id}, {boardings:.0f} boardings)" for (name, line_id), boardings in dropped.items()))
+                counts = counts[~foreign]
+
+        self.warn_shared_line_names(counts)
+        return counts
+
+    OWN_LINE_SHARE = 0.5
+
+    @staticmethod
+    def warn_shared_line_names(counts):
+        """The comparisons match MATSim and the observed counts by line name: warn when one name covers several
+        transit lines (line_id) among the given counts, as they would be added together."""
+        ids = counts.groupby("line_name")["line_id"].nunique()
+        for name in ids[ids > 1].index:
+            lines = counts[counts["line_name"] == name]
+            detail = ", ".join(
+                f"{line_id} ({group['stop_id_gtfs'].nunique()} stops, {group['boardings'].sum():.0f} boardings)"
+                for line_id, group in lines.groupby("line_id")
+            )
+            print(f"WARNING line name {name} covers several transit lines, matched together: {detail}")
+
+    @cached_property
+    def line_modes(self):
+        """{transit line id: transport mode of the transit schedule}; empty without a schedule"""
+        if self.schedule_path is None:
+            return {}
+
+        return gtfs_utils.read_schedule_line_modes(self.schedule_path)
 
     @cached_property
     def route_stops(self):
         """{(transit line id, transit route id): stop facility ids in the order of the route}"""
-        return gtfs_utils.read_schedule_route_stops(self.require_schedule_path())
+        routes = gtfs_utils.read_schedule_route_stops(self.require_schedule_path())
+
+        # The schedule of the output folder can be older than the simulation: the routes of the counts that it does
+        # not have are read from the GTFS (cfg.route_gtfs_zip), where their route id is a trip id
+        if self.cfg.route_gtfs_zip:
+            counts = self.matsim_counts[["line_id", "route_id"]].drop_duplicates()
+            missing = {route_id: line_id for line_id, route_id in zip(counts["line_id"], counts["route_id"])
+                       if (line_id, route_id) not in routes}
+
+            if missing:
+                print(f"{len(missing)} routes of the counts are not in the transit schedule: reading their stops from {self.cfg.route_gtfs_zip}")
+                found = gtfs_utils.read_gtfs_route_stops(self.cfg.route_gtfs_zip, missing)
+                routes.update({(missing[route_id], route_id): stops for route_id, stops in found.items()})
+                print(f"  -> {len(found)} found in the GTFS, {len(missing) - len(found)} still unknown")
+
+        return routes
 
     @cached_property
     def tpg_stops(self):

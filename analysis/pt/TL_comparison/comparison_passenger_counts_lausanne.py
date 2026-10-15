@@ -13,20 +13,21 @@ from scipy.spatial import cKDTree
 # The comparison machinery (GTFS and MATSim readers, tables, maps) is the one of the TPG comparison
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "TPG_comparison"))
 
-from config import Config
-from pt_data import PtData
-import comparison
-import interactive_map
-import plotting
-import stages
-import tpg_data
+from config import Config  # pyright: ignore[reportMissingImports]
+from pt_data import PtData # pyright: ignore[reportMissingImports]
+import comparison          # pyright: ignore[reportMissingImports]
+import line_matching       # pyright: ignore[reportMissingImports]
+import interactive_map     # pyright: ignore[reportMissingImports]
+import plotting            # pyright: ignore[reportMissingImports]
+import stages              # pyright: ignore[reportMissingImports]
+import tpg_data            # pyright: ignore[reportMissingImports]
 
 REFERENCE_NAME = "TL"
 
 _SUM_COLUMNS = ["boardings_raw_mean", "alightings_raw_mean", "boardings_raw_var", "alightings_raw_var"]
 
 # Lines that are numbered differently in the TL counts and in the simulated schedule (GTFS route_short_name)
-TL_TO_MATSIM_LINE = {"70": "m1", "72": "m2", "78": "R20", "91": "N1", "92": "N2", "93": "N3", "94": "N4", "95": "N5", "96": "N6"}
+TL_TO_MATSIM_LINE = {"70": "m1", "72": "m2", "77": "R20", "91": "N1", "92": "N2", "93": "N3", "94": "N4", "95": "N5", "96": "N6"}
 
 # Maximum distance to move a TL stop to the stop served by the same line in MATSim
 MAX_STOP_DISTANCE = 250.0
@@ -71,6 +72,15 @@ def resolve_tl_stats_path(processed_dir):
         )
 
     return candidates[-1]
+
+
+# Names of the transport modes of the transit schedule on the map, and the lines that get a submode of their own
+SUBMODE_NAMES     = {"subway": "metro", "rail": "train"}
+SUBMODE_OF_LINE   = {"R20": "LEB"} # the only R20 inside the perimeter (the other one is Neuchâtel's)
+
+
+def submode_of(line_name, line_modes):
+    return SUBMODE_OF_LINE.get(line_name) or SUBMODE_NAMES.get(line_modes.get(line_name), line_modes.get(line_name, "bus"))
 
 
 def _sum_stats(tl):
@@ -136,17 +146,34 @@ def station_codes(codes, stop_coordinates, weights, max_distance = STATION_DISTA
     return {code: busiest[group] for code, group in zip(codes, component)}
 
 
+def line_modes_of(counts, mode_of_line_id):
+    """{line name: transport mode of the transit schedule}, the one that carries most passengers among the lines of the name"""
+    lines = counts.assign(passengers = counts["boardings"] + counts["alightings"])
+    lines = lines.groupby(["line_name", "line_id"], as_index = False)["passengers"].sum()
+    lines["mode"] = lines["line_id"].map(mode_of_line_id)
+
+    modes = lines.dropna(subset = ["mode"]).groupby(["line_name", "mode"], as_index = False)["passengers"].sum()
+    modes = modes.sort_values("passengers", ascending = False).drop_duplicates("line_name")
+
+    return {str(name): mode for name, mode in zip(modes["line_name"], modes["mode"])}
+
+
 def build_tl_mofr(data, tl_stats_path):
     cfg = data.cfg
 
-    counts = data.counts_in(data.stops_in_perimeter)
+    counts = data.counts_in(data.stops_in_perimeter, own_lines_only = True)
     counts["stop_id_gtfs_base"] = counts["stop_id_gtfs"].astype(str).str.split(":").str[0]
-    counts = counts.groupby(["stop_id_gtfs_base", "line_name", "hour"], as_index = False)[["boardings", "alightings"]].sum()
-    counts[["boardings", "alightings"]] /= cfg.input_downsampling
     counts["line_name"] = counts["line_name"].astype(str)
 
     print(f"Loading the TL stats from {tl_stats_path}")
     tl_mofr = load_tl_line_stats(tl_stats_path)
+
+    # one transit line per line name, the one that the TL counts: the others are other networks or other modes
+    counts = line_matching.select_line_ids(counts, tl_mofr, data.stop_coordinates, MAX_STOP_DISTANCE, label = "TL")
+    line_modes = line_modes_of(counts, data.line_modes)
+
+    counts = counts.groupby(["stop_id_gtfs_base", "line_name", "hour"], as_index = False)[["boardings", "alightings"]].sum()
+    counts[["boardings", "alightings"]] /= cfg.input_downsampling
 
     # TL lines that the simulation does not have (e.g. the depot line 23) would only add MATSim zeros
     absent = sorted(set(tl_mofr["line_name"]) - set(counts["line_name"]))
@@ -160,6 +187,21 @@ def build_tl_mofr(data, tl_stats_path):
     stations = station_codes(set(counts["stop_id_gtfs_base"]) | set(tl_mofr["gtfs_code"]), data.stop_coordinates, weights)
     merged   = {code: station for code, station in stations.items() if code != station}
     print(f"{len(merged)} GTFS stops merged into the station within {STATION_DISTANCE:.0f} m that has the most MATSim passengers")
+
+    # the stops of a station are drawn as one per submode: each keeps the name of its own stop of that submode, e.g.
+    # "Lausanne, gare" for the metro and not the name of the train station that the station code comes from
+    origins = pd.concat([
+        pd.DataFrame({"code": counts["stop_id_gtfs_base"], "line_name": counts["line_name"],
+                      "weight": counts["boardings"] + counts["alightings"]}),
+        pd.DataFrame({"code": tl_mofr["gtfs_code"], "line_name": tl_mofr["line_name"],
+                      "weight": tl_mofr["boardings_raw_mean"] + tl_mofr["alightings_raw_mean"]}),
+    ])
+    origins["submode"] = [submode_of(name, line_modes) for name in origins["line_name"]]
+    origins["station"] = origins["code"].map(lambda c: stations.get(c, c))
+    stop_names = data.gtfs_stops.drop_duplicates("stop_id").set_index("stop_id")["stop_name"].to_dict()
+    origins = origins.groupby(["station", "submode", "code"], as_index = False)["weight"].sum()
+    origins = origins.sort_values("weight", ascending = False).drop_duplicates(["station", "submode"])
+    submode_names = {(r.station, r.submode): stop_names[r.code] for r in origins.itertuples() if r.code in stop_names}
 
     counts["stop_id_gtfs_base"] = counts["stop_id_gtfs_base"].map(lambda c: stations.get(c, c))
     counts = counts.groupby(["stop_id_gtfs_base", "line_name", "hour"], as_index = False)[["boardings", "alightings"]].sum()
@@ -191,6 +233,11 @@ def build_tl_mofr(data, tl_stats_path):
         f"Restricting to active stops (>{cfg.min_stop_avg_events} avg passenger movements during "
         f">={cfg.min_stop_active_hours} hours/day): {tl_mofr['gtfs_code'].nunique()}/{n_stops_before} stops kept"
     )
+
+    # the map shows one marker per stop and submode (metro, LEB, train, tram, bus ...)
+    tl_mofr["submode"] = [submode_of(name, line_modes) for name in tl_mofr["line_name"]]
+    tl_mofr["stop_name"] = [submode_names.get(key, name) for key, name in zip(zip(tl_mofr["gtfs_code"], tl_mofr["submode"]), tl_mofr["stop_name"])]
+    print("Submodes of the lines: " + ", ".join(f"{sub} {n}" for sub, n in tl_mofr.groupby("submode")["line_name"].nunique().items()))
 
     return tl_mofr
 

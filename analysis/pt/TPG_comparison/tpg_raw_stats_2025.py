@@ -1,5 +1,12 @@
 import argparse
+import datetime
+import os
+import sys
+
 import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import tpg_raw_stats_2024
 
 _BANK_HOLIDAYS_2025 = pd.to_datetime([
@@ -31,7 +38,7 @@ _COUNT_COLUMNS = [("NbMontees", "boardings"), ("NbDescentes", "alightings")]
 
 
 def aggregate_workday_stats(raw_counts_path, tpg_data_path,
-                             bank_holidays = _BANK_HOLIDAYS_2025, school_holidays = _SCHOOL_HOLIDAYS_2025):
+                             bank_holidays = _BANK_HOLIDAYS_2025, school_holidays = ()):
 
     print(f"Reading raw TPG counts from {raw_counts_path} (this is large, ~4.85GB)...")
     raw = pd.read_csv(
@@ -109,6 +116,31 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path,
             out[f"{prefix}_{stat}"]     = value
 
     return out
+
+
+def configure(context):
+    context.config("data_path")
+
+    context.config("analysis.pt.tpg_data",                  default = "Geneva_passenger_counts/TPG")
+    context.config("analysis.pt.tpg_raw_counts_2025",       default = "Geneva_passenger_counts/TPG/raw/2025/raw_transit_data_2025.csv")
+    context.config("analysis.pt.tpg_processed_counts_path", default = "Geneva_passenger_counts/TPG/processed")
+
+
+def execute(context):
+    data_path = context.config("data_path")
+    out_dir   = os.path.join(data_path, context.config("analysis.pt.tpg_processed_counts_path"))
+
+    result = aggregate_workday_stats(
+        os.path.join(data_path, context.config("analysis.pt.tpg_raw_counts_2025")),
+        os.path.join(data_path, context.config("analysis.pt.tpg_data")),
+    )
+
+    # the comparison reads the latest tpg2025_agg_workday_<date>.csv of the folder
+    path = os.path.join(out_dir, f"tpg2025_agg_workday_{datetime.date.today():%Y%m%d}.csv")
+    result.to_csv(path, index = False)
+    print(f"Wrote {path} ({result.shape[0]} rows)")
+
+    return dict(done = True, path = path)
 
 
 def main():

@@ -44,6 +44,8 @@ def configure(context):
     context.config("analysis.pt.sbb_path",    default = "Geneva_passenger_counts/SBB/passagierfrequenz.csv")
     context.config("analysis.pt.sbb_year",    default = 2025)
 
+    context.config("analysis.pt.route_gtfs_zip", default = None)  # e.g. gtfs/merged_gtfs.zip, see Config.route_gtfs_zip
+
     context.config("analysis.pt.include_lemanis",   default = True)
     context.config("analysis.pt.lemanis_year",      default = 2022)  # 2022 or 2024
 
@@ -60,7 +62,8 @@ def run(gtfs_zip, perimeter_shapefile, tpg_data_path, matsim_output_folder, inpu
         night_hours = 5, include_lemanis = False, lemanis_year = 2022, lemanis_path = None, day_scenario = "workday",
         sbb_path = None, sbb_year = 2024,
         stop_line_comparison = False, stop = "Genève, gare Cornavin", line = None,
-        use_schedule_stops = True, stop_all_lines = None, skip_global_comparison = False, counts_source = "auto"):
+        use_schedule_stops = True, stop_all_lines = None, skip_global_comparison = False, counts_source = "auto",
+        route_gtfs_zip = None):
     
     if include_lemanis and not lemanis_path:
         raise RuntimeError("include_lemanis is true but lemanis_path is not set")
@@ -94,6 +97,7 @@ def run(gtfs_zip, perimeter_shapefile, tpg_data_path, matsim_output_folder, inpu
         sbb_path                  = sbb_path,
         use_schedule_stops        = use_schedule_stops,
         counts_source             = counts_source,
+        route_gtfs_zip            = route_gtfs_zip,
     )
 
     data = PtData(cfg)  # GTFS, MATSim counts and schedule: read once for all the stages
@@ -168,6 +172,8 @@ def execute(context):
         line                      = context.config("analysis.pt.line"),
         stop_all_lines            = context.config("analysis.pt.stop_all_lines"),
         skip_global_comparison    = context.config("analysis.pt.skip_global_comparison"),
+        route_gtfs_zip            = (os.path.join(data_path, context.config("analysis.pt.route_gtfs_zip"))
+                                     if context.config("analysis.pt.route_gtfs_zip") else None),
         counts_source             = context.config("analysis.pt.counts_source"),
     )
 
@@ -197,6 +203,8 @@ def main(argv = None):
     parser.add_argument("--map-hour-end", type = int, default = 22)
     parser.add_argument("--night-hours", type = int, default = 5,
                         help = "The MATSim counts of the hours 0 to N-1 are replaced by the ones of the hours 24 to 24+N-1")
+    parser.add_argument("--route-gtfs-zip", default = None,
+                        help = "GTFS (e.g. merged Swiss and French) read for the stop order of the routes missing from the transit schedule")
     parser.add_argument("--lemanis-path", default = None,
                         help = "Folder with the Lemanis counts of --lemanis-year; if given, Léman Express is included")
     parser.add_argument("--lemanis-year", type = int, default = 2022, choices = [2022, 2024])
@@ -225,7 +233,7 @@ def main(argv = None):
         include_lemanis = args.lemanis_path is not None, lemanis_year = args.lemanis_year, lemanis_path = args.lemanis_path, day_scenario = args.day_scenario,
         sbb_path = args.sbb_path, sbb_year = args.sbb_year,
         stop_line_comparison = args.stop_line_comparison, stop = args.stop, line = args.line,
-        use_schedule_stops = not args.no_schedule_stops,
+        use_schedule_stops = not args.no_schedule_stops, route_gtfs_zip = args.route_gtfs_zip,
         stop_all_lines = args.stop_all_lines, skip_global_comparison = args.skip_global_comparison,
         counts_source = args.counts_source,
     )

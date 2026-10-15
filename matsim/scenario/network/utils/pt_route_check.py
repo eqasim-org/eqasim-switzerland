@@ -1,6 +1,7 @@
 import csv
 import gzip
 import heapq
+import itertools
 import math
 import re
 import unicodedata
@@ -8,6 +9,7 @@ import xml.etree.ElementTree as ET
 from collections import defaultdict
 
 import geopandas as gpd
+import numpy as np
 import shapely
 from shapely.geometry import LineString, Point
 from shapely.strtree import STRtree
@@ -17,18 +19,25 @@ ARTIFICIAL_MODES = {"artificial", "stopFacilityLink"}
 
 OUTSIDE_PENALTY    = 20.0    # cost multiplier for links outside the official corridor
 NO_MODE_PENALTY    = 1.3     # cost multiplier for links that do not allow the route's mode yet
+CONTRAFLOW_PENALTY = 3.0     # cost multiplier for driving a one-way link of the corridor against its direction
 OPPOSITE_DIRECTION_COST = 30.0   # cost of a stop on a link that runs against the direction of travel
-U_TURN_COST        = 100.0    # cost of turning back onto the reverse of the link just driven
+U_TURN_COST        = 300.0    # cost of turning back onto the reverse of the link just driven
+U_TURN_MAX_SHARE_LOSS = 0.02  # a correction with fewer U-turns is kept if its share inside drops by at most this
 STOP_DISTANCE_COST = 0.1     # cost per metre between a stop and the link it is put on
 OUTSIDE_STOP_COST  = 200.0   # cost of putting a stop on a link outside the corridor
 MAX_PATH_COST      = 6000.0
 BOUNDS_MARGIN      = 1000.0
+REVERSE_PREFIX     = "reverse:"  # routing id of a one-way link driven against its direction
+
+# The stops of a route are within this distance (median) of the official route they follow
+DIRECTION_FIT_DISTANCE = 20.0
  
 PLATFORM_SWITCH_DISTANCE    = 100.0  # extra "distance" for using another platform of the same station
 STATION_SWITCH_MIN_DISTANCE = 50.0   # only switch platform if the stop is this far outside the corridor
 
 NEW_LINK_RATIO         = 1.5     # a leg gets new links if its path is longer than this x the official distance ...
 NEW_LINK_SLACK         = 100.0   # ... plus this many metres
+NEW_LINK_MAX_OUTSIDE   = 100.0   # ... or if it still has a U-turn or this many metres outside the corridor
 NEW_LINK_SNAP_DISTANCE = 60.0    # stops further than this from the official route get no new links
 NEW_LINK_MAX_LENGTH    = 3000.0
 NEW_LINK_SPEED         = 11.1    # m/s
@@ -59,6 +68,33 @@ def normalize_line(name):
 # Official line routes
 # ---------------------------------------------------------------------------
 
+def read_line_columns(gdf):
+    """(line names, directions) of a shapefile of official line routes. SITG TPG_LIGNES has
+    LIGNE and DIRECTION; TL (Lausanne) has CODE_LIGNE and SENS_TXT = "origin -> destination"."""
+    if "LIGNE" in gdf.columns:
+        return gdf["LIGNE"], gdf["DIRECTION"].astype(str)
+    return gdf["CODE_LIGNE"], gdf["SENS_TXT"].astype(str).str.split("->").str[-1]
+
+
+def select_directions(directions, centerlines, destination_name, stop_points = None):
+    """(indices of the official routes of a line that a route follows, whether one direction was found).
+
+    Routes are matched on their terminus, but the stops decide when given: some features are labelled with the
+    terminus of the other direction (TPG lines 21, 31 and 70), and a route whose terminus no feature has (e.g. a
+    short-turn service) follows one direction only. Without a match, all the routes of the line are used."""
+    destination = normalize_name(destination_name)
+    named = [i for i, d in enumerate(directions) if destination in d]
+
+    if stop_points is not None and len(stop_points):
+        fit = [float(np.median(shapely.distance(stop_points, c))) for c in centerlines]
+        best = min(range(len(fit)), key = lambda i: (fit[i], i not in named))
+        named_fit = min((fit[i] for i in named), default = math.inf)
+        if fit[best] <= DIRECTION_FIT_DISTANCE and named_fit > 3.0 * fit[best] + 3.0:
+            return [best], True
+
+    return (named, True) if named else (list(range(len(directions))), False)
+
+
 class Corridors:
     def __init__(self, shapefile_path, buffer_m):
         gdf = gpd.read_file(shapefile_path)
@@ -66,7 +102,7 @@ class Corridors:
 
         self.features = defaultdict(list)  # normalized line -> [(directions, buffered geometry)]
         self.centerlines = defaultdict(list)  # normalized line -> [unbuffered geometry]
-        for line, direction, geometry in zip(gdf["LIGNE"], gdf["DIRECTION"], gdf.geometry):
+        for line, direction, geometry in zip(*read_line_columns(gdf), gdf.geometry):
             if geometry is None or geometry.is_empty:
                 continue
             geometry = shapely.force_2d(geometry)
@@ -89,17 +125,17 @@ class Corridors:
         return self._graphs[key]
 
 
-    def lookup(self, line_name, destination_name):
+    def lookup(self, line_name, destination_name, stop_points = None):
         """Returns (key, geometry, matched_direction) or None if the line has no official route.
-        If no route runs towards the destination, all routes of the line are used."""
+        The direction is selected by select_directions (from the destination and the stops)."""
         features = self.features.get(normalize_line(line_name))
         if not features:
             return None
 
-        destination = normalize_name(destination_name)
-        selected = [i for i, (directions, _) in enumerate(features) if destination in directions]
-        matched = bool(selected)
-        selected = selected or list(range(len(features)))
+        selected, matched = select_directions(
+            [directions for directions, _ in features], self.centerlines[normalize_line(line_name)],
+            destination_name, stop_points,
+        )
 
         key = (normalize_line(line_name), tuple(selected))
         if key not in self._geometries:
@@ -224,8 +260,12 @@ class Network:
         ]
         self.routing_ids_set = set(self.routing_ids)
         self.adjacency = defaultdict(list)  # node -> [link ids leaving it]
+        self.incoming = defaultdict(list)  # node -> [link ids arriving there]
         for link_id in self.routing_ids:
             self.adjacency[self.links[link_id][0]].append(link_id)
+            self.incoming[self.links[link_id][1]].append(link_id)
+        self._routing_pairs = {self.links[link_id][:2] for link_id in self.routing_ids}
+        self._reverse_links = {}  # one-way link id -> id of the link added against it
         self._tree = STRtree([self.segments[link_id] for link_id in self.routing_ids])
         self._inside = {}
 
@@ -308,6 +348,26 @@ class Network:
         return link_ids
 
 
+    def add_reverse_link(self, link_id, inside):
+        """Link that only allows the routing modes against a one-way link of the corridor (the network
+        lacks the contraflow bus lane). Returns its id."""
+        if link_id not in self._reverse_links:
+            from_node, to_node, freespeed, _ = self.links[link_id]
+            new_id = "pt_bus_link_%d" % (len(self.new_links) + 1)
+            segment = LineString([self.nodes[to_node], self.nodes[from_node]])
+            self.links[new_id] = (to_node, from_node, NEW_LINK_SPEED, self.routing_modes)
+            self.segments[new_id] = segment
+            self.length[new_id] = segment.length
+            self.new_links[new_id] = (to_node, from_node, segment.length)
+            self.adjacency[to_node].append(new_id)
+            self.routing_ids_set.add(new_id)
+            self._routing_pairs.add((to_node, from_node))
+            self._reverse_links[link_id] = new_id
+        new_id = self._reverse_links[link_id]
+        inside.setdefault(new_id, inside.get(link_id, 0.0))
+        return new_id
+
+
     def inside_lengths(self, key, geometry):
         """Length of each routing link that lies inside the corridor (only links with > 0)."""
         if key not in self._inside:
@@ -343,44 +403,91 @@ class Network:
 
     # -- routing ------------------------------------------------------------
 
-    def shortest_path(self, source_node, target_node, inside, cache):
-        """Cheapest list of links from source_node to target_node (None if unreachable)."""
-        if source_node == target_node:
-            return [], 0.0
-        cache_key = (id(inside), source_node, target_node)
+    def _ends(self, link_id):
+        """(from node, to node) of a link, or of a one-way link driven against its direction."""
+        if link_id.startswith(REVERSE_PREFIX):
+            from_node, to_node = self.links[link_id[len(REVERSE_PREFIX):]][:2]
+            return to_node, from_node
+        return self.links[link_id][:2]
+
+
+    def _turns_back(self, link_a, link_b):
+        (a_from, a_to), (b_from, b_to) = self._ends(link_a), self._ends(link_b)
+        return a_from == b_to and a_to == b_from
+
+
+    def _next_links(self, node, inside):
+        """Links the search can take from a node: the routing links leaving it, and the one-way links of
+        the corridor arriving there, driven against their direction."""
+        yield from self.adjacency.get(node, ())
+        for link_id in self.incoming.get(node, ()):
+            from_node, to_node = self.links[link_id][:2]
+            if (to_node, from_node) not in self._routing_pairs and self.link_is_inside(link_id, inside):
+                yield REVERSE_PREFIX + link_id
+
+
+    def _step_cost(self, link_id, inside):
+        if link_id.startswith(REVERSE_PREFIX):
+            link_id = link_id[len(REVERSE_PREFIX):]
+            return self.length[link_id] / max(self.links[link_id][2], 1.0) * CONTRAFLOW_PENALTY
+        step = self.length[link_id] / max(self.links[link_id][2], 1.0)
+        if not self.link_is_inside(link_id, inside):
+            step *= OUTSIDE_PENALTY
+        if self.lacks_mode(link_id):
+            step *= NO_MODE_PENALTY
+        return step
+
+
+    def shortest_path(self, from_link, to_link, inside, cache):
+        """(cheapest list of links between from_link and to_link, both excluded, cost) or (None, inf).
+        Turning back onto the reverse of the link just driven costs U_TURN_COST, also when entering to_link.
+        Where the path drives a one-way link against its direction, the link is added (add_reverse_link)."""
+        cache_key = (id(inside), from_link, to_link)
         if cache_key in cache:
             return cache[cache_key]
 
-        best = {source_node: 0.0}
+        end = "__end__"
+        target = self.links[to_link][0]
+        best = {from_link: 0.0}
         previous = {}
-        queue = [(0.0, source_node)]
+        order = itertools.count()
+        queue = [(0.0, next(order), from_link)]
         result = (None, math.inf)
         while queue:
-            cost, node = heapq.heappop(queue)
-            if cost > best.get(node, math.inf):
-                continue
-            if node == target_node:
+            cost, _, link_id = heapq.heappop(queue)
+            if link_id == end:
                 path = []
-                while node != source_node:
-                    link_id = previous[node]
+                link_id = previous[end]
+                while link_id != from_link:
                     path.append(link_id)
-                    node = self.links[link_id][0]
-                result = (path[::-1], cost)
+                    link_id = previous[link_id]
+                path = [
+                    self.add_reverse_link(l[len(REVERSE_PREFIX):], inside) if l.startswith(REVERSE_PREFIX) else l
+                    for l in reversed(path)
+                ]
+                result = (path, cost)
                 break
+            if cost > best.get(link_id, math.inf):
+                continue
             if cost > MAX_PATH_COST:
                 break
-            for link_id in self.adjacency.get(node, ()):
-                _, head, freespeed, _ = self.links[link_id]
-                step = self.length[link_id] / max(freespeed, 1.0)
-                if not self.link_is_inside(link_id, inside):
-                    step *= OUTSIDE_PENALTY
-                if self.lacks_mode(link_id):
-                    step *= NO_MODE_PENALTY
-                new_cost = cost + step
-                if new_cost < best.get(head, math.inf):
-                    best[head] = new_cost
-                    previous[head] = link_id
-                    heapq.heappush(queue, (new_cost, head))
+
+            head = self._ends(link_id)[1]
+            if head == target:
+                final = cost + (U_TURN_COST if self._turns_back(link_id, to_link) else 0.0)
+                if final < best.get(end, math.inf):
+                    best[end] = final
+                    previous[end] = link_id
+                    heapq.heappush(queue, (final, next(order), end))
+
+            for next_id in self._next_links(head, inside):
+                new_cost = cost + self._step_cost(next_id, inside)
+                if self._turns_back(link_id, next_id):
+                    new_cost += U_TURN_COST
+                if new_cost < best.get(next_id, math.inf):
+                    best[next_id] = new_cost
+                    previous[next_id] = link_id
+                    heapq.heappush(queue, (new_cost, next(order), next_id))
 
         cache[cache_key] = result
         return result
@@ -493,7 +600,11 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
             counts["other_agency"] += 1
             continue
 
-        reference = corridors.lookup(line_name, destination)
+        stop_points = shapely.points([
+            (float(schedule.facilities[s].attrib["x"]), float(schedule.facilities[s].attrib["y"]))
+            for s in stop_ids
+        ])
+        reference = corridors.lookup(line_name, destination, stop_points)
         if reference is None:
             counts["no_reference"] += 1
             continue
@@ -501,10 +612,6 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
 
         # Lines with the same name exist in other cities: only routes serving the area of the
         # official route are compared.
-        stop_points = shapely.points([
-            (float(schedule.facilities[s].attrib["x"]), float(schedule.facilities[s].attrib["y"]))
-            for s in stop_ids
-        ])
         if shapely.dwithin(stop_points, geometry, stop_radius).mean() < 0.5:
             counts["other_area"] += 1
             continue
@@ -537,7 +644,7 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
                 new_share, _ = network.route_metrics(new_links, key, geometry)
                 new_uturns = network.count_uturns(new_links)
                 # better: closer to the official route, or fewer U-turns without leaving it
-                if new_share > share_inside + 1e-6 or (new_uturns < n_uturns and new_share >= share_inside - 0.005):
+                if new_share > share_inside + 1e-6 or (new_uturns < n_uturns and new_share >= share_inside - U_TURN_MAX_SHARE_LOSS):
                     _apply(route_element, stop_elements, new_stop_ids, new_links)
                     patched_links.update(l for l in new_links if network.lacks_mode(l))
                     added = [l for l in new_links if l in network.new_links]
@@ -640,17 +747,11 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
                 if link_k == link_j:
                     path, leg_cost = [], 0.0
                 else:
-                    path, leg_cost = network.shortest_path(
-                        network.links[link_k][1], network.links[link_j][0], inside, path_cache
-                    )
+                    path, leg_cost = network.shortest_path(link_k, link_j, inside, path_cache)
                     if path is None:
                         continue
                 legs[(i, k, j)] = path
                 total = best[i - 1][k] + leg_cost + cost_j
-                first = path[0] if path else link_j
-                last = path[-1] if path else link_k
-                if network.is_reverse(link_k, first) or network.is_reverse(last, link_j):
-                    total += U_TURN_COST
                 if total < best_cost:
                     best_cost, best_k = total, k
             costs.append(best_cost)
@@ -668,7 +769,7 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
     chosen.reverse()
 
     new_stop_ids, new_links, moved = [], [], 0
-    stop_links, leg_lengths = [], []
+    stop_links, leg_lengths, legs_off_route = [], [], []
     for i, j in enumerate(chosen):
         copy_id, base_id, link_id, _ = candidates[i][j]
         if copy_id is None:
@@ -681,15 +782,26 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
         else:
             leg = legs[(i, chosen[i - 1], j)]
             leg_lengths.append(sum(network.length[l] for l in leg))
+            legs_off_route.append(_is_off_route(network, inside, stop_links[-2], leg, link_id))
             new_links.extend(leg)
             if link_id != candidates[i - 1][chosen[i - 1]][2]:
                 new_links.append(link_id)
-    return new_stop_ids, new_links, moved, stop_links, leg_lengths
+    return new_stop_ids, new_links, moved, stop_links, leg_lengths, legs_off_route
 
 
-def _add_bus_links(schedule, network, graph, key, geometry, stop_ids, stop_links, leg_lengths, path_cache):
+def _is_off_route(network, inside, from_link, leg, to_link):
+    """True if the path between two stop links turns back, or keeps more than NEW_LINK_MAX_OUTSIDE metres
+    outside the corridor: the network lacks the official route there (e.g. a bus-only passage missing in OSM)."""
+    links = [from_link] + leg + [to_link]
+    if any(network._turns_back(a, b) for a, b in zip(links, links[1:])):
+        return True
+    return sum(network.length[l] for l in leg if not network.link_is_inside(l, inside)) > NEW_LINK_MAX_OUTSIDE
+
+
+def _add_bus_links(schedule, network, graph, key, geometry, stop_ids, stop_links, leg_lengths, legs_off_route, path_cache):
     """Adds new bus links along the official route for legs without a sensible connection in the
-    network. `leg_lengths[i]` is the length of the path between stop i and i + 1 (inf if none).
+    network. `leg_lengths[i]` is the length of the path between stop i and i + 1 (inf if none),
+    `legs_off_route[i]` whether it turns back or leaves the corridor (_is_off_route).
     Returns the number of new links added."""
     inside = network.inside_lengths(key, geometry)
     added = 0
@@ -706,7 +818,7 @@ def _add_bus_links(schedule, network, graph, key, geometry, stop_ids, stop_links
         if official is None or official[1] > NEW_LINK_MAX_LENGTH:
             continue
         coords, official_length = official
-        if leg_length <= NEW_LINK_RATIO * official_length + NEW_LINK_SLACK:
+        if leg_length <= NEW_LINK_RATIO * official_length + NEW_LINK_SLACK and not legs_off_route[i]:
             continue
 
         source_node, target_node = network.links[stop_links[i]][1], network.links[stop_links[i + 1]][0]
@@ -727,23 +839,25 @@ def _reroute_with_bus_links(schedule, network, corridors, key, geometry, stop_id
         return result
 
     if result is not None:
-        stop_links, leg_lengths = result[3], result[4]
+        stop_links, leg_lengths, legs_off_route = result[3], result[4], result[5]
     else:
         # No connection at all: look for the legs without a path between the current stop links
         stop_links = [schedule.facilities[s].attrib.get("linkRefId") for s in stop_ids]
         if any(l not in network.segments for l in stop_links):
             return None
         inside = network.inside_lengths(key, geometry)
-        leg_lengths = []
+        leg_lengths, legs_off_route = [], []
         for a, b in zip(stop_links, stop_links[1:]):
             if a == b:
                 leg_lengths.append(0.0)
+                legs_off_route.append(False)
                 continue
-            path, _ = network.shortest_path(network.links[a][1], network.links[b][0], inside, path_cache)
+            path, _ = network.shortest_path(a, b, inside, path_cache)
             leg_lengths.append(math.inf if path is None else sum(network.length[l] for l in path))
+            legs_off_route.append(path is not None and _is_off_route(network, inside, a, path, b))
 
     chosen_stop_ids = result[0] if result is not None else stop_ids
-    if _add_bus_links(schedule, network, graph, key, geometry, chosen_stop_ids, stop_links, leg_lengths, path_cache):
+    if _add_bus_links(schedule, network, graph, key, geometry, chosen_stop_ids, stop_links, leg_lengths, legs_off_route, path_cache):
         result = _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache)
     return result
 

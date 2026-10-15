@@ -4,6 +4,7 @@ import pandas as pd
 import comparison
 import gtfs_utils
 import interactive_map
+import line_matching
 import lemanis_2022
 import lemanis_2024
 import sbb
@@ -30,7 +31,16 @@ def _load_gtfs_and_matched_counts(data):
     stops_in_ge = data.stops_in_perimeter
     tpg_stops   = data.tpg_stops
 
-    counts_ge = data.counts_in(stops_in_ge)
+    counts_ge = data.counts_in(stops_in_ge, own_lines_only = True)
+
+    # one transit line per line name, the one that the TPG serves: the others are lines of the French network, of other cities...
+    tpg_lines = pd.read_csv(f"{data.cfg.tpg_data_path}/TPG_stops_info/tpg_Lignes-arrêts_2024.csv")
+    tpg_lines = tpg_lines.merge(tpg_stops[["stop_code", "gtfs_code"]], left_on = "Code", right_on = "stop_code", how = "inner")
+    tpg_lines = tpg_lines.rename(columns = {"Ligne": "line_name"})[["line_name", "gtfs_code"]]
+    tpg_lines["gtfs_code"] = tpg_lines["gtfs_code"].astype(str)
+    counts_ge["stop_id_gtfs_base"] = counts_ge["stop_id_gtfs"].astype(str).str.split(":").str[0]
+    counts_ge = line_matching.select_line_ids(counts_ge, tpg_lines, data.stop_coordinates, label = "TPG")
+    counts_ge = counts_ge.drop(columns = "stop_id_gtfs_base")
 
     line_directions, counts_ge = tpg_data.match_line_directions(data.cfg.tpg_data_path, tpg_stops, counts_ge)
 

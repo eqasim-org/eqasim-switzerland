@@ -8,7 +8,10 @@ from concurrent.futures import ProcessPoolExecutor
 
 import pandas as pd
 
-WEEKDAY_TYPE = "SU"
+# All the workdays, school holidays included (public holidays are DI, Saturdays SA). Most lines have SU for the school
+# term and SHU/VHU/VU for the holidays; the LEB (line 77) has LJ (Monday to Thursday) and VE (Friday), and Vlj/Vlv/Vve
+# for the holidays
+WEEKDAY_TYPES = ("SU", "SHU", "VHU", "VU", "LJ", "VE", "Vlj", "Vlv", "Vve")
 
 _USECOLS = ["date", "type_horaire", "ligne", "sens", "id_parcours_type", "code_arret", "libelle_arret",
             "heure_arrivee_arret", "monte", "descendu"]
@@ -32,7 +35,7 @@ def _read_file(path):
         dtype = {"type_horaire": "category", "sens": "category", "code_arret": "category", "libelle_arret": "category"},
     )
 
-    df = df[(df["type_horaire"] == WEEKDAY_TYPE) & df["sens"].notna() & df["monte"].notna() & df["descendu"].notna()]
+    df = df[(df["type_horaire"].isin(WEEKDAY_TYPES)) & df["sens"].notna() & df["monte"].notna() & df["descendu"].notna()]
     df = df.assign(
         hour = df["heure_arrivee_arret"].astype(str).str.slice(11, 13).astype(int) % 24,
         sens = df["sens"].astype(str), code_arret = df["code_arret"].astype(str), libelle_arret = df["libelle_arret"].astype(str),
@@ -75,7 +78,7 @@ def read_daily_counts(results_dir, workers = 8):
     if (files_per_date > 1).any():
         print(f"WARNING: {int((files_per_date > 1).sum())} (line, date) are in more than one file")
 
-    print(f"  -> {len(daily)} date/line/direction/stop/hour rows, {daily['date'].nunique()} school-term weekdays, "
+    print(f"  -> {len(daily)} date/line/direction/stop/hour rows, {daily['date'].nunique()} weekdays, "
           f"{daily['ligne'].nunique()} lines")
 
     return daily, pd.concat(runs, ignore_index = True)

@@ -40,10 +40,13 @@ def filter_active_stops(tpg_mofr, min_avg_events = 10, min_active_hours = 6):
 
 
 def build_stop_hour_table(tpg_mofr, gtfs_stops, stops_in_perimeter):
+    """One row per stop and hour; per stop, submode and hour when tpg_mofr has a submode column."""
     df = _with_totals(tpg_mofr)
     df = df[df["gtfs_code"].isin(stops_in_perimeter)]
 
-    grouped = df.groupby(["gtfs_code", "stop_name", "hour"], as_index = False).agg(
+    keys = ["gtfs_code"] + (["submode"] if "submode" in df.columns else [])
+
+    grouped = df.groupby(keys + ["stop_name", "hour"], as_index = False).agg(
         tpg_mean     = ("tpg_total_mean", "sum"),
         tpg_var      = ("tpg_total_var", "sum"),
         matsim_total = ("matsim_total", "sum"),
@@ -53,17 +56,17 @@ def build_stop_hour_table(tpg_mofr, gtfs_stops, stops_in_perimeter):
     coords["stop_x"] = gtfs_stops.geometry.x  
     coords["stop_y"] = gtfs_stops.geometry.y
 
-    stop_info = grouped[["gtfs_code", "stop_name"]].drop_duplicates("gtfs_code").merge(
+    stop_info = grouped[keys + ["stop_name"]].drop_duplicates(keys).merge(
         coords, left_on = "gtfs_code", right_on = "stop_id", how = "left"
     )
 
-    full_index = pd.MultiIndex.from_product(
-        [stop_info["gtfs_code"], range(24)], names = ["gtfs_code", "hour"]
+    full_index = pd.MultiIndex.from_frame(
+        stop_info[keys].merge(pd.DataFrame({"hour": range(24)}), how = "cross")
     )
 
-    grouped = grouped.set_index(["gtfs_code", "hour"]).reindex(full_index).drop(columns = "stop_name").reset_index()
+    grouped = grouped.set_index(keys + ["hour"]).reindex(full_index).drop(columns = "stop_name").reset_index()
     grouped = grouped.fillna({"tpg_mean": 0, "tpg_var": 0, "matsim_total": 0})
-    grouped = grouped.merge(stop_info, on = "gtfs_code", how = "left")
+    grouped = grouped.merge(stop_info, on = keys, how = "left")
 
     grouped = _add_confidence_interval(grouped)
     grouped["pct_of_mean"] = compute_matsim_pct_of_mean(grouped["matsim_total"], grouped["tpg_mean"])
@@ -72,7 +75,8 @@ def build_stop_hour_table(tpg_mofr, gtfs_stops, stops_in_perimeter):
 
 
 def build_full_day_table(stop_hour_df):
-    grouped = stop_hour_df.groupby(["gtfs_code", "stop_name", "stop_lat", "stop_lon", "stop_x", "stop_y"], as_index = False).agg(
+    keys    = ["gtfs_code"] + (["submode"] if "submode" in stop_hour_df.columns else [])
+    grouped = stop_hour_df.groupby(keys + ["stop_name", "stop_lat", "stop_lon", "stop_x", "stop_y"], as_index = False).agg(
         tpg_mean     = ("tpg_mean", "sum"),
         tpg_var      = ("tpg_var", "sum"),
         matsim_total = ("matsim_total", "sum"),

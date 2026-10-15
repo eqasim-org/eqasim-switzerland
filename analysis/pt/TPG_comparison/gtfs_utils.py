@@ -136,6 +136,25 @@ def read_schedule_stops(schedule_path):
     return gpd.GeoDataFrame(df, geometry = gpd.points_from_xy(df["x"], df["y"]), crs = "EPSG:2056").drop(columns = ["x", "y"])
 
 
+def read_schedule_line_modes(schedule_path):
+    """{transit line id: transport mode of most of its routes (bus, tram, subway, rail ...)}"""
+    opener = gzip.open if schedule_path.endswith(".gz") else open
+    modes = {}
+    line_id = None
+
+    with opener(schedule_path, "rb") as f:
+        for event, element in ET.iterparse(f, events = ("start", "end")):
+            if event == "start" and element.tag == "transitLine":
+                line_id = element.attrib["id"]
+            elif event == "end" and element.tag == "transportMode" and line_id is not None:
+                count = modes.setdefault(line_id, {})
+                count[element.text] = count.get(element.text, 0) + 1
+            elif event == "end" and element.tag == "transitRoute":
+                element.clear()
+
+    return {line_id: max(count, key = count.get) for line_id, count in modes.items()}
+
+
 def read_schedule_route_stops(schedule_path):
     """{(transit line id, transit route id): [stop facility refIds in the order of the route]}"""
     opener = gzip.open if schedule_path.endswith(".gz") else open
@@ -157,6 +176,29 @@ def read_schedule_route_stops(schedule_path):
                 element.clear()
 
     return routes
+
+
+def read_gtfs_route_stops(gtfs_zip, route_ids, chunk_size = 5_000_000):
+    """{route id: [stop ids in the order of the trip]} for the GTFS trips whose trip_id is one of route_ids (the
+    pt2matsim route ids are the trip ids of the GTFS the schedule was built from)."""
+    route_ids = set(route_ids)
+    parts = []
+
+    with ZipFile(gtfs_zip) as zf:
+        with zf.open("stop_times.txt") as f:
+            for chunk in pd.read_csv(f, usecols = ["trip_id", "stop_id", "stop_sequence"], dtype = str, chunksize = chunk_size):
+                chunk = chunk[chunk["trip_id"].isin(route_ids)]
+                if len(chunk):
+                    parts.append(chunk)
+
+    if not parts:
+        return {}
+
+    stop_times = pd.concat(parts, ignore_index = True)
+    stop_times["stop_sequence"] = stop_times["stop_sequence"].astype(float)
+    stop_times = stop_times.sort_values(["trip_id", "stop_sequence"])
+
+    return {trip_id: group["stop_id"].tolist() for trip_id, group in stop_times.groupby("trip_id")}
 
 
 def supplement_with_schedule_stops(gtfs_stops, schedule_path, max_distance = 300.0):

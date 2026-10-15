@@ -14,6 +14,8 @@ import xopen
 from shapely.geometry import LineString, Point
 from shapely.ops import unary_union
 
+import matsim.scenario.network.utils.pt_route_check as pt_route_check
+
 NETWORK_CRS = "epsg:2056"
 
 TILE_URL = "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg"
@@ -36,7 +38,9 @@ DEFAULT_MODE_COLOR    = "#888888"
 BUS_LANE_COLOR        = "#190387"
 DEFAULT_VISIBLE_MODES = {"bus"}
 LINE_ROUTE_COLOR      = "#ff8c00"
-DEFAULT_LINE_ROUTES   = "TPG_line_routes/TPG_LIGNES-SHP/TPG_LIGNES.shp"
+CHECK_OK_COLOR        = "#2a9d3a"
+CHECK_DEVIATES_COLOR  = "#c0392b"
+DEFAULT_LINE_ROUTES   = "PT_line_routes/Geneva/TPG_LIGNES.shp"
 
 
 def configure(context):
@@ -47,8 +51,17 @@ def configure(context):
     context.config("analysis.pt.transit_schedule_show_schedules", default = True)
     context.config("extent_path", default = "")
     context.config("data_path")
-    context.config("analysis.pt.transit_schedule_line_routes_path", default = "")
+    context.config("analysis.pt.transit_schedule_line_routes_path", default = "PT_line_routes/Geneva/TPG_LIGNES.shp")
     context.config("analysis.pt.transit_schedule_source", default = "simulation")
+
+    # Compares the routes with the official line routes (report in route_check.csv)
+    context.config("analysis.pt.transit_schedule_route_check", default = True)
+    context.config("pt_route_modes", ["bus"])
+    context.config("pt_route_buffer", 30.0)
+    context.config("pt_route_min_share", 0.9)
+    context.config("pt_route_agencies", ["881"])
+    if context.config("analysis.pt.transit_schedule_route_check") and context.config("pt_route_agencies"):
+        context.stage("data.gtfs.cleaned")
 
     source = context.config("analysis.pt.transit_schedule_source")
     if source in ("mapped", "corrected"):
@@ -86,21 +99,41 @@ def execute(context):
         network_path = _find_output_file(matsim_output_folder, "output_network.xml.gz")
         output_dir = os.path.join(matsim_output_folder, "pt_transit_schedule")
 
-    line_routes_path = context.config("analysis.pt.transit_schedule_line_routes_path")
-    if not line_routes_path:
-        default_path = os.path.join(context.config("data_path"), DEFAULT_LINE_ROUTES)
-        line_routes_path = default_path if os.path.exists(default_path) else None
+    # Absolute, or relative to data_path
+    line_routes_path = os.path.join(
+        context.config("data_path"),
+        context.config("analysis.pt.transit_schedule_line_routes_path") or DEFAULT_LINE_ROUTES,
+    )
+    if not os.path.exists(line_routes_path):
+        print(f"WARNING: official line routes not found at {line_routes_path}: "
+              "they are not shown on the map and the routes are not checked")
+        line_routes_path = None
 
     os.makedirs(output_dir, exist_ok = True)
     output_file = os.path.join(output_dir, "transit_schedule_map.html")
+
+    route_check_rows = None
+    report_path = None
+    if line_routes_path and context.config("analysis.pt.transit_schedule_route_check"):
+        agencies = [str(a) for a in context.config("pt_route_agencies")]
+        report_path = os.path.join(output_dir, "route_check.csv")
+        route_check_rows, _ = pt_route_check.run(
+            schedule_path = schedule_path, network_path = network_path,
+            shapefile_path = line_routes_path, report_path = report_path,
+            modes = tuple(context.config("pt_route_modes")),
+            buffer_m = context.config("pt_route_buffer"), min_share = context.config("pt_route_min_share"),
+            agencies = agencies,
+            gtfs_routes_path = "%s/output/routes.txt" % context.path("data.gtfs.cleaned") if agencies else None,
+        )
 
     plot_transit_schedule(
         schedule_path = schedule_path, network_path = network_path,
         output_path = output_file, modes = modes, show_schedules = show_schedules,
         extent_path = context.config("extent_path"), line_routes_path = line_routes_path,
+        route_check_rows = route_check_rows,
     )
 
-    return dict(done = True, path = output_file)
+    return dict(done = True, path = output_file, route_check = report_path)
 
 
 def _find_output_file(simulation_path, filename):
@@ -166,11 +199,6 @@ def load_extent(extent_path):
     return shapely.force_2d(unary_union(boundary.geometry))
 
 
-def _normalize_line(name):
-    name = str(name).strip().upper()
-    return name.lstrip("0") or name
-
-
 def load_line_routes(line_routes_path, region = None):
     """Official line routes by normalized line name: list of dicts with the terminus names
     the route runs towards ("DIRECTION", possibly several separated by "/") and its paths."""
@@ -181,19 +209,15 @@ def load_line_routes(line_routes_path, region = None):
         region_4326 = gpd.GeoSeries([region], crs = NETWORK_CRS).to_crs(epsg = 4326).iloc[0]
         gdf = gdf[gdf.intersects(region_4326)]
 
-    # SITG TPG_LIGNES: LIGNE and DIRECTION. TL (Lausanne): CODE_LIGNE and SENS_TXT = "origin -> destination"
-    if "LIGNE" in gdf.columns:
-        lines, directions = gdf["LIGNE"], gdf["DIRECTION"]
-    else:
-        lines, directions = gdf["CODE_LIGNE"], gdf["SENS_TXT"].astype(str).str.split("->").str[-1]
-
     line_routes = defaultdict(list)
-    for line, direction, geometry in zip(lines, directions, gdf.geometry):
+    geometries_2056 = gdf.geometry.to_crs(NETWORK_CRS)
+    for line, direction, geometry, geometry_2056 in zip(*pt_route_check.read_line_columns(gdf), gdf.geometry, geometries_2056):
         if geometry is None or geometry.is_empty:
             continue
         parts = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
-        line_routes[_normalize_line(line)].append({
-            "directions": {d.strip().casefold() for d in str(direction).split("/")},
+        line_routes[pt_route_check.normalize_line(line)].append({
+            "directions": {pt_route_check.normalize_name(d) for d in str(direction).split("/")},
+            "centerline": shapely.force_2d(geometry_2056),
             "paths": [[[c[1], c[0]] for c in part.coords] for part in parts],
         })
     return line_routes
@@ -474,7 +498,10 @@ def plot_transit_schedule(
     show_schedules = True,
     extent_path = None,
     line_routes_path = None,
+    route_check_rows = None,
 ):
+    """route_check_rows: rows of pt_route_check.run (comparison with the official line routes),
+    shown next to the routes of the line menu."""
     if schedule_path is None or network_path is None:
         if simulation_path is None:
             raise ValueError(
@@ -573,11 +600,6 @@ def plot_transit_schedule(
         group_lines[key] = lines
     print(f"  -> {len(group_keys)} station(s) after grouping ({len(stop_ids_with_coords)} platform(s)/stop id(s) before)")
 
-    group_latlon = {
-        key: [float(point.y), float(point.x)]
-        for key, point in zip(group_keys, group_points_2056)
-    }
-
     print("Aggregating links used by transit routes (one segment per link, not per line)...")
     mode_link_lines = defaultdict(lambda: defaultdict(set))
     for route in routes:
@@ -617,6 +639,14 @@ def plot_transit_schedule(
         print(f"  -> routes for {len(official_routes)} line(s)")
     reference_paths = {}  # feature id -> paths, only for features some selectable route refers to
 
+    route_checks = {
+        (row["line_id"], row["route_id"]): {
+            "status": row["status"], "share_inside": row["share_inside"],
+            "n_uturns": row["n_uturns"], "reference_matched": row["reference_matched"],
+        }
+        for row in route_check_rows or []
+    }
+
     print("Building per-line paths for the selector menu...")
     route_index = []
     skipped = 0
@@ -632,18 +662,23 @@ def plot_transit_schedule(
         from_name = stops.get(route["stop_ids"][0], {}).get("name", "-") if route["stop_ids"] else "-"
         to_name   = stops.get(route["stop_ids"][-1], {}).get("name", "-") if route["stop_ids"] else "-"
 
-        stop_group_keys = []
-        for stop_id in route["stop_ids"]:
-            key = group_key_of.get(stop_id)
-            if key is not None and (not stop_group_keys or stop_group_keys[-1] != key):
-                stop_group_keys.append(key)
-
         line_label = route["line_name"] or route["line_id"]
         reference_ids = []
-        features = official_routes.get(_normalize_line(line_label), [])
-        # Routes are matched on the terminus; if none matches (e.g. a short-turn service),
-        # every route of the line is shown rather than none.
-        matching = [f for f in features if to_name.strip().casefold() in f["directions"]] or features
+        features = official_routes.get(pt_route_check.normalize_line(line_label), [])
+        # Same official route as the route check: matched on the terminus and the stops; if none
+        # matches, every route of the line is shown rather than none.
+        stop_points = shapely.points([
+            (stops[s]["x"], stops[s]["y"]) for s in route["stop_ids"] if stops.get(s, {}).get("x") is not None
+        ])
+        selected, _ = pt_route_check.select_directions(
+            [f["directions"] for f in features], [f["centerline"] for f in features], to_name, stop_points,
+        ) if features else ([], False)
+        matching = [features[i] for i in selected]
+        # The platforms the route serves (the station markers are at the mean position of all platforms)
+        platform_latlon = [
+            [round(point.y, 6), round(point.x, 6)]
+            for point in gpd.GeoSeries(stop_points, crs = NETWORK_CRS).to_crs(epsg = 4326)
+        ]
         for feature in matching:
             feature_id = id(feature)
             reference_paths[feature_id] = feature["paths"]
@@ -656,7 +691,8 @@ def plot_transit_schedule(
             "label": f"{line_label} ({route['mode']}): {from_name} → {to_name}"
                      + (f" [via {route['via']}]" if route.get("via") else ""),
             "path": [[lat, lon] for lon, lat in path_4326],
-            "stop_group_keys": stop_group_keys,
+            "platforms": platform_latlon,
+            "check": route_checks.get((route["line_id"], route["route_id"])),
         })
 
     if skipped:
@@ -795,13 +831,24 @@ def plot_transit_schedule(
     print("Adding line-selector menu...")
    
     map_var_name = m.get_name()
-    menu_html = """
+    check_html = ""
+    if route_check_rows:
+        n_deviating = sum(row["status"] != "ok" for row in route_check_rows)
+        check_html = f"""
+  <div style="margin-bottom:4px; color:#555;">
+    Route check: {n_deviating} of {len(route_check_rows)} route(s) deviate from the official route
+    (share of the length inside the official corridor, U-turns; details in route_check.csv)
+  </div>
+  <label style="display:block; margin-bottom:4px; cursor:pointer;">
+    <input id="line-menu-deviating" type="checkbox"> Only routes deviating from the official route
+  </label>"""
+    menu_html = f"""
 <div id="line-menu" style="position:fixed; top:80px; right:10px; z-index:1000;
      background:white; border:1px solid #ccc; border-radius:6px; padding:8px;
-     font-family:sans-serif; font-size:12px; width:280px;">
+     font-family:sans-serif; font-size:12px; width:300px;">
   <b>Select a line to highlight</b>
   <input id="line-menu-filter" type="text" placeholder="Filter lines..."
-         style="width:100%; box-sizing:border-box; margin:6px 0; padding:4px;">
+         style="width:100%; box-sizing:border-box; margin:6px 0; padding:4px;">{check_html}
   <div id="line-menu-list" style="max-height:320px; overflow-y:auto; border-top:1px solid #eee;"></div>
 </div>
 """
@@ -812,15 +859,23 @@ def plot_transit_schedule(
 (function () {{
   var routeIndex = {json.dumps(route_index)};
   var mapVarName = {json.dumps(map_var_name)};
-  var groupLatLon = {json.dumps(group_latlon)};
   var referencePaths = {json.dumps({str(k): v for k, v in reference_paths.items()})};
   var referenceColor = {json.dumps(LINE_ROUTE_COLOR)};
+  var checkColors = {json.dumps({"ok": CHECK_OK_COLOR, "deviates": CHECK_DEVIATES_COLOR})};
   var referenceLayers = [];
   var highlightLine = null;
   var highlightStopMarkers = [];
   var selectedRouteId = null;
   var listEl = document.getElementById("line-menu-list");
   var filterEl = document.getElementById("line-menu-filter");
+  var deviatingEl = document.getElementById("line-menu-deviating");
+
+  function checkSummary(check) {{
+    var text = Math.round(check.share_inside * 100) + "% on official route";
+    if (check.n_uturns) {{ text += ", " + check.n_uturns + " U-turn(s)"; }}
+    if (!check.reference_matched) {{ text += " (no official route towards this terminus: compared with all routes of the line)"; }}
+    return text;
+  }}
 
   function clearHighlight(map) {{
     if (highlightLine) {{
@@ -857,18 +912,15 @@ def plot_transit_schedule(
     }});
 
     highlightLine = L.polyline(route.path, {{color: "#e34948", weight: 6, opacity: 1}}).addTo(map);
+    if (route.check) {{ highlightLine.bindTooltip("Modelled route: " + checkSummary(route.check), {{sticky: true}}); }}
     highlightLine.bringToFront();
     map.fitBounds(highlightLine.getBounds(), {{maxZoom: 16, padding: [40, 40]}});
 
-    // Also mark every station this route serves. interactive: false keeps
-    // this ring from capturing clicks itself - it sits exactly on top of
-    // the real stop marker (which still has its own popup/tooltip), and
-    // without this a click here would hit the ring instead and do
-    // nothing, making the stop appear to have "lost" its popup while
-    // highlighted.
-    (route.stop_group_keys || []).forEach(function (key) {{
-      var latlon = groupLatLon[key];
-      if (!latlon) {{ return; }}
+    // Also mark the platforms this route serves. interactive: false keeps
+    // this ring from capturing clicks itself - it can sit on top of the
+    // station marker (which still has its own popup/tooltip), and without
+    // this a click here would hit the ring instead and do nothing.
+    (route.platforms || []).forEach(function (latlon) {{
       var marker = L.circleMarker(latlon, {{
         radius: 7, color: "#e34948", weight: 2, fill: true,
         fillColor: "#ffffff", fillOpacity: 1, interactive: false,
@@ -886,9 +938,18 @@ def plot_transit_schedule(
     listEl.innerHTML = "";
     routeIndex.forEach(function (route) {{
       if (needle && route.label.toLowerCase().indexOf(needle) === -1) {{ return; }}
+      if (deviatingEl && deviatingEl.checked && !(route.check && route.check.status !== "ok")) {{ return; }}
       var row = document.createElement("div");
       row.className = "line-menu-item" + (route.route_id === selectedRouteId ? " selected" : "");
       row.textContent = route.label;
+      if (route.check) {{
+        var badge = document.createElement("span");
+        badge.textContent = " " + Math.round(route.check.share_inside * 100) + "%"
+          + (route.check.n_uturns ? " \u21BA" + route.check.n_uturns : "");
+        badge.style.cssText = "font-weight:bold; color:" + (checkColors[route.check.status] || "#555") + ";";
+        badge.title = checkSummary(route.check);
+        row.appendChild(badge);
+      }}
       row.style.cssText = "padding:3px 4px; cursor:pointer; border-bottom:1px solid #f2f2f2;";
       row.addEventListener("mouseenter", function () {{ row.style.background = "#f0f0f0"; }});
       row.addEventListener("mouseleave", function () {{
@@ -901,6 +962,7 @@ def plot_transit_schedule(
   }}
 
   filterEl.addEventListener("input", function () {{ renderList(filterEl.value); }});
+  if (deviatingEl) {{ deviatingEl.addEventListener("change", function () {{ renderList(filterEl.value); }}); }}
   renderList("");
 }})();
 </script>
@@ -919,6 +981,12 @@ def plot_transit_schedule(
         legend_html += f'<span style="color:{BUS_LANE_COLOR};">&#9644;&#9658;</span> reserved bus/PT lane (arrow = direction)<br>'
     if reference_paths:
         legend_html += f'<span style="color:{LINE_ROUTE_COLOR};">&#9644;</span> official line route (shown when a line is selected)<br>'
+    if route_checks:
+        legend_html += (
+            f'<span style="color:{CHECK_OK_COLOR};font-weight:bold;">%</span> / '
+            f'<span style="color:{CHECK_DEVIATES_COLOR};font-weight:bold;">%</span> share of the route on the official route '
+            '(&#8634; = U-turns)<br>'
+        )
     legend_html += '<div style="margin-top:6px;color:#666;">Use the line menu (top right) to highlight a line and its stops</div>'
     legend_html += "</div>"
     m.get_root().html.add_child(folium.Element(legend_html))
@@ -950,7 +1018,25 @@ if __name__ == "__main__":
                          help = "Shapefile of official line routes (columns LIGNE, DIRECTION) shown when a line is selected")
     parser.add_argument("--no-schedules", action = "store_true",
                          help = "Skip building per-stop departure-time popups (faster, smaller output)")
+    parser.add_argument("--no-route-check", action = "store_true",
+                         help = "Do not compare the routes with the official line routes (--line-routes)")
+    parser.add_argument("--gtfs-routes", default = None, help = "GTFS routes.txt (to filter the route check by agency)")
+    parser.add_argument("--agency", action = "append", default = [],
+                         help = "Only check the lines of this GTFS agency_id (repeatable)")
     args = parser.parse_args()
+
+    route_check_rows = None
+    if args.line_routes and not args.no_route_check:
+        if args.schedule is None:
+            args.schedule = _find_output_file(args.simulation_path, "output_transitSchedule.xml.gz")
+        if args.network is None:
+            args.network = _find_output_file(args.simulation_path, "output_network.xml.gz")
+        os.makedirs(os.path.dirname(args.output) or ".", exist_ok = True)
+        route_check_rows, _ = pt_route_check.run(
+            args.schedule, args.network, args.line_routes,
+            os.path.join(os.path.dirname(args.output) or ".", "route_check.csv"),
+            gtfs_routes_path = args.gtfs_routes, agencies = args.agency,
+        )
 
     plot_transit_schedule(
         simulation_path = args.simulation_path,
@@ -959,4 +1045,5 @@ if __name__ == "__main__":
         modes = set(args.modes) if args.modes else None,
         show_schedules = not args.no_schedules,
         extent_path = args.extent, line_routes_path = args.line_routes,
+        route_check_rows = route_check_rows,
     )

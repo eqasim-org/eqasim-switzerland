@@ -5,7 +5,7 @@ import matsim.scenario.network.utils.pt_route_check as pt_route_check
 def configure(context):
     context.stage("matsim.scenario.network.mapped")
     context.config("data_path")
-    context.config("pt_line_routes_path", "TPG_line_routes/TPG_LIGNES-SHP/TPG_LIGNES.shp")
+    context.config("pt_line_routes_path", "PT_line_routes/Geneva/TPG_LIGNES.shp")
     context.config("pt_route_modes", ["bus"])
     # Links that do not allow the route mode but one of these modes can still be used by the
     # re-routing: buses run there in reality, so the route mode is added to them if they are used.

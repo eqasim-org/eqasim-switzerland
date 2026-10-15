@@ -31,6 +31,34 @@ def _build_colormap(color_half_range_pct, reference_name = "TPG 2024"):
     return colormap
 
 
+# Markers of the submodes of one stop are shifted by this distance (m) around the stop, in a direction of their own
+_SUBMODE_ORDER = ["metro", "LEB", "train", "tram", "bus", "funicular", "cable car", "ferry"]
+_SUBMODE_OFFSET_M = 35.0
+
+
+def _submode_offset(submode, lat):
+    """(dlat, dlon) in degrees of the marker of a submode: the first submode of _SUBMODE_ORDER stays at the stop."""
+    import math
+    index = _SUBMODE_ORDER.index(submode) if submode in _SUBMODE_ORDER else len(_SUBMODE_ORDER)
+    if index == 0:
+        return 0.0, 0.0
+    angle = math.radians(90 - 72 * (index - 1))
+    dlat = _SUBMODE_OFFSET_M * math.sin(angle) / 111_320
+    dlon = _SUBMODE_OFFSET_M * math.cos(angle) / (111_320 * math.cos(math.radians(lat)))
+    return dlat, dlon
+
+
+def _marker_location(row):
+    if "submode" not in row.index:
+        return row["stop_lat"], row["stop_lon"]
+    dlat, dlon = _submode_offset(row["submode"], row["stop_lat"])
+    return row["stop_lat"] + dlat, row["stop_lon"] + dlon
+
+
+def _stop_label(row):
+    return f"{row['stop_name']} ({row['submode']})" if "submode" in row.index else row["stop_name"]
+
+
 def _marker_radius(tpg_mean, matsim_total, global_max, low_data = False):
     magnitude = max(tpg_mean, matsim_total, 0)
     radius = 7 + 20 * (magnitude ** 0.5) / (max(global_max, 1) ** 0.5)
@@ -42,8 +70,9 @@ def _is_low_data(tpg_mean, matsim_total, min_events):
 
 
 def _popup_html(row, reference_label = "TPG mean"):
+    submode = f" ({row['submode']})" if "submode" in row.index else ""
     return (
-        f"<b>{row['stop_name']}</b><br>"
+        f"<b>{row['stop_name']}</b>{submode}<br>"
         f"MATSim (scaled): {row['matsim_total']:.0f}<br>"
         f"{reference_label}: {row['tpg_mean']:.0f} "
         f"(95% CI {row['tpg_lo']:.0f}-{row['tpg_hi']:.0f})<br>"
@@ -73,7 +102,7 @@ def _add_hourly_layer(m, stop_hour_df, colormap, global_max, low_data_min_events
                 "fillColor":   colormap(row["pct_of_mean"]), 
                 "fillOpacity": 0.95,
                 "stroke":      "true", 
-                "color":       "#222222", 
+                "color":       "#222222",
                 "weight":      1.2,
                 "radius":      _marker_radius(row["tpg_mean"], row["matsim_total"], global_max),
             }
@@ -85,7 +114,7 @@ def _add_hourly_layer(m, stop_hour_df, colormap, global_max, low_data_min_events
 
         features.append({
             "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [row["stop_lon"], row["stop_lat"]]},
+            "geometry": {"type": "Point", "coordinates": list(reversed(_marker_location(row)))},
             "properties": {
                 "time": time,
                 "popup": popup,
@@ -238,7 +267,10 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
 
     global_max      = max(combined_full_day_df[["tpg_mean", "matsim_total"]].max().max(), 1)
     colormap        = _build_colormap(color_half_range_pct, f"{reference_name} 2024")
-    hours_by_stop   = {code: df for code, df in stop_hour_df.groupby("gtfs_code")}
+    has_submode     = "submode" in combined_full_day_df.columns
+    stop_key        = ["gtfs_code", "submode"] if has_submode else "gtfs_code"
+    hours_by_stop   = {code: df for code, df in stop_hour_df.groupby(stop_key)}
+    submodes        = sorted(combined_full_day_df["submode"].dropna().unique()) if has_submode else []
     periods_by_stop = (
         {code: df for code, df in lemanis_stop_period_df.groupby("gtfs_code")}
         if lemanis_stop_period_df is not None else {}
@@ -247,7 +279,13 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
 
     m = _base_map(center, perimeter_shapefile)
 
-    for _, row in combined_full_day_df.iterrows():
+    # one layer per submode, to show or hide them; the biggest markers first so that the small ones stay visible
+    layers = {sub: folium.FeatureGroup(name = f"Stops: {sub}", show = True) for sub in submodes}
+    ordered = combined_full_day_df.assign(_size = combined_full_day_df[["tpg_mean", "matsim_total"]].max(axis = 1))
+    ordered = ordered.sort_values("_size", ascending = False)
+
+    for _, row in ordered.iterrows():
+        target = layers[row["submode"]] if has_submode and row["submode"] in layers else m
         low_data = _is_low_data(row["tpg_mean"], row["matsim_total"], low_data_min_events)
 
         chart_html   = ""
@@ -258,9 +296,10 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
             chart_b64  = plotting.render_period_chart_png(stop_periods, row["stop_name"], lemanis_2022.PERIOD_ORDER)
             chart_html = f'<br><img src="data:image/png;base64,{chart_b64}" width="320">'
         else:
-            stop_hours = hours_by_stop.get(row["gtfs_code"])
+            stop_hours = hours_by_stop.get((row["gtfs_code"], row["submode"]) if has_submode else row["gtfs_code"])
             if stop_hours is not None and not stop_hours.empty:
-                chart_b64  = plotting.render_hourly_chart_png(stop_hours, row["stop_name"], reference_name)
+                title      = f"{row['stop_name']} ({row['submode']})" if has_submode else row["stop_name"]
+                chart_b64  = plotting.render_hourly_chart_png(stop_hours, title, reference_name)
                 chart_html = f'<br><img src="data:image/png;base64,{chart_b64}" width="320">'
 
         reference_label = "Lemanis mean" if is_lemanis else f"{reference_name} mean"
@@ -271,7 +310,7 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
 
         if low_data:
             folium.CircleMarker(
-                location     = (row["stop_lat"], row["stop_lon"]),
+                location     = _marker_location(row),
                 radius       = _marker_radius(row["tpg_mean"], row["matsim_total"], global_max, low_data = True),
                 color        = "#9e9e9e", 
                 weight       = 0.5, 
@@ -279,20 +318,24 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
                 fill_color   = "#9e9e9e", 
                 fill_opacity = 0.12,
                 popup        = folium.Popup(popup, max_width = 360),
-            ).add_to(m)
+                tooltip      = _stop_label(row),
+            ).add_to(target)
 
         else:
             folium.CircleMarker(
-                location     = (row["stop_lat"], row["stop_lon"]),
+                location     = _marker_location(row),
                 radius       = _marker_radius(row["tpg_mean"], row["matsim_total"], global_max),
-                color        = "#222222", 
-                weight       = 1.2, 
+                color        = "#222222",
+                weight       = 1.2,
                 fill         = True, 
                 fill_color   = colormap(row["pct_of_mean"]), 
                 fill_opacity = 0.95,
                 popup        = folium.Popup(popup, max_width = 360),
-                tooltip      = row["stop_name"],
-            ).add_to(m)
+                tooltip      = _stop_label(row),
+            ).add_to(target)
+
+    for layer in layers.values():
+        layer.add_to(m)
 
     has_border = border_crossing_df is not None and not border_crossing_df.empty
     has_sbb    = sbb_station_df is not None and not sbb_station_df.empty
@@ -301,7 +344,7 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
         _add_sbb_station_squares(m, sbb_station_df, colormap)
     if has_border:
         _add_border_crossing_squares(m, border_crossing_df, colormap)
-    if has_border or has_sbb:
+    if has_border or has_sbb or has_submode:
         folium.LayerControl(collapsed = False).add_to(m)
 
     colormap.add_to(m)

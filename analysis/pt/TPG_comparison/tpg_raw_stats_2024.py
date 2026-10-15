@@ -36,12 +36,14 @@ _COUNT_COLUMNS = [
 ]
 
 
-def classify_day_type(dates, bank_holidays = _BANK_HOLIDAYS_2024, school_holidays = _SCHOOL_HOLIDAYS_2024):
+def classify_day_type(dates, bank_holidays = _BANK_HOLIDAYS_2024, school_holidays = ()):
     dates   = pd.DatetimeIndex(dates)
     weekday = dates.weekday
 
     day_type = pd.Series(np.where(weekday <= 4, "Weekday", None), index = range(len(dates)))
 
+    # School holidays are weekdays like the others: only the bank holidays are left out. Pass
+    # school_holidays to label them as "School holiday" (and so leave them out) again.
     is_school_holiday = np.zeros(len(dates), dtype = bool)
     for start, end in school_holidays:
         is_school_holiday |= (dates >= start) & (dates <= end)
