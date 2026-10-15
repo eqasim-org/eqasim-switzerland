@@ -7,6 +7,63 @@ import logging
 
 logger = logging.getLogger("synpp")
 
+# BFS 2023 codebook, sheet 25. The same labels are assumed for 2021–2022.
+EDUCATION_LEVELS = {
+    1: "none", 2: "compulsory_incomplete", 3: "compulsory",
+    4: "bridging", 5: "specialised_secondary", 6: "vocational_secondary",
+    7: "general_secondary", 8: "vocational_maturity",
+    9: "higher_professional_examination", 10: "higher_vocational_college",
+    11: "bachelor", 12: "master", 13: "doctorate_habilitation",
+}
+TERTIARY_INSTITUTIONS = {
+    "854201": "UH", "854202": "FH_PH", "854203": "higher_vocational",
+}
+
+
+def classify_education(df):
+    df = df.copy()
+    df["study_level"] = df["current_education"].map(EDUCATION_LEVELS).fillna("unresolved")
+    df["education_codebook_assumed"] = df["survey_year"].ne(2023)
+
+    local_type = df["education_noga"].map(TERTIARY_INSTITUTIONS)
+    enterprise_type = df["education_enterprise_noga"].map(TERTIARY_INSTITUTIONS)
+    df["institution_type"] = local_type.fillna(enterprise_type).fillna("unresolved")
+    df["institution_type_source"] = "unresolved"
+    df.loc[enterprise_type.notna(), "institution_type_source"] = "enterprise"
+    df.loc[local_type.notna(), "institution_type_source"] = "establishment"
+    df["institution_type_conflict"] = (
+        local_type.notna() & enterprise_type.notna() & local_type.ne(enterprise_type)
+    )
+
+    # These are review flags, not proof that a reported programme is invalid.
+    degree = df["current_education"].isin([11, 12, 13])
+    vocational = df["current_education"].isin([9, 10])
+    known_institution = df["institution_type"].ne("unresolved")
+    df["study_institution_conflict"] = (
+        (degree & df["institution_type"].eq("higher_vocational"))
+        | (vocational & df["institution_type"].isin(["UH", "FH_PH"]))
+        | (df["current_education"].eq(13) & df["institution_type"].eq("FH_PH"))
+        | (df["current_education"].isin(range(1, 9)) & known_institution)
+    )
+    df["education_participation_conflict"] = (
+        df["in_education"].ne(df["is_student"])
+        | (df["current_education"].eq(1) & df["in_education"].eq(1))
+        | (df["current_education"].isin(range(2, 14)) & df["in_education"].eq(0))
+    )
+
+    # Only compatible, participating tertiary cases enter the initial OD groups.
+    df["education_od_group"] = "unresolved"
+    df.loc[df["current_education"].isin(range(1, 9)), "education_od_group"] = "not_applicable"
+    eligible = (
+        (degree | vocational) & df["in_education"].eq(1)
+        & ~df["institution_type_conflict"] & ~df["study_institution_conflict"]
+        & ~df["education_participation_conflict"]
+    )
+    df.loc[eligible & df["institution_type"].eq("UH"), "education_od_group"] = "UH"
+    df.loc[eligible & df["institution_type"].isin(["FH_PH", "higher_vocational"]),
+           "education_od_group"] = "other_tertiary"
+    return df
+
 
 def configure(context):
     context.stage("data.structural_survey.raw")
@@ -20,6 +77,42 @@ def configure(context):
     context.stage("data.spatial.zones")
 
     context.config("random_seed")
+
+
+def prepare_education_departure(df, df_municipality_mapping, df_quarters, df_zones):
+    """Harmonise commute departure geography without replacing residence fields.
+
+    Never silently substitute registered residence for an unknown departure:
+    that would recreate artificial long daily journeys for term-time residents.
+    Foreign departure origins remain identifiable and are excluded from domestic OD.
+    """
+    df = df.copy()
+    source = df[["education_departure_municipality", "education_departure_quarter"]].rename(
+        columns={"education_departure_municipality": "municipality_id",
+                 "education_departure_quarter": "quarter_id"}).reset_index(drop=True)
+    source = quarters.update_quarter_ids(source, df_quarters)
+    source = municipalities.update_municipality_ids(source, df_municipality_mapping)
+    source = source.rename(columns={"municipality_id": "education_departure_municipality_id",
+                                    "quarter_id": "education_departure_quarter_id"})
+    source = zones.impute(source, df_zones, zone_id_prefix="education_departure_",
+        zone_fields={"quarter": "education_departure_quarter_id",
+                     "municipality": "education_departure_municipality_id"})
+    for column in ["education_departure_municipality_id", "education_departure_quarter_id",
+                   "education_departure_zone_id", "education_departure_zone_level"]:
+        df[column] = source[column].to_numpy()
+    country = pd.to_numeric(df["education_departure_country_code"], errors="coerce")
+    foreign = country.gt(0) & country.ne(8100)
+    df["education_departure_status"] = "unresolved"
+    domestic = df["education_departure_zone_id"].notna() & ~foreign
+    df.loc[domestic, "education_departure_status"] = "domestic"
+    df.loc[foreign, "education_departure_status"] = "abroad"
+    df.loc[foreign, ["education_departure_municipality_id", "education_departure_quarter_id",
+                     "education_departure_zone_id", "education_departure_zone_level"]] = np.nan
+    df["education_departure_differs_from_residence"] = (
+        domestic & df["home_municipality_id"].notna()
+        & df["education_departure_municipality_id"].notna()
+        & df["education_departure_municipality_id"].ne(df["home_municipality_id"]))
+    return df
 
 
 def execute(context):
@@ -299,6 +392,7 @@ def execute(context):
                                                     "nuts": "nuts_id",
                                                     "postal_code": "postal_code"})
     logger.info("Imputing municipality type at home location ...")
+    df_se = prepare_education_departure(df_se, df_municipality_mapping, df_quarters, df_zones)
     df_municipality_types = context.stage("data.spatial.municipality_types")
     df_se = df_se.reset_index(drop=True)
     df_se.insert(0, "id", np.arange(1, len(df_se) + 1, dtype=int))
@@ -321,6 +415,7 @@ def execute(context):
     assert df_se[col].isin([1, 2]).all(), f"{col} has values other than 1/2: {df_se.loc[~df_se[col].isin([1,2]), col].unique()}"
     
     df_se["nationality"]-=1
+    df_se = classify_education(df_se)
     return df_se[[
         "home_municipality_id", "home_quarter_id", "home_zone_id", "home_zone_level",
         "work_country_id", "work_municipality_id", "work_quarter_id", "work_zone_id", "work_zone_level",
@@ -328,6 +423,17 @@ def execute(context):
         "education_municipality_id", "education_quarter_id", "education_zone_id", "education_zone_level", "municipality_type",
         "nationality", "crowfly_distance_to_work", "crowfly_distance_to_school", "freq_per_week", "commute_to_work", "start_work", 
         "highest_completed_education", "isco_code",       
+        # Retain source codes for education classification and commuting analysis.
+        "current_education", "in_education", "education_noga", "education_enterprise_noga",
+        "education_country_code", "education_mode_code", "education_freq_per_week", "commute_to_education",
+        "work_noga", "work_enterprise_noga", "survey_year",
+        "study_level", "institution_type", "education_od_group", "institution_type_source",
+        "institution_type_conflict", "study_institution_conflict", "education_participation_conflict",
+        "education_codebook_assumed",
+        "education_departure_code", "education_departure_country_code", "main_residence_category",
+        "education_departure_municipality_id", "education_departure_quarter_id",
+        "education_departure_zone_id", "education_departure_zone_level", "education_departure_status",
+        "education_departure_differs_from_residence",
     ]]
 
 

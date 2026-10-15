@@ -30,24 +30,29 @@ def configure(context):
 
 
 def load_raw_statent(context):
-    """The raw STATENT extract, before international-organization rows are
-    appended. Factored out of execute() so
-    find_statent_matches_for_international_organizations can reuse it.
-    """
-    data_path = context.config("data_path")
+    """Raw STATENT rows, reused by international-organization duplicate detection."""
+    return read_statent(context.config("data_path"))
 
+
+def read_statent(data_path):
+    """Retain enterprise/site IDs, sector, FTE and year alongside canonical destination IDs."""
     df = pd.DataFrame(pd.read_csv(
         "%s/statent/250221_STATENT_2022_LOC_17042025.csv" % data_path,
-        encoding = "latin1", sep = ","))
+        encoding = "latin1", sep = ",",
+        dtype = {"ANONYM_ENT_ID": "string", "ANONYM_LOCAL_ID": "string",
+                 "NOGA08_ENT_CD": "string"}))
 
-    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08_CD", "EMPTOT", "ANONYM_LOCAL_ID"]])
-    df.columns = ["x", "y", "noga", "number_employees", "anonym_local_id"]
+    df = pd.DataFrame(df[["METER_X", "METER_Y", "NOGA08_CD", "EMPTOT",
+                          "ANONYM_ENT_ID", "ANONYM_LOCAL_ID", "NOGA08_ENT_CD",
+                          "EMPFTE", "STATENT_YEAR"]])
+    df.columns = ["x", "y", "noga", "number_employees",
+                  "statent_enterprise_id", "statent_local_id", "enterprise_noga",
+                  "number_employees_fte", "statent_year"]
 
     df["noga"] = df["noga"].astype(str)
-
-    # Canonical id from BFS's stable per-establishment id, base62-encoded.
-    df["enterprise_id"] = "CH_STATENT_" + df["anonym_local_id"].astype(int).astype(str)#.apply(data.utils.to_base62)
-    del df["anonym_local_id"]
+    # Preserve the updated base branch's canonical destination IDs. The source
+    # enterprise ID groups sites; the source local ID identifies each establishment.
+    df["enterprise_id"] = "CH_STATENT_" + df["statent_local_id"].astype(str)
 
     df.loc[df["noga"].str.startswith("851"), "education_type"] = "kindergarten"
     df.loc[df["noga"].str.startswith("852"), "education_type"] = "primary"
@@ -55,7 +60,9 @@ def load_raw_statent(context):
     df.loc[df["noga"].str.startswith("854"), "education_type"] = "tertiary"
     df["education_type"] = df["education_type"].astype("category")
 
-    # For now we don't do anything with the NOGA category.
+    # Detailed local/enterprise NOGA codes remain available for institution and
+    # study-level compatibility; this broad type still supports legacy assignment.
+
     return df
 
 
@@ -65,6 +72,10 @@ def execute(context):
     if context.config("include_international_organizations"):
         df = pd.concat([df, get_international_organizations(context)], ignore_index = True)
 
+    return impute_locations(context, df)
+
+
+def impute_locations(context, df):
     # Impute zones
     df_zones          = context.stage("data.spatial.zones")
     df_quarters       = context.stage("data.spatial.quarters")
