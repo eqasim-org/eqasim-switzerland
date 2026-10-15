@@ -53,9 +53,12 @@ def configure(context):
 	context.stage("data.microcensus.persons")
 	context.stage("data.microcensus.trips")
 	context.stage("data.microcensus.activity_chains")
+	context.stage("data.microcensus.commute")
 	context.stage("synthesis.population.sampled")
 	context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
 	context.stage("data.constants")
+	if context.config("census", "statpop") == "statpop":
+		context.stage("synthesis.population.spatial.primary.education.locations", alias="education_locations")
 
 
 def _as_bool(value):
@@ -562,9 +565,8 @@ def _prepare_common_features(df_source, df_population, const):
 		df_source["household_size"] = df_source["household_size"].clip(upper=8)
 		df_population["household_size"] = df_population["household_size"].clip(upper=8)
 
-	# Follow v1 commute-distance convention for non-employed.
-	df_source.loc[df_source["employed"] != 1, "commute_distance"] = -1.0
-	df_population.loc[df_population["employed"] != 1, "commute_distance"] = -1.0
+	# Non-employed students can have an education commute. The shared predictor
+	# already supplies -1 only when neither a work nor education distance exists.
 
 	if "age" not in df_population.columns and "age_class" in df_population.columns:
 		df_population["age"] = pd.to_numeric(df_population["age_class"], errors="coerce").fillna(0) * 10.0
@@ -679,12 +681,20 @@ def _build_sequence_targets(source_ids, df_trips, max_sequence_len=8, trip_count
 	}
 
 
+def validate(context):
+	# The shared predictor helper is imported, so include it in cache validation.
+	from synthesis.population.matching.matched_v1 import validate as validate_commutes
+	return validate_commutes(context)
+
+
 def execute(context):
 	const = context.stage("data.constants")
 	random_seed = int(context.config("random_seed"))
 	rng = np.random.RandomState(random_seed)
 
-	model_path = os.path.join(context.working_directory, "matching_embedding_model.pkl")
+	# A work-only embedding/scaler cannot be reused after the commute predictor
+	# changes to max(usual work, usual education). Keep the old artifact intact.
+	model_path = os.path.join(context.working_directory, "matching_embedding_usual_commutes_model.pkl")
 	overwrite_model = _as_bool(context.config("overwrite_matching_embedding_model"))
 
 	top_k = int(context.config("matching_embedding_top_k"))
@@ -743,8 +753,10 @@ def execute(context):
 	df_source = df_source.rename(columns={"person_id": "mz_id"}).copy()
 
 	df_population = context.stage("synthesis.population.sampled").copy()
-	df_work = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]]
-	df_population = df_population.merge(df_work, on="person_id", how="left")
+	from synthesis.population.matching.commute import population_commutes, write_diagnostics
+	education = context.stage("education_locations") if const.census == "statpop" else None
+	df_population = population_commutes(df_population, context.stage("work_locations"), education)
+	write_diagnostics(df_source, df_population, context.path())
 	df_population["commute_distance"] = pd.to_numeric(df_population["commute_distance"], errors="coerce").fillna(-1)
 	df_population["work_location_type"] = df_population["work_location_type"].fillna("none")
 

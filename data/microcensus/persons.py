@@ -8,6 +8,33 @@ import logging
 
 logger = logging.getLogger("synpp")
 
+
+def reported_education_location(raw):
+    """Retain the education address reported independently of the diary day.
+
+    MZ 2015 database documentation, Zielpersonen: AU_X/AU_Y are the education
+    place in WGS84, AU_LND its country, AU_QAL its geocoding quality. Missing
+    codes must not be transformed into locations or zero-length commutes.
+    """
+    x = pd.to_numeric(raw["AU_X"], errors="coerce")
+    y = pd.to_numeric(raw["AU_Y"], errors="coerce")
+    country = pd.to_numeric(raw["AU_LND"], errors="coerce")
+    quality = pd.to_numeric(raw["AU_QAL"], errors="coerce")
+    valid = (np.isfinite(x) & np.isfinite(y) & x.between(-180, 180) & y.between(-90, 90)
+             & ~x.isin([-99, -98, -97, -96, -95, 0])
+             & ~y.isin([-99, -98, -97, -96, -95, 0]) & country.gt(0) & quality.gt(0))
+    result = pd.DataFrame(index=raw.index)
+    result["education_x"], result["education_y"] = np.nan, np.nan
+    transformer = pyproj.Transformer.from_crs(4326, 2056, always_xy=True)
+    if valid.any():
+        east, north = transformer.transform(x.loc[valid].to_numpy(), y.loc[valid].to_numpy())
+        result.loc[valid, "education_x"] = east
+        result.loc[valid, "education_y"] = north
+    result["education_country_code"] = country
+    result["education_location_quality"] = quality
+    return result
+
+
 def configure(context):
     context.config("data_path")
 
@@ -161,6 +188,13 @@ def execute(context):
 
     columns.extend(["work_x", "work_y"])
 
+    # A usual school address exists for many students even on a nonattendance
+    # day. Keep it separate from the education destination observed in trips.
+    education = reported_education_location(df_mz_persons)
+    for column in education:
+        df_mz_persons[column] = education[column]
+    columns.extend(education.columns)
+
     # Parking
     df_mz_persons["parking_work"] = "unknown"
     df_mz_persons.loc[df_mz_persons["f41300"] == 1, "parking_work"] = "free"
@@ -240,6 +274,10 @@ def execute(context):
         (df_mz_persons.loc[employed, "work_x"] - df_mz_persons.loc[employed, "home_x"]) ** 2 +
         (df_mz_persons.loc[employed, "work_y"] - df_mz_persons.loc[employed, "home_y"]) ** 2
     ).fillna(0.0).replace([np.inf, -np.inf], 0.0)
+    df_mz_persons["education_commute_distance"] = np.hypot(
+        df_mz_persons.education_x - df_mz_persons.home_x,
+        df_mz_persons.education_y - df_mz_persons.home_y)
+    columns.append("education_commute_distance")
 
     # Flag persons completely outside of Switzerland and those crossing the border
     df_mz_persons.loc[:, "is_outside_of_switzerland"] = df_mz_persons["person_id"].isin(persons_outside_ch)

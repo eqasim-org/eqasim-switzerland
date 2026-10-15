@@ -12,9 +12,15 @@ logger = logging.getLogger("synpp")
 def configure(context):
     context.config("data_path")
     context.stage("synthesis.population.models.income")
-    context.stage("data.structural_survey.structural_survey")
+    context.stage("data.structural_survey.student_training")
 
 def execute(context):
+    from synthesis.population.models.non_private import execute_without_home_only
+    return execute_without_home_only(context, "synthesis.population.models.income", _execute_model,
+                                     {"is_student": 0, "student_probability": 0.})
+
+
+def _execute_model(context):
 
     # =========================================================
     # CONFIG FOR ANALYSIS
@@ -36,8 +42,10 @@ def execute(context):
     # =========================================================
     # 0. PREP: CLEAN + ALIGN EMPLOYMENT INFO
     # =========================================================
-    survey_df = context.stage("data.structural_survey.structural_survey")
-    pop_df    = context.stage("synthesis.population.models.income")
+    # A dedicated copy uses school-departure geography for students, residence
+    # fallback otherwise. Other models retain the original survey geography.
+    survey_df = context.stage("data.structural_survey.student_training").copy()
+    pop_df    = context.stage("synthesis.population.models.income").copy()
 
     survey_df['employed']     = survey_df['employed'].astype('int64')
     survey_df['job_position'] = survey_df['job_position'].astype('int64')
@@ -285,6 +293,10 @@ def execute(context):
 
     n = len(pop_df)
     stu_out = np.empty(n, dtype=int)
+    # Retain classifier probabilities for diagnostics and any later review of
+    # matched dorm swaps. They do not impose student status or stock quotas.
+    student_probability = np.empty(n, dtype=float)
+    student_class = np.flatnonzero(classes_stu == 1)
 
     logger.info(f"Predicting students in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
 
@@ -299,17 +311,16 @@ def execute(context):
 
         X_chunk = X_chunk.reindex(columns=student_feature_cols, fill_value=0).astype(float)
 
+        # Recovered residents use the same probabilities and draws as private
+        # residents. Dorm proximity does not establish student participation.
         proba_stu = student_model.predict_proba(X_chunk)
-
+        student_probability[start:end] = proba_stu[:, student_class[0]] if len(student_class) else 0.
         stu_draw = draw_multinomial_from_proba(
-            proba_stu,
-            classes_stu,
-            seed=SEED_STUDENT + start
-        ).astype('int64')
+            proba_stu, classes_stu, seed=SEED_STUDENT + start).astype('int64')
 
         stu_out[start:end] = stu_draw
 
-        del X_chunk, proba_stu, stu_draw
+        del X_chunk, stu_draw
         gc.collect()
 
         if (start // CHUNK_SIZE) % 20 == 0:
@@ -319,6 +330,7 @@ def execute(context):
 
     pop_df['STUDENT_draw'] = pop_df['STUDENT_draw'].astype('int64')
     pop_df = pop_df.rename(columns={"STUDENT_draw": "is_student"})
+    pop_df["student_probability"] = student_probability
     pop_df.loc[pop_df['age'] < 15, 'is_student'] = 1
     # plot_student_share_by_agebin_and_district(
     #     survey_df=survey_df,

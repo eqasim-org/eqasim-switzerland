@@ -3,7 +3,7 @@ Stage: synthesis.population.models.cross_border
 
 Fits a weighted border-crossing classifier on the data.microcensus.persons
 subset selected by ``specific_day_scenario`` and applies it to
-synthesis.population.models.students. Each predicted crosser is then matched
+synthesis.population.models.education. Each predicted crosser is then matched
 to a data.cross_border.swiss_residents_od record, the single source of truth
 for their destination country, crossing point and trip mode.
 
@@ -506,7 +506,7 @@ def configure(context):
     context.config("cross_border_use_spatial_calibration", default=True)
     context.config("cross_border_exclude_shapefiles", default=None)
     context.stage("data.microcensus.persons")
-    context.stage("synthesis.population.models.students")
+    context.stage("synthesis.population.models.education")
     context.stage("data.spatial.swiss_border")
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.cantons")
@@ -515,6 +515,14 @@ def configure(context):
 
 
 def execute(context):
+    from synthesis.population.models.non_private import execute_without_home_only
+    # Only the agreed older home-only group bypasses this model. Younger
+    # recovered residents receive the ordinary cross-border prediction too.
+    return execute_without_home_only(context, "synthesis.population.models.education", _execute_model,
+        {"is_crossing_the_border": 0, "destination_country_raw": pd.NA, "employment_status": 0})
+
+
+def _execute_model(context):
     c               = context.stage("data.constants")
     day_scenario    = context.config("specific_day_scenario")
     model_type      = context.config("cross_border_model_type")
@@ -540,7 +548,7 @@ def execute(context):
     # -------------------------------------------------------------------
     # 1. SYNTHETIC POPULATION (loaded early — needed as the OD-rate denominator)
     # -------------------------------------------------------------------
-    pop_df = context.stage("synthesis.population.models.students").copy().reset_index(drop=True)
+    pop_df = context.stage("synthesis.population.models.education").copy().reset_index(drop=True)
     pop_df["_row_order"] = np.arange(len(pop_df))
 
     # Agents living in the excluded region are set aside before anything else,

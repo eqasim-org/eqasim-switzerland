@@ -4,12 +4,13 @@ from .hierarchical_utils import encode_purpose
 
 def configure(context):
     context.stage("data.microcensus.persons")
-    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.secondary_trips")
 
 
 def execute(context):
     persons = context.stage("data.microcensus.persons")[["person_id", "home_x", "home_y", "work_x", "work_y"]]
-    trips = context.stage("data.microcensus.trips")[0].copy()
+    # Encode the same purpose grouping used by synthetic secondary visits.
+    trips = context.stage("data.microcensus.secondary_trips").copy()
 
     trips = trips.merge(persons, on="person_id", how="left")
 

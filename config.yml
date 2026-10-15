@@ -9,6 +9,13 @@ dryrun: false
 run:
     - synthesis.output
     - matsim.output
+    # Optional inspection of campus targets and home-to-education distances.
+    #- analysis.tertiary_education_assignment
+    #- analysis.education_distances
+    #- analysis.secondary_education_assignment
+    #- analysis.non_private_residents
+    #- analysis.education_student_stock
+    #- analysis.education_doctoral_scope
 
 
 # These are configuration options that we use in the pipeline
@@ -22,6 +29,20 @@ config:
     # General parameters
     threads: 48
     random_seed: 518745
+    # Pooled tertiary OD smoothing (prior measured in effective observations).
+    tertiary_od_prior_strength: 100.0
+    tertiary_od_neighbors: 50
+    tertiary_od_bandwidth: 20000.0 # meters
+    tertiary_od_distance_decay: 0.005 # per km, scaled by origin's smoothing/fallback share; 0 disables it
+    education_campus_cluster_distance: 500.0 # meters between linked sites in one enterprise
+    education_enrolment_path: null # defaults to data_path/education_enrolment
+    education_enrolment_year: "2023/24" # separate Zurich providers; not a commuter or campus target
+    education_institution_links: data/statent/education_institution_links.csv
+    education_site_eligibility: data/statent/education_site_eligibility.csv
+    education_level_prior_strength: 20.0 # effective survey observations for study-level backoff
+    education_tertiary_balance: true # annual pooled BFS/FTE shares; daily attendance is determined by MZ diaries
+    education_distance_ss_unit: km # DISTTOSCHOOL_AIR; explicit assumption for the distance analysis
+    secondary_education_distance_minimum_effective_n: 50 # sparse age cells pool the same programme across ages
     hot_deck_matching_runners: 1
     disable_progress_bar: false
     java_memory: 210G
@@ -32,6 +53,14 @@ config:
     scaling_year: 2025
     use_freight: true
     only_permanent_residents: false
+    # Recover geocoded people absent from the private-household table as flagged
+    # one-person modelling households. False restores the former inner join.
+    retain_geocoded_missing_households: true
+    # Descriptive proximity to possible dorms; younger recovered residents use
+    # ordinary behaviour models. Older recovered residents remain home-only.
+    non_private_residences_enabled: true
+    non_private_residence_radius: 250.0
+    non_private_home_only_minimum_age: 39
     
     # algorithms selection
     matching_algorithm: v1
@@ -139,4 +168,4 @@ config:
     include_external_population: true # default:false
     external_population_folder: /cluster/project/cmdp/ch_data/pipeline/fr_population_100pct_20260521
     fr_sample_rate: 1.0 # Sample size used for the generation of the outputs in the folder above. Will be used to downsample the FR population if necessary.
-    gtfs_name: merged_gtfs 
+    gtfs_name: merged_gtfs
