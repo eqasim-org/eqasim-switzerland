@@ -35,10 +35,9 @@ config:
     tertiary_od_bandwidth: 20000.0 # meters
     tertiary_od_distance_decay: 0.005 # per km, scaled by origin's smoothing/fallback share; 0 disables it
     education_campus_cluster_distance: 500.0 # meters between linked sites in one enterprise
+    # Reference CSVs live under data_path/education_enrolment; GWR under data_path/gwr.
     education_enrolment_path: null # defaults to data_path/education_enrolment
     education_enrolment_year: "2023/24" # separate Zurich providers; not a commuter or campus target
-    education_institution_links: data/statent/education_institution_links.csv
-    education_site_eligibility: data/statent/education_site_eligibility.csv
     education_level_prior_strength: 20.0 # effective survey observations for study-level backoff
     education_tertiary_balance: true # annual pooled BFS/FTE shares; daily attendance is determined by MZ diaries
     education_distance_ss_unit: km # DISTTOSCHOOL_AIR; explicit assumption for the distance analysis

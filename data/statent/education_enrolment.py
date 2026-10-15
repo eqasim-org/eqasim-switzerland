@@ -10,8 +10,9 @@ import pandas as pd
 
 
 TABLES = {"UH": "px-x-1502040100_108", "FH_PH": "px-x-1502040400_136"}
-DEFAULT_MAPPING = Path(__file__).with_name("education_institution_links.csv")
-DEFAULT_HIGHER_VOCATIONAL = Path(__file__).with_name("education_higher_vocational_enrolment.csv")
+# Relative input paths are resolved under data_path; references stay outside Git.
+DEFAULT_MAPPING = Path("education_enrolment/education_institution_links.csv")
+DEFAULT_HIGHER_VOCATIONAL = Path("education_enrolment/education_higher_vocational_enrolment.csv")
 LEVELS = {
     "Bachelor": "bachelor", "Master": "master", "Doktorat": "doctorate_habilitation",
     "Lizenziat/Diplom": "legacy_degree", "Diplom": "legacy_degree",
@@ -26,8 +27,8 @@ def configure(context):
     context.config("data_path")
     context.config("education_enrolment_path", None)
     context.config("education_enrolment_year", "2023/24")
-    context.config("education_institution_links", str(DEFAULT_MAPPING))
-    context.config("education_higher_vocational_reference", str(DEFAULT_HIGHER_VOCATIONAL))
+    context.config("education_institution_links", str(Path(context.config("data_path")) / DEFAULT_MAPPING))
+    context.config("education_higher_vocational_reference", str(Path(context.config("data_path")) / DEFAULT_HIGHER_VOCATIONAL))
     context.stage("data.statent.education_institutions")
 
 
@@ -40,12 +41,7 @@ def validate(context):
     path = context.config("education_enrolment_path")
     path = Path(path) if path is not None else Path(context.config("data_path")) / "education_enrolment"
     files = [Path(context.config("education_institution_links")), *sorted(path.glob("*.json"))]
-    # Some isolated inspection contexts predate the pooled reference setting.
-    try:
-        higher = context.config("education_higher_vocational_reference")
-    except KeyError:
-        higher = str(DEFAULT_HIGHER_VOCATIONAL)
-    files.append(Path(higher))
+    files.append(Path(context.config("education_higher_vocational_reference")))
     # Synpp stores tokens in JSON: a dict survives that round-trip unchanged,
     # whereas tuples would become lists and invalidate the cache on every run.
     return {str(file): hashlib.sha256(file.read_bytes()).hexdigest() for file in files}

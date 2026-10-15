@@ -5,11 +5,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DEFAULT_REFERENCE = Path(__file__).with_name("residence_candidates.csv")
+DEFAULT_REFERENCE = Path("gwr/residence_candidates.csv")
 
 
 def configure(context):
-    context.config("gwr_residence_candidates", str(DEFAULT_REFERENCE))
+    context.config("data_path")
+    context.config("gwr_residence_candidates", str(Path(context.config("data_path")) / DEFAULT_REFERENCE))
 
 
 def validate(context):

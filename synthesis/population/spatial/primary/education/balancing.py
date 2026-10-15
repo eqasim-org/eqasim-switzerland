@@ -1,5 +1,7 @@
 """Balance supported domestic OD flows against provisional enrolment shares."""
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import linprog
@@ -11,12 +13,13 @@ from synthesis.population.spatial.primary.education.tertiary import domestic_coh
 
 
 def configure(context):
+    context.config("data_path")
     for stage in ["synthesis.population.sampled",
                   "synthesis.population.spatial.primary.education.targets",
                   "data.statent.education_institutions", "data.statent.statent",
                   "data.spatial.zones", "data.od.tertiary_education_matrix"]:
         context.stage(stage)
-    context.config("education_site_eligibility", str(DEFAULT_ELIGIBILITY_RULES))
+    context.config("education_site_eligibility", str(Path(context.config("data_path")) / DEFAULT_ELIGIBILITY_RULES))
     context.config("education_tertiary_balance", True)
 
 

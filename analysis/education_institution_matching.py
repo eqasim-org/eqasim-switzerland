@@ -14,9 +14,11 @@ DEFAULT_REFERENCES = DEFAULT_MAPPING.with_name("education_reference_sites.csv")
 
 
 def configure(context):
+    context.config("data_path")
     context.stage("data.statent.education_institutions")
     context.stage("data.statent.education_enrolment")
-    context.config("education_institution_links", str(DEFAULT_MAPPING))
+    context.config("education_institution_links", str(Path(context.config("data_path")) / DEFAULT_MAPPING))
+    context.config("education_reference_sites", str(Path(context.config("data_path")) / DEFAULT_REFERENCES))
     context.config("analysis_path")
 
 
@@ -138,7 +140,7 @@ def execute(context):
     context.stage("data.statent.education_enrolment")
     registry = context.stage("data.statent.education_institutions")
     links = pd.read_csv(context.config("education_institution_links"), dtype=str)
-    references = pd.read_csv(DEFAULT_REFERENCES, dtype={"bfs_institution_code": str})
+    references = pd.read_csv(context.config("education_reference_sites"), dtype={"bfs_institution_code": str})
     return audit(registry, links, references,
                  Path(context.config("analysis_path")) / "education_institution_matching")
 
@@ -148,8 +150,8 @@ if __name__ == "__main__":
     parser.add_argument("--registry-path", required=True)
     parser.add_argument("--enrolment-path", required=True)
     parser.add_argument("--output-path", required=True)
-    parser.add_argument("--mapping-path", default=str(DEFAULT_MAPPING))
-    parser.add_argument("--reference-path", default=str(DEFAULT_REFERENCES))
+    parser.add_argument("--mapping-path", required=True)
+    parser.add_argument("--reference-path", required=True)
     parser.add_argument("--academic-year", default="2023/24")
     args = parser.parse_args()
     registry = {name: pd.read_csv(Path(args.registry_path) / (name + ".csv"),

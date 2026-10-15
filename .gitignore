@@ -26,11 +26,6 @@ catboost_info
 ch_cutter
 *.pkl
 *.csv
-!data/gwr/residence_candidates.csv
-!data/statent/education_institution_links.csv
-!data/statent/education_reference_sites.csv
-!data/statent/education_site_eligibility.csv
-!data/statent/education_higher_vocational_enrolment.csv
 main*.py
 .claude
 AGENTS.md

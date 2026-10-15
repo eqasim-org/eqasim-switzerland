@@ -4,7 +4,7 @@ The analysis follows the existing `configure`/`execute` structure and uses the
 STATENT registry and BFS enrolment stage. It does not change student assignment,
 campus capacity or study-level eligibility.
 
-`data/statent/education_reference_sites.csv` contains 14 documented location
+`<data_path>/education_enrolment/education_reference_sites.csv` contains 14 documented location
 references, official sources, LV95 coordinates, coordinate sources, notes and
 review date. Addresses were checked on institution pages and geocoded with the
 swisstopo address service. Coordinates use its projected geometry, avoiding the

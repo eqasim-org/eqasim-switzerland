@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 import pandas as pd
 
 from data.statent.education_enrolment import (
-    TABLES, DEFAULT_MAPPING, build_query, table_url, read_enrolment, link_institutions)
+    TABLES, build_query, table_url, read_enrolment, link_institutions)
 
 
 def configure(context):
@@ -111,7 +111,7 @@ if __name__ == "__main__":
     parser.add_argument("--input-path", required=True, help="BFS snapshot directory")
     parser.add_argument("--registry-path", required=True, help="Existing campus audit directory")
     parser.add_argument("--output-path", required=True)
-    parser.add_argument("--mapping-path", default=str(DEFAULT_MAPPING))
+    parser.add_argument("--mapping-path", required=True)
     parser.add_argument("--academic-year", default="2023/24")
     parser.add_argument("--download", action="store_true")
     parser.add_argument("--years", nargs="+", default=["2021/22", "2022/23", "2023/24"])

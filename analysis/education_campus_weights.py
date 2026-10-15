@@ -12,11 +12,13 @@ from data.statent.education_campus_weights import estimate_campus_weights, DEFAU
 
 
 def configure(context):
+    context.config("data_path")
     context.stage("data.statent.education_institutions")
     context.stage("data.statent.education_enrolment")
     context.stage("data.statent.education_campus_weights")
-    context.config("education_institution_links", str(DEFAULT_MAPPING))
-    context.config("education_site_eligibility", str(DEFAULT_ELIGIBILITY_RULES))
+    context.config("education_institution_links", str(Path(context.config("data_path")) / DEFAULT_MAPPING))
+    context.config("education_site_eligibility", str(Path(context.config("data_path")) / DEFAULT_ELIGIBILITY_RULES))
+    context.config("education_reference_sites", str(Path(context.config("data_path")) / DEFAULT_REFERENCES))
     context.config("analysis_path")
 
 
@@ -116,7 +118,7 @@ def execute(context):
     detailed = estimate_campus_weights(registry, enrolment["linked_model_enrolment"], eligibility_rules=rules)
     result = audit(registry, enrolment, detailed,
                  pd.read_csv(context.config("education_institution_links"), dtype=str),
-                 pd.read_csv(DEFAULT_REFERENCES, dtype={"bfs_institution_code": str}),
+                 pd.read_csv(context.config("education_reference_sites"), dtype={"bfs_institution_code": str}),
                  path, rules)
     for name, table in context.stage("data.statent.education_campus_weights").items():
         result["pooled_" + name] = table
@@ -133,8 +135,9 @@ if __name__ == "__main__":
     parser.add_argument("--registry-path", required=True)
     parser.add_argument("--enrolment-path", required=True)
     parser.add_argument("--output-path", required=True)
-    parser.add_argument("--mapping-path", default=str(DEFAULT_MAPPING))
-    parser.add_argument("--eligibility-path", default=str(DEFAULT_ELIGIBILITY_RULES))
+    parser.add_argument("--mapping-path", required=True)
+    parser.add_argument("--eligibility-path", required=True)
+    parser.add_argument("--reference-path", required=True)
     parser.add_argument("--academic-year", default="2023/24")
     parser.add_argument("--campus-distance", type=float, default=500.0)
     args = parser.parse_args()
@@ -149,4 +152,4 @@ if __name__ == "__main__":
     rules = pd.read_csv(args.eligibility_path, dtype={"statent_local_id": str})
     result = estimate_campus_weights(registry, enrolment["linked_model_enrolment"], eligibility_rules=rules)
     audit(registry, enrolment, result, links,
-          pd.read_csv(DEFAULT_REFERENCES, dtype={"bfs_institution_code": str}), args.output_path, rules)
+          pd.read_csv(args.reference_path, dtype={"bfs_institution_code": str}), args.output_path, rules)

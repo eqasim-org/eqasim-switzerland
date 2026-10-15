@@ -2,11 +2,11 @@ Public GWR residence reference
 =============================
 
 `residences.py` follows the existing configure/execute/validate stage structure.
-`gwr_residence_candidates` can override the bundled `residence_candidates.csv`.
+`gwr_residence_candidates` can override `<data_path>/gwr/residence_candidates.csv`.
 The content hash participates in cache validation; the pipeline does not fetch
 live buildings or depend on temporary audit paths.
 
-The bundled public snapshot contains 4,774 unique existing GWR buildings:
+The local public snapshot contains 4,774 unique existing GWR buildings:
 4,712 communal-residence buildings (class 1130), 38 further buildings with explicit
 student-housing names, and 24 further matches to FMEL's published addresses.
 Overlapping evidence is deduplicated by EGID. Source date: 13 October 2026.
@@ -31,5 +31,8 @@ Bourdonnette verification: https://www.fmel.ch/maison/bourdonnette
 
 Construction audit scripts and review outputs are recorded in
 /private/tmp/gwr_named_residences_audit/README.md; pipeline execution needs only
-the versioned CSV. No person identities or residential population locations are
+the external CSV. No person identities or residential population locations are
 included in this public building reference.
+
+Reference CSVs are external inputs and are not tracked in Git. Copy the GWR
+snapshot to `<data_path>/gwr/residence_candidates.csv` before running.

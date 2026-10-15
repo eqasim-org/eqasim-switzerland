@@ -21,7 +21,10 @@ class CampusAssignmentTest(unittest.TestCase):
             mapping = path / "links.csv"
             mapping.write_text("first mapping")
             (path / "snapshot.json").write_text("{}")
-            settings = {"education_enrolment_path":str(path), "education_institution_links":str(mapping)}
+            higher = path / "higher_vocational.csv"
+            higher.write_text("students\n100\n")
+            settings = {"education_enrolment_path":str(path), "education_institution_links":str(mapping),
+                        "education_higher_vocational_reference":str(higher)}
             class Context:
                 def config(self, name):
                     return settings[name]

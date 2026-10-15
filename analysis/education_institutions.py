@@ -21,6 +21,9 @@ def configure(context):
     context.stage("data.statent.education_institutions")
     context.stage("data.structural_survey.structural_survey")
     context.stage("data.spatial.zones")
+    from data.statent.education_enrolment import DEFAULT_MAPPING
+    context.config("data_path")
+    context.config("education_institution_links", str(Path(context.config("data_path")) / DEFAULT_MAPPING))
     context.config("analysis_path")
     context.config("education_campus_cluster_distance", DEFAULT_CAMPUS_DISTANCE)
     context.stage("data.od.tertiary_education_matrix")
@@ -29,8 +32,8 @@ def configure(context):
 def create_map(registry, output_path, institution_links=None, reference_sites=None):
     """Show provisional site clusters, their review flags and named link evidence."""
     if institution_links is None:
-        from data.statent.education_enrolment import DEFAULT_MAPPING
-        institution_links = pd.read_csv(DEFAULT_MAPPING, dtype=str)
+        # Generic registry maps can omit names; never read source-relative data.
+        institution_links = pd.DataFrame(columns=["statent_enterprise_id", "institution_name", "match_status"])
     labels = {}
     for enterprise, group in institution_links.groupby("statent_enterprise_id"):
         labels["STATENT_ENTERPRISE_" + enterprise] = "; ".join(
@@ -97,13 +100,13 @@ def create_map(registry, output_path, institution_links=None, reference_sites=No
     map_view.save(str(Path(output_path) / "campuses.html"))
 
 
-def audit(df_statent, registry, df_survey, df_zones, output_path, profiles=None):
+def audit(df_statent, registry, df_survey, df_zones, output_path, profiles=None, institution_links=None):
     """Compare campus/type coverage with OD evidence before using it for assignment."""
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
     for name, table in registry.items():
         table.to_csv(output_path / (name + ".csv"), index=False)
-    create_map(registry, output_path)
+    create_map(registry, output_path, institution_links=institution_links)
     (output_path / "README.md").write_text(
         "# Provisional tertiary institution and campus registry\n\n"
         "Institutions are anonymous STATENT enterprise groups, not verified university "
@@ -188,7 +191,8 @@ def execute(context):
     return audit(context.stage("data.statent.statent"),
                  context.stage("data.statent.education_institutions"),
                  context.stage("data.structural_survey.structural_survey"),
-                 zones, Path(context.config("analysis_path")) / "education_institutions", profiles)
+                 zones, Path(context.config("analysis_path")) / "education_institutions", profiles,
+                 pd.read_csv(context.config("education_institution_links"), dtype=str))
 
 
 def main():
@@ -211,7 +215,9 @@ def main():
         context.stage("data.spatial.quarters"), mapping,
         context.config("tertiary_od_prior_strength"), context.config("tertiary_od_neighbors"),
         context.config("tertiary_od_bandwidth"))
-    print(audit(statent, registry, survey, zones, args.output_path, profiles).to_string())
+    from data.statent.education_enrolment import DEFAULT_MAPPING
+    links = pd.read_csv(Path(args.data_path) / DEFAULT_MAPPING, dtype=str)
+    print(audit(statent, registry, survey, zones, args.output_path, profiles, links).to_string())
 
 
 if __name__ == "__main__":

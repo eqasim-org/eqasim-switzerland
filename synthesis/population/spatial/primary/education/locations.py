@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 from sklearn.neighbors import KDTree
 import pandas as pd
@@ -11,6 +12,7 @@ logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    context.config("data_path")
     context.stage("data.statent.statent")
     context.stage("data.statent.education_institutions")
     context.stage("data.constants")
@@ -18,7 +20,7 @@ def configure(context):
     context.stage("data.microcensus.commute")
     context.stage("data.microcensus.persons")
     context.config("specific_day_scenario", "workday")
-    context.config("education_site_eligibility", str(DEFAULT_ELIGIBILITY_RULES))
+    context.config("education_site_eligibility", str(Path(context.config("data_path")) / DEFAULT_ELIGIBILITY_RULES))
     if context.config("census", "statpop") == "statpop":
         context.stage("synthesis.population.sampled")
         context.stage("synthesis.population.spatial.primary.education.secondary_distances")

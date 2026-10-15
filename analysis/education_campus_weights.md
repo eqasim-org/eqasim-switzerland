@@ -30,7 +30,7 @@ estimate placement frequency.
 [Sion master projects and doctoral research](https://www.epfl.ch/schools/sb/research/isic/valais/)
 
 Programme coverage is not proven by NOGA. Reviewed rules are now stored in
-`data/statent/education_site_eligibility.csv`: Sion is excluded from the regular
+`<data_path>/education_enrolment/education_site_eligibility.csv`: Sion is excluded from the regular
 bachelor split but remains placement-eligible. Its master eligibility is retained
 for possible thesis destinations. The remote ZHAW branch is excluded from regular
 bachelor/master splits while remaining placement-eligible. These are explicit

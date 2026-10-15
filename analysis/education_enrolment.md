@@ -46,7 +46,7 @@ vocational education.
 
 ## Institution mapping
 
-`data/statent/education_institution_links.csv` contains source institution type,
+`<data_path>/education_enrolment/education_institution_links.csv` contains source institution type,
 BFS institution code, anonymous enterprise ID, name, evidence URL/note and
 `proposed` or `verified` status. EPFL, UNIL and ZHAW are spatially reviewed
 proposals (see `analysis/education_institution_matching.md`). Public campus
@@ -133,3 +133,14 @@ Next: confirm institution identities or obtain an enterprise crosswalk, includin
 umbrella-provider structures. Then review study-level campus eligibility (including
 doctoral research sites), reconcile totals with the simulated population, and
 estimate campus shares using FTE where observed campus enrolment is unavailable.
+
+## External reference files
+
+Reference CSVs are not tracked in Git. Store `education_institution_links.csv`,
+`education_reference_sites.csv`, `education_site_eligibility.csv` and
+`education_higher_vocational_enrolment.csv` under `<data_path>/education_enrolment/`.
+These defaults can be overridden by `education_institution_links`,
+`education_reference_sites`, `education_site_eligibility` and
+`education_higher_vocational_reference`. Standalone audit commands require explicit
+reference paths through their `--mapping-path`, `--reference-path` and
+`--eligibility-path` options where applicable.

@@ -26,7 +26,7 @@ attend on the diary day. Proxies remain an uncertainty in those matching distanc
 
 BFS 2023/24 totals pool all published disjoint university programmes, including
 continuing/other and legacy diplomas. The higher-vocational national reference is
-versioned in `data/statent/education_higher_vocational_enrolment.csv`. The pooled
+versioned in `<data_path>/education_enrolment/education_higher_vocational_enrolment.csv`. The pooled
 reference has 169,249 UH, 107,196 FH/PH and 60,854 higher-vocational enrolments.
 Preparation-course coverage is incomplete and institution and resident frames
 differ. These shares are modelling assumptions, **not absolute resident-stock caps**.

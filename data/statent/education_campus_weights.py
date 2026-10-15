@@ -6,13 +6,14 @@ import hashlib
 from pathlib import Path
 
 
-DEFAULT_ELIGIBILITY_RULES = Path(__file__).with_name("education_site_eligibility.csv")
+DEFAULT_ELIGIBILITY_RULES = Path("education_enrolment/education_site_eligibility.csv")
 
 
 def configure(context):
+    context.config("data_path")
     context.stage("data.statent.education_institutions")
     context.stage("data.statent.education_enrolment")
-    context.config("education_site_eligibility", str(DEFAULT_ELIGIBILITY_RULES))
+    context.config("education_site_eligibility", str(Path(context.config("data_path")) / DEFAULT_ELIGIBILITY_RULES))
 
 
 def validate(context):
