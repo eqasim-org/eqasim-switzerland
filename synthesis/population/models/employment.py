@@ -23,6 +23,13 @@ def configure(context):
     context.stage("data.statpop.statpop")
 
 def execute(context):
+    from synthesis.population.models.non_private import execute_without_home_only
+    c = context.stage("data.constants")
+    return execute_without_home_only(context, "data.statpop.statpop", _execute_model,
+                                     {"employed": c.INACTIVE, "job_position": 70})
+
+
+def _execute_model(context):
     c = context.stage("data.constants")
 
     # -------------------------------------------------------------------
@@ -45,7 +52,7 @@ def execute(context):
     # 0. LOAD
     # -------------------------------------------------------------------
     survey_df = context.stage("data.structural_survey.structural_survey")
-    pop_df = context.stage("data.statpop.statpop")
+    pop_df = context.stage("data.statpop.statpop").copy()
 
     survey_df['employed']     = survey_df['employed'].astype('int32')
     survey_df['job_position'] = survey_df['job_position'].astype('int32')
@@ -217,7 +224,9 @@ def execute(context):
         youth_mask = (age_arr >= 15) & (age_arr <= 23)
         adult_mask = (age_arr >= 24)
 
-        act_draw = np.empty(end - start, dtype=int)
+        # All modelled residents use the same age-specific predictions, including
+        # recovered singletons near dorm candidates. Under-15s stay inactive.
+        act_draw = np.full(end - start, c.INACTIVE, dtype=int)
 
         # youth predictions
         if youth_mask.any():

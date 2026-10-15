@@ -30,6 +30,12 @@ def configure(context):
     context.stage("synthesis.population.models.cross_border")
 
 def execute(context):
+    from synthesis.population.models.non_private import execute_without_home_only
+    return execute_without_home_only(context, "synthesis.population.models.cross_border", _execute_model,
+                                     {"driving_license": 0})
+
+
+def _execute_model(context):
     c = context.stage("data.constants")
 
     # -------------------------------------------------------------------

@@ -23,6 +23,12 @@ def configure(context):
 
 
 def execute(context):
+    from synthesis.population.models.non_private import execute_without_home_only
+    return execute_without_home_only(context, "synthesis.population.models.employment", _execute_model,
+                                     {"income_class": 0})
+
+
+def _execute_model(context):
     # -------------------------------------------------------------------
     # CONFIG: model type + calibration switch
     # -------------------------------------------------------------------

@@ -65,6 +65,12 @@ def configure(context):
 
 
 def execute(context):
+    from synthesis.population.models.non_private import execute_without_home_only
+    return execute_without_home_only(context, "synthesis.population.models.carownership", _execute_model,
+                                     {"car_availability": 0})
+
+
+def _execute_model(context):
     # -------------------------------------------------------------------
     # CONFIG
     # -------------------------------------------------------------------

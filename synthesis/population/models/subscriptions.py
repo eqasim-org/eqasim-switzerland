@@ -147,6 +147,12 @@ def configure(context):
 
 
 def execute(context):
+    from synthesis.population.models.non_private import execute_without_home_only
+    return execute_without_home_only(context, "synthesis.population.enriched", _execute_model,
+                                     {"pt_subscription": 0})
+
+
+def _execute_model(context):
     # -------------------------------------------------------------------
     # CONFIG
     # -------------------------------------------------------------------
@@ -937,6 +943,7 @@ def execute(context):
        'is_student', 'ovgk', "sp_region",
        'driving_license', 'number_of_cars_class', 'car_availability', 'bike_availability', 'PT_SUB_draw', 'mz_person_id', 'is_car_passenger',
        'income_class', 'is_crossing_the_border', 'destination_country_raw']
+    keep_columns += [name for name in pop_df if name.startswith("non_private_") or name == "is_synthetic_household"]
     pop_df = pop_df[keep_columns]
     pop_df = pop_df.rename(columns={"PT_SUB_draw": "pt_subscription"})
 
