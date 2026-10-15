@@ -24,13 +24,17 @@ def _read_cached(signatures):
     for path, *_ in signatures:
         with Path(path).open() as stream:
             values = yaml.safe_load(stream)
+        # it must be a dict
         if not isinstance(values, dict):
             raise ValueError(f"Expected a parameter mapping in {path}")
+        # check that all values are finite numbers (or dicts of finite numbers)
         for key, value in values.items():
             if isinstance(value, dict):
                 if not all(math.isfinite(float(v)) for v in value.values()):
                     raise ValueError(f"Non-finite parameter in {path}: {key}")
             elif not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"Invalid numeric parameter in {path}: {key}")
+
         result.update(values)
+
     return result

@@ -119,7 +119,12 @@ def run_pt_router(context, df):
     initial_ids = df[["identifier"]].astype(str).copy()
     if os.path.exists(output_path):
         logger.info("\t PT routed trips already exist. Checking if they are valid.")
-        df_old = pd.read_csv(output_path)
+        try:
+            df_old = pd.read_csv(output_path)
+        except Exception as e:
+            logger.warning("\t  - Could not read the existing routed trips. Exception: \n %s. \n Performing routing.", e)
+            df_old = pd.DataFrame()
+
         required_columns = {
             "identifier",
             "access_travel_time_min",

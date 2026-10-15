@@ -26,6 +26,13 @@ def configure(context):
         context.stage("data.microcensus.shares")
 
 
+def execute(context):
+    try:
+        return run_mode_choice(context)
+    finally:
+        RoutingServer.stop_server()
+
+
 def apply_choices(original, choices):
     """Preserve every source trip and its original survey ID; replace modes by key."""
     if choices["trip_id"].n_unique() != choices.height:
@@ -39,19 +46,13 @@ def apply_choices(original, choices):
         result = result.rename({SOURCE_TRIP_ID: "trip_id"})
     return result
 
-
-def execute(context):
-    try:
-        return _execute(context)
-    finally:
-        RoutingServer.stop_server()
-
-
-def _execute(context):
+def run_mode_choice(context):
+    # Read prepared batches; routing, costs and availability are already cached.
     original = context.stage("mode_choice.data.trips")
     paths = context.stage("mode_choice.tours.batches")
     if not paths and context.config("mode_choice_calibrate_alphas"):
         raise ValueError("Cannot calibrate alphas: no eligible population trips")
+    # Reuse the same sampler and batch arrays across calibration iterations.
     sampler = TourSampler(
         method=context.config("mode_choice_sampling_method"),
         random_cache_max_values=context.config("mode_choice_random_cache_max_values"),
@@ -63,6 +64,7 @@ def _execute(context):
                                     and context.config("mode_choice_cache_prepared_batches"))) as model:
         choices = (calibration.run(context, model, load(context)) if context.config("mode_choice_calibrate_alphas")
                    else model.run())
+    # Save the trip-keyed choices and merge them back into the complete population.
     choices.write_parquet(Path(context.path()) / "choices.parquet")
     logger.info("Assigned modes to %d trips; retained %d source modes. Topology cache: %s",
                 choices.height, original.height - choices.height, sampler.cache.info())

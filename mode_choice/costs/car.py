@@ -1,7 +1,7 @@
-"""Car operating costs, together with the separately computed parking costs."""
+"""Read driving costs produced during routing and add parking costs."""
 import polars as pl
-from mode_choice import defaults as D
-from mode_choice.model.parameters import load
+from dmc.cost.car import car_cost_simple, car_cost_weiss
+from mode_choice.costs.artifacts import read_costs
 from mode_choice.data.frames import join_variables
 
 
@@ -9,22 +9,26 @@ def configure(context):
     context.stage("mode_choice.routing_variables.car")
     context.stage("mode_choice.costs.parking")
     context.stage("mode_choice.defaults")
-    context.stage("dmc.params")
-    context.config("car_cost_model", D.RUN_DEFAULTS["car_cost_model"])
 
 
 def execute(context):
-    trips = context.stage("mode_choice.routing_variables.car")
-    costs = trips.select("trip_id", cost_expression(load(context), context.config("car_cost_model").lower()).alias("car_cost_CHF"))
-    return join_variables(costs, context.stage("mode_choice.costs.parking"))
+    # Read driving costs cached by either router, then attach parking variables.
+    return join_variables(read_costs(context, "car"), context.stage("mode_choice.costs.parking"))
 
 
-def cost_expression(p, car_cost_model):
-    distance = pl.col("car_distance_km")
-    if car_cost_model == "weiss":
-        car_cost = distance * pl.min_horizontal(pl.lit(D.WEISS_MAX_RATE), D.WEISS_BASE_RATE + D.WEISS_RATE_AMPLITUDE * (D.WEISS_DISTANCE_RATE * distance.pow(D.WEISS_DISTANCE_EXPONENT)).exp())
-    elif car_cost_model == "simple":
-        car_cost = distance * p["carCost_CHF_km"]
+def calculate_driving_costs(routes, parameters, cost_model):
+    """Price Pandana distances with the same functions used for DMC estimation."""
+    # DMC's cost functions operate on arrays; the stage input/output stays Polars.
+    distances = routes["car_distance_km"].to_numpy()
+    if cost_model.lower() == "simple":
+        costs = car_cost_simple(distances, parameters["carCost_CHF_km"])
+    elif cost_model.lower() == "weiss":
+        costs = car_cost_weiss(distances)
     else:
-        raise ValueError(f"Unknown car_cost_model: {car_cost_model}")
-    return car_cost
+        raise ValueError(f"Unknown car_cost_model: {cost_model}")
+
+    # Reject missing or invalid prices before publishing the cost artifact.
+    result = routes.with_columns(pl.Series("car_cost_CHF", costs, dtype=pl.Float64))
+    if result.filter(~pl.col("car_cost_CHF").is_finite().fill_null(False) | (pl.col("car_cost_CHF") < 0)).height:
+        raise ValueError("Invalid car costs")
+    return result
