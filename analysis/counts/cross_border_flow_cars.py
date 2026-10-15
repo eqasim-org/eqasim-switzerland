@@ -359,16 +359,8 @@ def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, outp
     # beyond the extent get dropped.
     swiss_border_full = shapely.force_2d(unary_union(gpd.GeoSeries(swiss_border).to_crs(geometry.crs)))
 
-    # replicate_of is set on the bookkeeping rows replicate_merged_links()
-    # adds for original sub-segment ids absorbed into a simplified simulation
-    # link (kept so count stations can be matched to the right original
-    # geometry elsewhere) - they share their base link's from/to node, so our
-    # node-to-node geometry would otherwise draw them as an exact duplicate
-    # of the real link, permanently stuck at 0 flow since they're never the
-    # id actually used in output_events.
-    links = network.links[["link_id", "freespeed", "replicate_of"]].copy()
+    links = network.links[["link_id", "freespeed"]].copy()
     links["link_id"] = links["link_id"].astype(str)
-    links = links[links["replicate_of"].isna()]
     fast_link_ids = set(links.loc[links.freespeed >= MIN_SPEED_KMH_FOR_FLOW_MAP / 3.6, "link_id"])
 
     keep_mask = geometry.link_id.isin(fast_link_ids) & (

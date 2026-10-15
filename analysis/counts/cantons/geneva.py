@@ -4,6 +4,7 @@ import geopandas as gpd
 import os
 import contextily as ctx
 import numpy as np
+from ..matching.matcher import MATCH_ENDPOINT_COLUMNS
 
 def configure(context):
     context.config("data_path")
@@ -49,7 +50,7 @@ def execute(context):
     #                                     }).reset_index(drop=True)
     
     df["OBJECTID"] = df["counter_id"].astype(str)+'_'+df["denomination"].astype(str).replace('.','')
-    df = df[["OBJECTID", "mean_flow_2025", "median_flow_2025", "geometry", "osm_id", "angle"]]
+    df = df[["OBJECTID", "mean_flow_2025", "median_flow_2025", "geometry", "osm_id", "angle", *MATCH_ENDPOINT_COLUMNS]]
     df = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:2056")
     
     # plot
@@ -83,7 +84,7 @@ def merge_with_matched_stations(context, df):
                                     df_matched["link_x_to_node"] - df_matched["link_x_from_node"],
                                 ))
 
-    df_matched = df_matched[["counter_id", "network", "denomination", "link_osm_id", "angle"]]
+    df_matched = df_matched[["counter_id", "network", "denomination", "link_osm_id", "angle", *MATCH_ENDPOINT_COLUMNS]]
     df_matched = df_matched.rename(columns={"link_osm_id": "osm_id"})
 
     # merge

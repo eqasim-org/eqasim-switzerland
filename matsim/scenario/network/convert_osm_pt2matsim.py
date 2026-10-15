@@ -1,22 +1,6 @@
 import matsim.runtime.pt2matsim as pt2matsim
 from lxml import etree
 
-DEFAULT_SPEEDS = {
-    "motorway": 120,
-    "motorway_link": 80,
-    "trunk": 100,
-    "trunk_link": 80,
-    "primary": 80,
-    "primary_link": 50,
-    "secondary": 50,
-    "secondary_link": 30,
-    "tertiary": 50,
-    "tertiary_link": 30,
-    "unclassified": 30,
-    "residential": 30,
-    "living_street": 20,
-}
-DEFAULT_SPEEDS = {k: round(v / 3.6,1) for k, v in DEFAULT_SPEEDS.items()}  # convert km/h to m/s
 
 def configure(context):
     context.stage("matsim.runtime.java")
@@ -30,6 +14,8 @@ def configure(context):
     context.config("pt2matsim.respectVehicleAccess", True)
     context.config("pt2matsim.allowPtRoutesOnPrivateRoads", True)
     context.config("pt2matsim.maxLinkLength", 1000.0)
+    context.config("pt2matsim.useOsmTurnArrows", True)
+    context.config("java_memory", "50G", volatile=True)
 
 
 def execute(context):
@@ -103,6 +89,7 @@ def execute(context):
     set_param("parseTurnRestrictions", str(context.config("parseTurnRestrictions")).lower())
     set_param("respectVehicleAccess", str(context.config("pt2matsim.respectVehicleAccess")).lower())
     set_param("allowPtRoutesOnPrivateRoads", str(context.config("pt2matsim.allowPtRoutesOnPrivateRoads")).lower())
+    set_param("useOsmTurnArrows", str(context.config("pt2matsim.useOsmTurnArrows")).lower())
 
     if export_detailed_network:
         set_param("outputDetailedLinkGeometryFile", detailed_network_file)
@@ -138,3 +125,29 @@ def execute(context):
 
     network_path = "%s/converted_network.xml.gz" % context.path()
     return network_path, detailed_network_file
+
+
+
+
+
+
+
+
+
+################ defaults and options ##################
+DEFAULT_SPEEDS = {
+    "motorway": 120,
+    "motorway_link": 80,
+    "trunk": 100,
+    "trunk_link": 80,
+    "primary": 80,
+    "primary_link": 50,
+    "secondary": 50,
+    "secondary_link": 30,
+    "tertiary": 50,
+    "tertiary_link": 30,
+    "unclassified": 30,
+    "residential": 30,
+    "living_street": 20,
+}
+DEFAULT_SPEEDS = {k: round(v / 3.6,1) for k, v in DEFAULT_SPEEDS.items()}  # convert km/h to m/s

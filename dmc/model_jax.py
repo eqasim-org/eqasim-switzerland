@@ -26,6 +26,7 @@ from scipy.optimize import OptimizeResult, minimize
 import yaml
 
 from dmc.constants import constants
+from dmc.specification import LINEAR_TERMS
 from dmc.vot.functions import vot_utils
 from dmc.writer import writer
 
@@ -358,67 +359,6 @@ def define_parameters(
     return parameters
 
 
-LINEAR_TERMS = {
-    "car": [
-        ("destination_work", "destination_work"), ("destination_home", "destination_home"),
-        ("destination_education", "destination_education"), ("destination_shopping", "destination_shopping"),
-        ("destination_leisure", "destination_leisure"), ("destination_other", "destination_other"),
-        ("destination_urban", "urban_destination"), ("destination_urbancore", "urbancore_destination"),
-        ("sex", "sex"), ("retired", "is_retired"), ("junior", "is_junior"),
-        ("ownership_ratio", "car_ownership_ratio"), ("low_income", "low_income"),
-        ("high_income", "high_income"), ("region_1", "region_1"), ("region_2", "region_2"),
-        ("origin_home", "origin_home"), ("short_distance", "short_distance"),
-        ("long_distance", "long_distance"), ("destination_zurich", "destination_zurich"),
-        ("destination_geneva", "destination_geneva"), ("destination_basel", "destination_basel"),
-        ("destination_lausanne", "destination_lausanne"), ("destination_luzern", "destination_luzern"),
-        ("destination_bern", "destination_bern"),
-    ],
-    "pt": [
-        ("sex", "sex"), ("retired", "is_retired"), ("junior", "is_junior"),
-        ("low_income", "low_income"), ("high_income", "high_income"),
-        ("destination_work", "destination_work"), ("destination_home", "destination_home"),
-        ("destination_education", "destination_education"), ("destination_shopping", "destination_shopping"),
-        ("destination_leisure", "destination_leisure"), ("destination_other", "destination_other"),
-        ("destination_urban", "urban_destination"), ("destination_urbancore", "urbancore_destination"),
-        ("region_1", "region_1"), ("region_2", "region_2"), ("origin_home", "origin_home"),
-        ("short_distance", "short_distance"), ("long_distance", "long_distance"),
-        ("good_service", "good_pt_service"), ("medium_service", "medium_pt_service"),
-        ("destination_good_service", "destination_good_pt_service"),
-        ("destination_medium_service", "destination_medium_pt_service"),
-    ],
-    "bike": [
-        ("sex", "sex"), ("retired", "is_retired"), ("junior", "is_junior"),
-        ("low_income", "low_income"), ("high_income", "high_income"),
-        ("destination_work", "destination_work"), ("destination_home", "destination_home"),
-        ("destination_education", "destination_education"), ("destination_shopping", "destination_shopping"),
-        ("destination_leisure", "destination_leisure"), ("destination_other", "destination_other"),
-        ("destination_urban", "urban_destination"), ("destination_urbancore", "urbancore_destination"),
-        ("region_1", "region_1"), ("region_2", "region_2"), ("origin_home", "origin_home"),
-        ("short_distance", "short_distance"), ("long_distance", "long_distance"),
-    ],
-    "walk": [
-        ("sex", "sex"), ("retired", "is_retired"), ("junior", "is_junior"),
-        ("low_income", "low_income"), ("high_income", "high_income"),
-        ("destination_work", "destination_work"), ("destination_home", "destination_home"),
-        ("destination_education", "destination_education"), ("destination_shopping", "destination_shopping"),
-        ("destination_leisure", "destination_leisure"), ("destination_other", "destination_other"),
-        ("destination_urban", "urban_destination"), ("destination_urbancore", "urbancore_destination"),
-        ("region_1", "region_1"), ("region_2", "region_2"), ("origin_home", "origin_home"),
-        ("short_distance", "short_distance"), ("long_distance", "long_distance"),
-    ],
-    "car_passenger": [
-        ("driving_permit", "driving_license"), ("sex", "sex"), ("retired", "is_retired"),
-        ("junior", "is_junior"), ("low_income", "low_income"), ("high_income", "high_income"),
-        ("destination_work", "destination_work"), ("destination_home", "destination_home"),
-        ("destination_education", "destination_education"), ("destination_shopping", "destination_shopping"),
-        ("destination_leisure", "destination_leisure"), ("destination_other", "destination_other"),
-        ("destination_urban", "urban_destination"), ("destination_urbancore", "urbancore_destination"),
-        ("region_1", "region_1"), ("region_2", "region_2"),
-        ("short_distance", "short_distance"), ("long_distance", "long_distance"),
-        ("very_long_distance", "very_long_distance"), ("origin_home", "origin_home"),
-        ("ownership_ratio", "car_ownership_ratio"), ("has_car", "has_car"),
-    ],
-}
 
 
 def dataframe_to_arrays(df: pd.DataFrame) -> dict[str, jax.Array]:

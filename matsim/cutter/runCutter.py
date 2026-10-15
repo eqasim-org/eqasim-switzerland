@@ -1,61 +1,47 @@
+"""Run the selected Java cutter; scenario assembly lives in scenario.py."""
 import os.path
-import shutil
-import glob
 import matsim.runtime.eqasim as eqasim
-import logging
-from .cutter_tools import change_params, cut_csv_to_region, cut_csv_to_network, get_regions_path
-import matsim.simulation.config_utils as config_utils
+from .cutter_tools import change_params
+from .file_paths import simulation_root
 
-logger = logging.getLogger("synpp")
 
 def configure(context):
-    context.stage("matsim.runtime.java")
-    context.stage("matsim.runtime.eqasim")
-    context.stage("matsim.simulation.prepare")
-    context.stage("matsim.simulation.run")
-    context.stage("data.pt_pricing.pt_pricing")
-    context.stage("data.microcensus.shares")
-
-    context.config("network_calibration.activate", default=False)
-    context.config("network_calibration.calibrate_disutilities", default=True)
-    context.config("network_calibration.calibrate_freespeed", default=True)
-    context.config("network_calibration.calibrate_agents_ascs", default=True)
-    context.config("network_calibration.calibrate_subpopulations", default=True)
-
-    need_counts = config_utils.need_counts_file(context)
-    if context.config("network_calibration.activate") and need_counts:
-        context.stage("analysis.counts.target")
-        if context.config("network_calibration.calibrate_disutilities"):
-            context.stage("calibration.road_regions.penalty_calibration")
-        
-    
-    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
-        context.stage("analysis.travel_times.APIs.target")
-        context.stage("calibration.road_regions.freespeed_calibration")   
-
-    context.config("calibrate_alphas_in_matsim", default=False)
-    context.config("calibrate_betas_in_matsim", default=False)
+    context.config("cutter.scenario_path", default="")
     context.config("extent_path", default="")
     context.config("extent_prefix", default="")
-    context.config("threads")
+    context.config("use_vdf", default=False)
+    context.config("cutterVersion", default="v2" if context.config("use_vdf") else "v1")
+    context.config("threads", volatile=True)
+    if not context.config("extent_path") or not context.config("extent_prefix"):
+        return
     
+    cutter_version(context)
+    context.stage("matsim.runtime.java")
+    context.stage("matsim.runtime.eqasim")
+
+    # If this path is provided, we just use it to get the parent model and cut it
+    if not context.config("cutter.scenario_path"):
+        context.stage("matsim.simulation.run")    
+
 
 def execute(context):
-    if context.config("extent_path") == "" or context.config("extent_prefix") == "":
+    if not context.config("extent_path") or not context.config("extent_prefix"):
         return ""
+    version = cutter_version(context)
     
-    # get the output config from the simulation run in matsim.simulation.run stage
-    config_path = "%s/%s" % (context.path("matsim.simulation.run"), "simulation_output/output_config.xml" )
-    assert os.path.exists(config_path)
-    
+    # Read the supplied simulation or the pipeline simulation stage.
+    p = simulation_root(context)
+    config_path = os.path.join(p, "simulation_output", "output_config.xml")
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Simulation output config does not exist: {config_path}")
+
     # the output path, where the scenario is created
     output_path = "%s/output" % context.path()
 
     # change the path of all input files to point to the output files
     # population, households, facitilies, network, transit_schedule, transit_vehicles, vehicles
-    p = context.path("matsim.simulation.run")
     cutter_config_path = "%s/config_cutter.xml" % context.path()
-    change_params(config_path = config_path, 
+    change_params(config_path = config_path,
                   output_path = cutter_config_path,
                   params = [
                             # First: use the simulation results to cut the scenario
@@ -79,110 +65,35 @@ def execute(context):
                             ("eqasim:networkCalibration.freespeedCalibration.specialRegionPath",""),
                             ] )
 
- 
-    # use the new config to run the cutter
-    events_path = "%s/%s/output_events.xml.gz" % (context.path("matsim.simulation.run"), "simulation_output")
-    eqasim.run(context, "org.eqasim.core.scenario.cutter.RunScenarioCutter", [
+
+    arguments = [
         "--config-path", cutter_config_path,
         "--output-path", output_path,
         "--extent-path", context.config("extent_path"),
         "--threads", context.config("threads"),
         "--prefix", context.config("extent_prefix"),
-        "--events-path", events_path,
-        "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator"
-        ] )
-
-    # move some parameters files to the output path to be comprehensive for the scenario (self contained)
-    # 1. mode parameters
-    shutil.copyfile("%s/dmc_parameters.yml" % context.path("matsim.simulation.prepare"),
-                    "%s/dmc_parameters.yml" % output_path)
-    shutil.copyfile("%s/cost_parameters.yml" % context.path("matsim.simulation.prepare"),
-                    "%s/cost_parameters.yml" % output_path)
-    dmc_params = "dmc_parameters.yml"
-    if context.config("calibrate_alphas_in_matsim") or context.config("calibrate_betas_in_matsim"):
-        calibrated_parameters_path = glob.glob("%s/%s/*_parameters.yml" % (context.path("matsim.simulation.run"), "simulation_output"))
-        if len(calibrated_parameters_path) > 0:            
-            calibrated_parameters_path = max(calibrated_parameters_path, key=os.path.getctime)
-            shutil.copyfile(calibrated_parameters_path, 
-                            "%s/calibrated_dmc_parameters.yml" % output_path)
-            dmc_params = "calibrated_dmc_parameters.yml"
-
-    # 2.mode shares
-    global_shares_output_path, cantonal_shares_output_path = context.stage("data.microcensus.shares")
-    shutil.copy(global_shares_output_path, f"{output_path}/global_target_mode_shares.csv" )
-    shutil.copy(cantonal_shares_output_path, f"{output_path}/cantonal_target_mode_shares.csv" )
-
-    # 3. pricing parameters
-    sbb_path, zones_path, pricing_path = context.stage("data.pt_pricing.pt_pricing")    
-    shutil.copy(sbb_path, f"{output_path}/SBB_all_distances.csv" )    
-    shutil.copy(zones_path, f"{output_path}/gtfs_zones.csv" )    
-    shutil.copy(pricing_path, f"{output_path}/pricingDescription.xml" )
-
-    # 4. calibration files (special regions and target files)
-    calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = config_utils.get_network_cal_config_as_bool(context)
-    need_counts = config_utils.need_counts_file(context)
-
-    regionl_speeds_file = ""
-    if calibrate_network and calibrate_freespeed:
-        region_dir = os.path.join(output_path, "network_calibration_files")
-        os.makedirs(region_dir, exist_ok=True)
-
-        freespeed_calibration_path = context.stage("calibration.road_regions.freespeed_calibration")
-        if freespeed_calibration_path!="":                        
-            regions = freespeed_calibration_path.split(";")
-            for i,region in enumerate(regions):
-                if os.path.exists(region):
-                    shutil.copy(region, f"{region_dir}/freespeed_special_region_{i}.yml" )
-
-        target_traveltimes_file = context.stage("analysis.travel_times.APIs.target")
-        if target_traveltimes_file!="":
-            cut_csv_to_region(csv_path= target_traveltimes_file, 
-                              region_path = context.config("extent_path"),
-                              output_path = f"{region_dir}/target_travel_times.csv")
-            if os.path.exists(f"{region_dir}/target_travel_times.csv"):
-                    regionl_speeds_file = "network_calibration_files/target_travel_times.csv"
-
-    regional_counts_file = ""
-    if need_counts:  
-        region_dir = os.path.join(output_path, "network_calibration_files")
-        os.makedirs(region_dir, exist_ok=True)
-
-        target_counts_file = context.stage("analysis.counts.target")
-        if target_counts_file!="":
-            cut_csv_to_network(csv_path = target_counts_file, 
-                               network_path = "%s/%snetwork.xml.gz" % (output_path, context.config("extent_prefix")),
-                               output_path = f"{region_dir}/target_counts.csv")
-            if os.path.exists(f"{region_dir}/target_counts.csv"):
-                regional_counts_file = "network_calibration_files/target_counts.csv"
-
-        if calibrate_network and calibrate_disutilities:
-            penalty_calibration_path = context.stage("calibration.road_regions.penalty_calibration")  
-            if penalty_calibration_path!="":            
-                regions = penalty_calibration_path.split(";")
-                for i,region in enumerate(regions):
-                    if os.path.exists(region):
-                        shutil.copy(region, f"{region_dir}/penalties_special_region_{i}.yml" )
-
-    # 5. modify the regional model config
-    config_file = "%s/%sconfig.xml" % (output_path, context.config("extent_prefix") )
-    assert os.path.exists(config_file), "Config file does not exist: %s" % config_file
-    change_params(config_path = config_file, 
-                  output_path = config_file,
-                  params = [
-                        ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
-                        ("eqasim:networkCalibration.objective", config_utils.get_network_calibration_objectives(context)),
-                        ("eqasim:networkCalibration.calibrate", config_utils.get_network_calibration_calibrate(context, ignore=("penalty","freespeed"))), # we do not calibrate penalty and freespeed here
-                        ("eqasim:networkCalibration.costCalibration.activate","false"),
-                        ("eqasim:networkCalibration.freespeedCalibration.activate","false"),
-                        ("eqasim:alphaCalibration.filePath","cantonal_target_mode_shares.csv"),
-                        ("eqasim.modeParametersPath",dmc_params),
-                        ("eqasim.costParametersPath","cost_parameters.yml"),
-                        ("eqasim:networkCalibration.countsFile",regional_counts_file),
-                        ("eqasim:networkCalibration.freespeedCalibration.observedTripsFile",regionl_speeds_file),
-                        ("eqasim:networkCalibration.costCalibration.specialRegionPath",get_regions_path(output_path, kind="penalty")),
-                        ("eqasim:networkCalibration.freespeedCalibration.specialRegionPath",get_regions_path(output_path, kind="freespeed")),
-                        ("ptZones.ptZonesFilePath", "gtfs_zones.csv"),
-                        ("ptZones.sbbDistancesPath", "SBB_all_distances.csv"),
-                        ("ptZones.pricingDescriptionPath", "pricingDescription.xml")
-                        ] )
+    ]
+    if version == "v1":
+        main_class = "org.eqasim.core.scenario.cutter.RunScenarioCutter"
+        arguments.extend([
+            "--events-path", os.path.join(p, "simulation_output", "output_events.xml.gz"),
+            "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator",
+        ])
+    else:
+        main_class = "org.eqasim.core.scenario.cutter.RunScenarioCutterV2"
+        arguments.extend([
+            "--vdf-travel-times-path", os.path.join(p, "simulation_output", "vdf.bin"),
+        ])
+    eqasim.run(context, main_class, arguments)
     return output_path
+
+
+################### Functions ####################
+
+def cutter_version(context):
+    version = str(context.config("cutterVersion")).lower().replace(".", "")
+    if version not in {"v1", "v2"}:
+        raise ValueError(f"Invalid cutter version: {context.config('cutterVersion')}")
+    if version == "v2" and not context.config("use_vdf"):
+        raise ValueError("VDF must be enabled for cutter version 2")
+    return version

@@ -12,7 +12,7 @@ def configure(context):
     context.stage("calibration.pt_pricing.generate_config")
     context.stage("dmc.params")
 
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config('random_seed')
 
 

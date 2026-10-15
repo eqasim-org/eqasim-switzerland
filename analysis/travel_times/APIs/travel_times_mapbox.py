@@ -1,6 +1,4 @@
-import json
 import pandas as pd
-import os
 import logging
 from data.spatial.utils import convert_crs
 
@@ -10,33 +8,14 @@ def configure(context):
     context.stage("analysis.travel_times.APIs.get_from_mapbox")
 
 def execute(context):
-    path_to_travel_times = context.stage("analysis.travel_times.APIs.get_from_mapbox")
+    summary_path = context.stage("analysis.travel_times.APIs.get_from_mapbox")
+    df = pd.read_csv(summary_path, dtype={"identifier": str})
 
-    # load the json file with travel times
-    with open(path_to_travel_times, 'r') as f:
-        travel_times_data = json.load(f)
-
-    # get the data into a dataframe
-    records = []
-    for identifier, data in travel_times_data.items():
-        if data["route_info"] is None:
-            continue
-        #duration = data['route_info']['route']['duration_typical']
-        duration = data['route_info']['route']['duration'] #if duration is None else duration
-        record = {
-            'identifier': identifier,            
-            'distance_km': data["route_info"]['route']['distance'] / 1000,
-            'travel_time_min': duration / 60,
-            'departure_time': data["departure_time"],
-            'origin_x': data["origin_x"],
-            'origin_y': data["origin_y"],
-            'destination_x': data["destination_x"],
-            'destination_y': data["destination_y"],
-        }
-        records.append(record)
-    
-    # create dataframe
-    df = pd.DataFrame.from_records(records)
+    if df.empty:
+        df["euclidean_distance_km"] = pd.Series(dtype=float)
+        return df[['identifier', 'distance_km', 'travel_time_min', 'departure_time',
+                   'euclidean_distance_km', 'origin_x', 'origin_y', 'destination_x',
+                   'destination_y']]
 
     # compute euclidean distance
     df["origin_x"], df["origin_y"] = convert_crs( df["origin_x"].values, 

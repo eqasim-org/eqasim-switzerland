@@ -48,6 +48,8 @@ TRANSCALITY_FLOW_MAP_TOOLTIP_FIELDS = [
     "daily_profile",
 ]
 FLOW_MAP_FIELD_LABELS = {
+    "construction_affected": "Construction affected",
+    "construction_reason": "Construction flag reason",
     "link_id": "Link ID",
     "id": "Station",
     "matched_link_ids": "Matched link ID(s)",
@@ -136,7 +138,7 @@ class Plotter:
             )
 
         flow_columns = ["id", "flow", "simulated_flow", "pdiff", "adiff"]
-        for optional_column in ("directions_represented", "matched_link_ids", "link_id", "period_hours", "flow_period"):
+        for optional_column in ("directions_represented", "matched_link_ids", "link_id", "period_hours", "flow_period", "construction_affected", "construction_reason"):
             if optional_column in flows.columns:
                 flow_columns.append(optional_column)
         result = points[["id", "geometry"]].merge(
@@ -161,12 +163,17 @@ class Plotter:
                 else 2
             )
         result["directions_represented"] = directions_represented
+        # Combining daily authorities with Transcality creates NaNs for stages
+        # that do not provide duration metadata. Preserve explicit peak windows.
+        result["period_hours"] = (
+            result["period_hours"].fillna(24) if "period_hours" in result else 24
+        )
         result["geh"] = GEH(
             result["flow"],
             result["simulated_flow"],
             return_vector=True,
             directions_represented=directions_represented,
-            period_hours=result.get("period_hours", 24),
+            period_hours=result["period_hours"],
         ).round(2)
         return gpd.GeoDataFrame(result, geometry="geometry", crs=points.crs)
 
@@ -485,7 +492,7 @@ class Plotter:
         if matched is not None:
             matched_ids = matched.link_id.unique()
             matched_links = network.get_link_geometries(
-                matched_ids, expand_merged=True
+                matched_ids
             )
             matched_links.plot(ax=ax, color='blue', linewidth=2*lw)
             
@@ -776,12 +783,14 @@ class Plotter:
         return points, True
 
     @staticmethod
-    def _inject_flow_metric_controls(path_to_save, metric_settings, has_count_bounds=False):
+    def _inject_flow_metric_controls(path_to_save, metric_settings, has_count_bounds=False,
+                                     has_construction=False, show_construction=True):
         if not metric_settings:
             return
 
         controls = """
 <div id="counts-map-controls">
+  __CONSTRUCTION_CONTROL__
   __COUNT_MODE_CONTROL__
   <div class="counts-control-title">Count point colors</div>
   <label for="counts-color-metric">Metric</label>
@@ -830,6 +839,12 @@ class Plotter:
   </select>
   <div>Points without valid bounds remain unchanged. Daily profiles show original observations.</div>
 """ if has_count_bounds else "")
+        controls = controls.replace("__CONSTRUCTION_CONTROL__", (
+            '<label><input id="counts-show-construction" type="checkbox" '
+            + ('checked' if show_construction else '')
+            + '> Show construction-affected counts</label>'
+            '<div>Map display only; does not change calibration targets or saved statistics.</div>'
+        ) if has_construction else "")
         style = """
 <style>
 #counts-map-controls {
@@ -925,6 +940,7 @@ class Plotter:
   const metricSettings = __METRIC_SETTINGS__;
   const select = document.getElementById("counts-color-metric");
   const countMode = document.getElementById("counts-count-mode");
+  const constructionToggle = document.getElementById("counts-show-construction");
   const lowerInput = document.getElementById("counts-lower-bound");
   const upperInput = document.getElementById("counts-upper-bound");
   const lowerLabel = document.getElementById("counts-lower-label");
@@ -1084,6 +1100,16 @@ class Plotter:
     deck.setProps({layers: layers});
   }
 
+  if (constructionToggle) {
+    constructionToggle.addEventListener("change", function () {
+      if (!deck || !deck.props || !deck.props.layers) return;
+      deck.setProps({layers: deck.props.layers.map(function (layer) {
+        return layer.id.endsWith("-construction")
+          ? layer.clone({visible: constructionToggle.checked}) : layer;
+      })});
+    });
+  }
+
   if (countMode) {
     countMode.addEventListener("change", function () {
       if (!deck || !deck.props || !deck.props.layers) return;
@@ -1182,7 +1208,8 @@ class Plotter:
                    path_to_save=None, 
                    cut_network = False,
                    path_color_column=None,
-                   path_color_legend=None):
+                   path_color_legend=None,
+                   show_construction=True):
         
         point_data_to_show = point_data_to_show or []
 
@@ -1194,6 +1221,22 @@ class Plotter:
         if not isinstance(df, list):
             df = [df]
 
+        # Separate layers let deck.gl hide affected points (including picking
+        # and accuracy centers) without discarding their data or count modes.
+        split_points = []
+        has_construction = False
+        for points in point_gdf:
+            if points is not None and "construction_affected" in points:
+                affected = points.construction_affected.fillna(False).astype(bool)
+                has_construction |= bool(affected.any())
+                split_points.extend([points[~affected].copy(), points[affected].copy()])
+            else:
+                split_points.append(points)
+        point_gdf = split_points
+        if has_construction:
+            point_data_to_show = list(dict.fromkeys([
+                *point_data_to_show, "construction_affected", "construction_reason"
+            ]))
         metric_settings = Plotter._flow_metric_settings(point_gdf)
 
         # cut df to point gdf (just plot the regional network
@@ -1267,7 +1310,10 @@ class Plotter:
         if point_gdf:
             colors = [[255, 0, 0], [0, 102, 51], [128, 0, 128]]
             for i, gdf in enumerate(point_gdf):
-                if not gdf.empty:
+                if gdf is not None and not gdf.empty:
+                    affected_layer = "construction_affected" in gdf and bool(gdf.construction_affected.all())
+                    layer_key = f"{i}-construction" if affected_layer else str(i)
+                    visible = show_construction or not affected_layer
                     gdf = gdf.copy().reset_index(drop=True)
                     gdf["coordinates"] = gdf.geometry.apply(
                         lambda geometry: [geometry.x, geometry.y]
@@ -1288,10 +1334,11 @@ class Plotter:
                     point_layer = pdk.Layer(
                         "ScatterplotLayer",
                         gdf,
-                        id=f"counts-points-{i}",
+                        id=f"counts-points-{layer_key}",
+                        visible=visible,
                         pickable=True,
                         get_position="coordinates",
-                        get_fill_color="color" if "color" in gdf else colors[i],
+                        get_fill_color="color" if "color" in gdf else colors[i % len(colors)],
                         get_radius=2,
                         radius_min_pixels=6,
                     )
@@ -1314,7 +1361,8 @@ class Plotter:
                             pdk.Layer(
                                 "ScatterplotLayer",
                                 gdf,
-                                id=f"counts-quality-green-{i}",
+                                id=f"counts-quality-green-{layer_key}",
+                                visible=visible,
                                 pickable=False,
                                 get_position="coordinates",
                                 get_fill_color="quality_green_color",
@@ -1327,7 +1375,8 @@ class Plotter:
                             pdk.Layer(
                                 "ScatterplotLayer",
                                 gdf,
-                                id=f"counts-quality-gold-{i}",
+                                id=f"counts-quality-gold-{layer_key}",
+                                visible=visible,
                                 pickable=False,
                                 get_position="coordinates",
                                 get_fill_color="quality_gold_color",
@@ -1379,7 +1428,8 @@ class Plotter:
         # Save the map as an HTML file and add browser-side controls.
         if path_to_save:
             r.to_html(path_to_save, notebook_display=False)
-            Plotter._inject_flow_metric_controls(path_to_save, metric_settings, has_count_bounds)
+            Plotter._inject_flow_metric_controls(path_to_save, metric_settings, has_count_bounds,
+                                                has_construction, show_construction)
             Plotter._inject_path_color_legend(path_to_save, path_color_legend)
             logger.info(f"Map saved to {path_to_save}")
         else:

@@ -1,4 +1,4 @@
-"""Memory-efficient storage helpers for TomTom routing responses.
+"""Memory-efficient storage helpers for routing responses.
 
 Raw API responses are kept in immutable ``routed_trips_*.json.gz`` batches.
 The fields used by the analysis are kept separately in a small CSV index, so a
@@ -115,7 +115,7 @@ def iter_raw_routes(path):
         while True:
             identifier = reader.decode()
             if not isinstance(identifier, str):
-                raise ValueError(f"TomTom route identifier must be a string in {path}")
+                raise ValueError(f"Route identifier must be a string in {path}")
             reader.consume(":")
             yield identifier, reader.decode()
 
@@ -129,12 +129,20 @@ def iter_raw_routes(path):
                 raise ValueError(f"Expected ',' or '}}' in {path}, found {separator!r}")
 
 
-def raw_route_files(directory):
-    """Return all legacy and compressed raw TomTom files in stable order."""
+def raw_route_files(
+    directories,
+    patterns=("routed_trips*.json", "routed_trips*.json.gz"),
+):
+    """Return matching legacy and compressed route files in stable order."""
 
-    directory = Path(directory)
-    paths = set(directory.glob("routed_trips*.json"))
-    paths.update(directory.glob("routed_trips*.json.gz"))
+    if isinstance(directories, (str, os.PathLike)):
+        directories = [directories]
+
+    paths = set()
+    for directory in map(Path, directories):
+        if directory.exists():
+            for pattern in patterns:
+                paths.update(directory.glob(pattern))
     return sorted(path for path in paths if path.is_file())
 
 
@@ -222,16 +230,16 @@ def append_summary_records(summary_path, records):
     return count
 
 
-def _records_from_files(paths, known_ids=None):
+def _records_from_files(paths, known_ids=None, record_factory=summary_record):
     known_ids = set() if known_ids is None else known_ids
     for path in paths:
-        logger.info("Indexing raw TomTom routes from %s", path)
+        logger.info("Indexing raw routes from %s", path)
         file_count = 0
         for identifier, data in iter_raw_routes(path):
             identifier = str(identifier)
             if identifier in known_ids:
                 continue
-            record = summary_record(identifier, data)
+            record = record_factory(identifier, data)
             if record is not None:
                 known_ids.add(identifier)
                 file_count += 1
@@ -240,18 +248,30 @@ def _records_from_files(paths, known_ids=None):
                     logger.info("Indexed %s trips from %s", file_count, path)
 
 
-def rebuild_summary_csv(directory):
+def rebuild_summary_csv(
+    directory,
+    raw_directories=None,
+    raw_patterns=("routed_trips*.json", "routed_trips*.json.gz"),
+    record_factory=summary_record,
+    metadata_directory=None,
+):
     """Stream all raw route files into a new CSV and replace the old index."""
 
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
+    raw_directories = [directory] if raw_directories is None else raw_directories
+    metadata_directory = directory if metadata_directory is None else Path(metadata_directory)
+    metadata_directory.mkdir(parents=True, exist_ok=True)
     summary_path = directory / SUMMARY_FILENAME
-    manifest_path = directory / MANIFEST_FILENAME
-    paths = raw_route_files(directory)
+    manifest_path = metadata_directory / MANIFEST_FILENAME
+    paths = raw_route_files(raw_directories, raw_patterns)
     temporary_path = summary_path.with_name(f".{summary_path.name}.{uuid4().hex}.tmp")
 
     try:
-        append_summary_records(temporary_path, _records_from_files(paths))
+        append_summary_records(
+            temporary_path,
+            _records_from_files(paths, record_factory=record_factory),
+        )
         if not temporary_path.exists():
             with temporary_path.open("w", encoding="utf-8", newline="") as stream:
                 csv.DictWriter(stream, fieldnames=SUMMARY_COLUMNS).writeheader()
@@ -266,32 +286,54 @@ def rebuild_summary_csv(directory):
         if temporary_path.exists():
             temporary_path.unlink()
 
-    logger.info("TomTom summary index is available at %s", summary_path)
+    logger.info("Route summary index is available at %s", summary_path)
     return summary_path
 
 
-def ensure_summary_csv(directory):
+def ensure_summary_csv(
+    directory,
+    raw_directories=None,
+    raw_patterns=("routed_trips*.json", "routed_trips*.json.gz"),
+    record_factory=summary_record,
+    metadata_directory=None,
+):
     """Create the CSV once, then index only raw files not in the manifest."""
 
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
+    raw_directories = [directory] if raw_directories is None else raw_directories
+    metadata_directory = directory if metadata_directory is None else Path(metadata_directory)
+    metadata_directory.mkdir(parents=True, exist_ok=True)
     summary_path = directory / SUMMARY_FILENAME
-    manifest_path = directory / MANIFEST_FILENAME
+    manifest_path = metadata_directory / MANIFEST_FILENAME
 
     if not summary_path.exists():
-        return rebuild_summary_csv(directory)
+        return rebuild_summary_csv(
+            directory,
+            raw_directories=raw_directories,
+            raw_patterns=raw_patterns,
+            record_factory=record_factory,
+            metadata_directory=metadata_directory,
+        )
 
     indexed_files = _read_manifest(manifest_path)
-    pending_files = [path for path in raw_route_files(directory) if path.name not in indexed_files]
+    pending_files = [
+        path
+        for path in raw_route_files(raw_directories, raw_patterns)
+        if path.name not in indexed_files
+    ]
     if pending_files:
         known_ids = read_routed_ids(summary_path)
-        append_summary_records(summary_path, _records_from_files(pending_files, known_ids))
+        append_summary_records(
+            summary_path,
+            _records_from_files(pending_files, known_ids, record_factory),
+        )
         _append_manifest(manifest_path, (path.name for path in pending_files))
 
     return summary_path
 
 
-def save_raw_batch(directory, routed_data):
+def save_raw_batch(directory, routed_data, filename_prefix="routed_trips"):
     """Atomically save one complete, compact, gzip-compressed JSON batch."""
 
     if not routed_data:
@@ -300,7 +342,7 @@ def save_raw_batch(directory, routed_data):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    output_path = directory / f"routed_trips_{timestamp}.json.gz"
+    output_path = directory / f"{filename_prefix}_{timestamp}.json.gz"
     temporary_path = directory / f".{output_path.name}.{uuid4().hex}.tmp"
 
     try:
@@ -314,22 +356,32 @@ def save_raw_batch(directory, routed_data):
     return output_path
 
 
-def persist_routed_batch(directory, routed_data):
+def persist_routed_batch(
+    directory,
+    routed_data,
+    raw_directory=None,
+    metadata_directory=None,
+    record_factory=summary_record,
+    filename_prefix="routed_trips",
+):
     """Save raw responses, append their summaries, and mark the batch indexed."""
 
     if not routed_data:
         return None
 
     directory = Path(directory)
+    raw_directory = directory if raw_directory is None else Path(raw_directory)
+    metadata_directory = directory if metadata_directory is None else Path(metadata_directory)
+    metadata_directory.mkdir(parents=True, exist_ok=True)
     summary_path = directory / SUMMARY_FILENAME
-    manifest_path = directory / MANIFEST_FILENAME
-    raw_path = save_raw_batch(directory, routed_data)
+    manifest_path = metadata_directory / MANIFEST_FILENAME
+    raw_path = save_raw_batch(raw_directory, routed_data, filename_prefix)
     records = (
         record
         for identifier, data in routed_data.items()
-        if (record := summary_record(identifier, data)) is not None
+        if (record := record_factory(identifier, data)) is not None
     )
     append_summary_records(summary_path, records)
     _append_manifest(manifest_path, [raw_path.name])
-    logger.info("Saved %s new TomTom routes to %s", len(routed_data), raw_path)
+    logger.info("Saved %s new routes to %s", len(routed_data), raw_path)
     return raw_path

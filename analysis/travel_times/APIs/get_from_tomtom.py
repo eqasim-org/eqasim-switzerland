@@ -21,6 +21,14 @@ def configure(context):
                    default = os.path.join(context.config("data_path"),
                                           "travel_times",
                                           "tomtom_travel_times"))
+    context.config(
+        "tomtom_travel_times_backup_path",
+        default=os.path.join(
+            os.path.dirname(context.config("data_path")),
+            "travel_times_backup",
+            "tomtom",
+        ),
+    )
     context.config("num_tomtom_requests", default=int(1e10))
     context.config("tomtom_json_batch_size", default=100)
 
@@ -142,11 +150,17 @@ def route_with_tomtom(df_trips, tomtom_api_key, max_requests):
 
 def execute(context):
     output_directory = context.config("tomtom_travel_times_path")
+    backup_directory = context.config("tomtom_travel_times_backup_path")
     os.makedirs(output_directory, exist_ok=True)
+    os.makedirs(backup_directory, exist_ok=True)
 
     # On the first run this streams the legacy JSON files into a compact index.
     # Later runs read the CSV and only inspect any unindexed JSON batch.
-    summary_path = ensure_summary_csv(output_directory)
+    summary_path = ensure_summary_csv(
+        output_directory,
+        raw_directories=[output_directory, backup_directory],
+        metadata_directory=backup_directory,
+    )
 
     max_requests = context.config("num_tomtom_requests")
     tomtom_api_key = context.config("tomtom_api_key")
@@ -185,12 +199,22 @@ def execute(context):
             ):
                 batch[identifier] = data
                 if len(batch) >= batch_size:
-                    persist_routed_batch(output_directory, batch)
+                    persist_routed_batch(
+                        output_directory,
+                        batch,
+                        raw_directory=backup_directory,
+                        metadata_directory=backup_directory,
+                    )
                     total_routed += len(batch)
                     batch = {}
 
             if batch:
-                persist_routed_batch(output_directory, batch)
+                persist_routed_batch(
+                    output_directory,
+                    batch,
+                    raw_directory=backup_directory,
+                    metadata_directory=backup_directory,
+                )
                 total_routed += len(batch)
 
             logger.info("Saved %s newly routed TomTom trips", total_routed)

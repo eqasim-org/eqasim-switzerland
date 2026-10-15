@@ -4,7 +4,7 @@ import os
 import numpy as np
 import logging
 import glob
-from .readers import houshold_reader
+from matsim.readers import houshold_reader
 from analysis.counts.paths import get_simulation_path
 
 logger = logging.getLogger("synpp")

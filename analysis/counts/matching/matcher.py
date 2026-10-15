@@ -5,6 +5,8 @@ from enum import Enum
 
 import geopandas as gpd
 import pandas as pd
+import numpy as np
+from shapely.geometry import Point
 
 from .road_matching import (
     ROAD_TYPE_PRIORITY,
@@ -15,6 +17,7 @@ from .road_matching import (
 )
 
 logger = logging.getLogger("synpp")
+MATCH_ENDPOINT_COLUMNS = ["link_x_from_node", "link_y_from_node", "link_x_to_node", "link_y_to_node"]
 
 
 class MatchMode(str, Enum):
@@ -28,12 +31,18 @@ class TrafficDataMatcher:
     """Match count observations to MATSim links.
 
     Directional observations require manual ``osm_id`` and ``angle`` columns
-    and produce exactly one directed link. Bidirectional observations represent
+    and produce exactly one directed link. Try current OSM IDs, historical OSM
+    IDs, then nearby geometry, accepting only compatible directions at every
+    step. Spatial fallback uses the manual endpoints' midpoint/angle when
+    available, otherwise the station location/angle. Its default radius is
+    50 metres and the default angle tolerance is 45 degrees.
+    Bidirectional observations represent
     an aggregate across both directions and produce exactly two opposite links.
     """
 
     def match(self, network, counts, mode=None, search_radius=10,
-              prioritize_road_types=False, road_types_stopping_type = "secondary"):
+              prioritize_road_types=False, road_types_stopping_type = "secondary",
+              directional_search_radius=50, max_angle_difference=45):
         has_manual_direction = {"osm_id", "angle"}.issubset(counts.counts.columns)
         if mode is None:
             if not has_manual_direction:
@@ -50,7 +59,7 @@ class TrafficDataMatcher:
                 raise ValueError(
                     "Directional matching requires osm_id and angle in the count data."
                 )
-            matched = self._match_directional(network, counts)
+            matched = self._match_directional(network, counts, directional_search_radius, max_angle_difference)
         else:
             matched = self._match_bidirectional(
                 network, counts, search_radius, prioritize_road_types, road_types_stopping_type
@@ -68,8 +77,14 @@ class TrafficDataMatcher:
         logger.info("Matched %d of %d %s count stations.", found, total, mode.value)
         return matched.reset_index(drop=True)
 
-    def _match_directional(self, network, counts):
-        count_data = counts.counts[["id", "geometry", "osm_id", "angle"]].copy()
+    def _match_directional(self, network, counts, search_radius=50, max_angle_difference=45):
+        if not np.isfinite(max_angle_difference) or not 0 <= max_angle_difference < 90:
+            raise ValueError("max_angle_difference must be >= 0 and < 90 degrees")
+        if not np.isfinite(search_radius) or search_radius < 0:
+            raise ValueError("directional_search_radius must be finite and non-negative")
+        if network.crs != counts.counts.crs or not network.crs.is_projected:
+            raise ValueError("Directional matching requires the same projected CRS for counts and network")
+        count_data = counts.counts.copy()
         count_data["_osm_key"] = count_data["osm_id"].map(self._normalise_osm_id)
         count_data["angle"] = pd.to_numeric(count_data["angle"], errors="coerce")
 
@@ -83,35 +98,74 @@ class TrafficDataMatcher:
             )
         links["link_id"] = links["link_id"].astype(str)
         links["_osm_key"] = links["osm_id"].map(self._normalise_osm_id)
-        links = links[links["_osm_key"].isin(count_data["_osm_key"].dropna())]
+        attributes = network.links.get("attributes", pd.Series([None] * len(links), index=links.index))
+        old_ids = attributes.map(
+            lambda value: value.get("old_osm_id") if isinstance(value, dict) else None
+        )
+        if "old_osm_id" in network.links:
+            old_ids = network.links["old_osm_id"].combine_first(old_ids)
+        links["_old_keys"] = old_ids.map(self._old_osm_ids)
 
         roads = self._network_roads(network)
-        roads = roads[roads["link_id"].isin(links["link_id"])]
-        roads = roads.merge(links[["link_id", "_osm_key"]], on="link_id", how="inner")
+        roads = roads.merge(links[["link_id", "_osm_key", "_old_keys"]], on="link_id", how="inner")
         roads["road_angle"] = roads["geometry"].map(geometry_angle)
-        roads = roads.rename(columns={"geometry": "road_geometry"})
-
-        candidates = count_data.merge(
-            roads[["link_id", "road_geometry", "_osm_key", "road_angle"]],
-            on="_osm_key",
-            how="left",
-        ).dropna(subset=["link_id", "angle", "road_angle"])
-        if candidates.empty:
+        current_lookup = roads.groupby("_osm_key").groups
+        old_lookup = roads.explode("_old_keys").groupby("_old_keys").groups
+        rows = []
+        for _, station in count_data.iterrows():
+            reference = station.geometry
+            angle = station.angle
+            endpoints = pd.to_numeric(station.reindex(MATCH_ENDPOINT_COLUMNS), errors="coerce").to_numpy(dtype=float)
+            if np.isfinite(endpoints).all():
+                x0, y0, x1, y1 = endpoints
+                if x0 != x1 or y0 != y1:
+                    reference = Point((x0 + x1) / 2, (y0 + y1) / 2)
+                    angle = np.degrees(np.arctan2(y1 - y0, x1 - x0))
+            if reference is None or reference.is_empty or not np.isfinite(angle):
+                logger.warning("No valid direction/location for count %s; leaving unmatched", station.id)
+                continue
+            selected = None
+            for method, lookup in (("osm_id", current_lookup), ("old_osm_id", old_lookup), ("geometry", None)):
+                if lookup is None:
+                    if search_radius == 0:
+                        continue
+                    indices = roads.sindex.query(reference.buffer(search_radius), predicate="intersects")
+                    candidates = roads.iloc[indices].copy()
+                else:
+                    candidates = roads.loc[lookup.get(station["_osm_key"], [])].copy()
+                if candidates.empty:
+                    continue
+                candidates["angle_difference"] = angular_difference(angle, candidates.road_angle)
+                candidates = candidates[candidates.angle_difference <= max_angle_difference].copy()
+                if candidates.empty:
+                    continue
+                candidates["reference_distance"] = candidates.geometry.distance(reference)
+                if lookup is None:
+                    candidates = candidates[candidates.reference_distance <= search_radius]
+                if candidates.empty:
+                    continue
+                selected = candidates.sort_values(["reference_distance", "angle_difference", "link_id"], kind="stable").iloc[0]
+                rows.append({"id": station.id, "geometry": station.geometry,
+                             "link_id": selected.link_id, "road_geometry": selected.geometry,
+                             "distance": station.geometry.distance(selected.geometry),
+                             "match_method": method, "angle_difference": selected.angle_difference,
+                             "reference_distance": selected.reference_distance})
+                break
+            if selected is None:
+                logger.warning("No same-direction link found for count %s (OSM %s); leaving unmatched", station.id, station.osm_id)
+        if not rows:
             return self._empty_matches(counts.counts.crs)
-        candidates["angle_difference"] = angular_difference(
-            candidates["angle"], candidates["road_angle"]
-        )
-        candidates = candidates.sort_values(
-            ["id", "angle_difference", "link_id"], kind="stable"
-        ).drop_duplicates("id")
-        candidates["distance"] = candidates.apply(
-            lambda row: row["geometry"].distance(row["road_geometry"]), axis=1
-        )
-        return gpd.GeoDataFrame(
-            candidates[["id", "geometry", "link_id", "road_geometry", "distance"]],
-            geometry="geometry",
-            crs=counts.counts.crs,
-        )
+        result = gpd.GeoDataFrame(rows, geometry="geometry", crs=counts.counts.crs)
+        logger.info("Directional match methods: %s", result.match_method.value_counts().to_dict())
+        return result
+
+    @classmethod
+    def _old_osm_ids(cls, value):
+        """The network cleaner writes underscore-separated OSM histories."""
+        if isinstance(value, (list, tuple, set, np.ndarray)):
+            return list(dict.fromkeys(key for item in value for key in cls._old_osm_ids(item)))
+        value = cls._normalise_osm_id(value)
+        return [] if not value else list(dict.fromkeys(cls._normalise_osm_id(key) for key in value.split("_") if key))
 
     def _match_bidirectional(self, network, counts, search_radius, prioritize_road_types, road_types_stopping_type):
         count_data = gpd.GeoDataFrame(

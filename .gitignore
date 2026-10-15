@@ -29,3 +29,9 @@ ch_cutter
 main*.py
 .claude
 AGENTS.md
+
+CuttingBoundries
+
+# Population routing is source code, not generated routing output.
+!mode_choice/routing/
+!mode_choice/routing/*.py

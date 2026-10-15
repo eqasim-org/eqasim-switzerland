@@ -7,11 +7,13 @@ from .matching.counts import Counts
 from .matching.matcher import TrafficDataMatcher
 from .run_utils import filter_data, save_as_target
 from .runs.transcality import aggregate_counts_by_link
+from .construction_sites import configure_filter, filter_counts
 
 logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    configure_filter(context)
     geneva_source = context.config("analysis.counts.geneva_source", default="transcality")
     if geneva_source not in ("geneva", "transcality"):
         raise ValueError("analysis.counts.geneva_source must be 'geneva' or 'transcality'")
@@ -167,6 +169,8 @@ def _load_counts_and_match(context, network, city):
 
     matcher = TrafficDataMatcher()
     matched = matcher.match(network=network, counts=counts, **match_kwargs)
+    if city in ("geneva", "transcality"):
+        counts, matched = filter_counts(context, counts, matched, network, city)
     if city == "transcality" and not matched.empty:
         counts, matched = aggregate_counts_by_link(counts, matched, network)
 

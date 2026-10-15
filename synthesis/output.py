@@ -1,11 +1,13 @@
 import geopandas as gpd
 import pandas as pd
+import polars as pl
 import shapely.geometry as geo
 import os
 import sqlite3
 import math
 
 from data.utils import coerce_boolean_series
+from synthesis.population.trips_with_departures import align_activities
 
 
 HOUSEHOLD_DTYPES = {
@@ -64,7 +66,9 @@ def configure(context):
     context.stage("synthesis.population.models.subscriptions")
 
     context.stage("synthesis.population.activities")
-    context.stage("synthesis.population.trips")
+    context.config("enable_mode_choice", False)
+    context.stage("mode_choice.run" if context.config("enable_mode_choice") else "synthesis.population.trips_with_departures",
+                  alias="population_trips")
 
     context.stage("synthesis.population.spatial.locations")
 
@@ -105,6 +109,10 @@ def clean_gpkg(path):
 
 
 def execute(context):
+    population_trips = context.stage("population_trips")
+    if isinstance(population_trips, pl.DataFrame):
+        population_trips = population_trips.to_pandas()
+
     output_path   = context.config("output_path")
     output_prefix = context.config("output_prefix")
 
@@ -140,7 +148,7 @@ def execute(context):
     df_persons.to_csv("%s/%spersons.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
 
     # Prepare activities
-    df_activities = context.stage("synthesis.population.activities").copy()
+    df_activities = align_activities(context.stage("synthesis.population.activities"), population_trips)
     df_activities["following_trip_index"] = df_activities["activity_index"]
     
     df_activities = pd.merge(
@@ -169,7 +177,7 @@ def execute(context):
     print("Finished writing activities!")
 
     # Prepare trips
-    df_trips = context.stage("synthesis.population.trips").copy()
+    df_trips = population_trips.copy()
 
     df_trips["preceding_activity_index"] = df_trips["trip_index"]
     df_trips["following_activity_index"] = df_trips["trip_index"] + 1

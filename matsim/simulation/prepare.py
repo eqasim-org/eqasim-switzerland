@@ -25,7 +25,7 @@ def configure(context):
     context.stage("calibration.car_routing_vot.optimal_value")
 
     context.config("input_downsampling")
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("random_seed")
     
     context.config("output_prefix", "switzerland_")

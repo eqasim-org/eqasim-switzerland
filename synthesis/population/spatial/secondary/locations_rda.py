@@ -29,7 +29,7 @@ def configure(context):
         context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
 
     context.config("random_seed")
-    context.config("threads")
+    context.config("threads", volatile=True)
 
 
 def prepare_locations(context):

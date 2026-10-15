@@ -4,6 +4,14 @@ import os
 def configure(context):
     context.config("estimate_dmc", default=False)
     context.config("dmc_estimator", default="jax")
+    context.config("dmc_mode_parameters_path", "")
+    context.config("dmc_cost_parameters_path", "")
+    mode_path = context.config("dmc_mode_parameters_path")
+    cost_path = context.config("dmc_cost_parameters_path")
+    if bool(mode_path) != bool(cost_path):
+        raise ValueError("Provide both dmc_mode_parameters_path and dmc_cost_parameters_path")
+    if mode_path:
+        return
     context.stage("calibration.dmc.default")
 
     if context.config("estimate_dmc"):
@@ -14,6 +22,9 @@ def configure(context):
 
 
 def execute(context):
+    if context.config("dmc_mode_parameters_path"):
+        return (context.config("dmc_mode_parameters_path"),
+                context.config("dmc_cost_parameters_path"))
     if context.config("estimate_dmc"):
         _, _, (mode_params_path, cost_params_path), _, _ = context.stage("dmc_model")
         mode_params_path = calibrate_default(context, mode_params_path)
@@ -62,3 +73,12 @@ def calibrate_default(context, path_to_params):
         yaml.safe_dump(model_params, f, sort_keys=False)
 
     return path_to_params
+
+def validate(context):
+    """Track changes to explicitly supplied fitted artifacts without estimating."""
+    paths = [context.config("dmc_mode_parameters_path"),
+             context.config("dmc_cost_parameters_path")]
+    for path in filter(None, paths):
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Fitted DMC parameter file does not exist: {path}")
+    return tuple(os.stat(path).st_mtime_ns for path in paths if path)

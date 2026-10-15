@@ -43,7 +43,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("synthesis.population.spatial.secondary_nn.regional_model")
 
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("random_seed")
 
     context.config("overwrite_short_range_model_if_exists", True)

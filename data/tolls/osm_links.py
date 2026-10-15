@@ -1,8 +1,5 @@
 import osmium
-import pandas as pd
-import geopandas as gpd
 import logging
-from data.osm.clean import get_region
 from multiprocessing import get_context
 import time
 
@@ -71,20 +68,18 @@ def execute(context):
 def find_toll_way_ids(pbf_path: str) -> list[int]:
     """
     Scan an OSM .pbf (or .osm) file and return the IDs of all ways
-    that carry a toll-related tag (e.g. toll=yes, toll:hgv=yes, toll:motorcar=yes),
-    excluding ways explicitly tagged toll=no.
+    tolled for ordinary cars. Car-specific tags override the general toll tag;
+    truck-only and conditional toll tags do not mark a road as generally tolled.
     """
     logger.info(f"\t Scanning {pbf_path} for toll ways...")
     toll_way_ids: set[int] = set()
 
     class TollHandler(osmium.SimpleHandler):
         def way(self, w):
-            for tag in w.tags:
-                key, val = tag.k, tag.v
-                if key == "toll" or key.startswith("toll:"):
-                    if val.lower() != "no":
-                        toll_way_ids.add(w.id)
-                        break
+            toll = w.tags.get("toll:motorcar",
+                              w.tags.get("toll:motor_vehicle", w.tags.get("toll", "no")))
+            if toll.lower() == "yes":
+                toll_way_ids.add(w.id)
     
     to = time.time()
     TollHandler().apply_file(pbf_path)

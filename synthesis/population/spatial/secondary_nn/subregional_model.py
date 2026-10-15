@@ -28,7 +28,7 @@ def configure(context):
     context.stage("data.constants")
     context.stage("data.spatial.swiss_border")
 
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("random_seed")
 
     # training params

@@ -1,4 +1,7 @@
-"""Prepare matched Transcality detector profiles for count comparison."""
+"""
+This data is sent by Lukas to Milos. The counts are already processes by Transcality.
+Prepare matched Transcality detector profiles for count comparison.
+"""
 
 import json
 import logging
@@ -8,6 +11,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from ..matching.matcher import MATCH_ENDPOINT_COLUMNS
 
 
 logger = logging.getLogger("synpp")
@@ -63,6 +67,7 @@ def prepare_transcality_counts(input_path):
                 "geometry",
                 "osm_id",
                 "angle",
+                *MATCH_ENDPOINT_COLUMNS,
             ]
         ],
         on=["source", "detid"],
@@ -94,6 +99,7 @@ def prepare_transcality_counts(input_path):
         geometry=("geometry", "first"),
         osm_id=("osm_id", "first"),
         angle=("angle", "first"),
+        **{column: (column, "first") for column in MATCH_ENDPOINT_COLUMNS},
     )
     daily = profile.groupby("OBJECTID", as_index=False).agg(
         flow=("hourly_flow", "sum"),

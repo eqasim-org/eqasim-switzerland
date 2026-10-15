@@ -33,7 +33,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("synthesis.population.spatial.secondary_nn.regional_model")
 
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("random_seed")
 
     # training params

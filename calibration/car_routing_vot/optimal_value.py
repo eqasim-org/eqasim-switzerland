@@ -15,7 +15,7 @@ def configure(context):
         context.stage("calibration.car_routing_vot.dataset")
         context.stage("matsim.runtime.eqasim")
         context.stage("matsim.runtime.java")
-        context.config("threads")
+        context.config("threads", volatile=True)
 
 def execute(context):
     if not context.config("calibrate_routing_vot"):

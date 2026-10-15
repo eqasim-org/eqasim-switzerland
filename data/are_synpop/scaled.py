@@ -12,7 +12,7 @@ def configure(context):
     context.config("scaling_year", default=2015)
     
     context.config("random_seed")
-    context.config("threads")  
+    context.config("threads", volatile=True)  
 
     context.stage("data.constants")  
 

@@ -305,7 +305,7 @@ def compute_ovgk_areas(stops):
 
 def configure(context):
     context.config("data_path")
-    context.config("threads")
+    context.config("threads", volatile=True)
 
     context.config("compute_ovgk_from_gtfs", default = False)
     if context.config("compute_ovgk_from_gtfs"):

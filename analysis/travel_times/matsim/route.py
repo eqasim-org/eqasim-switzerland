@@ -16,7 +16,7 @@ def configure(context):
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")
     context.config("output_prefix", "switzerland_")
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("router_return_links", default = True)    
 
 

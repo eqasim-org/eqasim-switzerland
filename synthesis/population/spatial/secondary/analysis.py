@@ -23,7 +23,7 @@ def configure(context):
     context.stage("data.spatial.ovgk")
     context.stage("data.statent.density")
 
-    context.config("threads")
+    context.config("threads", volatile=True)
     context.config("locations_v2_analysis_max_points", 250000)
     context.config("locations_v2_analysis_density_radius", 250.0)
 
