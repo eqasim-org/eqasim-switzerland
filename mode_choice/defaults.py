@@ -73,6 +73,7 @@ DISTANCE_COST_INTERACTION = RUN_DEFAULTS["distance_cost_interaction"]
 INCOME_COST_INTERACTION = RUN_DEFAULTS["income_cost_interaction"]
 
 HOME_PURPOSES = ("home", "home_secondary")
+TOUR_HOME_PURPOSE = "home"
 WORK_PURPOSES = ("work", "work_secondary")
 DESTINATION_PURPOSES = {
     "home": HOME_PURPOSES, "work": WORK_PURPOSES,
@@ -95,9 +96,9 @@ POWER_FLOOR = 1e-300
 OECD_ADDITIONAL_ADULT_WEIGHT = 0.5
 OECD_CHILD_WEIGHT = 0.3
 
-MIN_ROUTED_TIME_MIN = 0.5
+MIN_MOTORIZED_TOUR_TIME_MIN = 0.5
 MAX_ROUTED_TIME_MIN = 300.0
-MIN_MOTORIZED_DISTANCE_KM = 0.05
+MIN_MOTORIZED_TOUR_DISTANCE_KM = 0.05
 MAX_PT_TRANSFERS = 6
 MAX_PT_TRANSFER_TIME_MIN = 60.0
 MAX_BIKE_DISTANCE_KM = 12.0
@@ -106,11 +107,6 @@ PARKING_END_S = 19 * 3600
 PARKING_MAX_DURATION_MIN = (PARKING_END_S - PARKING_START_S) / 60
 PARKING_FREE_HOURS = 1.0
 PARKING_MAX_COST_CHF = 40.0
-WEISS_MAX_RATE = 0.3
-WEISS_BASE_RATE = 0.104
-WEISS_RATE_AMPLITUDE = 0.6
-WEISS_DISTANCE_RATE = -1.2
-WEISS_DISTANCE_EXPONENT = 0.33
 
 
 def execute(context):
@@ -129,12 +125,20 @@ SERVER_DEFAULTS = {
 SERVER_HEALTH_TIMEOUT = 2.0
 
 SERVER_LOG_FILENAME_FORMAT = "server_logs_starting_at_%Y-%m-%d_%H-%M-%S_%f_UTC.logs"
+ROUTING_COST_FILENAME = "cost.parquet"
+# Files read by MultiModeRouter, relative to the original MATSim config.
+ROUTER_CONFIG_INPUTS = {
+    "transit": ("transitScheduleFile", "vehiclesFile"),
+    "ptZones": ("ptZonesFilePath", "sbbDistancesPath", "pricingDescriptionPath"),
+}
 
 # Stage output contracts.
 SOURCE_TRIP_ID = "source_trip_id"
 TOUR_BATCH_FILENAME = "tours_batch_num{i}.parquet"
 ROUTING_VARIABLE_STAGES = tuple(f"mode_choice.routing_variables.{mode}" for mode in MODES)
 COST_STAGES = ("mode_choice.costs.car", "mode_choice.costs.pt")
+AVAILABILITY_COLUMNS = tuple(f"{mode}_availability" for mode in MODES)
+PERSON_AVAILABILITY_COLUMNS = ("car_availability", "bike_availability")
 TOUR_BATCH_COLUMNS = ("trip_id", *CALIBRATION_COLUMNS, CALIBRATION_CANTON_COLUMN)
 PT_ROUTING_COLUMNS = (
     "pt_total_travel_time_min", "pt_total_distance_km", "pt_in_vehicle_time_min", "pt_in_vehicle_distance_km",

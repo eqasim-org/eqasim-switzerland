@@ -131,7 +131,17 @@ class RoutingServer:
             time.sleep(settings["poll_interval"])
 
     @staticmethod
-    def route_csv(input_csv_path, output_csv_path, mode=None):
+    def route_csv(input_csv_path, output_csv_path, mode=None, *, compute_cost=False):
+        return RoutingServer._csv_request("/route", input_csv_path, output_csv_path, mode,
+                                          compute_cost=compute_cost)
+
+    @staticmethod
+    def cost_csv(input_csv_path, output_csv_path, mode=None):
+        """Price saved routes or distances using the already initialized workers."""
+        return RoutingServer._csv_request("/cost", input_csv_path, output_csv_path, mode)
+
+    @staticmethod
+    def _csv_request(endpoint, input_csv_path, output_csv_path, mode, *, compute_cost=None):
         if mode == "car_passenger":
             mode = "car"
         if mode is not None and mode not in ROUTER_SERVER_MODES:
@@ -141,7 +151,9 @@ class RoutingServer:
                    "outputCsv": str(Path(output_csv_path).resolve())}
         if mode is not None:
             payload["mode"] = mode
-        result = RoutingServer._request("/route", payload, RoutingServer._settings["request_timeout"])
+        if compute_cost is not None:
+            payload["computeCost"] = compute_cost
+        result = RoutingServer._request(endpoint, payload, RoutingServer._settings["request_timeout"])
         if result is None or not Path(output_csv_path).is_file():
             raise RuntimeError("Routing server did not produce the requested CSV")
         return result
