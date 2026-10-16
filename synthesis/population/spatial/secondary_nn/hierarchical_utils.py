@@ -3,6 +3,7 @@ from numba import njit, prange
 
 SECONDARY_ACTIVITIES = ["other", "shop", "leisure", "work_secondary", "home_secondary", "education_secondary"]
 PRIMARY_ACTIVITIES = ["home", "work", "education"]
+DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 10.0  # metres
 
 ORIGIN_PURPOSE_REMAP = {"home": "home_secondary", "work": "work_secondary", "education": "education_secondary"}
 PURPOSES_INDEX = {purpose: idx for idx, purpose in enumerate(SECONDARY_ACTIVITIES)}

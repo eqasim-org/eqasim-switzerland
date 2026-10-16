@@ -6,6 +6,7 @@ from mode_choice.routing.java import configure_mode, route_mode, read_results
 from mode_choice.routing.RoutingServer import RoutingServer
 from mode_choice.data.frames import join_variables
 from mode_choice.defaults import PT_ROUTING_COLUMNS
+from mode_choice.routing.results import complete_routes
 
 
 def configure(context):
@@ -14,6 +15,7 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.config("threads", volatile=True)
+    context.config("java_memory", "50G", volatile=True)
 
 
 def execute(context):
@@ -35,9 +37,14 @@ def route_public_transport(context):
     directory = Path(context.path())
     config = context.stage("calibration.pt_pricing.generate_config")
     batch_size = context.config("mode_choice_routing_batch_size")
-    pt_routes_path = directory / "pt_routes.csv"
+    # This router's Task accepts only OD/time fields. The shared server request
+    # also carries home/subscription attributes for fares and must stay intact.
+    pt_requests_path = directory / "detailed_pt_requests.csv"
+    trips.select("trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time").rename(
+        {"trip_id": "identifier"}).write_csv(pt_requests_path)
+    pt_routes_path = directory / "detailed_pt_routes.csv"
     eqasim.run(context, "org.eqasim.core.tools.routing.RunBatchPublicTransportRouter", [
-        "--config-path", config, "--input-path", context.stage("mode_choice.routing.requests"),
+        "--config-path", config, "--input-path", str(pt_requests_path),
         "--output-trips-path", str(pt_routes_path),
         "--threads", str(context.config("threads")),
         "--batch-size", str(batch_size),
@@ -49,7 +56,11 @@ def route_public_transport(context):
         "access_travel_time_min": "access_time", "egress_travel_time_min": "egress_time",
         "transfer_waiting_time_min": "transfer_wait", "transfer_travel_time_min": "transfer_walk",
         "transfers": "pt_transfers",
-    }).with_columns(
+    })
+    # Both routers may omit trips independently. Keep all requested identifiers
+    # and invalidate bad components before adding access/egress and transfer times.
+    pt = complete_routes(trips, pt, ["pt_in_vehicle_time_min", "access_time", "egress_time",
+                                     "transfer_wait", "transfer_walk"]).with_columns(
         (pl.col("access_time") + pl.col("egress_time")).alias("pt_access_egress_time_min"),
         (pl.col("transfer_wait") + pl.col("transfer_walk")).alias("pt_transfer_time_min"),
     ).drop("access_time", "egress_time", "transfer_wait", "transfer_walk")

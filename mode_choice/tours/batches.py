@@ -2,7 +2,7 @@
 from pathlib import Path
 import polars as pl
 from mode_choice.defaults import RUN_DEFAULTS, TOUR_BATCH_FILENAME, TOUR_BATCH_COLUMNS, MODES
-from mode_choice.model.parameters import load
+from dmc.parameters import Parameters
 from mode_choice.model.utilities import expressions
 from mode_choice.tours.batching import person_batches
 
@@ -10,7 +10,7 @@ from mode_choice.tours.batching import person_batches
 def configure(context):
     context.stage("mode_choice.data.inputs")
     context.stage("mode_choice.defaults")
-    context.stage("dmc.params")
+    context.stage("dmc.parameter_files")
     for name in ("mode_choice_person_batch_size", "distance_cost_interaction", "income_cost_interaction", "use_income_in_dmc"):
         context.config(name, RUN_DEFAULTS[name])
 
@@ -19,7 +19,7 @@ def execute(context):
     trips = context.stage("mode_choice.data.inputs").sort("person_id", "trip_index")
     if trips.is_empty():
         return []
-    utility_expressions = expressions(load(context), distance_interaction=context.config("distance_cost_interaction"),
+    utility_expressions = expressions(Parameters.from_context(context), distance_interaction=context.config("distance_cost_interaction"),
         income_interaction=context.config("income_cost_interaction") and context.config("use_income_in_dmc"))
     paths = []
     for i, batch in enumerate(person_batches(trips, context.config("mode_choice_person_batch_size"))):

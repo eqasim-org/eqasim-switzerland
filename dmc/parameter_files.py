@@ -1,4 +1,4 @@
-import yaml
+from dmc.parameters import Parameters
 import os
 
 def configure(context):
@@ -11,14 +11,14 @@ def configure(context):
     if bool(mode_path) != bool(cost_path):
         raise ValueError("Provide both dmc_mode_parameters_path and dmc_cost_parameters_path")
     if mode_path:
-        return
-    context.stage("calibration.dmc.default")
+        return    
 
+    context.stage("calibration.dmc.default")
     if context.config("estimate_dmc"):
         estimator = str(context.config("dmc_estimator")).strip().lower()
         if estimator not in ("biogeme", "jax"):
             raise ValueError("dmc_estimator must be either 'biogeme' or 'jax'")
-        context.stage("dmc.model_jax" if estimator == "jax" else "dmc.model", alias="dmc_model")
+        context.stage("dmc.models.model_jax" if estimator == "jax" else "dmc.models.model_biogeme", alias="dmc_model")        
 
 
 def execute(context):
@@ -48,11 +48,8 @@ def calibrate_default(context, path_to_params):
     calibrated_params, _ = context.stage("calibration.dmc.default")
 
     # read both yml files
-    with open(path_to_params, 'r') as f:
-        model_params = yaml.safe_load(f)
-
-    with open(calibrated_params, 'r') as f:
-        cal_params = yaml.safe_load(f)
+    model_params = Parameters.from_yaml(path_to_params)
+    cal_params = Parameters.from_yaml(calibrated_params)
 
     # use the calibrated ASCs and cantons ASCs
     model_params["car.alpha_u"] = cal_params["car.alpha_u"]
@@ -69,8 +66,7 @@ def calibrate_default(context, path_to_params):
     # save the yaml file
     estimator = context.config("dmc_estimator")
     os.rename(path_to_params, path_to_params.replace(".yml", f"_{estimator}.yml"))
-    with open(path_to_params, 'w') as f:
-        yaml.safe_dump(model_params, f, sort_keys=False)
+    model_params.to_yaml(path_to_params)
 
     return path_to_params
 
@@ -81,4 +77,4 @@ def validate(context):
     for path in filter(None, paths):
         if not os.path.isfile(path):
             raise FileNotFoundError(f"Fitted DMC parameter file does not exist: {path}")
-    return tuple(os.stat(path).st_mtime_ns for path in paths if path)
+    return [os.stat(path).st_mtime_ns for path in paths if path]

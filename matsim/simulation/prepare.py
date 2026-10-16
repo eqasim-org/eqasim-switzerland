@@ -21,7 +21,7 @@ def configure(context):
     context.stage("calibration.pt_routing.pt_routing_parameters")
         
     context.stage("data.microcensus.shares")
-    context.stage("dmc.params")
+    context.stage("dmc.parameter_files")
     context.stage("calibration.car_routing_vot.optimal_value")
 
     context.config("input_downsampling")
@@ -100,7 +100,7 @@ def execute(context):
                     "%s/%scantonal_mode_shares.csv" % (context.path(), context.config("output_prefix")))
     
     # copy the mode choice params
-    mode_params_path, cost_params_path = context.stage("dmc.params")
+    mode_params_path, cost_params_path = context.stage("dmc.parameter_files")
     mode_parameters_path = "%s/dmc_parameters.yml" % context.path()
     cost_parameters_path = "%s/cost_parameters.yml" % context.path()
     shutil.copy(mode_params_path, mode_parameters_path)

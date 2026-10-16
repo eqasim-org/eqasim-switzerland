@@ -1,13 +1,154 @@
+"""Read, access and write DMC parameters using their exported MATSim names."""
+from collections.abc import Mapping, MutableMapping
+from copy import deepcopy
+from functools import lru_cache
+import math
+import logging
 import os
-import pandas as pd
-import numpy as np
+from numbers import Integral, Real
+from pathlib import Path
+
 import yaml
 from dmc.constants import constants
-import logging
+
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
+class Parameters(MutableMapping):
+    """An independent model, with flat keys and views such as ``params.pt``.
+
+    The exported keys are the schema: no second list of fields or implicit zero
+    defaults can discard fitted coefficients. Missing parameters fail explicitly.
+    Global values support both ``params.timeScale_min`` and
+    ``params.cost.timeScale_min``; canton dictionaries retain their original keys.
+    """
+
+    def __init__(self, values=None):
+        self._values = {}
+        if values is not None:
+            if not isinstance(values, Mapping):
+                raise ValueError("Expected a DMC parameter mapping")
+            self.update(values)
+
+    @classmethod
+    def from_context(cls, context):
+        return cls.from_yaml(*context.stage("dmc.parameter_files"))
+
+    @classmethod
+    def from_yaml(cls, *paths):
+        """Read mode/cost files in order, reusing unchanged files in memory."""
+        if not paths:
+            raise ValueError("Provide at least one DMC parameter file")
+        result = cls()
+        for path in paths:
+            path = Path(path).resolve()
+            stat = path.stat()
+            values = _read_yaml(str(path), stat.st_mtime_ns, stat.st_size, stat.st_ino)
+            result.update(values)
+        return result
+
+    def to_yaml(self, destination, *, sort_keys=False):
+        """Write exact MATSim keys to a path or an already-open text stream."""
+        values = self.to_dict()
+        if hasattr(destination, "write"):
+            yaml.safe_dump(values, destination, sort_keys=sort_keys)
+        else:
+            with Path(destination).open("w") as stream:
+                yaml.safe_dump(values, stream, sort_keys=sort_keys)
+
+    def to_dict(self):
+        # Revalidate nested dictionaries, which calibration may modify in place.
+        return {key: _numeric_value(value, key) for key, value in self._values.items()}
+
+    def get_parameters(self, names):
+        if isinstance(names, str):
+            names = [names]
+        return {name: deepcopy(self[name]) for name in names}
+
+    def set_parameters(self, updates):
+        self.update(updates)
+
+    def setdefault(self, key, default=None):
+        # Return the stored copy, so canton calibration can update a new map.
+        if key not in self:
+            self[key] = default
+        return self[key]
+
+    def copy(self):
+        return type(self)(self._values)
+
+    def __deepcopy__(self, memo):
+        result = self.copy()
+        memo[id(self)] = result
+        return result
+
+    def __getitem__(self, key):
+        return self._values[key]
+
+    def __setitem__(self, key, value):
+        if not isinstance(key, str) or not key:
+            raise ValueError("DMC parameter names must be nonempty strings")
+        self._values[key] = _numeric_value(value, key)
+
+    def __delitem__(self, key):
+        del self._values[key]
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def __len__(self):
+        return len(self._values)
+
+    def __getattr__(self, name):
+        values = object.__getattribute__(self, "_values")
+        if name in values:
+            return values[name]
+        if name == "cost":
+            return _Section(self, "")
+        if any(key.startswith(name + ".") for key in values):
+            return _Section(self, name + ".")
+        raise AttributeError(f"Unknown DMC parameter or section: {name}")
+
+
+class _Section:
+    """Attribute view backed by the same values as the flat mapping."""
+
+    def __init__(self, parameters, prefix):
+        object.__setattr__(self, "_parameters", parameters)
+        object.__setattr__(self, "_prefix", prefix)
+
+    def __getattr__(self, name):
+        try:
+            return self._parameters[self._prefix + name]
+        except KeyError as exc:
+            raise AttributeError(f"Unknown DMC parameter: {self._prefix + name}") from exc
+
+    def __setattr__(self, name, value):
+        self._parameters[self._prefix + name] = value
+
+
+def _numeric_value(value, key):
+    if isinstance(value, Mapping):
+        if not all(isinstance(name, str) and name for name in value):
+            raise ValueError(f"Invalid dictionary keys for DMC parameter {key}")
+        return {name: _numeric_value(item, f"{key}.{name}") for name, item in value.items()}
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
+        raise ValueError(f"Expected a finite numeric DMC parameter: {key}={value!r}")
+    return int(value) if isinstance(value, Integral) else float(value)
+
+
+@lru_cache(maxsize=8)
+def _read_yaml(path, modified_ns, size, inode):
+    with Path(path).open() as stream:
+        values = yaml.safe_load(stream)
+    if not isinstance(values, dict):
+        raise ValueError(f"Expected a DMC parameter mapping in {path}")
+    return values
+
+
+# -----------------------------------------------------------------------------
+# MATSim export: fitted-parameter writer and estimation-to-MATSim name conversion.
+# -----------------------------------------------------------------------------
 
 class writer:
     def __init__(self, context, biogeme_model, betas,
@@ -41,8 +182,7 @@ class writer:
         params_dict["ptRegionalRadius_km"] = self.context.config("pt_regional_radius_km") # km
 
         # Write to YAML with 
-        with open(self.cost_output_path, 'w') as f:
-            yaml.dump(params_dict, f, sort_keys=False)
+        Parameters(params_dict).to_yaml(self.cost_output_path)
 
         logger.info(f"Cost parameters written to {self.cost_output_path}")
 
@@ -101,9 +241,9 @@ class writer:
         with open(self.mode_output_path, 'w') as f:
             for mode in modes:
                 f.write(f"# {mode}\n")
-                yaml.dump(grouped_params[mode], f, sort_keys=False)
+                Parameters(grouped_params[mode]).to_yaml(f)
             f.write("# cost\n")
-            yaml.dump(grouped_params["cost"], f, sort_keys=False)
+            Parameters(grouped_params["cost"]).to_yaml(f)
 
         logger.info(f"Model parameters written to {self.mode_output_path}")
     
@@ -146,8 +286,7 @@ class writer:
         Save all parameters to a YAML file.
         """
         
-        with open(file_path, 'w') as f:
-            yaml.dump(params, f, sort_keys=False)
+        Parameters(params).to_yaml(file_path)
         
         logger.info(f"All DMC parameters saved to: {file_path}")
 

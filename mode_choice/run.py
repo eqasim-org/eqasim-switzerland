@@ -4,7 +4,7 @@ from pathlib import Path
 import polars as pl
 from mode_choice.defaults import RUN_DEFAULTS, CALIBRATION_DEFAULTS, SOURCE_TRIP_ID
 from mode_choice.calibration import population as calibration
-from mode_choice.model.parameters import load
+from dmc.parameters import Parameters
 from mode_choice.selection.mode_choice import ModeChoice
 from mode_choice.selection.sampler import TourSampler
 from mode_choice.selection.cache import TopologyCache
@@ -17,7 +17,7 @@ def configure(context):
     context.stage("mode_choice.defaults")
     context.stage("mode_choice.data.trips")
     context.stage("mode_choice.tours.batches")
-    context.stage("dmc.params")
+    context.stage("dmc.parameter_files")
     context.config("random_seed")
     for name, default in {**RUN_DEFAULTS, **CALIBRATION_DEFAULTS}.items():
         context.config(name, default)
@@ -62,7 +62,7 @@ def run_mode_choice(context):
     with ModeChoice(paths, context.config("random_seed"), sampler,
                     cache_prepared=(context.config("mode_choice_calibrate_alphas")
                                     and context.config("mode_choice_cache_prepared_batches"))) as model:
-        choices = (calibration.run(context, model, load(context)) if context.config("mode_choice_calibrate_alphas")
+        choices = (calibration.run(context, model, Parameters.from_context(context)) if context.config("mode_choice_calibrate_alphas")
                    else model.run())
     # Save the trip-keyed choices and merge them back into the complete population.
     choices.write_parquet(Path(context.path()) / "choices.parquet")

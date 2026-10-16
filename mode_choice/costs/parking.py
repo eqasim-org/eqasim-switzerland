@@ -1,7 +1,7 @@
 """Parking duration, monetary cost and search time on complete person days."""
 import polars as pl
 from mode_choice import defaults as D
-from mode_choice.model.parameters import load
+from dmc.parameters import Parameters
 from mode_choice.data.frames import join_variables
 
 
@@ -9,7 +9,7 @@ def configure(context):
     context.stage("mode_choice.data.prepare")
     context.stage("mode_choice.routing_variables.car")
     context.stage("mode_choice.defaults")
-    context.stage("dmc.params")
+    context.stage("dmc.parameter_files")
 
 
 def execute(context):
@@ -19,7 +19,7 @@ def execute(context):
             pl.lit(None, dtype=pl.Float64).alias("parking_cost_CHF"),
             pl.lit(None, dtype=pl.Float64).alias("parking_searching_duration_min"))
     trips = join_variables(trips, context.stage("mode_choice.routing_variables.car"))
-    return calculate(trips.sort("person_id", "trip_index"), load(context))
+    return calculate(trips.sort("person_id", "trip_index"), Parameters.from_context(context))
 
 
 def calculate(trips, p):

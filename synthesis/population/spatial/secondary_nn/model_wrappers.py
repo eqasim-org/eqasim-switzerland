@@ -1,8 +1,8 @@
+import joblib
 import numpy as np
 from .location_helpers import _prepare_destination_level2_index, _reverse_tree
 import torch
 import logging
-import h3
 from sklearn.neighbors import KDTree
 from .feature_encoding import (CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, DYNAMIC_CANDIDATE_FEATURES, N_PERSON_STATIC,
                                transform_candidate_static_matrix, transform_candidate_dynamic_matrix, transform_person_static_vector, 
@@ -10,7 +10,6 @@ from .feature_encoding import (CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, DY
 
 from .choice_model import NeuralChoiceModel, predict_choice_proba
 from .hierarchical_utils import build_dynamic_vector, ORIGIN_PURPOSE_REMAP
-from .h3 import H3_LEVELS
 
 def _torch_load_checkpoint(path, map_location=None):
     try:
@@ -765,6 +764,8 @@ class HierarchicalLocationChoiceModel:
         self.wrappers = dict(coarse=coarse_wrapper, medium=medium_wrapper, detailed=detailed_wrapper)
         if short_wrapper is not None:
             self.wrappers["short"] = short_wrapper
+        self.use_target_distance = "target_distance" in self.c.person_trip_cols
+        self.short_trip_classifier = None
         self.short_trip_threshold_m = 1000.0
         self.short_query_radius_m = 200.0
         self.short_min_candidates = 12
@@ -786,6 +787,7 @@ class HierarchicalLocationChoiceModel:
         self.destination_fallback = None
         self.destination_index_xy = None    # {purpose: {level2_h3: np.ndarray [N,2]}} — company (x,y) per L2 pool
         self.destination_fallback_xy = None  # {purpose: {level1_h3: np.ndarray [N,2]}} — company (x,y) per L1 fallback pool
+        self.level2_to_level1 = None
         self.l1_siblings = None  # {level1_h3: [sibling_level1_h3s]} — built once, used for O(1) fallback widening
         self.short_destination_support_masks = None
         self.detour_factor = None
@@ -797,7 +799,7 @@ class HierarchicalLocationChoiceModel:
         self._purpose_index = {p: i for i, p in enumerate(self._purpose_categories)}
 
     @classmethod
-    def load(cls, coarse_path:str, medium_path:str, detailed_path:str, short_path:str=None, map_location=None, optimize=True):
+    def load(cls, coarse_path:str, medium_path:str, detailed_path:str, short_path:str=None, map_location=None, optimize=True, short_trip_classifier_path=None):
         cls.log("Loading models")
         coarse_wrapper = RegionalChoiceWrapper.load(coarse_path, map_location=map_location)
         medium_wrapper = DistrictChoiceWrapper.load(medium_path, map_location=map_location)
@@ -805,24 +807,27 @@ class HierarchicalLocationChoiceModel:
         short_wrapper = None
         if short_path is not None:
             short_wrapper = ShortRangeChoiceWrapper.load(short_path, map_location=map_location)
-        return cls(
+        obj = cls(
             coarse_wrapper=coarse_wrapper,
             medium_wrapper=medium_wrapper,
             detailed_wrapper=detailed_wrapper,
             short_wrapper=short_wrapper,
             optimize=optimize,
         )
+        if short_trip_classifier_path is not None:
+            obj.short_trip_classifier = joblib.load(short_trip_classifier_path)
+        return obj
 
     @classmethod
     def build(cls, context, map_location=None, optimize=True):
         regional_model_path, _, _ = context.stage("synthesis.population.spatial.secondary_nn.regional_model")
         subregional_model_path = context.stage("synthesis.population.spatial.secondary_nn.subregional_model")[0]
         local_model_path = context.stage("synthesis.population.spatial.secondary_nn.local_model")[0]
-        short_model_path = None
-        try:
-            short_model_path = context.stage("synthesis.population.spatial.secondary_nn.short_range_model")[0]
-        except Exception as exc:
-            cls.log(f"Short-range model unavailable, falling back to long-range hierarchy only: {exc}", level=logging.WARNING)
+        short_model_path = context.stage("synthesis.population.spatial.secondary_nn.short_range_model")[0]
+        use_target_distance = bool(context.config("secondary_nn_use_target_distance"))
+        classifier_path = None
+        if not use_target_distance:
+            classifier_path = context.stage("synthesis.population.spatial.secondary_nn.short_trip_classifier")[0]
 
         obj = cls.load(
             coarse_path=regional_model_path,
@@ -831,6 +836,7 @@ class HierarchicalLocationChoiceModel:
             short_path=short_model_path,
             map_location=map_location,
             optimize=optimize,
+            short_trip_classifier_path=classifier_path,
         )
         try:
             obj.short_trip_threshold_m = float(context.config("secondary_nn_short_trip_threshold_m"))
@@ -839,19 +845,40 @@ class HierarchicalLocationChoiceModel:
         except Exception:
             # Keep safe defaults when config keys are not declared by caller.
             pass
+        if ("target_distance" in obj.c.person_trip_cols) != bool(context.config("secondary_nn_use_target_distance")):
+            raise ValueError("Retrain secondary_nn models for the configured target-distance option")
+        if obj.short_trip_classifier is not None and not np.isclose(obj.short_trip_classifier.short_trip_threshold_m, obj.short_trip_threshold_m):
+            raise ValueError("Retrain the short-trip classifier for the configured distance threshold")
         obj.build_candidates_and_trees(context)
         return obj
     
     def build_candidates_and_trees(self, context):
         h3_data, h3_geo, h3_tree = context.stage("synthesis.population.spatial.secondary_nn.h3")
+        self._validate_coordinate_tree(h3_tree)
         (self.destination_index, self.destination_fallback, self.car_available_probabilities,
             self.no_car_available_probabilities, self.destination_index_xy,
             self.destination_fallback_xy) = _prepare_destination_level2_index(context, h3_data, h3_geo)
+        self.level2_to_level1 = {leaf: middle for branches in h3_tree.values() for middle, leaves in branches.items() for leaf in leaves}
         self.l1_siblings = _reverse_tree(h3_tree)  # {level1: [sibling_level1s]} — built once for O(1) fallback widening
         self._build_short_destination_support_masks()
         self._build_detour_factor_cache(
             context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
         )
+
+    def _validate_coordinate_tree(self, tree):
+        """Reject stale checkpoints before prediction can mix incompatible branches."""
+        expected_middle = {root: set(branches) for root, branches in tree.items()}
+        expected_leaves = {(root, middle): set(leaves)
+                           for root, branches in tree.items() for middle, leaves in branches.items()}
+        actual_middle = {root: set(attrs["children"])
+                         for root, attrs in self.m.level1_candidate_attributes_by_level0.items()}
+        actual_leaves = {key: set(attrs["children"])
+                         for key, attrs in self.d.level2_candidate_attributes_by_level1.items()}
+        if (set(self.c.all_h3) != set(tree) or actual_middle != expected_middle
+                or actual_leaves != expected_leaves):
+            raise ValueError("Retrain secondary_nn models for the current coordinate-based destination tree")
+        if self.s is not None and set(self.s.all_h3) != set().union(*expected_leaves.values()):
+            raise ValueError("Retrain the short-range model for the current coordinate-based destination tree")
 
     def _build_detour_factor_cache(self, detour_factor):
         """Snap all fixed candidate centroids once for fast prediction lookups."""
@@ -1046,6 +1073,8 @@ class HierarchicalLocationChoiceModel:
             )
 
     def assert_ready_for_prediction(self):
+        if not self.use_target_distance and (self.short_trip_classifier is None or self.s is None):
+            raise RuntimeError("Distance-free model selection requires the short-trip classifier and short-range model")
         assert self.destination_index is not None and self.destination_fallback is not None and self.l1_siblings is not None, (
             "Destination pools / sibling map are not initialized. Call build_candidates_and_trees(context) before predict()."
         )
@@ -1137,6 +1166,13 @@ class HierarchicalLocationChoiceModel:
             purpose_supported_mask=support_mask,
         )
 
+    def _select_short_model(self, *, target_distance, **features):
+        if self.use_target_distance:
+            return self.s is not None and target_distance <= float(self.short_trip_threshold_m)
+        if self.short_trip_classifier is None or self.s is None:
+            raise RuntimeError("Distance-free model selection requires the short-trip classifier and short-range model")
+        return self.short_trip_classifier.predict_short(**features)
+
     ##################### Main prediction method that runs the full three-level prediction process #####################
 
     def predict(self, person_id, home_x, home_y, work_x, work_y, origin_x, origin_y, age, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work,
@@ -1152,7 +1188,15 @@ class HierarchicalLocationChoiceModel:
             self.s._current_origin_detour_index = self._current_origin_detour_index
 
         safe_target_distance = float(target_distance) if np.isfinite(target_distance) and float(target_distance) >= 0.0 else np.inf
-        use_short = self.s is not None and safe_target_distance <= float(self.short_trip_threshold_m)
+        use_short = self._select_short_model(
+            target_distance=safe_target_distance, age=age, income_class=income_class,
+            daily_longest=daily_longest_distance_from_home, daily_total=daily_crowfly_total,
+            daily_longest_work=daily_longest_distance_from_work, activity_chain_vector=activity_chain_vector,
+            sex=sex, employed=employed, car_availability=car_availability,
+            consumed_before=crowfly_consumed_before_trip, trip_position=trip_position_class,
+            departure_time=departure_time_normalized, activity_duration_h=activity_duration_h,
+            purpose=purpose, origin_purpose=origin_purpose,
+        )
 
         if use_short:
             level2_h3 = self._predict_short_level2_from_person(
@@ -1168,10 +1212,7 @@ class HierarchicalLocationChoiceModel:
                 target_distance=safe_target_distance,
                 rng=rng,
             )
-            try:
-                level1_h3 = str(h3.cell_to_parent(level2_h3, H3_LEVELS[1]))
-            except Exception:
-                level1_h3 = str(level2_h3)
+            level1_h3 = self.level2_to_level1[level2_h3]
         else:
             level0_h3 = self._predict_level0_from_person(person_matrix, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=origin_x, origin_y=origin_y,
                                                          has_work=has_work, rng=rng, purpose=purpose)

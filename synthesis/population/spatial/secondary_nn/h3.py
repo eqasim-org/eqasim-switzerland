@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 import pandas as pd
 import geopandas as gpd
 import h3
@@ -5,13 +7,14 @@ from shapely.geometry import Polygon
 import logging
 import numpy as np
 from shapely import contains_xy
+from shapely.ops import transform
+from pyproj import Transformer
 logger = logging.getLogger("synpp")
 
-"""
-This stage processes the spatial data from various sources (Statent, Microcensus trips, and synthetic population locations)
-and converts their geometries into H3 hexagonal indices at three resolutions. 
-It also merges the unique hexagons across all datasets for each resolution level to create a comprehensive set of 
-hexagonal geometries that can be used for further analysis or visualization.
+"""Destination features and a spatially nested hierarchy shared by all NN models.
+
+Each point is indexed at every resolution. Nodes below the root are identified
+by their coordinate path, and their polygons are clipped to all ancestors.
 """
 
 H3_LEVELS = [5, 7, 10]
@@ -22,7 +25,7 @@ H3_DEST_FEATURE_COLUMNS = ["num_statent", "employees", "urban_core", "urban", "e
 def _aggregate_destination_features_by_level(destinations_with_levels, level_col, all_hex):
     assert level_col in destinations_with_levels.columns
     assert destinations_with_levels[level_col].notna().all()
-    assert set(destinations_with_levels["ovgk"].unique()) == set(OVGK_CATEGORIES)
+    assert set(destinations_with_levels["ovgk"].unique()).issubset(OVGK_CATEGORIES)
 
     cols = [level_col, "destination_id", "number_employees", "ovgk", "offers_education_secondary", "offers_shop", "offers_leisure", 
             "offers_sport", "offers_gastronomy", "offers_accommodation", "offers_cultural", "municipality_type"] 
@@ -38,7 +41,7 @@ def _aggregate_destination_features_by_level(destinations_with_levels, level_col
     # ensure all expected categories exist
     expected_cols = [f"ovgk_share_{c.lower()}" for c in OVGK_CATEGORIES]
     ovgk_dummies.columns = [c.lower() for c in ovgk_dummies.columns]
-    assert all(col in ovgk_dummies.columns for col in expected_cols), f"Missing expected OVGK category columns after get_dummies. Expected: {expected_cols}, but got: {ovgk_dummies.columns.tolist()}"
+    ovgk_dummies = ovgk_dummies.reindex(columns=expected_cols, fill_value=0.0)
     df = pd.concat([df, ovgk_dummies[expected_cols]], axis=1)
 
     out = df.groupby(level_col, sort=False).agg(
@@ -68,76 +71,61 @@ def _aggregate_destination_features_by_level(destinations_with_levels, level_col
 
 
 def build_h3_tree(merged_level_geoms):
-    logger.info("Building H3 hierarchy tree from merged level geometries...")
-    level0_cells = set(merged_level_geoms.get(H3_LEVEL_NAMES[0], pd.DataFrame(columns=["h3_index"]))["h3_index"].tolist())
-    level1_cells = merged_level_geoms.get(H3_LEVEL_NAMES[1], pd.DataFrame(columns=["h3_index"]))["h3_index"].tolist()
-    level2_cells = merged_level_geoms.get(H3_LEVEL_NAMES[-1], pd.DataFrame(columns=["h3_index"]))["h3_index"].tolist()
-
-    tree = {l0: {} for l0 in level0_cells}
-    logger.info("\t Adding level 1 cells to tree...")
-    for l1 in level1_cells:
-        try:
-            l0 = h3.cell_to_parent(l1, H3_LEVELS[0])
-        except Exception:
-            continue
-        tree.setdefault(l0, {})
-        tree[l0].setdefault(l1, [])
-    
-    logger.info("\t Adding level 2 cells to tree...")
-    for l2 in level2_cells:
-        try:
-            l1 = h3.cell_to_parent(l2, H3_LEVELS[1])
-            l0 = h3.cell_to_parent(l2, H3_LEVELS[0])
-        except Exception:
-            continue
-        tree.setdefault(l0, {})
-        tree[l0].setdefault(l1, []).append(l2)
-
-    for l0 in tree:
-        for l1 in tree[l0]:
-            tree[l0][l1] = sorted(set(tree[l0][l1]))
-
+    """Build the shared tree from coordinate paths, never H3 logical ancestry."""
+    valid = {name: set(frame["h3_index"]) for name, frame in merged_level_geoms.items()}
+    tree = {}
+    for leaf in sorted(valid[H3_LEVEL_NAMES[-1]]):
+        root, middle, _ = leaf.split("/")
+        branch = f"{root}/{middle}"
+        if root not in valid[H3_LEVEL_NAMES[0]] or branch not in valid[H3_LEVEL_NAMES[1]]:
+            raise ValueError(f"Missing coordinate ancestors for {leaf}")
+        tree.setdefault(root, {}).setdefault(branch, []).append(leaf)
     return tree
 
-def to_geo_levels(df: gpd.GeoDataFrame, geometry_col: str = 'geometry', levels=H3_LEVELS) -> tuple[gpd.GeoDataFrame, dict]:
+
+@lru_cache(maxsize=16)
+def _coordinate_transformer(crs):
+    return Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+
+
+@lru_cache(maxsize=4096)
+def _cell_polygon(cell, crs):
+    polygon = Polygon([(lng, lat) for lat, lng in h3.cell_to_boundary(cell)])
+    if crs != "EPSG:4326":
+        polygon = transform(_coordinate_transformer(crs).transform, polygon)
+    return polygon
+
+
+def coordinate_cell_geometry(path, crs="EPSG:4326"):
+    """Intersect independently indexed cells so each branch lies inside its ancestors.
+
+    A physical H3 cell may cross a coarser boundary. The full coordinate path
+    distinguishes its pieces instead of assigning the whole cell to one parent.
     """
-    Convert point geometries to H3 indices at multiple resolutions.
+    geometry = None
+    for cell in path.split("/"):
+        polygon = _cell_polygon(cell, crs)
+        geometry = polygon if geometry is None else geometry.intersection(polygon)
+    return geometry
 
-    Only the finest resolution is computed directly from geo coordinates via latlng_to_cell.
-    All coarser levels are then derived using cell_to_parent, which guarantees strict H3
-    hierarchy consistency: the same latlng_to_cell call cannot land a point in two different
-    parent chains at different resolutions.
-    """
-    df_copy = df[[geometry_col]].copy()
-    level_cols = [f'level_{i}' for i in range(len(levels))]
-    df_copy[level_cols] = None
-    level_unique_hex = {}
 
-    # do not process infinities, nans, or nulls
-    sel = df_copy[geometry_col].x.notnull() & (~df_copy[geometry_col].x.isin([np.inf, -np.inf]))
-
-    # convert to WGS84 once — a single shared conversion avoids cross-resolution floating-point drift
-    if df_copy.crs is not None and df_copy.crs.to_string() != 'EPSG:4326':
-        df_copy = df_copy.to_crs(epsg=4326)
-
-    # Compute the finest level directly from coordinates
-    finest_idx = len(levels) - 1
-    finest_col = f'level_{finest_idx}'
-    finest_res = levels[finest_idx]
-    df_copy.loc[sel, finest_col] = df_copy.loc[sel, geometry_col].apply(
-        lambda geom: h3.latlng_to_cell(geom.y, geom.x, finest_res)
-    )
-    level_unique_hex[finest_col] = set(df_copy.loc[sel, finest_col].dropna().unique())
-
-    # Derive all coarser levels as parents of the finest level — guaranteed consistent by H3
-    for i, res in enumerate(levels[:-1]):
-        col = f'level_{i}'
-        df_copy.loc[sel, col] = df_copy.loc[sel, finest_col].apply(
-            lambda l: h3.cell_to_parent(l, res) if pd.notna(l) else None
-        )
-        level_unique_hex[col] = set(df_copy.loc[sel, col].dropna().unique())
-
-    return (df_copy[level_cols], level_unique_hex)
+def to_geo_levels(df: gpd.GeoDataFrame, geometry_col: str = 'geometry', levels=H3_LEVELS) -> tuple[pd.DataFrame, dict]:
+    """Index each coordinate independently, retaining the full path at each level."""
+    points = gpd.GeoSeries(df[geometry_col], crs=df.crs)
+    if points.crs is None:
+        raise ValueError("A CRS is required to index locations")
+    points = points.to_crs(epsg=4326)
+    valid = np.isfinite(points.x) & np.isfinite(points.y)
+    result = pd.DataFrame(index=df.index)
+    unique = {}
+    path = pd.Series("", index=df.index, dtype=object)
+    for i, resolution in enumerate(levels):
+        cells = points.loc[valid].apply(lambda point: h3.latlng_to_cell(point.y, point.x, resolution))
+        path.loc[valid] = cells if i == 0 else path.loc[valid] + "/" + cells
+        name = f"level_{i}"
+        result[name] = path.where(valid, None)
+        unique[name] = set(result[name].dropna())
+    return result, unique
 
 def within_ch(context, df, cols1=["origin_x", "origin_y"], cols2=None):
     df_switzerland = context.stage("data.spatial.swiss_border")
@@ -149,9 +137,8 @@ def within_ch(context, df, cols1=["origin_x", "origin_y"], cols2=None):
     return inside_ch
 
 def configure(context):
-    # context.stage("synthesis.population.destinations") # maybe it should be this one instead of destinations_statent?
     context.stage("data.statent.statent")
-    context.stage("synthesis.population.destinations_statent")
+    context.stage("synthesis.population.destinations")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.persons")
     context.stage("data.spatial.swiss_border")
@@ -163,25 +150,32 @@ def execute(context):
     
     # Destination/company data (exclude non-offering rows such as remote work locations)
     logger.info("H3: \t Processing destination companies data...")
-    destinations = context.stage("synthesis.population.destinations_statent").copy()
+    destinations = context.stage("synthesis.population.destinations").copy()
     offer_cols = [f"offers_{p}" for p in ["shop", "leisure", "other", "work_secondary", "education_secondary", "home_secondary"] if f"offers_{p}" in destinations.columns]    
-    assert len(offer_cols) > 0, "No offers_* columns found in synthesis.population.destinations_statent"
+    assert len(offer_cols) > 0, "No offers_* columns found in synthesis.population.destinations"
     assert destinations[offer_cols].isna().sum().sum() == 0, "Found NaNs in offers_* columns of destinations data, please check the data preparation steps."
 
     # enrich destinations
-    df_statent = context.stage("data.statent.statent")[["enterprise_id", "noga"]]
+    df_statent = context.stage("data.statent.statent")[["enterprise_id", "noga"]].copy()
     df_statent.columns = ["destination_id", "noga"]
+    df_statent["noga"] = df_statent["noga"].fillna("").astype(str)
     df_statent["offers_cultural"] = df_statent["noga"].str.startswith("912") | df_statent["noga"].str.startswith("914")
     df_statent["offers_sport"] = df_statent["noga"].str.startswith("93")
     df_statent["offers_gastronomy"] = df_statent["noga"].str.startswith("56")
     df_statent["offers_accommodation"] = df_statent["noga"].str.startswith("55")
     additional_offers = ["offers_cultural", "offers_sport", "offers_gastronomy", "offers_accommodation"]
-    destinations = destinations.merge(df_statent[["destination_id"] + additional_offers], on="destination_id", how="left")
-    destinations[additional_offers] = destinations[additional_offers].fillna(0)
+    offers = df_statent.groupby("destination_id")[additional_offers].any()
+    destinations = destinations.merge(offers, on="destination_id", how="left", validate="one_to_one")
+    destinations[additional_offers] = destinations[additional_offers].fillna(False)
+    destinations["ovgk"] = destinations["ovgk"].fillna("None")
+    employees = pd.to_numeric(destinations["number_employees"], errors="coerce")
+    destinations["number_employees"] = employees.where(np.isfinite(employees), 1.0).clip(lower=0.0)
 
     # keep only rows that have at least one offer (this filter would remove remote work locations for example)
-    offer_cols = offer_cols + additional_offers
     destinations = destinations[destinations[offer_cols].any(axis=1)].reset_index(drop=True)
+    offer_cols = offer_cols + additional_offers
+    if destinations.empty:
+        raise RuntimeError("No destinations offering secondary activities")
 
     destinations_attrs_cols = ["destination_id", "number_employees", "ovgk", "municipality_type"] + offer_cols
     destinations_attributes = destinations[destinations_attrs_cols].copy()
@@ -244,22 +238,6 @@ def execute(context):
     level_unique_hex_list.extend([mz_persons_home_unique_hex, mz_persons_work_unique_hex])
     del mz_persons
 
-    # synthetic population
-    # logger.info("H3: \t Processing synthetic population data...")
-    # df_work, df_education = context.stage("synthesis.population.spatial.primary.locations")
-    # df_homes = context.stage("synthesis.population.spatial.home.locations")
-    # df_work = gpd.GeoDataFrame(df_work, geometry=gpd.points_from_xy(df_work["geometry"].x, df_work["geometry"].y), crs="EPSG:2056")
-    # df_education = gpd.GeoDataFrame(df_education, geometry=gpd.points_from_xy(df_education["geometry"].x, df_education["geometry"].y), crs="EPSG:2056")
-    # df_homes = gpd.GeoDataFrame(df_homes, geometry="geometry", crs="EPSG:2056")
-    # work_levels, work_unique_hex = to_geo_levels_parallel(df_work, geometry_col="geometry")
-    # education_levels, education_unique_hex = to_geo_levels_parallel(df_education, geometry_col="geometry")
-    # home_levels, home_unique_hex = to_geo_levels_parallel(df_homes, geometry_col="geometry")
-    # data_collections["synthetic_population_work"] = work_levels
-    # data_collections["synthetic_population_education"] = education_levels
-    # data_collections["synthetic_population_home"] = home_levels
-    # level_unique_hex_list.extend([work_unique_hex, education_unique_hex, home_unique_hex])
-    # del df_work, df_education, df_homes
-
     # Merge level geometries across all datasets
     logger.info("H3: \t Merging level geometries across all datasets...")
     swiss_border = context.stage("data.spatial.swiss_border").to_crs("EPSG:2056").geometry.union_all()
@@ -272,12 +250,12 @@ def execute(context):
         
         logger.info(f"\t\t Processing level {H3_LEVELS[i]} with {len(all_hex)} unique hexagons...")
 
-        polygons = [Polygon([(lng, lat) for lat, lng in h3.cell_to_boundary(h)]) for h in all_hex]
-        merged_gdf = gpd.GeoDataFrame({"h3_index": list(all_hex)}, geometry=polygons, crs="EPSG:4326")
-        # We need to merge to EPSG:2056 for compatibility with our pipeline later on
-        merged_gdf = merged_gdf.to_crs("EPSG:2056")
+        all_hex = sorted(all_hex)
+        # Project before clipping: projected straight polygon edges must also nest.
+        polygons = [coordinate_cell_geometry(path, crs="EPSG:2056") for path in all_hex]
+        merged_gdf = gpd.GeoDataFrame({"h3_index": all_hex}, geometry=polygons, crs="EPSG:2056")
 
-        merged_gdf["centroid"] = merged_gdf.geometry.centroid
+        merged_gdf["centroid"] = merged_gdf.geometry.representative_point()
         intersection_area = merged_gdf.geometry.intersection(swiss_border).area
         total_area = merged_gdf.geometry.area
         merged_gdf["outside_fraction"] = np.clip(1 - (intersection_area / total_area), 0, 1)
@@ -314,23 +292,3 @@ def execute(context):
     h3_tree = build_h3_tree(merged_level_geoms)
 
     return (data_collections, merged_level_geoms, h3_tree)
-
-
-
-
-
-
-
-
-# def plot_geom(levels):
-#     # --- Plotting ---
-#     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-#     for i, gdf_lvl in enumerate(levels.values()):
-#         gdf_lvl.plot(ax=axes[i], edgecolor="black", facecolor="none")
-#         axes[i].set_title(f"Level {i}")
-
-#     for ax in axes:
-#         ax.set_axis_off()
-
-#     plt.tight_layout()
-#     plt.show()

@@ -7,7 +7,7 @@ import geopandas as gpd
 import polars as pl
 from dmc.constants import constants
 from mode_choice import defaults as D
-from mode_choice.model.parameters import load
+from dmc.parameters import Parameters
 from mode_choice.routing.server import ensure_server_started
 from mode_choice.routing.RoutingServer import RoutingServer
 
@@ -15,7 +15,7 @@ def configure(context):
     context.stage("mode_choice.routing.server")
     context.stage("mode_choice.defaults")
     for stage in ("mode_choice.data.trips", "mode_choice.tours.build", "synthesis.population.spatial.locations",
-                  "synthesis.population.models.subscriptions", "data.constants", "dmc.params",
+                  "synthesis.population.models.subscriptions", "data.constants", "dmc.parameter_files",
                   "data.spatial.municipalities", "data.spatial.municipality_types",
                   "data.spatial.cantons", "data.statent.density", "data.statpop.density", "data.spatial.ovgk"):
         context.stage(stage)
@@ -33,7 +33,7 @@ def execute(context):
 # The execute function, this was makes sure the server is stopped if an error happen at this stage
 def prepare_data(context):
     # load the parameters
-    p = load(context)
+    p = Parameters.from_context(context)
 
     # load the trips and tours, and drop trips not eligible for mode choice
     trips = context.stage("mode_choice.data.trips")

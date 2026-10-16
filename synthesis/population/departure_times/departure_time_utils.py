@@ -1,8 +1,7 @@
 import pandas as pd
 import numpy as np
-import matsim.runtime.eqasim as eqasim
-import os
-from .dmc_parameters_class import Parameters
+from .routing_cache import route_trips
+from dmc.parameters import Parameters
 import logging
 logger = logging.getLogger("synpp")
 
@@ -44,7 +43,7 @@ def load_trips(context):
     df["euclidean_distance"] = np.hypot(df["destination_x"] - df["origin_x"], df["destination_y"] - df["origin_y"])
 
     result = df[["person_id", "trip_id", "trip_index", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time", "euclidean_distance", "preceding_purpose", "following_purpose"]].copy()
-    return result
+    return result.sort_values(["person_id", "trip_index"], kind="stable").reset_index(drop=True)
 
 def get_variation_window_min(context, df_trips):
     # enrich with car availability
@@ -84,13 +83,13 @@ def filter_trips(context, df_trips):
     
     return df.reset_index(drop=True)
 
-def propose_departures(row, min_time=0, max_time=30*3600, interval_s=5*60, rng=np.random):
+def propose_departures(row, min_time=0, max_time=30*3600, interval_s=5*60, *, rng):
     departure_time = row["departure_time"]
     var_window = row["variation_window_min"] * 60
     start_time = max(min_time, departure_time - var_window - 1)
     end_time = min(max_time, departure_time + var_window + 1)
     dur = end_time - start_time
-    n = max(3, (dur + interval_s) // interval_s)
+    n = int(max(3, (dur + interval_s) // interval_s))
     a = np.empty(n, dtype=np.int64)
     a[0] = int(start_time)
     a[n-1] = int(end_time)
@@ -99,7 +98,16 @@ def propose_departures(row, min_time=0, max_time=30*3600, interval_s=5*60, rng=n
     return a.astype(int).tolist()
 
 def prepare_trips_for_router(context, df_trips):
-    df = df_trips.copy()
+    df = df_trips.sort_values(["person_id", "trip_index"], kind="stable").copy()
+    if df.empty:
+        return pd.DataFrame(columns=(
+            'identifier',
+            'origin_x',
+            'origin_y',
+            'destination_x',
+            'destination_y',
+            'departure_time',
+        ))
     base_seed = context.config('random_seed')
     rng = np.random.default_rng(base_seed)
 
@@ -111,111 +119,50 @@ def prepare_trips_for_router(context, df_trips):
     # Router needs an identifier, different for each trip
     df["identifier"] = df["person_id"].astype(str) + "__" + df["trip_index"].astype(str) + "__" + df["departure_time"].astype(str)
 
-    return df[["identifier", "origin_x", "origin_y", "destination_x", "destination_y", "departure_time"]]
+    # Integer-second proposals can coincide; route each alternative only once.
+    return (df.loc[:, (
+        'identifier',
+        'origin_x',
+        'origin_y',
+        'destination_x',
+        'destination_y',
+        'departure_time',
+    )].drop_duplicates("identifier")
+            .sort_values("identifier", kind="stable").reset_index(drop=True))
 
 def run_pt_router(context, df):
-    # output path
-    output_path= os.path.join(context.working_directory, "pt_routed_trips.csv")
-    initial_ids = df[["identifier"]].astype(str).copy()
-    if os.path.exists(output_path):
-        logger.info("\t PT routed trips already exist. Checking if they are valid.")
-        try:
-            df_old = pd.read_csv(output_path)
-        except Exception as e:
-            logger.warning("\t  - Could not read the existing routed trips. Exception: \n %s. \n Performing routing.", e)
-            df_old = pd.DataFrame()
+    return route_trips(context, df)
 
-        required_columns = {
-            "identifier",
-            "access_travel_time_min",
-            "egress_travel_time_min",
-            "transfer_waiting_time_min",
-            "transfer_travel_time_min",
-            "in_vehicle_time_total_min",
-            "in_vehicle_distance_total_km",
-            "transfers",
-            "initial_waiting_time_min",
-        }
-        valid_cache = (
-            required_columns.issubset(df_old.columns)
-            and len(df_old) == len(df)
-            and set(df_old["identifier"].astype(str)) == set(df["identifier"].astype(str))
-        )
-        if valid_cache:
-            logger.info("\t  - They are valid. Skipping routing.")
-            df = initial_ids.merge(df_old, on="identifier", how="left")
-            df = _prepare_routed_output(df)
-            df.loc[df["access_egress_time_min"].isna(), ["access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]] = 1e6
-            return df[["identifier", "access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]]
-        else:
-            logger.info("\t  - They are not valid. Performing routing.")
-            del df_old
-
-    # save trips as csv file
-    input_path = os.path.join(context.working_directory, "pt_trips_to_be_routerd.csv")
-    initial_length = len(df)
-    logger.info("\t Saving %d trips to be routed to %s.", initial_length, input_path)
-    df.to_csv(input_path, index=False)
-    del df
-
-
-    # config path
-    config_path = context.stage("calibration.pt_pricing.generate_config")  
-    
-    # run the router
-    eqasim.run(context, "org.eqasim.core.tools.routing.RunBatchPublicTransportRouter",
-            [
-                "--config-path", config_path,
-                "--input-path", input_path,
-                "--output-trips-path", output_path,
-                "--batch-size", "2048",
-                "--chunk-size", "131072",
-                "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator",
-                "--threads", str(context.config("threads"))
-            ]
-        )
-    
-    # read the routed trips
-    df = pd.read_csv(output_path)
-    logger.info(f"\t There are {len(df)} trips after PT routing.")
-    logger.info(f"\t There are {initial_length - len(df)} trips lost during PT routing.")
-
-    # we merge to keep all initial trips, and set the nan values to very high number, so they won't be selected anyway
-    df = initial_ids.merge(df, on="identifier", how="left")
-    df = _prepare_routed_output(df)
-    df.loc[df["access_egress_time_min"].isna(), ["access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]] = 1e6
-
-    return df[["identifier", "access_egress_time_min", "in_vehicle_time_min", "transfers", "waiting_time_min", "initial_waiting_time_min", "distance_km"]]
-
-def _prepare_routed_output(df):
-    df["access_egress_time_min"] = df["access_travel_time_min"] + df["egress_travel_time_min"]
-    df["waiting_time_min"] = df["transfer_waiting_time_min"] + df["transfer_travel_time_min"]
-    df["in_vehicle_time_min"] = df["in_vehicle_time_total_min"]
-    df["distance_km"] = df["in_vehicle_distance_total_km"]
-    return df
-    
 def compute_utilities(context, df):
     # get and parse the params file
-    mode_params_path, _ = context.stage("dmc.params")
-    Parameters.from_yaml(mode_params_path)
+    parameters = Parameters.from_context(context)
 
     # compute the utility for each trip
     utility = (
-        Parameters.pt.betaAccessEgressTime_u_min * np.power((df["access_egress_time_min"]/Parameters.cost.timeScale_min), Parameters.pt.accessEgressTimeExponent) +
-        Parameters.pt.betaInVehicleTime_u_min * np.power((df["in_vehicle_time_min"]/Parameters.cost.timeScale_min), Parameters.pt.inVehicleTimeExponent) +
-        Parameters.pt.betaWaitingTime_u_min * np.power((df["waiting_time_min"]/Parameters.cost.timeScale_min), Parameters.pt.waitingTimeExponent) +
-        Parameters.pt.betaWaitingTime_u_min * np.power((df["initial_waiting_time_min"]/Parameters.cost.timeScale_min), Parameters.pt.waitingTimeExponent) +
-        Parameters.pt.betaLineSwitch_u * np.power((df["transfers"]), Parameters.pt.lineSwitchExponent)
+        parameters.pt.betaAccessEgressTime_u_min * np.power((df["access_egress_time_min"]/parameters.cost.timeScale_min), parameters.pt.accessEgressTimeExponent) +
+        parameters.pt.betaInVehicleTime_u_min * np.power((df["in_vehicle_time_min"]/parameters.cost.timeScale_min), parameters.pt.inVehicleTimeExponent) +
+        parameters.pt.betaWaitingTime_u_min * np.power((df["waiting_time_min"]/parameters.cost.timeScale_min), parameters.pt.waitingTimeExponent) +
+        parameters.pt.betaWaitingTime_u_min * np.power((df["initial_waiting_time_min"]/parameters.cost.timeScale_min), parameters.pt.waitingTimeExponent) +
+        parameters.pt.betaLineSwitch_u * np.power((df["transfers"]), parameters.pt.lineSwitchExponent)
     )
     # add very low gumbel randomness
     rng = np.random.default_rng(context.config('random_seed')*2)
-    noise = rng.gumbel(0.0, scale=abs(Parameters.pt.betaWaitingTime_u_min), size=len(utility))
+    noise = rng.gumbel(0.0, scale=abs(parameters.pt.betaWaitingTime_u_min), size=len(utility))
 
-    return utility + noise
+    # Assign draws by identifier, independently of router/output row order.
+    order = np.argsort(df["identifier"].to_numpy(), kind="stable")
+    aligned_noise = np.empty(len(noise))
+    aligned_noise[order] = noise
+    return utility + aligned_noise
 
 def find_best_departure_times(context, df, original_departures):
     # we first filter out the trips with not a valid route or for which the best departuer times wouldn't help much
     df = df[(df["access_egress_time_min"] < 3600) & (df["initial_waiting_time_min"] < 3600)].copy()
+
+    if df.empty:
+        return original_departures.rename(columns={"departure_time": "best_departure_time"})[
+            ["person_id", "trip_index", "best_departure_time"]].copy()
+    df = df.sort_values("identifier", kind="stable")
 
     # split the identifier into person_id, trip_index, and departure_time (this is how it was before routing)
     df[["person_id","trip_index","departure_time"]] = df['identifier'].str.split('__', expand=True)
@@ -258,7 +205,7 @@ def get_mz_departures(context, df_trips):
     # get mz id of each person
     df_persons = context.stage("synthesis.population.enriched")[["person_id", "mz_person_id"]]
     # merge the mz departures with the trips to get the mz departure time for each trip
-    df = df_trips[["person_id","trip_id","departure_time"]].merge(df_persons, on="person_id", how="left")
+    df = df_trips[["person_id","trip_id","trip_index","departure_time"]].merge(df_persons, on="person_id", how="left")
     df = df.merge(mz_departures, on=["mz_person_id","trip_id"], how="left")
     # if mz departure time is not available, keep the original departure time
     df["departure_time"] = df["mz_departure_time"].fillna(df["departure_time"])
@@ -268,7 +215,10 @@ def get_mz_departures(context, df_trips):
     base_seed = context.config('random_seed')
     rng = np.random.default_rng(base_seed+1)
     noise = rng.uniform(-5*60, 5*60, size=len(df))
-    df["departure_time"] = (df["departure_time"] + noise).astype(int)
+    order = df.sort_values(["person_id", "trip_index"], kind="stable").index.to_numpy()
+    aligned_noise = np.empty(len(noise))
+    aligned_noise[order] = noise
+    df["departure_time"] = (df["departure_time"] + aligned_noise).astype(int)
     
     return df["departure_time"].values
 

@@ -22,7 +22,7 @@ def _prepare_primary_locations(context):
     df_work = df_work.rename(columns={"geometry": "work", "destination_id": "work_destination_id"})
     df_education = df_education.rename(columns={"geometry": "education", "destination_id": "education_destination_id"})
 
-    df_locations = context.stage("synthesis.population.enriched")[["person_id", "household_id"]].copy()
+    df_locations = context.stage("synthesis.population.sampled")[["person_id", "household_id"]].copy()
     df_locations = df_locations.merge(df_home[["household_id", "home"]], how="left", on="household_id")
     df_locations = df_locations.merge(df_work[["person_id", "work", "work_destination_id"]], how="left", on="person_id")
     df_locations = df_locations.merge(df_education[["person_id", "education", "education_destination_id"]], how="left", on="person_id")
@@ -37,7 +37,7 @@ def _prepare_person_attributes(context):
     df = context.stage("synthesis.population.enriched").copy()
     required = ["person_id", "age", "sex", "employed", "income_class", "car_availability"]
     out = df[required].copy()
-    out["employed"] = (pd.to_numeric(out["employed"], errors="coerce").fillna(0) == 1).astype(int)
+    out["employed"] = pd.to_numeric(out["employed"], errors="coerce").isin([1, 3]).astype(int)
     return out[["person_id", "age", "sex", "employed", "income_class", "car_availability"]]
 
 
@@ -79,7 +79,9 @@ def _build_level_attributes(h3_data, h3_geo_level0, all_h3):
 
 
 def build_probability(num_employees, ovgk_none, car_available, alpha=0.7):
-    weight = np.asarray(num_employees) ** alpha
+    employees = np.asarray(num_employees, dtype=float)
+    employees = np.where(np.isfinite(employees), np.maximum(employees, 0.0), 1.0)
+    weight = employees ** alpha
     if not car_available:
         weight[ovgk_none] *= 0.01  # penalize locations with no OVGK if no car available
     total_weight = weight.sum()
@@ -92,7 +94,7 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
     
     offer_cols = [f"offers_{p}" for p in SECONDARY_ACTIVITIES]
     df_dest_attributes = context.stage("synthesis.population.destinations")[["destination_id", "number_employees", "ovgk", "geometry", *offer_cols]]
-    df_dest = df_dest.merge(df_dest_attributes, on="destination_id", how="left")
+    df_dest = df_dest.merge(df_dest_attributes, on="destination_id", how="left", validate="one_to_one")
 
     # Validate columns    
     missing = [c for c in offer_cols if c not in df_dest.columns]
@@ -100,8 +102,9 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
         raise RuntimeError(f"Missing columns in destinations data: {missing}")
 
     # Reusable full-frame arrays (boolean/numeric only — indexed with boolean mask below).
-    no_ovgk = (df_dest["ovgk"].to_numpy() == "None")
-    employees = df_dest["number_employees"].to_numpy()
+    no_ovgk = (df_dest["ovgk"].fillna("None").to_numpy() == "None")
+    employees = pd.to_numeric(df_dest["number_employees"], errors="coerce").to_numpy(dtype=float)
+    employees = np.where(np.isfinite(employees), np.maximum(employees, 0.0), 1.0)
     dest_ids = df_dest["destination_id"].to_numpy()
     geoms = df_dest["geometry"].values
 

@@ -1,9 +1,19 @@
 # Population mode choice
 
-This package applies the existing `dmc.params` model to home-based tours. It does
+This package applies the existing `dmc.parameter_files` model to home-based tours. It does
 not fit a second model. JAX and Biogeme exports use the same parameter schema.
 Global mode constants **plus residence-canton offsets** enter the base utilities;
 optional population calibration adjusts those constants further.
+
+The Synpp stage `dmc.parameter_files` selects or produces the mode and cost YAML
+files. `dmc.parameters` contains their shared `Parameters` container, the fitted
+parameter writer and the MATSim naming conversion. Estimation stages are
+`dmc.models.model_jax` and `dmc.models.model_biogeme`; their shared linear terms
+live in `dmc.models.specification`.
+
+Renaming stages changes their Synpp cache identities. To reuse an existing fit
+without estimating it again, set both `dmc_mode_parameters_path` and
+`dmc_cost_parameters_path` to the existing exported files.
 
 Use `config_dib_10.yml` as the configuration source:
 
@@ -131,12 +141,31 @@ The context manager and calibration cleanup release reservations on errors too.
 
 `mode_choice_car_routing_backend` selects:
 
-- **`java`**: one `MultiModeRouterServer` routes car, PT, walk and bike. Active
-  modes follow the MATSim config, including network routing or teleportation.
+- **`java`**: `MultiModeRouterServer` routes car.
   Server times/distances are converted from seconds/metres to minutes/km.
-- **`pandana`**: Pandana routes car; Java routes PT. Walk/bike use Euclidean
-  distance, configured distance factors and speeds. Optional hourly linkstats
+- **`pandana`**: Pandana routes car. Optional hourly linkstats
   supply car travel times by corrected departure hour.
+
+PT uses Java. Walk and bike are selected independently with
+`mode_choice_walk_routing_backend` and `mode_choice_bike_routing_backend`:
+
+- `java` (default): reuse the server and the MATSim routing configuration.
+- `python`: compute distance as Euclidean distance × detour factor, then time
+  as distance ÷ average speed, using vectorized Polars expressions.
+
+Python defaults match `origin/eqasim-mode-choice`: walking uses
+`walk_distance_factor: 1.3` and `walk_speed_m_per_s: 1.3`; cycling uses
+`bike_distance_factor: 1.4` and `bike_speed_m_per_s: 4.0`. All four can be
+overridden in the pipeline config. For example, Java car with Python walk/bike:
+
+```yaml
+mode_choice_car_routing_backend: java
+mode_choice_walk_routing_backend: python
+mode_choice_bike_routing_backend: python
+```
+
+Walk/bike no longer inherit the car backend. When using Pandana, explicitly set
+their backends to `python` to retain the previous detour/speed behavior.
 
 Car passengers always reuse the car route. `costs.parking` uses complete person
 chains, the existing charging window and destination-specific rates/search times.
@@ -144,9 +173,19 @@ chains, the existing charging window and destination-specific rates/search times
 parking stage's columns. The fitted utility model determines how those costs
 enter each alternative.
 
+Missing routing rows and null, NaN, infinite or negative route values are treated
+as unroutable trips. Routing stages retain every requested `trip_id`, set failed
+travel times to `UNROUTABLE_TIME_MIN` (1e9 minutes), and log the failure count.
+Other failed-route fields use finite zero placeholders. Availability excludes
+these routes explicitly, giving them utility `-inf` for both sampling methods
+and during calibration. Car passengers inherit failed car routes; PT requires
+valid results from both its total and component routers. If a tour has no
+feasible mode sequence, selection reports an error identifying the person and
+tour. Duplicate or unknown routing identifiers remain errors.
+
 The server starts with `--compute-cost true` and the configured `car_cost_model`.
 `routing.config` creates a private copy of the PT routing config pointing to the
-cost parameters from `dmc.params`, preserving relative transit/pricing input paths.
+cost parameters from `dmc.parameter_files`, preserving relative transit/pricing input paths.
 Java car and PT routing request prices together with routes, save only `trip_id` and
 `car_cost_CHF` or `pt_cost_CHF` in their stage's `cost.parquet`, and return routing
 variables without costs. `costs.car` and `costs.pt` read those artifacts; they do
@@ -155,9 +194,21 @@ With Pandana, the car routing stage uses `dmc.cost.car` locally on the routed
 distances and writes the same cost artifact. Simple pricing uses the fitted
 `carCost_CHF_km`; Weiss pricing uses DMC's shared function. No Java pricing request
 is made for Pandana car routes.
-PT requests carry age, home coordinates and subscription flags, so fares use
-the same traveler discounts and fitted regional-subscription radius as before.
+PT requests carry age, residence `home_x`/`home_y`, and the canonical
+`subscriptions` strings used in population export: `none`, `GA`, `VA`, `HT`,
+and `VA+HT`. Regional passes require valid residence coordinates even when the
+trip starts elsewhere. Unknown subscription codes and invalid ages fail before
+routing. Equivalent legacy boolean fields remain for compatibility with the
+previous JAR; the updated Java server prioritizes `subscriptions`.
+The current synthetic population supplies these five categories; junior and
+Gleis7 passes are not separately imputed by its subscription stage.
 The server's car cost excludes parking and toll charges; tolls affect routing.
+
+The updated server automatically includes `pt_cost_data` when routing PT with
+costs. This saved itinerary remains in `pt_routes.csv` and can be passed to
+`RoutingServer.cost_csv(..., mode="pt")` for repricing without routing again.
+The usual cost stages still read `cost.parquet`. No `savePtCostData` request or
+`--save-pt-cost-data` launch option is needed with the updated API.
 
 **Current Java API limitation:** the multimodal server supplies PT total time and
 distance and fares but not the separately weighted time/distance components
@@ -167,7 +218,15 @@ until the server exposes these fields. The standalone fare calculator is no long
 called. Totals are never substituted for in-vehicle times, and string trip IDs
 are preserved throughout routing and pricing.
 
-The current eqasim integration was checked against commit `64b8ce08`. The server
+The supplemental router receives `detailed_pt_requests.csv` with only identifier,
+origin/destination coordinates and departure time. Home and subscription fields
+remain in the multimodal server's request CSV for pricing. Its component results
+are saved as `detailed_pt_routes.csv`, separately from the server's `pt_routes.csv`.
+The supplemental Java process reads the current `java_memory` configuration.
+
+The baseline integration was checked against commit `64b8ce08`; the canonical
+subscription and automatic itinerary interfaces follow the updated sources in
+`java_router/`. Rebuild and install the JAR to enable those Java changes. The server
 receives `--routingDistanceUtility` from
 `calibration.car_routing_vot.optimal_value`, so its calibrated result (or that
 stage's default when calibration is disabled) overrides the config value. This

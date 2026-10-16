@@ -67,17 +67,17 @@ def add_detour_factor_feature(candidate_tensor, origin_x, origin_y, candidate_x,
     )
 
 
-def _make_quantile_transformer(n_rows):
+def _make_quantile_transformer(n_rows, random_state=None):
     """All scalable features in this model are non-negative by construction (distances, counts,
     fractions, ages, …).  Using output_distribution='uniform' maps them to [0, 1], guaranteeing
     no negative values after transformation."""
-    n_quantiles = int(min(1000, max(10, n_rows/10)))
-    return QuantileTransformer(output_distribution="uniform", n_quantiles=n_quantiles)
+    n_quantiles = int(min(n_rows, 1000, max(1, n_rows/10)))
+    return QuantileTransformer(output_distribution="uniform", n_quantiles=n_quantiles, random_state=random_state)
 
 
 def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_matrix,
                            consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_series, origin_purpose_series, purpose_categories,
-                           person_static_scaler=None, person_dynamic_scaler=None):
+                           person_static_scaler=None, person_dynamic_scaler=None, use_target_distance=True, random_state=None):
     age = np.asarray(age, dtype=np.float64); income_class = np.asarray(income_class, dtype=np.float64)
     daily_longest = np.asarray(daily_longest, dtype=np.float64); daily_total = np.asarray(daily_total, dtype=np.float64)
     daily_longest_work = np.asarray(daily_longest_work, dtype=np.float64)
@@ -88,20 +88,25 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
     target_distance = np.asarray(target_distance, dtype=np.float64)
     static_numeric  = np.column_stack([age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_matrix]).astype(np.float64)  # [N, 11]
     dynamic_numeric = np.column_stack([consumed_before, trip_position, departure_time, activity_duration_h, target_distance]).astype(np.float64)                      # [N, 5]
-    if static_numeric.shape[0] > 1:
-        if person_static_scaler is None:
-            person_static_scaler  = _make_quantile_transformer(static_numeric.shape[0])
-            static_scaled  = person_static_scaler.fit_transform(static_numeric).astype(np.float32)
-        else:
-            static_scaled  = person_static_scaler.transform(static_numeric).astype(np.float32)
-        if person_dynamic_scaler is None:
-            person_dynamic_scaler = _make_quantile_transformer(dynamic_numeric.shape[0])
-            dynamic_scaled = person_dynamic_scaler.fit_transform(dynamic_numeric).astype(np.float32)
-        else:
-            dynamic_scaled = person_dynamic_scaler.transform(dynamic_numeric).astype(np.float32)
+    if person_dynamic_scaler is not None:
+        expected = getattr(person_dynamic_scaler, "use_target_distance", True)
+        if expected != use_target_distance:
+            raise ValueError("Target-distance option differs from the fitted person scaler")
+    if not use_target_distance:
+        dynamic_numeric = dynamic_numeric[:, :-1]
+    if static_numeric.shape[0] == 0:
+        raise ValueError("Cannot fit person features without training rows")
+    if person_static_scaler is None:
+        person_static_scaler  = _make_quantile_transformer(static_numeric.shape[0], random_state=random_state)
+        static_scaled  = person_static_scaler.fit_transform(static_numeric).astype(np.float32)
     else:
-        static_scaled = static_numeric.astype(np.float32)
-        dynamic_scaled = dynamic_numeric.astype(np.float32)
+        static_scaled  = person_static_scaler.transform(static_numeric).astype(np.float32)
+    if person_dynamic_scaler is None:
+        person_dynamic_scaler = _make_quantile_transformer(dynamic_numeric.shape[0], random_state=random_state)
+        dynamic_scaled = person_dynamic_scaler.fit_transform(dynamic_numeric).astype(np.float32)
+    else:
+        dynamic_scaled = person_dynamic_scaler.transform(dynamic_numeric).astype(np.float32)
+    person_dynamic_scaler.use_target_distance = use_target_distance
 
     purpose_categories = [str(p) for p in purpose_categories]
     purpose_to_idx = {purpose: idx for idx, purpose in enumerate(purpose_categories)}
@@ -117,7 +122,7 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
     static_matrix  = np.concatenate([static_scaled, binary],                                          axis=1).astype(np.float32)  # [N, 14]
     dynamic_matrix = np.concatenate([dynamic_scaled, purpose_one_hot, origin_purpose_one_hot],         axis=1).astype(np.float32)  # [N, 5+2P]
     full_matrix    = np.concatenate([static_matrix,  dynamic_matrix],                                  axis=1).astype(np.float32)  # [N, 14+5+2P]
-    feature_names  = PERSON_STATIC_FEATURES + PERSON_DYNAMIC_FEATURES + [f"purpose_{p}" for p in purpose_categories] + [f"origin_purpose_{p}" for p in purpose_categories]
+    feature_names  = PERSON_STATIC_FEATURES + [name for name in PERSON_DYNAMIC_FEATURES if use_target_distance or name != "target_distance"] + [f"purpose_{p}" for p in purpose_categories] + [f"origin_purpose_{p}" for p in purpose_categories]
     return full_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, feature_names
 
 
@@ -132,6 +137,8 @@ def transform_person_static_vector(age, income_class, daily_longest, daily_total
 def transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler):
     """Returns [1, 5+2P]: [scaled_consumed_before, scaled_trip_position, scaled_departure_time, scaled_activity_duration_h, scaled_target_distance, purpose_one_hot, origin_purpose_one_hot]."""
     numeric = np.array([[consumed_before, trip_position, departure_time, activity_duration_h, target_distance]], dtype=np.float64)
+    if not getattr(dynamic_scaler, "use_target_distance", True):
+        numeric = numeric[:, :-1]
     numeric_scaled = dynamic_scaler.transform(numeric).astype(np.float32)
     return np.concatenate([numeric_scaled, [purpose_hot], [origin_purpose_hot]], axis=1).astype(np.float32)  # [1, 5+2P]
 

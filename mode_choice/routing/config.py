@@ -9,12 +9,12 @@ from mode_choice.defaults import ROUTER_CONFIG_INPUTS
 def configure(context):
     context.stage("mode_choice.defaults")
     context.stage("calibration.pt_pricing.generate_config")
-    context.stage("dmc.params")
+    context.stage("dmc.parameter_files")
 
 
 def execute(context):
     source = Path(context.stage("calibration.pt_pricing.generate_config")).resolve()
-    _, cost_parameters = context.stage("dmc.params")
+    _, cost_parameters = context.stage("dmc.parameter_files")
     tree = ET.parse(source)
     root = tree.getroot()
     # Moving the config must not change where transit and pricing inputs resolve.

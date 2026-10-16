@@ -4,7 +4,7 @@ import polars as pl
 from mode_choice.defaults import ROUTING_DEFAULTS, CAR_ROUTING_BACKENDS, ROUTING_COST_FILENAME
 from mode_choice.routing.server import ensure_server_started
 from mode_choice.routing.RoutingServer import RoutingServer
-from mode_choice.data.frames import join_variables
+from mode_choice.routing.results import complete_routes
 
 
 def car_backend(context):
@@ -25,8 +25,11 @@ def configure_mode(context, mode):
 
 
 def read_results(path, identifier, mapping):
-    frame = pl.read_csv(path, columns=[identifier, *mapping], schema_overrides={identifier: pl.String},
-                        null_values=["NaN", "Infinity"])
+    try:
+        frame = pl.read_csv(path, columns=[identifier, *mapping], schema_overrides={identifier: pl.String},
+                            null_values=["NaN", "nan", "Infinity"])
+    except pl.exceptions.NoDataError:
+        frame = pl.DataFrame(schema={identifier: pl.String, **{column: pl.Float64 for column in mapping}})
     frame = frame.select(pl.col(identifier).alias("trip_id"),
                          *[pl.col(source).cast(pl.Float64).alias(target) for source, target in mapping.items()])
     if frame["trip_id"].null_count() or frame["trip_id"].n_unique() != frame.height:
@@ -49,10 +52,7 @@ def route_mode(context, mode):
         RoutingServer.route_csv(context.stage("mode_choice.routing.requests"), output, mode, compute_cost=compute_cost)
         result = read_results(output, "identifier", columns).with_columns(
             pl.col(f"{mode}_travel_time_min") / 60, pl.col(f"{mode}_distance_km") / 1000)
-        join_variables(trips.select("trip_id"), result)
-        if result.select(pl.any_horizontal([
-                ~pl.col(c).is_finite().fill_null(False) | (pl.col(c) < 0) for c in columns.values()]).any()).item():
-            raise ValueError(f"Invalid {mode} routing values")
+        result = complete_routes(trips, result, [f"{mode}_travel_time_min"])
         return save_costs(context, result, mode) if compute_cost else result
     except BaseException:
         RoutingServer.stop_server()

@@ -19,6 +19,7 @@ MODEL_NAME = "regional_model.pt"
 
 
 def configure(context):
+    context.config("secondary_nn_use_target_distance", True)
     context.stage("synthesis.population.spatial.secondary_nn.h3")
     context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
@@ -182,6 +183,7 @@ def execute(context):
                                                                                  consumed_before=consumed_before, trip_position=trip_position, departure_time=departure_time,
                                                                                  activity_duration_h=activity_duration_h, target_distance=target_distance,
                                                                                  purpose_series=df_trips["purpose"], origin_purpose_series=df_trips["origin_purpose"],
+                                                                                 use_target_distance=bool(context.config("secondary_nn_use_target_distance")),
                                                                                  purpose_categories=purpose_categories)
 
     logger.info("\t Building candidate tensor with Numba...")

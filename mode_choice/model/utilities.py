@@ -1,14 +1,14 @@
 """Polars implementation of the current DMC export's utility equations."""
 import polars as pl
-from dmc.specification import LINEAR_TERMS
-from dmc.writer import NAMES_CONVERSION
+from dmc.models.specification import LINEAR_TERMS
+from dmc.parameters import NAMES_CONVERSION
 
 from mode_choice.defaults import (MODES, ADULT_AGE_REFERENCE, CP_DISTANCE_REFERENCE_KM, POWER_FLOOR,
                                   DISTANCE_COST_INTERACTION, INCOME_COST_INTERACTION, CANTON_ALPHA_KEYS, CALIBRATION_CANTON_COLUMN)
 
 
 def power(base, exponent):
-    # Match dmc.model_jax._safe_power, including zero ** zero.
+    # Match dmc.models.model_jax._safe_power, including zero ** zero.
     if exponent == 1.0:
         return pl.when(base > 0).then(base).otherwise(0.0)
     return pl.when(base > 0).then(base.clip(lower_bound=POWER_FLOOR).pow(exponent)).otherwise(0.0)

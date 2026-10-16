@@ -1,11 +1,11 @@
 """Estimate the DMC multinomial-logit model with JAX and SciPy.
 
-This is a Biogeme-independent implementation of `dmc.model`.  It keeps
+This is a Biogeme-independent implementation of `dmc.models.model_biogeme`.  It keeps
 the same data preparation, utility specification, fixed parameters, bounds,
 weights, MATSim YAML output and value-of-time calculations.  JAX compiles the
 likelihood and its exact gradient; SciPy's L-BFGS-B handles the bounds.
 
-Run this Synpp stage as ``dmc.model_jax``.
+Run this Synpp stage as ``dmc.models.model_jax``.
 """
 
 from dataclasses import dataclass
@@ -26,9 +26,9 @@ from scipy.optimize import OptimizeResult, minimize
 import yaml
 
 from dmc.constants import constants
-from dmc.specification import LINEAR_TERMS
+from dmc.models.specification import LINEAR_TERMS
 from dmc.vot.functions import vot_utils
-from dmc.writer import writer
+from dmc.parameters import writer
 
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ class EstimationResult:
 
 
 def preprocess_data(df: pd.DataFrame, ignore_car_passenger: bool):
-    """Apply exactly the coding and weighting used by ``dmc.model``."""
+    """Apply exactly the coding and weighting used by ``dmc.models.model_biogeme``."""
     modes = MODES.copy()
     if ignore_car_passenger:
         df = df[df["mode"] != "car_passenger"].reset_index(drop=True)
@@ -386,7 +386,7 @@ def build_utilities(
     modes: list[str],
     ignore_car_passenger: bool,
 ):
-    """Evaluate the utility equations from ``dmc.model`` with JAX."""
+    """Evaluate the utility equations from ``dmc.models.model_biogeme`` with JAX."""
     if context.config("distance_cost_interaction"):
         cost_by_distance = _safe_power(
             arrays["euclidean_distance_km"] / context.config("reference_euclidean_distance_km"),

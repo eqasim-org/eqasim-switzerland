@@ -1,17 +1,15 @@
 import os
-import yaml
+from dmc.parameters import Parameters
 
 def configure(context):
   pass
 
 def execute(context):
     mode_params_path = os.path.join(context.path(), "default_params.yml")
-    with open(mode_params_path, 'w') as f:
-       yaml.dump(default_mode_params, f, sort_keys=False)
+    Parameters(default_mode_params).to_yaml(mode_params_path)
 
     cost_params_path = os.path.join(context.path(), "default_cost_params.yml")
-    with open(cost_params_path, 'w') as f:
-       yaml.dump(default_cost_params, f, sort_keys=False)
+    Parameters(default_cost_params).to_yaml(cost_params_path)
 
     return mode_params_path, cost_params_path
 

@@ -1,7 +1,7 @@
 import os
 
 from dmc.constants import constants
-from dmc.writer import writer
+from dmc.parameters import writer
 from dmc.vot.functions import vot_utils
 
 import biogeme.database as db
@@ -43,6 +43,74 @@ def configure(context):
     context.config("reference_euclidean_distance_km", constants.REF_EUCLIDEAN_DISTANCE_KM)
     context.config("reference_income_chf", constants.REF_INCOME_CHF)
     context.config("pt_regional_radius_km", constants.PT_REGIONAL_RADIUS_KM)
+
+
+def execute(context):
+    df = context.stage("dmc.data.training_data")
+    ignore_car_passenger = context.config("ignore_car_passenger")
+    use_exponents = context.config("use_exponents")
+    use_income = context.config("use_income_in_dmc")
+
+    df, modes = preprocess_data(df, ignore_car_passenger)
+    log_trip_stats(df, modes)
+
+    database = db.Database("data", df)
+    vars = define_variables(database, ignore_car_passenger)
+    betas = define_betas(ignore_car_passenger, use_exponents, use_income)
+    utilities, availability = build_utilities(context, vars, betas, modes, ignore_car_passenger)
+
+    # Training the model
+    logprob = models.loglogit(utilities, availability, vars["mode"])
+    cwd = os.getcwd()
+    os.chdir(context.working_directory)
+    biogeme = create_biogeme(database, logprob, vars["weight"])
+    
+    biogeme.calculate_null_loglikelihood(availability)
+    result = biogeme.estimate()
+    os.chdir(cwd)
+    
+    # Print summary of the results
+    logger.info(result.short_summary())
+
+    # write the optimal parameters to a yaml file in MATSim input format    
+    mode_params_path, cost_params_path = writer(context, result, betas).write()
+
+    # write the optimal parameters to a csv file
+    csv_params_path = os.path.join(context.path(), "dmc_model_parameters.csv")
+    estimated_parameters = get_pandas_estimated_parameters(
+        estimation_results=result
+    )["Estimated parameters"].set_index("Name")
+    estimated_parameters.to_csv(csv_params_path)
+    logger.info("The estimated parameters are saved to %s", csv_params_path)
+
+    # Compute the VOT for car users
+    vot_car, mean_vot_car = vot_utils.get_car_vot(context, df, result, MODES)
+    vot_pt, mean_vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer = vot_utils.get_pt_vot(context, df, result, MODES)    
+
+    logger.info("Mean marginal WTP for observed car trips: %.2f CHF/hour", mean_vot_car)
+    logger.info("Mean marginal WTP for observed PT trips: %.2f CHF/hour", mean_vot_pt)
+
+    path_to_figure = os.path.join(context.path(),"vot_distribution.png")
+    use_vot_weights = context.config("use_weights_for_vot")
+    logger.info(
+        "WTP summaries and histogram use %s trip observations",
+        "survey-weighted" if use_vot_weights else "unweighted",
+    )
+    vot_utils.plot_vot(
+        vot_car,
+        vot_pt,
+        figure_path=path_to_figure,
+        car_weights=df.loc[vot_car.index, "person_weight"] if use_vot_weights else None,
+        pt_weights=df.loc[vot_pt.index, "person_weight"] if use_vot_weights else None,
+    )
+    logger.info("The VOT distribution figure is saved to %s", path_to_figure)
+    
+    return (result, 
+            df, 
+            (mode_params_path, cost_params_path), 
+            path_to_figure,
+            (vot_car, vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer))
+
 
 def preprocess_data(df, ignore_car_passenger):
     modes = MODES.copy()
@@ -645,68 +713,3 @@ def create_biogeme(database, log_probability, weight):
     return estimator
 
 
-def execute(context):
-    df = context.stage("dmc.data.training_data")
-    ignore_car_passenger = context.config("ignore_car_passenger")
-    use_exponents = context.config("use_exponents")
-    use_income = context.config("use_income_in_dmc")
-
-    df, modes = preprocess_data(df, ignore_car_passenger)
-    log_trip_stats(df, modes)
-
-    database = db.Database("data", df)
-    vars = define_variables(database, ignore_car_passenger)
-    betas = define_betas(ignore_car_passenger, use_exponents, use_income)
-    utilities, availability = build_utilities(context, vars, betas, modes, ignore_car_passenger)
-
-    # Training the model
-    logprob = models.loglogit(utilities, availability, vars["mode"])
-    cwd = os.getcwd()
-    os.chdir(context.working_directory)
-    biogeme = create_biogeme(database, logprob, vars["weight"])
-    
-    biogeme.calculate_null_loglikelihood(availability)
-    result = biogeme.estimate()
-    os.chdir(cwd)
-    
-    # Print summary of the results
-    logger.info(result.short_summary())
-
-    # write the optimal parameters to a yaml file in MATSim input format    
-    mode_params_path, cost_params_path = writer(context, result, betas).write()
-
-    # write the optimal parameters to a csv file
-    csv_params_path = os.path.join(context.path(), "dmc_model_parameters.csv")
-    estimated_parameters = get_pandas_estimated_parameters(
-        estimation_results=result
-    )["Estimated parameters"].set_index("Name")
-    estimated_parameters.to_csv(csv_params_path)
-    logger.info("The estimated parameters are saved to %s", csv_params_path)
-
-    # Compute the VOT for car users
-    vot_car, mean_vot_car = vot_utils.get_car_vot(context, df, result, MODES)
-    vot_pt, mean_vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer = vot_utils.get_pt_vot(context, df, result, MODES)    
-
-    logger.info("Mean marginal WTP for observed car trips: %.2f CHF/hour", mean_vot_car)
-    logger.info("Mean marginal WTP for observed PT trips: %.2f CHF/hour", mean_vot_pt)
-
-    path_to_figure = os.path.join(context.path(),"vot_distribution.png")
-    use_vot_weights = context.config("use_weights_for_vot")
-    logger.info(
-        "WTP summaries and histogram use %s trip observations",
-        "survey-weighted" if use_vot_weights else "unweighted",
-    )
-    vot_utils.plot_vot(
-        vot_car,
-        vot_pt,
-        figure_path=path_to_figure,
-        car_weights=df.loc[vot_car.index, "person_weight"] if use_vot_weights else None,
-        pt_weights=df.loc[vot_pt.index, "person_weight"] if use_vot_weights else None,
-    )
-    logger.info("The VOT distribution figure is saved to %s", path_to_figure)
-    
-    return (result, 
-            df, 
-            (mode_params_path, cost_params_path), 
-            path_to_figure,
-            (vot_car, vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer))

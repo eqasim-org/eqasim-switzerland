@@ -34,6 +34,7 @@ DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 1.0
 SHORT_RANGE_MODEL_THRESHOLD = 1500.0
 
 def configure(context):
+    context.config("secondary_nn_use_target_distance", True)
     context.stage("synthesis.population.spatial.secondary_nn.h3")
     context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
@@ -56,7 +57,7 @@ def configure(context):
     context.config("short_range_model_validation_every", 2)
     context.config("short_range_model_early_stopping_patience", 5)
     context.config("short_range_model_early_stopping_min_delta", 1e-3)
-    context.config("short_range_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
+    context.config("secondary_nn_short_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
     context.config("short_range_trip_min_m", DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION)
     context.config("secondary_nn_distance_loss_weight", 0.07)
     context.config("secondary_nn_distance_loss_short_floor_m", 100.0)
@@ -164,7 +165,7 @@ def execute(context):
         subset=[f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}", f"destination_{H3_LEVEL_NAMES[-1]}"]
     ).reset_index(drop=True)
 
-    short_max = float(context.config("short_range_trip_threshold_m"))
+    short_max = float(context.config("secondary_nn_short_trip_threshold_m"))
     short_min = float(context.config("short_range_trip_min_m"))
     td = df["target_distance"].to_numpy(dtype=np.float64)
     td_valid = np.isfinite(td)
@@ -307,6 +308,7 @@ def execute(context):
         target_distance=target_distance,
         purpose_series=df["purpose"],
         origin_purpose_series=df["origin_purpose"],
+        use_target_distance=bool(context.config("secondary_nn_use_target_distance")),
         purpose_categories=purpose_categories,
         person_static_scaler=person_static_scaler,
         person_dynamic_scaler=person_dynamic_scaler,
