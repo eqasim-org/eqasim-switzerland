@@ -21,6 +21,13 @@ uv sync
 
 In particular, the dependencies contain the [synpp](https://github.com/eqasim-org/synpp) package, which is the computational backbone of the pipeline.
 
+`pyproject.toml` and `uv.lock` pin Synpp to commit
+[`638adc5`](https://github.com/Dib-AEK/synpp/commit/638adc5ea847eef97a8637c8620ea636b436ae8a)
+of [Dib-AEK/synpp](https://github.com/Dib-AEK/synpp/tree/fix/shared-dependency-traversal),
+based on v1.7.3. The fork resolves shared dependencies once per stage, avoiding
+the repeated traversal that stalled mode-choice initialization. `uv sync` installs
+the corrected package directly; no local package patch is needed.
+
 ## Executing the pipeline
 
 To run the pipeline, go to the project directory and call the `synpp` execution script:

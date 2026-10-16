@@ -37,7 +37,8 @@ client are implementation helpers, not additional data stages.
 | `costs.parking` | `trip_id`, parking cost and parking search time |
 | `costs.car` | `trip_id`, car operating cost, parking cost and search time |
 | `costs.pt` | `trip_id`, subscription-aware PT fare |
-| `data.inputs` | Strict joins of features, routing and costs; mode availability |
+| `data.availabilities` | `trip_id`, final mode availabilities using tour minimums and trip validity |
+| `data.inputs` | Strict joins of features, routing, costs and availabilities |
 | `tours.batches` | List of paths to `tours_batch_num{i}.parquet` |
 | `run` | Polars population trips with selected modes; diagnostic artifacts |
 
@@ -51,11 +52,15 @@ flowchart TD
     routes --> passenger[routing_variables.car_passenger]
     routes --> parking[costs.parking]
     parking --> carcost[costs.car]
-    features --> fares[costs.pt]
+    routes --> fares[costs.pt]
     routes --> inputs[data.inputs]
     passenger --> inputs
     carcost --> inputs
     fares --> inputs
+    features --> availability[data.availabilities]
+    routes --> availability
+    fares --> availability
+    availability --> inputs
     inputs --> batches[tours.batches: Parquet files]
     batches --> run[run: ModeChoice / calibration]
     trips --> run
@@ -68,8 +73,9 @@ Routing/cost stage outputs contain only their trip key and produced variables.
 Joins reject missing, duplicate, unknown or conflicting columns rather than
 silently changing the population.
 
-Tours are identified before routing so loop modes, remote-work legs, border
-chains and chains that do not start/end at home can retain their original modes.
+Tours are identified before routing. Only departures from `home` start a new tour;
+`home_secondary` stays within the same tour. Loop modes, remote-work legs and border
+chains retain their original modes. Open chains remain eligible for mode choice.
 Their rows and metadata remain in `data.trips`. The later batch stage writes the
 eligible tours with utilities, geometry and stable person/tour identifiers.
 
@@ -134,17 +140,41 @@ The context manager and calibration cleanup release reservations on errors too.
 
 Car passengers always reuse the car route. `costs.parking` uses complete person
 chains, the existing charging window and destination-specific rates/search times.
-`costs.car` adds the selected simple or Weiss operating cost and includes the
+`costs.car` reads the selected simple or Weiss operating cost and includes the
 parking stage's columns. The fitted utility model determines how those costs
 enter each alternative.
 
+The server starts with `--compute-cost true` and the configured `car_cost_model`.
+`routing.config` creates a private copy of the PT routing config pointing to the
+cost parameters from `dmc.params`, preserving relative transit/pricing input paths.
+Java car and PT routing request prices together with routes, save only `trip_id` and
+`car_cost_CHF` or `pt_cost_CHF` in their stage's `cost.parquet`, and return routing
+variables without costs. `costs.car` and `costs.pt` read those artifacts; they do
+not start Java or route again. Parking remains a separate calculation.
+With Pandana, the car routing stage uses `dmc.cost.car` locally on the routed
+distances and writes the same cost artifact. Simple pricing uses the fitted
+`carCost_CHF_km`; Weiss pricing uses DMC's shared function. No Java pricing request
+is made for Pandana car routes.
+PT requests carry age, home coordinates and subscription flags, so fares use
+the same traveler discounts and fitted regional-subscription radius as before.
+The server's car cost excludes parking and toll charges; tolls affect routing.
+
 **Current Java API limitation:** the multimodal server supplies PT total time and
-distance but not the separately weighted components and subscription-aware fares
+distance and fares but not the separately weighted time/distance components
 required by DMC. `routing_variables.pt` therefore also calls the detailed PT router,
-excluding initial waiting from transfer time; `costs.pt` calls the existing fare
-calculator. PT routing remains duplicated until the server exposes these fields.
-Totals are never substituted for in-vehicle times. The fare tool's integer request
-IDs are mapped back to public string trip IDs without truncating person IDs.
+excluding initial waiting from transfer time. This supplemental routing remains
+until the server exposes these fields. The standalone fare calculator is no longer
+called. Totals are never substituted for in-vehicle times, and string trip IDs
+are preserved throughout routing and pricing.
+
+The current eqasim integration was checked against commit `64b8ce08`. The server
+receives `--routingDistanceUtility` from
+`calibration.car_routing_vot.optimal_value`, so its calibrated result (or that
+stage's default when calibration is disabled) overrides the config value. This
+is a distance-disutility coefficient, not the monetary toll value of time.
+The newer `tolls-value-of-time` and `tolls-sigma` options are left unset so Java
+inherits their values from the supplied MATSim config. Pandana's car impedance
+remains departure-hour travel time; the Java distance coefficient does not change it.
 
 `mode_choice_car_events_path` is forwarded to the Java server. Pandana uses
 `mode_choice_car_linkstats_path` instead, retaining its hourly fallback/bounding
@@ -204,6 +234,16 @@ computational splits; both must return to the original home location. Long tours
 split preferentially at work, otherwise near the middle. Splitting does not
 reset vehicle availability or change the seeded result. Random streams use the
 seed, person ID and original tour index, making choices invariant to batching.
+
+`data.availabilities` computes minimum motorized distance and minimum routed time
+over each complete `(person_id, tour_index)` group, before computational splitting.
+A short middle leg (including a zero-time snapped car route or a walking-only PT
+connection) stays available in an otherwise eligible tour. Entirely short tours
+and PT tours with no transit time remain unavailable for those modes. Missing,
+non-finite, negative or excessively long routes are still rejected per trip;
+ownership/licence constraints and the bike distance limit also remain in force.
+The sampler enforces vehicle continuity, including parking a car or bike for a
+subtour and collecting it at the same location afterwards.
 
 `synthesis.population.trips_with_departures` resolves optional optimized departure
 times before feature preparation and routing. Original `trips` and `activities`

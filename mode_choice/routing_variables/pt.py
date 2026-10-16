@@ -18,18 +18,18 @@ def configure(context):
 
 def execute(context):
     try:
-        return _execute(context)
+        return route_public_transport(context)
     except BaseException:
         RoutingServer.stop_server()
         raise
 
 
-def _execute(context):
+def route_public_transport(context):
     trips = context.stage("mode_choice.data.prepare")
-    if trips.is_empty():
-        return trips.select("trip_id").with_columns([pl.lit(None, dtype=pl.Float64).alias(c) for c in PT_ROUTING_COLUMNS])
     totals = route_mode(context, "pt").rename({"pt_travel_time_min": "pt_total_travel_time_min",
                                              "pt_distance_km": "pt_total_distance_km"})
+    if trips.is_empty():
+        return trips.select("trip_id").with_columns([pl.lit(None, dtype=pl.Float64).alias(c) for c in PT_ROUTING_COLUMNS])
     # Until MultiModeRouterServer exposes PT components, the detailed router
     # remains necessary. Total travel time is not in-vehicle travel time.
     directory = Path(context.path())

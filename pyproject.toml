@@ -64,6 +64,7 @@ dependencies = [
 override-dependencies = ["pandas>=3.0.2"]
 
 [tool.uv.sources]
+synpp = { git = "https://github.com/Dib-AEK/synpp.git", rev = "638adc5ea847eef97a8637c8620ea636b436ae8a" }
 torch = { index = "pytorch-cpu" }
 
 [[tool.uv.index]]

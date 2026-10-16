@@ -13,6 +13,7 @@ def configure(context):
     context.stage("dmc.params")
 
     context.config("threads", volatile=True)
+    context.config("java_memory", "50G", volatile=True)
     context.config('random_seed')
 
 
