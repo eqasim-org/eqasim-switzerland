@@ -12,6 +12,10 @@ is the file MATSim will be given, so anything lost or mangled on the way out
 shows up here.
 
 Produces, in <analysis_path>/cross_border_plans:
+  - plans.html          interactive map: the sampled agents move along their
+                        plans over the day (time slider, play/pause), can be
+                        filtered by residence (Swiss / foreign) and mode, and
+                        show their plan when clicked
   - plans_map.png       the sampled plans drawn on the Swiss border, by mode
   - plans_summary.png   chain lengths, modes, departure times, chains, ODs
   - plans.gpkg          the same sample as legs (lines) and activities (points)
@@ -22,6 +26,9 @@ Pipeline config keys
 cross_border_plans_sample_size (default 300)
     How many agents are drawn on the map and written to the gpkg. The summary
     figures always use every border-crossing agent.
+cross_border_plans_html_sample_size (default 2000)
+    How many agents are shown in plans.html, split evenly between Swiss and
+    foreign residents.
 """
 
 import os
@@ -36,6 +43,8 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from shapely.geometry import LineString, Point
 import xopen
+
+from analysis.cross_border.plans_html import sample_by_group, residence_group, write_html
 
 logger = logging.getLogger("synpp")
 
@@ -55,6 +64,7 @@ def configure(context):
     context.config("analysis_path")
     context.config("random_seed")
     context.config("cross_border_plans_sample_size", default = 300)
+    context.config("cross_border_plans_html_sample_size", default = 2000)
 
     context.stage("matsim.scenario.population")
     context.stage("data.spatial.swiss_border")
@@ -95,6 +105,19 @@ def execute(context):
                  os.path.join(output_path, "plans_summary.png"))
 
     write_gpkg(df_trips_sample, df_activities_sample, os.path.join(output_path, "plans.gpkg"))
+
+    # The interactive map shows more agents, split evenly between Swiss and foreign
+    # residents so that the smaller group is not drowned out.
+    od = df_persons["crossBorderOD"] if "crossBorderOD" in df_persons.columns else pd.Series(None, index = df_persons.index)
+    df_groups = pd.DataFrame({"person_id": df_persons["person_id"], "group": od.map(residence_group)})
+    html_sample_size = min(int(context.config("cross_border_plans_html_sample_size")), len(df_persons))
+    html_ids = sample_by_group(df_groups, html_sample_size, np.random.RandomState(context.config("random_seed")))
+
+    write_html(df_persons[df_persons["person_id"].isin(html_ids)],
+               df_activities[df_activities["person_id"].isin(html_ids)],
+               df_legs[df_legs["person_id"].isin(html_ids)] if len(df_legs) > 0 else df_legs,
+               context.stage("data.spatial.swiss_border"), len(df_persons),
+               MODE_COLORS, OTHER_MODE_COLOR, os.path.join(output_path, "plans.html"))
 
     logger.info("Wrote the border-crossing plan analysis to %s", output_path)
 

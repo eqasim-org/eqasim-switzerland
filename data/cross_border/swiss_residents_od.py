@@ -2,14 +2,18 @@ import pandas as pd
 import numpy as np
 from shapely.geometry import Point
 import geopandas as gpd
+import logging
 
 # expand_and_sample / sample_rows_by_weight are shared with generate_od rather
 # than duplicated here: the two copies had already drifted apart (see the
 # country swap in process_from_to_trips).
 from data.cross_border.generate_od import (
+    TRAIN_CATEGORIES,
     expand_and_sample,
     sjoin_within_unique,
 )
+
+logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
@@ -19,6 +23,10 @@ def configure(context):
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.cantons")
     context.stage("data.cross_border.interview_places")
+    context.stage("data.cross_border.pt_gateways")
+    context.stage("data.spatial.swiss_border")
+
+    context.config("border_offset", default = 20000)
 
 
 def process_from_to_trips(df_trips, context, rng):
@@ -30,7 +38,7 @@ def process_from_to_trips(df_trips, context, rng):
     # 1. Remove "through" trips that were not classified properly
     trips    = df_trips[(df_trips["origin_country"]=="CH") | (df_trips["destination_country"]=="CH")].copy()
     trips_od = trips[["origin_country", "destination_country", "origin_country_raw", "destination_country_raw",
-        "start_x", "start_y", "end_x", "end_y", "trip_mode", "trip_purpose", "weight", "nb_passengers",
+        "start_x", "start_y", "end_x", "end_y", "trip_mode", "train_category", "trip_purpose", "weight", "nb_passengers",
         "interview_place", "interview_point_id", "interview_geometry_point"]].copy()
 
     # 2. Remove trips with missing information on start or end point
@@ -121,12 +129,69 @@ def process_from_to_trips(df_trips, context, rng):
     # differ for "Through" trips) - see data.cross_border.destinations.
     df["border_crossing_point"] = df["interview_geometry_point"]
 
+    # Public transport travellers do not stop at the crossing, a station on the border
+    # where most long-distance trains do not stop, but at their real destination
+    # abroad if it lies inside the simulated perimeter, and at a gateway station of
+    # the crossing otherwise (see place_pt_border_points).
+    df = place_pt_border_points(df, context)
+
     df = df[["cross_border_person_id",
         "origin_municipality", "origin_canton_id", "origin_x", "origin_y",
         "destination_country", "destination_country_raw",
         "trip_mode", "trip_purpose",
         "interview_place", "interview_point_id", "interview_geometry_point",
         "border_crossing_point"]]
+
+    return df
+
+
+def place_pt_border_points(df, context):
+    """
+    Moves the border activity of the public transport records off the interview
+    place: to the real foreign end of the trip if it lies within border_offset of
+    the Swiss border (the simulated perimeter), and otherwise to the gateway station
+    of the surveyed crossing (data.cross_border.pt_gateways) closest to it - among
+    those served by long-distance trains for the long-distance travellers. Same
+    rule as data.cross_border.generate_od for the foreign residents. The
+    interview_point_id is left untouched: it remains the crossing the record was
+    surveyed at.
+    """
+
+    df = df.copy()
+    is_pt = (df["trip_mode"] == "pt").values
+
+    if not is_pt.any():
+        return df
+
+    ends = gpd.GeoSeries(gpd.points_from_xy(df["end_x"], df["end_y"]), crs = "EPSG:4326").to_crs("EPSG:2056")
+    border = context.stage("data.spatial.swiss_border").copy().iloc[0].boundary.simplify(50)
+    is_close = (ends.distance(border) <= context.config("border_offset")).values
+
+    gateways = context.stage("data.cross_border.pt_gateways")
+    grouped_gateways = {k: v for k, v in gateways.groupby("interview_place")}
+
+    points = df["border_crossing_point"].values.copy()
+    moved_to_gateway = 0
+
+    for index in np.flatnonzero(is_pt):
+        if is_close[index]:
+            points[index] = ends.iloc[index]
+            continue
+
+        candidates = grouped_gateways.get(df["interview_place"].iloc[index])
+        if candidates is None or len(candidates) == 0:
+            continue
+
+        if df["train_category"].iloc[index] == "long_distance" and candidates["has_long_distance"].any():
+            candidates = candidates[candidates["has_long_distance"]]
+
+        points[index] = candidates.geometry.iloc[np.argmin(candidates.geometry.distance(ends.iloc[index]).values)]
+        moved_to_gateway += 1
+
+    df["border_crossing_point"] = points
+
+    logger.info("Swiss residents by public transport: %d placed at their real destination abroad, %d at a pt gateway station, %d left on the interview place",
+                int((is_pt & is_close).sum()), moved_to_gateway, int(is_pt.sum() - (is_pt & is_close).sum() - moved_to_gateway))
 
     return df
 
@@ -209,6 +274,8 @@ def read_2021_data(context):
     df2021.loc[df2021["day_cat"]=="Wochenende", "day_cat"] = "WE"
     
     # 9. Identify the train category for rail observations
+    df2021["train_type"] = df2021["train_type"].astype(str).str.strip()
+    df2021["train_category"] = df2021["train_type"].map(TRAIN_CATEGORIES)
     df2021.loc[df2021["train_type"]=="1", "train_type"] = "pt" #"long distance train"
     df2021.loc[df2021["train_type"]=="2", "train_type"] = "pt" #"regional train"
 

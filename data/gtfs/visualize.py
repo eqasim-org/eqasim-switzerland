@@ -3,12 +3,11 @@ import logging
 import os
 import re
 import zipfile
-from collections import Counter, defaultdict
+from collections import Counter
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from scipy.spatial import cKDTree
 
 import data.gtfs.utils as gtfs_utils
 from data.gtfs import visualize_pages
@@ -303,9 +302,9 @@ def build_lines(feed, perimeter = None):
 
 FAST_SPEED_M_S = 2.0       # a rule faster than this (distance / time) does not leave the time to walk
 EXTRA_TIME_S   = 300       # a rule this much longer than walking at 1 m/s
+LONG_DISTANCE_M = 800      # a rule between stops further apart than this
+# the origin of the rules: how their time was set (0: given by a source feed, the others computed by data.gtfs.cleaned)
 RULE_ORIGINS   = {"feed": 0, "bridge": 1, "manual": 2, "nearby": 3}
-NEARBY_M       = 300       # stops of different modes this close are expected to have a rule when their station has rules to that mode
-REMOVED_DISTANCE_M, REMOVED_DURATION_S = 1500, 1200   # the thresholds of filter_long_transfers
 
 
 def build_transfers(feed, perimeter = None):
@@ -316,14 +315,14 @@ def build_transfers(feed, perimeter = None):
     rules_path = os.path.join(feed.diagnostics_path, "transfers.csv") if feed.diagnostics_path else None
     if rules_path and os.path.exists(rules_path):
         transfers = pd.read_csv(rules_path, dtype = {"from_stop_id": str, "to_stop_id": str})
-        transfers["kept"] = transfers["kept"].astype(str).str.lower() == "true"
+        transfers = transfers[transfers["kept"].astype(str).str.lower() == "true"]   # the removed rules are not shown
         has_rules = True
     else:
         transfers = feed.table("transfers", ["from_stop_id", "to_stop_id", "min_transfer_time"], optional = True)
         transfers = pd.DataFrame(columns = ["from_stop_id", "to_stop_id", "min_transfer_time"]) if transfers is None else transfers.copy()
-        transfers["rule"], transfers["kept"] = "feed", True
+        transfers["rule"] = "feed"
         has_rules = False
-        logger.info("  no diagnostics of data.gtfs.cleaned (re-run it): the origin of the rules and the removed ones are unknown")
+        logger.info("  no diagnostics of data.gtfs.cleaned (re-run it): the origin of the rules is unknown")
 
     transfers["min_transfer_time"] = pd.to_numeric(transfers["min_transfer_time"], errors = "coerce").fillna(0)
     position = stops.drop_duplicates("stop_id").set_index("stop_id")[["stop_lat", "stop_lon"]]
@@ -354,42 +353,16 @@ def build_transfers(feed, perimeter = None):
         for row in shown.itertuples()
     ]
 
-    # rules: [from, to, time, origin (0 source feed, 1 bridge, 2 manual, 3 nearby: added by gtfs.add_nearby_transfers),
-    # status (0 kept, 1 removed for the distance, 2 for the time), distance]
+    # rules: [from, to, time, origin (see RULE_ORIGINS), distance]
     t = t[t["from_stop_id"] != t["to_stop_id"]]
-    status = np.where(t["kept"], 0, np.where(t["dist"] > REMOVED_DISTANCE_M, 1, 2))
-    rules = [[index[a], index[b], int(time), RULE_ORIGINS.get(rule, 0), int(s), int(round(d))]
-             for a, b, time, rule, s, d in zip(t["from_stop_id"], t["to_stop_id"], t["min_transfer_time"], t["rule"], status, t["dist"])]
+    rules = [[index[a], index[b], int(time), RULE_ORIGINS.get(rule, 0), int(round(d))]
+             for a, b, time, rule, d in zip(t["from_stop_id"], t["to_stop_id"], t["min_transfer_time"], t["rule"], t["dist"])]
 
-    # stops of different modes close to each other without a rule between them, when one of them has rules to other
-    # stops of the mode of the second: the station has rules to some of its stops of that mode but not to this one, which
-    # makes it faster to change there (e.g. in the 2024 feed, the rail platforms of Lausanne had 300 s to the metro at
-    # Lausanne, gare but nothing to the metro at Lausanne, Grancy)
-    pairs = set(zip(t["from_stop_id"], t["to_stop_id"])) | set(zip(t["to_stop_id"], t["from_stop_id"]))
-    modes_with_rules = defaultdict(set)   # stop -> the modes of the stops it has rules to
-    for a, b in pairs:
-        modes_with_rules[a].update(stop_modes.get(b, []))
-    lat0 = np.radians(served["stop_lat"].mean()) if len(served) else 0
-    xy = np.column_stack([served["stop_lon"] * 111_320 * np.cos(lat0), served["stop_lat"] * 111_320])
-    missing = []
-    if len(served) > 1:
-        ids = served["stop_id"].tolist()
-        for i, j in cKDTree(xy).query_pairs(NEARBY_M):
-            a, b = ids[i], ids[j]
-            modes_a, modes_b = set(stop_modes.get(a, [])), set(stop_modes.get(b, []))
-            if modes_a == modes_b or (a, b) in pairs:
-                continue
-            for x, y, modes_y in ((a, b, modes_b), (b, a, modes_a)):
-                if modes_with_rules[x] & (modes_y - set(stop_modes.get(x, []))):
-                    missing.append([index[x], index[y], int(round(float(np.hypot(*(xy[i] - xy[j])))))])
-                    break
-
-    logger.info(f"  {len(stop_rows)} stops, {len(rules)} rules between different stops, {len(missing)} nearby stops without a rule while their station has rules to that mode")
+    logger.info(f"  {len(stop_rows)} stops, {len(rules)} rules between different stops")
     return {
-        "stops": stop_rows, "rules": rules, "missing": missing, "sources": sources, "sourceColors": SOURCE_COLORS,
+        "stops": stop_rows, "rules": rules, "sources": sources, "sourceColors": SOURCE_COLORS,
         "modes": MODES, "hasRules": has_rules, "perimeter": perimeter_geojson,
-        "thresholds": {"fast": FAST_SPEED_M_S, "extra": EXTRA_TIME_S, "nearby": NEARBY_M,
-                       "removedDistance": REMOVED_DISTANCE_M, "removedDuration": REMOVED_DURATION_S},
+        "thresholds": {"fast": FAST_SPEED_M_S, "extra": EXTRA_TIME_S, "distance": LONG_DISTANCE_M},
     }
 
 

@@ -145,4 +145,4 @@ config:
     include_external_population: true # default:false
     external_population_folder: /cluster/project/cmdp/ch_data/pipeline/fr_population_100pct_20260521
     fr_sample_rate: 1.0 # Sample size used for the generation of the outputs in the folder above. Will be used to downsample the FR population if necessary.
-    gtfs_name: merged_gtfs 
+    gtfs_name: merged_gtfs_20261015 

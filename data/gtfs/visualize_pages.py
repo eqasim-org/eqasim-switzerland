@@ -236,58 +236,65 @@ draw();
 TRANSFERS_MENU = r"""
   <div id="menu">
     <div id="top">
-      <h1>GTFS transfers: checks of the merge</h1>
+      <h1>GTFS transfers</h1>
       <div class="muted" id="subtitle"></div>
-      <div class="row">Implausible times:
-        faster than <input type="range" id="fast" min="0.5" max="5" step="0.1"> <span id="fastValue"></span> m/s,
-        or <input type="range" id="extra" min="60" max="900" step="30"> <span id="extraValue"></span> s longer than walking at 1 m/s
+      <div class="row legend">
+        <div><label><input type="checkbox" class="origin" data-key="0" checked> <span class="line"></span>given by the GTFS <span class="muted" id="count0"></span></label></div>
+        <div><label><input type="checkbox" class="origin" data-key="1" checked> <span class="line dashed"></span>computed or set by hand <span class="muted" id="count1"></span></label></div>
       </div>
-      <div class="row legend" id="legend"></div>
+      <div class="row legend">
+        <div><label><input type="checkbox" class="issue" data-key="ok" checked> <span class="swatch" style="background:#8a8985"></span>plausible <span class="muted" id="count_ok"></span></label></div>
+        <div><label><input type="checkbox" class="issue" data-key="fast" checked> <span class="swatch" style="background:#b0242a"></span>too fast: walking faster than <span id="fastValue"></span> m/s <span class="muted" id="count_fast"></span></label>
+          <input type="range" id="fast" min="0.5" max="5" step="0.1"></div>
+        <div><label><input type="checkbox" class="issue" data-key="slow" checked> <span class="swatch" style="background:#8a4fa8"></span>too slow: <span id="extraValue"></span> s longer than walking at 1 m/s <span class="muted" id="count_slow"></span></label>
+          <input type="range" id="extra" min="60" max="900" step="30"></div>
+        <div><label><input type="checkbox" class="issue" data-key="distance" checked> <span class="swatch" style="background:#d97a00"></span>too far: stops more than <span id="distanceValue"></span> m apart <span class="muted" id="count_distance"></span></label>
+          <input type="range" id="distance" min="200" max="1500" step="50"></div>
+      </div>
       <div class="row"><label><input type="checkbox" id="showStops" checked> stops (zoomed in), coloured by source feed</label></div>
+      <div class="row legend muted" id="sources"></div>
     </div>
     <div id="panel"></div>
   </div>
+  <style>
+    .line { display:inline-block; width:22px; height:0; border-top:3px solid #52514e; vertical-align:middle; margin-right:5px; }
+    .line.dashed { border-top-style:dashed; }
+    .legend input[type=range] { width:100%; }
+  </style>
 """
 
 TRANSFERS_JS = r"""
 const S = DATA.stops, R = DATA.rules, T = DATA.thresholds;
-byId("fast").value = T.fast; byId("extra").value = T.extra;
-const CATEGORIES = [
-  // [key, label, color, dashed, always drawn (else only zoomed in)]
-  ["missing", `No rule to a stop of another mode ≤ ${T.nearby} m away, though rules to that mode exist`, "#d4a017", true, true],
-  ["fast", "Time too short for the distance", "#b0242a", false, true],
-  ["slow", "Time much longer than walking", "#8a4fa8", false, true],
-  ["removed_distance", `Removed: longer than ${T.removedDistance} m`, "#52514e", true, true],
-  ["removed_duration", `Removed: longer than ${T.removedDuration} s`, "#8a8985", true, true],
-  ["nearby", "Added between neighbouring stops without a rule (rule nearby + walk)", "#c77d1a", false, false],
-  ["manual", "Set by hand (MANUAL_TRANSFERS)", "#6b4fbb", false, true],
-  ["bridge", "Added between the stations of different feeds", "#2a78d6", false, false],
-  ["feed", "From the source feeds", "#2a9d8f", false, false],
-];
-const COLOR = Object.fromEntries(CATEGORIES.map(c => [c[0], c[2]]));
-const shown = new Set(CATEGORIES.map(c => c[0]));
+byId("fast").value = T.fast; byId("extra").value = T.extra; byId("distance").value = T.distance;
+const ISSUES = {fast: ["Too fast", "#b0242a"], distance: ["Too far", "#d97a00"], slow: ["Too slow", "#8a4fa8"], ok: ["Plausible", "#8a8985"]};
+const ORIGINS = ["given by the GTFS", "computed: between the stations of different feeds", "set by hand (MANUAL_TRANSFERS)",
+                 "computed: rule of a nearby stop + walking"];
+const shownIssues = new Set(Object.keys(ISSUES)), shownOrigins = new Set([0, 1]);
+const computed = rule => rule[3] > 0 ? 1 : 0;
 
-function categoryOf(rule) {
-  const [, , time, origin, status, dist] = rule;
-  if (status === 1) return "removed_distance";
-  if (status === 2) return "removed_duration";
-  if (origin === 2) return "manual";
-  if (origin === 3) return "nearby";  // walking is part of their time: not checked against it
-  if (dist > 50 && dist / Math.max(time, 1) > +byId("fast").value) return "fast";
-  if (time > dist / 1.0 + +byId("extra").value) return "slow";
-  return origin === 1 ? "bridge" : "feed";
+// the issues of a rule, the most serious first
+function issuesOf(rule) {
+  const [, , time, origin, dist] = rule, issues = [];
+  if (dist > 50 && dist / Math.max(time, 1) > +byId("fast").value) issues.push("fast");
+  if (dist > +byId("distance").value) issues.push("distance");
+  // the time of the nearby rules includes the transfer at the nearby stop: not compared with walking alone
+  if (origin !== 3 && time > dist / 1.0 + +byId("extra").value) issues.push("slow");
+  return issues;
 }
+const issueOf = rule => issuesOf(rule)[0] || "ok";
 
-byId("subtitle").textContent = `${S.length.toLocaleString("en")} stops, ${R.length.toLocaleString("en")} rules between different stops.` +
-  (DATA.hasRules ? "" : " The origin of the rules and the removed ones are written by data.gtfs.cleaned: re-run it to have them.");
+byId("subtitle").textContent = `${S.length.toLocaleString("en")} stops, ${R.length.toLocaleString("en")} transfer rules between different stops (the removed ones are not shown).` +
+  (DATA.hasRules ? "" : " Where the rules come from is written by data.gtfs.cleaned: re-run it to have it.");
+byId("sources").innerHTML = DATA.sources.length ? "Stops: " + DATA.sources.map((s, k) => `<span class="dot" style="background:${DATA.sourceColors[k % DATA.sourceColors.length]}"></span>${esc(s)}`).join(" &nbsp;") : "";
 
 const layer = L.layerGroup().addTo(map), highlight = L.layerGroup().addTo(map);
 const stopLabel = i => `${esc(S[i][0])} <span class="muted">${esc(S[i][3])}</span>`;
 const modesOf = i => DATA.modes.filter((m, k) => S[i][5] & (1 << k)).join(", ") || "not served";
 
-function ruleTip(rule, cat) {
-  const [a, b, time, , , dist] = rule;
-  return `<b>${esc(CATEGORIES.find(c => c[0] === cat)[1])}</b><br>${stopLabel(a)} (${modesOf(a)})<br>→ ${stopLabel(b)} (${modesOf(b)})<br>${fmt(dist)} m, ${fmt(time)} s` +
+function ruleTip(rule) {
+  const [a, b, time, origin, dist] = rule, issues = issuesOf(rule);
+  return `<b>${issues.length ? issues.map(i => ISSUES[i][0]).join(", ") : "Plausible"}</b> <span class="muted">${esc(ORIGINS[origin])}</span>` +
+    `<br>${stopLabel(a)} (${modesOf(a)})<br>→ ${stopLabel(b)} (${modesOf(b)})<br>${fmt(dist)} m, ${fmt(time)} s` +
     (time > 0 ? `, ${(dist / time).toFixed(2)} m/s` : "");
 }
 
@@ -295,20 +302,15 @@ function draw() {
   layer.clearLayers();
   const view = map.getBounds().pad(0.2), zoom = map.getZoom(), counts = {};
   R.forEach(rule => {
-    const cat = categoryOf(rule);
-    counts[cat] = (counts[cat] || 0) + 1;
-    const def = CATEGORIES.find(c => c[0] === cat);
-    if (!shown.has(cat) || (!def[4] && zoom < 13)) return;
+    const issue = issueOf(rule), origin = computed(rule);
+    counts[issue] = (counts[issue] || 0) + 1;
+    counts[origin] = (counts[origin] || 0) + 1;
+    // the plausible rules are many: only zoomed in
+    if (!shownIssues.has(issue) || !shownOrigins.has(origin) || (issue === "ok" && zoom < 13)) return;
     const a = S[rule[0]], b = S[rule[1]];
     if (!view.contains([a[1], a[2]]) && !view.contains([b[1], b[2]])) return;
-    L.polyline([[a[1], a[2]], [b[1], b[2]]], {color: def[2], weight: def[4] ? 3 : 1.5, opacity: 0.85, dashArray: def[3] ? "5 4" : null})
-      .bindTooltip(ruleTip(rule, cat), {sticky: true}).addTo(layer);
-  });
-  counts.missing = DATA.missing.length;
-  if (shown.has("missing")) DATA.missing.forEach(([a, b, dist]) => {
-    if (!view.contains([S[a][1], S[a][2]])) return;
-    L.polyline([[S[a][1], S[a][2]], [S[b][1], S[b][2]]], {color: COLOR.missing, weight: 3, opacity: 0.9, dashArray: "2 5"})
-      .bindTooltip(`<b>No rule</b> between<br>${stopLabel(a)} (${modesOf(a)})<br>and ${stopLabel(b)} (${modesOf(b)})<br>${fmt(dist)} m`, {sticky: true}).addTo(layer);
+    L.polyline([[a[1], a[2]], [b[1], b[2]]], {color: ISSUES[issue][1], weight: issue === "ok" ? 1.5 : 3, opacity: 0.85, dashArray: origin ? "5 4" : null})
+      .bindTooltip(ruleTip(rule), {sticky: true}).addTo(layer);
   });
   if (byId("showStops").checked && zoom >= 14) S.forEach(([name, la, lo, id, source], i) => {
     if (!view.contains([la, lo])) return;
@@ -316,33 +318,24 @@ function draw() {
     L.circleMarker([la, lo], {radius: 3.5, color: "#0b0b0b", weight: 0.8, fillColor: color, fillOpacity: 1})
       .bindTooltip(`${stopLabel(i)}<br>${modesOf(i)}${source >= 0 ? "<br>" + esc(DATA.sources[source]) : ""}`).addTo(layer);
   });
-  legend(counts);
-  table(counts);
+  ["0", "1"].forEach(k => byId("count" + k).textContent = `(${fmt(counts[k] || 0)})`);
+  Object.keys(ISSUES).forEach(k => byId("count_" + k).textContent = `(${fmt(counts[k] || 0)}${k === "ok" ? ", zoomed in" : ""})`);
+  table();
 }
 
-function legend(counts) {
-  byId("legend").innerHTML = CATEGORIES.map(([key, label, color, dashed, always]) =>
-    `<div><label><input type="checkbox" data-key="${key}" ${shown.has(key) ? "checked" : ""}> <span class="swatch" style="background:${color}${dashed ? ";opacity:0.6" : ""}"></span>${esc(label)} <span class="muted">(${fmt(counts[key] || 0)}${always ? "" : ", zoomed in"})</span></label></div>`).join("") +
-    (DATA.sources.length ? `<div class="muted" style="margin-top:6px">Stops: ` + DATA.sources.map((s, k) => `<span class="dot" style="background:${DATA.sourceColors[k % DATA.sourceColors.length]}"></span>${esc(s)}`).join(" &nbsp;") + "</div>" : "");
-  byId("legend").querySelectorAll("input").forEach(el => el.addEventListener("change", () => { el.checked ? shown.add(el.dataset.key) : shown.delete(el.dataset.key); draw(); }));
-}
-
-// the flagged rules and stop pairs, to go through them
-function table(counts) {
-  const rows = [];
-  R.forEach(rule => { const cat = categoryOf(rule); if (["fast", "slow", "removed_distance", "removed_duration"].includes(cat)) rows.push([cat, rule]); });
-  DATA.missing.forEach(m => rows.push(["missing", [m[0], m[1], 0, 0, 0, m[2]]]));
-  const order = {missing: 0, fast: 1, slow: 2, removed_distance: 3, removed_duration: 4};
-  // the closest stops without a rule first, the longest rules first for the others
-  rows.sort((x, y) => order[x[0]] - order[y[0]] || (x[0] === "missing" ? x[1][5] - y[1][5] : y[1][5] - x[1][5]));
+// the flagged rules, to go through them
+function table() {
+  const order = {fast: 0, distance: 1, slow: 2};
+  const rows = R.filter(rule => shownOrigins.has(computed(rule))).map(rule => [issueOf(rule), rule]).filter(([issue]) => issue !== "ok" && shownIssues.has(issue));
+  rows.sort((x, y) => order[x[0]] - order[y[0]] || y[1][4] - x[1][4]);   // the longest first
   let html = `<h2>Flagged (${fmt(rows.length)})</h2><div class="muted">Click a row to go there.</div><table class="t"><tr><th></th><th>from</th><th>to</th><th class="n">m</th><th class="n">s</th></tr>`;
-  rows.slice(0, 500).forEach(([cat, rule], n) => {
-    html += `<tr data-n="${n}" style="cursor:pointer"><td><span class="swatch" style="background:${COLOR[cat]}"></span></td><td>${esc(S[rule[0]][0])}</td><td>${esc(S[rule[1]][0])}</td><td class="n">${fmt(rule[5])}</td><td class="n">${cat === "missing" ? "–" : fmt(rule[2])}</td></tr>`;
+  rows.slice(0, 500).forEach(([issue, rule], n) => {
+    html += `<tr data-n="${n}" style="cursor:pointer"><td><span class="swatch" style="background:${ISSUES[issue][1]}"></span></td><td>${esc(S[rule[0]][0])}</td><td>${esc(S[rule[1]][0])}</td><td class="n">${fmt(rule[4])}</td><td class="n">${fmt(rule[2])}</td></tr>`;
   });
   html += "</table>" + (rows.length > 500 ? `<div class="muted">The first 500 are listed.</div>` : "");
   byId("panel").innerHTML = html;
   byId("panel").querySelectorAll("tr[data-n]").forEach(el => el.addEventListener("click", () => {
-    const [cat, rule] = rows[+el.dataset.n], a = S[rule[0]], b = S[rule[1]];
+    const rule = rows[+el.dataset.n][1], a = S[rule[0]], b = S[rule[1]];
     map.fitBounds(L.latLngBounds([[a[1], a[2]], [b[1], b[2]]]).pad(1.5), {maxZoom: 17});
     highlight.clearLayers();
     L.polyline([[a[1], a[2]], [b[1], b[2]]], {color: "#0b0b0b", weight: 7, opacity: 0.5}).addTo(highlight);
@@ -352,8 +345,11 @@ function table(counts) {
 function sliders() {
   byId("fastValue").textContent = (+byId("fast").value).toFixed(1);
   byId("extraValue").textContent = byId("extra").value;
+  byId("distanceValue").textContent = byId("distance").value;
 }
-["fast", "extra"].forEach(id => byId(id).addEventListener("input", () => { sliders(); draw(); }));
+["fast", "extra", "distance"].forEach(id => byId(id).addEventListener("input", () => { sliders(); draw(); }));
+document.querySelectorAll("input.issue").forEach(el => el.addEventListener("change", () => { el.checked ? shownIssues.add(el.dataset.key) : shownIssues.delete(el.dataset.key); draw(); }));
+document.querySelectorAll("input.origin").forEach(el => el.addEventListener("change", () => { el.checked ? shownOrigins.add(+el.dataset.key) : shownOrigins.delete(+el.dataset.key); draw(); }));
 byId("showStops").addEventListener("change", draw);
 map.on("moveend", draw);
 sliders();
