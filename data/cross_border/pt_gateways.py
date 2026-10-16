@@ -131,27 +131,30 @@ def find_gateways(df_stops, routes, df_points, swiss_border, border_offset):
             step = 1 if in_ch[index] else -1
             position = index + 1 if in_ch[index] else index
             abroad = []
+            # whether the route comes from beyond the perimeter, as the trains of the travellers living there do
+            from_far = False
 
             while 0 <= position < len(route_stops) and not in_ch[position]:
                 stop_id = route_stops[position]
                 if stops.at[stop_id, "distance_to_border"] > border_offset:
+                    from_far = True
                     break
                 abroad.append(stop_id)
                 position += step
 
             for stop_id in abroad:
-                rows.append((point_index, stop_id, route["departures"], long_distance))
+                rows.append((point_index, stop_id, route["departures"], route["departures"] if from_far else 0, long_distance))
 
-    df = pd.DataFrame(rows, columns = ["point_index", "stop_id", "departures", "has_long_distance"])
+    df = pd.DataFrame(rows, columns = ["point_index", "stop_id", "departures", "far_departures", "has_long_distance"])
     if len(df) == 0:
         return pd.DataFrame(columns = ["interview_place", "border_crossing_point_id", "gateway_name", "x", "y",
-                                       "departures", "has_long_distance", "distance_to_border"])
+                                       "departures", "far_departures", "has_long_distance", "distance_to_border"])
 
     df["gateway_name"] = stops.loc[df["stop_id"], "name"].values
 
     # One gateway per station: the platforms of a station share its name.
     df = df.groupby(["point_index", "gateway_name"]).agg(
-        departures = ("departures", "sum"), has_long_distance = ("has_long_distance", "any"), stop_id = ("stop_id", "first"),
+        departures = ("departures", "sum"), far_departures = ("far_departures", "sum"), has_long_distance = ("has_long_distance", "any"), stop_id = ("stop_id", "first"),
     ).reset_index()
 
     max_departures = df.groupby("point_index")["departures"].transform("max")
@@ -164,7 +167,7 @@ def find_gateways(df_stops, routes, df_points, swiss_border, border_offset):
     df["border_crossing_point_id"] = df_points["border_crossing_point_id"].values[df["point_index"]]
 
     return df[["interview_place", "border_crossing_point_id", "gateway_name", "x", "y",
-               "departures", "has_long_distance", "distance_to_border"]]
+               "departures", "far_departures", "has_long_distance", "distance_to_border"]]
 
 
 def apply_overrides(df_gateways, df_points, path):
@@ -180,6 +183,7 @@ def apply_overrides(df_gateways, df_points, path):
 
     df_override = df_override.merge(df_points[["interview_place", "border_crossing_point_id"]], on = "interview_place")
     df_override["departures"] = np.nan
+    df_override["far_departures"] = np.nan
     df_override["distance_to_border"] = np.nan
     df_override["has_long_distance"] = df_override["has_long_distance"].astype(bool)
 

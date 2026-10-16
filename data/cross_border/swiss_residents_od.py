@@ -10,6 +10,8 @@ import logging
 from data.cross_border.generate_od import (
     TRAIN_CATEGORIES,
     expand_and_sample,
+    repair_interview_place_names,
+    sample_gateway,
     sjoin_within_unique,
 )
 
@@ -133,7 +135,7 @@ def process_from_to_trips(df_trips, context, rng):
     # where most long-distance trains do not stop, but at their real destination
     # abroad if it lies inside the simulated perimeter, and at a gateway station of
     # the crossing otherwise (see place_pt_border_points).
-    df = place_pt_border_points(df, context)
+    df = place_pt_border_points(df, context, rng)
 
     df = df[["cross_border_person_id",
         "origin_municipality", "origin_canton_id", "origin_x", "origin_y",
@@ -145,14 +147,15 @@ def process_from_to_trips(df_trips, context, rng):
     return df
 
 
-def place_pt_border_points(df, context):
+def place_pt_border_points(df, context, rng):
     """
     Moves the border activity of the public transport records off the interview
     place: to the real foreign end of the trip if it lies within border_offset of
-    the Swiss border (the simulated perimeter), and otherwise to the gateway station
-    of the surveyed crossing (data.cross_border.pt_gateways) closest to it - among
-    those served by long-distance trains for the long-distance travellers. Same
-    rule as data.cross_border.generate_od for the foreign residents. The
+    the Swiss border (the simulated perimeter), and otherwise to a gateway station
+    of the surveyed crossing (data.cross_border.pt_gateways, see generate_od.
+    sample_gateway) - among those served by long-distance trains for the
+    long-distance travellers. Same rule as data.cross_border.generate_od for the
+    foreign residents. The
     interview_point_id is left untouched: it remains the crossing the record was
     surveyed at.
     """
@@ -185,7 +188,8 @@ def place_pt_border_points(df, context):
         if df["train_category"].iloc[index] == "long_distance" and candidates["has_long_distance"].any():
             candidates = candidates[candidates["has_long_distance"]]
 
-        points[index] = candidates.geometry.iloc[np.argmin(candidates.geometry.distance(ends.iloc[index]).values)]
+        home = Point(df["origin_x"].iloc[index], df["origin_y"].iloc[index])
+        points[index] = sample_gateway(candidates, ends.iloc[index], home, rng)["geometry"]
         moved_to_gateway += 1
 
     df["border_crossing_point"] = points
@@ -217,6 +221,9 @@ def read_2021_data(context):
                   "start_y", "start_x", "end_y", "end_x", 
                   "trip_purpose", "nb_nights", "country1", "country2", "country3",
                   "train_type", "direction_crossing", "direction_alps", "travel_cat", "weight", "weight_vehicles"]
+
+    df2021["interview_place"] = repair_interview_place_names(
+        df2021["interview_place"], context.stage("data.cross_border.interview_places")["interview_place"])
     
     # Process the columns
     # 1. Rename countries

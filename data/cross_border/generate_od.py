@@ -5,6 +5,7 @@ import geopandas as gpd
 import random
 from pathlib import Path
 import logging
+import re
 
 logger = logging.getLogger("synpp")
 
@@ -14,6 +15,58 @@ MODE_TO_LABEL = {"car": "road", "car_passenger": "road", "pt": "pt"}
 
 # ZUGTYP of the 2021 survey
 TRAIN_CATEGORIES = {"1": "long_distance", "2": "regional"}
+
+# A public transport traveller starts at one of the gateway stations of the crossing whose detour
+# (real end -> gateway -> other end) is at most this factor times the smallest one
+GATEWAY_DETOUR_FACTOR = 1.2
+
+
+def repair_interview_place_names(names, known):
+    """
+    The 2021 survey file has "?" in place of some accented letters (Ch?ne-Bourg,
+    Les Verri?res), so these places did not match data.cross_border.interview_places
+    nor data.cross_border.pt_gateways. Each such name is replaced by the only known
+    place it matches with "?" standing for any letter.
+    """
+    mapping = {}
+    for name in pd.unique(names[names.astype(str).str.contains("?", regex = False)]):
+        pattern = re.compile(re.escape(name).replace(re.escape("?"), "."))
+        matches = [k for k in set(known) if pattern.fullmatch(str(k))]
+        if len(matches) == 1:
+            mapping[name] = matches[0]
+        else:
+            logger.warning(f"Interview place {name} matches {len(matches)} known places: left as is")
+
+    return names.replace(mapping)
+
+
+def sample_gateway(candidates, point, other_point, rng):
+    """
+    One gateway station of a crossing (data.cross_border.pt_gateways) for a public
+    transport traveller whose real end abroad is point, the other end of the trip
+    other_point (or None). Always taking the closest one sent everyone living beyond
+    the same gateway onto it, e.g. all of the Lyon area onto Tenay-Hauteville, a
+    village station with 8 trains a day. Among the gateways on the way (see
+    GATEWAY_DETOUR_FACTOR), one is drawn in proportion to its departures of trains
+    coming from beyond the perimeter, where the traveller lives: not the local
+    trains of the stations next to the border (Pougny-Chancy). Without such trains,
+    in proportion to all departures, and evenly for the gateways of
+    cross_border_pt_gateways_file, which have none.
+    """
+    detour = candidates.geometry.distance(point).values
+    if other_point is not None:
+        detour = detour + candidates.geometry.distance(other_point).values
+
+    eligible = candidates[detour <= detour.min() * GATEWAY_DETOUR_FACTOR]
+
+    weights = None
+    for column in ("far_departures", "departures"):
+        values = eligible[column].astype(float).fillna(0.0)
+        if values.sum() > 0:
+            weights = values
+            break
+
+    return eligible.sample(n = 1, weights = weights, random_state = rng).iloc[0]
 
 
 def configure(context):
@@ -121,10 +174,10 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     # real point, among those served by long-distance trains for the long-distance
     # travellers. Interview places without gateways fall back to the interview place.
     pt_gateways = context.stage("data.cross_border.pt_gateways")[
-        ["geometry", "gateway_id", "interview_place", "has_long_distance"]].reset_index(drop = True)
+        ["geometry", "gateway_id", "interview_place", "has_long_distance", "departures", "far_departures"]].reset_index(drop = True)
     grouped_gateways = {k: v for k, v in pt_gateways.groupby("interview_place")}
 
-    def sample_gateway(row):
+    def sample_pt_gateway(row):
         candidates = grouped_gateways.get(row["interview_place"]) if row["restrict_to_place"] else pt_gateways
 
         if candidates is None or len(candidates) == 0:
@@ -133,12 +186,12 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
         if row["train_category"] == "long_distance" and candidates["has_long_distance"].any():
             candidates = candidates[candidates["has_long_distance"]]
 
-        closest = candidates.loc[candidates["geometry"].distance(row["geometry"]).idxmin()]
-        return pd.Series({"geometry": closest["geometry"], "border_crossing_point_id": closest["gateway_id"], "is_pt_gateway": True})
+        gateway = sample_gateway(candidates, row["geometry"], row["other_geometry"], rng)
+        return pd.Series({"geometry": gateway["geometry"], "border_crossing_point_id": gateway["gateway_id"], "is_pt_gateway": True})
 
     def sample_far_point(row):
         if row["label"] == "pt":
-            gateway = sample_gateway(row)
+            gateway = sample_pt_gateway(row)
             if gateway is not None:
                 return gateway
 
@@ -445,6 +498,9 @@ def read_2021_data(context):
                   "start_y", "start_x", "end_y", "end_x", 
                   "trip_purpose", "nb_nights", "country1", "country2", "country3",
                   "train_type", "direction_crossing", "direction_alps", "travel_cat", "weight", "weight_vehicles"]
+
+    df2021["interview_place"] = repair_interview_place_names(
+        df2021["interview_place"], context.stage("data.cross_border.interview_places")["interview_place"])
     
     # Process the columns
     # 1. Rename countries
