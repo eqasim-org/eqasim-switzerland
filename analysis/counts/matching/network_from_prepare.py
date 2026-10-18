@@ -20,5 +20,5 @@ def execute(context):
     network_geometry_file = mapped["geometry"]
 
     logger.info("\t LOADING NETWORK FROM: %s" % network_file)
-    network = RoadNetwork(network_file, network_geometry_file, overwrite=True, cache_dir= context.path())
+    network = RoadNetwork(network_file, network_geometry_file, overwrite=True, cache_dir= context.path(), context=context)
     return network

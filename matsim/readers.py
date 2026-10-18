@@ -68,11 +68,13 @@ class Network:
             self.links["attributes"] = None
             return
 
-        # As a single column containing dicts
-        link_attrs = self.link_attrs.groupby('link_id').apply(lambda x: dict(zip(x['name'], x['value']))).reset_index(name='attributes')
-        self.links = self.links.merge(link_attrs, on="link_id",how="left")
-        self.links.loc[self.links["attributes"].isna(), "attributes"] = None
-        
+        attributes = {}
+        for link_id, name, value in zip(self.link_attrs.link_id.to_numpy(),
+                                        self.link_attrs.name.to_numpy(),
+                                        self.link_attrs.value.to_numpy()):
+            attributes.setdefault(link_id, {})[name] = value
+        self.links["attributes"] = [attributes.get(link_id) for link_id in self.links.link_id.to_numpy()]
+
     def __len__(self):
         return len(self.links)
     
@@ -413,7 +415,19 @@ def parse_links(content, skip_attributes):
     return links, link_attrs
 
 
-def read_network(filename, skip_attributes=False, only_car_links=False):
+def read_network(filename, skip_attributes=False, only_car_links=False, context=None):
+    """Read XML using C++ when available, or reuse its shared binary cache.
+
+    Pass a Synpp context to cache in context.working_directory. Cache identity
+    includes the absolute source path, nanosecond mtime, size, attribute option,
+    and reader schema version. Car filtering does not alter the stored network.
+    Without a context, reading still works but no binary network cache is used.
+    """
+    from matsim.network_reader import read_network_cached
+    return read_network_cached(filename, context, skip_attributes, only_car_links)
+
+
+def _read_network_xml(filename, skip_attributes=False, only_car_links=False):
     """Read a MATSim network.xml.gz file. Returns a Network object with dataframes
     for nodes, links, node_attributes, and link_attributes. If the network has a CRS
     projection set, it will be available in network_attrs."""

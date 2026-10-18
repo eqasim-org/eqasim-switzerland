@@ -117,7 +117,7 @@ def execute(context):
 
         target_counts_file = files.get("counts")
         if target_counts_file!="":
-            cut_csv_to_network(csv_path = target_counts_file,
+            cut_csv_to_network(csv_path = target_counts_file, context=context,
                                network_path = "%s/%snetwork.xml.gz" % (output_path, context.config("extent_prefix")),
                                output_path = f"{region_dir}/target_counts.csv")
             if os.path.exists(f"{region_dir}/target_counts.csv"):
@@ -137,6 +137,7 @@ def execute(context):
     if context.config("export_detailed_network"):
         geometry_file = files.get("geometry")
         cut_and_save_network_geometry(
+            context=context,
             geometry = geometry_file,
             local_network = network_path,
             output_path = geometry_path

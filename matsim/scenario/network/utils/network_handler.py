@@ -20,7 +20,7 @@ class NetworkHandler:
     def __init__(self, context, network_path: str, detailed_network_path:str):
         self.network_path = network_path
         self.detailed_network_path = detailed_network_path
-        self.net = read_network(network_path)
+        self.net = read_network(network_path, context=context)
         self.context = context
 
     def process_network(self, save_as_pickle:bool = False, network_pickle: str=None):

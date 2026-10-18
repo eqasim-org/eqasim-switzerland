@@ -211,10 +211,10 @@ def _semantic_element_signature(element):
 
 ############ Other functions for the cutter ######################
 
-def cut_and_save_network_geometry(geometry, local_network, output_path):
+def cut_and_save_network_geometry(geometry, local_network, output_path, context=None):
     """Keep detailed geometry rows whose LinkId exists in the cut network."""
     df = pd.read_csv(geometry, dtype={"LinkId": str}, keep_default_na=False)
-    links = read_network(str(local_network), skip_attributes=True).links
+    links = read_network(str(local_network), skip_attributes=True, context=context).links
     df = df.loc[df["LinkId"].isin(links.link_id.astype(str))]
     df.to_csv(output_path, index=False)
 
@@ -244,13 +244,13 @@ def cut_csv_to_region(csv_path, region_path, output_path = None, only_origin=Fal
         return df
 
 
-def cut_csv_to_network(csv_path, network_path, output_path = None, link_id_col = "linkId"):
+def cut_csv_to_network(csv_path, network_path, output_path = None, link_id_col = "linkId", context=None):
     assert os.path.exists(csv_path)
     assert os.path.exists(network_path)
 
     # Read the file
     df = pd.read_csv(csv_path)
-    links = read_network(network_path).links
+    links = read_network(network_path, skip_attributes=True, context=context).links
 
     # Check points entirely within the region
     network_links = set(links.link_id.astype(str).unique())

@@ -99,7 +99,7 @@ def route(context, trips, batch_size):
     from matsim.readers import read_network
 
     network = read_network(context.stage("matsim.scenario.network.mapped")["network"],
-                           skip_attributes=True, only_car_links=True)
+                           skip_attributes=True, only_car_links=True, context=context)
     nodes, links = pl.from_pandas(network.nodes), pl.from_pandas(network.links)
     del network
     path = input_path(context, "pandana")
