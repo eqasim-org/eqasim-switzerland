@@ -69,7 +69,7 @@ def drop_duplicate_columns(df, source_name):
 
 
 def configure(context):
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     context.config("random_seed")
 
     if context.config("include_external_population"):

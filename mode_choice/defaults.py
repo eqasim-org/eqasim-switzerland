@@ -85,8 +85,6 @@ DESTINATION_PURPOSES = {
     "shopping": ("shop", "shopping"), "leisure": ("leisure",), "other": ("other",),
 }
 CITY_IDS = {"zurich": 261, "bern": 351, "luzern": 1061, "basel": 2701, "lausanne": 5586, "geneva": 6621}
-GOOD_PT_SERVICE = ("A", "B")
-MEDIUM_PT_SERVICE = ("C", "D")
 PT_GA = (1,)
 PT_HALBTAX = (3, 4)
 PT_VERBUND = (2, 4)

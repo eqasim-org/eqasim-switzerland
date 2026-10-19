@@ -12,7 +12,7 @@ It progressively decreases the minimum number of observations to ensure the most
 
 
 def configure(context):
-    context.config("hot_deck_matching_runners")
+    context.config("hot_deck_matching_runners", 1)
     context.config("random_seed")
     context.config("matching_minimum_observations", 10)
     context.config("matching_enable_diagnostics", False)

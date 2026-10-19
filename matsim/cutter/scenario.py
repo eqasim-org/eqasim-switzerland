@@ -26,7 +26,7 @@ def configure(context):
         context.stage("data.pt_pricing.pt_pricing")
         context.stage("data.microcensus.shares")    
 
-    context.config("network_calibration.activate", default=False)
+    context.config("network_calibration.activate", default=True)
     context.config("network_calibration.calibrate_disutilities", default=True)
     context.config("network_calibration.calibrate_freespeed", default=True)
     context.config("network_calibration.calibrate_agents_ascs", default=True)
@@ -43,7 +43,7 @@ def configure(context):
         context.stage("analysis.travel_times.APIs.target")
         context.stage("calibration.road_regions.freespeed_calibration")
 
-    context.config("calibrate_alphas_in_matsim", default=False)
+    context.config("calibrate_alphas_in_matsim", default=True)
     context.config("calibrate_betas_in_matsim", default=False)
     context.config("export_detailed_network", True)
 

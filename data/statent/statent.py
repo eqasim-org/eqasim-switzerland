@@ -24,7 +24,7 @@ def configure(context):
     context.stage("data.spatial.postal_codes")
     context.stage("data.spatial.cantons")
 
-    context.config("include_international_organizations", default = False)
+    context.config("include_international_organizations", default = True)
     if context.config("include_international_organizations"):
         context.stage("data.statent.international_organizations")
 

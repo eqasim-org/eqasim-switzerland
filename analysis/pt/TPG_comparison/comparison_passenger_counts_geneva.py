@@ -13,7 +13,7 @@ def configure(context):
     context.config("output_path")
     context.config("output_id")
     context.config("extent_prefix", default = "")
-    context.config("simulation_directory", default = "simulation_output")
+    context.config("simulation_directory", default = 'simulation_output')
 
     context.config("analysis.pt.tpg_processed_counts_path", default = "TPG_passenger_counts")
     context.config("analysis.pt.perimeter", default = "spatial/MMT/CMDP_Limites_WG84.shp")

@@ -13,7 +13,7 @@ def configure(context):
 
     context.config("input_downsampling")
     configure_simulation_path(context)
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
 
 def execute(context):       
     if context.config("only_weekday"):

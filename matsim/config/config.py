@@ -14,10 +14,10 @@ def configure(context):
     context.config("output_prefix", "switzerland_")
     context.config("random_seed")
     context.config("threads", volatile=True)
-    context.config("use_freight", False)
+    context.config("use_freight", True)
     context.config("car_cost_model", dmc_constants.CAR_COST_MODEL)
     context.config("route_bike", True)
-    context.config("useScheduleBasedTransport", True)
+    context.config("useScheduleBasedTransport", False)
 
 
 def execute(context):

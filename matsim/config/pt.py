@@ -23,7 +23,7 @@ def configure(context):
     context.config("output_prefix", "switzerland_")
     context.config("random_seed")
     context.config("threads", volatile=True)
-    context.config("useScheduleBasedTransport")
+    context.config("useScheduleBasedTransport", False)
 
 
 def execute(context):

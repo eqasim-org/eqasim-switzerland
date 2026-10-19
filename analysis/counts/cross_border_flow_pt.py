@@ -45,7 +45,7 @@ RIDER_GROUP_FLOW_COLUMNS = ["crossborder_pt_flow", "swiss_crossborder_pt_flow", 
 
 def configure(context):
     configure_simulation_path(context)
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
     context.config("input_downsampling")
     context.config("pt_flow_min_daily_count", default=1)
     context.config("extent_path", default="")

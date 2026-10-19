@@ -10,10 +10,10 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.config("use_vdf", default=False)
     context.config("input_downsampling")
-    context.config("use_freight")
+    context.config("use_freight", True)
     context.config("output_prefix", "switzerland_")
 
-    context.config("useScheduleBasedTransport", default=True)
+    context.config("useScheduleBasedTransport", default=False)
     context.config("preventwaitingtoentertraffic", default=False)
     context.config("writeexperiencedplans", default=False)
 

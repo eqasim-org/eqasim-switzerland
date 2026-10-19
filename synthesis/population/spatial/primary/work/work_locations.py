@@ -46,7 +46,7 @@ def configure(context):
     context.stage("data.od.matrix")
     context.stage("data.od.matrix_moving")
     
-    if context.config("include_cross_border"):
+    if context.config("include_cross_border", False):
         context.stage("data.cross_border.destinations")
 
     context.config("random_seed")

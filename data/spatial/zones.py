@@ -10,7 +10,7 @@ def configure(context):
     context.stage("data.spatial.quarters")
     context.stage("data.spatial.nuts")
     context.stage("data.spatial.postal_codes")
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     context.stage("data.external_population.constants")
 
 

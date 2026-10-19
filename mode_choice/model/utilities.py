@@ -55,6 +55,9 @@ def expressions(p, *, distance_interaction=DISTANCE_COST_INTERACTION, income_int
             u += p["car.betaTravelTime_u_min"] * power(time / p["timeScale_min"], p["car.travelTimeExponent"])
             u += cost_factor * (pl.col("car_cost_CHF") + pl.col("parking_cost_CHF"))
         elif mode == "pt":
+            u += p["pt.betaHomePtQuality_u"] * power(pl.col("homePtQuality"), p["pt.homePtQualityExponent"])
+            u += p["pt.betaDestinationPtQuality_u"] * power(
+                pl.col("destinationPtQuality"), p["pt.destinationPtQualityExponent"])
             for column, coefficient, exponent in [
                 ("pt_access_egress_time_min", "betaAccessEgressTime_u_min", "accessEgressTimeExponent"),
                 ("pt_in_vehicle_time_min", "betaInVehicleTime_u_min", "inVehicleTimeExponent"),

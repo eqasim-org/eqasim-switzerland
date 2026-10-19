@@ -11,6 +11,27 @@ parameter writer and the MATSim naming conversion. Estimation stages are
 `dmc.models.model_jax` and `dmc.models.model_biogeme`; their shared linear terms
 live in `dmc.models.specification`.
 
+
+PT quality uses the same OVGK coding in survey estimation and population choice:
+`A=0`, `B=1`, `C=2`, `D=3`, and no service or missing classification `=4`.
+The home feature is `homePtQuality`; the destination feature is `destinationPtQuality`.
+PT utility includes
+`beta_pt_home_quality * homePtQuality**gamma_pt_home_quality` plus
+`beta_pt_destination_quality * destinationPtQuality**gamma_pt_destination_quality`.
+Both coefficients and both exponents are estimated in JAX and Biogeme, including
+when `use_exponents=False` for the existing travel-time terms. Both quality
+coefficients start at `-0.05` and both exponents start at `1`. Quality exponents
+are bounded to `[0.01, 2]`; powers and exponent gradients are safe at quality zero.
+
+The writer exports `pt.betaHomePtQuality_u`, `pt.homePtQualityExponent`,
+`pt.betaDestinationPtQuality_u`, and `pt.destinationPtQualityExponent`.
+These replace all good/medium service coefficients. Previous fitted files need
+re-estimation with this specification; there is no exact conversion from the
+categorical terms. The bundled defaults use zero quality coefficients and unit
+exponents until a new fit is supplied. The separate eqasim Java utility estimator
+must support these new fields before the exported model can be used in MATSim;
+its old good/medium implementation does not evaluate the new utility.
+
 Renaming stages changes their Synpp cache identities. To reuse an existing fit
 without estimating it again, set both `dmc_mode_parameters_path` and
 `dmc_cost_parameters_path` to the existing exported files.

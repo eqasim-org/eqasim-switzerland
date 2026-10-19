@@ -29,9 +29,9 @@ def configure(context):
     context.config("java_memory", "50G", volatile=True)
     context.config("random_seed")
     context.config("use_vdf", False)
-    context.config("last_iteration", 60)
-    context.config("calibrate_alphas_in_matsim", False)
-    context.config("alphaCalibration.level", "global")
+    context.config("last_iteration", 140)
+    context.config("calibrate_alphas_in_matsim", True)
+    context.config("alphaCalibration.level", 'canton')
     context.config("calibrate_betas_in_matsim", False)
     context.config("activate_traffic_light_delays", True)
     context.config("activate_unsignalized_intersections_delays", True)
@@ -41,7 +41,7 @@ def configure(context):
     context.config("writeexperiencedplans", False)
     
     context.config("output_prefix", "switzerland_")
-    context.config("useScheduleBasedTransport", default = True)
+    context.config("useScheduleBasedTransport", default = False)
     context.config("route_bike", True)
     context.config("include_cross_border", default=False)
     context.stage("data.cross_border.swiss_residents_od")
@@ -51,7 +51,7 @@ def configure(context):
         context.stage("data.cross_border.destinations")
 
     # network calibration
-    context.config("network_calibration.activate", default=False)
+    context.config("network_calibration.activate", default=True)
     context.config("network_calibration.calibrate_disutilities", default=True)
     context.config("network_calibration.calibrate_freespeed", default=True)
     context.config("network_calibration.calibrate_agents_ascs", default=True)

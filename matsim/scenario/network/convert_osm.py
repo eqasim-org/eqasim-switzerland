@@ -15,7 +15,7 @@ def configure(context):
 
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
-    context.config("border_offset", 20000)
+    context.config("border_offset", 50000)
     context.config("correct_links_capacity", True)
     context.config("correct_capacities_from_manual_list", True)
     context.config("minimum_speed", 1.0) #in km/h
@@ -27,11 +27,11 @@ def configure(context):
     # only if simplify network is true
     context.config("remove_network_loops", True)
     context.config("remove_replicate_links", False)
-    context.config("remove_nodes_with_no_intersection", False)
+    context.config("remove_nodes_with_no_intersection", True)
     context.config("correct_speed", True)
     context.config("ensure_network_connectivity", True)
     # correct speed for uphill links only
-    context.config("adjust_speed_uphill", True) # if true, it is triggered only if elevation is assigned
+    context.config("correct_speed_uphill", True)
     context.config("adjust_speed_straightness", True) # if true, it is triggered only if elevation is assigned
     context.config("adjust_speed_mountain_links", True) # if true, it is triggered only if elevation is assigned
     context.config("max_gradient_threshold", 0.1) # in percentage (10% = 0.1)
@@ -48,7 +48,7 @@ def configure(context):
 
     # we include the network of this region, i don't know if this is the right config param to use, to check later!
     context.config("cross_border_exclude_shapefiles", default=None)
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
 
 
 def execute(context):

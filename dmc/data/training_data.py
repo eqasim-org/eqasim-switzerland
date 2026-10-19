@@ -200,7 +200,7 @@ def execute(context):
 
         # person
         "age", "sex", "income", "income_class", "sp_region", "ms_region", "is_car_passenger", "ovgk", 
-        "good_pt_service", "medium_pt_service", "destination_good_pt_service", "destination_medium_pt_service",
+        "homePtQuality", "destinationPtQuality",
         "car_ownership_ratio", "is_retired","is_junior", "low_income","high_income", 'has_car','num_adults',
 
         # car

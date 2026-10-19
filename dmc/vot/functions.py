@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from dmc.constants import constants
 
@@ -8,9 +9,31 @@ class vot_utils:
     @staticmethod
     def _mean(values, weights, use_weights):
         """Mean with optional survey weights and aligned pandas indices."""
+        values = values[np.isfinite(values)]
+        if values.empty:
+            return float("nan")
         if not use_weights:
-            return float(np.mean(values))
+            return float(values.mean())
         return float(np.average(values, weights=weights.loc[values.index]))
+
+    @staticmethod
+    def _parameters(result, declarations):
+        # Estimators return free coefficients only; fixed exponents still enter VOT.
+        parameters = {name: float(parameter.init_value)
+                      for name, parameter in (declarations or {}).items()}
+        parameters.update(result.get_beta_values())
+        return parameters
+
+    @staticmethod
+    def _cost_marginal_utility(context, df, parameters):
+        interaction = pd.Series(1.0, index=df.index)
+        if context.config("distance_cost_interaction", True):
+            interaction *= (df["euclidean_distance_km"] / context.config(
+                "reference_euclidean_distance_km")) ** parameters.get("lambda_cost_distance", 0.0)
+        if context.config("income_cost_interaction", True) and context.config("use_income_in_dmc", True):
+            interaction *= (df["income"] / context.config(
+                "reference_income_chf")) ** parameters.get("lambda_cost_income", 0.0)
+        return parameters["beta_cost_CHF"] * interaction
 
     @staticmethod
     def _power_marginal_utility(beta, exponent, scaled_time, time_scale):
@@ -35,7 +58,7 @@ class vot_utils:
         return result
 
     @staticmethod
-    def get_car_vot(context, df, res, modes):
+    def get_car_vot(context, df, res, modes, parameters=None):
         """
         Return model-implied marginal WTP for car-time savings (CHF/hour).
         
@@ -56,22 +79,12 @@ class vot_utils:
         Note: The division by TIME_SCALE_MIN accounts for the fact that car_time is scaled in the utility function.
         """
         # Extract estimated parameters
-        params = res.get_beta_values()
+        params = vot_utils._parameters(res, parameters)
         
         beta_car_time = params.get("beta_car_travel_time_min")
         lambda_car_time = params.get("lambda_car_travel_time", 1.0)
-        beta_cost = params.get("beta_cost_CHF")
-        lambda_cost_distance = params.get("lambda_cost_distance", 0.0)
-        lambda_cost_income = params.get("lambda_cost_income", 0.0)
-        
-        # Calculate cost interaction terms
-        ref_euclidean_distance_km = context.config("reference_euclidean_distance_km")
-        ref_income_chf = context.config("reference_income_chf")
         TIME_SCALE_MIN = constants.TIME_SCALE_MIN
-        
-        euclidean_interaction_cost = (df["euclidean_distance_km"] / ref_euclidean_distance_km) ** lambda_cost_distance
-        income_interaction_cost = (df["income"] / ref_income_chf) ** lambda_cost_income
-        cost_interaction = euclidean_interaction_cost * income_interaction_cost
+        marginal_utility_cost = vot_utils._cost_marginal_utility(context, df, params)
         
         # Calculate car time (same as in model)
         car_time = (df["car_travel_time_min"] + df["parking_searching_duration_min"]) / TIME_SCALE_MIN
@@ -82,7 +95,6 @@ class vot_utils:
         marginal_utility_time = vot_utils._power_marginal_utility(
             beta_car_time, lambda_car_time, car_time, TIME_SCALE_MIN
         )
-        marginal_utility_cost = beta_cost * cost_interaction
         
         # VOT in CHF per minute, then convert to CHF per hour
         vot_car = (marginal_utility_time / marginal_utility_cost) * 60
@@ -110,7 +122,7 @@ class vot_utils:
         return vot_car, mean_vot_car
 
     @staticmethod
-    def get_pt_vot(context, df, res, modes):
+    def get_pt_vot(context, df, res, modes, parameters=None):
         """
         Return model-implied marginal WTP for PT-time savings (CHF/hour).
         
@@ -131,7 +143,7 @@ class vot_utils:
         so we must account for this when calculating marginal utilities.
         """
         # Extract estimated parameters
-        params = res.get_beta_values()
+        params = vot_utils._parameters(res, parameters)
         
         beta_pt_in_vehicle = params.get("beta_pt_in_vehicle_time_min")
         lambda_pt_in_vehicle = params.get("lambda_pt_in_vehicle_time", 1.0)
@@ -142,21 +154,8 @@ class vot_utils:
         beta_pt_transfer_time = params.get("beta_pt_transfer_time_min")
         lambda_pt_transfer_time = params.get("lambda_pt_transfer_time", 1.0)
         
-        beta_cost = params.get("beta_cost_CHF")
-        lambda_cost_distance = params.get("lambda_cost_distance", 0.0)
-        lambda_cost_income = params.get("lambda_cost_income", 0.0)
-        
-        # Calculate cost interaction terms
-        ref_euclidean_distance_km = context.config("reference_euclidean_distance_km")
-        ref_income_chf = context.config("reference_income_chf")
         TIME_SCALE_MIN = constants.TIME_SCALE_MIN
-        
-        euclidean_interaction_cost = (df["euclidean_distance_km"] / ref_euclidean_distance_km) ** lambda_cost_distance
-        income_interaction_cost = (df["income"] / ref_income_chf) ** lambda_cost_income
-        cost_interaction = euclidean_interaction_cost * income_interaction_cost
-        
-        # Marginal utility of cost
-        marginal_utility_cost = beta_cost * cost_interaction
+        marginal_utility_cost = vot_utils._cost_marginal_utility(context, df, params)
         
         # Calculate VOT for each time component
         # In-vehicle time VOT

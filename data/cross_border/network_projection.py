@@ -40,7 +40,7 @@ def configure(context):
     context.stage("data.cross_border.generate_od")
     context.stage("data.spatial.swiss_border")
 
-    context.config("border_offset", default = 20000)
+    context.config("border_offset", default = 50000)
     context.config("random_seed")
 
     context.config("cached_network_path", default = None)

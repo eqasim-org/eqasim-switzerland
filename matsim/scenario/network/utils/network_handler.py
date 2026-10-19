@@ -121,7 +121,7 @@ class NetworkHandler:
             self.net.links = CapacityCorrector(self.context, self.net).reduce_capacity_outside_border()
 
     def _adjust_uphill_speed_if_requested(self):
-        if not self.context.config("adjust_speed_uphill"):
+        if not self.context.config("correct_speed_uphill"):
             return
         if not self.context.config("assign_elevations"):
             raise ValueError("To correct speeds of uphill links, elevations must be assigned first.")

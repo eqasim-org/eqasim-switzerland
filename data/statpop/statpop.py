@@ -26,7 +26,7 @@ def configure(context):
     context.stage("data.spatial.ovgk")
     context.stage("data.constants")
     context.config("threads", volatile=True)
-    context.config("only_permanent_residents", default=True)
+    context.config("only_permanent_residents", default=False)
 
 
 def execute(context):

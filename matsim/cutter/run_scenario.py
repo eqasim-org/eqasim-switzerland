@@ -14,7 +14,7 @@ def configure(context):
     context.config("use_vdf", default=False)
     context.config("extent_path", default="")
     context.config("extent_prefix", default="")
-    context.config("last_iteration", default = 60)
+    context.config("last_iteration", default = 140)
     context.config("regional_model_last_iteration", default = 2 * context.config("last_iteration"))
     context.config("run_regional_model", default=True)
     context.config("cutter.output_path", default="")

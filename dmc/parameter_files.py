@@ -2,8 +2,8 @@ from dmc.parameters import Parameters
 import os
 
 def configure(context):
-    context.config("estimate_dmc", default=False)
-    context.config("dmc_estimator", default="jax")
+    context.config("estimate_dmc", default=True)
+    context.config("dmc_estimator", default='jax')
     context.config("dmc_mode_parameters_path", "")
     context.config("dmc_cost_parameters_path", "")
     mode_path = context.config("dmc_mode_parameters_path")

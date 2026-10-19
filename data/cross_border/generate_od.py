@@ -22,8 +22,8 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("data.cross_border.interview_places")
 
-    context.config("border_offset", default = 20000)
-    context.config("cross_border_countries", default = "All")
+    context.config("border_offset", default = 50000)
+    context.config("cross_border_countries", default = 'All')
     context.config("cross_border_exclude_shapefiles", default=None)
 
 

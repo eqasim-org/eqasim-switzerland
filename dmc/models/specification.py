@@ -24,9 +24,6 @@ LINEAR_TERMS = {
         ("destination_urban", "urban_destination"), ("destination_urbancore", "urbancore_destination"),
         ("region_1", "region_1"), ("region_2", "region_2"), ("origin_home", "origin_home"),
         ("short_distance", "short_distance"), ("long_distance", "long_distance"),
-        ("good_service", "good_pt_service"), ("medium_service", "medium_pt_service"),
-        ("destination_good_service", "destination_good_pt_service"),
-        ("destination_medium_service", "destination_medium_pt_service"),
     ],
     "bike": [
         ("sex", "sex"), ("retired", "is_retired"), ("junior", "is_junior"),

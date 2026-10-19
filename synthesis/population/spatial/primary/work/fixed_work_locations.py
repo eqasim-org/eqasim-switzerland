@@ -26,10 +26,10 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.21.persons")
 
-    if context.config("include_cross_border"):
+    if context.config("include_cross_border", False):
         context.stage("data.cross_border.destinations")
 
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     if context.config("include_external_population"):
         context.stage("data.external_population.commutes")
 

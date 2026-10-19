@@ -13,7 +13,7 @@ def configure(context):
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
     context.config("input_downsampling")
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
     configure_simulation_path(context)
     configure_peak_hours(context)
 

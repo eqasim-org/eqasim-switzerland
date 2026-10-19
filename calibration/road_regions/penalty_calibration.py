@@ -15,7 +15,7 @@ def configure(context):
     # we need to include the network of this french region, 
     # I don't know if this is the right config param to use, to check later!
     context.config("cross_border_exclude_shapefiles", default=None)
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     context.stage("data.external_population.constants")
  
  
@@ -179,4 +179,4 @@ def multipolygone_to_polygone_wkt(geometry):
     # Return the largest polygon by area
     largest = max(polygons, key=lambda p: p.area)
     return largest.wkt
- 
+

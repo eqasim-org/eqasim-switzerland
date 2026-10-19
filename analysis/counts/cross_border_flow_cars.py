@@ -55,7 +55,7 @@ def configure(context):
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
     configure_simulation_path(context)
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
     context.config("input_downsampling")
     context.config("cross_border_flow_min_daily_count", default=20)
     context.config("extent_path", default="")

@@ -48,7 +48,7 @@ def configure(context):
     context.stage("analysis.counts.cross_border_flow")
     context.stage("data.spatial.swiss_border")
     configure_simulation_path(context)
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
 
     for run_name in CITY_RUNS.values():
         context.stage(f"analysis.counts.runs.{run_name}")

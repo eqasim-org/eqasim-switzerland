@@ -25,9 +25,9 @@ def configure(context):
 
     context.config("output_path")
     context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    context.config("simulation_directory", default = 'simulation_output')
     context.config("distance_bin_km", default=8.0)
-    context.config("travel_times_from", default="tomtom")
+    context.config("travel_times_from", default='tomtom')
 
 
 def merge_and_filter_large_differences(df_api, df_matsim):

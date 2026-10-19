@@ -23,6 +23,8 @@ AGE_SCALE_YEAR = constants.AGE_SCALE_YEAR
 def configure(context):
     context.stage("dmc.data.training_data")
     context.stage("data.constants")
+    if context.config("dmc_vot_constraints", True):
+        raise ValueError("VOT-constrained estimation requires dmc_estimator: jax")
     context.config("ignore_car_passenger", False)
     context.config("distance_cost_interaction", True)
     context.config("income_cost_interaction", True)
@@ -84,11 +86,14 @@ def execute(context):
     logger.info("The estimated parameters are saved to %s", csv_params_path)
 
     # Compute the VOT for car users
-    vot_car, mean_vot_car = vot_utils.get_car_vot(context, df, result, MODES)
-    vot_pt, mean_vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer = vot_utils.get_pt_vot(context, df, result, MODES)    
+    vot_car, mean_vot_car = vot_utils.get_car_vot(context, df, result, MODES, betas)
+    vot_pt, mean_vot_pt, vot_in_vehicle, vot_access_egress, vot_transfer = vot_utils.get_pt_vot(context, df, result, MODES, betas)
 
     logger.info("Mean marginal WTP for observed car trips: %.2f CHF/hour", mean_vot_car)
     logger.info("Mean marginal WTP for observed PT trips: %.2f CHF/hour", mean_vot_pt)
+    logger.info("PT component WTP (CHF/hour): in-vehicle %.2f, access/egress %.2f, waiting %.2f",
+                *[vot_utils._mean(values, df["person_weight"], context.config("use_weights_for_vot"))
+                  for values in (vot_in_vehicle, vot_access_egress, vot_transfer)])
 
     path_to_figure = os.path.join(context.path(),"vot_distribution.png")
     use_vot_weights = context.config("use_weights_for_vot")
@@ -156,10 +161,8 @@ def preprocess_data(df, ignore_car_passenger):
     df["long_distance"]  = df["long_distance"].astype(float)
     df["very_long_distance"]  = df["very_long_distance"].astype(float)
     # quality of pt service
-    df["good_pt_service"] = df["good_pt_service"].astype(int)
-    df["medium_pt_service"] = df["medium_pt_service"].astype(int)
-    df["destination_good_pt_service"] = df["destination_good_pt_service"].astype(int)
-    df["destination_medium_pt_service"] = df["destination_medium_pt_service"].astype(int)
+    df["homePtQuality"] = df["homePtQuality"].astype(int)
+    df["destinationPtQuality"] = df["destinationPtQuality"].astype(int)
     # low/high income
     df["low_income"] = df["low_income"].astype(int)    
     df["high_income"] = df["high_income"].astype(int)
@@ -245,10 +248,8 @@ def define_variables(database, ignore_car_passenger):
         "pt_transfer_time_min": Variable("pt_transfer_time_min"),
         "pt_in_vehicle_distance_km": Variable("pt_in_vehicle_distance_km"),
         "pt_cost_CHF": Variable("pt_cost_CHF"),
-        "good_pt_service": Variable("good_pt_service"),
-        "medium_pt_service": Variable("medium_pt_service"),
-        "destination_good_pt_service": Variable("destination_good_pt_service"),
-        "destination_medium_pt_service": Variable("destination_medium_pt_service"),
+        "homePtQuality": Variable("homePtQuality"),
+        "destinationPtQuality": Variable("destinationPtQuality"),
         # bike
         "bike_availability": Variable("bike_availability"),
         "bike_travel_time_min": Variable("bike_travel_time_min"),
@@ -370,10 +371,10 @@ def define_betas(ignore_car_passenger, use_exponents, use_income):
         "beta_pt_short_distance": Beta("beta_pt_short_distance", 0, None, None, 1),
         "beta_pt_long_distance": Beta("beta_pt_long_distance", 0, None, None, 1),
         
-        "beta_pt_good_service": Beta("beta_pt_good_service", 0.685, None, None, 0),
-        "beta_pt_medium_service": Beta("beta_pt_medium_service", 0.196, None, None, 0),
-        "beta_pt_destination_good_service": Beta("beta_pt_destination_good_service", 0.0, None, None, 0),
-        "beta_pt_destination_medium_service": Beta("beta_pt_destination_medium_service", 0.0, None, None, 0),
+        "beta_pt_home_quality": Beta("beta_pt_home_quality", -0.05, None, None, 0),
+        "gamma_pt_home_quality": Beta("gamma_pt_home_quality", 1.0, min_lambda, max_lambda, 0),
+        "beta_pt_destination_quality": Beta("beta_pt_destination_quality", -0.05, None, None, 0),
+        "gamma_pt_destination_quality": Beta("gamma_pt_destination_quality", 1.0, min_lambda, max_lambda, 0),
         
         "beta_pt_densities": Beta("beta_pt_densities", 0.08, None, None, 0),
 
@@ -574,10 +575,11 @@ def build_utilities(context, vars, betas, modes, ignore_car_passenger):
         + betas["beta_pt_origin_home"] * vars["origin_home"]
         + betas["beta_pt_short_distance"] * vars["short_distance"]
         + betas["beta_pt_long_distance"] * vars["long_distance"]
-        + betas["beta_pt_good_service"] * vars["good_pt_service"]
-        + betas["beta_pt_medium_service"] * vars["medium_pt_service"]
-        + betas["beta_pt_destination_good_service"] * vars["destination_good_pt_service"]
-        + betas["beta_pt_destination_medium_service"] * vars["destination_medium_pt_service"]
+        # Guard the power base so exponent derivatives remain finite at quality 0.
+        + betas["beta_pt_home_quality"] * (vars["homePtQuality"] > 0)
+        * BinaryMax(vars["homePtQuality"], 1.0)**betas["gamma_pt_home_quality"]
+        + betas["beta_pt_destination_quality"] * (vars["destinationPtQuality"] > 0)
+        * BinaryMax(vars["destinationPtQuality"], 1.0)**betas["gamma_pt_destination_quality"]
         + betas["beta_pt_densities"] * aggregated_density
     )
 

@@ -21,7 +21,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     
     context.config("cross_border_exclude_shapefiles", default=None)
-    context.config("include_external_population", default=False)
+    context.config("include_external_population", default=True)
 
 
 def execute(context):

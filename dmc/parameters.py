@@ -226,8 +226,9 @@ class writer:
         # set non-estimated parameters to their beta initial values
         params_dict = self.get_initial_if_not_estimated(params_dict)
         
-        # round all floats to 4 decimals
-        params_dict = {k: round(v, 4) if isinstance(v, float) else v for k, v in params_dict.items()}
+        # Preserve constrained-fit precision so export does not shift the VOT targets.
+        if not self.context.config("dmc_vot_constraints", True):
+            params_dict = {k: round(v, 4) if isinstance(v, float) else v for k, v in params_dict.items()}
 
         # Organize parameters by mode
         modes = ["car",  "pt", "bike", "walk", "cp", "parking"]
@@ -412,10 +413,10 @@ NAMES_CONVERSION = {
     'beta_pt_retired': 'pt.betaRetired_u',
     'beta_pt_junior': 'pt.betaJunior_u',
     'beta_pt_long_distance': 'pt.betaLongDistance_u',
-    'beta_pt_good_service': 'pt.betaGoodService_u',
-    'beta_pt_medium_service': 'pt.betaMediumService_u',
-    'beta_pt_destination_good_service': 'pt.betaDestinationGoodService_u',
-    'beta_pt_destination_medium_service': 'pt.betaDestinationMediumService_u',
+    'beta_pt_home_quality': 'pt.betaHomePtQuality_u',
+    'gamma_pt_home_quality': 'pt.homePtQualityExponent',
+    'beta_pt_destination_quality': 'pt.betaDestinationPtQuality_u',
+    'gamma_pt_destination_quality': 'pt.destinationPtQualityExponent',
     'beta_pt_densities': 'pt.betaDensities_u',
     
     # Walk

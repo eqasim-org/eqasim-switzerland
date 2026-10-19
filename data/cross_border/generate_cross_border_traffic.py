@@ -38,7 +38,7 @@ def configure(context):
         context.stage("data.cross_border.vehicles")
         context.stage("synthesis.population.enriched")
 
-    if context.config("include_external_population", default = False):
+    if context.config("include_external_population", default = True):
         context.stage("data.external_population.read_outputs")
 
 
