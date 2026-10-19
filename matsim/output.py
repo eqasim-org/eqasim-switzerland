@@ -2,15 +2,12 @@ import os
 import shutil
 import glob
 from matsim.config.tools import change_params, get_regions_path
-import matsim.config.tools as config_tools
 
 def configure(context):
     context.stage("matsim.simulation.run")    
     context.stage("matsim.simulation.prepare")
     context.stage("contracts.contracts")
     context.stage("matsim.runtime.eqasim")
-    context.stage("matsim.scenario.network.convert_osm")
-    context.stage("matsim.scenario.network.mapped")
     context.stage("matsim.cutter.run_scenario")
 
     context.config("output_path")
@@ -23,23 +20,6 @@ def configure(context):
     context.config("simulation_directory", 'simulation_output')
     context.config("extent_prefix", default="")
 
-    # network calibration
-    context.config("network_calibration.activate", default=True)
-    context.config("network_calibration.calibrate_disutilities", default=True)
-    context.config("network_calibration.calibrate_freespeed", default=True)
-    context.config("network_calibration.calibrate_agents_ascs", default=True)
-    context.config("network_calibration.calibrate_subpopulations", default=True)
-
-    need_counts = config_tools.need_counts_file(context)
-    if context.config("network_calibration.activate") and need_counts:
-        context.stage("analysis.counts.target")
-        if context.config("network_calibration.calibrate_disutilities"):
-            context.stage("calibration.road_regions.penalty_calibration")
-        
-    
-    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
-        context.stage("analysis.travel_times.APIs.target")
-        context.stage("calibration.road_regions.freespeed_calibration")
 
 
 def execute(context):
@@ -81,18 +61,15 @@ def execute(context):
         "pricingDescription.xml"
     ]
     
-    for file in file_names:
-        shutil.copyfile("%s/%s" % (source_path, file), 
-                        "%s/%s" % (target_path, file))
-
-    # copy the detailed geometry
     if context.config("export_detailed_network"):
-        geometry_file = context.stage("matsim.scenario.network.mapped")["geometry"]
-        shutil.copy(
-            geometry_file,
-            "%s/%s" % (target_path, "%sdetailed_network.csv" % context.config("output_prefix"))
-        )
-    
+        file_names.append("%sdetailed_network.csv" % context.config("output_prefix"))
+    file_names.extend(glob.glob("network_calibration_files/*", root_dir=source_path))
+
+    for file in file_names:
+        destination = os.path.join(target_path, file)
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copyfile(os.path.join(source_path, file), destination)
+
     # copy the jar file
     if context.config("write_jar"):
         shutil.copy(
@@ -114,46 +91,6 @@ def execute(context):
             shutil.copyfile(calibrated_parameters_path, "%s/calibrated_dmc_parameters.yml" % target_path)
             dmc_params = "calibrated_dmc_parameters.yml"
 
-    # calibration files (special regions and target files)
-    regional_speeds_file = ""
-    if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
-        regions_dir = os.path.join(target_path, "network_calibration_files")
-        os.makedirs(regions_dir, exist_ok=True)
-
-        freespeed_calibration_path = context.stage("calibration.road_regions.freespeed_calibration")
-        if freespeed_calibration_path!="":                        
-            regions = freespeed_calibration_path.split(";")
-            for i,region in enumerate(regions):
-                if os.path.exists(region):
-                    shutil.copy(region, f"{regions_dir}/freespeed_special_region_{i}.yml" )
-
-        target_traveltimes_file = context.stage("analysis.travel_times.APIs.target")
-        if target_traveltimes_file!="":
-            shutil.copy(target_traveltimes_file, f"{regions_dir}/target_travel_times.csv")
-            if os.path.exists(f"{regions_dir}/target_travel_times.csv"):
-                regional_speeds_file = "network_calibration_files/target_travel_times.csv"
-
-    regional_counts_file = ""
-    if context.config("network_calibration.activate") and config_tools.need_counts_file(context):
-        regions_dir = os.path.join(target_path, "network_calibration_files")
-        os.makedirs(regions_dir, exist_ok=True)
-
-        target_counts_file = context.stage("analysis.counts.target")
-        if target_counts_file!="":
-            shutil.copy(target_counts_file, f"{regions_dir}/target_counts.csv")
-            if os.path.exists(f"{regions_dir}/target_counts.csv"):
-                regional_counts_file = "network_calibration_files/target_counts.csv"
-
-        if context.config("network_calibration.calibrate_disutilities"):
-            penalty_calibration_path = context.stage("calibration.road_regions.penalty_calibration")   
-            if penalty_calibration_path!="":            
-                regions = penalty_calibration_path.split(";")
-                for i,region in enumerate(regions):
-                    if os.path.exists(region):
-                        shutil.copy(region, f"{regions_dir}/penalties_special_region_{i}.yml" )
-            
-
-
     # replace the config file with the real output config file
     output_config = "%s/output_config.xml" % new_path_to_results
     config_file = "%s/%sconfig.xml" % (target_path, context.config("output_prefix"))
@@ -165,8 +102,10 @@ def execute(context):
                   params = [("eqasim:alphaCalibration.filePath","%scantonal_mode_shares.csv" % context.config("output_prefix")),
                             ("eqasim.modeParametersPath",dmc_params),
                             ("eqasim.costParametersPath","cost_parameters.yml"),
-                            ("eqasim:networkCalibration.countsFile",regional_counts_file),
-                            ("eqasim:networkCalibration.freespeedCalibration.observedTripsFile",regional_speeds_file),
+                            ("eqasim:networkCalibration.countsFile", "network_calibration_files/target_counts.csv"
+                             if os.path.isfile(os.path.join(target_path, "network_calibration_files/target_counts.csv")) else ""),
+                            ("eqasim:networkCalibration.freespeedCalibration.observedTripsFile", "network_calibration_files/target_travel_times.csv"
+                             if os.path.isfile(os.path.join(target_path, "network_calibration_files/target_travel_times.csv")) else ""),
                             ("eqasim:networkCalibration.costCalibration.specialRegionPath",get_regions_path(target_path, kind="penalty")),
                             ("eqasim:networkCalibration.freespeedCalibration.specialRegionPath",get_regions_path(target_path, kind="freespeed")),
                             ("ptZones.ptZonesFilePath", "gtfs_zones.csv"),

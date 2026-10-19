@@ -1,5 +1,6 @@
 import shutil
 import os.path
+from pathlib import Path
 import matsim.runtime.eqasim as eqasim
 from matsim.config import config as shared_config
 from matsim.simulation.cross_border_links import patch_directional_border_links
@@ -29,6 +30,7 @@ def configure(context):
     context.config("java_memory", "50G", volatile=True)
     context.config("random_seed")
     context.config("use_vdf", False)
+    context.config("export_detailed_network", True)
     context.config("last_iteration", 140)
     context.config("calibrate_alphas_in_matsim", True)
     context.config("alphaCalibration.level", 'canton')
@@ -67,6 +69,33 @@ def configure(context):
     if context.config("network_calibration.activate") and context.config("network_calibration.calibrate_freespeed"):
         context.stage("analysis.travel_times.APIs.target")
         context.stage("calibration.road_regions.freespeed_calibration")
+
+
+def _copy_network_calibration_files(context):
+    """Copy calibration inputs and return paths relative to the prepared config."""
+    parameters = config_tools.network_calibration_parameters(context)
+    names = {
+        "eqasim:networkCalibration.countsFile": "target_counts.csv",
+        "eqasim:networkCalibration.freespeedCalibration.observedTripsFile": "target_travel_times.csv",
+        "eqasim:networkCalibration.costCalibration.specialRegionPath": "penalties_special_region",
+        "eqasim:networkCalibration.freespeedCalibration.specialRegionPath": "freespeed_special_region",
+    }
+    local_parameters = {}
+    for parameter, sources in parameters.items():
+        local_paths = []
+        for index, source in enumerate(str(sources or "").split(";")):
+            if not source:
+                continue
+            name = names[parameter]
+            if parameter.endswith("specialRegionPath"):
+                name = f"{name}_{index}.yml"
+            relative_path = Path("network_calibration_files") / name
+            destination = Path(context.path()) / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            local_paths.append(relative_path.as_posix())
+        local_parameters[parameter] = ";".join(local_paths)
+    return local_parameters
 
 
 def execute(context):
@@ -116,6 +145,13 @@ def execute(context):
     cost_parameters_path = "%s/cost_parameters.yml" % context.path()
     shutil.copy(mode_params_path, mode_parameters_path)
     shutil.copy(cost_params_path, cost_parameters_path)
+
+    if context.config("export_detailed_network"):
+        shutil.copyfile(
+            context.stage("matsim.scenario.network.mapped")["geometry"],
+            "%s/%sdetailed_network.csv" % (context.path(), context.config("output_prefix")),
+        )
+    local_calibration_parameters = _copy_network_calibration_files(context)
 
     # Some files we send through several preparation scripts
     
@@ -179,7 +215,7 @@ def execute(context):
 
     shared_config.adapt_for_routing(context, local_config_path)
     config_tools.change_params(local_config_path,
-                               config_tools.network_calibration_parameters(context), create=True)
+                               local_calibration_parameters, create=True)
 
     # Route the population
     population_output_path = "%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix"))
@@ -204,6 +240,7 @@ def execute(context):
     # Apply runtime/calibration settings after routing so calibration does not
     # become active inside the population router or scenario validator.
     config_path = shared_config.adapt_for_simulation(context, local_config_path)
+    config_tools.change_params(local_config_path, local_calibration_parameters, create=True)
 
     # Cleanup
     os.remove("%s/prepared_population.xml.gz" % context.path())
