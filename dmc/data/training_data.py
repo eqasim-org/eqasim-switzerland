@@ -20,7 +20,7 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
-    context.stage("calibration.pt_pricing.generate_config")
+    context.stage("matsim.config.pt")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.stage("data.spatial.swiss_border")

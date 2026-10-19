@@ -36,7 +36,7 @@ def route_trips(context, requests):
 
     # Include requests and routing inputs, but not DMC coefficients: changing
     # utilities must not repeat routing. Seed changes are checked explicitly too.
-    config = Path(context.stage("calibration.pt_pricing.generate_config")).resolve()
+    config = Path(context.stage("matsim.config.pt")).resolve()
     jar = Path(context.path("matsim.runtime.eqasim")) / context.stage("matsim.runtime.eqasim")
     key = cache_key(requests, config, jar, context.config("random_seed"))
     directory = Path(context.working_directory) / 'departure_time_routing'

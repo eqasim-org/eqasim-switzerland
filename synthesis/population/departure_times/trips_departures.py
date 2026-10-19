@@ -9,7 +9,7 @@ def configure(context):
     context.stage("data.microcensus.trips")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
-    context.stage("calibration.pt_pricing.generate_config")
+    context.stage("matsim.config.pt")
     context.stage("dmc.parameter_files")
 
     context.config("threads", volatile=True)

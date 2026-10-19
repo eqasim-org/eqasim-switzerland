@@ -11,7 +11,7 @@ from mode_choice.routing.results import complete_routes
 
 def configure(context):
     configure_mode(context, "pt")
-    context.stage("calibration.pt_pricing.generate_config")
+    context.stage("matsim.config.pt")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.config("threads", volatile=True)
@@ -35,7 +35,7 @@ def route_public_transport(context):
     # Until MultiModeRouterServer exposes PT components, the detailed router
     # remains necessary. Total travel time is not in-vehicle travel time.
     directory = Path(context.path())
-    config = context.stage("calibration.pt_pricing.generate_config")
+    config = context.stage("matsim.config.pt")
     batch_size = context.config("mode_choice_routing_batch_size")
     # This router's Task accepts only OD/time fields. The shared server request
     # also carries home/subscription attributes for fares and must stay intact.

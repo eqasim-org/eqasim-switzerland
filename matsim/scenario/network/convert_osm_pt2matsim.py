@@ -1,5 +1,7 @@
 import matsim.runtime.pt2matsim as pt2matsim
 from lxml import etree
+from functools import partial
+from matsim.config import tools as config_tools
 
 
 def configure(context):
@@ -41,7 +43,7 @@ def execute(context):
     # ------------------------------------------------------------------
     # Parse XML properly instead of hacking strings
     # ------------------------------------------------------------------
-    tree = etree.parse(template_path)
+    tree = config_tools.read_config(template_path)
     root = tree.getroot()
 
     # Find the OsmConverter module unambiguously
@@ -51,35 +53,25 @@ def execute(context):
     osm_module = modules[0]
 
     # --- small helpers -------------------------------------------------
-    def get_param(name, parent=osm_module):
-        """Return a <param> element or None."""
-        return parent.find(f'param[@name="{name}"]')
-
-    def set_param(name, value, parent=osm_module):
-        """Set a <param> value, creating it if missing."""
-        param = get_param(name, parent)
-        if param is None:
-            param = etree.SubElement(parent, "param", name=name, value=str(value))
-        else:
-            param.set("value", str(value))
+    get_param = partial(config_tools.get_param, parent=osm_module)
+    set_param = partial(config_tools.set_param, parent=osm_module)
 
     # --- 1. Fix bus subnetwork ----------------------------------------
     for subnet in osm_module.xpath('parameterset[@type="routableSubnetwork"]'):
-        allowed = get_param("allowedTransportModes", subnet)
+        allowed = get_param("allowedTransportModes", parent=subnet)
         if allowed is not None and allowed.get("value") == "bus, car":
-            allowed.set("value", "bus")
+            config_tools.set_param("allowedTransportModes", "bus", subnet)
 
     # --- 2. Add taxi & bus to all road wayDefaultParams ---------------
     for way in osm_module.xpath('parameterset[@type="wayDefaultParams"]'):
-        allowed = get_param("allowedTransportModes", way)
+        allowed = get_param("allowedTransportModes", parent=way)
         if allowed is not None and allowed.get("value") == "car":
-            allowed.set("value", "car,taxi,bus")
-            highway = get_param("osmValue", way)
+            config_tools.set_param("allowedTransportModes", "car,taxi,bus", way)
+            highway = get_param("osmValue", parent=way)
             if highway is not None:
                 freespeed = DEFAULT_SPEEDS.get(highway.get('value'))
                 if freespeed is not None:
-                    way_speed = get_param("freespeed", way)
-                    way_speed.set("value", str(freespeed))
+                    config_tools.set_param("freespeed", freespeed, way)
 
     # --- 3.1 Set scalar parameters -------------------------------------
     set_param("osmFile", network_file)
@@ -101,19 +93,13 @@ def execute(context):
     ]
 
     for sn in new_subnetworks:
-        ps = etree.SubElement(osm_module, "parameterset", type="routableSubnetwork")
-        etree.SubElement(ps, "param", name="allowedTransportModes", value=sn["allowedTransportModes"])
-        etree.SubElement(ps, "param", name="subnetworkMode", value=sn["subnetworkMode"])
+        ps = config_tools.get_parameter_set(osm_module, "routableSubnetwork",
+                                             {"subnetworkMode": sn["subnetworkMode"]})
+        config_tools.set_param("allowedTransportModes", sn["allowedTransportModes"], ps)
 
     # --- 5. Write back, preserving XML declaration + DOCTYPE ----------
     etree.indent(tree, space="    ")
-    tree.write(
-        output_path,
-        xml_declaration=True,
-        encoding="UTF-8",
-        pretty_print=True,
-        doctype=tree.docinfo.doctype,  # keeps <!DOCTYPE config SYSTEM "...">
-    )
+    config_tools.write_config(tree, output_path)
 
     # Run conversion
     pt2matsim.run(

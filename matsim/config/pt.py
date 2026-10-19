@@ -1,14 +1,17 @@
+"""Shared network, schedule, pricing and PT-parameter config for all routers."""
 import shutil
 import matsim.runtime.eqasim as eqasim
 import xml.etree.ElementTree as ET
 import gzip
 import os
-import matsim.simulation.config_utils as config_utils
+import matsim.config.tools as config_tools
+from matsim.config import config as shared_config
 import logging
 
 logger = logging.getLogger("synpp")
 
 def configure(context):
+    context.stage("matsim.config.config")
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
 
@@ -71,17 +74,8 @@ def execute(context):
 
     shutil.copyfile(network_input_path, network_output_path)
 
-    config_path = "%sconfig.xml" % context.config("output_prefix")
-    eqasim.run(context, "org.eqasim.core.scenario.config.RunGenerateConfig", [
-        "--output-path", config_path,
-        "--prefix", context.config("output_prefix"),
-        "--sample-size", context.config("input_downsampling"),
-        "--random-seed", context.config("random_seed"),
-        "--threads", context.config("threads"),
-        "--eqasim-configurator", "org.eqasim.switzerland.ch.SwitzerlandConfigurator"
-    ])
-
-    assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
+    config_path = "%s/%sconfig.xml" % (context.path(), context.config("output_prefix"))
+    config_tools.copy_config(context.stage("matsim.config.config"), config_path)
 
     transit_schedule_input_path = context.stage("matsim.scenario.network.mapped")["schedule"]
     transit_schedule_output_path = "%stransit_schedule.xml.gz" % (context.config("output_prefix"))
@@ -93,29 +87,8 @@ def execute(context):
 
     assert os.path.exists("%s/%stransit_schedule.xml.gz" % (context.path(), context.config("output_prefix")))
 
-    eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunAdaptConfig", [
-        "--input-path", config_path,
-        "--output-path", config_path,
-        "--downsamplingRate", context.config("input_downsampling"),
-        "--replanningRate", "0.05",
-        "--hasFreight", False,
-        "--prefix", context.config("output_prefix")    ])
-
-    assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
-
-    config_utils.add_ptZones_module(context)
-    
-    if not context.config("useScheduleBasedTransport"):
-        config_utils.add_SBBPT_module(context)
-
-    pt_parameters = context.stage("calibration.pt_routing.pt_routing_parameters")
-    config_utils.adjust_pt_routing_parameters(context, pt_parameters)
-
-    config_utils.change_param(context, "facilities", "inputFacilitiesFile", "null")
-    config_utils.change_param(context, "households", "inputFile", "null")
-    config_utils.change_param(context, "plans", "inputPlansFile", "null")
-    config_utils.change_param(context, "DiscreteModeChoice", "modeAvailability", "SwissModeAvailability")
-    config_utils.change_param(context, "vehicles", "vehiclesFile", "null")
+    shared_config.adapt_for_routing(context, config_path)
+    config_tools.disable_population_inputs(config_path)
 
     return "%s/%sconfig.xml" % (context.path(), context.config("output_prefix"))
 

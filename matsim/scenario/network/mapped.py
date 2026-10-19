@@ -1,5 +1,6 @@
 import os
-from lxml import etree
+from functools import partial
+from matsim.config import tools as config_tools
 import matsim.runtime.pt2matsim as pt2matsim
 
 
@@ -87,21 +88,13 @@ def execute(context):
 
 def write_mapping_config(context, network_path, schedule_path):
     """Set mapper parameters by name, independent of template defaults/formatting."""
-    tree = etree.parse(
-        os.path.join(context.path(), "map_network_template.xml"),
-        etree.XMLParser(remove_blank_text=True, load_dtd=False, resolve_entities=False),
-    )
+    tree = config_tools.read_config(os.path.join(context.path(), "map_network_template.xml"))
     modules = tree.getroot().findall('module[@name="PublicTransitMapping"]')
     if len(modules) != 1:
         raise RuntimeError("Expected exactly one PublicTransitMapping module in template")
     module = modules[0]
 
-    def set_param(name, value, parent=module):
-        """Update a direct child parameter, or create it when absent."""
-        param = parent.find(f'param[@name="{name}"]')
-        if param is None:
-            param = etree.SubElement(parent, "param", name=name)
-        param.set("value", str(value).lower() if isinstance(value, bool) else str(value))
+    set_param = partial(config_tools.set_param, parent=module)
 
     set_param("inputNetworkFile", network_path)
     set_param("inputScheduleFile", schedule_path)
@@ -128,36 +121,21 @@ def write_mapping_config(context, network_path, schedule_path):
         set_param("inputNetworkGeometryFile", "")
         set_param("outputNetworkGeometryFile", "")
 
-    def mode_assignment(schedule_mode):
-        """Reuse a mode's existing assignment instead of adding conflicting rules."""
-        matches = module.xpath(
-            'parameterset[@type="transportModeAssignment"][param[@name="scheduleMode"][@value=$mode]]',
-            mode=schedule_mode,
-        )
-        if matches:
-            assignment = matches[0]
-            for duplicate in matches[1:]:
-                module.remove(duplicate)
-        else:
-            assignment = etree.SubElement(module, "parameterset", type="transportModeAssignment")
-        set_param("scheduleMode", schedule_mode, assignment)
-        return assignment
-
-    set_param("networkModes", "bus", mode_assignment("bus"))
+    assignment = config_tools.get_parameter_set(module, "transportModeAssignment", {"scheduleMode": "bus"})
+    set_param("networkModes", "bus", parent=assignment)
     for mode, network_modes, distance in (
         ("rail", "rail,light_rail,train", 120.0),
         ("tram", "tram", 180.0),
         ("subway", "light_rail,subway", 180.0),
         ("funicular", "funicular", 120.0),
     ):
-        assignment = mode_assignment(mode)
-        set_param("maxLinkCandidateDistance", distance, assignment)
-        set_param("nLinkThreshold", 1, assignment)
-        set_param("networkModes", network_modes, assignment)
-        set_param("strictLinkRule", True, assignment)
+        assignment = config_tools.get_parameter_set(module, "transportModeAssignment", {"scheduleMode": mode})
+        set_param("maxLinkCandidateDistance", distance, parent=assignment)
+        set_param("nLinkThreshold", 1, parent=assignment)
+        set_param("networkModes", network_modes, parent=assignment)
+        set_param("strictLinkRule", True, parent=assignment)
 
     config_path = os.path.join(context.path(), "map_network.xml")
-    tree.write(config_path,
-               encoding="UTF-8", xml_declaration=True, pretty_print=True)
+    config_tools.write_config(tree, config_path)
 
     return config_path

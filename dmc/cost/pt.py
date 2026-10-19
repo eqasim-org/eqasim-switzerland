@@ -73,7 +73,7 @@ def estimate_cost_from_eqasim_java(df, context, pt_regional_radius_km):
     df.to_csv(requests_path, index = False)
 
     output_path = context.path() + "/mzPricesRequests_done.csv"
-    config_path = context.stage("calibration.pt_pricing.generate_config")    
+    config_path = context.stage("matsim.config.pt")
 
     # check if the file existst and if it contains all the requests
     if os.path.exists(output_path):

@@ -1,8 +1,8 @@
 import os
 import shutil
 import glob
-from matsim.cutter.cutter_tools import change_params, get_regions_path
-import matsim.simulation.config_utils as config_utils
+from matsim.config.tools import change_params, get_regions_path
+import matsim.config.tools as config_tools
 
 def configure(context):
     context.stage("matsim.simulation.run")    
@@ -30,7 +30,7 @@ def configure(context):
     context.config("network_calibration.calibrate_agents_ascs", default=True)
     context.config("network_calibration.calibrate_subpopulations", default=True)
 
-    need_counts = config_utils.need_counts_file(context)
+    need_counts = config_tools.need_counts_file(context)
     if context.config("network_calibration.activate") and need_counts:
         context.stage("analysis.counts.target")
         if context.config("network_calibration.calibrate_disutilities"):
@@ -134,7 +134,7 @@ def execute(context):
                 regional_speeds_file = "network_calibration_files/target_travel_times.csv"
 
     regional_counts_file = ""
-    if context.config("network_calibration.activate") and config_utils.need_counts_file(context):
+    if context.config("network_calibration.activate") and config_tools.need_counts_file(context):
         regions_dir = os.path.join(target_path, "network_calibration_files")
         os.makedirs(regions_dir, exist_ok=True)
 

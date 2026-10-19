@@ -1,7 +1,7 @@
 """Run the selected Java cutter; scenario assembly lives in scenario.py."""
 import os.path
 import matsim.runtime.eqasim as eqasim
-from .cutter_tools import change_params
+from matsim.config.tools import change_params
 from .file_paths import simulation_root
 
 
