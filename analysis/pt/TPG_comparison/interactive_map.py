@@ -8,7 +8,7 @@ import geopandas as gpd
 import pandas as pd
 from folium.plugins import TimestampedGeoJson
 
-import lemanis
+import lemanis_2022
 import plotting
 
 
@@ -16,7 +16,7 @@ _BASE_TIME = datetime(2024, 1, 1)
 _TILE_URL  = "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg"
 
 
-def _build_colormap(color_half_range_pct):
+def _build_colormap(color_half_range_pct, reference_name = "TPG 2024"):
     lo = max(100 - color_half_range_pct, 0)
     hi = 100 + color_half_range_pct
     colormap = cm.LinearColormap(
@@ -25,10 +25,38 @@ def _build_colormap(color_half_range_pct):
         vmin   = lo, vmax = hi,
     )
     colormap.caption = (
-        "MATSim as % of TPG 2024 mean (100% = exact match; "
+        f"MATSim as % of {reference_name} mean (100% = exact match; "
         "blue = MATSim too low; red = MATSim too high)"
     )
     return colormap
+
+
+# Markers of the submodes of one stop are shifted by this distance (m) around the stop, in a direction of their own
+_SUBMODE_ORDER = ["metro", "LEB", "train", "tram", "bus", "funicular", "cable car", "ferry"]
+_SUBMODE_OFFSET_M = 35.0
+
+
+def _submode_offset(submode, lat):
+    """(dlat, dlon) in degrees of the marker of a submode: the first submode of _SUBMODE_ORDER stays at the stop."""
+    import math
+    index = _SUBMODE_ORDER.index(submode) if submode in _SUBMODE_ORDER else len(_SUBMODE_ORDER)
+    if index == 0:
+        return 0.0, 0.0
+    angle = math.radians(90 - 72 * (index - 1))
+    dlat = _SUBMODE_OFFSET_M * math.sin(angle) / 111_320
+    dlon = _SUBMODE_OFFSET_M * math.cos(angle) / (111_320 * math.cos(math.radians(lat)))
+    return dlat, dlon
+
+
+def _marker_location(row):
+    if "submode" not in row.index:
+        return row["stop_lat"], row["stop_lon"]
+    dlat, dlon = _submode_offset(row["submode"], row["stop_lat"])
+    return row["stop_lat"] + dlat, row["stop_lon"] + dlon
+
+
+def _stop_label(row):
+    return f"{row['stop_name']} ({row['submode']})" if "submode" in row.index else row["stop_name"]
 
 
 def _marker_radius(tpg_mean, matsim_total, global_max, low_data = False):
@@ -42,8 +70,9 @@ def _is_low_data(tpg_mean, matsim_total, min_events):
 
 
 def _popup_html(row, reference_label = "TPG mean"):
+    submode = f" ({row['submode']})" if "submode" in row.index else ""
     return (
-        f"<b>{row['stop_name']}</b><br>"
+        f"<b>{row['stop_name']}</b>{submode}<br>"
         f"MATSim (scaled): {row['matsim_total']:.0f}<br>"
         f"{reference_label}: {row['tpg_mean']:.0f} "
         f"(95% CI {row['tpg_lo']:.0f}-{row['tpg_hi']:.0f})<br>"
@@ -51,7 +80,7 @@ def _popup_html(row, reference_label = "TPG mean"):
     )
 
 
-def _add_hourly_layer(m, stop_hour_df, colormap, global_max, low_data_min_events):
+def _add_hourly_layer(m, stop_hour_df, colormap, global_max, low_data_min_events, reference_name = "TPG"):
     features = []
 
     for _, row in stop_hour_df.iterrows():
@@ -73,19 +102,19 @@ def _add_hourly_layer(m, stop_hour_df, colormap, global_max, low_data_min_events
                 "fillColor":   colormap(row["pct_of_mean"]), 
                 "fillOpacity": 0.95,
                 "stroke":      "true", 
-                "color":       "#222222", 
+                "color":       "#222222",
                 "weight":      1.2,
                 "radius":      _marker_radius(row["tpg_mean"], row["matsim_total"], global_max),
             }
 
-        popup = _popup_html(row) + (
-            f"<br><i>Low data: TPG mean and MATSim both under {low_data_min_events:.0f} events - "
+        popup = _popup_html(row, f"{reference_name} mean") + (
+            f"<br><i>Low data: {reference_name} mean and MATSim both under {low_data_min_events:.0f} events - "
             "comparison not meaningful</i>" if low_data else ""
         )
 
         features.append({
             "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [row["stop_lon"], row["stop_lat"]]},
+            "geometry": {"type": "Point", "coordinates": list(reversed(_marker_location(row)))},
             "properties": {
                 "time": time,
                 "popup": popup,
@@ -135,7 +164,7 @@ def _base_map(center, perimeter_shapefile):
 
 
 def build_hourly_map(stop_hour_df, output_path, perimeter_shapefile = None, color_half_range_pct = 100,
-                      low_data_min_events = 5, hour_range = (6, 22)):
+                      low_data_min_events = 5, hour_range = (6, 22), reference_name = "TPG"):
 
     first_hour, last_hour = hour_range
     stop_hour_df          = stop_hour_df[stop_hour_df["hour"].between(first_hour, last_hour)]
@@ -144,25 +173,104 @@ def build_hourly_map(stop_hour_df, output_path, perimeter_shapefile = None, colo
 
     m = _base_map(center, perimeter_shapefile)
 
-    _add_hourly_layer(m, stop_hour_df, _build_colormap(color_half_range_pct), global_max, low_data_min_events)
+    colormap = _build_colormap(color_half_range_pct, f"{reference_name} 2024")
 
-    _build_colormap(color_half_range_pct).add_to(m)
+    _add_hourly_layer(m, stop_hour_df, colormap, global_max, low_data_min_events, reference_name)
+
+    colormap.add_to(m)
     folium.LayerControl(collapsed = False).add_to(m)
 
     m.save(output_path)
 
 
+def _add_border_crossing_squares(m, border_df, colormap, min_side = 26, max_side = 44):
+    """Square markers (not circles: they are not stop counts) for the loads of the trains at the border,
+    one per line and direction, sized by the load and colored by MATSim as % of Lemanis."""
+    border_df = border_df[border_df["marker_lat"].notna()]
+    if border_df.empty:
+        return
+
+    group    = folium.FeatureGroup(name = "Lemanis border crossing load (squares)", show = True)
+    max_load = max(border_df[["lemanis_load", "matsim_load"]].max().max(), 1)
+
+    for _, row in border_df.iterrows():
+        side      = min_side + (max_side - min_side) * (max(row["lemanis_load"], row["matsim_load"]) / max_load) ** 0.5
+        arrow     = "CH\u2192FR" if row["direction"] == "F" else "FR\u2192CH"
+        text      = f"{row['line']} {arrow}"
+        pct       = row["pct_of_lemanis"]
+        color     = colormap(min(max(pct, 0), 200)) if pd.notna(pct) else "#9e9e9e"
+
+        popup = (
+            f"<b>Line {row['line']} {arrow}</b> (load of the trains at the border)<br>"
+            f"MATSim (scaled): {row['matsim_load']:.0f}<br>"
+            f"Lemanis mean: {row['lemanis_load']:.0f}<br>"
+            f"MATSim reaches {pct:.0f}% of the Lemanis mean"
+        )
+
+        html = (
+            f'<div style="width:{side:.0f}px;height:{side:.0f}px;background:{color};border:2px solid #222;'
+            f'box-sizing:border-box;display:flex;align-items:center;justify-content:center;text-align:center;'
+            f'font:bold 8px/9px sans-serif;color:#fff;text-shadow:0 0 2px #000;opacity:0.95">{row["line"]}<br>{arrow}</div>'
+        )
+
+        folium.Marker(
+            location = (row["marker_lat"], row["marker_lon"]),
+            icon     = folium.DivIcon(html = html, icon_size = (side, side), icon_anchor = (side / 2, side / 2)),
+            popup    = folium.Popup(popup, max_width = 300),
+            tooltip  = text,
+        ).add_to(group)
+
+    group.add_to(m)
+
+
+def _add_sbb_station_squares(m, station_df, colormap, min_side = 12, max_side = 40):
+    """Square markers for the SBB passenger frequency of the train stations, sized by the movements
+    and colored by MATSim as % of SBB."""
+    group    = folium.FeatureGroup(name = "SBB station passenger counts (squares)", show = True)
+    max_load = max(station_df[["sbb_total", "matsim_total"]].max().max(), 1)
+
+    for _, row in station_df.iterrows():
+        side  = min_side + (max_side - min_side) * (max(row["sbb_total"], row["matsim_total"]) / max_load) ** 0.5
+        pct   = row["pct_of_sbb"]
+        color = colormap(min(max(pct, 0), 200)) if pd.notna(pct) else "#9e9e9e"
+
+        popup = (
+            f"<b>{row['station']}</b> (SBB station, {row['sbb_year']})<br>"
+            f"MATSim (scaled, all lines): {row['matsim_total']:.0f}<br>"
+            f"SBB: {row['sbb_total']:.0f}<br>"
+            f"MATSim reaches {pct:.0f}% of the SBB count"
+        )
+
+        html = (
+            f'<div style="width:{side:.0f}px;height:{side:.0f}px;background:{color};border:2px solid #000;'
+            f'box-sizing:border-box;opacity:0.8"></div>'
+        )
+
+        folium.Marker(
+            location = (row["lat"], row["lon"]),
+            icon     = folium.DivIcon(html = html, icon_size = (side, side), icon_anchor = (side / 2, side / 2)),
+            popup    = folium.Popup(popup, max_width = 300),
+            tooltip  = row["station"],
+        ).add_to(group)
+
+    group.add_to(m)
+
+
 def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefile = None,
                         color_half_range_pct = 100, low_data_min_events = 5,
-                        lemanis_stop_period_df = None, lemanis_stop_full_day_df = None):
+                        lemanis_stop_period_df = None, lemanis_stop_full_day_df = None,
+                        border_crossing_df = None, sbb_station_df = None, reference_name = "TPG"):
 
     combined_full_day_df = full_day_df
     if lemanis_stop_full_day_df is not None and not lemanis_stop_full_day_df.empty:
         combined_full_day_df = pd.concat([full_day_df, lemanis_stop_full_day_df], ignore_index = True)
 
     global_max      = max(combined_full_day_df[["tpg_mean", "matsim_total"]].max().max(), 1)
-    colormap        = _build_colormap(color_half_range_pct)
-    hours_by_stop   = {code: df for code, df in stop_hour_df.groupby("gtfs_code")}
+    colormap        = _build_colormap(color_half_range_pct, f"{reference_name} 2024")
+    has_submode     = "submode" in combined_full_day_df.columns
+    stop_key        = ["gtfs_code", "submode"] if has_submode else "gtfs_code"
+    hours_by_stop   = {code: df for code, df in stop_hour_df.groupby(stop_key)}
+    submodes        = sorted(combined_full_day_df["submode"].dropna().unique()) if has_submode else []
     periods_by_stop = (
         {code: df for code, df in lemanis_stop_period_df.groupby("gtfs_code")}
         if lemanis_stop_period_df is not None else {}
@@ -171,7 +279,13 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
 
     m = _base_map(center, perimeter_shapefile)
 
-    for _, row in combined_full_day_df.iterrows():
+    # one layer per submode, to show or hide them; the biggest markers first so that the small ones stay visible
+    layers = {sub: folium.FeatureGroup(name = f"Stops: {sub}", show = True) for sub in submodes}
+    ordered = combined_full_day_df.assign(_size = combined_full_day_df[["tpg_mean", "matsim_total"]].max(axis = 1))
+    ordered = ordered.sort_values("_size", ascending = False)
+
+    for _, row in ordered.iterrows():
+        target = layers[row["submode"]] if has_submode and row["submode"] in layers else m
         low_data = _is_low_data(row["tpg_mean"], row["matsim_total"], low_data_min_events)
 
         chart_html   = ""
@@ -179,15 +293,16 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
         is_lemanis   = stop_periods is not None and not stop_periods.empty
 
         if is_lemanis:
-            chart_b64  = plotting.render_period_chart_png(stop_periods, row["stop_name"], lemanis.PERIOD_ORDER)
+            chart_b64  = plotting.render_period_chart_png(stop_periods, row["stop_name"], lemanis_2022.PERIOD_ORDER)
             chart_html = f'<br><img src="data:image/png;base64,{chart_b64}" width="320">'
         else:
-            stop_hours = hours_by_stop.get(row["gtfs_code"])
+            stop_hours = hours_by_stop.get((row["gtfs_code"], row["submode"]) if has_submode else row["gtfs_code"])
             if stop_hours is not None and not stop_hours.empty:
-                chart_b64  = plotting.render_hourly_chart_png(stop_hours, row["stop_name"])
+                title      = f"{row['stop_name']} ({row['submode']})" if has_submode else row["stop_name"]
+                chart_b64  = plotting.render_hourly_chart_png(stop_hours, title, reference_name)
                 chart_html = f'<br><img src="data:image/png;base64,{chart_b64}" width="320">'
 
-        reference_label = "Lemanis mean" if is_lemanis else "TPG mean"
+        reference_label = "Lemanis mean" if is_lemanis else f"{reference_name} mean"
         popup = _popup_html(row, reference_label) + (
             f"<br><i>Low data: {reference_label} and MATSim both under {low_data_min_events:.0f} events - "
             "comparison not meaningful</i>" if low_data else ""
@@ -195,7 +310,7 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
 
         if low_data:
             folium.CircleMarker(
-                location     = (row["stop_lat"], row["stop_lon"]),
+                location     = _marker_location(row),
                 radius       = _marker_radius(row["tpg_mean"], row["matsim_total"], global_max, low_data = True),
                 color        = "#9e9e9e", 
                 weight       = 0.5, 
@@ -203,20 +318,34 @@ def build_full_day_map(stop_hour_df, full_day_df, output_path, perimeter_shapefi
                 fill_color   = "#9e9e9e", 
                 fill_opacity = 0.12,
                 popup        = folium.Popup(popup, max_width = 360),
-            ).add_to(m)
+                tooltip      = _stop_label(row),
+            ).add_to(target)
 
         else:
             folium.CircleMarker(
-                location     = (row["stop_lat"], row["stop_lon"]),
+                location     = _marker_location(row),
                 radius       = _marker_radius(row["tpg_mean"], row["matsim_total"], global_max),
-                color        = "#222222", 
-                weight       = 1.2, 
+                color        = "#222222",
+                weight       = 1.2,
                 fill         = True, 
                 fill_color   = colormap(row["pct_of_mean"]), 
                 fill_opacity = 0.95,
                 popup        = folium.Popup(popup, max_width = 360),
-                tooltip      = row["stop_name"],
-            ).add_to(m)
+                tooltip      = _stop_label(row),
+            ).add_to(target)
+
+    for layer in layers.values():
+        layer.add_to(m)
+
+    has_border = border_crossing_df is not None and not border_crossing_df.empty
+    has_sbb    = sbb_station_df is not None and not sbb_station_df.empty
+
+    if has_sbb:
+        _add_sbb_station_squares(m, sbb_station_df, colormap)
+    if has_border:
+        _add_border_crossing_squares(m, border_crossing_df, colormap)
+    if has_border or has_sbb or has_submode:
+        folium.LayerControl(collapsed = False).add_to(m)
 
     colormap.add_to(m)
 
@@ -275,7 +404,7 @@ def build_line_map(line_hour_df, line_base_df, line_geometries_df, output_path, 
         if is_lemanis:
             for direction_letter, direction_periods in line_periods.groupby("direction_letter", dropna = False):
                 title       = f"Line {line_base}" + (f" ({direction_letter})" if pd.notna(direction_letter) else "")
-                chart_b64   = plotting.render_period_chart_png(direction_periods, title, lemanis.PERIOD_ORDER)
+                chart_b64   = plotting.render_period_chart_png(direction_periods, title, lemanis_2022.PERIOD_ORDER)
                 chart_html += f'<br><img src="data:image/png;base64,{chart_b64}" width="320">'
         elif line_hours is not None:
             for direction_letter, direction_hours in line_hours.groupby("direction_letter", dropna = False):

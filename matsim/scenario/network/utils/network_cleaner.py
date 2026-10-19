@@ -22,16 +22,19 @@ class networkCleaner():
 
     def run(self, remove_network_loops= True, remove_replicate_links= True,
                   remove_nodes_with_no_intersection= True, correct_speeds= True,
-                  ensure_network_connectivity= True, only_important_roads_outside_border=False):
-        stats = self.clean_network(remove_network_loops, remove_replicate_links, remove_nodes_with_no_intersection, 
-                                   correct_speeds, ensure_network_connectivity, only_important_roads_outside_border)
+                  ensure_network_connectivity= True, only_important_roads_outside_border=False,
+                  protected_nodes= None):
+        stats = self.clean_network(remove_network_loops, remove_replicate_links, remove_nodes_with_no_intersection,
+                                   correct_speeds, ensure_network_connectivity, only_important_roads_outside_border,
+                                   protected_nodes)
         self.network.nodes = self.nodes
         self.network.links = self.links
         return self.network, stats
 
     def clean_network(self, remove_network_loops= True, remove_replicate_links= True,
                             remove_nodes_with_no_intersection= True, correct_speeds= True,
-                            ensure_network_connectivity= True, only_important_roads_outside_border=False):
+                            ensure_network_connectivity= True, only_important_roads_outside_border=False,
+                            protected_nodes= None):
         stats = dict()
 
         """All network should be considered, because intersections could be with (pt) and (pt,car)"""
@@ -66,7 +69,7 @@ class networkCleaner():
         # Removing nodes with no intersection
         if remove_nodes_with_no_intersection:
             logger.info("Removing nodes that do not represent an intersection.")
-            df, stats2 = self.merge_link_chains(df, protected=protected)
+            df, stats2 = self.merge_link_chains(df, protected=protected, protected_nodes=protected_nodes)
             stats.update(stats2)
         
         # Removed links that are not connected to the whole graph
@@ -150,20 +153,23 @@ class networkCleaner():
                     mode, len(connected_ids), len(mode_links))
         return self._apply_connectivity_filter(df, selected, connected, mode, remove_mode_only)
 
-    def merge_link_chains(self, df, protected=None):
+    def merge_link_chains(self, df, protected=None, protected_nodes=None):
         """Contract road chains between intersections or attribute boundaries.
 
         Two-way roads are checked in both directions. A node is retained if
         either direction changes speed, capacity, modes or toll status. Lanes are deliberately
         not a merge condition. Parallel links, loops and restriction identities
         are preserved rather than choosing an arbitrary path through them.
+        Nodes in ``protected_nodes`` (e.g. nodes close to PT stops) are always
+        kept as chain break points.
         """
+        protected_nodes = protected_nodes or set()
         if protected is None:
             protected = restricted_link_ids(zip(df.link_id, df.attributes))
         stats = dict(number_of_nodes=0, number_of_links=len(df), attributes_change=0,
                      skiped_loop=0, successful_merge=0, degree_is_2=0,
                      one_in_one_out=0, ignored_no_car=0, break_no_car=0,
-                     already_visited=0, ambiguous_nodes=0)
+                     already_visited=0, ambiguous_nodes=0, protected_stop_break=0)
         if df.empty:
             return df.copy(), stats
 
@@ -198,6 +204,11 @@ class networkCleaner():
             stats["degree_is_2"] += 1
             incident = ins + outs
             if any(ids[i] in protected for i in incident):
+                continue
+            if node in protected_nodes:
+                # A PT stop is snapped near this node: keep it as a break point
+                # so that nearby stops are not collapsed onto one merged link.
+                stats["protected_stop_break"] += 1
                 continue
             if any(not modes[i].intersection(road_modes) for i in incident):
                 stats["ignored_no_car"] += 1

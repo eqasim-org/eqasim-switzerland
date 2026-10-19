@@ -36,12 +36,14 @@ _COUNT_COLUMNS = [
 ]
 
 
-def classify_day_type(dates, bank_holidays = _BANK_HOLIDAYS_2024, school_holidays = _SCHOOL_HOLIDAYS_2024):
+def classify_day_type(dates, bank_holidays = _BANK_HOLIDAYS_2024, school_holidays = ()):
     dates   = pd.DatetimeIndex(dates)
     weekday = dates.weekday
 
     day_type = pd.Series(np.where(weekday <= 4, "Weekday", None), index = range(len(dates)))
 
+    # School holidays are weekdays like the others: only the bank holidays are left out. Pass
+    # school_holidays to label them as "School holiday" (and so leave them out) again.
     is_school_holiday = np.zeros(len(dates), dtype = bool)
     for start, end in school_holidays:
         is_school_holiday |= (dates >= start) & (dates <= end)
@@ -137,7 +139,7 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path):
 def main():
     parser = argparse.ArgumentParser(description = __doc__, formatter_class = argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--raw-counts-path", required = True, help = "Path to TPG's raw 2024 daily passenger counts (data.txt)")
-    parser.add_argument("--tpg-data-path", required = True, help = "Path to the TPG_passenger_counts folder (crosswalk files)")
+    parser.add_argument("--tpg-data-path", required = True, help = "Path to the Geneva_passenger_counts/TPG folder (crosswalk files in TPG_stops_info)")
     parser.add_argument("--out", required = True, help = "Where to write the rebuilt tpg2024_agg_workday_*.csv - drop it into config.Config.tpg_processed_counts_path")
     args = parser.parse_args()
 

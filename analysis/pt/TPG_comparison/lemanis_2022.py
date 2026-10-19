@@ -1,24 +1,13 @@
 import numpy as np
 import pandas as pd
 
-
-# The three periods that actually PARTITION Lemanis' reported operating day
-# (a rail line with ~no service 0h-5h). "All day" is Lemanis' own separate
-# full-day total (== the sum of these three) - it is intentionally NOT one
-# of these periods: an earlier version of this module exploded every row
-# (including "All day") to hourly and summed by hour, which double-counted
-# every hour once from its own period row and once more from "All day"'s
-# expansion covering the same hours. See ALL_DAY_LABEL / to_period_shape.
-PERIOD_ORDER = ["6h-9h", "16h-19h", "9h-16h and 19h-6h"]
-ALL_DAY_LABEL = "All day"
+PERIOD_ORDER     = ["6h-9h", "16h-19h", "9h-16h and 19h-6h"]
+ALL_DAY_LABEL    = "All day"
 _OPERATING_HOURS = {
     "6h-9h": [6, 7, 8],
     "16h-19h": [16, 17, 18],
     "9h-16h and 19h-6h": [9, 10, 11, 12, 13, 14, 15, 19, 20, 21, 22, 23, 5],
 }
-# {hour: period} - used to bucket MATSim's own hourly counts into the same
-# periods Lemanis reports, instead of splitting Lemanis demand down to an
-# hourly resolution it doesn't actually have.
 HOUR_TO_PERIOD = {hour: period for period, hours in _OPERATING_HOURS.items() for hour in hours}
 
 
@@ -76,12 +65,18 @@ def load_weekday_counts(path):
 
 
 def to_period_shape(weekday_df):
-    """One row per (stop, line, period), aggregating Lemanis' own reported
-    period totals directly - no hourly splitting/expansion. Rows for
-    ALL_DAY_LABEL are dropped: PERIOD_ORDER already partitions the same
-    operating day, so keeping "All day" alongside it would double the
-    total wherever both get summed together."""
     df = weekday_df[weekday_df["time"].isin(PERIOD_ORDER)].copy()
+
+    if df.empty:
+        raise RuntimeError(
+            f"No Lemanis row has a period in {PERIOD_ORDER}; periods found: "
+            f"{sorted(weekday_df['time'].astype(str).unique())}"
+        )
+
+    missing_periods = [p for p in PERIOD_ORDER if p not in set(df["time"])]
+    if missing_periods:
+        print(f"lemanis.to_period_shape: WARNING no Lemanis rows for period(s) {missing_periods}")
+
     df["gtfs_code"] = df["stop"].map(STOP_NAME_TO_GTFS_CODE)
 
     unmatched = sorted(df.loc[df["gtfs_code"].isna(), "stop"].unique())

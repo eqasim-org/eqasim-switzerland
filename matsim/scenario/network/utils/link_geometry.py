@@ -91,3 +91,25 @@ def write_link_geometries(network, path):
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def copy_link_geometries_with_additions(source_path, output_path, new_shapes, reversed_links=None):
+    """Preserve mapped shapes and append new PT links without loading the whole CSV."""
+    shapes = dict(new_shapes)
+    reversed_links = reversed_links or {}
+    with open(source_path, newline="", encoding="utf-8-sig") as source, \
+            open(output_path, "w", newline="", encoding="utf-8") as output:
+        reader = csv.DictReader(source)
+        if not {"LinkId", "Geometry"}.issubset(reader.fieldnames or ()):
+            raise ValueError(f"Geometry CSV needs LinkId and Geometry columns: {source_path}")
+        writer = csv.DictWriter(output, fieldnames=reader.fieldnames)
+        writer.writeheader()
+        for row in reader:
+            writer.writerow(row)
+            reverse_id = reversed_links.get(row["LinkId"])
+            if reverse_id in shapes:
+                shape = from_wkt(row["Geometry"], on_invalid="ignore")
+                if isinstance(shape, LineString) and not shape.is_empty:
+                    shapes[reverse_id] = LineString(list(shape.coords)[::-1])
+        for link_id, shape in shapes.items():
+            writer.writerow({"LinkId": link_id, "Geometry": to_wkt(shape, rounding_precision=-1)})

@@ -8,13 +8,19 @@ attributed to it, split into three categories of person:
     sent across the border (one trip per person, from synthesis.population.trips).
   - cross_border_not_teleported: foreign cross-border agents (data.cross_border.*)
     whose home (or, for "Through" trips, either end) lies close enough to the
-    border (<20km) that it was used as-is.
+    border (closer than border_offset) that it was used as-is.
   - cross_border_teleported: foreign cross-border agents whose home (or,
-    for "Through" trips, either end) was too far from the border (>20km,
+    for "Through" trips, either end) was too far from the border (beyond border_offset,
     see data.cross_border.generate_od.project_point_series_close_to_border)
     and got snapped onto the nearest matching-mode interview place instead -
     i.e. the survey respondent's real, distant origin is not represented;
-    their trip effectively teleports them to the border.
+    their trip effectively teleports them to the border (public transport:
+    to a gateway station, see data.cross_border.pt_gateways).
+
+Public transport agents have no border activity (it would force them off the
+train at the crossing, see data.cross_border.activities): each of their trips
+between abroad and Switzerland counts as one crossing at their surveyed
+interview point instead.
 
 This intentionally reads the pre-write data.cross_border.* /
 synthesis.population.trips frames rather than the written MATSim population
@@ -44,6 +50,7 @@ import logging
 import os
 
 import folium
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger("synpp")
@@ -83,7 +90,7 @@ def execute(context):
     df_points      = context.stage("data.cross_border.interview_places").copy()
     df_trips       = context.stage("synthesis.population.trips")
     df_projected   = context.stage("data.cross_border.destinations")[
-        ["cross_border_person_id", "is_border_point_projected",
+        ["cross_border_person_id", "label", "trip_mode", "is_border_point_projected",
          "interview_point_id", "entry_interview_point_id", "exit_interview_point_id"]
     ].drop_duplicates("cross_border_person_id")
     df_activities  = context.stage("data.cross_border.activities")
@@ -157,6 +164,18 @@ def count_cross_border_people(df_activities, df_projected):
     on_entry = df["destination_id"] == df["entry_interview_point_id"]
     on_exit  = df["destination_id"] == df["exit_interview_point_id"]
     df.loc[on_entry | on_exit, "destination_id"] = df.loc[on_entry | on_exit, "interview_point_id"]
+
+    # Public transport agents have no border activity: one crossing per trip between
+    # abroad and Switzerland, at their surveyed interview point. "From-To" agents
+    # cross on their first trip, and on their last one if they come back
+    # (3 activities or more); "Through" agents cross twice on their single trip.
+    df_pt = df_projected[df_projected["trip_mode"] == "pt"]
+    activity_counts = df_activities.groupby("person_id").size()
+    crossings = np.where(df_pt["label"] == "Through", 2,
+                         np.where(df_pt["cross_border_person_id"].map(activity_counts).fillna(0) >= 3, 2, 1))
+    df_pt = df_pt.loc[df_pt.index.repeat(crossings)].assign(destination_id = lambda d: d["interview_point_id"])
+
+    df = pd.concat([df, df_pt], ignore_index = True)
 
     df["category"] = df["is_border_point_projected"].map({
         True: "cross_border_teleported", False: "cross_border_not_teleported",

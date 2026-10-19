@@ -17,7 +17,7 @@ def configure(context):
     context.stage("matsim.scenario.vehicles")
 
     context.stage("matsim.scenario.facilities")
-    context.stage("matsim.scenario.network.mapped")
+    context.stage("matsim.scenario.network.pt")
 
     context.stage("data.pt_pricing.pt_pricing")
     context.stage("calibration.pt_routing.pt_routing_parameters")
@@ -100,7 +100,7 @@ def _copy_network_calibration_files(context):
 
 def execute(context):
     # Some files we just copy
-    transit_vehicles_input_path  = context.stage("matsim.scenario.network.mapped")["vehicles"]
+    transit_vehicles_input_path  = context.stage("matsim.scenario.network.pt")["vehicles"]
     transit_vehicles_output_path = "%s/%stransit_vehicles.xml.gz" % (context.path(), context.config("output_prefix"))
 
     sample_size     = context.config("input_downsampling")
@@ -148,7 +148,7 @@ def execute(context):
 
     if context.config("export_detailed_network"):
         shutil.copyfile(
-            context.stage("matsim.scenario.network.mapped")["geometry"],
+            context.stage("matsim.scenario.network.pt")["geometry"],
             "%s/%sdetailed_network.csv" % (context.path(), context.config("output_prefix")),
         )
     local_calibration_parameters = _copy_network_calibration_files(context)
@@ -162,7 +162,7 @@ def execute(context):
     population_input_path = context.stage("matsim.scenario.population")
     population_prepared_path = "prepared_population.xml.gz"
     
-    network_input_path = context.stage("matsim.scenario.network.mapped")["network"]
+    network_input_path = context.stage("matsim.scenario.network.pt")["network"]
     network_output_path = "%snetwork.xml.gz" % context.config("output_prefix")
 
     # Call the basic preparation script
@@ -203,7 +203,7 @@ def execute(context):
     config_tools.copy_config(context.stage("matsim.config.config"), local_config_path)
 
     # Calculate the stop categories
-    transit_schedule_input_path = context.stage("matsim.scenario.network.mapped")["schedule"]
+    transit_schedule_input_path = context.stage("matsim.scenario.network.pt")["schedule"]
     transit_schedule_output_path = "%stransit_schedule.xml.gz" % context.config("output_prefix")
 
     eqasim.run(context, "org.eqasim.switzerland.ch.scenario.RunCalculateStopCategories", [

@@ -22,7 +22,7 @@ def configure(context):
     if not context.config("cutter.scenario_path"):
         context.stage("matsim.simulation.prepare")
         context.stage("matsim.simulation.run")
-        context.stage("matsim.scenario.network.mapped")
+        context.stage("matsim.scenario.network.pt")
         context.stage("data.pt_pricing.pt_pricing")
         context.stage("data.microcensus.shares")    
 

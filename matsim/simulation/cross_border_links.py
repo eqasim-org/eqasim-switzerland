@@ -65,9 +65,20 @@ def _read_network_nodes_links(network_path):
     return pd.DataFrame.from_records(nodes), pd.DataFrame.from_records(links)
 
 
+def _without_public_transport(df):
+    # Directional road links only make sense for road crossings. Public transport
+    # border facilities sit at stations, possibly far from the border (pt gateways,
+    # see data.cross_border.pt_gateways), and keep the link MATSim assigns them.
+    if "trip_mode" not in df.columns:
+        return df
+    return df[df["trip_mode"] != "pt"]
+
+
 def _as_foreign_resident_border_facilities(df_cross_border_destinations):
     if df_cross_border_destinations is None:
         return pd.DataFrame(columns=["facility_id", "geometry", "direction"])
+
+    df_cross_border_destinations = _without_public_transport(df_cross_border_destinations)
 
     # The cross-border destination stage keeps one row per person, so flatten its
     # entry and exit columns into the facility rows that need directional links.
@@ -95,6 +106,8 @@ def _as_foreign_resident_border_facilities(df_cross_border_destinations):
 def _as_swiss_resident_border_facilities(df_swiss_residents_od):
     if df_swiss_residents_od is None:
         return pd.DataFrame(columns=["facility_id", "geometry", "direction"])
+
+    df_swiss_residents_od = _without_public_transport(df_swiss_residents_od)
 
     # Swiss residents can be sampled as either home -> border or border -> home,
     # so every matched border-crossing record needs both directional facilities.
