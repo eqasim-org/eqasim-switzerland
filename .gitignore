@@ -32,6 +32,8 @@ AGENTS.md
 
 CuttingBoundries
 
+tests*
+
 # Population routing is source code, not generated routing output.
 !mode_choice/routing/
 !mode_choice/routing/*.py

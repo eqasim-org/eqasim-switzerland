@@ -203,9 +203,9 @@ def execute(context):
     
     # Apply runtime/calibration settings after routing so calibration does not
     # become active inside the population router or scenario validator.
-    simulation = shared_config.adapt_for_simulation(context, local_config_path)
+    config_path = shared_config.adapt_for_simulation(context, local_config_path)
 
     # Cleanup
     os.remove("%s/prepared_population.xml.gz" % context.path())
 
-    return simulation
+    return config_path

@@ -59,17 +59,5 @@ def adapt_for_simulation(context, config_path):
     """Finish a prepared scenario's config; run only needs to launch Java."""
     adapt_for_routing(context, config_path)
     tools.change_params(config_path, tools.simulation_parameters(context), create=True)
-    vdf = tools.parse_boolean(context.config("use_vdf"))
-    arguments = []
-    if vdf:
-        # Java resets this engine switch unless it is supplied on launch.
-        arguments = ["--generateNetworkEvents", "true"]
-    elif tools.parse_boolean(context.config("preventwaitingtoentertraffic")):
-        # The QSim capacity-easing setter is not exposed as an XML parameter.
-        arguments = ["--preventwaitingtoentertraffic", "y"]
-    return {
-        "config": str(Path(config_path).resolve()),
-        "main_class": "org.eqasim.switzerland.ch_cmdp.RunVDFSimulation" if vdf
-                      else "org.eqasim.switzerland.ch_cmdp.RunSimulation",
-        "arguments": arguments,
-    }
+
+    return str(Path(config_path).resolve())
