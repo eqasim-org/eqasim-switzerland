@@ -14,6 +14,7 @@ def configure(context):
     context.config("analysis.counts.simulation_path", default="")
     context.config("output_path")
     context.config("output_id")
+    context.config("output_prefix", "switzerland_")
     context.config("simulation_directory", default = 'simulation_output')
 
 

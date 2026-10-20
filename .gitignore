@@ -42,3 +42,4 @@ tests*
 !tests/
 tests/*
 !tests/test_random_seed.py
+!tests/test_xml_readers.py

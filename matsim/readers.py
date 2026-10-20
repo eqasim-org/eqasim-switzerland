@@ -460,9 +460,15 @@ class Plans:
         self.legs = legs
         self.routes = routes
 
+def _iterparse_file(filename):
+    """Feed bytes to the XML parser and close plain or compressed input files."""
+    with xopen.xopen(filename, "rb") as stream:
+        yield from _iterparse(stream)
+
+
 def plan_reader(filename, selected_plans_only = False):
     person = None
-    tree = ET.iterparse(xopen.xopen(filename), events=['start','end'])
+    tree = _iterparse_file(filename)
     
     for xml_event, elem in tree:
         if elem.tag == 'person' and xml_event == 'start':
@@ -502,7 +508,7 @@ def _parseAttributes(elem, dict):
 # Route :leg_id
 # The column names of the dataframes are the same as the attribute names (<name:'value'> and <attribute> are parsed)
 def plan_reader_dataframe(filename, selected_plans_only = False):
-    tree = ET.iterparse(xopen.xopen(filename), events=['start','end'])
+    tree = _iterparse_file(filename)
     
     persons = []
     plans = []
@@ -642,14 +648,14 @@ def parse_attributes(elem, dict):
 
 # Returns households as a dataframe
 def houshold_reader(filename, convert_dataframes_types = True):
-    tree = ET.iterparse(xopen.xopen(filename, "r"), events = ["start", "end"])
+    tree = _iterparse_file(filename)
     
     households        = []
     current_persons   = []
     current_household = {}
     
     for xml_event, elem in tree:
-        _, _, elem_tag = elem.tag.partition('}')     # Removing xmlns tag from tag name
+        elem_tag = elem.tag.rsplit("}", 1)[-1]  # Accept namespaced and plain XML.
         
         # HOUSEHOLDS
         if elem_tag == "household":
