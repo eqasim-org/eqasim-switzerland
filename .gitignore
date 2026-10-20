@@ -43,3 +43,4 @@ tests*
 tests/*
 !tests/test_random_seed.py
 !tests/test_xml_readers.py
+!tests/test_gtfs_output_path.py

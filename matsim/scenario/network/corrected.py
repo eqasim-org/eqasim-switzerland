@@ -41,8 +41,7 @@ def execute(context):
     geometry_path = "%s/detailed_network.csv" % context.path()
     gtfs_routes_path = None
     if context.config("pt_route_agencies"):
-        gtfs_routes_path = os.path.join(context.path("data.gtfs.cleaned"),
-                                        context.stage("data.gtfs.cleaned"), "routes.txt")
+        gtfs_routes_path = os.path.join(context.path("data.gtfs.cleaned"), "output", "routes.txt")
 
     _, n_patched = pt_route_check.run(
         schedule_path           = paths["schedule"], network_path = paths["network"],
