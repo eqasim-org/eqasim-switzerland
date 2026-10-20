@@ -248,6 +248,7 @@ def execute(context):
         activity_duration_h=activity_duration_h, target_distance=target_distance,
         purpose_series=df["purpose"], origin_purpose_series=df["origin_purpose"],
         use_target_distance=bool(context.config("secondary_nn_use_target_distance")),
+        random_state=int(context.config("random_seed")),
         purpose_categories=purpose_categories,
         person_static_scaler=person_static_scaler, person_dynamic_scaler=person_dynamic_scaler)
 
@@ -263,7 +264,7 @@ def execute(context):
     candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
     candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
     
-    candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask)
+    candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask, random_state=int(context.config("random_seed")))
 
     ############ Training the model ###########
     logger.info("\t Training district neural choice model...")

@@ -164,7 +164,7 @@ def fit_candidate_tensor(candidate_tensor, valid_mask, max_fit_rows=1000000, ran
         if max_fit_rows is not None and valid_vals.shape[0] > int(max_fit_rows):
             rs = np.random.RandomState(int(random_state))
             fit_vals = valid_vals[rs.choice(valid_vals.shape[0], size=int(max_fit_rows), replace=False)]
-        sc = _make_quantile_transformer(fit_vals.shape[0]); sc.fit(fit_vals)
+        sc = _make_quantile_transformer(fit_vals.shape[0], random_state=random_state); sc.fit(fit_vals)
         return sc, sc.transform(cols_flat)
 
     # Dynamic features (distances and detour factor) are non-negative.

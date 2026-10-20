@@ -324,14 +324,14 @@ def _logit_or_table(result, feature_cols, feature_labels) -> pd.DataFrame:
 # CatBoost classifier
 # ---------------------------------------------------------------------------
 
-def _fit_catboost(X: np.ndarray, y: np.ndarray, w: np.ndarray) -> CatBoostClassifier:
+def _fit_catboost(X: np.ndarray, y: np.ndarray, w: np.ndarray, random_seed: int) -> CatBoostClassifier:
     model = CatBoostClassifier(
         loss_function="Logloss",
         iterations=500,
         learning_rate=0.05,
         depth=6,
         l2_leaf_reg=6.0,
-        random_seed=42,
+        random_seed=random_seed,
         verbose=False,
         bootstrap_type="Bernoulli",
         subsample=0.8,
@@ -344,7 +344,7 @@ def _fit_catboost(X: np.ndarray, y: np.ndarray, w: np.ndarray) -> CatBoostClassi
 # Per-subset training pipeline
 # ---------------------------------------------------------------------------
 
-def _train_subset(label: str, df: pd.DataFrame, model_type: str, feature_cols, feature_labels):
+def _train_subset(label: str, df: pd.DataFrame, model_type: str, feature_cols, feature_labels, random_seed: int):
     """
     Fits the selected model on one day-type subset and returns it.
     model_type: "catboost" | "logit"
@@ -374,7 +374,7 @@ def _train_subset(label: str, df: pd.DataFrame, model_type: str, feature_cols, f
         return result
     else:  # catboost
         logger.info("[%s] Fitting CatBoost …", label)
-        model = _fit_catboost(X, y, w)
+        model = _fit_catboost(X, y, w, random_seed)
         logger.info("[%s] CatBoost fitted.", label)
         return model
 
@@ -501,6 +501,7 @@ def _iterative_spatial_calibration(pop_df: pd.DataFrame, proba: np.ndarray, od_c
 # ---------------------------------------------------------------------------
 
 def configure(context):
+    context.config("random_seed")
     context.config("specific_day_scenario", default="workday")
     context.config("cross_border_model_type", default="logit")
     context.config("cross_border_use_spatial_calibration", default=True)
@@ -515,6 +516,7 @@ def configure(context):
 
 
 def execute(context):
+    random_seed = int(context.config("random_seed"))
     c               = context.stage("data.constants")
     day_scenario    = context.config("specific_day_scenario")
     model_type      = context.config("cross_border_model_type")
@@ -523,7 +525,7 @@ def execute(context):
     assert model_type in ("catboost", "logit"), (
         f"cross_border_model_type must be 'catboost' or 'logit', got '{model_type}'"
     )
-    SEED_CB = 2027
+    SEED_CB = random_seed
 
     logger.info(
         "Cross-border model: specific_day_scenario='%s', model='%s', spatial_calibration=%s",
@@ -648,7 +650,8 @@ def execute(context):
     # -------------------------------------------------------------------
     # 4. FIT MODEL (selected day subset only)
     # -------------------------------------------------------------------
-    selected_model = _train_subset(day_scenario, selected_survey, model_type, feature_cols, feature_labels)
+    selected_model = _train_subset(
+        day_scenario, selected_survey, model_type, feature_cols, feature_labels, random_seed)
 
     logger.info("Applying '%s' %s model to synthetic population.", day_scenario, model_type)
 

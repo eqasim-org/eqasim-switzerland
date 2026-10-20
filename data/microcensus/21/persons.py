@@ -7,6 +7,7 @@ import data.utils
 
 def configure(context):
     context.config("data_path")
+    context.config("random_seed")
     #context.config("weekend", default = False)
 
     context.stage("data.microcensus.21.households")
@@ -187,7 +188,8 @@ def execute(context):
     df_mz_households = context.stage("data.microcensus.21.households")
 
     df_mz_persons = pd.merge(df_mz_persons, df_mz_households)
-    df_mz_persons = data.microcensus.income.impute(df_mz_persons)
+    df_mz_persons = data.microcensus.income.impute(
+        df_mz_persons, random_seed=context.config("random_seed"))
 
     # commute distance
     df_mz_persons["work_commute_distance"] = 0.0

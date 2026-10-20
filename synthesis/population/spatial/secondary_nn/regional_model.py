@@ -184,6 +184,7 @@ def execute(context):
                                                                                  activity_duration_h=activity_duration_h, target_distance=target_distance,
                                                                                  purpose_series=df_trips["purpose"], origin_purpose_series=df_trips["origin_purpose"],
                                                                                  use_target_distance=bool(context.config("secondary_nn_use_target_distance")),
+                                                                                 random_state=int(context.config("random_seed")),
                                                                                  purpose_categories=purpose_categories)
 
     logger.info("\t Building candidate tensor with Numba...")

@@ -37,3 +37,8 @@ tests*
 # Population routing is source code, not generated routing output.
 !mode_choice/routing/
 !mode_choice/routing/*.py
+
+# Keep pipeline regression tests under version control.
+!tests/
+tests/*
+!tests/test_random_seed.py

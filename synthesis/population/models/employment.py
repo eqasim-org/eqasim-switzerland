@@ -18,6 +18,7 @@ def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
     return classes[chosen_idx]
 
 def configure(context):
+    context.config("random_seed")
     context.stage("data.constants")
     context.stage("data.structural_survey.structural_survey")
     context.stage("data.statpop.statpop")
@@ -32,8 +33,8 @@ def execute(context):
     JOB_MODEL      = "gbm"        # "gbm" or "rf"
 
     CHUNK_SIZE = 25_000
-    SEED_ACTIVITY = 123
-    SEED_JOB      = 456
+    SEED_ACTIVITY = int(context.config("random_seed"))
+    SEED_JOB = SEED_ACTIVITY + 1
 
     CANTON_FOR_ANALYSIS = 22  # e.g. "1"
 
@@ -103,14 +104,14 @@ def execute(context):
                 max_depth=3,
                 learning_rate=0.1,
                 max_iter=100,
-                random_state=42
+                random_state=SEED_ACTIVITY
             )
         elif model_type == "rf":
             return RandomForestClassifier(
                 n_estimators=300,
                 max_depth=15,
                 min_samples_leaf=5,
-                random_state=42,
+                random_state=SEED_ACTIVITY,
                 n_jobs=1
             )
         elif model_type in ("catboost", "cat"):
@@ -120,7 +121,7 @@ def execute(context):
                 learning_rate=0.01,
                 depth=10,
                 l2_leaf_reg=6.0,
-                random_seed=42,
+                random_seed=SEED_ACTIVITY,
                 verbose=200,
                 bootstrap_type="Bernoulli",
                 subsample=0.8
@@ -141,7 +142,7 @@ def execute(context):
             train_idx, val_idx = train_test_split(
                 idx,
                 test_size=VALID_FRAC,
-                random_state=42,
+                random_state=SEED_ACTIVITY,
                 stratify=y
             )
 
