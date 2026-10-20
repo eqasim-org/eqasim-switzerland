@@ -133,7 +133,7 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
     person_dynamic_tensor   = torch.as_tensor(person_dynamic_x,   dtype=torch.float32, device=device)
     candidate_static_tensor = torch.as_tensor(candidate_static_x, dtype=torch.float32, device=device)
     candidate_dynamic_tensor= torch.as_tensor(candidate_dynamic_x,dtype=torch.float32, device=device)
-    y_tensor      = torch.as_tensor(y,          dtype=torch.long,  device=device)
+    y_tensor      = torch.tensor(y,             dtype=torch.long,  device=device)
     mask_tensor   = torch.as_tensor(valid_mask, dtype=torch.bool,  device=device)
     weights_tensor = (torch.as_tensor(weights, dtype=torch.float32, device=device)
                       if weights is not None

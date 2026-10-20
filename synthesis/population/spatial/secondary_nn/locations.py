@@ -12,6 +12,8 @@ from .location_helpers import (_prepare_primary_locations, _prepare_person_attri
 from .model_wrappers import HierarchicalLocationChoiceModel
 from .short_range_model import SHORT_RANGE_MODEL_THRESHOLD
 from .hierarchical_utils import DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION
+from .tools import MOBILITY_FEATURES, mobility_features
+
 logger = logging.getLogger("synpp")
 
 _WORKER_STATE = {}
@@ -22,8 +24,10 @@ _CHUNCK_SIZE_PERSONS = 10000
 def configure(context):
     context.config("secondary_nn_use_target_distance", True)
     context.stage("data.constants")
+    context.stage("data.spatial.ovgk")
     context.stage("synthesis.population.trips")
     context.stage("synthesis.population.enriched")
+    context.stage("synthesis.population.models.subscriptions")
     context.stage("synthesis.population.sampled")
     context.stage("synthesis.population.spatial.home.locations")
     context.stage("synthesis.population.spatial.primary.locations")
@@ -60,6 +64,16 @@ def execute(context):
     logger.info("\t Loading population data")    
     df_primary = _prepare_primary_locations(context)
     df_person = _prepare_person_attributes(context)
+    source_persons = context.stage("synthesis.population.models.subscriptions").copy()
+    # Use actual home accessibility and the synthetic person's mobility resources.
+    home_coords = df_primary[["person_id", "home"]].copy()
+    home_coords["home_x"] = home_coords.home.map(lambda p: p.x)
+    home_coords["home_y"] = home_coords.home.map(lambda p: p.y)
+    source_persons = source_persons.drop(columns=["home_x", "home_y"], errors="ignore").merge(
+        home_coords[["person_id", "home_x", "home_y"]], on="person_id", validate="one_to_one")
+    mobility = mobility_features(source_persons, ovgk=context.stage("data.spatial.ovgk"))
+    mobility["person_id"] = source_persons.person_id.to_numpy()
+    df_person = df_person.merge(mobility, on="person_id", validate="one_to_one")
     df_meta = df_primary.merge(df_person, on="person_id", how="left")    
 
     # Precompute numeric coordinates once to reduce repeated Point -> xy conversions in hot loops.
@@ -78,7 +92,7 @@ def execute(context):
     
     df_meta = df_meta[["person_id","home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", 
                        "sex", "employed", "income_class", "car_availability","has_work", "has_education",
-                       "work_destination_id","education_destination_id", "home_destination_id"]]
+                       "work_destination_id","education_destination_id", "home_destination_id"] + MOBILITY_FEATURES]
     
     # remove nans from meta data, they can provoke an error or loss of performance with numba
     df_meta.loc[~df_meta["has_work"], ["work_x","work_y"]] = 0.0
@@ -369,7 +383,7 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
     
     meta_cols = ["home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", "sex", "employed", "income_class", 
                 "car_availability", "has_work", "has_education",
-                "work_destination_id","education_destination_id","home_destination_id"]
+                "work_destination_id","education_destination_id","home_destination_id"] + MOBILITY_FEATURES
     meta_lookup = df_meta_chunk.set_index("person_id")[meta_cols].to_dict("index")
     person_groups = df_trips_chunk.groupby("person_id", sort=False)
     pending_progress = 0
@@ -444,7 +458,8 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
                                                         target_distance=target_distance,
                                                         activity_chain_vector=activity_chain_vector,
                                                         origin_purpose=origin_purpose,
-                                                        purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng)
+                                                        purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng,
+                                                        mobility_vector=np.asarray([info[c] for c in MOBILITY_FEATURES], dtype=np.float32))
 
                     # sample a destination point within the predicted level 2 cell                 
 

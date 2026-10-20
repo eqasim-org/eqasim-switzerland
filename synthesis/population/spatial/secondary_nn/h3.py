@@ -1,3 +1,4 @@
+from .tools import aggregate_osm_features
 from functools import lru_cache
 
 import pandas as pd
@@ -137,6 +138,7 @@ def within_ch(context, df, cols1=["origin_x", "origin_y"], cols2=None):
     return inside_ch
 
 def configure(context):
+    context.stage("data.osm.secondary_features")
     context.stage("data.statent.statent")
     context.stage("synthesis.population.destinations")
     context.stage("data.microcensus.trips")
@@ -268,6 +270,9 @@ def execute(context):
         assert merged_gdf[H3_DEST_FEATURE_COLUMNS].isna().sum().sum() == 0, f"Found NaNs in destination feature columns of merged_gdf for level {i}, please check the merging process. Columns with NaNs: {merged_gdf[H3_DEST_FEATURE_COLUMNS].isna().sum()}"
         merged_gdf[H3_DEST_FEATURE_COLUMNS] = merged_gdf[H3_DEST_FEATURE_COLUMNS]
 
+        # Environmental context follows clipped cell geometry at every level.
+        osm = aggregate_osm_features(merged_gdf, context.stage("data.osm.secondary_features"))
+        merged_gdf[osm.columns] = osm
         merged_level_geoms[level_col] = merged_gdf
 
     # Filter hexagons to only keep those with companies (num_statent > 0).

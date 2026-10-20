@@ -23,6 +23,8 @@ def _to_float_array(values):
 
 
 def _candidate_column_indices(candidate_cols):
+    if list(candidate_cols) != CANDIDATE_FEATURES:
+        raise ValueError("Retrain secondary_nn models: the candidate feature schema has changed")
     static_indices = [candidate_cols.index(name) for name in STATIC_CANDIDATE_FEATURES]
     dynamic_indices = [candidate_cols.index(name) for name in DYNAMIC_CANDIDATE_FEATURES]
     return static_indices, dynamic_indices
@@ -819,14 +821,14 @@ class HierarchicalLocationChoiceModel:
         return obj
 
     @classmethod
-    def build(cls, context, map_location=None, optimize=True):
+    def build(cls, context, map_location=None, optimize=True, load_selector=True):
         regional_model_path, _, _ = context.stage("synthesis.population.spatial.secondary_nn.regional_model")
         subregional_model_path = context.stage("synthesis.population.spatial.secondary_nn.subregional_model")[0]
         local_model_path = context.stage("synthesis.population.spatial.secondary_nn.local_model")[0]
         short_model_path = context.stage("synthesis.population.spatial.secondary_nn.short_range_model")[0]
         use_target_distance = bool(context.config("secondary_nn_use_target_distance"))
         classifier_path = None
-        if not use_target_distance:
+        if not use_target_distance and load_selector:
             classifier_path = context.stage("synthesis.population.spatial.secondary_nn.short_trip_classifier")[0]
 
         obj = cls.load(
@@ -847,8 +849,6 @@ class HierarchicalLocationChoiceModel:
             pass
         if ("target_distance" in obj.c.person_trip_cols) != bool(context.config("secondary_nn_use_target_distance")):
             raise ValueError("Retrain secondary_nn models for the configured target-distance option")
-        if obj.short_trip_classifier is not None and not np.isclose(obj.short_trip_classifier.short_trip_threshold_m, obj.short_trip_threshold_m):
-            raise ValueError("Retrain the short-trip classifier for the configured distance threshold")
         obj.build_candidates_and_trees(context)
         return obj
     
@@ -1079,9 +1079,9 @@ class HierarchicalLocationChoiceModel:
             "Destination pools / sibling map are not initialized. Call build_candidates_and_trees(context) before predict()."
         )
 
-    def _get_cached_person_static(self, person_id, age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability):
+    def _get_cached_person_static(self, person_id, age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, mobility_vector=None):
         if person_id != self._last_person_id:
-            self._last_person_static = transform_person_static_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, self.c.person_static_scaler)
+            self._last_person_static = transform_person_static_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, self.c.person_static_scaler, mobility_vector=mobility_vector)
             self._last_person_id = person_id
         return self._last_person_static
 
@@ -1177,8 +1177,8 @@ class HierarchicalLocationChoiceModel:
 
     def predict(self, person_id, home_x, home_y, work_x, work_y, origin_x, origin_y, age, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work,
             crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, target_distance, activity_chain_vector, sex, employed, car_availability, income_class, purpose, origin_purpose,
-                has_work, has_education, rng):
-        person_static  = self._get_cached_person_static(person_id, age, income_class, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work, activity_chain_vector, sex, employed, car_availability)
+                has_work, has_education, rng, mobility_vector=None, force_expert=None):
+        person_static  = self._get_cached_person_static(person_id, age, income_class, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work, activity_chain_vector, sex, employed, car_availability, mobility_vector)
         person_dynamic = self._build_person_dynamic(crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, target_distance, purpose, origin_purpose)
         person_matrix  = np.concatenate([person_static, person_dynamic], axis=1)
         self._current_origin_detour_index = int(
@@ -1188,7 +1188,9 @@ class HierarchicalLocationChoiceModel:
             self.s._current_origin_detour_index = self._current_origin_detour_index
 
         safe_target_distance = float(target_distance) if np.isfinite(target_distance) and float(target_distance) >= 0.0 else np.inf
-        use_short = self._select_short_model(
+        if force_expert not in (None, "short", "hierarchy"):
+            raise ValueError("force_expert must be short or hierarchy")
+        use_short = force_expert == "short" if force_expert is not None else self._select_short_model(
             target_distance=safe_target_distance, age=age, income_class=income_class,
             daily_longest=daily_longest_distance_from_home, daily_total=daily_crowfly_total,
             daily_longest_work=daily_longest_distance_from_work, activity_chain_vector=activity_chain_vector,
@@ -1196,6 +1198,8 @@ class HierarchicalLocationChoiceModel:
             consumed_before=crowfly_consumed_before_trip, trip_position=trip_position_class,
             departure_time=departure_time_normalized, activity_duration_h=activity_duration_h,
             purpose=purpose, origin_purpose=origin_purpose,
+            mobility_vector=mobility_vector, origin_x=origin_x, origin_y=origin_y,
+            home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, has_work=has_work,
         )
 
         if use_short:
@@ -1223,7 +1227,7 @@ class HierarchicalLocationChoiceModel:
 
         destination_id, geom = self.sample_company_in_l2(
             purpose, level1_h3, level2_h3, rng, car_availability, home_x, home_y,
-            origin_x=origin_x, origin_y=origin_y, target_distance=target_distance)
+            origin_x=origin_x, origin_y=origin_y, target_distance=target_distance if self.use_target_distance else None)
         return destination_id, geom
 
     @staticmethod

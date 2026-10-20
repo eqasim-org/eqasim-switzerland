@@ -14,6 +14,9 @@ from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import LocalChoiceWrapper
 
+from .tools import training_mobility, enrich_candidate_tensor, attach_candidate_features
+from .training_split import expert_persons
+
 logger = logging.getLogger("synpp: local_model")
 
 MODEL_NAME = "local_model.pt"
@@ -25,6 +28,9 @@ COUNT_ZOOM_AREAS = {
 
 def configure(context):
     context.config("secondary_nn_use_target_distance", True)
+    context.stage("data.spatial.ovgk")
+    if not context.config("secondary_nn_use_target_distance"):
+        context.stage("synthesis.population.spatial.secondary_nn.training_split")
     context.stage("synthesis.population.spatial.secondary_nn.h3")
     context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
@@ -65,10 +71,12 @@ def execute(context):
     mz_persons = context.stage("data.microcensus.persons")[[
         "person_id", "age", "sex", "car_availability", "employed", "income_class", "home_x", "home_y", "work_x", "work_y", "weekend", "person_weight"
     ]]
+    mz_persons = expert_persons(context, mz_persons)
     constants = context.stage("data.constants")
     mz_persons["car_availability"] = (mz_persons["car_availability"] != constants.CAR_AVAILABILITY_NEVER)
 
     mz_trips, _, _, _ = context.stage("data.microcensus.trips")
+    mz_trips = mz_trips.loc[mz_trips.person_id.isin(mz_persons.person_id)].copy()
     mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "purpose", "origin_purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
         "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
@@ -129,6 +137,8 @@ def execute(context):
                                                     urban_core_count_l2, urban_count_l2, education_count_l2, shop_count_l2, leisure_count_l2, sport_count_l2, gastronomy_count_l2,
                                                     accommodation_count_l2, cultural_count_l2, ovgk_share_a_by_l2, ovgk_share_b_by_l2,
                                                     ovgk_share_c_by_l2, ovgk_share_d_by_l2, ovgk_share_none_by_l2, outside_fraction_by_l2)
+
+    attach_candidate_features(level2_candidate_attributes_by_level1, h3_geo_level2)
 
     logger.info("\t Preparing microcensus training set...")
     df = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
@@ -250,6 +260,7 @@ def execute(context):
     ########### Building tensors and fitting scalers ###########
     purpose_categories = [str(purpose) for purpose in SECONDARY_ACTIVITIES]
     person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(
+        mobility_matrix=training_mobility(context, df),
         age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
         daily_longest=daily_longest, daily_total=daily_total, daily_longest_work=daily_longest_work,
         activity_chain_matrix=activity_chain_matrix,
@@ -270,6 +281,7 @@ def execute(context):
         candidate_tensor, origin_x, origin_y, cand_x, cand_y, valid_mask,
         context.stage("synthesis.population.spatial.secondary.detour_factors.factors"),
     )
+    candidate_tensor = enrich_candidate_tensor(candidate_tensor, cand_x, cand_y, valid_mask, h3_geo_level2)
     candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
     candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask, random_state=int(context.config("random_seed")))
