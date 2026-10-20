@@ -28,20 +28,13 @@ ch_cutter
 *.csv
 main*.py
 .claude
-AGENTS.md
 
 CuttingBoundries
 
-tests*
 
 # Population routing is source code, not generated routing output.
 !mode_choice/routing/
 !mode_choice/routing/*.py
 
-# Keep pipeline regression tests under version control.
-!tests/
-tests/*
-!tests/test_random_seed.py
-!tests/test_xml_readers.py
-!tests/test_gtfs_output_path.py
-!tests/test_secondary_nn_enrichment.py
+# Tests stay local; agent guidance is shared.
+/tests/

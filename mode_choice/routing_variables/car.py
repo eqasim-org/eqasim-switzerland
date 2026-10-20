@@ -10,7 +10,7 @@ from mode_choice.routing.results import complete_routes
 def configure(context):
     configure_mode(context, "car")
     if car_backend(context) == "pandana":
-        context.stage("matsim.scenario.network.mapped")
+        context.stage("matsim.scenario.network.pt")
         context.stage("dmc.parameter_files")
         context.config("car_cost_model", RUN_DEFAULTS["car_cost_model"])
 

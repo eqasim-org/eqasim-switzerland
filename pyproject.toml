@@ -2,7 +2,7 @@
 name = "eqasim-switzerland"
 version = "1.4.0"
 description = "Generating synthetic populations for Switzerland"
-readme = "README.md"
+readme = "doc/README.md"
 requires-python = ">=3.13"
 dependencies = [
     "biogeme>=3.3.4",

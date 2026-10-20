@@ -30,7 +30,7 @@ the corrected package directly; no local package patch is needed.
 
 ## Executing the pipeline
 
-The beginner [configuration template](config.yml) contains the main inputs and
+The beginner [configuration template](../config.yml) contains the main inputs and
 scenario choices, each with a short comment. Advanced defaults are declared
 directly in each stage. Explicit YAML values override these defaults.
 

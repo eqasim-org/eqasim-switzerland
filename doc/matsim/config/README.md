@@ -35,10 +35,10 @@ calibration, delays, DMC paths, iteration counts and output intervals using the
 helpers in `matsim.config.tools`. Preparation applies simulation settings after
 population routing and validation, keeping calibration inactive during those steps.
 
-`matsim.simulation.prepare` returns the completed config path, main class and
-launch arguments. `matsim.simulation.run` only launches that prepared simulation.
-The waiting-to-enter-traffic option and VDF network-event generation remain Java
-launch switches because the runners require them; preparation chooses these too.
+`matsim.simulation.prepare` returns the completed config path.
+`matsim.simulation.run` selects the Java runner and its launch switches. The
+waiting-to-enter-traffic option and VDF network-event generation remain Java
+launch switches because the runners require them.
 PT2MATSim converter and mapper templates are different config formats and remain
 in their respective stages; they use the same shared XML helpers.
 
@@ -86,9 +86,10 @@ Focused tests cover config generation, consumer-specific overrides, unchanged
 source templates, nested fields, PT parameter idempotence, external custom
 settings, network converter/mapper options, and prepared queue/VDF simulations
 with alpha/beta calibration. Java generation and reloading of
-PT-modified configs were exercised with a valid cached eqasim JAR. The JAR
-currently configured in `config_dib_10.yml` failed archive validation during the
-check; it was not replaced.
+PT-modified configs can be exercised with the configured eqasim JAR. Before
+running Java checks, verify that the selected JAR is a valid archive and contains
+the required main classes. Cluster builds need explicit Maven proxy settings;
+the launchers enable these through `MAVEN_USE_ENV_PROXY=true`.
 
 Dependency graphs are checked without executing pipeline stages. The default
 configuration has one shared generator. Testing PT parameter calibration also

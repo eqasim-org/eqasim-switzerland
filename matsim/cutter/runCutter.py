@@ -18,7 +18,8 @@ def configure(context):
     cutter_version(context)
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
-
+    context.config("java_memory", "50G", volatile=True)
+    
     # If this path is provided, we just use it to get the parent model and cut it
     if not context.config("cutter.scenario_path"):
         context.stage("matsim.simulation.run")    

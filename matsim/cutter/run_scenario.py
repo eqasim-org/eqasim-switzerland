@@ -18,6 +18,7 @@ def configure(context):
     context.config("regional_model_last_iteration", default = 2 * context.config("last_iteration"))
     context.config("run_regional_model", default=True)
     context.config("cutter.output_path", default="")
+    context.config("java_memory", "50G", volatile=True)
 
 
 def execute(context):
