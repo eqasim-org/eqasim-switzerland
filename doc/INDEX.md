@@ -6,7 +6,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 
 ## Pipeline and inputs
 
-- [Overview, setup and input datasets](README.md)
+- [Overview, setup and input datasets](../README.md)
 - [Beginner configuration template](../config.yml)
 - [Public-transport pricing inputs](PT_pricing_inputs_and_explanations.md)
 

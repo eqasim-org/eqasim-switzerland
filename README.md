@@ -1,7 +1,10 @@
-This repository contains the documentation and the code used to create the
-Switzerland synthetic population and corresponding travel. It also provides stages that can be used to convert it and run a MATSim/eqasim agent-based simulations. Furthermore, it provides a visualization of the data at the end of the pipeline.
+# eqasim Switzerland
 
-The pipeline uses the `synpp` Python package for stage chaining avaialble at [here](https://github.com/eqasim-org/synpp).
+This repository generates Switzerland's synthetic population and daily travel,
+builds MATSim/eqasim scenarios, runs transport simulations, and analyzes the results.
+The pipeline uses [Synpp](https://github.com/eqasim-org/synpp) to organize its stages.
+
+See the [documentation index](doc/INDEX.md) for module guides and changelogs.
 
 ## Main reference
 
@@ -12,7 +15,9 @@ The main research reference for the synthetic population of Switzerland is:
 
 ## Preparing the environment
 
-We use `uv` for dependency management. Make sure that you can call `uv` from your working environment. You can set up all dependencies by calling:
+Use Python 3.13 or newer and `uv` for dependency management. MATSim requires a
+Java 25 JDK; building eqasim from source also requires Maven 3.x and access to its
+dependency repositories. Install the Python dependencies from the repository root:
 
 ```bash
 cd /project/code
@@ -30,7 +35,7 @@ the corrected package directly; no local package patch is needed.
 
 ## Executing the pipeline
 
-The beginner [configuration template](../config.yml) contains the main inputs and
+The beginner [configuration template](config.yml) contains the main inputs and
 scenario choices, each with a short comment. Advanced defaults are declared
 directly in each stage. Explicit YAML values override these defaults.
 
@@ -42,7 +47,13 @@ cd /project/code
 uv run -m synpp config.yml
 ```
 
-It will read the configuration file, run the processing pipeline, and eventually create the synthetic population inside the output directory.
+Fill in the template's paths and input filenames before running it. The selected
+`run` stages determine whether population synthesis, simulation, or analysis is
+executed. The working cluster configuration is run with
+`uv run -m synpp config_dib_10.yml`; private configurations are not included in Git.
+On the cluster, Maven needs explicit proxy settings. The local launchers enable
+these with `MAVEN_USE_ENV_PROXY=true` after loading `eth_proxy`. Alternatively,
+set `eqasim_path` to an existing, valid eqasim JAR.
 
 ## Generating pipeline flowchart
 
@@ -64,14 +75,16 @@ Type `python3 visualize_pipeline.py -h` for further explanations.
 
 ## Output
 
-To create a full scenario, add the `matsim.simulation.run` stage to the config file. The
-configuration option `output_path` must be set. The option
-`output_path` must point to an existing directory, where results of the pipeline
-will be saved. 
+Use `matsim.output` in the configuration's `run` list to build, simulate and
+export a complete scenario to `<output_path>/<output_id>`. Set `output_path` to
+your export folder. Scenario inputs and simulation results are copied there;
+the upstream caches remain available. `matsim.simulation.run` alone runs the
+prepared scenario without exporting it. Use `synthesis.output` to export the
+synthetic population separately.
 
 # Setting up and running on Windows
 
-We recommend to run the pipeline on a Linux server, mainly because for large scenarios around 100GB of memory are needed. However, it is possible to run the pipeline locally on a Windows machine. The whole pipeline can run in a Virtual Machine (VM). The procedure would be as follows:
+We recommend running the pipeline on a Linux server because full-country scenarios can require substantial memory. However, it is possible to run the pipeline locally on a Windows machine. The whole pipeline can run in a Virtual Machine (VM). The procedure would be as follows:
 
 - Install VirtualBox
 - Install a lightweight Linux system in the VM, for instance Ubuntu Server
@@ -93,7 +106,7 @@ The raw data that is used in the process can be found on our server
 
 **Microcensus Transport and Mobility**
 - Content: `microcensus/` contains the Mikrozensus Verkehr und Mobilität in CSV
-format with 60'000 daily trips of Swiss residents.
+format describing Swiss residents' daily travel.
 - The following files should be placed in the `microcensus/` directory: `etappen.csv`, `haushalte.csv`, `haushaltspersonen.csv`, `wege.csv`, `zielpersonen.csv`
 - Year: 2015, 2021
 - Contract: BfS

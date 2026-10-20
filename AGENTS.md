@@ -38,6 +38,34 @@ Run commands from the repository root unless a document explicitly says otherwis
 - `analysis/`: mode shares, counts, travel times and public-transport comparisons.
 - `calibration/`: calibration inputs and regional/manual corrections.
 
+## Stage layout and readability
+
+- After imports and module-level constants, define `configure(context)` first
+  and `execute(context)` second.
+- Import reusable helper functions from the appropriate module. Define helpers
+  specific to the stage below `execute(context)`, rather than placing them
+  between `configure` and `execute` or before those stage functions.
+- Keep `execute(context)` organized into small, clearly ordered logical blocks.
+  Start each block with a short comment explaining what it does. Put a blank
+  line before the comment and another blank line between the comment and its
+  code, including for the first block:
+
+```python
+def execute(context):
+
+    # Load input data.
+
+    data = ...
+
+    # Prepare the results.
+
+    result = ...
+
+    # Return stage results.
+
+    return result
+```
+
 ## Stage contracts and caches
 
 - Register configuration and dependencies in `configure(context)` before using
@@ -117,8 +145,9 @@ Run commands from the repository root unless a document explicitly says otherwis
 
 - Keep project guides, module READMEs and changelogs in `doc/`, mirroring package
   paths where useful. [doc/INDEX.md](doc/INDEX.md) is the documentation index.
-- Keep this `AGENTS.md` at the repository root for automatic discovery. Update
-  documentation links and package metadata when moving documents.
+- Keep `README.md` at the repository root so GitHub displays the project overview,
+  and keep this `AGENTS.md` there for automatic discovery. Other documentation
+  belongs in `doc/`. Update links and package metadata when moving documents.
 - Leave third-party environment files and generated analysis artifacts in their
   own directories. Moving source documentation must not alter installed packages
   or break generated report workflows.
