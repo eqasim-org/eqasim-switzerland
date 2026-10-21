@@ -26,11 +26,19 @@ def municipality_features(municipalities, districts, cantons, types):
     Interior points avoid ambiguous polygon overlaps at municipal boundaries.
     This small lookup also covers municipalities with no residence respondents.
     """
-    points = municipalities[["municipality_id", "geometry"]].to_crs(2056).copy()
+    # Municipality stages can retain source indices after combining boundary
+    # releases. Spatial matches must identify rows independently of those labels.
+    points = municipalities[["municipality_id", "geometry"]].to_crs(2056).reset_index(drop=True)
     points.geometry = points.geometry.representative_point()
     result = points[["municipality_id"]].copy()
     for field, polygons in [("district_id", districts), ("canton_id", cantons)]:
-        matched = gpd.sjoin(points, polygons[[field, "geometry"]].to_crs(2056),
+        # The external-population perimeter is also stored in cantons with ID
+        # -1 and can overlap Swiss municipalities. It is a simulation region,
+        # not a second administrative canton. Foreign departures are handled
+        # explicitly by prepare_student_training, outside this Swiss lookup.
+        ids = pd.to_numeric(polygons[field], errors="coerce")
+        domestic = ids.between(1, 26) if field == "canton_id" else ids.gt(0)
+        matched = gpd.sjoin(points, polygons.loc[domestic, [field, "geometry"]].to_crs(2056),
                             how="left", predicate="intersects")
         if matched.index.duplicated().any():
             raise ValueError("Student geography requires an unambiguous %s per municipality" % field)

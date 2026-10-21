@@ -4,12 +4,37 @@ import unittest
 
 import numpy as np
 import pandas as pd
+import geopandas as gpd
+from shapely.geometry import box
 
-from data.structural_survey.student_training import prepare_student_training
+from data.structural_survey.student_training import municipality_features, prepare_student_training
 from synthesis.population.models.education import assign_education
 
 
 class StudentOriginTrainingTest(unittest.TestCase):
+    def geography(self):
+        # Repeated source indices are harmless when municipality IDs differ.
+        municipalities = gpd.GeoDataFrame({'municipality_id':[1,2]},
+            geometry=[box(0,0,1,1), box(2,0,3,1)], crs=2056, index=[0,0])
+        districts = gpd.GeoDataFrame({'district_id':[100,200]},
+            geometry=list(municipalities.geometry), crs=2056)
+        cantons = gpd.GeoDataFrame({'canton_id':[1,2,-1]},
+            geometry=[*municipalities.geometry, box(-1,-1,4,2)], crs=2056)
+        types = pd.DataFrame({'municipality_id':[1,2], 'municipality_type':['rural','urban']})
+        return municipalities, districts, cantons, types
+
+    def test_external_perimeter_does_not_override_swiss_canton(self):
+        result = municipality_features(*self.geography())
+        self.assertEqual(result.municipality_id.tolist(), [1,2])
+        self.assertEqual(result.canton_id.tolist(), [1,2])
+        self.assertEqual(result.district_id.tolist(), [100,200])
+
+    def test_ambiguous_swiss_cantons_still_raise(self):
+        municipalities, districts, cantons, types = self.geography()
+        cantons.loc[cantons.canton_id.eq(-1), 'canton_id'] = 3
+        with self.assertRaisesRegex(ValueError, 'unambiguous canton_id'):
+            municipality_features(municipalities, districts, cantons, types)
+
     def test_departure_fallback_and_foreign_geography_keep_every_respondent(self):
         survey = pd.DataFrame({'is_student':[1,1,1,0], 'weight':[2.,3.,4.,5.],
             'home_municipality_id':1, 'home_quarter_id':np.nan, 'home_zone_id':10,
@@ -34,9 +59,11 @@ class StudentOriginTrainingTest(unittest.TestCase):
 
     def test_all_tertiary_programmes_collapse_before_imputation(self):
         survey = pd.DataFrame({'age':22, 'sex':0, 'employed':3, 'canton_id':1,
+            'job_position':70,
             'weight':1., 'is_student':1, 'current_education':[9,10,11,12,13],
             'education_country_code':8100, 'education_municipality':1})
         people = pd.DataFrame({'age':[22]*20, 'sex':0, 'employed':3, 'canton_id':1,
+            'job_position':70,
             'is_student':[1]*19+[0]})
         result = assign_education(people, survey, seed=0)
         self.assertTrue(result.loc[result.is_student.eq(1), 'study_level'].eq('tertiary').all())
