@@ -120,7 +120,7 @@ def test_replay_prepares_common_income_and_chain_inputs_once():
     from shapely.geometry import box
     cohort = pd.DataFrame({'person_id':[1], 'trip_id':[1], 'origin_x':[1.], 'origin_y':[2.],
                           'purpose':['shop'], 'origin_purpose':['home']})
-    chains = pd.DataFrame({'person_id':[1],'trip_id':[1],'activity_chain':[np.ones(6)],'target_distance':[100.]})
+    chains = pd.DataFrame({'person_id':[1],'trip_id':[1],'activity_chain':[np.ones(6)],'target_distance':[100.], 'chain_state':[np.zeros(16)]})
     persons = pd.DataFrame({'person_id':[1],'age':[30],'sex':[0],'employed':[1], 'income_class':[3],
                            'car_availability':[0], 'home_x':[1.],'home_y':[2.],'work_x':[3.],'work_y':[4.]})
     persons['bike_availability'] = 0
@@ -139,3 +139,77 @@ def test_replay_prepares_common_income_and_chain_inputs_once():
     assert inputs.iloc[0].pt_ga == 1
     assert inputs.iloc[0].bike_available == 1
     assert inputs.iloc[0].home_ovgk_a == 1
+
+
+def test_cache_uses_latest_secondary_assignment_and_its_dependencies(tmp_path):
+    full = 'synthesis.population.spatial.locations__old'
+    old_secondary = 'synthesis.population.spatial.secondary.locations__old'
+    new_secondary = 'synthesis.population.spatial.secondary.locations__new'
+    old, new = 'stage__old', 'stage__new'
+    metadata = {
+        full: {'updated': 10, 'dependencies': {old_secondary: 1, old: 1}, 'config': {}},
+        old_secondary: {'updated': 9, 'dependencies': {old: 1}, 'config': {}},
+        new_secondary: {'updated': 20, 'dependencies': {new: 1},
+                        'config': {'locations_algorithm': 'nn', 'secondary_nn_use_target_distance': False}},
+        old: {'updated': 1, 'dependencies': {}}, new: {'updated': 19, 'dependencies': {}},
+    }
+    for key in metadata:
+        (tmp_path / (key + '.p')).write_bytes(pickle.dumps(key))
+    (tmp_path / 'pipeline.json').write_text(json.dumps(metadata))
+    config = tmp_path / 'config.yml'
+    config.write_text(yaml.safe_dump({'working_directory': str(tmp_path), 'config': {}}))
+    cache = RunCache(config)
+    assert cache.root == new_secondary
+    assert cache.resolve('stage') == new
+    assert cache.kind == 'nn_no_distance'
+
+
+def test_reconstructs_latest_secondary_origins_and_primary_origins():
+    import geopandas as gpd
+    from shapely.geometry import Point
+    from cohorts import assignment_locations
+    secondary = gpd.GeoDataFrame({'person_id': [1, 1, 1], 'trip_index': [1, 2, 4],
+                                 'destination_id': ['new1', 'new2', 'new4']},
+                                geometry=[Point(100, 0), Point(200, 0), Point(400, 0)], crs=2056)
+    work = gpd.GeoDataFrame({'person_id': [1], 'destination_id': ['work']},
+                           geometry=[Point(300, 0)], crs=2056)
+    education = gpd.GeoDataFrame({'person_id': [], 'destination_id': []}, geometry=[], crs=2056)
+    persons = pd.DataFrame({'person_id': [1], 'home_x': [0.], 'home_y': [0.]})
+    trips = pd.DataFrame({'person_id': [1, 1, 1], 'trip_index': [0, 1, 3],
+                          'preceding_purpose': ['home', 'shop', 'work']})
+    class Cache:
+        def stage(self, name):
+            assert name == 'synthesis.population.spatial.primary.locations'
+            return work, education
+    locations = assignment_locations(Cache(), trips, secondary, persons).set_index('activity_index')
+    assert locations.x.to_dict() == {0: 0., 1: 100., 2: 200., 3: 300., 4: 400.}
+    assert locations.loc[1, 'destination_id'] == 'new1'
+
+
+def test_cache_selects_production_expert_before_deeper_crossfit_versions(tmp_path):
+    root = 'synthesis.population.spatial.secondary.locations__root'
+    final, fold = 'model__final', 'model__fold'
+    selector, crossfit = 'selector__stage', 'crossfit__stage'
+    metadata = {root: {'updated': 10, 'dependencies': {final: 1, selector: 1}, 'config': {}},
+                final: {'updated': 1, 'dependencies': {}},
+                selector: {'updated': 2, 'dependencies': {crossfit: 1}},
+                crossfit: {'updated': 3, 'dependencies': {fold: 1}},
+                fold: {'updated': 9, 'dependencies': {}}}
+    for key in metadata:
+        (tmp_path/(key+'.p')).write_bytes(pickle.dumps(key))
+    (tmp_path/'pipeline.json').write_text(json.dumps(metadata))
+    config=tmp_path/'config.yml'
+    config.write_text(yaml.safe_dump({'working_directory':str(tmp_path),'config':{}}))
+    cache=RunCache(config)
+    assert cache.resolve('model')==final
+
+
+def test_selector_diagnostics_keep_probabilities_and_actual_draws_separate():
+    from metrics import selector_diagnostics
+    observed=pd.DataFrame(dict(person_id=[1],trip_id=[1],crowfly_distance=[30000.]))
+    predictions=pd.DataFrame(dict(person_id=[1,1,1],trip_id=[1,1,1],dataset=['nn_no_distance']*3,
+        selected_short=[True,False,False],short_probability=[.2]*3,weight=[1/3]*3,
+        car_group=['Car access']*3))
+    table,trips=selector_diagnostics(observed,predictions)
+    assert trips.iloc[0].selected_short==pytest.approx(.2)
+    assert table.loc[table.selected_short,'row_share'].iloc[0]==pytest.approx(1/3)

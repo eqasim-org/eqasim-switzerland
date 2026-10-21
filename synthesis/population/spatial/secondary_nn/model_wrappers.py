@@ -180,7 +180,7 @@ class RegionalChoiceWrapper:
     def predict_level0(self, home_x, home_y, work_x, work_y, origin_x, origin_y, age, sex, employed, car_availability, income_class,
                        daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work,
                        crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, target_distance, activity_chain_vector, purpose, origin_purpose,
-                       candidate_mask=None, rng=None):
+                       candidate_mask=None, rng=None, chain_state_vector=None, mobility_vector=None):
         safe_daily_longest = float(daily_longest_distance_from_home) if np.isfinite(daily_longest_distance_from_home) and float(daily_longest_distance_from_home) >= 0.0 else 0.0
         safe_daily_total = float(daily_crowfly_total) if np.isfinite(daily_crowfly_total) and float(daily_crowfly_total) >= 0.0 else 0.0
         safe_daily_longest_work = float(daily_longest_distance_from_work) if np.isfinite(daily_longest_distance_from_work) and float(daily_longest_distance_from_work) >= 0.0 else 0.0
@@ -199,7 +199,8 @@ class RegionalChoiceWrapper:
             sex=sex, employed=employed, car_availability=car_availability,
             consumed_before=safe_consumed, trip_position=safe_trip_position, departure_time=safe_departure_time, target_distance=safe_target_distance,
             purpose_hot=purpose_hot, origin_purpose_hot=origin_purpose_hot,
-            static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler)
+            static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler,
+            chain_state_vector=chain_state_vector, mobility_vector=mobility_vector)
         has_work = np.isfinite(work_x) and np.isfinite(work_y)
         candidate_dynamic        = self._build_candidate_dynamic(home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
         candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.candidate_dynamic_scaler)[None, :, :]
@@ -463,7 +464,8 @@ class LocalChoiceWrapper:
             sex=sex, employed=employed, car_availability=car_availability,
             consumed_before=safe_consumed, trip_position=safe_trip_position, departure_time=safe_departure_time, target_distance=safe_target_distance,
             purpose_hot=purpose_hot, origin_purpose_hot=origin_purpose_hot,
-            static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler)
+            static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler,
+            chain_state_vector=kwargs.get("chain_state_vector"), mobility_vector=kwargs.get("mobility_vector"))
         has_work = np.isfinite(work_x) and np.isfinite(work_y)
         candidate_dynamic        = self._build_candidate_dynamic(attrs, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
         candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.candidate_dynamic_scaler)[None, :, :]
@@ -677,7 +679,7 @@ class ShortRangeChoiceWrapper:
 
     def predict_level2_short(self, person_matrix, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work,
                              purpose, target_distance=None, radius_m=200.0, expand_step_m=200.0,
-                             min_candidates=12, rng=None, purpose_supported_mask=None):
+                             min_candidates=12, rng=None, purpose_supported_mask=None, return_distribution=False):
         if len(self.all_h3) == 0:
             raise RuntimeError("No level2 candidates are available in short-range wrapper")
 
@@ -727,6 +729,12 @@ class ShortRangeChoiceWrapper:
 
         purpose_key = str(purpose)
         candidate_mask = require_purpose_mask(self.mask, purpose_key).index_select(0, index_tensor)
+
+        if return_distribution:
+            probabilities = predict_choice_proba(
+                self.model, person_matrix[:, :N_PERSON_STATIC], person_matrix[:, N_PERSON_STATIC:],
+                candidate_static_scaled, candidate_dynamic_scaled, candidate_mask).cpu().numpy()[0]
+            return [self.all_h3[i] for i in candidate_indices], probabilities
 
         idx = self.predict_from_inputs(
             person_matrix,
@@ -835,6 +843,10 @@ class HierarchicalLocationChoiceModel:
             pass
         if ("target_distance" in obj.c.person_trip_cols) != bool(context.config("secondary_nn_use_target_distance")):
             raise ValueError("Retrain secondary_nn models for the configured target-distance option")
+        if "remaining_distance_budget_m" not in obj.c.person_trip_cols:
+            raise ValueError("Retrain all secondary_nn experts with remaining-chain features")
+        if not use_target_distance and load_selector and not hasattr(obj.short_trip_classifier, "feature_scaler"):
+            raise ValueError("Retrain the distance-free selector as a cross-fitted probabilistic mixture")
         obj.build_candidates_and_trees(context)
         return obj
     
@@ -1083,7 +1095,7 @@ class HierarchicalLocationChoiceModel:
             self._last_person_id = person_id
         return self._last_person_static
 
-    def _build_person_dynamic(self, consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose, origin_purpose):
+    def _build_person_dynamic(self, consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose, origin_purpose, chain_state_vector=None):
         purpose_key = str(purpose)
         purpose_idx = self._purpose_index.get(purpose_key, self._purpose_index.get("other", 0))
         purpose_hot = self._purpose_identity[purpose_idx]
@@ -1095,7 +1107,7 @@ class HierarchicalLocationChoiceModel:
         else:
             # Match training-time behavior for unknown origin purpose: all-zero one-hot.
             origin_purpose_hot = np.zeros(len(self._purpose_categories), dtype=np.float32)
-        return transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, self.c.person_dynamic_scaler)
+        return transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, self.c.person_dynamic_scaler, chain_state_vector=chain_state_vector)
 
     def _predict_level0_from_person(self, person_matrix, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work, rng, purpose):
         candidate_dynamic = self.c._build_candidate_dynamic(home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
@@ -1164,20 +1176,26 @@ class HierarchicalLocationChoiceModel:
             purpose_supported_mask=support_mask,
         )
 
-    def _select_short_model(self, *, target_distance, **features):
+    def _select_short_model(self, *, target_distance, rng=None, **features):
         if self.use_target_distance:
-            return self.s is not None and target_distance <= float(self.short_trip_threshold_m)
+            selected = self.s is not None and target_distance <= float(self.short_trip_threshold_m)
+            self.last_short_probability = float(selected)
+            return selected
         if self.short_trip_classifier is None or self.s is None:
             raise RuntimeError("Distance-free model selection requires the short-trip classifier and short-range model")
-        return self.short_trip_classifier.predict_short(**features)
+        if rng is None:
+            raise ValueError("Probabilistic expert selection requires the configured random generator")
+        probability = self.short_trip_classifier.predict_probability(**features)
+        self.last_short_probability = probability
+        return bool(rng.random() < probability)
 
     ##################### Main prediction method that runs the full three-level prediction process #####################
 
     def predict(self, person_id, home_x, home_y, work_x, work_y, origin_x, origin_y, age, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work,
             crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, target_distance, activity_chain_vector, sex, employed, car_availability, income_class, purpose, origin_purpose,
-                has_work, has_education, rng, mobility_vector=None, force_expert=None):
+                has_work, has_education, rng, mobility_vector=None, force_expert=None, chain_state_vector=None):
         person_static  = self._get_cached_person_static(person_id, age, income_class, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work, activity_chain_vector, sex, employed, car_availability, mobility_vector)
-        person_dynamic = self._build_person_dynamic(crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, target_distance, purpose, origin_purpose)
+        person_dynamic = self._build_person_dynamic(crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, target_distance, purpose, origin_purpose, chain_state_vector=chain_state_vector)
         person_matrix  = np.concatenate([person_static, person_dynamic], axis=1)
         self._current_origin_detour_index = int(
             self.detour_factor.get_cell_indices(origin_x, origin_y)[0]
@@ -1189,7 +1207,7 @@ class HierarchicalLocationChoiceModel:
         if force_expert not in (None, "short", "hierarchy"):
             raise ValueError("force_expert must be short or hierarchy")
         use_short = force_expert == "short" if force_expert is not None else self._select_short_model(
-            target_distance=safe_target_distance, age=age, income_class=income_class,
+            target_distance=safe_target_distance, rng=rng, age=age, income_class=income_class,
             daily_longest=daily_longest_distance_from_home, daily_total=daily_crowfly_total,
             daily_longest_work=daily_longest_distance_from_work, activity_chain_vector=activity_chain_vector,
             sex=sex, employed=employed, car_availability=car_availability,
@@ -1198,7 +1216,11 @@ class HierarchicalLocationChoiceModel:
             purpose=purpose, origin_purpose=origin_purpose,
             mobility_vector=mobility_vector, origin_x=origin_x, origin_y=origin_y,
             home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, has_work=has_work,
+            chain_state_vector=chain_state_vector,
         )
+        self.last_selected_expert = "short" if use_short else "hierarchy"
+        if force_expert is not None:
+            self.last_short_probability = float(use_short)
 
         if use_short:
             level2_h3 = self._predict_short_level2_from_person(
@@ -1227,6 +1249,67 @@ class HierarchicalLocationChoiceModel:
             purpose, level1_h3, level2_h3, rng, car_availability, home_x, home_y,
             origin_x=origin_x, origin_y=origin_y, target_distance=target_distance if self.use_target_distance else None)
         return destination_id, geom
+
+    def expert_leaf_probabilities(self, observed_leaf, **inputs):
+        """Exact probability mass at the observed coordinate leaf for both experts.
+
+        Survey coordinates need not equal any company coordinate. Scoring their
+        common finest H3 cell gives both experts the same observation space.
+        """
+        static = self._get_cached_person_static(
+            inputs['person_id'], inputs['age'], inputs['income_class'],
+            inputs['daily_longest_distance_from_home'], inputs['daily_crowfly_total'],
+            inputs['daily_longest_distance_from_work'], inputs['activity_chain_vector'],
+            inputs['sex'], inputs['employed'], inputs['car_availability'], inputs['mobility_vector'])
+        dynamic = self._build_person_dynamic(
+            inputs['crowfly_consumed_before_trip'], inputs['trip_position_class'],
+            inputs['departure_time_normalized'], inputs['activity_duration_h'], 0.,
+            inputs['purpose'], inputs['origin_purpose'], chain_state_vector=inputs['chain_state_vector'])
+        person = np.concatenate([static, dynamic], axis=1)
+        self._current_origin_detour_index = int(self.detour_factor.get_cell_indices(inputs['origin_x'], inputs['origin_y'])[0])
+        self.s._current_origin_detour_index = self._current_origin_detour_index
+        geometry = {key: inputs[key] for key in ('home_x', 'home_y', 'work_x', 'work_y', 'origin_x', 'origin_y', 'has_work')}
+        purpose = inputs['purpose']
+        leaves, masses = self.s.predict_level2_short(
+            person, **geometry, purpose=purpose,
+            radius_m=self.short_trip_threshold_m + self.short_query_radius_m * 1.5,
+            expand_step_m=self.short_query_radius_m, min_candidates=self.short_min_candidates,
+            purpose_supported_mask=self.short_destination_support_masks[purpose], return_distribution=True)
+        short = float(masses[leaves.index(observed_leaf)]) if observed_leaf in leaves else 0.
+        parts = observed_leaf.split('/')
+        root, middle = parts[0], '/'.join(parts[:2])
+        probability = 1.
+        for wrapper, key, chosen in [(self.c, None, root), (self.m, root, middle), (self.d, (root, middle), observed_leaf)]:
+            if key is None:
+                children = wrapper.all_h3
+                attributes = None
+                candidate_static = wrapper.scaled_static_features_torch
+                distances = wrapper._build_candidate_dynamic(**geometry)
+                detour_indices = self._coarse_detour_indices
+                mask = require_purpose_mask(wrapper.mask, purpose)
+            else:
+                attribute_map = (wrapper.level1_candidate_attributes_by_level0 if wrapper is self.m
+                                 else wrapper.level2_candidate_attributes_by_level1)
+                attributes = attribute_map.get(key)
+                if attributes is None or chosen not in attributes['children']:
+                    return short, 0.
+                children = attributes['children']
+                candidate_static = attributes['scaled_static_features_torch']
+                distances = wrapper._build_candidate_dynamic(attributes, **geometry)
+                detour_indices = attributes['detour_cell_indices']
+                mask = require_purpose_mask(wrapper.mask[key], purpose)
+            if chosen not in children:
+                return short, 0.
+            distances = self._add_cached_detour_feature(distances, detour_indices,
+                                                       None if attributes is None else attributes['n_children'])
+            distances = transform_candidate_dynamic_matrix(distances, wrapper.candidate_dynamic_scaler)[None, :, :]
+            masses = predict_choice_proba(wrapper.model, person[:, :N_PERSON_STATIC], person[:, N_PERSON_STATIC:],
+                                         candidate_static, distances, mask).cpu().numpy()[0]
+            factor = float(masses[children.index(chosen)])
+            if factor == 0:
+                return short, 0.
+            probability *= factor
+        return short, probability
 
     @staticmethod
     def _reweight_by_distance(base_prob, xy, origin_x, origin_y, target_distance,

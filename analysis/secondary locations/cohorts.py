@@ -71,27 +71,28 @@ def population(cache):
     border_ids = trips.loc[(trips.preceding_purpose == 'border') | (trips.following_purpose == 'border'), 'person_id'].unique()
     trips = trips.loc[trips.following_purpose.isin(PURPOSES) & ~trips.person_id.isin(border_ids)].copy()
     audit['secondary_trips_excluding_border_persons'] = len(trips)
-    secondary = cache.stage('synthesis.population.spatial.secondary.locations')[0][['person_id', 'trip_index']].copy()
+    secondary_locations = cache.stage('synthesis.population.spatial.secondary.locations')[0]
+    secondary = secondary_locations[['person_id', 'trip_index']].copy()
     # Secondary output trip_index denotes the following activity index.
     secondary = secondary.rename(columns={'trip_index': 'activity_index'})
     trips['activity_index'] = trips.trip_index + 1
     trips = trips.merge(secondary, on=['person_id', 'activity_index'], validate='one_to_one')
     audit['with_secondary_assignment'] = len(trips)
-    locations = xy(cache.stage('synthesis.population.spatial.locations'))[
-        ['person_id', 'activity_index', 'destination_id', 'x', 'y', 'ovgk']]
-    origins = locations.rename(columns={'activity_index': 'trip_index', 'x': 'origin_x', 'y': 'origin_y'})
-    trips = trips.merge(origins[['person_id', 'trip_index', 'origin_x', 'origin_y']],
-                        on=['person_id', 'trip_index'], validate='many_to_one')
-    destinations = locations.rename(columns={'x': 'destination_x', 'y': 'destination_y', 'ovgk': 'destination_pt'})
-    trips = trips.merge(destinations, on=['person_id', 'activity_index'], validate='many_to_one')
-    # First activity may be away from home. Use actual household home geometry.
+    # Reconstruct origins from this assignment's dependencies, not stale combined locations.
     persons = cache.stage('synthesis.population.enriched')
     keep = ['person_id', 'household_id', 'age', 'sex', 'car_availability', 'driving_license', 'municipality_type']
     persons = persons[keep].copy()
     homes_hh = xy(cache.stage('synthesis.population.spatial.home.locations'))[['household_id', 'x', 'y']]
     persons = persons.merge(homes_hh, on='household_id', validate='many_to_one').rename(columns={'x': 'home_x', 'y': 'home_y'})
+    locations = assignment_locations(cache, trips, secondary_locations, persons)
+    origins = locations.rename(columns={'activity_index': 'trip_index', 'x': 'origin_x', 'y': 'origin_y'})
+    trips = trips.merge(origins[['person_id', 'trip_index', 'origin_x', 'origin_y']],
+                        on=['person_id', 'trip_index'], validate='many_to_one')
+    destinations = locations.rename(columns={'x': 'destination_x', 'y': 'destination_y'})
+    trips = trips.merge(destinations, on=['person_id', 'activity_index'], validate='many_to_one')
     polygons = cache.stage('data.spatial.ovgk')
     persons['home_pt'] = accessibility(persons.home_x, persons.home_y, polygons)
+    trips['destination_pt'] = accessibility(trips.destination_x, trips.destination_y, polygons)
     persons['car_available'] = persons.pop('car_availability').eq(1)
     trips = trips.merge(persons, on='person_id', validate='many_to_one')
     trips = trips.rename(columns={'following_purpose': 'purpose', 'preceding_purpose': 'origin_purpose'})
@@ -107,6 +108,26 @@ def population(cache):
     del persons, locations, origins, destinations
     gc.collect()
     return decorate(trips, cache.kind), audit
+
+
+def assignment_locations(cache, trips, secondary, persons):
+    """Combine current secondary coordinates with primary origins for secondary legs."""
+    columns = ['person_id', 'activity_index', 'destination_id', 'x', 'y']
+    assigned = xy(secondary).rename(columns={'trip_index': 'activity_index'})[columns]
+    origins = trips[['person_id', 'trip_index', 'preceding_purpose']].rename(
+        columns={'trip_index': 'activity_index'})
+    work, education = cache.stage('synthesis.population.spatial.primary.locations')
+    homes = persons[['person_id', 'home_x', 'home_y']].rename(columns={'home_x': 'x', 'home_y': 'y'})
+    homes = homes.assign(destination_id='home')
+    locations = [assigned]
+    for purpose, primary in [('home', homes), ('work', xy(work)), ('education', xy(education))]:
+        selected = origins.loc[origins.preceding_purpose.eq(purpose), ['person_id', 'activity_index']]
+        locations.append(selected.merge(primary[['person_id', 'destination_id', 'x', 'y']],
+                                        on='person_id', validate='many_to_one')[columns])
+    result = pd.concat(locations, ignore_index=True)
+    if result.duplicated(['person_id', 'activity_index']).any():
+        raise ValueError('Reconstructed assignment contains duplicate activity keys')
+    return result
 
 
 def survey(cache):

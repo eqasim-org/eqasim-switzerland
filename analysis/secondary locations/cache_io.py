@@ -1,5 +1,6 @@
 """Read completed Synpp artifacts without scheduling or modifying the pipeline."""
 from pathlib import Path
+from collections import deque
 import hashlib
 import json
 import pickle
@@ -7,7 +8,8 @@ import logging
 import yaml
 
 LOG = logging.getLogger(__name__)
-ROOT_STAGE = 'synthesis.population.spatial.locations'
+ROOT_STAGES = ('synthesis.population.spatial.locations',
+               'synthesis.population.spatial.secondary.locations')
 
 
 class RunCache:
@@ -16,18 +18,19 @@ class RunCache:
         self.yaml = yaml.safe_load(self.path.read_text())
         self.directory = Path(self.yaml['working_directory'])
         self.meta = json.loads((self.directory / 'pipeline.json').read_text())
-        roots = self.candidates(ROOT_STAGE)
+        roots = [key for stage in ROOT_STAGES for key in self.candidates(stage)]
         if not roots:
-            raise FileNotFoundError(f'{ROOT_STAGE} not complete in {self.directory}')
+            raise FileNotFoundError(f'No completed spatial assignment in {self.directory}')
         self.root = max(roots, key=lambda k: self.meta[k]['updated'])
-        self.closure = set()
-        def walk(key):
+        self.closure, self.depth = set(), {}
+        pending = deque([(self.root, 0)])
+        while pending:
+            key, depth = pending.popleft()
             if key in self.closure:
-                return
+                continue
             self.closure.add(key)
-            for dependency in self.meta.get(key, {}).get('dependencies', {}):
-                walk(dependency)
-        walk(self.root)
+            self.depth[key] = depth
+            pending.extend((dependency, depth + 1) for dependency in self.meta.get(key, {}).get('dependencies', {}))
         self.used = {}
         self.keep = {}
         self.settings = self.meta[self.root]['config']
@@ -40,7 +43,9 @@ class RunCache:
         choices = self.candidates(stage)
         linked = [key for key in choices if key in self.closure]
         if linked:
-            choices = linked
+            # Production experts are direct assignment dependencies; fold models are deeper.
+            nearest = min(self.depth[key] for key in linked)
+            choices = [key for key in linked if self.depth[key] == nearest]
         if len(choices) != 1:
             raise ValueError(f'Expected one completed artifact for {stage}: {choices}')
         return choices[0]

@@ -32,6 +32,9 @@ def prepare_inputs(source, cohort):
     from synthesis.population.spatial.secondary_nn.tools import MOBILITY_FEATURES, mobility_features
     name = 'synthesis.population.spatial.secondary_nn.mz_chains'
     chains = source.stage(name) if source.candidates(name) else mz_chains.execute(source)
+    if 'chain_state' not in chains:
+        # Reconstruct missing diagnostic features locally; never rewrite an old run cache.
+        chains = mz_chains.execute(source)
     survey_persons = source.stage('data.microcensus.persons')
     mobility = mobility_features(survey_persons, source.stage('data.constants'), survey=True,
                                  ovgk=source.stage('data.spatial.ovgk'))
@@ -86,16 +89,6 @@ def replay(cache, cohort, inputs, draws, seed, threads, shared_detour=None):
                 else:
                     xw, yw = (row.work_x, row.work_y) if work else (0., 0.)
                     mobility = np.asarray([getattr(row, column) for column in MOBILITY_FEATURES], dtype=np.float32)
-                    feature = dict(age=row.age, income_class=row.income_class,
-                        daily_longest=row.daily_longest_distance_from_home, daily_total=row.daily_crowfly_total,
-                        daily_longest_work=row.daily_longest_distance_from_work, activity_chain_vector=row.activity_chain,
-                        sex=row.sex, employed=row.employed, car_availability=row.car_availability,
-                        consumed_before=row.crowfly_consumed_before_trip, trip_position=row.trip_position_class,
-                        departure_time=row.departure_time_normalized, activity_duration_h=row.activity_duration_h,
-                        purpose=row.purpose, origin_purpose=row.origin_purpose,
-                        mobility_vector=mobility, origin_x=row.origin_x, origin_y=row.origin_y,
-                        home_x=row.home_x, home_y=row.home_y, work_x=xw, work_y=yw, has_work=work)
-                    short = wrapper._select_short_model(target_distance=distance, **feature)
                     _, geom = wrapper.predict(person_id=int(row.person_id), home_x=row.home_x, home_y=row.home_y,
                         work_x=xw, work_y=yw, origin_x=row.origin_x, origin_y=row.origin_y,
                         age=row.age, daily_longest_distance_from_home=row.daily_longest_distance_from_home,
@@ -104,12 +97,15 @@ def replay(cache, cohort, inputs, draws, seed, threads, shared_detour=None):
                         departure_time_normalized=row.departure_time_normalized, activity_duration_h=row.activity_duration_h,
                         target_distance=distance, activity_chain_vector=row.activity_chain, sex=row.sex, employed=row.employed,
                         car_availability=row.car_availability, income_class=row.income_class, purpose=row.purpose,
-                        origin_purpose=row.origin_purpose, has_work=work, has_education=False, rng=rng, mobility_vector=mobility)
+                        origin_purpose=row.origin_purpose, has_work=work, has_education=False, rng=rng, mobility_vector=mobility,
+                        chain_state_vector=row.chain_state)
                     x, y = geom.x, geom.y
-                records.append((row.person_id, row.trip_id, draw, x, y, short))
+                    short = wrapper.last_selected_expert == "short"
+                probability = 1.0 if distance < DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION else wrapper.last_short_probability
+                records.append((row.person_id, row.trip_id, draw, x, y, short, probability))
             if (i + 1) % 250 == 0:
                 LOG.info('%s replay: %d/%d survey trips', cache.kind, i + 1, len(frame))
-    points = pd.DataFrame(records, columns=['person_id', 'trip_id', 'draw', 'prediction_x', 'prediction_y', 'selected_short'])
+    points = pd.DataFrame(records, columns=['person_id', 'trip_id', 'draw', 'prediction_x', 'prediction_y', 'selected_short', 'short_probability'])
     frame = cohort.drop(columns=['dataset']).merge(points, on=['person_id', 'trip_id'], validate='one_to_many')
     frame['destination_x'], frame['destination_y'] = frame.pop('prediction_x'), frame.pop('prediction_y')
     frame['weight'] /= draws

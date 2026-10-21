@@ -153,11 +153,16 @@ def selector_diagnostics(observed, predictions, threshold_km=1.5):
     base['observed_km'] = base.crowfly_distance / 1000
     # Stationary trips bypass selection; do not credit a classifier for them.
     base = base.loc[base.observed_km >= .01]
+    probability_column = 'short_probability' if 'short_probability' in predictions else 'selected_short'
     trips = predictions.groupby(['dataset', 'person_id', 'trip_id'], observed=True).agg(
-        selected_short=('selected_short', 'first'), weight=('weight', 'sum'),
+        selected_short=(probability_column, 'mean'), weight=('weight', 'sum'),
         car_group=('car_group', 'first')).reset_index().merge(base, on=['person_id','trip_id'], validate='many_to_one')
     trips['observed_short'] = trips.observed_km <= threshold_km
-    table = trips.groupby(['dataset','observed_short','selected_short'], observed=True).agg(
-        weight=('weight','sum'),trips=('person_id','size'),persons=('person_id','nunique')).reset_index()
-    table['row_share'] = table.weight / table.groupby(['dataset','observed_short'],observed=True).weight.transform('sum')
+    # Average sampled routing per trip for plots; tabulate actual draws with their weights.
+    draws = predictions.merge(base, on=['person_id', 'trip_id'], validate='many_to_one')
+    draws['observed_short'] = draws.observed_km <= threshold_km
+    draws['trip_key'] = list(zip(draws.person_id, draws.trip_id))
+    table = draws.groupby(['dataset','observed_short','selected_short'], observed=True).agg(
+        weight=('weight','sum'), trips=('trip_key','nunique'), persons=('person_id','nunique')).reset_index()
+    table['row_share'] = table.weight / table.groupby(['dataset','observed_short'], observed=True).weight.transform('sum')
     return table, trips

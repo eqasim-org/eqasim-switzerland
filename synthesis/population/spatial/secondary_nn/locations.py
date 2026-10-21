@@ -13,6 +13,7 @@ from .model_wrappers import HierarchicalLocationChoiceModel
 from .short_range_model import SHORT_RANGE_MODEL_THRESHOLD
 from .hierarchical_utils import DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION
 from .tools import MOBILITY_FEATURES, mobility_features
+from .chain_state import chain_state_vector
 
 logger = logging.getLogger("synpp")
 
@@ -462,7 +463,13 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
                                                         activity_chain_vector=activity_chain_vector,
                                                         origin_purpose=origin_purpose,
                                                         purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng,
-                                                        mobility_vector=np.asarray([info[c] for c in MOBILITY_FEATURES], dtype=np.float32))
+                                                        mobility_vector=np.asarray([info[c] for c in MOBILITY_FEATURES], dtype=np.float32),
+                                                        chain_state_vector=chain_state_vector(
+                                                            chain_daily_total, consumed_fore_trip_start,
+                                                            following_purpose_arr[local_idx:], current_x, current_y,
+                                                            primary_locations={"home": (home_x, home_y),
+                                                                               "work": (work_x, work_y) if has_work else None,
+                                                                               "education": (edu_x, edu_y) if has_education else None}))
 
                     # sample a destination point within the predicted level 2 cell                 
 

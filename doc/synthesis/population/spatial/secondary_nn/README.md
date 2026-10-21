@@ -127,84 +127,141 @@ are encoded with the same GA-first category priorities. Home accessibility is
 recomputed from the actual home point and the common `data.spatial.ovgk` layer;
 overlapping polygons use the best class.
 
-The selector also receives origin-to-home/work distances, nearest candidate-cell
-distance and nearby H3 opportunity summaries within 1.5 km and 5 km. Quantities
-are summed and fractions averaged. Summaries use candidate representative points
-around a 250 m origin grid, rather than expensive per-trip polygon overlays.
-This is a local supply approximation; it is not a routed travel-time catchment.
-No person identifiers, observed destination coordinates, observed trip distance,
-or expert comparison outcomes are selector inputs.
+The selector also receives origin-to-home/work distances, nearest opportunity
+cell distances, and H3 supply summaries within 1.5, 5 and 20 km by default.
+Purpose-eligible facility counts and nearest eligible cells come from the same
+catalogue and coordinate leaves used for assignment. Quantities are summed and
+fractions averaged around a 250 m origin grid. These are spatial supply
+approximations, not routed travel-time catchments.
 
-## Distance-free expert selection
+All four experts, with or without target distance, and the distance-free gate receive
+remaining distance budget, remaining trip count, budget per remaining trip,
+consumed-budget fraction, remaining counts of each purpose, and the distance,
+trip offset and type of the next known primary anchor. `chain_state.py` computes
+the same vector for survey fitting and synthetic assignment. Only future plan
+purposes and primary coordinates are read; future secondary coordinates are not
+inputs. The shared daily budget is retained as an existing synthesis input.
 
-With `secondary_nn_use_target_distance: true`, target distance remains an input
-and selects the short expert for trips up to
-`secondary_nn_short_trip_threshold_m` (default 1500 m). Otherwise, the separate
-`short_trip_classifier` stage learns **which expert has lower destination loss**.
-Its historical stage name is retained; it now saves `expert_selector.pkl`.
+## Destination distribution loss
 
-The person split is shared across every expert. By default 70% of weekday survey
-persons are available for expert training, and 30% are reserved for selector
-training and assessment. Reserved persons are excluded before expert feature
-scaling and fitting. No expert is refitted on reserved people afterwards, since
-that would change the distributions on which the selector was trained.
+Both target-distance configurations use destination cross-entropy regularized
+by exact discrete CRPS for origin/home distances and a spatial energy-score
+approximation by default (`secondary_nn_distance_loss_kind: crps_energy`).
+The score evaluates the full predicted distribution instead of just its mean.
+Distance scores reward the correct radius; spatial scores additionally penalize
+wrong directions. Target distance remains an input when enabled, and the 1.5 km
+expert-routing threshold and final facility distance reweighting are preserved.
+No cross-fitting or mixture gate is scheduled for distance-conditioned models.
 
-For every eligible nonstationary reserved trip, the stage draws ten final
-facilities from each expert. Both experts use the same observed origin, person
-and chain inputs, with independent reproducible random streams. The observed
-destination is used only to calculate supervision. For predictions `X_j`, origin
-`O` and observed destination `Y`, the score is:
+Set `secondary_nn_distance_loss_kind: relative` to compare against the previous
+relative Huber penalty on expected origin/home distances. This selects the
+legacy `secondary_nn_distance_loss_weight` (default 0.07) and
+`secondary_nn_distance_loss_short_floor_m` (default 100 m). The new loss uses
+`secondary_nn_distribution_loss_weight` (default 0.1). Both options retain the
+new remaining-chain features, so this comparison isolates the loss choice.
+
+For the default distribution loss, spatial energy uses fixed angular projections of exact CRPS, multiplied by pi/2: each
+projection is a proper score and their angular average approximates Euclidean
+energy without quadratic memory in the candidate count. All scores use the
+fixed `secondary_nn_distribution_scale_m`, never the observed trip length as a
+normalizer. The same objective selects stopping epochs. This removes the earlier
+asymmetry between equal absolute over- and under-prediction errors.
+
+For the distance-free configuration, after selecting an epoch count on an
+internal person-separated holdout, an expert is reinitialized and fitted for
+that many epochs on every supplied development row. The outer validation and excluded cross-fitting fold never enter this refit.
+
+## Cross-fitted probabilistic expert mixture
+
+The historical `short_trip_classifier` stage name is retained, but it now saves
+a probabilistic mixture gate rather than a cost-difference regressor.
+
+1. `training_split` reserves 20% of weekday survey people for untouched outer
+   validation. The other 80% are development people. Their cross-fitting fold IDs
+   are fixed by the configured seed; development also has person-separated gate
+   fitting and stopping partitions.
+2. `cross_fitted_experts` requests three fold-specific sets of the four expert
+   stages, using `secondary_nn_crossfit_fold`. For each fold, experts and their
+   scalers exclude that whole fold and all outer people. Predictions for the
+   excluded fold form the gate's out-of-fold development data.
+3. The normal four expert stages use all development people, including refitting
+   after epoch selection. Their predictions on outer validation people provide
+   the untouched final evaluation. There is no permanent 30% gate reservation.
+4. The gate fits a small regularized neural network. Its normalization is fitted
+   only on gate-fitting people, and stopping uses development stopping people.
+   It is then reinitialized and refitted on all out-of-fold development rows for
+   the selected epoch count. Outer outcomes are used only for final diagnostics.
+
+For each eligible nonstationary trip, both experts provide exact probability mass
+for the same observed coordinate leaf and ten reproducible final-facility draws.
+Using the common leaf space avoids requiring a survey coordinate to equal a
+catalogue company point. Both likelihoods use exactly the masks and local
+candidate query used during assignment. A hierarchy likelihood is the product
+of its three conditional probabilities. Unsupported observed leaves are counted
+in validation coverage; a numerical likelihood floor prevents infinite losses.
+
+The gate predicts `g(x)` and minimizes:
 
 ```text
-spatial_error = mean_j ||X_j - Y||
-length_error  = abs(mean_j ||X_j - O|| - ||Y - O||)
-loss = w * log1p(spatial_error / s) + (1-w) * log1p(length_error / s)
+-log(g(x) * P_local(observed_leaf | x)
+     + (1-g(x)) * P_hierarchy(observed_leaf | x))
++ crps_weight * CRPS(mixture trip distances, observed distance)
++ energy_weight * Energy(mixture destinations, observed destination)
 ```
 
-Defaults are `w=0.5`, `s=1000 m`. Spatial error penalizes wrong direction and
-prevents opposite-side predictions from cancelling. The second term matches
-mean trip length. Log scaling limits domination by very long excursions. Both
-experts can have high loss: the selector regresses `loss_short-loss_hierarchy`
-and picks short only when the predicted difference is negative. It does not
-turn all expert mistakes into equally important binary labels.
+The ensemble scores include within- and between-expert pairwise distances,
+using unbiased within-expert pair estimates. They reward calibrated spread as
+well as location and distance accuracy. Observed destination/leaf, target distance
+and expert outcomes are supervision only, never gate inputs. At assignment time
+an expert is drawn with probability `g(x)` using the person's supplied seeded RNG.
+The no-distance prediction ignores the supplied target distance apart from the
+existing upstream stationary-trip handling. It does not threshold `g(x)` or a
+predicted cost difference.
 
-The regularized histogram gradient booster has seven leaves per tree. Selector
-persons are split again: 20% untouched outer validation; the remainder has a
-separate 20% person-disjoint early-stopping partition. Scalers see only the
-fitting partition. Outer validation is never used for stopping or tuning.
-
-The stage writes `expert_comparisons.parquet`, `selector_partitions.parquet`, and
-`validation.json`. Metrics include selected loss, always-short/always-hierarchy
-baselines, oracle loss, regret, expert-choice accuracy and short-selection share.
-These assess performance on people unseen by both experts and the selector.
-They do not establish geographic generalization or accuracy of full-day rollouts.
+The cross-fitting stage writes `expert_predictions.parquet` and `fold_audit.json`.
+The gate writes `expert_comparisons.parquet`, `selector_partitions.parquet`,
+`validation.json`, and `validation_by_distance.csv`. Diagnostics report observed
+and predicted means/tail shares, local-expert probabilities and unsupported
+leaf coverage. A mean-distance ratio outside 0.7–1.3 emits a warning; it does not
+silently force predictions to match survey marginals. Person-held-out validation
+is distinct from observed-origin report replay and does not establish geographic
+or sequential-rollout generalization. Compare these diagnostics and population
+behavior after refitting; distribution improvement is not guaranteed by unit tests.
 
 Optional controls and defaults:
 
 | Configuration | Default |
 |---|---:|
-| `secondary_nn_selector_person_fraction` | 0.3 |
-| `secondary_nn_selector_draws` | 10 |
-| `secondary_nn_selector_context_radii_m` | [1500.0, 5000.0] |
+| `secondary_nn_crossfit_folds` | 3 |
 | `secondary_nn_selector_validation_fraction` | 0.2 |
-| `secondary_nn_selector_spatial_loss_weight` | 0.5 |
-| `secondary_nn_selector_loss_scale_m` | 1000.0 |
-| `secondary_nn_selector_max_iter` | 150 |
-| `secondary_nn_selector_min_samples_leaf` | 40 |
-| `secondary_nn_selector_l2` | 10.0 |
+| `secondary_nn_selector_draws` | 10 |
+| `secondary_nn_selector_context_radii_m` | [1500.0, 5000.0, 20000.0] |
+| `secondary_nn_distance_loss_kind` | `crps_energy` |
+| `secondary_nn_distribution_loss_weight` | 0.1 |
+| `secondary_nn_distribution_scale_m` | 1000.0 |
+| `secondary_nn_energy_projections` | 8 |
+| `secondary_nn_selector_crps_weight` | 0.1 |
+| `secondary_nn_selector_energy_weight` | 0.1 |
+| `secondary_nn_selector_max_iter` | 300 |
+| `secondary_nn_selector_learning_rate` | 0.01 |
+| `secondary_nn_selector_weight_decay` | 0.001 |
+| `secondary_nn_selector_patience` | 20 |
 | `secondary_nn_short_query_radius_m` | 200.0 |
 | `secondary_nn_short_min_candidates` | 6 |
 
-The short-range training cutoff remains 1500 m; the selector may choose either
-expert for any nonstationary trip. Ten draws per expert can make this stage
-substantially more expensive than the former threshold classifier. `threads`
-controls CPU resources and `random_seed` controls reproducibility.
+`secondary_nn_crossfit_fold=-1` selects production expert fitting; nonnegative
+values are internal fold stages. Leave it at its default in run configurations.
+The old `selector_person_fraction`, `selector_spatial_loss_weight`,
+`selector_loss_scale_m`, `selector_min_samples_leaf` and `selector_l2` controls
+are obsolete. Three folds require four expert sets in total, plus the selected-
+epoch refits; fold checkpoints and comparisons are cached for reuse. Fold-only
+models skip country-wide diagnostic maps but retain fitting histories.
 
-When target distance is disabled, the final facility draw also omits target-distance
-reweighting, so selector replay and population assignment use the same expert
-behavior. Observed/matched distances still supply expert distance-loss targets,
-identify stationary trips below 10 m, and contribute existing person-day distance
-summaries. The switch is not removal of every survey distance from the pipeline.
+The local training cutoff remains 1500 m. When target distance is disabled,
+final facility sampling omits target-distance reweighting. Observed/matched
+distances still supply training supervision, identify stationary trips below
+10 m, and contribute existing day-budget summaries. The switch does not remove
+every survey distance from the pipeline.
 
 ## Coordinate hierarchy and compatibility
 
@@ -214,16 +271,17 @@ has a separate node in each occupied branch. Node polygons are intersected in
 EPSG:2056 with every ancestor. Training labels, feature aggregation, destination
 pools, sibling fallbacks and short-range lookup all use this shared tree.
 
-**Retrain all four experts and the selector after this update.** Existing model
-feature schemas and selector checkpoints are incompatible. The default
-`overwrite_*_model_if_exists` options are true. The selector runs only when
-target distance is disabled; neither selector training nor its person reservation
-is scheduled for distance-enabled runs. Consequently, default distance-enabled
-experts see more training people; comparing the two settings is not a pure
-feature ablation unless their expert training cohorts are also controlled.
+**Retrain all four experts in both configurations after this update, and the
+mixture gate for the distance-free configuration.** Both expert schemas now
+include remaining-chain features; loading older expert checkpoints raises a
+retraining message. The default `overwrite_*_model_if_exists` options are true.
+Separate target-distance configurations still use different expert cohorts, so
+comparisons between them are fitted-pipeline comparisons rather than pure feature
+ablations. Better held-out scores and population behavior must be checked after
+retraining; the new loss alone does not guarantee empirical improvement.
 
-Run the focused tests, including a small end-to-end training/reload/prediction:
+Run focused checks, including calibration and a small real stage chain:
 
 ```sh
-uv run -m pytest tests/test_secondary_nn_enrichment.py -q
+uv run -m pytest tests/test_secondary_nn_distribution.py tests/test_secondary_nn_enrichment.py -q
 ```

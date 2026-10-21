@@ -1,4 +1,5 @@
 from .tools import MOBILITY_FEATURES, OSM_FEATURES
+from .chain_state import CHAIN_STATE_FEATURES
 import numpy as np
 from sklearn.preprocessing import QuantileTransformer
 from .hierarchical_utils import ORIGIN_PURPOSE_REMAP, SECONDARY_ACTIVITIES
@@ -78,7 +79,7 @@ def _make_quantile_transformer(n_rows, random_state=None):
 
 def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_matrix,
                            consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_series, origin_purpose_series, purpose_categories,
-                           person_static_scaler=None, person_dynamic_scaler=None, use_target_distance=True, random_state=None, mobility_matrix=None):
+                           person_static_scaler=None, person_dynamic_scaler=None, use_target_distance=True, random_state=None, mobility_matrix=None, chain_state_matrix=None):
     age = np.asarray(age, dtype=np.float64); income_class = np.asarray(income_class, dtype=np.float64)
     daily_longest = np.asarray(daily_longest, dtype=np.float64); daily_total = np.asarray(daily_total, dtype=np.float64)
     daily_longest_work = np.asarray(daily_longest_work, dtype=np.float64)
@@ -95,6 +96,14 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
             raise ValueError("Target-distance option differs from the fitted person scaler")
     if not use_target_distance:
         dynamic_numeric = dynamic_numeric[:, :-1]
+    if chain_state_matrix is not None:
+        state = np.asarray(chain_state_matrix, dtype=np.float64)
+        if state.shape != (len(age), len(CHAIN_STATE_FEATURES)) or not np.isfinite(state).all():
+            raise ValueError("Invalid remaining-chain feature matrix")
+        dynamic_numeric = np.column_stack([dynamic_numeric, state])
+    if person_dynamic_scaler is not None:
+        if getattr(person_dynamic_scaler, "chain_state_features", False) != (chain_state_matrix is not None):
+            raise ValueError("Remaining-chain option differs from the fitted person scaler")
     if static_numeric.shape[0] == 0:
         raise ValueError("Cannot fit person features without training rows")
     if person_static_scaler is None:
@@ -108,6 +117,7 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
     else:
         dynamic_scaled = person_dynamic_scaler.transform(dynamic_numeric).astype(np.float32)
     person_dynamic_scaler.use_target_distance = use_target_distance
+    person_dynamic_scaler.chain_state_features = chain_state_matrix is not None
 
     purpose_categories = [str(p) for p in purpose_categories]
     purpose_to_idx = {purpose: idx for idx, purpose in enumerate(purpose_categories)}
@@ -126,7 +136,7 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
     static_matrix  = np.concatenate([static_scaled, binary, mobility],                                          axis=1).astype(np.float32)
     dynamic_matrix = np.concatenate([dynamic_scaled, purpose_one_hot, origin_purpose_one_hot],         axis=1).astype(np.float32)  # [N, 5+2P]
     full_matrix    = np.concatenate([static_matrix,  dynamic_matrix],                                  axis=1).astype(np.float32)
-    feature_names  = PERSON_STATIC_FEATURES + [name for name in PERSON_DYNAMIC_FEATURES if use_target_distance or name != "target_distance"] + [f"purpose_{p}" for p in purpose_categories] + [f"origin_purpose_{p}" for p in purpose_categories]
+    feature_names  = PERSON_STATIC_FEATURES + [name for name in PERSON_DYNAMIC_FEATURES if use_target_distance or name != "target_distance"] + (CHAIN_STATE_FEATURES if person_dynamic_scaler.chain_state_features else []) + [f"purpose_{p}" for p in purpose_categories] + [f"origin_purpose_{p}" for p in purpose_categories]
     return full_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, feature_names
 
 
@@ -139,18 +149,25 @@ def transform_person_static_vector(age, income_class, daily_longest, daily_total
     mobility = np.zeros((1, len(MOBILITY_FEATURES)), dtype=np.float32) if mobility_vector is None else np.asarray(mobility_vector, dtype=np.float32).reshape(1, len(MOBILITY_FEATURES))
     return np.concatenate([numeric_scaled, binary, mobility], axis=1).astype(np.float32)
 
-def transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler):
-    """Returns [1, 5+2P]: [scaled_consumed_before, scaled_trip_position, scaled_departure_time, scaled_activity_duration_h, scaled_target_distance, purpose_one_hot, origin_purpose_one_hot]."""
+def transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler, chain_state_vector=None):
+    """Encode trip state with the same optional distance and plan fields as fitting."""
     numeric = np.array([[consumed_before, trip_position, departure_time, activity_duration_h, target_distance]], dtype=np.float64)
     if not getattr(dynamic_scaler, "use_target_distance", True):
         numeric = numeric[:, :-1]
+    if getattr(dynamic_scaler, "chain_state_features", False):
+        if chain_state_vector is None:
+            raise ValueError("Prediction requires remaining-chain features from the remaining plan")
+        state = np.asarray(chain_state_vector, dtype=np.float64).reshape(1, -1)
+        if state.shape[1] != len(CHAIN_STATE_FEATURES) or not np.isfinite(state).all():
+            raise ValueError("Invalid remaining-chain prediction features")
+        numeric = np.column_stack([numeric, state])
     numeric_scaled = dynamic_scaler.transform(numeric).astype(np.float32)
     return np.concatenate([numeric_scaled, [purpose_hot], [origin_purpose_hot]], axis=1).astype(np.float32)  # [1, 5+2P]
 
-def transform_person_trip_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, static_scaler, dynamic_scaler):
+def transform_person_trip_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, static_scaler, dynamic_scaler, chain_state_vector=None, mobility_vector=None):
     """Combined convenience wrapper used by standalone predict_levelX analysis methods."""
-    p_static  = transform_person_static_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, static_scaler)
-    p_dynamic = transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler)  # [1, 5+2P]
+    p_static  = transform_person_static_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, static_scaler, mobility_vector=mobility_vector)
+    p_dynamic = transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler, chain_state_vector=chain_state_vector)  # [1, 5+2P]
     return np.concatenate([p_static, p_dynamic], axis=1).astype(np.float32)  # [1, 19+2P]
 
 

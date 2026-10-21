@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import os, json
+from .distribution_scores import discrete_crps, projected_energy_score
 import matplotlib.pyplot as plt
 logger = logging.getLogger("synpp: choice_model")
 
@@ -111,7 +112,10 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
                        restore_best_weights=False,
                        distance_candidates=None, distance_targets=None,
                        distance_candidates_home=None, distance_targets_home=None,
-                       distance_loss_weight=0.0, distance_loss_short_floor_m=100.0):
+                       distance_loss_weight=0.0, distance_loss_short_floor_m=100.0,
+                       distance_loss_kind="relative", distribution_scale_m=1000.0,
+                       candidate_xy=None, observed_xy=None, energy_projections=8,
+                       refit_full=False):
     """Train the choice model with rotating or fixed-fold validation.
 
     ``validation_groups`` keeps related samples (for example, trips belonging to
@@ -179,6 +183,43 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
         distance_targets_home_tensor = None
     short_floor = float(max(1e-6, distance_loss_short_floor_m))
 
+    # Score destination distributions on fixed physical scales.
+
+    if distance_loss_kind not in ("relative", "crps_energy") or distribution_scale_m <= 0 or distance_loss_weight < 0:
+        raise ValueError("Invalid distance distribution loss settings")
+    spatial_candidates = spatial_targets = None
+    if distance_loss_kind == "crps_energy":
+        if candidate_xy is None or observed_xy is None or energy_projections < 2:
+            raise ValueError("Spatial distribution scoring requires coordinates and at least two projections")
+        spatial_candidates = torch.as_tensor(candidate_xy, dtype=torch.float32, device=device)
+        spatial_targets = torch.as_tensor(observed_xy, dtype=torch.float32, device=device)
+        if spatial_candidates.shape != (*mask_tensor.shape, 2) or spatial_targets.shape != (len(y_tensor), 2):
+            raise ValueError("Spatial distribution scores require aligned candidate and observed coordinates")
+        if not torch.isfinite(spatial_candidates).all() or not torch.isfinite(spatial_targets).all():
+            raise ValueError("Spatial distribution coordinates must be finite")
+
+    def regularization(indices, probabilities):
+        values = probabilities.new_zeros(len(indices))
+        if float(distance_loss_weight) == 0:
+            return values
+        for candidates, targets in [(distance_candidates_tensor, distance_targets_tensor),
+                                     (distance_candidates_home_tensor, distance_targets_home_tensor)]:
+            if candidates is None:
+                continue
+            if distance_loss_kind == "relative":
+                expected = (probabilities * candidates[indices]).sum(dim=1)
+                error = (expected - targets[indices]) / (targets[indices] + short_floor).clamp_min(short_floor)
+                values = values + F.smooth_l1_loss(error, torch.zeros_like(error), reduction="none")
+            else:
+                values = values + discrete_crps(probabilities, candidates[indices], targets[indices]) / distribution_scale_m
+        if spatial_candidates is not None:
+            values = values + projected_energy_score(
+                probabilities, spatial_candidates[indices], spatial_targets[indices],
+                projections=energy_projections) / distribution_scale_m
+        return values
+
+    initial_state = {key: value.detach().clone() for key, value in model.state_dict().items()} if refit_full else None
+
     n_samples   = person_static_tensor.shape[0]
     n_val_folds = max(2, int(n_val_folds))
     val_every   = max(1, int(val_every))
@@ -231,7 +272,10 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
         validation_description, group_label, val_every,
     )
     if float(distance_loss_weight) > 0.0:
-        if use_distance_last_loss or use_distance_home_loss:
+        if distance_loss_kind == "crps_energy":
+            local_logger.info("Distribution scoring: weight=%.4f, fixed_scale_m=%.1f, spatial_projections=%s",
+                              distance_loss_weight, distribution_scale_m, energy_projections)
+        elif use_distance_last_loss or use_distance_home_loss:
             local_logger.info(
                 "\tDistance regularization enabled: weight=%.4f, short_floor_m=%.1f, use_last=%s, use_home=%s",
                 float(distance_loss_weight),
@@ -288,41 +332,8 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
             weighted_ce_loss = ce_loss_per_sample * batch_w
             ce_loss = weighted_ce_loss.sum() / batch_w.sum().clamp_min(1e-12)
 
-            if use_distance_last_loss:
-                batch_dist_candidates = distance_candidates_tensor[idx]
-                batch_target_distance = distance_targets_tensor[idx]
-                probs = torch.softmax(utilities, dim=1)
-                expected_distance = (probs * batch_dist_candidates).sum(dim=1)
-                normalizer = torch.clamp(batch_target_distance + short_floor, min=short_floor)
-                relative_error = (expected_distance - batch_target_distance) / normalizer
-                distance_loss_per_sample = F.smooth_l1_loss(
-                    relative_error,
-                    torch.zeros_like(relative_error),
-                    reduction="none",
-                )
-                weighted_distance_loss = distance_loss_per_sample * batch_w
-                distance_last_loss = weighted_distance_loss.sum() / batch_w.sum().clamp_min(1e-12)
-            else:
-                distance_last_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-
-            if use_distance_home_loss:
-                batch_dist_home_candidates = distance_candidates_home_tensor[idx]
-                batch_target_home_distance = distance_targets_home_tensor[idx]
-                probs = torch.softmax(utilities, dim=1)
-                expected_home_distance = (probs * batch_dist_home_candidates).sum(dim=1)
-                normalizer_home = torch.clamp(batch_target_home_distance + short_floor, min=short_floor)
-                relative_home_error = (expected_home_distance - batch_target_home_distance) / normalizer_home
-                home_loss_per_sample = F.smooth_l1_loss(
-                    relative_home_error,
-                    torch.zeros_like(relative_home_error),
-                    reduction="none",
-                )
-                weighted_home_loss = home_loss_per_sample * batch_w
-                distance_home_loss = weighted_home_loss.sum() / batch_w.sum().clamp_min(1e-12)
-            else:
-                distance_home_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-
-            distance_loss = distance_last_loss + distance_home_loss
+            distribution_scores = regularization(idx, torch.softmax(utilities, dim=1))
+            distance_loss = (distribution_scores * batch_w).sum() / batch_w.sum().clamp_min(1e-12)
 
             loss = ce_loss + float(distance_loss_weight) * distance_loss
 
@@ -355,33 +366,8 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
                 v_utils = v_utils.masked_fill(~v_m, -1e9)
                 v_ce_loss = ((F.cross_entropy(v_utils, v_y, reduction="none") * v_w).sum()
                              / v_w.sum().clamp_min(1e-12))
-                if use_distance_last_loss:
-                    v_dist_candidates = distance_candidates_tensor[val_idx]
-                    v_target_distance = distance_targets_tensor[val_idx]
-                    v_probs = torch.softmax(v_utils, dim=1)
-                    v_expected_distance = (v_probs * v_dist_candidates).sum(dim=1)
-                    v_normalizer = torch.clamp(v_target_distance + short_floor, min=short_floor)
-                    v_relative_error = (v_expected_distance - v_target_distance) / v_normalizer
-                    v_distance_last_loss = (
-                        F.smooth_l1_loss(v_relative_error, torch.zeros_like(v_relative_error), reduction="none") * v_w
-                    ).sum() / v_w.sum().clamp_min(1e-12)
-                else:
-                    v_distance_last_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-
-                if use_distance_home_loss:
-                    v_dist_home_candidates = distance_candidates_home_tensor[val_idx]
-                    v_target_home_distance = distance_targets_home_tensor[val_idx]
-                    v_probs = torch.softmax(v_utils, dim=1)
-                    v_expected_home_distance = (v_probs * v_dist_home_candidates).sum(dim=1)
-                    v_normalizer_home = torch.clamp(v_target_home_distance + short_floor, min=short_floor)
-                    v_relative_home_error = (v_expected_home_distance - v_target_home_distance) / v_normalizer_home
-                    v_distance_home_loss = (
-                        F.smooth_l1_loss(v_relative_home_error, torch.zeros_like(v_relative_home_error), reduction="none") * v_w
-                    ).sum() / v_w.sum().clamp_min(1e-12)
-                else:
-                    v_distance_home_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-
-                v_distance_loss = v_distance_last_loss + v_distance_home_loss
+                v_scores = regularization(val_idx, torch.softmax(v_utils, dim=1))
+                v_distance_loss = (v_scores * v_w).sum() / v_w.sum().clamp_min(1e-12)
 
                 val_loss = float((v_ce_loss + float(distance_loss_weight) * v_distance_loss).item())
 
@@ -437,6 +423,35 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
             best_epoch, best_val_loss,
         )
 
+    # Refit on every supplied development person after selecting an epoch count.
+
+    refit_epochs = 0
+    if refit_full:
+        refit_epochs = best_epoch or len(train_losses)
+        model.load_state_dict(initial_state)
+        optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=lr_step_size, gamma=lr_gamma)
+        local_logger.info("Refitting %s epochs on all %s development rows", refit_epochs, n_samples)
+        for epoch in range(refit_epochs):
+            model.train()
+            order = torch.randperm(n_samples, device=device)
+            for start in range(0, n_samples, batch_size):
+                idx = order[start:start + batch_size]
+                static = candidate_static_tensor if candidate_static_tensor.shape[0] == 1 else candidate_static_tensor[idx]
+                utilities = model(person_static_tensor[idx], person_dynamic_tensor[idx], static, candidate_dynamic_tensor[idx])
+                utilities = utilities.masked_fill(~mask_tensor[idx], -1e9)
+                weight = weights_tensor[idx]
+                score = F.cross_entropy(utilities, y_tensor[idx], reduction="none")
+                score = score + float(distance_loss_weight) * regularization(idx, torch.softmax(utilities, dim=1))
+                loss = (score * weight).sum() / weight.sum().clamp_min(1e-12)
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                if grad_clip is not None and float(grad_clip) > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), float(grad_clip))
+                optimizer.step()
+            scheduler.step()
+        model.eval()
+
     # ── Save history & plot ───────────────────────────────────────────────────
     if path is not None:
         history = {
@@ -456,6 +471,10 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
             "best_val_loss": None if best_epoch is None else best_val_loss,
             "stopped_early": stopped_early,
             "epochs_completed": len(train_losses),
+            "refit_full": bool(refit_full), "refit_rows": n_samples if refit_full else 0,
+            "refit_epochs": refit_epochs, "distance_loss_kind": distance_loss_kind,
+            "distribution_scale_m": float(distribution_scale_m),
+            "energy_projections": int(energy_projections),
         }
         with open(os.path.join(path, "loss_history.json"), "w") as f:
             json.dump(history, f, indent=2)

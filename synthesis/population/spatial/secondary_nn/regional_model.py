@@ -24,7 +24,12 @@ MODEL_NAME = "regional_model.pt"
 def configure(context):
     context.config("secondary_nn_use_target_distance", True)
     context.stage("data.spatial.ovgk")
+    context.config("secondary_nn_distance_loss_kind", "crps_energy")
+    context.config("secondary_nn_distribution_loss_weight", 0.1)
+    context.config("secondary_nn_distribution_scale_m", 1000.0)
+    context.config("secondary_nn_energy_projections", 8)
     if not context.config("secondary_nn_use_target_distance"):
+        context.config("secondary_nn_crossfit_fold", -1)
         context.stage("synthesis.population.spatial.secondary_nn.training_split")
     context.stage("synthesis.population.spatial.secondary_nn.h3")
     context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
@@ -47,6 +52,9 @@ def configure(context):
 
 
 def execute(context):
+
+    # Load expert inputs and prepare the fitting data.
+
     logger.info("Training regional model (neural choice) for secondary location choice...")
     overwrite_model = context.config("overwrite_regional_model_if_exists")
     model_path = os.path.join(context.working_directory, MODEL_NAME)
@@ -72,7 +80,7 @@ def execute(context):
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
         "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", 
         "trip_position_class", "departure_time_normalized", "daily_longest_distance_from_work",
-        "activity_duration_h", "target_distance", "trip_destination_distance_from_home", "activity_chain"
+        "activity_duration_h", "target_distance", "trip_destination_distance_from_home", "activity_chain", "chain_state"
     ]]
     mz_trips = mz_trips.merge(mz_chain_trips, on=["person_id", "trip_id"], how="left")
 
@@ -123,10 +131,10 @@ def execute(context):
 
     person_cols = ["person_id", "age", "sex", "employed", "car_availability", "income_class", "home_x", "home_y", "work_x", "work_y"]
     trip_cols = [
-        "person_id", "trip_id", "origin_x", "origin_y", f"destination_{H3_LEVEL_NAMES[0]}", "purpose","origin_purpose",
+        "person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", f"destination_{H3_LEVEL_NAMES[0]}", "purpose","origin_purpose",
         "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
         "departure_time_normalized", "daily_longest_distance_from_work",
-        "activity_duration_h", "target_distance", "trip_destination_distance_from_home", "activity_chain"
+        "activity_duration_h", "target_distance", "trip_destination_distance_from_home", "activity_chain", "chain_state"
     ]
     df_trips = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
     df_trips = df_trips[df_trips["purpose"].isin(SECONDARY_ACTIVITIES)].dropna(subset=[f"destination_{H3_LEVEL_NAMES[0]}"])
@@ -193,6 +201,7 @@ def execute(context):
         activity_duration_h=activity_duration_h, target_distance=target_distance,
         purpose_series=df_trips["purpose"], origin_purpose_series=df_trips["origin_purpose"],
         use_target_distance=bool(context.config("secondary_nn_use_target_distance")),
+        chain_state_matrix=np.stack(df_trips["chain_state"]),
         random_state=int(context.config("random_seed")), purpose_categories=purpose_categories,
     )
 
@@ -221,23 +230,44 @@ def execute(context):
     candidate_dynamic_x = candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC]    # [n_trips, num_h3, 4] — per-trip distances and detour factor
 
     model = NeuralChoiceModel(person_input_dim=person_trip_matrix.shape[1], candidate_input_dim=candidate_tensor.shape[2], person_hidden_dim=32, hidden_dim=64)
-    train_choice_model(model=model, person_static_x=static_matrix, person_dynamic_x=dynamic_matrix, candidate_static_x=candidate_static_x, candidate_dynamic_x=candidate_dynamic_x,
-                              y=y, valid_mask=valid_mask, logger_instance=logger, weights=weights,
-                              epochs=int(context.config("regional_model_epochs")),
-                              batch_size=int(context.config("regional_model_batch_size")),
-                              lr=float(context.config("regional_model_learning_rate")),
-                              num_threads=int(context.config("threads")),
-                              path=context.path(),
-                              validation_groups=df_trips["person_id"].to_numpy(),
-                              rotate_validation=False,
-                              restore_best_weights=True,
-                              early_stopping_patience=5,
-                              distance_candidates=candidate_dist_last_m,
-                              distance_targets=target_distance.astype(np.float32),
-                              distance_candidates_home=candidate_dist_home_m,
-                              distance_targets_home=target_home_distance.astype(np.float32),
-                              distance_loss_weight=float(context.config("secondary_nn_distance_loss_weight")),
-                              distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")))
+
+    # Select the destination distribution loss.
+
+    loss_kind = context.config("secondary_nn_distance_loss_kind")
+    train_choice_model(
+        model=model,
+        person_static_x=static_matrix,
+        person_dynamic_x=dynamic_matrix,
+        candidate_static_x=candidate_static_x,
+        candidate_dynamic_x=candidate_dynamic_x,
+        y=y, valid_mask=valid_mask, logger_instance=logger, weights=weights,
+        epochs=int(context.config("regional_model_epochs")),
+        batch_size=int(context.config("regional_model_batch_size")),
+        lr=float(context.config("regional_model_learning_rate")),
+        num_threads=int(context.config("threads")),
+        path=context.path(),
+        validation_groups=df_trips["person_id"].to_numpy(),
+        rotate_validation=False,
+        restore_best_weights=True,
+        early_stopping_patience=5,
+        distance_candidates=candidate_dist_last_m,
+        distance_targets=target_distance.astype(np.float32),
+        distance_candidates_home=candidate_dist_home_m,
+        distance_targets_home=target_home_distance.astype(np.float32),
+        distance_loss_weight=float(context.config(
+            "secondary_nn_distribution_loss_weight" if loss_kind == "crps_energy"
+            else "secondary_nn_distance_loss_weight")),
+        distance_loss_kind=loss_kind,
+        distribution_scale_m=float(context.config("secondary_nn_distribution_scale_m")),
+        energy_projections=int(context.config("secondary_nn_energy_projections")),
+        candidate_xy=np.stack([
+            np.broadcast_to(centroid_x, candidate_dist_last_m.shape),
+            np.broadcast_to(centroid_y, candidate_dist_last_m.shape)], axis=-1)
+            if loss_kind == "crps_energy" else None,
+        observed_xy=df_trips[["destination_x", "destination_y"]].to_numpy(dtype=np.float32, copy=True)
+            if loss_kind == "crps_energy" else None,
+        refit_full=not bool(context.config("secondary_nn_use_target_distance")),
+        distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")))
 
     ########## Building wrapper and saving model ##########
     static_candidate_features = h3_indexed[STATIC_CANDIDATE_FEATURES].to_numpy(dtype=np.float64)
@@ -252,7 +282,8 @@ def execute(context):
     joblib.dump(person_static_scaler,  person_static_scaler_path)
     joblib.dump(person_dynamic_scaler, person_dynamic_scaler_path)
     ########## analysis and plots ##########
-    _ = plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, y, all_h3, h3_geo_level0, centroid_x, centroid_y, home_x, home_y, origin_x, origin_y, h3_to_index, n_trips)
+    if context.config("secondary_nn_use_target_distance") or int(context.config("secondary_nn_crossfit_fold")) < 0:
+        _ = plot_analysis(context, wrapper, person_trip_matrix, candidate_tensor, y, all_h3, h3_geo_level0, centroid_x, centroid_y, home_x, home_y, origin_x, origin_y, h3_to_index, n_trips)
 
     return model_path, person_static_scaler_path, person_dynamic_scaler_path
 

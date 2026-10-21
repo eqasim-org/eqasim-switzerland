@@ -447,7 +447,7 @@ def training_mobility(context, frame):
 class OriginContext:
     """Summarize nearby opportunities without observing the chosen destination."""
 
-    def __init__(self, cells, radii=(1500.0, 5000.0)):
+    def __init__(self, cells, radii=(1500.0, 5000.0, 20000.0), purpose_counts=None):
         from .feature_encoding import STATIC_CANDIDATE_FEATURES
         self.columns = list(STATIC_CANDIDATE_FEATURES)
         self.radii = tuple(float(r) for r in radii)
@@ -457,16 +457,25 @@ class OriginContext:
         self.tree = cKDTree(self.xy)
         self.values = cells[self.columns].to_numpy(dtype=float)
         self.cache = {}
-        self.names = ["origin_nearest_destination_cell_m", "origin_home_distance_m", "origin_work_distance_m"]
+        self.purpose_values = {}
+        self.purpose_trees = {}
+        for purpose, fallback in {'work': 'num_statent', 'home': 'num_statent', 'other': 'num_statent',
+                                  'shop': 'shop', 'leisure': 'leisure', 'education': 'education'}.items():
+            counts = cells[fallback].to_numpy(dtype=float) if purpose_counts is None else purpose_counts[purpose].reindex(cells.h3_index, fill_value=0).to_numpy(dtype=float)
+            self.purpose_values[purpose] = counts
+            self.purpose_trees[purpose] = cKDTree(self.xy[counts > 0]) if (counts > 0).any() else None
+        self.names = ["origin_nearest_destination_cell_m", "origin_home_distance_m", "origin_work_distance_m",
+                      "origin_nearest_purpose_opportunity_m", "origin_has_purpose_opportunities"]
         for radius in self.radii:
             self.names.extend(f"origin_{int(radius)}m_{name}" for name in self.columns)
-            self.names.append(f"origin_{int(radius)}m_cells")
+            self.names.extend([f"origin_{int(radius)}m_cells", f"origin_{int(radius)}m_purpose_opportunities"])
 
-    def vector(self, origin_x, origin_y, home_x, home_y, work_x, work_y, has_work):
+    def vector(self, origin_x, origin_y, home_x, home_y, work_x, work_y, has_work, purpose="other"):
         # A 250 m origin grid shares summaries across repeated synthetic locations.
-        key = (int(np.floor(origin_x / 250)), int(np.floor(origin_y / 250)))
+        purpose = base_activity_purpose(purpose)
+        key = (int(np.floor(origin_x / 250)), int(np.floor(origin_y / 250)), purpose)
         if key not in self.cache:
-            center = (np.asarray(key, dtype=float) + .5) * 250
+            center = (np.asarray(key[:2], dtype=float) + .5) * 250
             summaries = []
             for radius in self.radii:
                 indices = self.tree.query_ball_point(center, radius)
@@ -477,14 +486,16 @@ class OriginContext:
                     if column.startswith("ovgk_share_") or column in ("urban", "urban_core", "outside_fraction"):
                         values[i] /= max(len(indices), 1)
                 summaries.extend(values)
-                summaries.append(len(indices))
+                summaries.extend([len(indices), self.purpose_values[purpose][indices].sum()])
             if len(self.cache) >= 10000:
                 self.cache.clear()
             self.cache[key] = np.asarray(summaries)
         nearest = self.tree.query([origin_x, origin_y])[0]
         home = np.hypot(origin_x - home_x, origin_y - home_y)
         work = np.hypot(origin_x - work_x, origin_y - work_y) if has_work else 0.0
-        return np.concatenate([[nearest, home, work], self.cache[key]]).astype(np.float32)
+        tree = self.purpose_trees[purpose]
+        purpose_distance = tree.query([origin_x, origin_y])[0] if tree is not None else 0.
+        return np.concatenate([[nearest, home, work, purpose_distance, float(tree is not None)], self.cache[key]]).astype(np.float32)
 
 
 
@@ -526,3 +537,17 @@ def require_purpose_mask(masks, purpose):
     if base not in masks:
         raise ValueError(f"No destination support mask for purpose {purpose!r}")
     return masks[base]
+
+
+def selector_origin_context(context):
+    """Count purpose-eligible facilities in each coordinate leaf for origin context."""
+    h3_data, levels, _ = context.stage('synthesis.population.spatial.secondary_nn.h3')
+    destinations = context.stage('synthesis.population.destinations')
+    masks = destination_offer_masks(destinations)
+    assignments = h3_data['destinations'].set_index('destination_id')['level_2']
+    counts = {}
+    for purpose, mask in masks.items():
+        leaves = assignments.reindex(destinations.loc[mask, 'destination_id'])
+        counts[purpose] = leaves.value_counts()
+    return OriginContext(levels['level_2'], radii=context.config('secondary_nn_selector_context_radii_m'),
+                         purpose_counts=counts)

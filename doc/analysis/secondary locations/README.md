@@ -5,9 +5,12 @@ configurations listed in `comparison.yml`. It does not schedule pipeline stages,
 rerun MATSim, overwrite run caches, or wait for the final simulation stage.
 Simulation input/output paths come from the supplied pipeline YAML files.
 Where those files were edited after a run, completed-stage metadata determines
-the algorithm and model settings. Dependency versions are resolved from the
-completed `synthesis.population.spatial.locations` root rather than whichever
-pickle happens to be newest.
+the algorithm and model settings. Production expert versions are selected by their nearest dependency path; deeper
+cross-fitting checkpoints are excluded from replay. Dependency versions are resolved from the
+latest completed full-spatial or secondary-assignment root rather than whichever
+dependency pickle happens to be newest. When only secondary assignment has been
+rerun, coordinates are reconstructed from its secondary locations and matching
+home/work/education dependencies; older combined-location outputs are not used.
 
 From the repository root:
 
@@ -141,10 +144,11 @@ independent observed people.
   is not independent held-out validation.** It isolates observed-origin
   destination choice and cannot establish predictive generalization or reproduce
   sequential rollout error. A paper claiming generalization would need new
-  person/household-separated fitting and testing outside this read-only analysis.
+  person/household-separated fitting and testing outside this read-only analysis. The cross-fitted gate
+  stages now save that separate person-held-out assessment in their validation artifacts.
 - “Learned selector” describes the flag-false experiment accurately: target
   distance is excluded from neural inputs and selection, but it still affects
-  training distance losses, stationary-trip handling and final facility draws.
+  training distance losses and stationary-trip handling.
   It is not an experiment with every influence of observed distance removed.
 - Only one fitted run/seed per method is available. Person-cluster intervals
   describe sampling variation across people, **not** between-seed variability,
@@ -155,3 +159,9 @@ independent observed people.
   uses each synthetic population’s own city-origin trips. All out-of-view mass
   stays in the denominator. The map caption states these different conditioning
   sets rather than suggesting the rows contain identical people.
+
+For probabilistic gates, replay records both the sampled expert and its local
+probability for each draw. Selection-diagnostic lines average fitted probabilities
+when available; the CSV table counts actual weighted draws. A trip can therefore
+contribute to both experts in that table. Historical deterministic outputs fall
+back to averaging their recorded decisions.

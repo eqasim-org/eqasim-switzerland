@@ -39,7 +39,12 @@ SHORT_RANGE_MODEL_THRESHOLD = 1500.0
 def configure(context):
     context.config("secondary_nn_use_target_distance", True)
     context.stage("data.spatial.ovgk")
+    context.config("secondary_nn_distance_loss_kind", "crps_energy")
+    context.config("secondary_nn_distribution_loss_weight", 0.1)
+    context.config("secondary_nn_distribution_scale_m", 1000.0)
+    context.config("secondary_nn_energy_projections", 8)
     if not context.config("secondary_nn_use_target_distance"):
+        context.config("secondary_nn_crossfit_fold", -1)
         context.stage("synthesis.population.spatial.secondary_nn.training_split")
     context.stage("synthesis.population.spatial.secondary_nn.h3")
     context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
@@ -70,6 +75,9 @@ def configure(context):
 
 
 def execute(context):
+
+    # Load expert inputs and prepare the fitting data.
+
     logger.info("Training short-range level2 model (<= threshold distance)...")
 
     overwrite_model = context.config("overwrite_short_range_model_if_exists")
@@ -88,11 +96,11 @@ def execute(context):
 
     mz_trips = context.stage("data.microcensus.trips")[0]
     mz_trips = mz_trips.loc[mz_trips.person_id.isin(mz_persons.person_id)].copy()
-    mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "purpose", "origin_purpose"]]
+    mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "purpose", "origin_purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
         "person_id", "trip_id", "daily_longest_distance_from_home", "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
         "departure_time_normalized", "daily_longest_distance_from_work",
-        "activity_duration_h", "target_distance", "trip_destination_distance_from_home", "activity_chain"
+        "activity_duration_h", "target_distance", "trip_destination_distance_from_home", "activity_chain", "chain_state"
     ]]
     mz_trips = mz_trips.merge(mz_chain_trips, on=["person_id", "trip_id"], how="left")
 
@@ -319,6 +327,7 @@ def execute(context):
         purpose_series=df["purpose"],
         origin_purpose_series=df["origin_purpose"],
         use_target_distance=bool(context.config("secondary_nn_use_target_distance")),
+        chain_state_matrix=np.stack(df["chain_state"]),
         random_state=int(context.config("random_seed")),
         purpose_categories=purpose_categories,
         person_static_scaler=person_static_scaler,
@@ -379,6 +388,10 @@ def execute(context):
         hidden_dim=32,
         dropout_rate=float(context.config("short_range_model_dropout_rate")),
     )
+
+    # Select the destination distribution loss.
+
+    loss_kind = context.config("secondary_nn_distance_loss_kind")
     train_choice_model(
         model=model,
         person_static_x=static_matrix,
@@ -406,7 +419,16 @@ def execute(context):
         distance_targets=target_distance.astype(np.float32),
         distance_candidates_home=candidate_dist_home_m,
         distance_targets_home=target_home_distance.astype(np.float32),
-        distance_loss_weight=float(context.config("secondary_nn_distance_loss_weight")),
+        distance_loss_weight=float(context.config(
+            "secondary_nn_distribution_loss_weight" if loss_kind == "crps_energy"
+            else "secondary_nn_distance_loss_weight")),
+        distance_loss_kind=loss_kind,
+        distribution_scale_m=float(context.config("secondary_nn_distribution_scale_m")),
+        energy_projections=int(context.config("secondary_nn_energy_projections")),
+        candidate_xy=np.stack([cand_x, cand_y], axis=-1) if loss_kind == "crps_energy" else None,
+        observed_xy=df[["destination_x", "destination_y"]].to_numpy(dtype=np.float32, copy=True)
+            if loss_kind == "crps_energy" else None,
+        refit_full=not bool(context.config("secondary_nn_use_target_distance")),
         distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")),
     )
 
@@ -436,17 +458,18 @@ def execute(context):
     )
     wrapper.save(model_path)
 
-    plot_distance_analysis(
-        context=context,
-        wrapper=wrapper,
-        person_trip_matrix=person_trip_matrix,
-        candidate_tensor=candidate_tensor,
-        valid_mask=valid_mask,
-        df=df,
-        children_by_level1=children_by_level1,
-        centroid_x_by_l2=centroid_x_by_l2,
-        centroid_y_by_l2=centroid_y_by_l2,
-    )
+    if context.config("secondary_nn_use_target_distance") or int(context.config("secondary_nn_crossfit_fold")) < 0:
+        plot_distance_analysis(
+            context=context,
+            wrapper=wrapper,
+            person_trip_matrix=person_trip_matrix,
+            candidate_tensor=candidate_tensor,
+            valid_mask=valid_mask,
+            df=df,
+            children_by_level1=children_by_level1,
+            centroid_x_by_l2=centroid_x_by_l2,
+            centroid_y_by_l2=centroid_y_by_l2,
+        )
 
     logger.info("Short-range model saved to %s", model_path)
     return (model_path,)
