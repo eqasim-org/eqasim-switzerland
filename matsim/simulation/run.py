@@ -87,6 +87,10 @@ def execute(context):
             "--config:controler.lastIteration", str(last_iteration),
             "--config:controler.writeEventsInterval", str(max(int(last_iteration/2),1)),
             "--config:controler.writePlansInterval", str(max(int(last_iteration/2),1)),
+            # Replanning/route calculators use global threads, not QSim threads.
+            # Override after the Java configurator resets global to CPU count;
+            # prepare may also have been cached with a different thread setting.
+            "--config:global.numberOfThreads", str(context.config("threads")),
             "--config:qsim.numberOfThreads", str(min(context.config("threads"),12)),
             "--config:linkStats.writeLinkStatsInterval", str(max(int(last_iteration/2),1)),
             "--config:linkStats.averageLinkStatsOverIterations", str(8),
@@ -103,6 +107,8 @@ def execute(context):
             "--config:controler.lastIteration", str(last_iteration),
             "--config:controler.writeEventsInterval", str(max(int(last_iteration/2),1)),
             "--config:controler.writePlansInterval", str(max(int(last_iteration/2),1)),
+            # Honour the same explicit replanning-thread limit in VDF runs.
+            "--config:global.numberOfThreads", str(context.config("threads")),
             "--config:qsim.numberOfThreads", str(min(context.config("threads"),16)),
             "--config:linkStats.writeLinkStatsInterval", str(last_iteration),
             "--config:linkStats.averageLinkStatsOverIterations", str(8),
