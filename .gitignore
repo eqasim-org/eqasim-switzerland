@@ -36,5 +36,3 @@ CuttingBoundries
 !mode_choice/routing/
 !mode_choice/routing/*.py
 
-# Tests stay local; agent guidance is shared.
-/tests/
