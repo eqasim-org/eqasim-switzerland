@@ -227,7 +227,7 @@ class writer:
         params_dict = self.get_initial_if_not_estimated(params_dict)
         
         # Preserve constrained-fit precision so export does not shift the VOT targets.
-        if not self.context.config("dmc_vot_constraints", True):
+        if not self.context.config("dmc_vot_constraints"):
             params_dict = {k: round(v, 4) if isinstance(v, float) else v for k, v in params_dict.items()}
 
         # Organize parameters by mode

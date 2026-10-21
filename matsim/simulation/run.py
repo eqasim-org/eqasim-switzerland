@@ -29,7 +29,7 @@ def execute(context):
     # whether to use qsim
     dsim = tools.parse_boolean(context.config("use_dsim"))
     if dsim:
-        arguments.extends([
+        arguments.extend([
             "--use-dsim", "true",
             "--config:dsim.threads", str(context.config("threads"))
         ])

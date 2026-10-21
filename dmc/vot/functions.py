@@ -27,10 +27,10 @@ class vot_utils:
     @staticmethod
     def _cost_marginal_utility(context, df, parameters):
         interaction = pd.Series(1.0, index=df.index)
-        if context.config("distance_cost_interaction", True):
+        if context.config("distance_cost_interaction"):
             interaction *= (df["euclidean_distance_km"] / context.config(
                 "reference_euclidean_distance_km")) ** parameters.get("lambda_cost_distance", 0.0)
-        if context.config("income_cost_interaction", True) and context.config("use_income_in_dmc", True):
+        if context.config("income_cost_interaction") and context.config("use_income_in_dmc"):
             interaction *= (df["income"] / context.config(
                 "reference_income_chf")) ** parameters.get("lambda_cost_income", 0.0)
         return parameters["beta_cost_CHF"] * interaction

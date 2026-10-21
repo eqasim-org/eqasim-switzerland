@@ -548,11 +548,11 @@ def get_regions_path(path,kind="freespeed", subfolder = "network_calibration_fil
     return ";".join(regions)
 
 
-def adapt_existing_scenario(config_path, sample_size, prefix, use_freight):
+def adapt_existing_scenario(config_path, sample_size, prefix, use_freight,*,storageCapExponent=1.0):
     """Apply local sampling/input changes to an already adapted external scenario."""
     change_params(config_path, {
         "qsim.flowCapacityFactor": sample_size,
-        "qsim.storageCapacityFactor": sample_size ** 0.75,
+        "qsim.storageCapacityFactor": sample_size ** storageCapExponent,
         "network.inputNetworkFile": prefix + "network.xml.gz",
         "plans.inputPlansFile": prefix + "population.xml.gz",
         "facilities.inputFacilitiesFile": prefix + "facilities.xml.gz",

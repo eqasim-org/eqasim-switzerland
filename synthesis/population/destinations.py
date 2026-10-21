@@ -1,6 +1,6 @@
 import pandas as pd
 import geopandas as gpd
-import data.spatial.ovgk
+from data.spatial.ovgk import impute as impute_ovgk
 from data.cross_border.destinations import make_entry_border_facility_id, make_exit_border_facility_id
 from synthesis.population.spatial.secondary_nn.tools import NN_ALGORITHMS, add_osm_destinations
 
@@ -82,7 +82,7 @@ def build_border_destinations(context):
         df[column] = False
 
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="border_facility")
+    df_spatial = impute_ovgk(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="border_facility")
     df = df.merge(df_spatial[["destination_id", "ovgk"]], how="left", on="destination_id")
 
     df_municipality_type = context.stage("data.spatial.municipality_types")
