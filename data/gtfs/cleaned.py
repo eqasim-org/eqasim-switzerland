@@ -73,6 +73,7 @@ def execute(context):
         logger.info(path)
         feed = gtfs.read_feed(path)
         feed = gtfs.clean_feed(feed)
+        feed = gtfs.repair_backward_stop_times(feed) # e.g. a missing time written 00:00:00, refused by MATSim
 
         # This was fixed in pt2matsim, so we can remove one a new release (> 20.7) is available.
         feed = gtfs.despace_stop_ids(feed) # Necessary as MATSim does not like stops/links with spaces
@@ -90,7 +91,7 @@ def execute(context):
         if swiss_idx is None:
             raise RuntimeError("gtfs_tpg_file is set but there is no Swiss feed (file name with 'fp') to replace the TPG lines in")
         logger.info(f"Reading the TPG feed {tpg_file}")
-        tpg_feed = gtfs.despace_stop_ids(gtfs.clean_feed(gtfs.read_feed(tpg_file)))
+        tpg_feed = gtfs.despace_stop_ids(gtfs.repair_backward_stop_times(gtfs.clean_feed(gtfs.read_feed(tpg_file))))
         swiss_feed = gtfs.replace_agency_lines(feeds[swiss_idx][1], tpg_feed, agency_id = "881", service_prefix = "TPG_",
                                                removed_lines = context.config("gtfs_tpg_removed_lines"))
         if filter_date:
