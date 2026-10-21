@@ -93,9 +93,12 @@ The stages perform the following steps:
    `split_network` splits crossing edges but retains the full inside and outside
    network. This gives loading an edge boundary at each regional entry/exit.
 3. **Load and route traffic on the full network.**
-   `load_network` uses iterative routing/simulation when
-   `sumo_loading_method: dua`, or native macro assignment for `incremental` and
-   `SUE`. It records explicit routes, edge exit times, weights and trip metrics.
+   `load_network` defaults to native macroscopic `incremental` assignment;
+   `SUE` is another macro option. Assigned route distributions are realized
+   reproducibly as individual routes, without a subsequent `duarouter` search.
+   Entry times accumulate loaded departure-slice edge costs. Full-network
+   iterative routing/simulation requires explicit `sumo_loading_method: dua`.
+   The stage records routes, estimated or experienced exit times, weights and metrics.
    Without a configured region, this stage uses the original unsplit network.
 4. **Keep every inside visit.**
    `cutter.network` retains regional edge pieces and applies the configured
@@ -105,7 +108,8 @@ The stages perform the following steps:
 5. **Package and simulate the region.**
    `cutter.scenario` copies the regional network, routes and edge mapping into
    a bundle. The selected final run stage generates its own local config from
-   those inputs and executes SUMO. `sumo.run` returns that stage's output paths.
+   those inputs and executes SUMO, retaining assigned paths by default
+   (`sumo_rerouting_probability: 0`). `sumo.run` returns its output paths.
 
 The final run stages reuse config-writing helpers directly. They do not depend
 on the standalone `sumo.config.*` stages shown in the next diagram. The bundle

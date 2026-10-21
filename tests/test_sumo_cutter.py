@@ -115,7 +115,7 @@ def test_regional_dispatch_dependencies_and_invalid_model():
         assert {stage['descriptor'] for stage in context.required_stages} == {'sumo.cutter.scenario', 'sumo.runtime.sumo'}
 
 
-@pytest.mark.parametrize('method,scale,expected', [('dua', 2, 6), ('incremental', 2, 3), ('SUE', 1, 3)])
+@pytest.mark.parametrize('method,scale,expected', [('dua', 2, 6), ('incremental', 2, 6), ('SUE', 1, 3)])
 def test_loading_methods_and_scale(tmp_path, runtime, network, method, scale, expected):
     source = trip_file(tmp_path, count=3)
     selected = demand.execute(Context(demand, tmp_path / 'demand', {'sumo_assignment_trip_files': [str(source)]}))
@@ -237,7 +237,8 @@ def test_nonconvergence_and_incomplete_horizon_are_explicit(tmp_path, runtime, n
     source = trip_file(tmp_path, count=1)
     selected = demand.execute(Context(demand, tmp_path / 'demand', {'sumo_assignment_trip_files': [str(source)]}))
     settings = {'sumo_network_file': str(network), 'random_seed': 42, 'sumo_end': 1000,
-                'sumo_assignment_iterations': 1, 'sumo_loading_require_convergence': True}
+                'sumo_assignment_iterations': 1, 'sumo_loading_require_convergence': True,
+                'sumo_loading_method': 'dua'}
     stages = {'sumo.runtime.sumo': runtime, 'sumo.scenario.demand': selected}
     with pytest.raises(RuntimeError, match='stability'):
         load_network.execute(Context(load_network, tmp_path / 'unstable', settings, stages))
@@ -296,8 +297,98 @@ def test_dua_updates_route_choices_using_loaded_costs(tmp_path, runtime):
     loaded = load_network.execute(Context(load_network, tmp_path / 'load', {
         'sumo_network_file': str(net), 'random_seed': 42, 'sumo_end': 2000,
         'sumo_assignment_interval': 300, 'sumo_assignment_iterations': 5,
-        'sumo_loading_convergence_tolerance': 0}, stages))
+        'sumo_loading_convergence_tolerance': 0, 'sumo_loading_method': 'dua'}, stages))
     routes = read_routes(loaded['routes'])[1]
     assert any('fast' in vehicle['edges'] for vehicle in routes)
     assert any('slow1' in vehicle['edges'] for vehicle in routes)
     assert loaded['convergence']['mean_travel_times_s'][0] > 30
+
+
+@pytest.mark.parametrize('restricted', [False, True])
+def test_default_macro_keeps_assignment_distribution_without_postrouting(tmp_path, runtime, monkeypatch, restricted):
+    nodes = tmp_path / 'nodes.xml'
+    nodes.write_text('<nodes><node id="a" x="0" y="0"/><node id="b" x="100" y="0"/>'
+        '<node id="c" x="200" y="0"/><node id="d" x="300" y="0"/>'
+        '<node id="e" x="150" y="50"/></nodes>')
+    edge_file = tmp_path / 'edges.xml'
+    permission = ' allow="passenger"' if restricted else ''
+    edge_file.write_text('<edges><edge id="in" from="a" to="b" length="100" speed="10"/>'
+        f'<edge id="fast" from="b" to="c" length="100" speed="10"{permission}/>'
+        '<edge id="slow1" from="b" to="e" length="70" speed="8"/>'
+        '<edge id="slow2" from="e" to="c" length="70" speed="8"/>'
+        '<edge id="out" from="c" to="d" length="100" speed="10"/></edges>')
+    stages = {'sumo.runtime.sumo': runtime}
+    network = tmp_path / 'network.net.xml'
+    sumo.run(Context(sumo, tmp_path / 'native', stages=stages), ['--node-files', nodes, '--edge-files', edge_file,
+        '--output-file', network, '--no-internal-links', 'true'], binary='netconvert')
+    source = trip_file(tmp_path, count=200)
+    if restricted:
+        source.write_text(source.read_text().replace('<routes>', '<routes><vType id="truck" vClass="truck"/>')
+                          .replace(' depart=', ' type="truck" depart='))
+    stages['sumo.scenario.demand'] = demand.execute(Context(demand, tmp_path / 'demand',
+        {'sumo_assignment_trip_files': [str(source)]}))
+    native_run = sumo.run
+    calls = []
+    def record(*args, **kwargs):
+        calls.append(kwargs.get('binary', 'sumo'))
+        return native_run(*args, **kwargs)
+    monkeypatch.setattr(sumo, 'run', record)
+    settings = {'sumo_network_file': str(network), 'random_seed': 42,
+                'sumo_end': 3600, 'sumo_assignment_scale': 10}
+    context = Context(load_network, tmp_path / 'load', settings, stages)
+    assert context.config('sumo_loading_method') == 'incremental'
+    if restricted:
+        with pytest.raises(ValueError, match='Invalid native marouter assignment.*forbidden to truck'):
+            load_network.execute(context)
+        assert calls == ['duarouter', 'marouter']
+        return
+    result = load_network.execute(context)
+    assert calls == ['duarouter', 'marouter']
+    assert result['source_count'] == 200
+    assert result['count'] == 2000
+    _, vehicles = read_routes(result['routes'])
+    assert {vehicle['parameters']['sumo_original_trip_id'] for vehicle in vehicles} == {f't{i}' for i in range(200)}
+    assert all(vehicle['parameters']['source_travel_time_s'] == '32' for vehicle in vehicles)
+    assigned_paths = {tuple(route.get('edges').split()) for vehicle in elements(context.cache / 'assigned.flows.xml.gz', 'vehicle')
+                      for route in vehicle.findall('routeDistribution/route') if float(route.get('probability')) > 0}
+    assert {tuple(vehicle['edges']) for vehicle in vehicles} == assigned_paths
+    weighted = {edge.get('id'): (float(edge.get('entered')), float(edge.get('traveltime')))
+                for interval in elements(result['weights'], 'interval') for edge in interval.findall('edge')}
+    for edge in ('fast', 'slow1'):
+        count = sum(edge in vehicle['edges'] for vehicle in vehicles)
+        assert count > 0
+        assert abs(count - weighted[edge][0]) < 1
+    for vehicle in vehicles:
+        duration = vehicle['exit_times'][-1] - float(vehicle['attributes']['depart'])
+        assert duration == pytest.approx(sum(weighted[edge][1] for edge in vehicle['edges']))
+    first = [(v['attributes']['id'], v['edges'], v['exit_times']) for v in vehicles]
+    second = load_network.execute(Context(load_network, tmp_path / 'repeat', settings, stages))
+    assert first == [(v['attributes']['id'], v['edges'], v['exit_times']) for v in read_routes(second['routes'])[1]]
+
+
+def test_macro_clock_uses_departure_slice_and_partial_endpoints(tmp_path):
+    from sumo.scenario.assignment import materialize_assignment
+    from lxml import etree
+    # All edges appear in an explicitly timed route; never fall back to free flow.
+    network = tmp_path / 'network.xml'
+    network.write_text('<net>' + ''.join(f'<edge id="{e}" from="a" to="b"><lane id="{e}_0" index="0" '
+        'speed="10" length="100" shape="0,0 100,0"/></edge>' for e in ('a', 'b'))
+        + '<connection from="a" to="b" fromLane="0" toLane="0"/></net>')
+    source = tmp_path / 'trips.xml'
+    source.write_text('<routes><trip id="p" depart="3595" departPos="50" arrivalPos="25" from="a" to="b"/></routes>')
+    assigned = tmp_path / 'assigned.xml'
+    assigned.write_text('<routes><vehicle id="p" depart="3595"><routeDistribution>'
+        '<route edges="a b" probability="7"/></routeDistribution></vehicle></routes>')
+    weights = tmp_path / 'weights.xml'
+    weights.write_text('<meandata><interval begin="0" end="3600"><edge id="a" traveltime="20"/>'
+        '<edge id="b" traveltime="40"/></interval><interval begin="3600" end="7200">'
+        '<edge id="a" traveltime="200"/><edge id="b" traveltime="400"/></interval></meandata>')
+    output = tmp_path / 'routes.xml'
+    materialize_assignment(assigned, weights, source, network, output, seed=42)
+    vehicle = read_routes(output)[1][0]
+    assert vehicle['exit_times'] == [3605, 3615]
+    tree = etree.parse(str(weights))
+    tree.find('interval/edge').getparent().remove(tree.find('interval/edge'))
+    tree.write(str(weights))
+    with pytest.raises(ValueError, match='No loaded travel time'):
+        materialize_assignment(assigned, weights, source, network, output, seed=42)

@@ -11,8 +11,7 @@ config:
   sumo_modes: [car, truck]
   sumo_region_geometry: data/zurich_region.gpkg
   sumo_simulation_model: microscopic  # Or mesoscopic.
-  sumo_loading_method: dua
-  sumo_loading_mesoscopic: true
+  sumo_loading_method: incremental  # Default: native macro assignment, then cut its assigned paths.
   sumo_assignment_scale: 1.0  # Full demand; loading already expands representative samples when >1.
   sumo_assignment_iterations: 50
   sumo_begin: 0

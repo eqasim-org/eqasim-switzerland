@@ -12,5 +12,5 @@ config:
   sumo_end: 108000
   sumo_micro_step_length: 0.5
   sumo_micro_action_step_length: 1.0
-  sumo_rerouting_probability: 1.0
+  sumo_rerouting_probability: 0.0  # Default: preserve supplied paths; enable rerouting explicitly.
   sumo_rerouting_period: 300

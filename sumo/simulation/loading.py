@@ -1,17 +1,20 @@
-"""Native iterative DUA orchestration and completion/stability diagnostics."""
+"""Native macroscopic assignment and opt-in simulation-based DUA loading."""
 
 from pathlib import Path
 import math
 import statistics
 
-from sumo.config import loaded, macroscopic
+from sumo.config import macroscopic
 from sumo.config.tools import positive
 from sumo.runtime import sumo
 from sumo.scenario.tools import elements
+from sumo.scenario.assignment import materialize_assignment
 
 
 def run_macroscopic(context, network, trips, method):
     cache = Path(context.path()).resolve()
+    if positive(context.config("sumo_assignment_scale"), "sumo_assignment_scale") < 1:
+        raise ValueError("Loading requires scale >= 1 so every original trip retains a route")
     mapped = cache / "mapped.trips.xml.gz"
     sumo.run(context, ["--net-file", network, "--route-files", trips, "--output-file", mapped,
                       "--write-trips", "true", "--mapmatch.distance", context.config("sumo_mapmatch_distance"),
@@ -20,10 +23,12 @@ def run_macroscopic(context, network, trips, method):
     demand = {"network": network, "loading": str(mapped), "queries": str(mapped), "count": len(departures),
               "first_departure": min(departures), "last_departure": max(departures)}
     assignment = macroscopic.write(context, demand, method=method)
-    workflow = loaded.write(context, assignment, demand)
-    sumo.run(context, ["-c", workflow["assignment_config"]], binary="marouter")
-    sumo.run(context, ["-c", workflow["routing_config"]], binary="duarouter")
-    return workflow["routes"], workflow["weights"]
+    sumo.run(context, ["-c", assignment], binary="marouter")
+    routes, weights = cache / "assigned.routes.xml.gz", cache / "loaded.edges.xml.gz"
+    report = materialize_assignment(cache / "assigned.flows.xml.gz", weights, mapped, network,
+                                    routes, context.config("random_seed"), context.config("sumo_begin"),
+                                    context.config("sumo_assignment_interval"))
+    return routes, weights, report
 
 
 def run_iterations(context, network, trips):

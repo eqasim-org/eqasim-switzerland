@@ -19,7 +19,7 @@ def configure(context, inputs=True):
     context.config("sumo_begin", 0)
     context.config("sumo_end", 108000)
     context.config("sumo_edge_output_period", 900)
-    context.config("sumo_rerouting_probability", 1.0)
+    context.config("sumo_rerouting_probability", 0.0)
     context.config("sumo_rerouting_period", 300)
 
 

@@ -15,7 +15,7 @@ vehicle composition and actual signal plans to calibrate a city scenario.
 | `sumo.config.config` | Dictionary collecting micro, meso, macro and loaded configs | Config generation only |
 | `sumo.simulation.run` | Simulation output paths; selects micro/meso with `sumo_simulation_model` | Runs `sumo` |
 | `sumo.router.assignment` | Loaded weights, assigned flows, query routes and `trip_metrics.parquet` | Runs both assignment and routing |
-| `sumo.simulation.load_network` | Full loaded routes with edge exit times, metrics and stability report | Iterative SUMO/duarouter, or native macro assignment |
+| `sumo.simulation.load_network` | Full assigned routes with edge exit times, metrics and loading report | Native macro assignment by default; simulation-based DUA opt-in |
 | `sumo.simulation.run_microscopic` | Microscopic execution using `sumo.cutter.scenario` | Runs `sumo` |
 | `sumo.simulation.run_mesoscopic` | Mesoscopic execution using `sumo.cutter.scenario` | Runs `sumo --mesosim` |
 | `sumo.run` | Selects one of the two regional run stages through `sumo_simulation_model` | Delegates to selected stage |
@@ -52,11 +52,12 @@ Tripinfo contains simulated travel time and route length; summary, vehicle-route
 and 15-minute edge statistics are also written.
 [Tripinfo output](https://sumo.dlr.de/docs/Simulation/Output/TripInfo.html).
 
-Both simulation presets give vehicles rerouting information with probability
-1, update routing observations every 60 seconds over five observations, and
-allow rerouting every 300 seconds. This assumes informed drivers. Change
-`sumo_rerouting_probability` and `sumo_rerouting_period` for the intended adoption
-and response behavior. This is online adaptation, not a converged user equilibrium.
+Both simulation presets retain assigned paths by default
+(`sumo_rerouting_probability: 0`). Enabling this probability models informed
+drivers: observations update every 60 seconds over five observations and
+rerouting is allowed every 300 seconds. Set `sumo_rerouting_probability` and
+`sumo_rerouting_period` for that behavior explicitly. Online adaptation does
+not establish user equilibrium.
 [SUMO routing device](https://sumo.dlr.de/docs/Simulation/Routing.html).
 
 For Zurich, supply a Zurich network and compatible demand. Guessed OSM traffic
@@ -78,7 +79,16 @@ are unavailable. [SUMO mesoscopic model and limitations](https://sumo.dlr.de/doc
 
 ## Macroscopic congestion and per-trip metrics
 
-The loaded workflow performs these steps:
+The default regional workflow (`sumo.run`) uses `sumo.simulation.load_network`:
+map endpoints, assign traffic with `marouter`, realize its assigned route
+distributions, cut those paths using loaded entry-time estimates, and run the
+regional micro/mesoscopic simulation. There is no route search after `marouter`
+and no full-network mesoscopic simulation by default. See the
+[loading and cutter guide](../cutter/README.md) for defaults, integer route-share
+realization, time-slice estimates and native vehicle-class limitations.
+
+The separate **loaded-skims** workflow (`sumo.router.assignment`, explicitly
+selected with `sumo.config.loaded`) performs these steps:
 
 1. Prepare individual road demand and queries for every source trip.
 2. Map geographic endpoints to connected SUMO edges, failing on invalid routes.
@@ -159,7 +169,9 @@ Imported costs must use current network edge IDs.
 for complete demand and 10 for a representative 10% sample. Capacity stays at
 the network scale. A shared factor assumes consistent sampling across resident,
 foreign, freight and commercial inputs; verify this before interpreting levels
-of congestion. The metric file still contains one row per original query.
+of congestion. In the standalone loaded-skims workflow the metric file contains
+one row per original query. The regional loading workflow instead exports all
+native scale clones and keeps their assigned paths through cutting and simulation.
 
 Hourly slices are macroscopic approximations; queues and spillback are not
 propagated between intervals. Routing does not extrapolate the last loaded

@@ -1,12 +1,19 @@
 # Loaded network and regional scenarios
 
 `sumo.simulation.load_network` loads the full scenario before cutting it. The
-default method alternates native `duarouter` route choice and SUMO mesoscopic
-simulation through `duaIterate.py`. The first routes use network speeds;
-subsequent iterations use measured edge costs from the preceding simulation.
-MSA progressively reduces the probability of changing an established route.
-Trips therefore interact through queues and junctions during loading, rather
-than being routed once against free-flow costs.
+default method is native `marouter` **incremental macroscopic assignment**.
+Demand is loaded in increments and route choice responds to flow-dependent
+edge costs. A seeded, balanced integer realization retains its assigned route
+distribution. There is no full-network traffic simulation and no `duarouter`
+route search after assignment. `duarouter` only maps and validates endpoints
+before `marouter`. The cutter uses those assigned paths and estimated entry
+times, then the regional stage runs microscopic or mesoscopic traffic.
+
+Set `sumo_loading_method: SUE` for native stochastic assignment, or explicitly
+select `dua` for iterative routing and traffic simulation via `duaIterate.py`.
+DUA starts from network speeds and updates routes with measured simulated
+costs; MSA progressively reduces route-changing probability. Only that opt-in
+method represents full-network queues and junction interactions during loading.
 
 `sumo_modes` is shared by population plans, commercial trips, vehicle demand,
 loading and connectivity checks. Its default is `[car, truck]`; **truck includes
@@ -88,8 +95,8 @@ and labels interpolated times explicitly.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `sumo_loading_method` | `dua` | `dua`, `incremental` or `SUE` |
-| `sumo_loading_mesoscopic` | `true` | Mesoscopic loading; false uses microscopic loading |
+| `sumo_loading_method` | `incremental` | Native macro `incremental` or `SUE`; simulation-based `dua` is opt-in |
+| `sumo_loading_mesoscopic` | `true` | For `dua` only: mesoscopic loading; false uses microscopic loading |
 | `sumo_loading_route_choice` | `msa` | `msa`, `gawron` or `logit`, for DUA |
 | `sumo_assignment_iterations` | `50` | Maximum DUA iterations or native macro increments/iterations |
 | `sumo_assignment_interval` | `3600` s | Aggregation of loaded edge costs |
@@ -97,23 +104,32 @@ and labels interpolated times explicitly.
 | `sumo_loading_convergence_window` | `5` | DUA mean travel-time observation window |
 | `sumo_loading_convergence_tolerance` | `0.01` | Relative standard deviation threshold; zero disables early stopping |
 | `sumo_loading_require_convergence` | `false` | Fail when DUA misses this stability threshold |
-| `sumo_begin` / `sumo_end` | `0` / `108000` s | Loading horizon; all selected trips must complete |
+| `sumo_begin` / `sumo_end` | `0` / `108000` s | All departures must be covered; DUA additionally requires completed trips |
 
-The convergence report includes iteration means, relative standard deviation
+For DUA, the convergence report includes iteration means, relative standard deviation
 and `equilibrium_guaranteed: false`. Stable mean travel time alone does not prove
 user equilibrium or route-level convergence. Assess iteration and aggregation
 sensitivity before interpreting an assignment as settled. Undeparted or
 unfinished DUA vehicles cause an error; extend the horizon or inspect deadlocks.
 Teleportation is disabled.
 
-DUA expansion creates simulated clones and exports all of them; their
+Both macro and DUA expansion export native scale clones; their
 `sumo_original_trip_id` identifies the original trip. The expansion factor must
-be at least one to retain every original trip. Macroscopic expansion increases
-flow volumes while exporting one query route per source trip. Its final query
-routes need not reproduce the mixed assignment route distribution. With a
-region, both macro methods use the same boundary-split network; their boundary
-times remain **estimated from macroscopic edge costs**, rather than experienced
-simulation times. See [macroscopic cost assumptions](../config/README.md).
+be at least one to retain every original trip. Macroscopic route shares use
+largest-remainder rounding and a configured-seed shuffle of vehicle identities;
+each assigned route count differs from its fractional target by less than one
+vehicle per distribution and departure slice. No new paths are calculated.
+With a region, both macro methods use the boundary-split network. Boundary times
+are **estimates** accumulated from loaded edge costs in each trip's departure
+slice, with partial endpoint positions accounted for. They do not model queue
+propagation between slices or demonstrate user equilibrium. The realization
+report records this approximation. See [macroscopic cost assumptions](../config/README.md).
+
+SUMO 1.28.0 `marouter` searches with its default vehicle class, even for typed
+truck/LCV input. All exported routes are checked against their actual vehicle
+class and permitted turns. An invalid native assignment fails explicitly;
+use `sumo_loading_method: dua` when class restrictions require class-aware
+assignment. The exporter does not reroute or silently modify assigned flows.
 
 `trip_metrics.parquet` contains source IDs, original travel-time references,
 loaded travel time and distance. DUA time measures actual departure to arrival;
@@ -145,8 +161,8 @@ The local ignored `config_sumo_load.yml` selects the loading stage using the
 current 10% synthesis configuration. The portable
 [cut.example.yml](cut.example.yml) demonstrates existing network/trip inputs.
 Use the returned bundle config with the isolated runtime's `sumo.run` helper.
-Default microscopic presets include online rerouting; set
-`sumo_rerouting_probability: 0` to keep the extracted paths during that run.
+Both regional presets default to `sumo_rerouting_probability: 0`, preserving
+the extracted paths. Enable online rerouting explicitly if desired.
 
 ## Run the cut scenario
 
@@ -154,8 +170,8 @@ Set `sumo_simulation_model` to `microscopic` (default) or `mesoscopic` and run
 `sumo.run`. Both choices consume `sumo.cutter.scenario` and generate a fresh local
 config using the corresponding shared preset. The microscopic preset uses
 `sumo_micro_*` settings; the mesoscopic preset uses `sumo_meso_*` settings.
-`sumo_loading_mesoscopic` independently controls the preceding full-network DUA
-loading, so the final city model can differ from the loading model.
+`sumo_loading_mesoscopic` controls only explicitly selected full-network DUA
+loading; it has no effect on the default macroscopic assignment.
 
 ```bash
 uv run -m synpp config_sumo_load.yml --run sumo.run \
@@ -182,10 +198,8 @@ written in the run stage cache. The cached cutter network and routes are read
 without modification; switching models keeps separate execution caches.
 
 The final run stages do not apply `sumo_assignment_scale` again. They simulate
-the vehicles already present in the cut routes. With DUA loading, exported
-clones are already included; with macro loading, its volume expansion alone
-does not expand the individual exported query routes. No new sampling or
-expansion mechanism is introduced by these run stages.
+the vehicles already present in the cut routes, including scale clones from
+either loading method. No new sampling or expansion is applied by these stages.
 
 The older `sumo.simulation.run` remains the runner for separately generated
 `sumo.config.microscopic` / `sumo.config.mesoscopic` configs and explicit inputs;

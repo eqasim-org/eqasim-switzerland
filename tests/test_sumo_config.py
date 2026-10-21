@@ -88,7 +88,7 @@ def test_simulation_configs_validate_run_and_keep_producers_readonly(tmp_path, r
     validate_schema(config, runtime, "sumo")
     before = {path.name: path.read_bytes() for path in config.parent.iterdir()}
     execution = Context(run, tmp_path / "simulation", {"sumo_simulation_model": model},
-                         {"sumo.config." + model: str(config), "sumo.runtime.sumo": runtime})
+                         {"sumo.config.config": {model: str(config)}, "sumo.runtime.sumo": runtime})
     result = run.execute(execution)
     assert Path(result["tripinfo"]).is_file()
     assert Path(result["edge_data"]).is_file()

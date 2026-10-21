@@ -150,9 +150,11 @@ file, separate freight/commercial trips, shared tools, and XML writer.
 [Simulation presets and loaded assignment](config/README.md) covers microscopic,
 mesoscopic and macroscopic configs, execution stages, and congestion-aware
 per-trip travel times and distances.
-[Network loading and regional scenarios](cutter/README.md) describes iterative
-traffic loading, shared `sumo_modes`, polygon clipping, crossing-trip entry times
-and runnable regional bundles.
+[Network loading and regional scenarios](cutter/README.md) describes default
+macroscopic assignment, shared `sumo_modes`, polygon clipping, estimated
+crossing-trip entry times and runnable regional bundles. Its default passes
+`marouter`'s assigned paths directly to the cutter and preserves them in the
+regional run; simulation-based full-network DUA is an explicit option.
 `sumo.run` executes that cut scenario; `sumo_simulation_model` selects
 `microscopic` (default) or `mesoscopic`. See the
 [regional execution commands](cutter/README.md#run-the-cut-scenario).

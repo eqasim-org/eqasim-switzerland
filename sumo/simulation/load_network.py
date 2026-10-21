@@ -7,6 +7,7 @@ import shutil
 
 from sumo.config import macroscopic, tools
 from sumo.scenario import modes
+from sumo.scenario.assignment import source_trip_id
 from sumo.scenario.network.tools import read_network, route_length, validate_routes
 from sumo.scenario.tools import elements, filter_loading_trips, read_routes, write_routes
 from sumo.runtime import sumo
@@ -24,7 +25,7 @@ def configure(context):
     context.config("sumo_region_geometry", None)
     if context.config("sumo_region_geometry") is not None:
         context.stage("sumo.cutter.split_network")
-    method = context.config("sumo_loading_method", "dua")
+    method = context.config("sumo_loading_method", "incremental")
     if method not in {"dua", "incremental", "SUE"}:
         raise ValueError("sumo_loading_method must be 'dua', 'incremental' or 'SUE'")
     if method != "dua":
@@ -63,15 +64,15 @@ def execute(context):
         remap_trip_endpoints(loading, split["mapping"], cache / "split.trips.xml.gz")
         loading = cache / "split.trips.xml.gz"
 
-    # Alternate route choice and traffic loading, or explicitly use a macroscopic method.
+    # Assign traffic macroscopically, or run simulation-based DUA when requested.
 
     method = context.config("sumo_loading_method")
     if method == "dua":
         raw_routes, weights, convergence = run_iterations(context, network, loading)
         timing = "experienced edge exit times"
     else:
-        raw_routes, weights = run_macroscopic(context, network, loading, method)
-        convergence = {"method": method, "equilibrium_guaranteed": False}
+        raw_routes, weights, realization = run_macroscopic(context, network, loading, method)
+        convergence = {"method": method, "equilibrium_guaranteed": False, "realization": realization}
         timing = "macroscopic estimated edge exit times"
 
     # Preserve source IDs and check completion and turn connectivity before publishing routes.
@@ -85,7 +86,7 @@ def execute(context):
     seen = set()
     data = read_network(network)
     for vehicle in vehicles:
-        source_id = _source_id(vehicle["attributes"]["id"], definitions)
+        source_id = source_trip_id(vehicle["attributes"]["id"], definitions)
         seen.add(source_id)
         vehicle["parameters"] = {**parameters[source_id], **vehicle["parameters"], "sumo_original_trip_id": source_id,
                                  "sumo_requested_depart": definitions[source_id]["depart"]}
@@ -128,12 +129,3 @@ def validate(context):
 def _copy(element):
     import copy
     return copy.deepcopy(element)
-
-
-def _source_id(vehicle_id, originals):
-    if vehicle_id in originals:
-        return vehicle_id
-    parent, separator, clone = vehicle_id.rpartition(".")
-    if separator and clone.isdigit() and parent in originals:
-        return parent
-    raise ValueError(f"Cannot match loaded vehicle {vehicle_id} to its source trip")
