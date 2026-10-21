@@ -73,9 +73,11 @@ class EducationStudentStockTest(unittest.TestCase):
 
     def test_unresolved_imputation_outcome_retains_saved_student(self):
         survey=pd.DataFrame({'age':[22,22], 'sex':[0,0], 'canton_id':[1,1], 'employed':[3,3],
+            'job_position':70,
             'weight':[1.,1.], 'is_student':[1,1], 'current_education':[1,1],
             'survey_year':[2022,2023], 'education_country_code':[8100,8100], 'education_municipality':[1,1]})
         persons=pd.DataFrame({'age':[22], 'sex':[0], 'canton_id':[1], 'employed':[3],
+            'job_position':70,
             'is_student':[1], 'current_education':pd.Series([pd.NA],dtype='Int64'),
             'education_destination_status':['domestic'], 'population_cohort':['private']})
         result=imputation_audit(persons,survey,.5,2023,20.)

@@ -12,7 +12,10 @@ logger = logging.getLogger("synpp")
 DEFAULT_PRIOR_STRENGTH = 20.0
 AGE_EDGES = [15, 18, 20, 25, 30, 40, 50, 65, np.inf]
 AGE_CENTERS = np.array([16, 18.5, 22, 27, 34.5, 44.5, 57, 75])
-FEATURES = ["age_band", "employed", "sex", "canton_id"]
+# Distinguish apprentices from other employed students before refining by sex
+# and canton. Otherwise their shared employment status can give an apprentice
+# a tertiary programme drawn from an ordinary working student's profile.
+FEATURES = ["age_band", "employed", "is_apprentice", "sex", "canton_id"]
 DESTINATION_STATUSES = ["domestic", "abroad", "unknown"]
 # 14 is an INTERNAL outcome index for pooled tertiary, never an SS source code.
 # Synthetic tertiary students retain current_education=NA rather than a fabricated
@@ -38,11 +41,17 @@ def configure(context):
 
 
 def prepare_features(frame):
-    """Build the same age, employment, sex and canton keys for donors and people."""
+    """Use the same demographic and apprenticeship keys for survey and population."""
     features = frame[["age", "employed", "sex", "canton_id"]].copy()
     for column in features:
         features[column] = pd.to_numeric(features[column], errors="coerce")
     features["age_band"] = pd.cut(features["age"], AGE_EDGES, right=False, labels=False)
+    # Both stages retain SS job codes: 50 means apprentice (MZ's code40 is not
+    # used here). Missing job information gets the existing unknown-key fallback,
+    # rather than being treated as evidence of a non-apprentice job. This is a
+    # predictor, not a rule forcing a programme or changing employment/student flags.
+    job_position = pd.to_numeric(frame["job_position"], errors="coerce")
+    features["is_apprentice"] = job_position.eq(50).astype("Int64").where(job_position.notna())
     return features[FEATURES].fillna(-1).astype(int)
 
 

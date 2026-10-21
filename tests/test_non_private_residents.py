@@ -48,11 +48,13 @@ class NonPrivateResidentsTest(unittest.TestCase):
         # The same demographics and seed must produce identical study/country
         # draws, whether a person is near a dorm candidate or in a private home.
         survey = pd.DataFrame({'age':[17]*4+[22]*4, 'employed':[3]*8,
+            'job_position':70,
             'sex':[0]*8, 'canton_id':[1]*8, 'is_student':[1]*8,
             'weight':[1.]*8, 'current_education':[5,11,12,13]*2,
             'education_country_code':[8100,250,8100,8100]*2,
             'education_municipality':[1]*8})
         persons = pd.DataFrame({'age':[17,22]*20, 'employed':[3]*40,
+            'job_position':70,
             'sex':[0]*40, 'canton_id':[1]*40, 'is_student':[1]*40,
             'non_private_dorm_candidate_households':[True]*40})
         private = persons.assign(non_private_dorm_candidate_households=False)

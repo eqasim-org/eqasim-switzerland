@@ -75,7 +75,7 @@ def audit(survey, output_path, prior_strength=DEFAULT_PRIOR_STRENGTH):
         "Scores describe current study level and destination-country status among "
         "age-15+ people already flagged as students; the existing binary student "
         "model is not retrained by this audit.\n\n"
-        "Predictions use weighted age-band/employment/sex/canton distributions with "
+        "Predictions use weighted age-band/employment/apprenticeship/sex/canton distributions with "
         "hierarchical smoothing. Unknown education levels and country status remain "
         "outcomes. Abroad is based on current school-address country, not nationality "
         "or educational origin. Domestic status uses a Swiss destination zone when "

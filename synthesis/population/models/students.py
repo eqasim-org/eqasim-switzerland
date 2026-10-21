@@ -6,6 +6,9 @@ from catboost import CatBoostClassifier
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 import logging
+from pathlib import Path
+
+from data.structural_survey.apprenticeship import model_apprentice_diagnostics
 
 logger = logging.getLogger("synpp")
 
@@ -60,6 +63,13 @@ def _execute_model(context):
     pop_df['employed']     = pop_df['employed'].astype('int64')
     pop_df['job_position'] = pop_df['job_position'].astype('int64')
 
+    # Both inputs retain SS job codes (50 = apprentice); income restores these
+    # codes after its own modelling. Learn student participation conditional on
+    # apprenticeship as well as employment, rather than forcing extra students
+    # after the draw and inflating the national student stock.
+    for df in (survey_df, pop_df):
+        df['is_apprentice'] = df['job_position'].eq(50).astype('int64')
+
     survey_df['age_sq'] = survey_df['age'] ** 2
     pop_df['age_sq'] = pop_df['age'] ** 2
 
@@ -105,6 +115,7 @@ def _execute_model(context):
         #'nationality',
         'municipality_type',
         'employed',
+        'is_apprentice',
         'district_id',
         'canton_id'
     ]
@@ -342,6 +353,13 @@ def _execute_model(context):
     logger.info("Final STUDENT distribution in population:")
     logger.info(pop_df['is_student'].value_counts(normalize=True))
 
+    # Check the national stock and any remaining apprentice/nonstudent conflicts
+    # after learning their joint status. This diagnostic does not override draws.
+    apprentice_diagnostics = model_apprentice_diagnostics(survey_df, pop_df)
+    apprentice_diagnostics.to_csv(Path(context.path()) / "national_apprentice_stock.csv", index=False)
+    logger.info("National apprenticeship after student assignment:\n%s",
+                apprentice_diagnostics.to_string(index=False))
+
     # =========================================================
     # 6. DIAGNOSTICS: COMPARE STUDENT RATES
     #    - by age_bin
@@ -438,7 +456,7 @@ def _execute_model(context):
             build_compare_table(survey_one, pop_one, 'municipality_type', 'municipality_type')
 
     # Remove helper features created only for modeling/diagnostics.
-    pop_df = pop_df.drop(columns=["age_sq", "is_school_age", "age_bin"], errors="ignore")
+    pop_df = pop_df.drop(columns=["age_sq", "is_school_age", "age_bin", "is_apprentice"], errors="ignore")
 
     pop_df['canton_id'] = pop_df['canton_id'].astype("int64")
     return pop_df

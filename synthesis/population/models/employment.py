@@ -5,6 +5,9 @@ import gc
 from catboost import CatBoostClassifier, Pool
 from sklearn.model_selection import train_test_split  # <-- ADD
 import logging
+from pathlib import Path
+
+from data.structural_survey.apprenticeship import model_apprentice_diagnostics
 
 logger = logging.getLogger("synpp")
 # ---------------------------------------------------------
@@ -281,6 +284,13 @@ def _execute_model(context):
 
     logger.info("Final employed distribution:")
     logger.info(pop_df[pop_df['age'] > 14]['employed'].value_counts(normalize=True))
+
+    # Inspect the national apprentice stock before the later student draw. Keep
+    # each SS year separate and label synthetic counts as sample persons.
+    apprentice_diagnostics = model_apprentice_diagnostics(survey_df, pop_df, include_students=False)
+    apprentice_diagnostics.to_csv(Path(context.path()) / "national_apprentice_stock.csv", index=False)
+    logger.info("National apprenticeship before student assignment:\n%s",
+                apprentice_diagnostics.to_string(index=False))
 
     # -------------------------------------------------------------------
     # 6. DIAGNOSTICS

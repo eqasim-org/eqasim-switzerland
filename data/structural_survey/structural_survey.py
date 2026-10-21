@@ -4,6 +4,9 @@ import pandas as pd
 from data.spatial import countries, municipalities, quarters, zones, utils
 from data.spatial.municipality_types import impute as impute_municipality_type
 import logging
+from pathlib import Path
+
+from data.structural_survey.apprenticeship import DEFAULT_REPAIR_FRACTION, repair_vocational_apprentices
 
 logger = logging.getLogger("synpp")
 
@@ -77,6 +80,7 @@ def configure(context):
     context.stage("data.spatial.zones")
 
     context.config("random_seed")
+    context.config("vocational_apprentice_repair_fraction", DEFAULT_REPAIR_FRACTION)
 
 
 def prepare_education_departure(df, df_municipality_mapping, df_quarters, df_zones):
@@ -406,10 +410,15 @@ def execute(context):
         on="id"
     )
 
-    # for some individuals in Berufschule it is not recreded that they are employed
-    # we correct this here for is_student, employed and job_position variables
-    df_se.loc[df_se["current_education"].eq(6), "employed"] = 1
-    df_se.loc[df_se["current_education"].eq(6), "job_position"] = 50
+    # Vocational education includes school-based programmes. Repair only a
+    # weighted subset of ambiguous records, retaining explicit apprentices and
+    # other reported jobs. Both sequential models consume these same labels;
+    # student participation itself is never changed by this correction.
+    df_se, apprentice_diagnostics = repair_vocational_apprentices(
+        df_se, context.config("vocational_apprentice_repair_fraction"), random_seed)
+    apprentice_diagnostics.to_csv(Path(context.path()) / "apprentice_repair.csv", index=False)
+    logger.info("National SS apprentice repair (each survey year separately):\n%s",
+                apprentice_diagnostics.to_string(index=False))
     #recode nationality to 0: swiss 1: others
     col = "nationality"
     assert df_se[col].isin([1, 2]).all(), f"{col} has values other than 1/2: {df_se.loc[~df_se[col].isin([1,2]), col].unique()}"
