@@ -746,6 +746,77 @@ def time_to_seconds(t):
     return int(h) * 3600 + int(m) * 60 + int(s)
 
 
+def _times_to_seconds(times):
+    """Vectorised time_to_seconds: NaN for an empty or malformed time."""
+    parts = times.astype(str).str.split(":", expand = True)
+    if parts.shape[1] < 3:
+        return pd.Series(np.nan, index = times.index)
+    return (pd.to_numeric(parts[0], errors = "coerce") * 3600 + pd.to_numeric(parts[1], errors = "coerce") * 60
+            + pd.to_numeric(parts[2], errors = "coerce"))
+
+
+def _seconds_to_time(seconds):
+    seconds = int(round(seconds))
+    return "%02d:%02d:%02d" % (seconds // 3600, seconds % 3600 // 60, seconds % 60)
+
+
+def repair_backward_stop_times(feed, max_rounds = 5):
+    """Repairs the stop times out of order inside a trip: a stop whose time is before the departure from the previous
+    stop or after the arrival at the next one, while these two are in order, gets a time between them (by
+    shape_dist_traveled when available, else halfway). E.g. the Haute-Savoie feed has trips with 00:00:00 at one stop
+    in the middle of the morning (a missing time): MATSim then refuses the schedule ("Invalid PT stop sequence/offsets")."""
+    st = feed["stop_times"]
+    sequence = pd.to_numeric(st["stop_sequence"], errors = "coerce")
+    order = st.assign(_seq = sequence).sort_values(["trip_id", "_seq"], kind = "stable").index
+
+    trip = st.loc[order, "trip_id"].astype(str).to_numpy()
+    arrival = _times_to_seconds(st.loc[order, "arrival_time"]).to_numpy(dtype = float)
+    departure = _times_to_seconds(st.loc[order, "departure_time"]).to_numpy(dtype = float)
+    distance = (pd.to_numeric(st.loc[order, "shape_dist_traveled"], errors = "coerce").to_numpy(dtype = float)
+                if "shape_dist_traveled" in st.columns else np.full(len(order), np.nan))
+
+    def shifted(values, k, fill):
+        out = np.full(len(values), fill, dtype = values.dtype)
+        if k > 0:
+            out[k:] = values[:-k]
+        else:
+            out[:k] = values[-k:]
+        return out
+
+    same_previous = trip == shifted(trip, 1, None)
+    same_next = trip == shifted(trip, -1, None)
+    repaired = np.zeros(len(order), dtype = bool)
+
+    for _ in range(max_rounds):
+        previous_departure, next_arrival = shifted(departure, 1, np.nan), shifted(arrival, -1, np.nan)
+        with np.errstate(invalid = "ignore"):
+            bad = same_previous & same_next & (previous_departure <= next_arrival) & (
+                (arrival < previous_departure) | (departure > next_arrival))
+        if not bad.any():
+            break
+
+        previous_distance, next_distance = shifted(distance, 1, np.nan), shifted(distance, -1, np.nan)
+        with np.errstate(invalid = "ignore", divide = "ignore"):
+            share = (distance - previous_distance) / (next_distance - previous_distance)
+        share = np.where(np.isfinite(share), np.clip(share, 0.0, 1.0), 0.5)
+        times = previous_departure + share * (next_arrival - previous_departure)
+        arrival[bad] = departure[bad] = times[bad]
+        repaired |= bad
+
+    if repaired.any():
+        rows = order[repaired]
+        new_times = [_seconds_to_time(t) for t in arrival[repaired]]
+        feed = dict(feed)
+        feed["stop_times"] = st = st.copy()
+        st.loc[rows, "arrival_time"] = new_times
+        st.loc[rows, "departure_time"] = new_times
+        trips = sorted(set(trip[repaired]))
+        logger.warning("Stop times out of order repaired (interpolated between the neighbouring stops): %d stop(s) of %d trip(s), e.g. %s",
+                       repaired.sum(), len(trips), ", ".join(trips[:5]))
+
+    return feed
+
+
 def expand_service_dates(feed):
     """
     Expand calendar.txt (weekday flags between start_date/end_date) and
