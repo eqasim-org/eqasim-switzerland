@@ -1,4 +1,4 @@
-"""Learn which expert has lower destination loss on people unseen by the experts.
+"""Learn which purpose-masked expert has lower destination loss on unseen people.
 
 The historical stage name is retained for pipeline compatibility. Labels now
 compare sampled destination predictions, never a 1.5 km trip-distance threshold.
@@ -50,6 +50,57 @@ def configure(context):
     context.config("secondary_nn_selector_max_iter", 150)
     context.config("secondary_nn_selector_min_samples_leaf", 40)
     context.config("secondary_nn_selector_l2", 10.0)
+
+
+def execute(context):
+
+    # Train only when the expert cannot be selected from target distance.
+
+    if context.config("secondary_nn_use_target_distance"):
+        return None
+
+    # Load experts with the same pool-backed masks used during assignment.
+
+    from .model_wrappers import HierarchicalLocationChoiceModel
+    torch.set_num_threads(max(1, int(context.config("threads"))))
+    frame = prepare_training_data(context)
+    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=False, load_selector=False)
+    seed = int(context.config("random_seed"))
+    draws = int(context.config("secondary_nn_selector_draws"))
+    weight = float(context.config("secondary_nn_selector_spatial_loss_weight"))
+    scale = float(context.config("secondary_nn_selector_loss_scale_m"))
+
+    # Compare predictions without exposing the observed destination to the models.
+
+    logger.info("Comparing %s draws per expert on %s trips from %s reserved persons", draws, len(frame), frame.person_id.nunique())
+    with context.progress(label="Comparing secondary destination experts", total=len(frame)) as progress:
+        comparisons = compare_experts(frame, wrapper, draws=draws, seed=seed,
+                                      spatial_weight=weight, scale_m=scale, progress=progress)
+
+    # Fit the selector with separate person groups for fitting and validation.
+
+    comparisons.to_parquet(Path(context.path()) / "expert_comparisons.parquet", index=False)
+    cells = context.stage("synthesis.population.spatial.secondary_nn.h3")[1]["level_2"]
+    classifier, audit = train_selector(
+        frame, comparisons, OriginContext(cells, radii=context.config("secondary_nn_selector_context_radii_m")), seed=seed,
+        validation_fraction=float(context.config("secondary_nn_selector_validation_fraction")),
+        max_iter=int(context.config("secondary_nn_selector_max_iter")),
+        min_samples_leaf=int(context.config("secondary_nn_selector_min_samples_leaf")),
+        l2=float(context.config("secondary_nn_selector_l2")),
+    )
+    classifier.metrics.update(draws_per_expert=draws, spatial_loss_weight=weight, loss_scale_m=scale,
+                              experts_exclude_all_selector_persons=True)
+
+    # Save the selector and validation audit.
+
+    classifier.origin_context.cache.clear()
+    path = Path(context.path()) / MODEL_NAME
+    joblib.dump(classifier, path)
+    audit.to_parquet(Path(context.path()) / "selector_partitions.parquet", index=False)
+    with open(Path(context.path()) / "validation.json", "w") as stream:
+        json.dump(classifier.metrics, stream, indent=2)
+    logger.info("Expert selector held-out validation: %s", classifier.metrics)
+    return (str(path),)
 
 
 def prepare_training_data(context):
@@ -253,39 +304,3 @@ def train_selector(frame, comparisons, origin_context, *, seed, validation_fract
     audit["predicted_loss_difference"] = np.nan
     audit.loc[validation, "predicted_loss_difference"] = predicted
     return ExpertSelector(model, static, dynamic, origin_context, names, metrics), audit
-
-
-def execute(context):
-    if context.config("secondary_nn_use_target_distance"):
-        return None
-    from .model_wrappers import HierarchicalLocationChoiceModel
-    torch.set_num_threads(max(1, int(context.config("threads"))))
-    frame = prepare_training_data(context)
-    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=False, load_selector=False)
-    seed = int(context.config("random_seed"))
-    draws = int(context.config("secondary_nn_selector_draws"))
-    weight = float(context.config("secondary_nn_selector_spatial_loss_weight"))
-    scale = float(context.config("secondary_nn_selector_loss_scale_m"))
-    logger.info("Comparing %s draws per expert on %s trips from %s reserved persons", draws, len(frame), frame.person_id.nunique())
-    with context.progress(label="Comparing secondary destination experts", total=len(frame)) as progress:
-        comparisons = compare_experts(frame, wrapper, draws=draws, seed=seed,
-                                      spatial_weight=weight, scale_m=scale, progress=progress)
-    comparisons.to_parquet(Path(context.path()) / "expert_comparisons.parquet", index=False)
-    cells = context.stage("synthesis.population.spatial.secondary_nn.h3")[1]["level_2"]
-    classifier, audit = train_selector(
-        frame, comparisons, OriginContext(cells, radii=context.config("secondary_nn_selector_context_radii_m")), seed=seed,
-        validation_fraction=float(context.config("secondary_nn_selector_validation_fraction")),
-        max_iter=int(context.config("secondary_nn_selector_max_iter")),
-        min_samples_leaf=int(context.config("secondary_nn_selector_min_samples_leaf")),
-        l2=float(context.config("secondary_nn_selector_l2")),
-    )
-    classifier.metrics.update(draws_per_expert=draws, spatial_loss_weight=weight, loss_scale_m=scale,
-                              experts_exclude_all_selector_persons=True)
-    classifier.origin_context.cache.clear()
-    path = Path(context.path()) / MODEL_NAME
-    joblib.dump(classifier, path)
-    audit.to_parquet(Path(context.path()) / "selector_partitions.parquet", index=False)
-    with open(Path(context.path()) / "validation.json", "w") as stream:
-        json.dump(classifier.metrics, stream, indent=2)
-    logger.info("Expert selector held-out validation: %s", classifier.metrics)
-    return (str(path),)

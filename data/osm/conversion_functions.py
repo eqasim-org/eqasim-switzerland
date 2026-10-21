@@ -24,25 +24,40 @@ class OSMHandler(osmium.SimpleHandler):
     def way(self, way):
         write_with_speed_correction(self.writer, way, self.speed_corrections)
 
+def _convert_pbf_to_osm(source, destination):
+    """Stream all entities, retaining access tags and turn restriction relations."""
+    logger.info("Converting SUMO input from PBF to OSM XML: %s", source)    
+    with osmium.io.Reader(str(source)) as reader:
+        with osmium.SimpleWriter(str(destination)) as writer:
+            osmium.apply(reader, writer)
 
-def convert_pbf_to_osm_pyosmium(input_file, output_file, speed_corrections=None):      
+def convert_pbf_to_osm(input_file, output_file, speed_corrections=None):      
+    # check if input file exists
+    assert os.path.exists(input_file), f"{input_file} doesn't exist"
+
+    # check if output file exists, if yes, remove it
     logger.info("using pyosmium to process OSM data")
     if os.path.exists(output_file):
         logger.info("The file: %s already exists. It will be overridden." % output_file)
         os.remove(output_file)
 
-    writer = osmium.SimpleWriter(output_file)
-    handler = OSMHandler(writer, speed_corrections)
-
-    try:
-        logger.info(f"Processing {input_file} → {output_file} ...")
-        handler.apply_file(input_file)
+    # if no speed correction is needed, do it with the simple converter
+    if speed_corrections is None:
+        _convert_pbf_to_osm(input_file, output_file)
         logger.info(f"Conversion successful: {output_file}")
-    except Exception as e:
-        logger.info(f"Error during network conversion using pyosmium: {e}")
-        sys.exit(1)
-    finally:
-        writer.close()
+    else:            
+        writer = osmium.SimpleWriter(output_file)
+        handler = OSMHandler(writer, speed_corrections)
+
+        try:
+            logger.info(f"Processing {input_file} → {output_file} ...")
+            handler.apply_file(input_file)
+            logger.info(f"Conversion successful: {output_file}")
+        except Exception as e:
+            logger.info(f"Error during network conversion using pyosmium: {e}")
+            sys.exit(1)
+        finally:
+            writer.close()
 
 def from_pbf_to_osm_gz(context, osm_file, output_file, speed_corrections=None):
     # Change format from .pbf format to osm.gz
@@ -51,7 +66,7 @@ def from_pbf_to_osm_gz(context, osm_file, output_file, speed_corrections=None):
     # if it is .pbf format, we convert the file
     if filename.endswith('.pbf') or speed_corrections is not None:          
         new_file_name = output_file.replace(".osm.gz","-pyosmium.osm")
-        convert_pbf_to_osm_pyosmium(osm_file, new_file_name, speed_corrections)        
+        convert_pbf_to_osm(osm_file, new_file_name, speed_corrections)        
     else:
         # else, the original file stays unchanged, and is used in next stages (not creating a copy)
         new_file_name = osm_file

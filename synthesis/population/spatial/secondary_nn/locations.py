@@ -50,6 +50,9 @@ def configure(context):
     context.config("secondary_nn_short_min_candidates", 6)
 
 def execute(context):
+
+    # Load models and bind purpose masks to their actual destination pools.
+
     logger.info("Starting secondary_nn location assignment")
     constants = context.stage("data.constants")
     crs = constants.LV95    

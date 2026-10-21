@@ -10,6 +10,7 @@ from .feature_encoding import (CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, DY
 
 from .choice_model import NeuralChoiceModel, predict_choice_proba
 from .hierarchical_utils import build_dynamic_vector, ORIGIN_PURPOSE_REMAP
+from .tools import base_activity_purpose, destination_support_masks, require_purpose_mask
 
 def _torch_load_checkpoint(path, map_location=None):
     try:
@@ -160,9 +161,7 @@ class RegionalChoiceWrapper:
 
     def predict_from_inputs(self, person_matrix, candidate_static, candidate_dynamic, candidate_mask=None, rng=None, return_probabilities=False, internal_mask=False, purpose=None):
         if internal_mask:
-            cand_mask = self.mask.get(purpose)
-            if cand_mask is None:
-                cand_mask = self.mask.get("statent")
+            cand_mask = require_purpose_mask(self.mask, purpose)
         else:
             cand_mask = candidate_mask
         p_static  = person_matrix[:, :N_PERSON_STATIC]
@@ -214,7 +213,7 @@ class RegionalChoiceWrapper:
         masks["statent"]   = torch.tensor(self.static_candidate_features[:, static_pos["num_statent"]] > 0.0, dtype=torch.bool)
         masks["shop"]      = torch.tensor(self.static_candidate_features[:, static_pos["shop"]]        > 0.0, dtype=torch.bool)
         masks["leisure"]   = torch.tensor(self.static_candidate_features[:, static_pos["leisure"]]     > 0.0, dtype=torch.bool)
-        masks["education_secondary"] = torch.tensor(self.static_candidate_features[:, static_pos["education"]]   > 0.0, dtype=torch.bool)
+        masks["education"] = torch.tensor(self.static_candidate_features[:, static_pos["education"]]   > 0.0, dtype=torch.bool)
         return masks
 
 
@@ -305,14 +304,7 @@ class DistrictChoiceWrapper:
         if internal_mask:
             if level0_h3 is None:
                 raise ValueError("level0_h3 must be provided when using internal_mask")
-            level_cand_mask = self.mask.get(level0_h3)
-            if level_cand_mask is None:
-                self.logger.warning(f"No candidate mask found for level0_h3 '{level0_h3}'; no internal mask will be applied")
-                cand_mask = None
-            else:
-                cand_mask = level_cand_mask.get(purpose)
-                if cand_mask is None:
-                    cand_mask = level_cand_mask.get("statent")
+            cand_mask = require_purpose_mask(self.mask[level0_h3], purpose)
         else:
             cand_mask = valid_mask
         p_static  = person_matrix[:, :N_PERSON_STATIC]
@@ -338,7 +330,7 @@ class DistrictChoiceWrapper:
                 "statent":             sf[:, _si["num_statent"]] > 0.0,
                 "shop":                sf[:, _si["shop"]]        > 0.0,
                 "leisure":             sf[:, _si["leisure"]]     > 0.0,
-                "education_secondary": sf[:, _si["education"]]   > 0.0,
+                "education":           sf[:, _si["education"]]   > 0.0,
             }
         return masks
 
@@ -425,13 +417,7 @@ class LocalChoiceWrapper:
             if level0_h3 is None or level1_h3 is None:
                 raise ValueError("level0_h3 and level1_h3 must be provided when using internal_mask")
             key = (level0_h3, level1_h3)
-            level_cand_mask = self.mask.get(key)
-            if level_cand_mask is None:
-                cand_mask = None
-            else:
-                cand_mask = level_cand_mask.get(purpose)
-                if cand_mask is None:
-                    cand_mask = level_cand_mask.get("statent")
+            cand_mask = require_purpose_mask(self.mask[key], purpose)
         else:
             cand_mask = valid_mask
         p_static  = person_matrix[:, :N_PERSON_STATIC]
@@ -507,7 +493,7 @@ class LocalChoiceWrapper:
                 "statent":             sf[:, _si["num_statent"]] > 0.0,
                 "shop":                sf[:, _si["shop"]]        > 0.0,
                 "leisure":             sf[:, _si["leisure"]]     > 0.0,
-                "education_secondary": sf[:, _si["education"]]   > 0.0,
+                "education":           sf[:, _si["education"]]   > 0.0,
             }
         return masks
 
@@ -604,7 +590,7 @@ class ShortRangeChoiceWrapper:
         masks["statent"] = torch.tensor(self.static_candidate_features[:, static_pos["num_statent"]] > 0.0, dtype=torch.bool)
         masks["shop"] = torch.tensor(self.static_candidate_features[:, static_pos["shop"]] > 0.0, dtype=torch.bool)
         masks["leisure"] = torch.tensor(self.static_candidate_features[:, static_pos["leisure"]] > 0.0, dtype=torch.bool)
-        masks["education_secondary"] = torch.tensor(self.static_candidate_features[:, static_pos["education"]] > 0.0, dtype=torch.bool)
+        masks["education"] = torch.tensor(self.static_candidate_features[:, static_pos["education"]] > 0.0, dtype=torch.bool)
         return masks
 
     def predict_from_inputs(self, person_matrix, candidate_static, candidate_dynamic, candidate_mask=None, rng=None, return_probabilities=False):
@@ -627,6 +613,8 @@ class ShortRangeChoiceWrapper:
         radius = float(max(radius_m, 0.0))
         min_candidates = max(1, int(min_candidates))
         support_mask = support_mask if support_mask is not None else self.mask["statent"]
+        if not bool(torch.as_tensor(support_mask).any().item()):
+            raise ValueError("No eligible destinations for the requested short-range purpose")
 
         # Simple one-shot query path (legacy behavior).
         if expand_step_m is None:
@@ -738,9 +726,7 @@ class ShortRangeChoiceWrapper:
             candidate_dynamic_scaled = candidate_dynamic.astype(np.float32)[None, :, :]
 
         purpose_key = str(purpose)
-        candidate_mask = self.mask.get(purpose_key, self.mask["statent"]).index_select(0, index_tensor)
-        if not bool(candidate_mask.any().item()):
-            candidate_mask = self.mask["statent"].index_select(0, index_tensor)
+        candidate_mask = require_purpose_mask(self.mask, purpose_key).index_select(0, index_tensor)
 
         idx = self.predict_from_inputs(
             person_matrix,
@@ -860,7 +846,7 @@ class HierarchicalLocationChoiceModel:
             self.destination_fallback_xy) = _prepare_destination_level2_index(context, h3_data, h3_geo)
         self.level2_to_level1 = {leaf: middle for branches in h3_tree.values() for middle, leaves in branches.items() for leaf in leaves}
         self.l1_siblings = _reverse_tree(h3_tree)  # {level1: [sibling_level1s]} — built once for O(1) fallback widening
-        self._build_short_destination_support_masks()
+        self._build_destination_support_masks(h3_tree)
         self._build_detour_factor_cache(
             context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
         )
@@ -909,32 +895,44 @@ class HierarchicalLocationChoiceModel:
             factors[int(n_children):] = 0.0
         return np.column_stack([candidate_dynamic, factors]).astype(np.float32)
 
-    def _build_short_destination_support_masks(self):
-        self.short_destination_support_masks = None
-        if self.s is None or self.destination_index is None:
-            return
+    def _build_destination_support_masks(self, tree):
+        """Propagate actual facility eligibility from leaves to every ancestor."""
+        purposes = self._purpose_categories
+        leaf_pools = self.destination_index
+        middle_pools = {}
+        root_pools = {}
+        for purpose in purposes:
+            base = base_activity_purpose(purpose)
+            eligible = leaf_pools[base]
+            middle_pools[base] = {
+                middle: any(bool(eligible.get(leaf)) for leaf in leaves)
+                for branches in tree.values() for middle, leaves in branches.items()
+            }
+            root_pools[base] = {
+                root: any(middle_pools[base][middle] for middle in branches)
+                for root, branches in tree.items()
+            }
 
-        h3_to_idx = {str(h): i for i, h in enumerate(self.s.all_h3)}
-        masks = {}
-        for purpose in self._purpose_categories:
-            supported = torch.zeros(len(self.s.all_h3), dtype=torch.bool)
-            purpose_index = self.destination_index.get(purpose, {})
-            for level2_h3, pool in purpose_index.items():
-                if not pool:
-                    continue
-                idx = h3_to_idx.get(str(level2_h3))
-                if idx is not None:
-                    supported[idx] = True
-            if not bool(supported.any().item()):
-                other_index = self.destination_index.get("other", {})
-                for level2_h3, pool in other_index.items():
-                    if not pool:
-                        continue
-                    idx = h3_to_idx.get(str(level2_h3))
-                    if idx is not None:
-                        supported[idx] = True
-            masks[purpose] = supported
-        self.short_destination_support_masks = masks
+        # Padded alternatives stay false; a selected parent always has a valid child.
+        coarse = destination_support_masks(self.c.all_h3, root_pools, purposes)
+        self.c.mask = {key: torch.as_tensor(value) for key, value in coarse.items()}
+        self.m.mask = {
+            root: destination_support_masks(
+                attrs["children"] + [None] * (len(attrs["x"]) - len(attrs["children"])),
+                middle_pools, purposes)
+            for root, attrs in self.m.level1_candidate_attributes_by_level0.items()
+        }
+        self.d.mask = {
+            key: destination_support_masks(
+                attrs["children"] + [None] * (len(attrs["x"]) - len(attrs["children"])),
+                leaf_pools, purposes)
+            for key, attrs in self.d.level2_candidate_attributes_by_level1.items()
+        }
+        self.short_destination_support_masks = None
+        if self.s is not None:
+            masks = destination_support_masks(self.s.all_h3, leaf_pools, purposes)
+            self.s.mask = {key: torch.as_tensor(value) for key, value in masks.items()}
+            self.short_destination_support_masks = self.s.mask
 
     @classmethod
     def log(cls, message, level=logging.INFO):
@@ -1279,53 +1277,13 @@ class HierarchicalLocationChoiceModel:
                     prob = self._reweight_by_distance(prob, xy, origin_x, origin_y, target_distance)
             return pool[int(rng.choice(len(pool), p=prob))]
 
-        purpose_index = self.destination_index.get(purpose)
-        purpose_prob = probabilities.get(purpose)
-        if purpose_index is not None:
-            pool = purpose_index.get(level2_h3)
-            if pool:
-                prob = purpose_prob.get(level2_h3)
-                xy_lookup = self.destination_index_xy.get(purpose) if self.destination_index_xy is not None else None
-                return _pick(pool, prob, xy_lookup, level2_h3)
-
-        purpose_fallback = self.destination_fallback.get(purpose)
-        if purpose_fallback is not None:
-            pool = purpose_fallback.get(level1_h3)
-            if pool:
-                prob = purpose_prob.get(level1_h3)
-                xy_lookup = self.destination_fallback_xy.get(purpose) if self.destination_fallback_xy is not None else None
-                return _pick(pool, prob, xy_lookup, level1_h3)
-
-        other_fallback = self.destination_fallback.get('other')
-        other_prob = probabilities.get('other')
-        other_xy_lookup = self.destination_fallback_xy.get('other') if self.destination_fallback_xy is not None else None
-        if other_fallback is not None:
-            pool = other_fallback.get(level1_h3)
-            if pool:
-                self.log(f"Using fallback pool for level1_h3 '{level1_h3}' and purpose '{purpose}' with {len(pool)} candidates", level=logging.WARNING)
-                prob = other_prob.get(level1_h3)
-                return _pick(pool, prob, other_xy_lookup, level1_h3)
-
-        # All local fallbacks exhausted — widen to sibling level1 cells (O(1) parent lookup, pre-built at init).
-        sibling_l1s = self.l1_siblings.get(level1_h3)
-        if sibling_l1s:
-            for i in rng.permutation(len(sibling_l1s)):
-                sib_l1 = sibling_l1s[i]
-                if purpose_fallback is not None:
-                    pool = purpose_fallback.get(sib_l1)
-                    if pool:
-                        prob = purpose_prob.get(sib_l1)
-                        xy_lookup = self.destination_fallback_xy.get(purpose) if self.destination_fallback_xy is not None else None
-                        self.log(f"Widened to sibling level1 '{sib_l1}' for purpose '{purpose}' (original level1 '{level1_h3}' had no destinations)", level=logging.WARNING)
-                        return _pick(pool, prob, xy_lookup, sib_l1)
-                if other_fallback is not None:
-                    pool = other_fallback.get(sib_l1)
-                    if pool:
-                        prob = other_prob.get(sib_l1)
-                        self.log(f"Widened to sibling level1 '{sib_l1}' (other fallback) for purpose '{purpose}' (original level1 '{level1_h3}' had no destinations)", level=logging.WARNING)
-                        return _pick(pool, prob, other_xy_lookup, sib_l1)
-
-        raise RuntimeError(
-            f"No candidates in destination pool for purpose '{purpose}', "
-            f"level1_h3 '{level1_h3}', level2_h3 '{level2_h3}'"
-        )
+        purpose = base_activity_purpose(purpose)
+        pool = self.destination_index.get(purpose, {}).get(level2_h3)
+        if not pool:
+            raise RuntimeError(
+                f"Destination mask/pool mismatch for purpose {purpose!r}, leaf {level2_h3!r}: "
+                "no eligible facility in the selected cell"
+            )
+        prob = probabilities[purpose][level2_h3]
+        xy_lookup = self.destination_index_xy[purpose]
+        return _pick(pool, prob, xy_lookup, level2_h3)

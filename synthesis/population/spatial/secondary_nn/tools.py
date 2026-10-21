@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from scipy.spatial import cKDTree
-from shapely import line_merge
+from shapely import line_merge, is_missing
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 import hashlib
@@ -29,18 +29,23 @@ MOBILITY_FEATURES = [
     "home_ovgk_a", "home_ovgk_b", "home_ovgk_c",
     "home_ovgk_d", "home_ovgk_none",
 ]
+PASSENGER_AERIALWAYS = {
+    "cable_car", "gondola", "chair_lift", "mixed_lift", "drag_lift", "t-bar",
+    "j-bar", "platter", "rope_tow", "magic_carpet", "zip_line",
+}
 NN_ALGORITHMS = {"nn", "neural_network", "v2", "v.2", "locations_v2"}
 
 
 def empty_features():
-    return gpd.GeoDataFrame(columns=["osm_id", "kind", "name", "public", "geometry"],
+    return gpd.GeoDataFrame(columns=["osm_id", "kind", "name", "public", "access_reason",
+                                         "access", "foot", "garden_type", "geometry"],
                             geometry="geometry", crs=2056)
 
 
 def classify_osm(tags):
-    """Return all relevant themes; private objects remain context, not candidates."""
+    """Identify themes before applying the common public-access filter."""
     kinds = []
-    if tags.get("aerialway") not in (None, "no", "station", "pylon"):
+    if tags.get("aerialway") in PASSENGER_AERIALWAYS:
         kinds.append("aerialway")
     if tags.get("aerialway") == "station":
         kinds.append("cable_station")
@@ -69,11 +74,128 @@ def classify_osm(tags):
 
 
 def public_access(tags):
-    return (tags.get("access") not in ("no", "private", "customers", "permit")
-            and tags.get("foot") not in ("no", "private")
-            and not tags.get("disused") == "yes"
-            and tags.get("lifecycle") not in ("disused", "abandoned"))
+    """Whether a mapped place is eligible for visitor destination assignment."""
+    return osm_access_decision(tags)[0]
 
+
+def osm_access_decision(tags, kind=None):
+    """Use access restrictions first, then evidence specific to the feature type."""
+    values = {key: str(value).strip().lower() for key, value in tags.items()}
+    kinds = {kind} if kind else set(classify_osm(tags))
+    garden_type = values.get("garden:type") or values.get("garden", "")
+
+    # Closed sites and residential grounds never become visitor destinations.
+
+    if any(values.get(key) == "yes"
+           for key in ("disused", "abandoned", "construction", "locked", "membership")):
+        return False, "closed_or_members_only"
+    if values.get("lifecycle") in ("disused", "abandoned", "construction"):
+        return False, "inactive"
+    if kinds & {"garden", "park"}:
+        residential_buildings = {"house", "detached", "semidetached_house", "terrace",
+                                 "apartments", "residential", "bungalow", "static_caravan"}
+        if (garden_type in {"residential", "residental", "private"}
+                or values.get("building") in residential_buildings
+                or values.get("landuse") == "residential"):
+            return False, "residential_grounds"
+    if kinds & {"aerialway", "cable_station"}:
+        if (values.get("usage") in {"industrial", "freight"}
+                or values.get("aerialway:goods") == "only"
+                or values.get("aerialway:access") == "no"):
+            return False, "non_visitor_aerialway"
+
+    # Explicit restrictions override names, fees, ownership and default access.
+
+    ski_facility = bool(kinds & {"aerialway", "cable_station", "piste", "ski_area"})
+    if (values.get("access:conditional") or values.get("foot:conditional")
+            or (ski_facility and values.get("ski:conditional"))):
+        return False, "conditional_access"
+    effective = values.get("foot") or values.get("access", "")
+    # A lift may prohibit pedestrians while explicitly admitting skiers.
+    if ski_facility and values.get("ski") in {"yes", "designated", "permissive", "official", "customers"}:
+        effective = values["ski"]
+    if effective in {"yes", "public", "permissive", "designated", "official"}:
+        return True, "explicit_access"
+    visitor_service = bool(kinds & {"aerialway", "cable_station", "piste", "ski_area",
+                                   "attraction", "worship"})
+    visitor_garden = ("garden" in kinds
+                      and garden_type in {"botanical", "arboretum", "community"})
+    if effective == "customers" and (visitor_service or visitor_garden):
+        return True, "visitor_customers"
+    if effective:
+        return False, "restricted_access"
+
+    # Gardens need more evidence than their name; untyped backyards stay excluded.
+
+    if "garden" in kinds:
+        if visitor_garden:
+            return True, "visitor_garden_type"
+        named = bool(str(tags.get("name", "")).strip())
+        public_operator = values.get("operator:type") in {"public", "government", "municipal"}
+        if named and public_operator:
+            return True, "named_garden_public_operator"
+        if named and values.get("tourism") == "attraction":
+            return True, "named_garden_attraction"
+        if named and not garden_type:
+            return False, "garden_needs_path"
+        return False, "uncertain_garden"
+
+    # Visitor facilities do not require public ownership or free admission.
+
+    if visitor_service or kinds & {"park", "viewpoint"}:
+        return True, "visitor_feature_default"
+    if "path" in kinds and values.get("highway") in {"path", "footway", "pedestrian", "steps"}:
+        return True, "pedestrian_path_default"
+    if kinds & {"water", "river"}:
+        return True, "water_context"
+    return False, "uncertain_access"
+
+
+def confirm_garden_access(features):
+    """Recover named gardens with a visitor path entering their interior."""
+    if "access_reason" not in features:
+        return features
+    pending = features.access_reason.eq("garden_needs_path") & features.kind.eq("garden")
+    gardens = features.loc[pending & features.geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
+    if gardens.empty:
+        return features
+
+    # Restricted grounds must not supply evidence through an intersecting path.
+
+    eligible = public_osm_features(features.loc[~pending])
+    paths = eligible.loc[eligible.kind.eq("path")]
+    if paths.empty:
+        return features
+    interiors = gardens.geometry.buffer(-1.0)
+    path_rows, garden_rows = interiors.sindex.query(paths.geometry, predicate="intersects")
+    result = features.copy()
+    for path_row, garden_row in zip(path_rows, garden_rows):
+        if paths.geometry.iloc[path_row].intersection(interiors.iloc[garden_row]).length > 0:
+            index = gardens.index[garden_row]
+            result.loc[index, "public"] = True
+            result.loc[index, "access_reason"] = "named_garden_with_path"
+    return result
+
+
+def public_osm_features(features):
+    """Keep eligible visitor records outside restricted or uncertain mapped areas."""
+    if "public" not in features:
+        raise ValueError("OSM features require public-access flags")
+    permitted = features["public"].fillna(False).astype(bool)
+    result = features.loc[permitted].copy().reset_index(drop=True)
+    restricted = features.loc[~permitted & features.geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
+    if result.empty or restricted.empty:
+        return result
+
+    # Exclude overlapping areas whose public access cannot be confirmed.
+    rows, areas = restricted.sindex.query(result.geometry, predicate="intersects")
+    geometry = result.geometry.to_numpy(copy=True)
+    matches = pd.DataFrame({"row": rows, "area": areas})
+    for row, indices in matches.groupby("row", sort=False):
+        exclusion = restricted.geometry.iloc[indices.area.to_numpy()].union_all()
+        geometry[row] = geometry[row].difference(exclusion)
+    result.geometry = geometry
+    return result.loc[~result.geometry.is_empty & ~is_missing(result.geometry.to_numpy())].reset_index(drop=True)
 
 
 def connected_path_sections(pieces):
@@ -90,9 +212,10 @@ def connected_path_sections(pieces):
 
 
 def derive_water_features(features, distance_m=30.0):
-    """Keep full shoreline context, but create visits only along accessible paths."""
+    """Derive public waterside paths and only their accessible shoreline sections."""
     if distance_m <= 0:
         raise ValueError("Water path buffer must be positive")
+    features = public_osm_features(confirm_garden_access(features))
     if features.empty:
         return features
     result = [features.loc[~features.kind.isin(["water", "river"])].copy()]
@@ -103,10 +226,6 @@ def derive_water_features(features, distance_m=30.0):
             continue
         if water_kind == "water":
             water.geometry = water.geometry.map(lambda g: g.boundary if g.geom_type in ("Polygon", "MultiPolygon") else g)
-            shoreline = water.copy()
-            shoreline["kind"] = "shoreline"
-            shoreline["public"] = False
-            result.append(shoreline)
         if paths.empty:
             continue
         # Intersect each path with nearby water buffers, not the entire water polygon.
@@ -116,33 +235,48 @@ def derive_water_features(features, distance_m=30.0):
         if nearby.empty:
             continue
         pieces = []
+        shore_sections = {}
         for row in nearby.itertuples():
             piece = row.geometry.intersection(buffers.geometry.loc[row.index_right])
             if not piece.is_empty and piece.length > 0:
                 pieces.append(piece)
+                if water_kind == "water":
+                    section = water.geometry.loc[row.index_right].intersection(row.geometry.buffer(distance_m))
+                    if not section.is_empty and section.length > 0:
+                        shore_sections.setdefault(row.index_right, []).append(section)
+        if shore_sections:
+            # Count shoreline length only where the adjoining path is public.
+            shoreline = water.loc[list(shore_sections)].copy()
+            shoreline.geometry = [gpd.GeoSeries(shore_sections[index], crs=2056).union_all()
+                                  for index in shoreline.index]
+            shoreline["kind"] = "shoreline"
+            shoreline["public"] = True
+            shoreline["access_reason"] = "pedestrian_shore_access"
+            result.append(shoreline)
         if pieces:
             # Connected shoreline sections produce one candidate, regardless of OSM way cuts.
             parts = connected_path_sections(pieces)
             result.append(gpd.GeoDataFrame([
                 dict(osm_id=path_kind + ":" + hashlib.sha256(g.normalize().wkb).hexdigest()[:20],
-                     kind=path_kind, name="", public=True, geometry=g)
+                     kind=path_kind, name="", public=True,
+                     access_reason="pedestrian_waterside_access", geometry=g)
                 for g in sorted(parts, key=lambda g: g.wkb_hex) if g.length > 0
             ], geometry="geometry", crs=2056))
     return gpd.GeoDataFrame(pd.concat(result, ignore_index=True), geometry="geometry", crs=2056)
 
 
 def candidate_points(features):
-    """One visit point per place or connected public waterside section."""
+    """Create visit points from the already eligible OSM stage output."""
     allowed = {"park", "garden", "viewpoint", "attraction", "cable_station", "worship",
                "piste", "ski_area", "riverside_path", "shore_path"}
-    places = features.loc[features.public & features.kind.isin(allowed)].copy()
+    places = features.loc[features.kind.isin(allowed)].copy()
     if places.empty:
         return places
     # Prefer explicit attractions and stations over area interiors when they coincide.
     priority = {"cable_station": 0, "viewpoint": 1, "attraction": 2, "worship": 3}
     places["priority"] = places.kind.map(priority).fillna(4)
     places = places.sort_values(["priority", "osm_id", "kind"]).reset_index(drop=True)
-    paths = features.loc[(features.kind == "path") & features.public]
+    paths = features.loc[features.kind == "path"]
     points = []
     for geometry in places.geometry:
         if geometry.geom_type in ("LineString", "MultiLineString"):
@@ -221,7 +355,7 @@ def accessibility_at_points(x, y, ovgk):
 
 
 def aggregate_osm_features(cells, features):
-    """Measure intersections with the actual clipped coordinate hierarchy polygons."""
+    """Measure the already eligible OSM stage output in clipped H3 polygons."""
     out = pd.DataFrame(0.0, index=cells.index, columns=OSM_FEATURES)
     for kind, column in OSM_KINDS.items():
         objects = features.loc[features.kind == kind, ["osm_id", "geometry"]].reset_index(drop=True)
@@ -351,3 +485,44 @@ class OriginContext:
         home = np.hypot(origin_x - home_x, origin_y - home_y)
         work = np.hypot(origin_x - work_x, origin_y - work_y) if has_work else 0.0
         return np.concatenate([[nearest, home, work], self.cache[key]]).astype(np.float32)
+
+
+
+def base_activity_purpose(purpose):
+    """Share facility offers between primary and secondary activity labels."""
+    return str(purpose).removesuffix("_secondary")
+
+
+def destination_offer_masks(destinations):
+    """Use base offers, preserving the catalogue's existing home-visit offer."""
+    masks = {}
+    for purpose in ("other", "shop", "leisure", "work", "education", "home"):
+        column = f"offers_{purpose}"
+        # The catalogue stores home visits separately from household home anchors.
+        if purpose == "home" and column not in destinations:
+            column = "offers_home_secondary"
+        if column not in destinations:
+            raise ValueError(f"Missing destination offer column: {column}")
+        masks[purpose] = destinations[column].fillna(False).to_numpy(dtype=bool)
+    return masks
+
+
+def destination_support_masks(candidate_ids, destination_index, purposes):
+    """Mark cells with a real eligible facility and leave padding unsupported."""
+    masks = {"statent": np.zeros(len(candidate_ids), dtype=bool)}
+    for purpose in purposes:
+        base = base_activity_purpose(purpose)
+        pools = destination_index[base]
+        supported = np.asarray([bool(pools.get(cell)) for cell in candidate_ids], dtype=bool)
+        masks[base] = supported
+        masks[str(purpose)] = supported
+        masks["statent"] |= supported
+    return masks
+
+
+def require_purpose_mask(masks, purpose):
+    """Never widen a purpose-specific choice set to arbitrary facilities."""
+    base = base_activity_purpose(purpose)
+    if base not in masks:
+        raise ValueError(f"No destination support mask for purpose {purpose!r}")
+    return masks[base]

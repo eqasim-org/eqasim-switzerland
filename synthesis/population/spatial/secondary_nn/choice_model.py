@@ -492,5 +492,7 @@ def predict_choice_proba(model, person_static, person_dynamic, candidate_static,
             valid_mask_tensor = torch.as_tensor(valid_mask_tensor, dtype=torch.bool, device=dev)
             if valid_mask_tensor.ndim == 1:
                 valid_mask_tensor = valid_mask_tensor.unsqueeze(0).expand(utilities.shape[0], -1)
-            utilities.masked_fill_(~valid_mask_tensor, -1e9)
+            if not bool(valid_mask_tensor.any(dim=1).all().item()):
+                raise ValueError("Destination choice has no eligible candidates for at least one row")
+            utilities = utilities.masked_fill(~valid_mask_tensor, -torch.inf)
         return torch.softmax(utilities, dim=1)

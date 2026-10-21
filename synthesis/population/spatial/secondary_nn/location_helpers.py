@@ -6,6 +6,7 @@ import geopandas as gpd
 import h3
 from numba import njit, prange
 from .h3 import H3_LEVEL_NAMES
+from .tools import base_activity_purpose, destination_offer_masks
 from .hierarchical_utils import SECONDARY_ACTIVITIES, PRIMARY_ACTIVITIES
 from matsim.scenario.population import HOME_DESTINATION_ID
 
@@ -92,14 +93,10 @@ def build_probability(num_employees, ovgk_none, car_available, alpha=0.7):
 def _prepare_destination_level2_index(context, h3_data, h3_geo):
     df_dest = h3_data["destinations"][["destination_id", H3_LEVEL_NAMES[1], H3_LEVEL_NAMES[-1]]]
     
-    offer_cols = [f"offers_{p}" for p in SECONDARY_ACTIVITIES]
-    df_dest_attributes = context.stage("synthesis.population.destinations")[["destination_id", "number_employees", "ovgk", "geometry", *offer_cols]]
+    destinations = context.stage("synthesis.population.destinations")
+    offer_cols = [column for column in destinations if column.startswith("offers_")]
+    df_dest_attributes = destinations[["destination_id", "number_employees", "ovgk", "geometry", *offer_cols]]
     df_dest = df_dest.merge(df_dest_attributes, on="destination_id", how="left", validate="one_to_one")
-
-    # Validate columns    
-    missing = [c for c in offer_cols if c not in df_dest.columns]
-    if missing:
-        raise RuntimeError(f"Missing columns in destinations data: {missing}")
 
     # Reusable full-frame arrays (boolean/numeric only — indexed with boolean mask below).
     no_ovgk = (df_dest["ovgk"].fillna("None").to_numpy() == "None")
@@ -109,7 +106,7 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
     geoms = df_dest["geometry"].values
 
     # Convert offer columns once
-    offer_masks = {purpose: df_dest[f"offers_{purpose}"].fillna(False).to_numpy(dtype=bool) for purpose in SECONDARY_ACTIVITIES}
+    offer_masks = destination_offer_masks(df_dest)
 
     index = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
     fallback = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
@@ -119,7 +116,7 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
     no_car_available_probabilities = {purpose: {} for purpose in SECONDARY_ACTIVITIES}
 
     for purpose in SECONDARY_ACTIVITIES:
-        mask = offer_masks[purpose]
+        mask = offer_masks[base_activity_purpose(purpose)]
         sub = df_dest.loc[mask].reset_index(drop=True)
         sub_no_ovgk = no_ovgk[mask]
         sub_employees = employees[mask]
@@ -150,7 +147,12 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
             car_available_probabilities[purpose][level_1] = build_probability(emp, nov, car_available=True)
             no_car_available_probabilities[purpose][level_1] = build_probability(emp, nov, car_available=False)
 
-    return (index, fallback, car_available_probabilities, no_car_available_probabilities, index_xy, fallback_xy)
+    # Base and diary labels refer to the same eligible facility pools.
+    pools = (index, fallback, car_available_probabilities, no_car_available_probabilities, index_xy, fallback_xy)
+    for lookup in pools:
+        for purpose in SECONDARY_ACTIVITIES:
+            lookup[base_activity_purpose(purpose)] = lookup[purpose]
+    return pools
 
 
 def _reverse_tree(h3_tree):

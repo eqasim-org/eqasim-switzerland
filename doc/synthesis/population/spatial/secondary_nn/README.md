@@ -17,6 +17,22 @@ config:
 uv run -m synpp config_dib_10.yml
 ```
 
+## Purpose eligibility and spatial masks
+
+Secondary diary labels share the base facility offers: `work_secondary` uses
+`offers_work` and `education_secondary` uses `offers_education`. The catalogue
+has no general household `offers_home` field, so home visits retain its existing
+`offers_home_secondary` eligibility unless an explicit `offers_home` is supplied.
+Shop, leisure and other activities use their own offers. Artificial OSM facilities
+remain eligible only for leisure and other activities.
+
+At assignment time all four experts receive masks built from the actual facility
+pools. Leaf support is propagated through the coordinate tree to middle and root
+cells; padded alternatives stay false. The short expert uses the same support.
+An all-false mask raises an error rather than creating a uniform distribution.
+The final draw stays in the selected leaf and requested purpose; it cannot switch
+to an `other` pool or widen to a sibling cell.
+
 ## OSM context and additional destinations
 
 `data.osm.secondary_features` reads the configured `data_path/osm/osm_file`
@@ -29,12 +45,52 @@ The stage returns a GeoDataFrame and writes `secondary_features.parquet`.
 
 Themes include aerialways, cable-car stations, ski pistes and winter-sport
 areas, parks, gardens, viewpoints, named tourist attractions, places of worship,
-lake shorelines, public shoreline paths and riverside paths. Shorelines use
-the original lake boundaries without additional country clipping. Public waterside access is inferred from walkable OSM
-paths within `secondary_nn_osm_water_path_buffer_m` (default 30 m) of water.
-Unspecified path access follows ordinary OSM access assumptions; this is not a
-legal guarantee of public access. Explicit private/no/customer/permit access is
-excluded from proposed facilities. Raw shoreline geometry supplies context only.
+lake shorelines, public shoreline paths and riverside paths. Waterside access is
+inferred from eligible pedestrian OSM paths within `secondary_nn_osm_water_path_buffer_m`
+(default 30 m) of water. Only shoreline sections within that distance of a public
+path contribute shoreline length; whole lake perimeters are not model features.
+
+Visitor eligibility is decided in `data.osm.secondary_features`. Destination
+enrichment and H3 aggregation consume every retained feature without applying a
+second `public` filter. The retained `public` flag means eligible for visitor
+assignment, including inferred access and ticketed facilities; it does not assert
+public ownership or unrestricted access. Original `access`, `foot`, `garden_type`
+and the decision's `access_reason` are retained for inspection.
+
+Explicit pedestrian permissions follow `foot` before general `access`. Private,
+no-access, members-only, unknown and conditional permissions are excluded.
+Closed, disused, abandoned and construction features are excluded. Explicit ski
+permissions are also considered for ski infrastructure, so `foot=no` with
+`ski=yes` does not remove an operating ski lift. A fee or private
+ownership alone does not exclude a visitor destination. `access=customers` is
+accepted for ski infrastructure, cable-car stations, named tourist attractions,
+places of worship and botanical/arboretum/community gardens, since these are
+potential visits to the facility rather than through travel. An explicit
+`access=private` still excludes a station or church unless a pedestrian permission
+overrides it.
+
+Without access tags, parks, viewpoints, named attractions, places of worship,
+passenger aerialways and ski infrastructure are retained by their visitor role.
+Freight/industrial aerialways and stations with `aerialway:access=no` are excluded.
+Water provides geographic context only: shorelines and riverside features still
+require an eligible pedestrian path nearby. Untagged paths, footways, pedestrian
+ways and steps are retained; tracks and cycleways need explicit pedestrian access.
+
+Gardens receive stricter checks to avoid residential backyards. Residential/private
+garden types (including `garden=residential` and the common `residental` typo),
+and gardens tagged as residential buildings or land use, are excluded even if named.
+Other gardens are retained with explicit access, botanical/arboretum/community
+classification, or a name accompanied by a public operator or tourist-attraction
+tag. A named, untyped garden can also be recovered when an eligible path enters
+its interior; a path merely along its boundary is insufficient. A name alone
+is insufficient. Restricted or uncertain garden polygons are removed from
+otherwise eligible overlapping paths, POIs and areas. These are documented
+heuristics based on available OSM tags, not guarantees of access at every location.
+
+The rules follow the OSM distinction between [access and ownership](https://wiki.openstreetmap.org/wiki/Access),
+[customer visits](https://wiki.openstreetmap.org/wiki/Tag:access%3Dcustomers),
+[garden types](https://wiki.openstreetmap.org/wiki/Key:garden:type), and
+[passenger versus freight aerialways](https://wiki.openstreetmap.org/wiki/Aerialway).
 
 When the NN algorithm is selected, the destination stage fills gaps in the
 catalogue. A proposed point is suppressed within

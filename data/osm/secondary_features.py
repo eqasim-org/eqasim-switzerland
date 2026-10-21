@@ -1,4 +1,4 @@
-"""Extract recreation and visitor context from the configured Swiss OSM files."""
+"""Extract visitor destinations using access restrictions and feature-specific evidence."""
 
 import logging
 from pathlib import Path
@@ -12,7 +12,7 @@ from shapely.ops import transform
 from pyproj import Transformer
 
 from synthesis.population.spatial.secondary_nn.tools import (
-    classify_osm, derive_water_features, empty_features, public_access,
+    classify_osm, derive_water_features, empty_features, osm_access_decision,
 )
 
 logger = logging.getLogger("synpp: osm.secondary_features")
@@ -25,6 +25,9 @@ def configure(context):
 
 
 def execute(context):
+
+    # Read the configured Swiss extracts and their access restrictions.
+
     files = context.config("osm_file")
     files = files if isinstance(files, list) else [files]
     frames = []
@@ -52,9 +55,16 @@ def execute(context):
         duplicate = matches.loc[(matches.kind_object == matches.kind_relation)
                                 & matches.osm_id.str.startswith("w")].index
         features = features.drop(index=duplicate.unique()).reset_index(drop=True)
+
+    # Resolve visitor eligibility and exclude residential grounds before deriving waterside features.
+
     features = derive_water_features(features, float(context.config("secondary_nn_osm_water_path_buffer_m")))
+
+    # Save eligible visitor features and access evidence for all model levels.
+
     features.to_parquet(Path(context.path()) / "secondary_features.parquet", index=False)
     logger.info("OSM secondary features by theme: %s", features.kind.value_counts().to_dict())
+    logger.info("OSM visitor access evidence: %s", features.access_reason.value_counts().to_dict())
     return features
 
 
@@ -105,8 +115,12 @@ def read_features(path, cache_directory):
                     # Use the original lake boundary for shoreline measurements.
                     measured = geometry.boundary if kind == "water" and geometry.geom_type in ("Polygon", "MultiPolygon") else geometry
                     if not measured.is_empty:
+                        permitted, reason = osm_access_decision(tags, kind)
                         rows.append(dict(osm_id=osm_id, kind=kind, name=tags.get("name", ""),
-                                         public=public_access(tags), geometry=measured))
+                                         public=permitted, access_reason=reason,
+                                         access=tags.get("access", ""), foot=tags.get("foot", ""),
+                                         garden_type=tags.get("garden:type", tags.get("garden", "")),
+                                         geometry=measured))
             except (RuntimeError, osmium.InvalidLocationError, ValueError):
                 failures += 1
     logger.info("Extracted %s features from %s; %s invalid/incomplete geometries", len(rows), path.name, failures)
