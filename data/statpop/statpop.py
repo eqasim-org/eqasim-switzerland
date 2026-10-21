@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from data.spatial.cantons import impute_sp_region
 from data.spatial.municipality_types import impute as impute_municipality_types
-import data.spatial.ovgk
+from data.spatial.ovgk import impute as impute_ovgk
 import data.spatial.utils
 import data.spatial.zones
 import data.statpop.density
@@ -27,7 +27,7 @@ def configure(context):
     context.stage("data.spatial.ovgk")
     context.stage("data.constants")
     context.config("threads", volatile=True)
-    context.config("only_permanent_residents", default=True)
+    context.config("only_permanent_residents", default=False)
     context.config("retain_geocoded_missing_households", default=True)
     context.config("non_private_residences_enabled", True)
     context.config("non_private_residence_radius", 250.)
@@ -193,7 +193,7 @@ def execute(context):
 
     # Impute OV Guteklasse
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
+    df_spatial = impute_ovgk(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
     df = pd.merge(
         df,
         df_spatial[["person_id", "ovgk"]],

@@ -1,7 +1,7 @@
 import pandas as pd
 import geopandas as gpd
 import data.spatial.utils as spatial_utils
-import data.spatial.ovgk
+from data.spatial.ovgk import impute as impute_ovgk
 
 def configure(context):
     context.stage("data.statent.statent")
@@ -52,7 +52,7 @@ def execute(context):
 
     # impute ovgk
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="facility")
+    df_spatial = impute_ovgk(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="facility")
     df = df.merge(df_spatial[["destination_id", "ovgk"]], how="left", on="destination_id")
 
     # impute municipality types

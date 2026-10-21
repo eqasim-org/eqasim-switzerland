@@ -25,6 +25,7 @@ def _weighted_mean(x, w):
 
 
 def configure(context):
+    context.config("random_seed")
     context.stage("data.constants")
     context.stage("data.microcensus.21.persons")
     context.stage("synthesis.population.models.cross_border")
@@ -42,7 +43,7 @@ def _execute_model(context):
     # CONFIG
     # -------------------------------------------------------------------
     DL_MODEL = "catboost"         # "rf" or "gbm" or "catboost"
-    SEED_DL  = 2026
+    SEED_DL = int(context.config("random_seed"))
     DIAG_CANTON_ID = "25"    # default canton selection for diagnostics
 
     # -------------------------------------------------------------------
@@ -176,14 +177,14 @@ def _execute_model(context):
                 learning_rate=0.05,
                 max_iter=400,
                 min_samples_leaf=50,
-                random_state=42
+                random_state=SEED_DL
             )
         elif mt == "rf":
             return RandomForestClassifier(
                 n_estimators=600,
                 max_depth=None,
                 min_samples_leaf=5,
-                random_state=42,
+                random_state=SEED_DL,
                 n_jobs=-1
             )
         elif mt in ("catboost", "cat"):
@@ -193,7 +194,7 @@ def _execute_model(context):
                 learning_rate=0.03,
                 depth=10,
                 l2_leaf_reg=6.0,
-                random_seed=42,
+                random_seed=SEED_DL,
                 verbose=False,
                 bootstrap_type="Bernoulli",
                 subsample=0.8

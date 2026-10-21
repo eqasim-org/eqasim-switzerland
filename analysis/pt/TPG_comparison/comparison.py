@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-import lemanis
+import lemanis_2022
 
 CONFIDENCE_Z = 1.96  # ~95% CI assuming a normal distribution
 
@@ -40,10 +40,13 @@ def filter_active_stops(tpg_mofr, min_avg_events = 10, min_active_hours = 6):
 
 
 def build_stop_hour_table(tpg_mofr, gtfs_stops, stops_in_perimeter):
+    """One row per stop and hour; per stop, submode and hour when tpg_mofr has a submode column."""
     df = _with_totals(tpg_mofr)
     df = df[df["gtfs_code"].isin(stops_in_perimeter)]
 
-    grouped = df.groupby(["gtfs_code", "stop_name", "hour"], as_index = False).agg(
+    keys = ["gtfs_code"] + (["submode"] if "submode" in df.columns else [])
+
+    grouped = df.groupby(keys + ["stop_name", "hour"], as_index = False).agg(
         tpg_mean     = ("tpg_total_mean", "sum"),
         tpg_var      = ("tpg_total_var", "sum"),
         matsim_total = ("matsim_total", "sum"),
@@ -53,17 +56,17 @@ def build_stop_hour_table(tpg_mofr, gtfs_stops, stops_in_perimeter):
     coords["stop_x"] = gtfs_stops.geometry.x  
     coords["stop_y"] = gtfs_stops.geometry.y
 
-    stop_info = grouped[["gtfs_code", "stop_name"]].drop_duplicates("gtfs_code").merge(
+    stop_info = grouped[keys + ["stop_name"]].drop_duplicates(keys).merge(
         coords, left_on = "gtfs_code", right_on = "stop_id", how = "left"
     )
 
-    full_index = pd.MultiIndex.from_product(
-        [stop_info["gtfs_code"], range(24)], names = ["gtfs_code", "hour"]
+    full_index = pd.MultiIndex.from_frame(
+        stop_info[keys].merge(pd.DataFrame({"hour": range(24)}), how = "cross")
     )
 
-    grouped = grouped.set_index(["gtfs_code", "hour"]).reindex(full_index).drop(columns = "stop_name").reset_index()
+    grouped = grouped.set_index(keys + ["hour"]).reindex(full_index).drop(columns = "stop_name").reset_index()
     grouped = grouped.fillna({"tpg_mean": 0, "tpg_var": 0, "matsim_total": 0})
-    grouped = grouped.merge(stop_info, on = "gtfs_code", how = "left")
+    grouped = grouped.merge(stop_info, on = keys, how = "left")
 
     grouped = _add_confidence_interval(grouped)
     grouped["pct_of_mean"] = compute_matsim_pct_of_mean(grouped["matsim_total"], grouped["tpg_mean"])
@@ -72,7 +75,8 @@ def build_stop_hour_table(tpg_mofr, gtfs_stops, stops_in_perimeter):
 
 
 def build_full_day_table(stop_hour_df):
-    grouped = stop_hour_df.groupby(["gtfs_code", "stop_name", "stop_lat", "stop_lon", "stop_x", "stop_y"], as_index = False).agg(
+    keys    = ["gtfs_code"] + (["submode"] if "submode" in stop_hour_df.columns else [])
+    grouped = stop_hour_df.groupby(keys + ["stop_name", "stop_lat", "stop_lon", "stop_x", "stop_y"], as_index = False).agg(
         tpg_mean     = ("tpg_mean", "sum"),
         tpg_var      = ("tpg_var", "sum"),
         matsim_total = ("matsim_total", "sum"),
@@ -141,10 +145,6 @@ def build_line_full_day_table(line_hour_df):
 
 
 def build_lemanis_stop_period_table(lemanis_mofr, gtfs_stops):
-    """Same idea as build_stop_hour_table, but keyed by Lemanis' own period
-    (see lemanis.to_period_shape) instead of hour, and without the
-    perimeter-stop restriction: lemanis_mofr is already limited to
-    Lemanis' own matched stops (see stages._build_lemanis_period_mofr)."""
     df = _with_totals(lemanis_mofr)
 
     grouped = df.groupby(["gtfs_code", "stop_name", "period"], as_index = False).agg(
@@ -162,7 +162,7 @@ def build_lemanis_stop_period_table(lemanis_mofr, gtfs_stops):
     )
 
     full_index = pd.MultiIndex.from_product(
-        [stop_info["gtfs_code"], lemanis.PERIOD_ORDER], names = ["gtfs_code", "period"]
+        [stop_info["gtfs_code"], lemanis_2022.PERIOD_ORDER], names = ["gtfs_code", "period"]
     )
 
     grouped = grouped.set_index(["gtfs_code", "period"]).reindex(full_index).drop(columns = "stop_name").reset_index()
@@ -191,11 +191,6 @@ def build_lemanis_stop_full_day_table(stop_period_df):
 
 
 def build_lemanis_line_period_table(lemanis_mofr):
-    """Same shape/purpose as build_line_hour_table, but keyed by Lemanis'
-    own reported period (see lemanis.to_period_shape) instead of hour -
-    MATSim is aggregated into those same periods rather than Lemanis being
-    split down to an hourly resolution it doesn't have (see
-    stages._build_lemanis_period_mofr)."""
     df = _with_totals(lemanis_mofr)
 
     grouped = df.groupby(["line_direction", "period"], as_index = False).agg(
@@ -205,7 +200,7 @@ def build_lemanis_line_period_table(lemanis_mofr):
     )
 
     full_index = pd.MultiIndex.from_product(
-        [grouped["line_direction"].unique(), lemanis.PERIOD_ORDER], names = ["line_direction", "period"]
+        [grouped["line_direction"].unique(), lemanis_2022.PERIOD_ORDER], names = ["line_direction", "period"]
     )
     grouped = grouped.set_index(["line_direction", "period"]).reindex(full_index).reset_index()
     grouped = grouped.fillna({"tpg_mean": 0, "tpg_var": 0, "matsim_total": 0})

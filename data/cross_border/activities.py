@@ -4,6 +4,7 @@ import geopandas as gpd
 from shapely import LineString
 
 from data.cross_border.destinations import make_entry_border_facility_id, make_exit_border_facility_id
+from data.cross_border.travel_times import estimate_travel_time
 
 
 def merge_refined_points(population, network_projection, real_x_col, real_y_col,
@@ -55,8 +56,9 @@ def rename_projected_ends(df_activities, population):
     below. "Through" agents' origin/destination bookends and border
     crossings are built separately, in execute() (see build_through_ends).
 
-    data.cross_border.generate_od moves an origin that is more than 20 km
-    from the border onto the nearest surveyed interview place, so the RAW
+    data.cross_border.generate_od moves an origin that is farther than
+    border_offset from the border onto a surveyed interview place (public
+    transport: onto a gateway station, see data.cross_border.pt_gateways), so the RAW
     interview place coordinate is not where a "From-To" agent lives - it is
     (approximately) the point where they cross the border. "From-To" agents
     DO reside at that end (just not at the raw interview place - their real
@@ -100,6 +102,15 @@ def rename_projected_ends(df_activities, population):
     df.loc[on_home_unrefined, "purpose"] = "other"
 
     return df.drop(columns = ["origin_is_projected", "refined_origin_x", "refined_origin_y"])
+
+
+THROUGH_DESTINATION_PREFIX = "through_destination_"
+
+
+def make_through_destination_id(person_id):
+    # The facility of the last activity of a "Through" agent, in the country it leaves Switzerland to
+    # (written by matsim.scenario.facilities)
+    return f"{THROUGH_DESTINATION_PREFIX}{person_id}"
 
 
 def build_through_ends(df_activities, df_trips, population):
@@ -183,12 +194,78 @@ def build_through_ends(df_activities, df_trips, population):
         "purpose": "other",
         "is_last": True,
         "geometry": gpd.points_from_xy(through_population["destination_point_x"], through_population["destination_point_y"]),
-        "destination_id": -1,
+        # Not -1: matsim.scenario.population writes an activity with that id at the person's home, the origin
+        "destination_id": through_population["person_id"].astype(str).apply(make_through_destination_id).values,
         "following_mode": None,
     })
     destination_bookend["duration"] = destination_bookend["end_time"] - destination_bookend["start_time"]
 
     return pd.concat([df_activities, origin_bookend, destination_bookend], ignore_index = True)
+
+
+def retime_with_travel_times(df_activities):
+    """
+    The trip times come from a microcensus chain (a Swiss resident's trips, mostly
+    short), whereas the trips of the cross-border agents start or end abroad, up to
+    border_offset away, or at a pt gateway station. The activities in Switzerland
+    (the middle activities of the "From-To" agents) keep their microcensus times;
+    the trips around them get a duration from their distance (data.cross_border.
+    travel_times): computed backwards from the arrival at the first activity in
+    Switzerland, and forwards from the departure from the last one. The border
+    pass-through activities keep their 1 second. Agents without activity in
+    Switzerland ("Through") keep the end of their first activity and are computed
+    forwards from it.
+
+    Expects df_activities sorted by person_id and activity_index.
+    """
+
+    df = df_activities.reset_index(drop = True).copy()
+
+    x = df["geometry"].apply(lambda g: g.x).values
+    y = df["geometry"].apply(lambda g: g.y).values
+
+    # Travel time of the trip leaving each activity (to the next one of the person)
+    same_person = np.append(df["person_id"].values[1:] == df["person_id"].values[:-1], False)
+    distance = np.hypot(np.roll(x, -1) - x, np.roll(y, -1) - y)
+    travel_time = np.where(same_person, estimate_travel_time(distance, df["following_mode"].fillna("car").values), np.nan)
+
+    start = df["start_time"].values.astype(float)
+    end = df["end_time"].values.astype(float)
+    duration = np.where((df["purpose"] == "border").values, 1.0, end - start)
+    is_border = (df["purpose"] == "border").values
+    is_anchor = ((df["label"] == "From-To") & ~is_border).values
+
+    person_starts = np.flatnonzero(np.append(True, df["person_id"].values[1:] != df["person_id"].values[:-1]))
+    person_ends = np.append(person_starts[1:], len(df))
+
+    for first, stop in zip(person_starts, person_ends):
+        last = stop - 1
+        anchors = [k for k in range(first + 1, last) if is_anchor[k]]
+
+        if anchors:
+            first_anchor, last_anchor = anchors[0], anchors[-1]
+        else:
+            first_anchor = last_anchor = first
+
+        # Backwards to the first activity
+        for k in range(first_anchor - 1, first - 1, -1):
+            end[k] = max(start[k + 1] - travel_time[k], 0.0)
+            if k > first:
+                start[k] = end[k] - duration[k]
+
+        # Forwards to the last activity
+        for k in range(last_anchor + 1, stop):
+            start[k] = end[k - 1] + travel_time[k - 1]
+            if k < last:
+                end[k] = start[k] + duration[k]
+
+        end[last] = max(end[last], start[last])
+
+    df["start_time"] = start
+    df["end_time"] = end
+    df["duration"] = end - start
+
+    return df
 
 
 def configure(context):
@@ -205,7 +282,7 @@ def execute(context):
     network_projection = context.stage("data.cross_border.network_projection")
     mz_trips          = context.stage("data.microcensus.trips")[0].copy()
 
-    population = df[["cross_border_person_id", "label", "mz_person_id",
+    population = df[["cross_border_person_id", "label", "mz_person_id", "trip_mode",
                      "origin_x", "origin_y",
                      "destination_x", "destination_y", "destination_id",
                      "residence_x", "residence_y",
@@ -397,6 +474,16 @@ def execute(context):
     df_activities = rename_projected_ends(df_activities, population)
     df_activities = build_through_ends(df_activities, df_trips, population)
 
+    # Public transport agents get no border activity: it would force them off the
+    # train at the crossing, a station on the border where most long-distance
+    # trains do not stop, onto the local services that do. Their trip runs directly
+    # from their origin (real or a pt gateway station, see data.cross_border.
+    # generate_od) to their destination, and the crossing they were surveyed at
+    # stays in data.cross_border.destinations' interview_point_id.
+    is_pt_person = df_activities["person_id"].isin(
+        population.loc[population["trip_mode"] == "pt", "cross_border_person_id"])
+    df_activities = df_activities[~(is_pt_person & (df_activities["purpose"] == "border"))]
+
     # ── 0. Sort ────────────────────────────────────────────────────────────────────
     df_activities = df_activities.sort_values(["person_id", "activity_index"]).reset_index(drop=True)
 
@@ -466,7 +553,9 @@ def execute(context):
     # activity (just relocated onto the refined point when projected - see
     # its docstring), so they always need this actual "border" activity
     # inserted next to it to model the crossing.
-    mask_border_activity = population["label"] != "Through"
+    #
+    # Public transport agents are skipped as well (see above).
+    mask_border_activity = (population["label"] != "Through") & (population["trip_mode"] != "pt")
 
     activities1point5 = (
         population[mask_border_activity].copy()
@@ -526,6 +615,9 @@ def execute(context):
     )
 
     df_activities["activity_index"] = df_activities.groupby("person_id").cumcount() + 1
+
+    # ── 8. Travel times from the distances ─────────────────────────────────────────
+    df_activities = retime_with_travel_times(df_activities)
 
     df_activities = df_activities[["person_id", "activity_index", "label",
                                    "start_time", "end_time", "duration",

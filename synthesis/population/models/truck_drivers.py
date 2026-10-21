@@ -18,7 +18,7 @@ def _integer_codes(values, name):
     return numeric.astype("int64")
 
 
-def find_truck_drivers(structural_survey, enriched, downsampling):
+def find_truck_drivers(structural_survey, enriched, downsampling, random_seed):
     se = structural_survey.copy()
     sr = downsampling
 
@@ -86,7 +86,7 @@ def find_truck_drivers(structural_survey, enriched, downsampling):
         n     = int(row["n"])
         if n == 0 or len(group) == 0:
             continue
-        sampled.append(group.sample(n = n, replace = len(group) < n, random_state = 42))
+        sampled.append(group.sample(n = n, replace = len(group) < n, random_state = random_seed))
 
     if not sampled:
         target_examples = (

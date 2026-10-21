@@ -6,7 +6,7 @@ import matsim.runtime.maven as maven
 
 DEFAULT_EQASIM_VERSION = "2.0.0"
 DEFAULT_EQASIM_BRANCH = "cmdp"
-DEFAULT_EQASIM_COMMIT = "64b8ce08b98a8777813b28097480ba6133795043"
+DEFAULT_EQASIM_COMMIT = "0f94bad76c7b4501f1a4d86606cb6d08586ab64a"
 
 
 def configure(context):
@@ -30,6 +30,9 @@ def run(context, command, arguments, cwd = None, memory = None):
 def execute(context):
     version = context.config("eqasim_version")
 
+    jar_relative_path = "eqasim-java/switzerland/target/switzerland.jar"
+    jar_path = os.path.join(context.path(), jar_relative_path)
+
     # Normal case: we clone eqasim
     if context.config("eqasim_path") == "":
         # Clone repository and checkout version
@@ -50,16 +53,16 @@ def execute(context):
 
         # Build eqasim
         maven.run(context, ["-Pstandalone", "--projects", "switzerland", "--also-make", "package", "-DskipTests"], cwd = "%s/eqasim-java" % context.path())
-        jar_path = "%s/eqasim-java/switzerland/target/switzerland-%s.jar" % (context.path(), version)
+        
 
     # Special case: We provide the jar directly. This is mainly used for
     # creating input to unit tests of the eqasim-java package.
     else:
         os.makedirs("%s/eqasim-java/switzerland/target" % context.path())
-        shutil.copy(context.config("eqasim_path"),
-            "%s/eqasim-java/switzerland/target/switzerland-%s.jar" % (context.path(), version))
+        shutil.copy(context.config("eqasim_path"), jar_path )
 
-    return "eqasim-java/switzerland/target/switzerland-%s.jar" % version
+    assert os.path.exists(jar_path), "Cannot find eqasim jar at: %s" % jar_path
+    return jar_relative_path
 
 
 def validate(context):

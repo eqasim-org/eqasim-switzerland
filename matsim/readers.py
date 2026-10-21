@@ -68,11 +68,13 @@ class Network:
             self.links["attributes"] = None
             return
 
-        # As a single column containing dicts
-        link_attrs = self.link_attrs.groupby('link_id').apply(lambda x: dict(zip(x['name'], x['value']))).reset_index(name='attributes')
-        self.links = self.links.merge(link_attrs, on="link_id",how="left")
-        self.links.loc[self.links["attributes"].isna(), "attributes"] = None
-        
+        attributes = {}
+        for link_id, name, value in zip(self.link_attrs.link_id.to_numpy(),
+                                        self.link_attrs.name.to_numpy(),
+                                        self.link_attrs.value.to_numpy()):
+            attributes.setdefault(link_id, {})[name] = value
+        self.links["attributes"] = [attributes.get(link_id) for link_id in self.links.link_id.to_numpy()]
+
     def __len__(self):
         return len(self.links)
     
@@ -413,7 +415,19 @@ def parse_links(content, skip_attributes):
     return links, link_attrs
 
 
-def read_network(filename, skip_attributes=False, only_car_links=False):
+def read_network(filename, skip_attributes=False, only_car_links=False, context=None):
+    """Read XML using C++ when available, or reuse its shared binary cache.
+
+    Pass a Synpp context to cache in context.working_directory. Cache identity
+    includes the absolute source path, nanosecond mtime, size, attribute option,
+    and reader schema version. Car filtering does not alter the stored network.
+    Without a context, reading still works but no binary network cache is used.
+    """
+    from matsim.network_reader import read_network_cached
+    return read_network_cached(filename, context, skip_attributes, only_car_links)
+
+
+def _read_network_xml(filename, skip_attributes=False, only_car_links=False):
     """Read a MATSim network.xml.gz file. Returns a Network object with dataframes
     for nodes, links, node_attributes, and link_attributes. If the network has a CRS
     projection set, it will be available in network_attrs."""
@@ -446,9 +460,15 @@ class Plans:
         self.legs = legs
         self.routes = routes
 
+def _iterparse_file(filename):
+    """Feed bytes to the XML parser and close plain or compressed input files."""
+    with xopen.xopen(filename, "rb") as stream:
+        yield from _iterparse(stream)
+
+
 def plan_reader(filename, selected_plans_only = False):
     person = None
-    tree = ET.iterparse(xopen.xopen(filename), events=['start','end'])
+    tree = _iterparse_file(filename)
     
     for xml_event, elem in tree:
         if elem.tag == 'person' and xml_event == 'start':
@@ -488,7 +508,7 @@ def _parseAttributes(elem, dict):
 # Route :leg_id
 # The column names of the dataframes are the same as the attribute names (<name:'value'> and <attribute> are parsed)
 def plan_reader_dataframe(filename, selected_plans_only = False):
-    tree = ET.iterparse(xopen.xopen(filename), events=['start','end'])
+    tree = _iterparse_file(filename)
     
     persons = []
     plans = []
@@ -628,14 +648,14 @@ def parse_attributes(elem, dict):
 
 # Returns households as a dataframe
 def houshold_reader(filename, convert_dataframes_types = True):
-    tree = ET.iterparse(xopen.xopen(filename, "r"), events = ["start", "end"])
+    tree = _iterparse_file(filename)
     
     households        = []
     current_persons   = []
     current_household = {}
     
     for xml_event, elem in tree:
-        _, _, elem_tag = elem.tag.partition('}')     # Removing xmlns tag from tag name
+        elem_tag = elem.tag.rsplit("}", 1)[-1]  # Accept namespaced and plain XML.
         
         # HOUSEHOLDS
         if elem_tag == "household":

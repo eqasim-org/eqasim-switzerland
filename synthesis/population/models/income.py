@@ -17,6 +17,7 @@ def draw_multinomial_from_proba(proba_matrix, classes, seed=None):
 
 
 def configure(context):
+    context.config("random_seed")
     context.stage("data.microcensus.21.persons")
     context.stage("synthesis.population.models.employment")
     context.stage("data.constants")
@@ -29,6 +30,7 @@ def execute(context):
 
 
 def _execute_model(context):
+    random_seed = int(context.config("random_seed"))
     # -------------------------------------------------------------------
     # CONFIG: model type + calibration switch
     # -------------------------------------------------------------------
@@ -83,7 +85,7 @@ def _execute_model(context):
     REP_MIN_AGE = 18
 
     pop_eligible = pop_df[pop_df['age'] >= REP_MIN_AGE].copy()
-    rng = np.random.default_rng(12345)
+    rng = np.random.default_rng(random_seed)
     pop_eligible['rand'] = rng.random(len(pop_eligible))
 
     reps = (
@@ -152,14 +154,14 @@ def _execute_model(context):
                 learning_rate=0.05,
                 max_iter=400,
                 min_samples_leaf=50,
-                random_state=42
+                random_state=random_seed
             )
         elif model_type == "rf":
             return RandomForestClassifier(
                 n_estimators=600,
                 max_depth=None,
                 min_samples_leaf=5,
-                random_state=42,
+                random_state=random_seed,
                 n_jobs=-1
             )
         elif model_type in ("catboost", "cat"):
@@ -170,7 +172,7 @@ def _execute_model(context):
                 learning_rate=0.05,
                 depth=8,
                 l2_leaf_reg=6.0,
-                random_seed=42,
+                random_seed=random_seed,
                 verbose=False,
                 bootstrap_type="Bernoulli",
                 subsample=0.8
@@ -299,7 +301,7 @@ def _execute_model(context):
         proba_reps_final = proba_reps_raw
         logger.info("\n[INFO] Using UNCALIBRATED model probabilities for draws.")
 
-    SEED_INCOME = 2025
+    SEED_INCOME = random_seed
     cls_draw = draw_multinomial_from_proba(
         proba_reps_final,
         classes_cls,

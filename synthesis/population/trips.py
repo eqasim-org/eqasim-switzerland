@@ -3,6 +3,7 @@ import pandas as pd
 import logging
 from data.utils import coerce_boolean_series
 from data.microcensus.secondary_trips import recode_nonstudent_education
+from data.cross_border.travel_times import estimate_travel_time
 
 logger = logging.getLogger("synpp")
 """
@@ -13,10 +14,12 @@ This stage attaches all trip relevant information to the synthetic population.
 def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.persons")
     context.stage("data.constants")
     context.stage("synthesis.population.spatial.primary.work.work_remotly")
 
     context.config("random_seed")
+    context.config("specific_day_scenario", default = "workday")
 
 
 BORDER_MATCH_COLUMNS = [
@@ -41,12 +44,14 @@ def execute(context):
 
     if c.census == "statpop":
         df_persons = context.stage("synthesis.population.enriched")[[
-            "person_id", "mz_person_id", "age", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id"
+            "person_id", "mz_person_id", "age", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id",
+            "home_x", "home_y",
         ] + BORDER_MATCH_COLUMNS].copy()
 
     elif c.census == "are_synpop":
         df_persons = context.stage("synthesis.population.enriched")[[
-            "person_id", "mz_person_id", "age_class", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id"
+            "person_id", "mz_person_id", "age_class", "is_truck_driver", "is_outside_of_switzerland", "is_crossing_the_border", "canton_id",
+            "home_x", "home_y",
         ] + BORDER_MATCH_COLUMNS].copy()
 
     df_trips = pd.DataFrame(context.stage("data.microcensus.trips")[0], copy=True)[[
@@ -172,7 +177,7 @@ def execute(context):
         df_persons["is_outside_of_switzerland"], name="is_outside_of_switzerland")
     is_cb_person &= df_persons["cross_border_person_id"].notna()
 
-    df_cb_persons = df_persons.loc[is_cb_person, ["person_id"] + BORDER_MATCH_COLUMNS].copy()
+    df_cb_persons = df_persons.loc[is_cb_person, ["person_id", "home_x", "home_y"] + BORDER_MATCH_COLUMNS].copy()
 
     final_columns = [
         "person_id", "mz_person_id", "trip_id", "trip_index",
@@ -191,10 +196,7 @@ def execute(context):
     # Direction: 50% leaving Switzerland (home -> border), 50% entering (border -> home)
     is_leaving = rng.random_sample(size=len(df_cb_persons)) < 0.5
 
-    # Sample departure/arrival times from an already existing (non-border) trip
-    sampled_times = df_trips_noncb[["departure_time", "arrival_time"]].sample(
-        n=len(df_cb_persons), replace=True, random_state=rng.randint(0, 2**31 - 1)
-    ).reset_index(drop=True)
+    sampled_times = sample_border_trip_times(context, df_cb_persons, is_leaving, rng)
 
     df_trips_cb = pd.DataFrame({
         "person_id": df_cb_persons["person_id"].values,
@@ -219,3 +221,78 @@ def execute(context):
     df_trips = pd.concat([df_trips_noncb, df_trips_cb], ignore_index=True, sort=False)
 
     return df_trips[final_columns]
+
+
+def sample_border_trip_times(context, df_cb_persons, is_leaving, rng):
+    """
+    Departure and arrival times of the single border trip of the Swiss residents
+    crossing the border.
+
+    The time of day comes from the microcensus trips that really cross the border
+    (on the scenario's day type), drawn by weight among those going in the same
+    direction (leaving / entering Switzerland) with the same mode (car or pt), so
+    that people leave in the morning and come back in the evening. A uniform
+    +/- 15 min offset spreads them over the rounded microcensus times.
+
+    The duration comes from the distance between the home and the border activity
+    (data.cross_border.travel_times), and the microcensus time is kept at the Swiss
+    end of the trip: the departure from home when leaving, the arrival at home
+    when entering (the departure from the border is computed backwards).
+    """
+
+    df_mz_trips = context.stage("data.microcensus.trips")[0]
+    df_mz_persons = context.stage("data.microcensus.persons")
+
+    day = context.config("specific_day_scenario")
+    if day == "weekend":
+        day_persons = df_mz_persons.loc[df_mz_persons["weekend"], "person_id"]
+    elif day == "workday":
+        day_persons = df_mz_persons.loc[df_mz_persons["workday"], "person_id"]
+    else:
+        day_persons = df_mz_persons.loc[df_mz_persons["day"] == day, "person_id"]
+
+    pool = df_mz_trips[df_mz_trips["trip_crossing_border"] & df_mz_trips["person_id"].isin(day_persons)].copy()
+    pool = pool[pool["mode"].isin(["car", "car_passenger", "pt"])]
+    pool["leaving"] = pool["origin_in_ch"].astype(bool)
+    pool["mode_group"] = np.where(pool["mode"] == "pt", "pt", "car")
+
+    modes = df_cb_persons["border_crossing_trip_mode"].values
+    mode_groups = np.where(modes == "pt", "pt", "car")
+
+    swiss_end_time = np.zeros(len(df_cb_persons))
+
+    for leaving in (True, False):
+        for mode_group in ("car", "pt"):
+            selection = (is_leaving == leaving) & (mode_groups == mode_group)
+            if not selection.any():
+                continue
+
+            candidates = pool[(pool["leaving"] == leaving) & (pool["mode_group"] == mode_group)]
+            if len(candidates) == 0:  # no microcensus trip for this mode: any mode, same direction
+                candidates = pool[pool["leaving"] == leaving]
+            if len(candidates) == 0:
+                raise RuntimeError("No border-crossing trip in the microcensus to sample the cross-border departure times from")
+
+            weights = candidates["weight_person"].values.astype(float)
+            weights = weights / weights.sum()
+            drawn = candidates.iloc[rng.choice(len(candidates), size = selection.sum(), p = weights)]
+
+            # The Swiss end of the trip: the departure from home, or the arrival at home
+            swiss_end_time[selection] = drawn["departure_time" if leaving else "arrival_time"].values
+
+    anchor = np.clip(swiss_end_time + rng.uniform(-900.0, 900.0, size = len(swiss_end_time)), 0.0, None)
+
+    distance = np.array([
+        np.hypot(point.x - x, point.y - y) if hasattr(point, "x") else np.nan
+        for point, x, y in zip(df_cb_persons["border_crossing_point"].values,
+                               df_cb_persons["home_x"].values, df_cb_persons["home_y"].values)
+    ])
+    travel_time = estimate_travel_time(distance, modes)
+
+    departure_time = np.where(is_leaving, anchor, np.clip(anchor - travel_time, 0.0, None))
+    arrival_time = np.where(is_leaving, anchor + travel_time, np.maximum(anchor, travel_time))
+
+    logger.info("Border trips of the Swiss residents: median travel time %.0f min (%d leaving, %d entering Switzerland, from %d microcensus border-crossing trips)",
+                np.nanmedian(travel_time) / 60, int(is_leaving.sum()), int((~is_leaving).sum()), len(pool))
+
+    return pd.DataFrame({"departure_time": np.round(departure_time), "arrival_time": np.round(arrival_time)})

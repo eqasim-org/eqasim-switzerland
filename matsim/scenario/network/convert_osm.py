@@ -7,6 +7,7 @@ import shutil
 
 def configure(context):
     context.stage("matsim.scenario.network.convert_osm_pt2matsim")
+    context.stage("matsim.scenario.network.convert_pt_schedule")
     context.stage("data.osm.traffic_lights")
     context.stage("data.spatial.municipality_types") # used in speed correction
     context.stage("data.spatial.municipalities") # used in speed correction
@@ -15,7 +16,7 @@ def configure(context):
 
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
-    context.config("border_offset", 20000)
+    context.config("border_offset", 50000)
     context.config("correct_links_capacity", True)
     context.config("correct_capacities_from_manual_list", True)
     context.config("minimum_speed", 1.0) #in km/h
@@ -27,11 +28,11 @@ def configure(context):
     # only if simplify network is true
     context.config("remove_network_loops", True)
     context.config("remove_replicate_links", False)
-    context.config("remove_nodes_with_no_intersection", False)
+    context.config("remove_nodes_with_no_intersection", True)
     context.config("correct_speed", True)
     context.config("ensure_network_connectivity", True)
     # correct speed for uphill links only
-    context.config("adjust_speed_uphill", True) # if true, it is triggered only if elevation is assigned
+    context.config("correct_speed_uphill", True)
     context.config("adjust_speed_straightness", True) # if true, it is triggered only if elevation is assigned
     context.config("adjust_speed_mountain_links", True) # if true, it is triggered only if elevation is assigned
     context.config("max_gradient_threshold", 0.1) # in percentage (10% = 0.1)
@@ -40,6 +41,11 @@ def configure(context):
     context.config("capacity_factor_outside_border", 0.5)
     # whether to route the bike in the network or not
     context.config("route_bike", True)
+    # Whether network nodes close to PT stops are protected from being merged away
+    # by remove_nodes_with_no_intersection (only relevant if that option is true).
+    context.config("protect_pt_stop_nodes", True)
+    # Radius (in meters) around a PT stop within which a network node is protected.
+    context.config("network_stop_protection_radius", 100.0)
     # Tools (in France)
     context.stage("data.tolls.osm_links")
     context.config("include_tolls", True)
@@ -48,7 +54,7 @@ def configure(context):
 
     # we include the network of this region, i don't know if this is the right config param to use, to check later!
     context.config("cross_border_exclude_shapefiles", default=None)
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
 
 
 def execute(context):
@@ -58,10 +64,11 @@ def execute(context):
     # Work on a local copy: NetworkHandler merges/filters its geometries along
     # with the links and saves the matching export here for the PT mapper.
     detailed_network_path = "%s/detailed_network.csv" % context.path()
-    if os.path.exists(detailed_network_file):     
+    if os.path.exists(detailed_network_file):
         shutil.copy(detailed_network_file, detailed_network_path)
 
+    schedule_path = context.stage("matsim.scenario.network.convert_pt_schedule")["schedule"]
 
     network_pickle = "%s/network.pkl" % context.path() # faster to read if we need it in the pipeline, it should be read from this file from now on
 
-    return NetworkHandler(context, network_path, detailed_network_path).process_network(save_as_pickle = True, network_pickle = network_pickle)
+    return NetworkHandler(context, network_path, detailed_network_path, schedule_path = schedule_path).process_network(save_as_pickle = True, network_pickle = network_pickle)

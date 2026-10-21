@@ -8,17 +8,17 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.spatial.swiss_border")
-    context.stage("matsim.scenario.network.mapped")
+    context.stage("matsim.scenario.network.pt")
 
     context.config("output_prefix", "switzerland_")
     context.config("export_detailed_network", True)
 
 
 def execute(context):
-    mapped = context.stage("matsim.scenario.network.mapped")
+    mapped = context.stage("matsim.scenario.network.pt")
     network_file = mapped["road_network"]
     network_geometry_file = mapped["geometry"]
 
     logger.info("\t LOADING NETWORK FROM: %s" % network_file)
-    network = RoadNetwork(network_file, network_geometry_file, overwrite=True, cache_dir= context.path())
+    network = RoadNetwork(network_file, network_geometry_file, overwrite=True, cache_dir= context.path(), context=context)
     return network

@@ -7,7 +7,8 @@ import geopandas as gpd
 import polars as pl
 from dmc.constants import constants
 from mode_choice import defaults as D
-from mode_choice.model.parameters import load
+from dmc.parameters import Parameters
+from dmc.pt_quality import pt_quality_expression
 from mode_choice.routing.server import ensure_server_started
 from mode_choice.routing.RoutingServer import RoutingServer
 
@@ -15,7 +16,7 @@ def configure(context):
     context.stage("mode_choice.routing.server")
     context.stage("mode_choice.defaults")
     for stage in ("mode_choice.data.trips", "mode_choice.tours.build", "synthesis.population.spatial.locations",
-                  "synthesis.population.models.subscriptions", "data.constants", "dmc.params",
+                  "synthesis.population.models.subscriptions", "data.constants", "dmc.parameter_files",
                   "data.spatial.municipalities", "data.spatial.municipality_types",
                   "data.spatial.cantons", "data.statent.density", "data.statpop.density", "data.spatial.ovgk"):
         context.stage(stage)
@@ -33,7 +34,7 @@ def execute(context):
 # The execute function, this was makes sure the server is stopped if an error happen at this stage
 def prepare_data(context):
     # load the parameters
-    p = load(context)
+    p = Parameters.from_context(context)
 
     # load the trips and tours, and drop trips not eligible for mode choice
     trips = context.stage("mode_choice.data.trips")
@@ -77,8 +78,7 @@ def prepare_data(context):
         pl.col("preceding_purpose").is_in(D.HOME_PURPOSES).alias("origin_home"),
         (pl.col("destination_municipality") == "urban").alias("urban_destination"),
         (pl.col("destination_municipality") == "urbancore").alias("urbancore_destination"),
-        pl.col("destination_ovgk").is_in(D.GOOD_PT_SERVICE).fill_null(False).alias("destination_good_pt_service"),
-        pl.col("destination_ovgk").is_in(D.MEDIUM_PT_SERVICE).fill_null(False).alias("destination_medium_pt_service"),
+        pt_quality_expression("destination_ovgk").alias("destinationPtQuality"),
         *[pl.col("following_purpose").is_in(values).alias(f"destination_{purpose}") for purpose, values in D.DESTINATION_PURPOSES.items()],
         *[(pl.col("municipality_id") == number).alias(f"destination_{city}") for city, number in D.CITY_IDS.items()],
     ).with_columns(
@@ -111,8 +111,7 @@ def prepare_persons(persons, c, p, cantons):
         (pl.col("bike_availability") == 1).alias("bike_availability"),
         (1 - pl.col("number_of_cars_class") / (pl.col("household_size") - pl.col("N_children_under_18")).clip(lower_bound=1)).clip(0, 1).alias("car_ownership_ratio"),
         (pl.col("number_of_cars_class") > 0).alias("has_car"),
-        pl.col("ovgk").is_in(D.GOOD_PT_SERVICE).fill_null(False).alias("good_pt_service"),
-        pl.col("ovgk").is_in(D.MEDIUM_PT_SERVICE).fill_null(False).alias("medium_pt_service"),
+        pt_quality_expression("ovgk").alias("homePtQuality"),
         (pl.col("age") >= D.RETIRED_AGE).alias("is_retired"),
         (pl.col("age") < D.JUNIOR_AGE).alias("is_junior"),
         ).with_columns(

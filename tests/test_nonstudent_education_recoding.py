@@ -22,7 +22,7 @@ class Context:
         return self.stages[name]
 
     def config(self, name):
-        return {"random_seed": 0}[name]
+        return {"random_seed": 0, "specific_day_scenario": "workday"}[name]
 
 
 class NonstudentEducationRecodingTest(unittest.TestCase):
@@ -55,17 +55,23 @@ class NonstudentEducationRecodingTest(unittest.TestCase):
     def make_trip_context(self, student_flags=(0, 1), border=False):
         people = pd.DataFrame({"person_id": [1, 2], "mz_person_id": [101, 101], "age": [25, 25],
             "is_student": list(student_flags), "is_truck_driver": False, "is_outside_of_switzerland": False,
-            "is_crossing_the_border": [False, border], "canton_id": 1})
+            "is_crossing_the_border": [False, border], "canton_id": 1,
+            "home_x": 2600000., "home_y": 1200000.})
         for column in BORDER_MATCH_COLUMNS:
             people[column] = None
         if border:
             people.loc[1, "cross_border_person_id"] = 901
             people.loc[1, "border_crossing_trip_mode"] = "car"
+            people.at[1, "border_crossing_point"] = Point(2601000., 1201000.)
         trips = pd.DataFrame({"person_id": [101, 101], "trip_id": [1, 2],
             "departure_time": [3600., 7200.], "arrival_time": [4200., 7800.], "mode": ["walk", "walk"],
-            "origin_purpose": ["home", "education"], "purpose": ["education", "home"]})
+            "origin_purpose": ["home", "education"], "purpose": ["education", "home"],
+            "trip_crossing_border": True, "origin_in_ch": [True, False], "weight_person": 1.})
+        if border:
+            trips["mode"] = "car"
         return Context({"data.constants": SimpleNamespace(census="statpop", MZ_AGE_THRESHOLD=6),
             "synthesis.population.enriched": people, "data.microcensus.trips": (trips, set(), [], []),
+            "data.microcensus.persons": pd.DataFrame({"person_id": [101], "workday": [True]}),
             "synthesis.population.spatial.primary.work.work_remotly": pd.DataFrame({"person_id": []})})
 
     def test_recipient_status_drives_recode_without_changing_diary_times(self):

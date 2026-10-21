@@ -139,6 +139,7 @@ def commute_from_location_df(pop_loc_df, pop_df, how="min"):
 
 
 def configure(context):
+    context.config("random_seed")
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.household_persons")
     context.stage("synthesis.population.spatial.primary.locations")
@@ -153,18 +154,19 @@ def execute(context):
 
 
 def _execute_model(context):
+    random_seed = int(context.config("random_seed"))
     # -------------------------------------------------------------------
     # CONFIG
     # -------------------------------------------------------------------
     PT_MODEL = "catboost"      # "rf" or "gbm" or "catboost"
-    SEED_PT  = 2026
+    SEED_PT = random_seed
     DIAG_CANTON_ID = "1"
     MIN_AGE = 6
     USE_DRAW_DIAG = True
 
     # split ages into 6-15 and 16+
     AGE_SPLIT = 16
-    SEED_PT_YOUTH = 20261
+    SEED_PT_YOUTH = random_seed + 1
 
     # Survey columns (per your assumption)
     SURVEY_TARGET_COL = "subscription"        # values 0..4
@@ -630,14 +632,14 @@ def _execute_model(context):
                 learning_rate=0.05,
                 max_iter=600,
                 min_samples_leaf=80,
-                random_state=42
+                random_state=random_seed
             )
         elif mt == "rf":
             return RandomForestClassifier(
                 n_estimators=900,
                 max_depth=None,
                 min_samples_leaf=10,
-                random_state=42,
+                random_state=random_seed,
                 n_jobs=-1
             )
         elif mt in ("catboost", "cat"):
@@ -647,7 +649,7 @@ def _execute_model(context):
                 learning_rate=0.03,
                 depth=10,
                 l2_leaf_reg=6.0,
-                random_seed=42,
+                random_seed=random_seed,
                 verbose=False,
                 bootstrap_type="Bernoulli",
                 subsample=0.8

@@ -3,7 +3,7 @@ from turtle import pd
 
 
 def configure(context):
-    context.config("travel_times_from", default="tomtom")
+    context.config("travel_times_from", default='tomtom')
     assert context.config("travel_times_from").lower() in ["google", "tomtom", "mapbox", "all"], \
         "travel_times_from must be either 'google', 'tomtom', or 'mapbox'"
     

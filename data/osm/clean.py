@@ -14,16 +14,16 @@ def configure(context):
     
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
-    context.config("border_offset", 20000)
+    context.config("border_offset", 50000)
     # we include the network of this region, i don't know if this is the right config param to use, to check later!
     context.config("cross_border_exclude_shapefiles", default=None)
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     context.config("correct_osm_speeds", default = True)
     if context.config("correct_osm_speeds"):
         context.stage("data.osm.speed_corrections")
 
-    context.config("use_latest_osm_for_correction", default = False)
-    context.config("latest_osm_for_correction", default = None)
+    context.config("use_latest_osm_for_correction", default = True)
+    context.config("latest_osm_for_correction", default = 'switzerland-261004.osm.pbf')
     if context.config("use_latest_osm_for_correction") and not context.config("latest_osm_for_correction"):
         raise ValueError("If use_latest_osm_for_correction is True, latest_osm_for_correction must be provided.")
 

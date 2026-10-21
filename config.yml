@@ -1,170 +1,65 @@
-# General pipeline settings
-# path to the working directory/cache
-working_directory: ...
-# path where the pipeline flowchart should be stored
-flowchart_path: .../flowchart.json
-dryrun: false
+# Fill in the input/output paths, then run: uv run -m synpp config.yml
+# Advanced options use defaults declared directly in each pipeline stage.
+working_directory: .../cache # Folder used to cache completed pipeline stages.
+flowchart_path: .../cache/flowchart.json # Save the pipeline dependency diagram here.
+dryrun: false # Set true to inspect the pipeline without running its stages.
 
-# Requested stages
 run:
-    - synthesis.output
-    - matsim.output
-    # Optional inspection of campus targets and home-to-education distances.
+    - synthesis.output # Export the synthetic population.
+    - matsim.output # Build, simulate, and export the MATSim scenario.
+    # Optional education inspection (uses the existing analysis_path):
     #- analysis.tertiary_education_assignment
     #- analysis.education_distances
-    #- analysis.secondary_education_assignment
-    #- analysis.non_private_residents
-    #- analysis.education_student_stock
-    #- analysis.education_doctoral_scope
 
+config:
+    # Files and folders
+    data_path: ... # Folder containing the required input datasets.
+    output_path: ... # Folder where generated scenarios are exported.
+    analysis_path: ... # Folder where analysis results are saved.
+    output_id: output # Name of the exported scenario folder.
+    output_prefix: switzerland_ # Prefix used for scenario filenames.
 
-# These are configuration options that we use in the pipeline
-config:        
-    # path to the input data folder
-    data_path: ...
-    output_path: ...
-    analysis_path: ...
-    output_id: output
-    
-    # General parameters
-    threads: 48
-    random_seed: 518745
-    # Pooled tertiary OD smoothing (prior measured in effective observations).
-    tertiary_od_prior_strength: 100.0
-    tertiary_od_neighbors: 50
-    tertiary_od_bandwidth: 20000.0 # meters
-    tertiary_od_distance_decay: 0.005 # per km, scaled by origin's smoothing/fallback share; 0 disables it
-    education_campus_cluster_distance: 500.0 # meters between linked sites in one enterprise
-    # Reference CSVs live under data_path/education_enrolment; GWR under data_path/gwr.
-    education_enrolment_path: null # defaults to data_path/education_enrolment
-    education_enrolment_year: "2023/24" # separate Zurich providers; not a commuter or campus target
-    education_level_prior_strength: 20.0 # effective survey observations for study-level backoff
-    education_tertiary_balance: true # annual pooled BFS/FTE shares; daily attendance is determined by MZ diaries
-    education_distance_ss_unit: km # DISTTOSCHOOL_AIR; explicit assumption for the distance analysis
-    secondary_education_distance_minimum_effective_n: 50 # sparse age cells pool the same programme across ages
-    hot_deck_matching_runners: 1
-    disable_progress_bar: false
-    java_memory: 210G
+    # Resources and population size
+    threads: 48 # Number of CPU threads available to the pipeline.
+    java_memory: 210G # Maximum Java memory; adjust to your machine or cluster job.
+    random_seed: 518745 # Seed used to reproduce random sampling.
+    input_downsampling: 0.001 # Fraction of the population to simulate; 0.001 is 0.1%.
+    enable_scaling: false # Scale population totals to a target year.
+    scaling_year: 2025 # Target population year when scaling is enabled.
+    census: statpop # Population source; statpop uses Swiss population-register data.
+    # Education references: data_path/education_enrolment; residence candidates: data_path/gwr.
+    specific_day_scenario: workday # Day to model: workday, weekend, or a weekday name.
 
-    # General population
-    input_downsampling: 0.001
-    enable_scaling: false
-    scaling_year: 2025
-    use_freight: true
-    only_permanent_residents: false
-    # Recover geocoded people absent from the private-household table as flagged
-    # one-person modelling households. False restores the former inner join.
-    retain_geocoded_missing_households: true
-    # Descriptive proximity to possible dorms; younger recovered residents use
-    # ordinary behaviour models. Older recovered residents remain home-only.
-    non_private_residences_enabled: true
-    non_private_residence_radius: 250.0
-    non_private_home_only_minimum_age: 39
-    
-    # algorithms selection
-    matching_algorithm: v1
-    locations_algorithm: rda    
-    compute_ovgk_from_gtfs: true
+    # Network and public-transport inputs
+    osm_file: # OSM filenames under data_path/osm; one filename or a list is accepted.
+        - bayern-251102.osm.pbf
+        - nord-est-251102.osm.pbf
+        - switzerland-latest-2025.osm.pbf
+        - alsace-251102.osm.pbf
+        - nord-ovest-251102.osm.pbf
+        - austria-251102.osm.pbf
+        - baden-wuerttemberg-251102.osm.pbf
+        - franche-comte-251102.osm.pbf
+        - rhone-alpes-251102.osm.pbf
+        - liechtenstein-251116.osm.pbf
+    latest_osm_for_correction: switzerland-261004.osm.pbf # Newer OSM file used to update tags while retaining the old topology.
+    gtfs_name: merged_gtfs # Name used to select the GTFS input under data_path/gtfs.
+    gtfs_date: dayWithMostServices # Service date, or dayWithMostServices for automatic selection.
 
-    # census
-    census: statpop
+    # Scenario scope and calibration
+    use_freight: true # Include freight vehicles.
+    use_lcv: true # Include light commercial vehicles.
+    include_cross_border: false # Generate additional foreign-resident cross-border flows.
+    generate_outbound_flows: false # Generate Swiss residents' outbound trips beyond the existing survey trips.
+    include_external_population: true # Include the population exported by eqasim-france.
+    external_population_folder: ... # Folder containing that eqasim-france population export.
+    estimate_dmc: true # Estimate mode-choice parameters; false uses the bundled defaults.
+    enable_mode_choice: false # Run population mode choice before preparing MATSim.
+    last_iteration: 140 # Final MATSim iteration; smaller values run faster.
 
-    # lcv
-    use_lcv: true
-
-    # Cross-border traffic
-    include_cross_border: true
-    weekend: false # if false, the working days will be selected. 
-    
-    # PT pricing
-    generate_pt_pricing_inputs: false
-
-    # Pt routing parameters
-    calibrate_pt_routing_params: false
-    
-    # there are two options to convert pt schedule: [hafas, gtfs]; default is gtfs
-    pt_schedule: gtfs
-    hafas_date: 01.10.2018
-    gtfs_name: gtfs_fp2024_2024-11-11
-    gtfs_date: "dayWithMostServices" 
-    
-    # if we should use schedule based pt or simulated
-    useScheduleBasedTransport: false
-    
-    # defines the prefix for the cutout scenario name; it should be of the zurich_ format
-    extent_prefix: switzerland_
-
-    # specifies if we want to use VDF as the traffic model, default is false
-    use_vdf: false
-
-    # Export detailed network in eqasim, default is false
-    export_detailed_network: true
-
-    # last iteration when runing MATSim
-    last_iteration: 100
-
-    # If you want to simplify the network (merge short links) in eqasim and correct their capacity, default is false
-    simplify_network_in_eqasim: true
-    correct_links_capacity: true
-    remove_nodes_with_no_intersection: true
-    
-    # path to the osm file, should be placed in data_path/osm (it can be list of files)    
-    osm_file: [bayern-251102.osm.pbf, nord-est-251102.osm.pbf, switzerland-latest-2025.osm.pbf,
-               alsace-251102.osm.pbf, nord-ovest-251102.osm.pbf, austria-251102.osm.pbf, 
-               baden-wuerttemberg-251102.osm.pbf, franche-comte-251102.osm.pbf, rhone-alpes-251102.osm.pbf, 
-               liechtenstein-251116.osm.pbf]
-    border_offset: 50000 # offset for border extension in meters   
-
-    # wether to parse turn restrictions or not
-    parseTurnRestrictions: True
-
-    # whether to add traffic lights to the network, default is false
-    add_traffic_lights: true
-
-    # whether to assign elevations to the nodes, default is false
-    assign_elevations: true
-
-    # correct the speed
-    correct_speed: true
-    correct_speed_uphill: true
-    speed_factor_outside_border: 0.7
-    capacity_factor_outside_border: 0.5
-    
-    # Specific day scenario (default: workday, also possible: weekend, Monday, ... Sunday)
-    specific_day_scenario: workday
-
-    # calibration and dmc model estimation
-    estimate_dmc: true
-    calibrate_alphas_in_matsim: true
-    alphaCalibration.level: canton
-    calibrate_betas_in_matsim: false
-    activate_traffic_light_delays: true
-    activate_unsignalized_intersections_delays: true
-    network_calibration.activate: true
-    network_calibration.calibrate_disutilities: true
-    network_calibration.calibrate_freespeed: true
-
-    # This is for the counts
-    simulation_directory: simulation_output
-    only_weekday: true
-    # tomtom_api_key: ...
-    # eqasim_path: ... # you can set the path to jar file
-    # num_tomtom_requests: 0 # number of requests to tomtom each time the stage is run
-    # num_mapbox_requests: 0
-    travel_times_from: tomtom
-
-    # This is to run the cutter
-    # extent_path: ...
-    # extent_prefix: ...
-
-    # This is for the french part
-    cross_border_countries: "All"
-    cross_border_exclude_shapefiles: ["/cluster/project/cmdp/ch_data/pipeline/spatial/MMT/MMT_extent_FR.gpkg"]
-
-    # Swiss people crossing the border
-    generate_outbound_flows: true # default: false
-    outbound_flows_perimeter: ["/cluster/project/cmdp/ch_data/pipeline/spatial/MMT/MMT_extent_FR.gpkg"]
-    include_external_population: true # default:false
-    external_population_folder: /cluster/project/cmdp/ch_data/pipeline/fr_population_100pct_20260521
-    fr_sample_rate: 1.0 # Sample size used for the generation of the outputs in the folder above. Will be used to downsample the FR population if necessary.
-    gtfs_name: merged_gtfs
+    # Optional local inputs
+    # cross_border_exclude_shapefiles: [...] # Extra region polygons to include around Switzerland.
+    # tomtom_api_key: ... # Needed only when enabling new TomTom requests; requests default to zero.
+    # eqasim_path: .../switzerland.jar # Use an existing eqasim JAR instead of building it.
+    # extent_path: .../region.gpkg # Region boundary for exporting a smaller cut scenario.
+    # extent_prefix: geneva_ # Filename prefix for that cut scenario.

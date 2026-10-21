@@ -21,15 +21,15 @@ logger = logging.getLogger("synpp")
 def configure(context):
     context.config("data_path")
     context.config("counts_path", default=os.path.join(context.config("data_path"), "traffic_counts"))
-    scope = context.config("analysis.counts.construction_scope", default="current_or_past")
+    scope = context.config("analysis.counts.construction_scope", default='current_or_past')
     if scope not in ("current", "past", "current_or_past"):
         raise ValueError(f"{"analysis.counts.construction_scope"} must be current, past, or current_or_past")
 
 
 def configure_filter(context, for_map=False):
-    exclude = context.config("analysis.counts.exclude_construction_sites", default=False)
+    exclude = context.config("analysis.counts.exclude_construction_sites", default=True)
     if exclude or for_map:
-        radius = context.config("analysis.counts.construction_radius_m", default=15.0)
+        radius = context.config("analysis.counts.construction_radius_m", default=15)
         if not np.isfinite(radius) or radius < 0:
             raise ValueError(f"{"analysis.counts.construction_radius_m"} must be a finite non-negative distance in metres")
         context.stage("analysis.counts.construction_sites")

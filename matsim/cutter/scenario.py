@@ -3,8 +3,9 @@ import os
 import shutil
 import glob
 import logging
-from .cutter_tools import change_params, cut_csv_to_region, cut_csv_to_network, get_regions_path, cut_and_save_network_geometry
-import matsim.simulation.config_utils as config_utils
+from matsim.config.tools import change_params, get_regions_path
+from .cutter_tools import cut_csv_to_region, cut_csv_to_network, cut_and_save_network_geometry
+import matsim.config.tools as config_tools
 from .file_paths import FilePaths, simulation_root
 
 logger = logging.getLogger("synpp")
@@ -21,17 +22,17 @@ def configure(context):
     if not context.config("cutter.scenario_path"):
         context.stage("matsim.simulation.prepare")
         context.stage("matsim.simulation.run")
-        context.stage("matsim.scenario.network.mapped")
+        context.stage("matsim.scenario.network.pt")
         context.stage("data.pt_pricing.pt_pricing")
         context.stage("data.microcensus.shares")    
 
-    context.config("network_calibration.activate", default=False)
+    context.config("network_calibration.activate", default=True)
     context.config("network_calibration.calibrate_disutilities", default=True)
     context.config("network_calibration.calibrate_freespeed", default=True)
     context.config("network_calibration.calibrate_agents_ascs", default=True)
     context.config("network_calibration.calibrate_subpopulations", default=True)
 
-    need_counts = config_utils.need_counts_file(context)
+    need_counts = config_tools.need_counts_file(context)
     if not context.config("cutter.scenario_path") and context.config("network_calibration.activate") and need_counts:
         context.stage("analysis.counts.target")
         if context.config("network_calibration.calibrate_disutilities"):
@@ -42,7 +43,7 @@ def configure(context):
         context.stage("analysis.travel_times.APIs.target")
         context.stage("calibration.road_regions.freespeed_calibration")
 
-    context.config("calibrate_alphas_in_matsim", default=False)
+    context.config("calibrate_alphas_in_matsim", default=True)
     context.config("calibrate_betas_in_matsim", default=False)
     context.config("export_detailed_network", True)
 
@@ -87,8 +88,8 @@ def execute(context):
     shutil.copy(pricing_path, f"{output_path}/pricingDescription.xml" )
 
     # 4. calibration files (special regions and target files)
-    calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = config_utils.get_network_cal_config_as_bool(context)
-    need_counts = config_utils.need_counts_file(context)
+    calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = config_tools.get_network_cal_config_as_bool(context)
+    need_counts = config_tools.need_counts_file(context)
 
     regionl_speeds_file = ""
     if calibrate_network and calibrate_freespeed:
@@ -117,7 +118,7 @@ def execute(context):
 
         target_counts_file = files.get("counts")
         if target_counts_file!="":
-            cut_csv_to_network(csv_path = target_counts_file,
+            cut_csv_to_network(csv_path = target_counts_file, context=context,
                                network_path = "%s/%snetwork.xml.gz" % (output_path, context.config("extent_prefix")),
                                output_path = f"{region_dir}/target_counts.csv")
             if os.path.exists(f"{region_dir}/target_counts.csv"):
@@ -137,6 +138,7 @@ def execute(context):
     if context.config("export_detailed_network"):
         geometry_file = files.get("geometry")
         cut_and_save_network_geometry(
+            context=context,
             geometry = geometry_file,
             local_network = network_path,
             output_path = geometry_path
@@ -149,8 +151,8 @@ def execute(context):
                   output_path = config_file,
                   params = [
                         ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
-                        ("eqasim:networkCalibration.objective", config_utils.get_network_calibration_objectives(context)),
-                        ("eqasim:networkCalibration.calibrate", config_utils.get_network_calibration_calibrate(context, ignore=("penalty","freespeed"))), # we do not calibrate penalty and freespeed here
+                        ("eqasim:networkCalibration.objective", config_tools.get_network_calibration_objectives(context)),
+                        ("eqasim:networkCalibration.calibrate", config_tools.get_network_calibration_calibrate(context, ignore=("penalty","freespeed"))), # we do not calibrate penalty and freespeed here
                         ("eqasim:networkCalibration.costCalibration.activate","false"),
                         ("eqasim:networkCalibration.freespeedCalibration.activate","false"),
                         ("eqasim:alphaCalibration.filePath","cantonal_target_mode_shares.csv"),

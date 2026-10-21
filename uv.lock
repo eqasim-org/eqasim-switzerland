@@ -694,6 +694,7 @@ dependencies = [
     { name = "fiona" },
     { name = "folium" },
     { name = "geopandas" },
+    { name = "gtfs-kit" },
     { name = "h3" },
     { name = "h5py" },
     { name = "igraph" },
@@ -749,6 +750,7 @@ requires-dist = [
     { name = "fiona", specifier = ">=1.9.2" },
     { name = "folium" },
     { name = "geopandas", specifier = ">=1.1.3" },
+    { name = "gtfs-kit" },
     { name = "h3", specifier = ">=4.4.2" },
     { name = "h5py", specifier = ">=3.15.1" },
     { name = "igraph", specifier = ">=1.0.0" },
@@ -985,6 +987,24 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f8/b3/3ac91e9be6b761a4b30d66ff165e54439dcd48b83f4e20d644867215f6ca/graphviz-0.21.tar.gz", hash = "sha256:20743e7183be82aaaa8ad6c93f8893c923bd6658a04c32ee115edb3c8a835f78", size = 200434, upload-time = "2025-06-15T09:35:05.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/91/4c/e0ce1ef95d4000ebc1c11801f9b944fa5910ecc15b5e351865763d8657f8/graphviz-0.21-py3-none-any.whl", hash = "sha256:54f33de9f4f911d7e84e4191749cac8cc5653f815b06738c54db9a15ab8b1e42", size = 47300, upload-time = "2025-06-15T09:35:04.433Z" },
+]
+
+[[package]]
+name = "gtfs-kit"
+version = "13.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "folium" },
+    { name = "geopandas" },
+    { name = "json2html" },
+    { name = "pandas" },
+    { name = "requests" },
+    { name = "rtree" },
+    { name = "shapely" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/26/df/d9eb5a90560974c20fbe5542a6484581e3e2e845dbefb615bc4d5d7c8cd3/gtfs_kit-13.0.1.tar.gz", hash = "sha256:9c4a58e6f11971d262dbaec08e4f85f727b6609479d07e39a54f2ca4f84eb65a", size = 1200365, upload-time = "2026-08-30T23:21:12.24Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8b/f2/34c73c28819ae5113c2b17cb7b5c84b6310258ec5e91ff4379d2cf1160c0/gtfs_kit-13.0.1-py3-none-any.whl", hash = "sha256:52677f8615b2751cdce2ee2b7e0acb9240ee8d755ef7a024aff62ea0fd884a77", size = 84544, upload-time = "2026-08-30T23:21:07.381Z" },
 ]
 
 [[package]]
@@ -1399,6 +1419,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/41/f2/d34e8b3a08a9cc79a
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl", hash = "sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713", size = 309071, upload-time = "2025-12-15T08:41:44.973Z" },
 ]
+
+[[package]]
+name = "json2html"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/d5/40b617ee19d2d79f606ed37f8a81e51158f126d2af67270c68f2b47ae0d5/json2html-1.3.0.tar.gz", hash = "sha256:8951a53662ae9cfd812685facdba693fc950ffc1c1fd1a8a2d3cf4c34600689c", size = 6977, upload-time = "2019-07-03T20:50:03.023Z" }
 
 [[package]]
 name = "kiwisolver"

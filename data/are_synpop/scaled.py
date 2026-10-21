@@ -36,7 +36,7 @@ def compute_individual_filters(df, individual_controls):
     return individual_filters
 
 
-def process_canton(canton_id, projection_df, df_population):
+def process_canton(canton_id, projection_df, df_population, rng):
 
     logger.info(f"Starting to weight and scale the population of canton {canton_id}.")
 
@@ -69,7 +69,7 @@ def process_canton(canton_id, projection_df, df_population):
 
         if remainder > 0:
 
-            indices = np.random.choice(a=choices, size = size, replace = False, p = [remainder / (remainder * len(choices)) for _ in choices])
+            indices = rng.choice(a=choices, size = size, replace = False, p = [remainder / (remainder * len(choices)) for _ in choices])
             df_sample = df_group.loc[indices]
 
             new_df_group = pd.concat([df_replicate, df_sample])
@@ -89,6 +89,7 @@ def execute(context):
     c         = context.stage("data.constants")
 
     if context.config("enable_scaling"):
+        rng = np.random.RandomState(context.config("random_seed"))
 
         scaling_year = context.config("scaling_year")
 
@@ -106,7 +107,7 @@ def execute(context):
         processed_cantons = []
 
         for canton_id in context.progress(canton_ids, label="Constructing separate scaling problems by canton..."):
-            df_synpop_canton = process_canton(canton_id, df_population_controls, df_synpop)
+            df_synpop_canton = process_canton(canton_id, df_population_controls, df_synpop, rng)
             processed_cantons.append(df_synpop_canton)
 
         # Concat to get the entire population

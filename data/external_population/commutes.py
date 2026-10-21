@@ -14,7 +14,7 @@ synthesis.population.matching.matched_v1's use of work_locations.
 
 
 def configure(context):
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
 
     if context.config("include_external_population"):
         context.config("external_population_folder")

@@ -14,6 +14,7 @@ logger = logging.getLogger("synpp")
 # Peak totals must never be mixed into the daily comparison.
 runs = [i.split('.')[0] for i in os.listdir("analysis/counts/runs") if not (i.startswith("_") or i.startswith(".") or i == "transcality_peak_hour.py")]
 
+
 def configure(context):    
     geneva_source = context.config("analysis.counts.geneva_source", default="transcality")
     if geneva_source not in ("geneva", "transcality"):
@@ -21,11 +22,12 @@ def configure(context):
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
     configure_simulation_path(context)
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
     for run in runs:
         logger.info(f"Staging analysis.counts.runs.{run}")
         context.stage(f"analysis.counts.runs.{run}",
                       alias="geneva_counts" if run == geneva_source else None)
+
 
 def execute(context):
     # Get the path to output

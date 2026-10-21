@@ -20,11 +20,12 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
-    context.stage("calibration.pt_pricing.generate_config")
+    context.stage("matsim.config.pt")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.stage("data.spatial.swiss_border")
     context.stage("data.external_population.constants")
+    context.config("java_memory", "50G", volatile=True)
 
     context.config("car_cost_per_km", constants.CAR_COST_PER_KM) #CHF per km
     context.config("parking_cost_per_hour_CHF_urban", constants.PARKING_COST_PER_HOUR_CHF_URBAN)
@@ -200,7 +201,7 @@ def execute(context):
 
         # person
         "age", "sex", "income", "income_class", "sp_region", "ms_region", "is_car_passenger", "ovgk", 
-        "good_pt_service", "medium_pt_service", "destination_good_pt_service", "destination_medium_pt_service",
+        "homePtQuality", "destinationPtQuality",
         "car_ownership_ratio", "is_retired","is_junior", "low_income","high_income", 'has_car','num_adults',
 
         # car

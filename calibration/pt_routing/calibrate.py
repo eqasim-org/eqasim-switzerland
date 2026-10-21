@@ -152,7 +152,8 @@ def prepare_bounds_and_initial_values(variables):
 
 def configure(context):
     context.stage("calibration.pt_routing.prepare_input_data")
-    context.stage("calibration.pt_routing.generate_config")
+    context.stage("matsim.config.pt", config={"calibrate_pt_routing_params": False},
+                  alias="pt_calibration_config")
     context.stage("calibration.pt_routing.eqasim")
 
     context.config("random_seed")
@@ -218,7 +219,7 @@ def execute(context):
 
         # --- Start external process ---
         jar_path = context.stage("calibration.pt_routing.eqasim")
-        config_path = context.stage("calibration.pt_routing.generate_config")
+        config_path = context.stage("pt_calibration_config")
 
         # --- It is ready so let's optimize ---
         for candidate in candidates:

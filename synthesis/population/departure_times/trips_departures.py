@@ -9,8 +9,8 @@ def configure(context):
     context.stage("data.microcensus.trips")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
-    context.stage("calibration.pt_pricing.generate_config")
-    context.stage("dmc.params")
+    context.stage("matsim.config.pt")
+    context.stage("dmc.parameter_files")
 
     context.config("threads", volatile=True)
     context.config("java_memory", "50G", volatile=True)
@@ -29,7 +29,8 @@ def execute(context):
     df_trips = filter_trips(context, df_trips)
     # prepare the trips for the router
     router_trips = prepare_trips_for_router(context, df_trips)
-    # routed trips
+    # Reuse completed PT routing from working_directory/departure_time_routing.
+    # Utilities remain separate so DMC changes do not repeat routing.
     routed_trips = run_pt_router(context, router_trips)
     # compute utilities
     routed_trips["utility"] = compute_utilities(context, routed_trips)

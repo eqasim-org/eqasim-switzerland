@@ -21,13 +21,13 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     
     context.config("cross_border_exclude_shapefiles", default=None)
-    context.config("include_external_population", default=False)
+    context.config("include_external_population", default=True)
 
 
 def execute(context):
     logger.info("\t Read the road network ...")
     network_file = context.stage("matsim.scenario.network.convert_osm")
-    network = read_network(network_file, only_car_links = True)
+    network = read_network(network_file, only_car_links = True, context=context)
 
     # build a grid of h3
     logger.info("\t Build h3 grid ...")

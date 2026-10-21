@@ -32,9 +32,9 @@ def configure(context):
     context.stage("analysis.counts.matching.network_from_prepare")
     context.stage("data.spatial.swiss_border")
 
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
     context.config("input_downsampling")
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
 
 
 def _load_counts_and_match(context, network, city):

@@ -43,6 +43,9 @@ class StudentApprenticeshipTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             class Context:
+                def config(self, name):
+                    return {"random_seed": 7}[name]
+
                 def stage(self, name):
                     return survey if name == "data.structural_survey.student_training" else source
 

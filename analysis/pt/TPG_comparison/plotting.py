@@ -5,6 +5,8 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 
+import lemanis_2022
+
 
 def categorize_error(row):
     sim  = row["boardings_matsim"]
@@ -169,19 +171,131 @@ def plot_comparison_for_stop(counts, option = "boardings", stop = "Genève, gare
     plt.close()
 
 
-def plot_global_hourly_comparison(global_hourly_df, output_path):
+def plot_stop_all_lines(line_hour_df, stop_label, output_path, n_cols = 3, lemanis_df = None):
+    totals = line_hour_df.groupby("line_name")[["boardings", "alightings"]].sum()
+
+    lemanis_days = None
+    if lemanis_df is not None and not lemanis_df.empty:
+        lemanis_days = lemanis_df.groupby("line_name")[["boardings", "alightings"]].sum()
+        # Lemanis lines that MATSim has no passengers for are compared against 0
+        totals = totals.reindex(totals.index.union(lemanis_days.index), fill_value = 0)
+
+    totals["total"] = totals["boardings"] + totals["alightings"]
+    totals = totals.sort_values("total", ascending = False)
+    lines  = totals.index.tolist()
+
+    hours = np.arange(0, 25)
+    color_boardings, color_alightings = "#2a7ab0", "#d9822b"
+
+    n_panels = len(lines) + 1
+    n_cols   = min(n_cols, n_panels)
+    n_rows   = int(np.ceil(n_panels / n_cols))
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize = (5.5 * n_cols, 3.2 * n_rows), squeeze = False)
+    flat = axes.flatten()
+
+    ax = flat[0]
+    x  = np.arange(len(lines))
+    ax.bar(x - 0.2, totals["boardings"],  0.4, color = color_boardings,  label = "Boardings")
+    ax.bar(x + 0.2, totals["alightings"], 0.4, color = color_alightings, label = "Alightings")
+    ax.set_xticks(x)
+    ax.set_xticklabels(lines, rotation = 90, fontsize = 7)
+    ax.set_title(f"Entire day, all lines (total {totals['total'].sum():,.0f})", fontsize = 10, fontweight = "bold")
+    ax.set_ylabel("Passengers (scaled)")
+    if lemanis_days is not None:
+        ld = lemanis_days.reindex(lines)
+        ax.scatter(x - 0.2, ld["boardings"],  marker = "D", color = "black", zorder = 5, label = "Lemanis")
+        ax.scatter(x + 0.2, ld["alightings"], marker = "D", color = "black", zorder = 5)
+    ax.legend(fontsize = 8)
+    ax.grid(True, axis = "y", alpha = 0.3)
+
+    lemanis_lines = set(lemanis_df["line_name"]) if lemanis_df is not None else set()
+
+    for ax, line in zip(flat[1:], lines):
+        title = (f"Line {line} ({totals.loc[line, 'boardings']:,.0f} boardings / "
+                 f"{totals.loc[line, 'alightings']:,.0f} alightings)")
+        line_hours = line_hour_df[line_hour_df["line_name"] == line]
+
+        if line in lemanis_lines:
+            # MATSim aggregated into the periods Lemanis reports, next to the Lemanis values
+            matsim_periods = line_hours.assign(period = line_hours["hour"].map(lemanis_2022.HOUR_TO_PERIOD))
+            matsim_periods = matsim_periods.groupby("period")[["boardings", "alightings"]].sum()
+            matsim_periods = matsim_periods.reindex(lemanis_2022.PERIOD_ORDER, fill_value = 0)
+            lemanis_periods = lemanis_df[lemanis_df["line_name"] == line].groupby("period")[["boardings", "alightings"]].sum()
+            lemanis_periods = lemanis_periods.reindex(lemanis_2022.PERIOD_ORDER, fill_value = 0)
+
+            x, w = np.arange(len(lemanis_2022.PERIOD_ORDER)), 0.2
+            ax.bar(x - 1.5 * w, matsim_periods["boardings"],   w, color = color_boardings,  label = "MATSim boardings")
+            ax.bar(x - 0.5 * w, lemanis_periods["boardings"],  w, color = color_boardings,  hatch = "//", edgecolor = "black", label = "Lemanis boardings")
+            ax.bar(x + 0.5 * w, matsim_periods["alightings"],  w, color = color_alightings, label = "MATSim alightings")
+            ax.bar(x + 1.5 * w, lemanis_periods["alightings"], w, color = color_alightings, hatch = "//", edgecolor = "black", label = "Lemanis alightings")
+            ax.set_xticks(x)
+            ax.set_xticklabels(lemanis_2022.PERIOD_ORDER, fontsize = 8)
+            ax.set_ylim(0, max(ax.get_ylim()[1], 1) * 1.3)
+            ax.legend(fontsize = 6, loc = "upper right", ncol = 2)
+            title += " - Lemanis periods"
+
+        else:
+            df = line_hours.set_index("hour")[["boardings", "alightings"]]
+            df = df[~df.index.duplicated()].reindex(hours, fill_value = 0)
+            ax.bar(hours - 0.2, df["boardings"].fillna(0),  0.4, color = color_boardings)
+            ax.bar(hours + 0.2, df["alightings"].fillna(0), 0.4, color = color_alightings)
+            ax.set_xticks(range(0, 25, 3))
+            ax.set_xlim(-1, 25)
+
+        ax.set_title(title, fontsize = 9)
+        ax.grid(True, axis = "y", alpha = 0.3)
+
+    for ax in flat[n_panels:]:
+        ax.axis("off")
+
+    for i, ax in enumerate(flat[:n_panels]):
+        if (i >= (n_rows - 1) * n_cols or i + n_cols >= n_panels) and i > 0 and lines[i - 1] not in lemanis_lines:
+            ax.set_xlabel("Hour of day")
+        if i % n_cols == 0:
+            ax.set_ylabel("Passengers (scaled)")
+
+    fig.suptitle(f"MATSim passenger movements at {stop_label}", fontsize = 13)
+    plt.tight_layout(rect = (0, 0, 1, 0.97))
+    plt.savefig(output_path, dpi = 150, bbox_inches = "tight")
+    plt.close(fig)
+
+
+def plot_border_crossing_loads(df, title, output_path):
+    """Grouped bars per line and direction of the Lemanis and MATSim loads at the border.
+    df has the columns line, direction, lemanis_load, matsim_load."""
+    labels = [f"{row.line} " + ("CH\u2192FR" if row.direction == "F" else "FR\u2192CH") for row in df.itertuples()]
+    x, w   = np.arange(len(df)), 0.4
+
+    fig, ax = plt.subplots(figsize = (max(6, 1.1 * len(df) + 2), 5))
+    ax.bar(x - w / 2, df["lemanis_load"].fillna(0), w, color = "black", alpha = 0.75, label = "Lemanis (reported)")
+    ax.bar(x + w / 2, df["matsim_load"],            w, color = "steelblue",           label = "MATSim (scaled)")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation = 45, ha = "right")
+    ax.set_ylabel("Passengers on board at the border (sum over the trains of the day)")
+    ax.set_title(title, fontsize = 10)
+    ax.legend()
+    ax.grid(True, axis = "y", alpha = 0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi = 150, bbox_inches = "tight")
+    plt.close(fig)
+
+
+def plot_global_hourly_comparison(global_hourly_df, output_path, reference_name = "TPG"):
     df = global_hourly_df.sort_values("hour")
 
     _, ax = plt.subplots(figsize = (12, 6))
 
-    ax.fill_between(df["hour"], df["tpg_lo"], df["tpg_hi"], color = "black", alpha = 0.15, label = "TPG 2024 (95% CI)")
-    ax.plot(df["hour"], df["tpg_mean"], "-s", color = "black", linewidth = 1.2, markersize = 4, label = "TPG 2024 (mean)")
+    ax.fill_between(df["hour"], df["tpg_lo"], df["tpg_hi"], color = "black", alpha = 0.15, label = f"{reference_name} 2024 (95% CI)")
+    ax.plot(df["hour"], df["tpg_mean"], "-s", color = "black", linewidth = 1.2, markersize = 4, label = f"{reference_name} 2024 (mean)")
     ax.plot(df["hour"], df["matsim_total"], "-o", color = "steelblue", linewidth = 1.5, markersize = 5, label = "MATSim (scaled)")
 
     ax.set_xticks(df["hour"])
     ax.set_xlabel("Hour of day")
     ax.set_ylabel("Total passenger events (boardings + alightings)")
-    ax.set_title("MATSim vs TPG 2024: total passenger events by hour, perimeter-wide")
+    ax.set_title(f"MATSim vs {reference_name} 2024: total passenger events by hour, perimeter-wide")
     ax.legend()
     ax.grid(True, alpha = 0.3)
 
@@ -191,11 +305,6 @@ def plot_global_hourly_comparison(global_hourly_df, output_path):
 
 
 def render_period_chart_png(period_df, title, period_order):
-    """Bar-chart counterpart to render_hourly_chart_png for Lemanis lines:
-    Lemanis only reports a handful of broad, non-contiguous time periods
-    (see lemanis.PERIOD_ORDER), so a bar per period is representative of
-    the data, whereas an hourly line chart would imply a false hourly
-    precision Lemanis doesn't have."""
     df = period_df.set_index("period").reindex(period_order).reset_index()
 
     fig, ax = plt.subplots(figsize = (5, 2.6))
@@ -227,13 +336,13 @@ def render_period_chart_png(period_df, title, period_order):
     return base64.b64encode(buffer.read()).decode("ascii")
 
 
-def render_hourly_chart_png(hourly_df, title):
+def render_hourly_chart_png(hourly_df, title, reference_name = "TPG"):
     df = hourly_df.sort_values("hour")
 
     fig, ax = plt.subplots(figsize = (5, 2.6))
 
-    ax.fill_between(df["hour"], df["tpg_lo"], df["tpg_hi"], color = "black", alpha = 0.15, label = "TPG (95% CI)")
-    ax.plot(df["hour"], df["tpg_mean"], "-s", color = "black", linewidth = 1, markersize = 3, label = "TPG (mean)")
+    ax.fill_between(df["hour"], df["tpg_lo"], df["tpg_hi"], color = "black", alpha = 0.15, label = f"{reference_name} (95% CI)")
+    ax.plot(df["hour"], df["tpg_mean"], "-s", color = "black", linewidth = 1, markersize = 3, label = f"{reference_name} (mean)")
     ax.plot(df["hour"], df["matsim_total"], "-o", color = "steelblue", linewidth = 1.2, markersize = 3.5, label = "MATSim (scaled)")
 
     ax.set_xlabel("Hour of day", fontsize = 8)

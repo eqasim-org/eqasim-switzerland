@@ -1,0 +1,21 @@
+# Paths are relative to the repository root. Simulation paths come from these files.
+configs:
+  - config_dib_10_rda.yml
+  - config_dib_10_nn_distance.yml
+  - config_dib_10_nn_no_distance.yml
+output: analysis/secondary locations/results
+seed: 518745
+threads: 4
+survey_draws: 3
+max_replay_people: 1000
+minimum_people_per_stratum: 10
+map_purposes: [shop, leisure]
+regions:
+  geneva:
+    label: Geneva
+    center_lon_lat: [6.1432, 46.2044]
+    half_width_m: 10000
+  zurich:
+    label: Zürich
+    center_lon_lat: [8.5417, 47.3769]
+    half_width_m: 10000

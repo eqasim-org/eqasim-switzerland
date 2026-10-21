@@ -1,15 +1,19 @@
 import glob
 import json
-import math
 import os
 import re
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 
-import folium
 import geopandas as gpd
+import shapely
 import xopen
+from pyproj import Transformer
 from shapely.geometry import LineString, Point
+from shapely.ops import unary_union
+
+import matsim.scenario.network.utils.pt_route_check as pt_route_check
+from analysis.pt.transit_schedule import page
 
 NETWORK_CRS = "epsg:2056"
 
@@ -32,39 +36,106 @@ MODE_COLORS = {
 DEFAULT_MODE_COLOR    = "#888888"
 BUS_LANE_COLOR        = "#190387"
 DEFAULT_VISIBLE_MODES = {"bus"}
+LINE_ROUTE_COLOR      = "#ff8c00"
+CHECK_OK_COLOR        = "#2a9d3a"
+CHECK_DEVIATES_COLOR  = "#c0392b"
+DEFAULT_LINE_ROUTES   = "PT_line_routes/Geneva/TPG_LIGNES.shp"
+SELECTED_COLOR        = "#e34948"
+
+TO_WGS84 = Transformer.from_crs(NETWORK_CRS, "epsg:4326", always_xy = True)
 
 
 def configure(context):
     context.config("output_path")
     context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    context.config("simulation_directory", default = 'simulation_output')
     context.config("analysis.pt.transit_schedule_modes", default = [])
     context.config("analysis.pt.transit_schedule_show_schedules", default = True)
+    context.config("extent_path", default = "")
+    context.config("data_path")
+    context.config("analysis.pt.transit_schedule_line_routes_path", default = "PT_line_routes/Geneva/TPG_LIGNES.shp")
+    context.config("analysis.pt.transit_schedule_source", default = "simulation")
+
+    # Compares the routes with the official line routes (report in route_check.csv)
+    context.config("analysis.pt.transit_schedule_route_check", default = True)
+    context.config("pt_route_modes", ["bus"])
+    context.config("pt_route_buffer", 30.0)
+    context.config("pt_route_min_share", 0.9)
+    context.config("pt_route_agencies", ["881"])
+    if context.config("analysis.pt.transit_schedule_route_check") and context.config("pt_route_agencies"):
+        context.stage("data.gtfs.cleaned")
+
+    source = context.config("analysis.pt.transit_schedule_source")
+    if source in ("mapped", "corrected"):
+        context.stage("matsim.scenario.network.%s" % source)
+    elif source != "simulation":
+        raise RuntimeError(
+            "analysis.pt.transit_schedule_source must be 'simulation', 'mapped' or 'corrected', got: %s" % source
+        )
 
 
 def execute(context):
-    matsim_output_folder = os.path.join(
-        context.config("output_path"),
-        context.config("output_id"),
-        context.config("simulation_directory"),
-    )
-
-    if not os.path.isdir(matsim_output_folder):
-        raise FileNotFoundError(
-            f"MATSim output not found at {matsim_output_folder} - "
-            "has the simulation been run for this output_id?"
-        )
-
     modes = set(context.config("analysis.pt.transit_schedule_modes")) or None
     show_schedules = context.config("analysis.pt.transit_schedule_show_schedules")
+    source = context.config("analysis.pt.transit_schedule_source")
 
-    output_dir = os.path.join(matsim_output_folder, "pt_transit_schedule")
+    if source in ("mapped", "corrected"):
+        mapped = context.stage("matsim.scenario.network.%s" % source)
+        schedule_path = mapped["schedule"]
+        network_path = mapped["network"]
+        output_dir = context.path()
+    else:
+        matsim_output_folder = os.path.join(
+            context.config("output_path"),
+            context.config("output_id"),
+            context.config("simulation_directory"),
+        )
+
+        if not os.path.isdir(matsim_output_folder):
+            raise FileNotFoundError(
+                f"MATSim output not found at {matsim_output_folder} - "
+                "has the simulation been run for this output_id?"
+            )
+
+        schedule_path = _find_output_file(matsim_output_folder, "output_transitSchedule.xml.gz")
+        network_path = _find_output_file(matsim_output_folder, "output_network.xml.gz")
+        output_dir = os.path.join(matsim_output_folder, "pt_transit_schedule")
+
+    # Absolute, or relative to data_path
+    line_routes_path = os.path.join(
+        context.config("data_path"),
+        context.config("analysis.pt.transit_schedule_line_routes_path") or DEFAULT_LINE_ROUTES,
+    )
+    if not os.path.exists(line_routes_path):
+        print(f"WARNING: official line routes not found at {line_routes_path}: "
+              "they are not shown on the map and the routes are not checked")
+        line_routes_path = None
+
     os.makedirs(output_dir, exist_ok = True)
     output_file = os.path.join(output_dir, "transit_schedule_map.html")
 
-    plot_transit_schedule(matsim_output_folder, output_path = output_file, modes = modes, show_schedules = show_schedules)
+    route_check_rows = None
+    report_path = None
+    if line_routes_path and context.config("analysis.pt.transit_schedule_route_check"):
+        agencies = [str(a) for a in context.config("pt_route_agencies")]
+        report_path = os.path.join(output_dir, "route_check.csv")
+        route_check_rows, _ = pt_route_check.run(
+            schedule_path = schedule_path, network_path = network_path,
+            shapefile_path = line_routes_path, report_path = report_path,
+            modes = tuple(context.config("pt_route_modes")),
+            buffer_m = context.config("pt_route_buffer"), min_share = context.config("pt_route_min_share"),
+            agencies = agencies,
+            gtfs_routes_path = "%s/output/routes.txt" % context.path("data.gtfs.cleaned") if agencies else None,
+        )
 
-    return dict(done = True, path = output_file)
+    plot_transit_schedule(
+        schedule_path = schedule_path, network_path = network_path,
+        output_path = output_file, modes = modes, show_schedules = show_schedules,
+        extent_path = context.config("extent_path"), line_routes_path = line_routes_path,
+        route_check_rows = route_check_rows,
+    )
+
+    return dict(done = True, path = output_file, route_check = report_path)
 
 
 def _find_output_file(simulation_path, filename):
@@ -111,17 +182,52 @@ def load_network_geometry(network_path):
 
 def is_bus_reserved_link(modes_string):
     modes = set(modes_string.split(","))
+    # pt2matsim "artificial" links only connect stops that could not be mapped to the road
+    # network (they can be kilometres long); they are not real bus lanes.
+    if modes & {"artificial", "stopFacilityLink"}:
+        return False
     return bool(modes & {"bus", "pt"}) and "car" not in modes
+
+
+def load_extent(extent_path):
+    if not extent_path:
+        return None
+    if not os.path.exists(extent_path):
+        raise FileNotFoundError(f"extent_path {extent_path} does not exist")
+
+    boundary = gpd.read_file(extent_path)
+    if boundary.crs is not None and boundary.crs != NETWORK_CRS:
+        boundary = boundary.to_crs(NETWORK_CRS)
+    return shapely.force_2d(unary_union(boundary.geometry))
+
+
+def load_line_routes(line_routes_path, region = None):
+    """Official line routes by normalized line name: list of dicts with the terminus names
+    the route runs towards ("DIRECTION", possibly several separated by "/") and its paths."""
+    gdf = gpd.read_file(line_routes_path)
+    gdf = gdf.to_crs(epsg = 4326) if gdf.crs is not None else gdf.set_crs(epsg = 4326)
+
+    if region is not None:
+        region_4326 = gpd.GeoSeries([region], crs = NETWORK_CRS).to_crs(epsg = 4326).iloc[0]
+        gdf = gdf[gdf.intersects(region_4326)]
+
+    line_routes = defaultdict(list)
+    geometries_2056 = gdf.geometry.to_crs(NETWORK_CRS)
+    for line, direction, geometry, geometry_2056 in zip(*pt_route_check.read_line_columns(gdf), gdf.geometry, geometries_2056):
+        if geometry is None or geometry.is_empty:
+            continue
+        parts = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
+        line_routes[pt_route_check.normalize_line(line)].append({
+            "directions": {pt_route_check.normalize_name(d) for d in str(direction).split("/")},
+            "centerline": shapely.force_2d(geometry_2056),
+            "paths": [[[c[1], c[0]] for c in part.coords] for part in parts],
+        })
+    return line_routes
 
 
 def _parse_hms(value):
     h, m, s = value.split(":")
     return int(h) * 3600 + int(m) * 60 + float(s)
-
-
-def _format_hms(seconds):
-    seconds = int(round(seconds)) % (24 * 3600)
-    return f"{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}"
 
 
 def load_transit_schedule(schedule_path):
@@ -215,69 +321,17 @@ def load_transit_schedule(schedule_path):
     return stops, routes
 
 
-# ---------------------------------------------------------------------------
-# Per-stop schedules (departure times of every service calling there)
-# ---------------------------------------------------------------------------
-
-def build_stop_schedules(stops, routes, group_key_of = None):
-    schedules = defaultdict(dict)
-
-    for route in routes:
-        stop_ids = route["stop_ids"]
-        offsets = route["stop_offsets"]
-        departure_times = route["departure_times"]
-        if len(stop_ids) < 2 or not offsets or not departure_times:
-            continue
-
-        origin_id, dest_id = stop_ids[0], stop_ids[-1]
-        origin_name = stops.get(origin_id, {}).get("name") or origin_id
-        dest_name   = stops.get(dest_id, {}).get("name") or dest_id
-        origin_offset = offsets[0][1] if offsets[0][1] is not None else (offsets[0][0] or 0.0)
-        dest_offset   = offsets[-1][0] if offsets[-1][0] is not None else (offsets[-1][1] or 0.0)
-
-        for position, (stop_id, (arrival_offset, departure_offset)) in enumerate(zip(stop_ids, offsets)):
-            is_terminal = position == len(stop_ids) - 1
-            offset = arrival_offset if is_terminal else departure_offset
-            if offset is None:
-                offset = arrival_offset if arrival_offset is not None else departure_offset
-            if offset is None:
-                continue
-
-            here_name = stops.get(stop_id, {}).get("name") or stop_id
-            label_place = origin_name if is_terminal else dest_name
-            line_key = (route["line_name"] or route["line_id"], label_place)
-            group_key = group_key_of.get(stop_id, stop_id) if group_key_of else stop_id
-
-            times = []
-            for base_time in departure_times:
-                here_time = base_time + offset
-                parts = [f"{origin_name} {_format_hms(base_time + origin_offset)}"]
-                if here_name not in (origin_name, dest_name):
-                    parts.append(f"{here_name} {_format_hms(here_time)}")
-                parts.append(f"{dest_name} {_format_hms(base_time + dest_offset)}")
-                times.append((_format_hms(here_time), " &rarr; ".join(parts)))
-
-            existing = schedules[group_key].get(line_key)
-            if existing is None:
-                schedules[group_key][line_key] = (is_terminal, label_place, origin_name, times)
-            else:
-                existing[3].extend(times)
-
-    for groups in schedules.values():
-        for is_terminal, label_place, origin_name, times in groups.values():
-            times.sort(key = lambda t: t[0])
-
-    return schedules
-
-
 def _extract_station_code(stop_id):
-    matches = re.findall(r"\d{7,8}", str(stop_id))
+    # pt2matsim appends ".link:<linkId>" to stop ids; the link id can itself be a 7-8 digit
+    # number and must not be mistaken for the station code (it would merge unrelated stops).
+    matches = re.findall(r"\d{7,8}", str(stop_id).split(".link:")[0])
     if not matches:
         return None
     code = matches[-1]
     if len(code) == 8:
         code = code[:7]  # drop UIC check digit
     return code
+
 
 
 # ---------------------------------------------------------------------------
@@ -306,16 +360,19 @@ def _route_path(route, link_geometry, stops):
     return fallback if len(fallback) >= 2 else None
 
 
-def _bearing_deg(from_latlon, to_latlon):
-    lat1, lon1 = math.radians(from_latlon[0]), math.radians(from_latlon[1])
-    lat2, lon2 = math.radians(to_latlon[0]), math.radians(to_latlon[1])
-    dlon = lon2 - lon1
-    x = math.sin(dlon) * math.cos(lat2)
-    y = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(dlon)
-    return (math.degrees(math.atan2(x, y)) + 360) % 360
+MIN_VARIANT_SHARE = 0.25  # keep a branch if it has at least this share of the busiest branch's departures
 
 
 def select_representative_routes(routes, stops):
+    """One route per line + direction + branch.
+
+    Routes of a line are grouped by (line, origin, destination); inside a group, routes are
+    split into branches by their sequence of stations. A branch is kept when it carries at
+    least MIN_VARIANT_SHARE of the departures of the busiest branch, so that real branches
+    (e.g. TPG line 1 via Belle-Terre or via Belle-Idée) are all selectable while rare
+    variants (night or one-off services) are ignored. Kept branches beyond the first get a
+    "via" hint naming a stop the other branches do not serve.
+    """
     groups = defaultdict(list)
     for route in routes:
         if len(route["stop_ids"]) < 2:
@@ -325,14 +382,40 @@ def select_representative_routes(routes, stops):
         key = (route["line_name"] or route["line_id"], origin_name, dest_name)
         groups[key].append(route)
 
+    def stop_name(stop_id):
+        return stops.get(stop_id, {}).get("name") or stop_id
+
     representatives = []
     for group_routes in groups.values():
-        signature_freq = Counter(tuple(r["stop_ids"]) for r in group_routes)
-        best = max(
-            group_routes,
-            key = lambda r: (len(set(r["stop_ids"])), signature_freq[tuple(r["stop_ids"])]),
+        branches = defaultdict(list)
+        for route in group_routes:
+            branches[tuple(_extract_station_code(sid) or sid for sid in route["stop_ids"])].append(route)
+
+        ranked = sorted(
+            branches.items(),
+            key = lambda item: -sum(len(r["departure_times"]) for r in item[1]),
         )
-        representatives.append(best)
+        top_departures = sum(len(r["departure_times"]) for r in ranked[0][1])
+        kept = [
+            item for item in ranked
+            if sum(len(r["departure_times"]) for r in item[1]) >= MIN_VARIANT_SHARE * top_departures
+        ]
+
+        for signature, branch_routes in kept:
+            signature_freq = Counter(tuple(r["stop_ids"]) for r in branch_routes)
+            best = dict(max(
+                branch_routes,
+                key = lambda r: (len(r["departure_times"]), signature_freq[tuple(r["stop_ids"])]),
+            ))
+
+            if len(kept) > 1:
+                others = set()
+                for other_signature, other_routes in kept:
+                    if other_signature != signature:
+                        others.update(_extract_station_code(sid) or sid for sid in other_routes[0]["stop_ids"])
+                own_stops = [sid for sid in best["stop_ids"] if (_extract_station_code(sid) or sid) not in others]
+                best["via"] = stop_name(own_stops[len(own_stops) // 2]) if own_stops else "fewer stops"
+            representatives.append(best)
     return representatives
 
 
@@ -341,18 +424,47 @@ def select_representative_routes(routes, stops):
 # ---------------------------------------------------------------------------
 
 def plot_transit_schedule(
-    simulation_path,
+    simulation_path = None,
+    schedule_path = None,
+    network_path = None,
     output_path = "transit_schedule_map.html",
     modes = None,
     show_schedules = True,
+    extent_path = None,
+    line_routes_path = None,
+    route_check_rows = None,
 ):
-    
-    schedule_path = _find_output_file(simulation_path, "output_transitSchedule.xml.gz")
-    network_path  = _find_output_file(simulation_path, "output_network.xml.gz")
+    """route_check_rows: rows of pt_route_check.run (comparison with the official line routes),
+    shown next to the routes in the search and the line details."""
+    if schedule_path is None or network_path is None:
+        if simulation_path is None:
+            raise ValueError(
+                "Either simulation_path, or both schedule_path and network_path, must be provided."
+            )
+
+    if schedule_path is None:
+        schedule_path = _find_output_file(simulation_path, "output_transitSchedule.xml.gz")
+    if network_path is None:
+        network_path = _find_output_file(simulation_path, "output_network.xml.gz")
 
     print(f"Reading transit schedule from {schedule_path} ...")
     stops, routes = load_transit_schedule(schedule_path)
     print(f"  -> {len(stops)} stops, {len(routes)} transit routes")
+
+    region = load_extent(extent_path)
+    if region is not None:
+        shapely.prepare(region)
+        print(f"Restricting to extent {extent_path} ...")
+        # Stops outside the extent lose their coordinates (so they are not plotted) but keep
+        # their names, which are still needed for the origin/destination labels of schedules.
+        for info in stops.values():
+            if info["x"] is not None and not region.contains(Point(info["x"], info["y"])):
+                info["x"] = info["y"] = None
+        routes = [
+            route for route in routes
+            if any(stops.get(sid, {}).get("x") is not None for sid in route["stop_ids"])
+        ]
+        print(f"  -> {sum(info['x'] is not None for info in stops.values())} stops and {len(routes)} routes within the extent")
 
     if modes is not None:
         routes = [route for route in routes if route["mode"] in modes]
@@ -366,6 +478,11 @@ def plot_transit_schedule(
 
     print(f"Reading network geometry from {network_path} ...")
     link_geometry, link_modes = load_network_geometry(network_path)
+    if region is not None:
+        link_geometry = {
+            link_id: endpoints for link_id, endpoints in link_geometry.items()
+            if region.intersects(LineString(endpoints))
+        }
     print(f"  -> {len(link_geometry)} links")
 
     bus_lane_link_ids = [
@@ -374,373 +491,250 @@ def plot_transit_schedule(
     ]
     print(f"  -> {len(bus_lane_link_ids)} link(s) reserved for bus/PT (excluded from car)")
 
-    stop_ids_with_coords = [sid for sid, info in stops.items() if info["x"] is not None]
+    # Only plot stops served by the retained routes (drops unused pt2matsim stop copies, which
+    # would otherwise skew the station position, and stops of modes excluded by `modes`).
+    used_stop_ids = {sid for route in routes for sid in route["stop_ids"]}
+    stop_ids_with_coords = [
+        sid for sid, info in stops.items() if info["x"] is not None and sid in used_stop_ids
+    ]
     if not stop_ids_with_coords:
-        raise RuntimeError("No stop coordinates found in the transit schedule; nothing to plot.")
+        raise RuntimeError("No stop coordinates found in the transit schedule (within the extent); nothing to plot.")
 
     print("Grouping stops across sources by station code...")
     group_key_of = {sid: (_extract_station_code(sid) or sid) for sid in stop_ids_with_coords}
     group_members = defaultdict(set)
     for sid in stop_ids_with_coords:
         group_members[group_key_of[sid]].add(sid)
-
     group_keys = list(group_members)
-    group_points_2056 = gpd.GeoSeries(
-        [
-            Point(
-                sum(stops[m]["x"] for m in group_members[key]) / len(group_members[key]),
-                sum(stops[m]["y"] for m in group_members[key]) / len(group_members[key]),
-            )
-            for key in group_keys
-        ],
-        crs = NETWORK_CRS,
-    ).to_crs(epsg = 4326)
-
-    group_name = {}
-    group_lines = {}
-    for key in group_keys:
-        members = group_members[key]
-        names = [stops[m]["name"] for m in members if stops[m]["name"]]
-        group_name[key] = Counter(names).most_common(1)[0][0] if names else key
-        lines = set()
-        for m in members:
-            lines |= stops[m]["lines"]
-        group_lines[key] = lines
+    group_index = {key: k for k, key in enumerate(group_keys)}
     print(f"  -> {len(group_keys)} station(s) after grouping ({len(stop_ids_with_coords)} platform(s)/stop id(s) before)")
 
-    group_latlon = {
-        key: [float(point.y), float(point.x)]
-        for key, point in zip(group_keys, group_points_2056)
-    }
-
-    print("Aggregating links used by transit routes (one segment per link, not per line)...")
-    mode_link_lines = defaultdict(lambda: defaultdict(set))
-    for route in routes:
-        line_label = route["line_name"] or route["line_id"]
-        for link_id in route["link_ids"]:
-            if link_id in link_geometry:
-                mode_link_lines[route["mode"]][link_id].add(line_label)
-
-    mode_features = defaultdict(list)
-    for mode, link_lines in mode_link_lines.items():
-        for link_id, lines in link_lines.items():
-            from_xy, to_xy = link_geometry[link_id]
-            sorted_lines = sorted(lines)
-            shown_lines = ", ".join(sorted_lines[:8]) + (f" (+{len(sorted_lines) - 8} more)" if len(sorted_lines) > 8 else "")
-            mode_features[mode].append({
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": [from_xy, to_xy]},
-                "properties": {"mode": mode, "n_lines": len(sorted_lines), "lines": shown_lines},
-            })
-
-    print("Reprojecting aggregated links to WGS84...")
-    for mode, features in mode_features.items():
-        lines_2056 = gpd.GeoSeries(
-            [LineString(f["geometry"]["coordinates"]) for f in features], crs = NETWORK_CRS,
-        ).to_crs(epsg = 4326)
-        for feature, geometry in zip(features, lines_2056):
-            feature["geometry"]["coordinates"] = list(geometry.coords)
-
-    print("Selecting one representative route per line + direction (for the line-selector menu)...")
+    print("Selecting one representative route per line + direction + branch...")
     line_routes = select_representative_routes(routes, stops)
-    print(f"  -> {len(line_routes)} representative route(s) selectable (from {len(routes)} total patterns)")
+    print(f"  -> {len(line_routes)} representative route(s) (from {len(routes)} total patterns)")
 
-    print("Building per-line paths for the selector menu...")
-    route_index = []
-    skipped = 0
-    for route in line_routes:
-        path_2056 = _route_path(route, link_geometry, stops)
-        if path_2056 is None:
-            skipped += 1
-            continue
-        path_4326 = list(
-            gpd.GeoSeries([LineString(path_2056)], crs = NETWORK_CRS).to_crs(epsg = 4326).iloc[0].coords
-        )
+    official_routes = {}
+    if line_routes_path:
+        print(f"Reading official line routes from {line_routes_path} ...")
+        official_routes = load_line_routes(line_routes_path, region)
+        print(f"  -> routes for {len(official_routes)} line(s)")
 
-        from_name = stops.get(route["stop_ids"][0], {}).get("name", "-") if route["stop_ids"] else "-"
-        to_name   = stops.get(route["stop_ids"][-1], {}).get("name", "-") if route["stop_ids"] else "-"
-
-        stop_group_keys = []
-        for stop_id in route["stop_ids"]:
-            key = group_key_of.get(stop_id)
-            if key is not None and (not stop_group_keys or stop_group_keys[-1] != key):
-                stop_group_keys.append(key)
-
-        line_label = route["line_name"] or route["line_id"]
-        route_index.append({
-            "route_id": route["route_id"],
-            "mode": route["mode"],
-            "label": f"{line_label} ({route['mode']}): {from_name} → {to_name}",
-            "path": [[lat, lon] for lon, lat in path_4326],
-            "stop_group_keys": stop_group_keys,
-        })
-
-    if skipped:
-        print(f"  -> skipped {skipped} route(s) with no resolvable geometry")
-    route_index.sort(key = lambda r: r["label"])
-
-    center = [group_points_2056.y.mean(), group_points_2056.x.mean()]
-
-    print("Building map...")
-    m = folium.Map(location = center, zoom_start = 12, tiles = None, prefer_canvas = True)
-    folium.TileLayer(
-        tiles   = TILE_URL,
-        attr    = "© swisstopo",
-        name    = "swisstopo (grayscale)",
-        opacity = 0.8,
-        control = False,
-    ).add_to(m)
-
-    mode_layers = {}
-    for mode, features in sorted(mode_features.items()):
-        color = MODE_COLORS.get(mode, DEFAULT_MODE_COLOR)
-        n_links = len(features)
-        layer = folium.FeatureGroup(name = f"{mode} ({n_links} link(s))", show = mode in DEFAULT_VISIBLE_MODES)
-        folium.GeoJson(
-            {"type": "FeatureCollection", "features": features},
-            style_function     = lambda _f, color = color: {"color": color, "weight": 2, "opacity": 0.6},
-            highlight_function = lambda _f: {"weight": 6, "opacity": 1, "color": "#222222"},
-            tooltip = folium.GeoJsonTooltip(
-                fields  = ["mode", "n_lines", "lines"],
-                aliases = ["Mode:", "Lines using this link:", ""],
-                sticky  = True,
-            ),
-        ).add_to(layer)
-        layer.add_to(m)
-        mode_layers[mode] = layer
-
-    if bus_lane_link_ids:
-        print("Adding reserved bus-lane layer...")
-        bus_lane_coords_2056 = [link_geometry[link_id] for link_id in bus_lane_link_ids]
-        bus_lane_lines_2056 = gpd.GeoSeries(
-            [LineString([from_xy, to_xy]) for from_xy, to_xy in bus_lane_coords_2056], crs = NETWORK_CRS,
-        ).to_crs(epsg = 4326)
-        bus_lane_layer = folium.FeatureGroup(name = f"Reserved bus lanes ({len(bus_lane_link_ids)})", show = True)
-        for geometry in bus_lane_lines_2056:
-            latlon_coords = [(lat, lon) for lon, lat in geometry.coords]
-            folium.PolyLine(
-                latlon_coords,
-                color = BUS_LANE_COLOR, weight = 3, opacity = 0.85, dash_array = "6,4",
-                tooltip = "Reserved bus/PT lane",
-            ).add_to(bus_lane_layer)
-
-            mid_index = len(latlon_coords) // 2
-            midpoint  = latlon_coords[mid_index]
-            bearing   = _bearing_deg(latlon_coords[max(mid_index - 1, 0)], latlon_coords[min(mid_index + 1, len(latlon_coords) - 1)])
-            folium.Marker(
-                midpoint,
-                icon = folium.DivIcon(html = (
-                    f'<div style="transform: rotate({bearing - 90:.1f}deg); '
-                    f'transform-origin: center; color:{BUS_LANE_COLOR}; font-size:16px; '
-                    'font-weight:bold; line-height:1;">&#9658;</div>'
-                )),
-                tooltip = "Reserved bus/PT lane",
-            ).add_to(bus_lane_layer)
-        bus_lane_layer.add_to(m)
-
-    line_to_mode = {route["line_name"] or route["line_id"]: route["mode"] for route in routes}
-
-    stop_schedules = {}
-    if show_schedules:
-        print("Building per-stop schedules (departure times for every service)...")
-        stop_schedules = build_stop_schedules(stops, routes, group_key_of = group_key_of)
-        n_departure_rows = sum(
-            len(times) for groups in stop_schedules.values() for *_, times in groups.values()
-        )
-        print(
-            f"  -> {len(stop_schedules)} station(s) with a schedule, {n_departure_rows} departure row(s) total "
-            "(pass a smaller modes=... set or show_schedules=False if the output gets too large)"
-        )
-
-    print("Adding stops layer...")
-    stops_layer = folium.FeatureGroup(name = f"Stops ({len(group_keys)})", show = True)
-    for key, point in zip(group_keys, group_points_2056):
-        stop_name = group_name[key]
-        groups = stop_schedules.get(key)
-
-        if groups:
-            popup_html = (
-                '<div style="max-height:350px; overflow-y:auto; font-family:sans-serif; '
-                'font-size:12px; min-width:280px;">'
-                f"<b>{stop_name}</b><br><br>"
-            )
-            for (line_name, label_place), (is_terminal, _, _, times) in sorted(groups.items()):
-                color = MODE_COLORS.get(line_to_mode.get(line_name), DEFAULT_MODE_COLOR)
-                label = "Arrivals" if is_terminal else "Departures"
-                time_header = "Arrival" if is_terminal else "Departure"
-                direction = f"&larr; from {label_place}" if is_terminal else f"&rarr; {label_place}"
-                rows_html = "".join(
-                    f"<tr><td>{time}</td><td>{summary}</td></tr>" for time, summary in times
-                )
-                popup_html += (
-                    f'<div style="margin-bottom:8px;">'
-                    f'<b style="color:{color};">{line_name}</b> {direction}<br>'
-                    f'<button onclick="var t=this.nextElementSibling;'
-                    f"t.style.display=(t.style.display==='none'?'table':'none');\""
-                    f'style="font-size:11px; margin:2px 0; cursor:pointer;">'
-                    f"{label} ({len(times)} trips)</button>"
-                    f'<table style="display:none; width:100%; font-size:11px; border-collapse:collapse;">'
-                    f'<tr><th style="text-align:left;">{time_header}</th><th style="text-align:left;">Itinerary</th></tr>'
-                    f"{rows_html}</table>"
-                    f"</div>"
-                )
-            popup_html += "</div>"
-            popup   = folium.Popup(popup_html, max_width = 420)
-            tooltip = f"{stop_name} (click for schedule)"
-        else:
-            popup   = None
-            lines   = ", ".join(sorted(group_lines[key])) or "-"
-            tooltip = f"{stop_name} - {lines}"
-
-        folium.CircleMarker(
-            location     = [point.y, point.x],
-            radius       = 3,
-            color        = "#333333",
-            weight       = 1,
-            fill         = True,
-            fill_color   = "#ffffff",
-            fill_opacity = 0.9,
-            tooltip      = tooltip,
-            popup        = popup,
-        ).add_to(stops_layer)
-    stops_layer.add_to(m)
-
-    folium.LayerControl(position = "topleft", collapsed = False).add_to(m)
-
-    print("Adding line-selector menu...")
-   
-    map_var_name = m.get_name()
-    menu_html = """
-<div id="line-menu" style="position:fixed; top:80px; right:10px; z-index:1000;
-     background:white; border:1px solid #ccc; border-radius:6px; padding:8px;
-     font-family:sans-serif; font-size:12px; width:280px;">
-  <b>Select a line to highlight</b>
-  <input id="line-menu-filter" type="text" placeholder="Filter lines..."
-         style="width:100%; box-sizing:border-box; margin:6px 0; padding:4px;">
-  <div id="line-menu-list" style="max-height:320px; overflow-y:auto; border-top:1px solid #eee;"></div>
-</div>
-"""
-    m.get_root().html.add_child(folium.Element(menu_html))
-
-    highlight_js = f"""
-<script>
-(function () {{
-  var routeIndex = {json.dumps(route_index)};
-  var mapVarName = {json.dumps(map_var_name)};
-  var groupLatLon = {json.dumps(group_latlon)};
-  var highlightLine = null;
-  var highlightStopMarkers = [];
-  var selectedRouteId = null;
-  var listEl = document.getElementById("line-menu-list");
-  var filterEl = document.getElementById("line-menu-filter");
-
-  function clearHighlight(map) {{
-    if (highlightLine) {{
-      map.removeLayer(highlightLine);
-      highlightLine = null;
-    }}
-    highlightStopMarkers.forEach(function (marker) {{ map.removeLayer(marker); }});
-    highlightStopMarkers = [];
-  }}
-
-  function selectRoute(route, rowEl) {{
-    var map = window[mapVarName];
-    if (!map) {{ return; }}
-
-    clearHighlight(map);
-    var previouslySelected = listEl.querySelector(".line-menu-item.selected");
-    if (previouslySelected) {{ previouslySelected.classList.remove("selected"); }}
-
-    if (selectedRouteId !== null && selectedRouteId === route.route_id) {{
-      selectedRouteId = null;
-      return;
-    }}
-
-    highlightLine = L.polyline(route.path, {{color: "#e34948", weight: 6, opacity: 1}}).addTo(map);
-    highlightLine.bringToFront();
-    map.fitBounds(highlightLine.getBounds(), {{maxZoom: 16, padding: [40, 40]}});
-
-    // Also mark every station this route serves. interactive: false keeps
-    // this ring from capturing clicks itself - it sits exactly on top of
-    // the real stop marker (which still has its own popup/tooltip), and
-    // without this a click here would hit the ring instead and do
-    // nothing, making the stop appear to have "lost" its popup while
-    // highlighted.
-    (route.stop_group_keys || []).forEach(function (key) {{
-      var latlon = groupLatLon[key];
-      if (!latlon) {{ return; }}
-      var marker = L.circleMarker(latlon, {{
-        radius: 7, color: "#e34948", weight: 2, fill: true,
-        fillColor: "#ffffff", fillOpacity: 1, interactive: false,
-      }}).addTo(map);
-      marker.bringToFront();
-      highlightStopMarkers.push(marker);
-    }});
-
-    rowEl.classList.add("selected");
-    selectedRouteId = route.route_id;
-  }}
-
-  function renderList(filterText) {{
-    var needle = (filterText || "").toLowerCase();
-    listEl.innerHTML = "";
-    routeIndex.forEach(function (route) {{
-      if (needle && route.label.toLowerCase().indexOf(needle) === -1) {{ return; }}
-      var row = document.createElement("div");
-      row.className = "line-menu-item" + (route.route_id === selectedRouteId ? " selected" : "");
-      row.textContent = route.label;
-      row.style.cssText = "padding:3px 4px; cursor:pointer; border-bottom:1px solid #f2f2f2;";
-      row.addEventListener("mouseenter", function () {{ row.style.background = "#f0f0f0"; }});
-      row.addEventListener("mouseleave", function () {{
-        row.style.background = row.classList.contains("selected") ? "#ffe8e8" : "";
-      }});
-      row.addEventListener("click", function () {{ selectRoute(route, row); }});
-      if (row.classList.contains("selected")) {{ row.style.background = "#ffe8e8"; }}
-      listEl.appendChild(row);
-    }});
-  }}
-
-  filterEl.addEventListener("input", function () {{ renderList(filterEl.value); }});
-  renderList("");
-}})();
-</script>
-"""
-    m.get_root().html.add_child(folium.Element(highlight_js))
-
-    legend_html = (
-        '<div style="position:fixed; bottom:30px; left:30px; z-index:1000;'
-        'background:white; padding:10px; border-radius:6px;'
-        'border:1px solid #ccc; font-size:12px;"><b>Transport mode</b><br>'
+    print("Building the map data...")
+    data = build_page_data(
+        stops, routes, link_geometry, bus_lane_link_ids, group_keys, group_members, group_index, group_key_of,
+        line_routes, official_routes, route_check_rows, show_schedules, region,
     )
-    for mode in sorted(mode_features):
-        color = MODE_COLORS.get(mode, DEFAULT_MODE_COLOR)
-        legend_html += f'<span style="color:{color};">&#9644;</span> {mode}<br>'
-    if bus_lane_link_ids:
-        legend_html += f'<span style="color:{BUS_LANE_COLOR};">&#9644;&#9658;</span> reserved bus/PT lane (arrow = direction)<br>'
-    legend_html += '<div style="margin-top:6px;color:#666;">Use the line menu (top right) to highlight a line and its stops</div>'
-    legend_html += "</div>"
-    m.get_root().html.add_child(folium.Element(legend_html))
+    if show_schedules:
+        print(f"  -> {sum(len(route[4]) for route in data['routes'])} departure(s) of {len(data['routes'])} route(s) "
+              "(pass a smaller modes=... set, an extent or show_schedules=False if the output gets too large)")
 
     print("Saving map...")
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok = True)
-    m.save(output_path)
-    print(f"Done - saved to {output_path}")
+    with open(output_path, "w", encoding = "utf-8") as f:
+        f.write(page.page("Transit schedule", data))
+    print(f"Done - saved to {output_path} ({os.path.getsize(output_path) / 1e6:.1f} MB)")
+
+
+def build_page_data(stops, routes, link_geometry, bus_lane_link_ids, group_keys, group_members, group_index,
+                    group_key_of, line_routes, official_routes, route_check_rows, show_schedules, region):
+    """The data of the page (see page.py), coordinates in WGS84:
+    - stops: one per station [name, lat, lon, modes]
+    - routes: every route [line, mode, origin, destination, departure times (s), [[stop, offset (s)], ...], representative]
+      (stop -1: outside the extent), from which the page computes the timetable of every stop
+    - reps: the representative routes (one per line, direction and branch) with their path on the network
+    - links: the links used by the routes [lat1, lon1, lat2, lon2, mode, lines], busLanes: [lat1, lon1, lat2, lon2]
+    Names (stops, lines, termini) are indexes into `names`."""
+    names, name_index = [], {}
+
+    def name_id(name):
+        name = str(name)
+        if name not in name_index:
+            name_index[name] = len(names)
+            names.append(name)
+        return name_index[name]
+
+    def stop_name(stop_id):
+        return stops.get(stop_id, {}).get("name") or stop_id
+
+    def to_latlon(xy):
+        lon, lat = TO_WGS84.transform(*zip(*xy)) if xy else ((), ())
+        return [[round(a, 6), round(b, 6)] for a, b in zip(lat, lon)]
+
+    mode_names = sorted({route["mode"] for route in routes}, key = lambda m: (m not in MODE_COLORS, m))
+    mode_index = {mode: k for k, mode in enumerate(mode_names)}
+
+    # Stations: at the mean position of their platforms
+    station_modes = defaultdict(set)
+    for route in routes:
+        for sid in route["stop_ids"]:
+            if sid in group_key_of:
+                station_modes[group_index[group_key_of[sid]]].add(mode_index[route["mode"]])
+    positions = to_latlon([
+        (sum(stops[m]["x"] for m in group_members[key]) / len(group_members[key]),
+         sum(stops[m]["y"] for m in group_members[key]) / len(group_members[key]))
+        for key in group_keys
+    ])
+    stop_rows = []
+    for k, key in enumerate(group_keys):
+        member_names = [stops[m]["name"] for m in group_members[key] if stops[m]["name"]]
+        label = Counter(member_names).most_common(1)[0][0] if member_names else key
+        stop_rows.append([name_id(label), *positions[k], sorted(station_modes[k]) or [0]])
+
+    # Representative routes, with their path on the network, the platforms they serve and their official routes
+    route_checks = {
+        (row["line_id"], row["route_id"]): {
+            "status": row["status"], "share_inside": row["share_inside"],
+            "n_uturns": row["n_uturns"], "reference_matched": row["reference_matched"],
+        }
+        for row in route_check_rows or []
+    }
+    references, reps, rep_of_key = {}, [], {}
+    for rep in line_routes:
+        path_2056 = _route_path(rep, link_geometry, stops)
+        if path_2056 is None:
+            continue
+        line_label = rep["line_name"] or rep["line_id"]
+        from_name, to_name = stop_name(rep["stop_ids"][0]), stop_name(rep["stop_ids"][-1])
+        platforms = [(stops[s]["x"], stops[s]["y"]) for s in rep["stop_ids"] if stops.get(s, {}).get("x") is not None]
+
+        # Same official route as the route check: matched on the terminus and the stops; if none
+        # matches, every route of the line is shown rather than none.
+        features = official_routes.get(pt_route_check.normalize_line(line_label), [])
+        selected, _ = pt_route_check.select_directions(
+            [f["directions"] for f in features], [f["centerline"] for f in features], to_name, shapely.points(platforms),
+        ) if features and platforms else ([], False)
+        reference_ids = []
+        for feature in (features[i] for i in selected):
+            references[str(id(feature))] = [[[round(a, 6), round(b, 6)] for a, b in path] for path in feature["paths"]]
+            reference_ids.append(str(id(feature)))
+
+        rep_of_key[_route_key(rep, stops)] = len(reps)
+        rep_of_key.setdefault(_route_key(rep, stops)[:3], len(reps))
+        reps.append({
+            "label": f"{line_label} ({rep['mode']}): {from_name} → {to_name}" + (f" [via {rep['via']}]" if rep.get("via") else ""),
+            "line": name_id(line_label), "mode": mode_index[rep["mode"]],
+            "path": to_latlon(path_2056), "platforms": to_latlon(platforms),
+            "check": route_checks.get((rep["line_id"], rep["route_id"])),
+            "references": reference_ids, "route": None, "key": (rep["line_id"], rep["route_id"]),
+        })
+
+    # Every route: departures and offsets at its stops, and the representative it is drawn with
+    route_rows = []
+    rep_by_route_id = {rep["key"]: k for k, rep in enumerate(reps)}
+    for route in routes:
+        if len(route["stop_ids"]) < 2:
+            continue
+        calls = []
+        for position, (sid, (arrival, departure)) in enumerate(zip(route["stop_ids"], route["stop_offsets"])):
+            offset = arrival if position == len(route["stop_ids"]) - 1 else departure
+            if offset is None:
+                offset = arrival if arrival is not None else departure
+            group = group_index[group_key_of[sid]] if sid in group_key_of else -1
+            calls.append([group, int(round(offset or 0))])
+        key = _route_key(route, stops)
+        rep = rep_of_key.get(key, rep_of_key.get(key[:3], -1))
+        if (route["line_id"], route["route_id"]) in rep_by_route_id:
+            reps[rep_by_route_id[(route["line_id"], route["route_id"])]]["route"] = len(route_rows)
+        route_rows.append([
+            name_id(route["line_name"] or route["line_id"]), mode_index[route["mode"]],
+            name_id(stop_name(route["stop_ids"][0])), name_id(stop_name(route["stop_ids"][-1])),
+            sorted(int(round(t)) for t in route["departure_times"]) if show_schedules else [],
+            calls, rep,
+        ])
+    for rep in reps:
+        del rep["key"]
+
+    # Links used by the routes: one segment per link, with the lines using it
+    link_lines = defaultdict(set)
+    link_mode = {}
+    for route in routes:
+        for link_id in route["link_ids"]:
+            if link_id in link_geometry:
+                link_lines[link_id].add(route["line_name"] or route["line_id"])
+                link_mode.setdefault(link_id, mode_index[route["mode"]])
+    link_rows = []
+    for link_id, lines in link_lines.items():
+        (a, b) = to_latlon(link_geometry[link_id])
+        sorted_lines = sorted(lines)
+        shown = ", ".join(sorted_lines[:12]) + (f" (+{len(sorted_lines) - 12} more)" if len(sorted_lines) > 12 else "")
+        link_rows.append([*a, *b, link_mode[link_id], name_id(shown)])
+    bus_lanes = [[*a, *b] for a, b in (to_latlon(link_geometry[link_id]) for link_id in bus_lane_link_ids)]
+
+    perimeter = None
+    if region is not None:
+        outline = gpd.GeoSeries([region.simplify(20)], crs = NETWORK_CRS).to_crs(epsg = 4326)
+        perimeter = json.loads(outline.to_json())
+
+    present = {mode_names[link[4]] for link in link_rows}
+    default_modes = [mode_index[m] for m in DEFAULT_VISIBLE_MODES if m in present] or list(range(len(mode_names)))
+
+    return {
+        "names": names, "stops": stop_rows, "routes": route_rows, "reps": reps, "references": references,
+        "links": link_rows, "busLanes": bus_lanes, "schedules": bool(show_schedules),
+        "modes": mode_names, "modeColors": {m: MODE_COLORS.get(m, DEFAULT_MODE_COLOR) for m in mode_names},
+        "defaultModes": default_modes, "perimeter": perimeter,
+        "routeCheck": {"deviating": sum(row["status"] != "ok" for row in route_check_rows),
+                       "total": len(route_check_rows)} if route_check_rows else None,
+        "colors": {"busLane": BUS_LANE_COLOR, "reference": LINE_ROUTE_COLOR, "selected": SELECTED_COLOR,
+                   "ok": CHECK_OK_COLOR, "deviates": CHECK_DEVIATES_COLOR},
+    }
+
+
+def _route_key(route, stops):
+    """(line, origin, destination, stations): the key of the branch of select_representative_routes."""
+    origin = stops.get(route["stop_ids"][0], {}).get("name") or route["stop_ids"][0]
+    destination = stops.get(route["stop_ids"][-1], {}).get("name") or route["stop_ids"][-1]
+    return (route["line_name"] or route["line_id"], origin, destination,
+            tuple(_extract_station_code(sid) or sid for sid in route["stop_ids"]))
 
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description = __doc__)
-    parser.add_argument("simulation_path", help = "MATSim simulation_output directory")
+    parser.add_argument("simulation_path", nargs = "?", default = None,
+                         help = "MATSim simulation_output directory (omit if using --schedule/--network)")
+    parser.add_argument("--schedule", default = None,
+                         help = "Explicit path to a transitSchedule.xml.gz (e.g. the pt2matsim-mapped schedule), "
+                                "instead of reading it from simulation_path")
+    parser.add_argument("--network", default = None,
+                         help = "Explicit path to a network.xml.gz (e.g. the pt2matsim-mapped network), "
+                                "instead of reading it from simulation_path")
     parser.add_argument("--output", default = "transit_schedule_map.html", help = "Output HTML path")
     parser.add_argument("--modes", nargs = "*", default = None,
                          help = "Restrict to these transportMode values (default: all modes)")
+    parser.add_argument("--extent", default = None,
+                         help = "Path to a polygon file; only the PT schedule within it is plotted")
+    parser.add_argument("--line-routes", default = None,
+                         help = "Shapefile of official line routes (columns LIGNE, DIRECTION) shown when a line is selected")
     parser.add_argument("--no-schedules", action = "store_true",
                          help = "Skip building per-stop departure-time popups (faster, smaller output)")
+    parser.add_argument("--no-route-check", action = "store_true",
+                         help = "Do not compare the routes with the official line routes (--line-routes)")
+    parser.add_argument("--gtfs-routes", default = None, help = "GTFS routes.txt (to filter the route check by agency)")
+    parser.add_argument("--agency", action = "append", default = [],
+                         help = "Only check the lines of this GTFS agency_id (repeatable)")
     args = parser.parse_args()
 
+    route_check_rows = None
+    if args.line_routes and not args.no_route_check:
+        if args.schedule is None:
+            args.schedule = _find_output_file(args.simulation_path, "output_transitSchedule.xml.gz")
+        if args.network is None:
+            args.network = _find_output_file(args.simulation_path, "output_network.xml.gz")
+        os.makedirs(os.path.dirname(args.output) or ".", exist_ok = True)
+        route_check_rows, _ = pt_route_check.run(
+            args.schedule, args.network, args.line_routes,
+            os.path.join(os.path.dirname(args.output) or ".", "route_check.csv"),
+            gtfs_routes_path = args.gtfs_routes, agencies = args.agency,
+        )
+
     plot_transit_schedule(
-        args.simulation_path, output_path = args.output,
+        simulation_path = args.simulation_path,
+        schedule_path = args.schedule, network_path = args.network,
+        output_path = args.output,
         modes = set(args.modes) if args.modes else None,
         show_schedules = not args.no_schedules,
+        extent_path = args.extent, line_routes_path = args.line_routes,
+        route_check_rows = route_check_rows,
     )

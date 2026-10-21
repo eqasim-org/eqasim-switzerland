@@ -4,28 +4,99 @@ import pandas as pd
 import numba
 
 logger = logging.getLogger("synpp")
+BALANCE_COLS = ["employed", "car_availability", "sex", "age_class", "ovgk",
+                "income_class", "driving_license", "is_student",]
 
-BALANCE_COLS = [
-    "employed",
-    "car_availability",
-    "sex",
-    "age_class",
-    "ovgk",
-    "income_class",
-    "driving_license",
-    "is_student",
-]
+WEIGHTS = dict(employed=2.0, car_availability=1.0, sex=1.5, age_class=1.0,
+               ovgk=1.0, income_class=1.0, driving_license=1.0, is_student=1.0,)
 
-WEIGHTS = dict(
-    employed=2.0,
-    car_availability=1.0,
-    sex=1.5,
-    age_class=1.0,
-    ovgk=1.0,
-    income_class=1.0,
-    driving_license=1.0,
-    is_student=1.0,
-)
+def configure(context):
+    context.stage("data.census.selected")
+    
+    context.config("input_downsampling")
+    context.config("random_seed")
+
+
+def execute(context):
+    df = context.stage("data.census.selected")
+    num_persons = len(df)
+
+    probability = context.config("input_downsampling")
+
+    if probability <= 0.0:
+        logger.warning("Downsampling probability <= 0. Returning empty population.")
+        return df.iloc[0:0].copy()
+    if probability >= 1.0:
+        return df
+
+    aggregation_col = "home_zone_id" if "home_zone_id" in df.columns else "home_municipality_id"
+    sampling_col = "household_id" if "household_id" in df.columns else "person_id"
+
+    logger.info(f"Downsampling ({probability})")
+    random = np.random.RandomState(context.config("random_seed"))
+
+    hh = _household_features(df, sampling_col, aggregation_col).reset_index(drop=True)
+    hh["_idx"] = hh.index
+
+    balance_columns = BALANCE_COLS.copy()
+    household_balance_counts, used_balance_columns, balance_block_sizes = _build_household_balance_matrix(
+        df,
+        hh,
+        sampling_col,
+        balance_columns,
+    )
+    balance_block_weights = np.asarray(
+        [float(WEIGHTS.get(column, 1.0)) for column, _ in used_balance_columns],
+        dtype=np.float64,
+    )
+
+    if len(used_balance_columns) == 0:
+        logger.warning("No additional balance columns available for downsampling objective.")
+    else:
+        details = ", ".join([f"{column}({n_categories})" for column, n_categories in used_balance_columns])
+        logger.info(f"  Balancing municipality shares for: {details}")
+        weight_details = ", ".join([f"{column}={WEIGHTS.get(column, 1.0)}" for column, _ in used_balance_columns])
+        logger.info(f"  Balance weights: {weight_details}")
+
+    logger.info(
+        f"  Initial unique {sampling_col}: {hh.shape[0]}, persons: {df['person_id'].nunique()}",
+    )
+
+    groups = hh.groupby(aggregation_col, sort=False)
+    household_counts = groups.size().values
+    target_counts = _allocate_largest_remainder(household_counts, probability)
+
+    kept_row_indices = []
+    for (_, group_df), target_n in context.progress(zip(groups, target_counts), label="Sampling population"):
+        group_row_idx = group_df["_idx"].to_numpy(dtype=np.int64)
+        group_balance_counts = household_balance_counts[group_row_idx]
+        selected_idx = _sample_balanced_group(
+            group_df,
+            int(target_n),
+            probability,
+            random,
+            group_balance_counts,
+            balance_block_sizes,
+            balance_block_weights,
+        )
+        if len(selected_idx) > 0:
+            kept_row_indices.extend(selected_idx.tolist())
+
+    kept_ids = hh.loc[kept_row_indices, sampling_col].values
+    df = df[df[sampling_col].isin(kept_ids)].reset_index(drop=True)
+    
+    logger.info(f"  Sampled {sampling_col}: {len(kept_ids)}, persons: {df['person_id'].nunique()}")
+    logger.info(f"Proportion of original population: {len(df) / num_persons}")
+
+    return df
+
+
+
+
+
+
+
+#################### Functions ######################
 
 def _allocate_largest_remainder(counts, probability):
     counts = np.asarray(counts, dtype=float)
@@ -409,83 +480,3 @@ def _sample_balanced_group(
     )
 
     return group_indices[selected_local_idx]
-
-def configure(context):
-    context.stage("data.census.selected")
-    
-    context.config("input_downsampling")
-    context.config("random_seed")
-
-
-def execute(context):
-    df = context.stage("data.census.selected")
-    num_persons = len(df)
-
-    probability = context.config("input_downsampling")
-
-    if probability <= 0.0:
-        logger.warning("Downsampling probability <= 0. Returning empty population.")
-        return df.iloc[0:0].copy()
-    if probability >= 1.0:
-        return df
-
-    aggregation_col = "home_zone_id" if "home_zone_id" in df.columns else "home_municipality_id"
-    sampling_col = "household_id" if "household_id" in df.columns else "person_id"
-
-    logger.info(f"Downsampling ({probability})")
-    random = np.random.RandomState(context.config("random_seed"))
-
-    hh = _household_features(df, sampling_col, aggregation_col).reset_index(drop=True)
-    hh["_idx"] = hh.index
-
-    balance_columns = BALANCE_COLS.copy()
-    household_balance_counts, used_balance_columns, balance_block_sizes = _build_household_balance_matrix(
-        df,
-        hh,
-        sampling_col,
-        balance_columns,
-    )
-    balance_block_weights = np.asarray(
-        [float(WEIGHTS.get(column, 1.0)) for column, _ in used_balance_columns],
-        dtype=np.float64,
-    )
-
-    if len(used_balance_columns) == 0:
-        logger.warning("No additional balance columns available for downsampling objective.")
-    else:
-        details = ", ".join([f"{column}({n_categories})" for column, n_categories in used_balance_columns])
-        logger.info(f"  Balancing municipality shares for: {details}")
-        weight_details = ", ".join([f"{column}={WEIGHTS.get(column, 1.0)}" for column, _ in used_balance_columns])
-        logger.info(f"  Balance weights: {weight_details}")
-
-    logger.info(
-        f"  Initial unique {sampling_col}: {hh.shape[0]}, persons: {df['person_id'].nunique()}",
-    )
-
-    groups = hh.groupby(aggregation_col, sort=False)
-    household_counts = groups.size().values
-    target_counts = _allocate_largest_remainder(household_counts, probability)
-
-    kept_row_indices = []
-    for (_, group_df), target_n in context.progress(zip(groups, target_counts), label="Sampling population"):
-        group_row_idx = group_df["_idx"].to_numpy(dtype=np.int64)
-        group_balance_counts = household_balance_counts[group_row_idx]
-        selected_idx = _sample_balanced_group(
-            group_df,
-            int(target_n),
-            probability,
-            random,
-            group_balance_counts,
-            balance_block_sizes,
-            balance_block_weights,
-        )
-        if len(selected_idx) > 0:
-            kept_row_indices.extend(selected_idx.tolist())
-
-    kept_ids = hh.loc[kept_row_indices, sampling_col].values
-    df = df[df[sampling_col].isin(kept_ids)].reset_index(drop=True)
-    
-    logger.info(f"  Sampled {sampling_col}: {len(kept_ids)}, persons: {df['person_id'].nunique()}")
-    logger.info(f"Proportion of original population: {len(df) / num_persons}")
-
-    return df

@@ -1,121 +1,45 @@
+"""Launch the simulation fully configured by matsim.simulation.prepare."""
 import os.path
 import matsim.runtime.eqasim as eqasim
-from matsim.simulation.config_utils import (
-    get_mode_shares_calibration_args,
-    get_delays_args,
-    get_network_calibration_args,
-    get_dmc_parameters_args,
-    java_boolean,
-    parse_boolean,
-)
-import logging
-
-logger = logging.getLogger("synpp")
-
+from matsim.config import tools
 
 def configure(context):
-    context.stage("matsim.simulation.prepare")    
+    context.stage("matsim.simulation.prepare")
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
-    context.stage("data.microcensus.shares")
-    
-    context.config("use_vdf", default=False)
-    context.config("threads", volatile=True)
-    context.config("last_iteration", 60)
     context.config("java_memory", "50G", volatile=True)
-
-    # mode shares calibration
-    context.config("calibrate_alphas_in_matsim", default=False)
-    context.config("alphaCalibration.level", default="global")    
-    context.config("calibrate_betas_in_matsim", default=False)
-
-    # traffic light and intersection delays
-    context.config("activate_traffic_light_delays", default=True)
-    context.config("activate_unsignalized_intersections_delays", default=True)
-
-    # network calibration
-    context.config("network_calibration.activate", default=False)
-    context.config("network_calibration.calibrate_disutilities", default=True)
-    context.config("network_calibration.calibrate_freespeed", default=True)
-    context.config("network_calibration.calibrate_agents_ascs", default=True)
-    context.config("network_calibration.calibrate_subpopulations", default=True)
-
-    context.config("correct_links_capacity", True)
-    context.config("minimum_speed", 1.0)
-
-    context.config("useScheduleBasedTransport", default=True)
-    context.config("preventwaitingtoentertraffic", default=False)
-    context.config("writeexperiencedplans", default=False)
+    context.config("threads", volatile=True)
+    context.config("use_vdf", False)
+    context.config("use_dsim", False)
 
 
 def execute(context):
-    config_path = "%s/%s" % (
-        context.path("matsim.simulation.prepare"),
-        context.stage("matsim.simulation.prepare")
-    )
-    
-    scheduleBasedPTconfig = java_boolean(
-        context.config("useScheduleBasedTransport"), "useScheduleBasedTransport")
+    config_path = context.stage("matsim.simulation.prepare")
 
-    preventwaitingtoentertraffic = "n"
-    if parse_boolean(context.config("preventwaitingtoentertraffic"), "preventwaitingtoentertraffic"):
-        preventwaitingtoentertraffic = "y"
-        logger.info("Prevent waiting to enter traffic: %s", preventwaitingtoentertraffic)
+    # whether to use vdf or qsim
+    vdf = tools.parse_boolean(context.config("use_vdf"))
+    arguments = []
+    if vdf:
+        # Java resets this engine switch unless it is supplied on launch.
+        arguments = ["--generateNetworkEvents", "true"]
+    elif tools.parse_boolean(context.config("preventwaitingtoentertraffic")):
+        # The QSim capacity-easing setter is not exposed as an XML parameter.
+        arguments = ["--preventwaitingtoentertraffic", "y"]
 
-    writeExperiencedPlans = "false"
-    if parse_boolean(context.config("writeexperiencedplans"), "writeexperiencedplans"):
-        writeExperiencedPlans = "true"
-        logger.info("Write experienced plans: %s", writeExperiencedPlans)
+    # whether to use qsim
+    dsim = tools.parse_boolean(context.config("use_dsim"))
+    if dsim:
+        arguments.extend([
+            "--use-dsim", "true",
+            "--config:dsim.threads", str(context.config("threads"))
+        ])
 
-    # dmc estimation and calibration
-    additional_args = []    
-    additional_args.extend(get_dmc_parameters_args(context))
-    additional_args.extend(get_mode_shares_calibration_args(context))
-    
-    # delays (signalized intersections delays using webster formula, and unsignalized intersection delays using BPR based approach)
-    additional_args.extend(get_delays_args(context))
+    # Java may reset global threads while loading the prepared configuration.
+    # Keep the explicit replanning limit even when preparation came from cache.
+    arguments.extend(["--config:global.numberOfThreads", str(context.config("threads"))])
 
-    # network calibration
-    additional_args.extend(get_network_calibration_args(context))
-
-    # Running the simulation
-    last_iteration = context.config("last_iteration")
-    if (not context.config("use_vdf")):
-        # Run simulation
-        eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunSimulation", [
-            "--config-path", config_path,
-            "--config:controler.lastIteration", str(last_iteration),
-            "--config:controler.writeEventsInterval", str(max(int(last_iteration/2),1)),
-            "--config:controler.writePlansInterval", str(max(int(last_iteration/2),1)),
-            # Replanning/route calculators use global threads, not QSim threads.
-            # Override after the Java configurator resets global to CPU count;
-            # prepare may also have been cached with a different thread setting.
-            "--config:global.numberOfThreads", str(context.config("threads")),
-            "--config:qsim.numberOfThreads", str(min(context.config("threads"),12)),
-            "--config:linkStats.writeLinkStatsInterval", str(max(int(last_iteration/2),1)),
-            "--config:linkStats.averageLinkStatsOverIterations", str(8),
-            "--config:controller.writeTripsInterval", str(max(int(last_iteration/2),1)),
-            "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
-            "--preventwaitingtoentertraffic", preventwaitingtoentertraffic,
-            "--config:scoring.writeExperiencedPlans", writeExperiencedPlans,
-        ] + additional_args)
-    else:
-        # Run simulation with vdf
-        eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunVDFSimulation", [
-            "--config-path", config_path,
-            "--generateNetworkEvents", "true",
-            "--config:controler.lastIteration", str(last_iteration),
-            "--config:controler.writeEventsInterval", str(max(int(last_iteration/2),1)),
-            "--config:controler.writePlansInterval", str(max(int(last_iteration/2),1)),
-            # Honour the same explicit replanning-thread limit in VDF runs.
-            "--config:global.numberOfThreads", str(context.config("threads")),
-            "--config:qsim.numberOfThreads", str(min(context.config("threads"),16)),
-            "--config:linkStats.writeLinkStatsInterval", str(last_iteration),
-            "--config:linkStats.averageLinkStatsOverIterations", str(8),
-            "--config:controller.writeTripsInterval", str(last_iteration),
-            "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
-        ] + additional_args)
-    
-    assert os.path.exists("%s/simulation_output/output_events.xml.gz" % context.path())
-    
+    # Run the simulation with the prepared config. The main class is chosen based on the engine.
+    main_class= "org.eqasim.switzerland.ch_cmdp.RunVDFSimulation" if vdf else "org.eqasim.switzerland.ch_cmdp.RunSimulation"
+    eqasim.run(context, main_class, ["--config-path", config_path, *arguments])
+    assert os.path.exists(os.path.join(context.path(), "simulation_output", "output_events.xml.gz"))
     return context.path()

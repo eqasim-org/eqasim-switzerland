@@ -15,7 +15,6 @@ SAMPLING_METHOD = "probability"
 MAX_TRIPS_PER_SEGMENT = 8
 CACHE_MAX_ENTRIES = 1_024
 CACHE_MAX_EDGES = 200_000
-PARAMETER_CACHE_SIZE = 8
 RANDOM_CACHE_MAX_VALUES = 2_000_000
 
 RUN_DEFAULTS = {
@@ -58,6 +57,11 @@ CALIBRATION_COLUMNS = (
     "euclidean_distance_km", *(f"utility_{mode}" for mode in MODES),
 )
 CAR_ROUTING_BACKENDS = ("java", "pandana")
+ACTIVE_ROUTING_BACKENDS = ("java", "python")
+ACTIVE_ROUTING_DEFAULTS = {
+    "mode_choice_walk_routing_backend": "python",
+    "mode_choice_bike_routing_backend": "python",
+}
 ROUTING_DEFAULTS = {
     "mode_choice_routing_batch_size": ROUTING_BATCH_SIZE,
     "mode_choice_car_routing_backend": "java",
@@ -81,11 +85,11 @@ DESTINATION_PURPOSES = {
     "shopping": ("shop", "shopping"), "leisure": ("leisure",), "other": ("other",),
 }
 CITY_IDS = {"zurich": 261, "bern": 351, "luzern": 1061, "basel": 2701, "lausanne": 5586, "geneva": 6621}
-GOOD_PT_SERVICE = ("A", "B")
-MEDIUM_PT_SERVICE = ("C", "D")
 PT_GA = (1,)
 PT_HALBTAX = (3, 4)
 PT_VERBUND = (2, 4)
+# Match the subscriptions attribute written by matsim.scenario.population.
+PT_SUBSCRIPTIONS = {0: "none", 1: "GA", 2: "VA", 3: "HT", 4: "VA+HT"}
 
 DRIVING_AGE = 18
 RETIRED_AGE = 65
@@ -98,6 +102,8 @@ OECD_CHILD_WEIGHT = 0.3
 
 MIN_MOTORIZED_TOUR_TIME_MIN = 0.5
 MAX_ROUTED_TIME_MIN = 300.0
+# Finite sentinel for failed routes; availability also excludes these explicitly.
+UNROUTABLE_TIME_MIN = 1e9
 MIN_MOTORIZED_TOUR_DISTANCE_KM = 0.05
 MAX_PT_TRANSFERS = 6
 MAX_PT_TRANSFER_TIME_MIN = 60.0

@@ -32,6 +32,7 @@ def _weighted_mean(x, w):
     return np.average(x[m], weights=w[m])
 
 def configure(context):
+    context.config("random_seed")
     context.stage("data.microcensus.21.persons")
     context.stage("data.microcensus.21.household_persons")
     context.stage("synthesis.population.models.drlicense")
@@ -47,7 +48,7 @@ def _execute_model(context):
     # CONFIG
     # -------------------------------------------------------------------
     CAR_MODEL = "catboost"     # "rf" or "gbm" or "catboost"
-    SEED_CAR  = 2026
+    SEED_CAR = int(context.config("random_seed"))
     DIAG_CANTON_ID = "25"
 
     # Survey car count column
@@ -299,14 +300,14 @@ def _execute_model(context):
                 learning_rate=0.05,
                 max_iter=500,
                 min_samples_leaf=80,
-                random_state=42
+                random_state=SEED_CAR
             )
         elif mt == "rf":
             return RandomForestClassifier(
                 n_estimators=800,
                 max_depth=None,
                 min_samples_leaf=10,
-                random_state=42,
+                random_state=SEED_CAR,
                 n_jobs=-1
             )
         elif mt in ("catboost", "cat"):
@@ -316,7 +317,7 @@ def _execute_model(context):
                 learning_rate=0.03,
                 depth=10,
                 l2_leaf_reg=6.0,
-                random_seed=42,
+                random_seed=SEED_CAR,
                 verbose=False,
                 bootstrap_type="Bernoulli",
                 subsample=0.8

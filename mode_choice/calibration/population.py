@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-import yaml
+from dmc.parameters import Parameters
 
 from mode_choice.defaults import (
     ALPHA_KEYS, MODES, CALIBRATION_REFERENCE_MODE,
@@ -40,6 +40,6 @@ def run(context, model, parameters):
     })
     directory = Path(context.path())
     # Final artifacts only: no per-iteration disk cache or modification of fits.
-    (directory / "calibrated_parameters.yml").write_text(yaml.safe_dump(calibrated, sort_keys=True))
+    Parameters(calibrated).to_yaml(directory / "calibrated_parameters.yml", sort_keys=True)
     (directory / "calibration.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
     return choices

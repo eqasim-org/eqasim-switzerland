@@ -1,6 +1,7 @@
 import gzip
 import io
 from .population import HOME_DESTINATION_ID
+from data.cross_border.activities import THROUGH_DESTINATION_PREFIX
 import matsim.writers
 
 
@@ -12,7 +13,7 @@ def configure(context):
     if context.config("include_cross_border"):
         context.stage("data.cross_border.generate_cross_border_traffic")
 
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     if context.config("include_external_population"):
         context.stage("data.external_population.read_outputs")
 
@@ -78,6 +79,17 @@ def execute(context):
 
                 # Border crossing points are now part of synthesis.population.destinations
                 # and are written in the main STATENT loop above.
+
+                # The destinations of the "Through" agents, abroad (data.cross_border.activities)
+                cross_border_activities = context.stage("data.cross_border.generate_cross_border_traffic")[1]
+                through_destinations = cross_border_activities[
+                    cross_border_activities["destination_id"].astype(str).str.startswith(THROUGH_DESTINATION_PREFIX)]
+
+                for destination_id, geometry in context.progress(zip(through_destinations["destination_id"], through_destinations["geometry"]),
+                                                                 total=len(through_destinations), label="Destinations - crossborder through"):
+                    writer.start_facility(destination_id, int(geometry.x), int(geometry.y))
+                    writer.add_activity("other")
+                    writer.end_facility()
 
             if context.config("include_external_population"):
                 # Write one home facility per person directly from home_x/home_y,
