@@ -13,6 +13,11 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 ## Implementation guides
 
 - [Shared MATSim configuration](matsim/config/README.md)
+- [SUMO overview and stage flowcharts](sumo/WORKFLOW.md)
+- [SUMO runtime and road network](sumo/README.md)
+- [SUMO population and plans](sumo/population/README.md)
+- [SUMO simulation presets and loaded assignment](sumo/config/README.md)
+- [SUMO network loading and regional cutter](sumo/cutter/README.md)
 - [Native network reader and binary cache](matsim/native/README.md)
 - [Population mode choice](mode_choice/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
