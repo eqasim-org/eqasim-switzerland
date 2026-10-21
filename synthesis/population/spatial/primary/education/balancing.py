@@ -10,6 +10,7 @@ from scipy.sparse import coo_matrix, vstack
 from data.statent.education_institutions import pooled_compatibility
 from data.statent.education_campus_weights import DEFAULT_ELIGIBILITY_RULES
 from synthesis.population.spatial.primary.education.tertiary import domestic_cohort, zone_candidates
+from data.od.tertiary_education_age import adjust_probabilities, distance_matrix
 
 
 def configure(context):
@@ -21,14 +22,19 @@ def configure(context):
         context.stage(stage)
     context.config("education_site_eligibility", str(Path(context.config("data_path")) / DEFAULT_ELIGIBILITY_RULES))
     context.config("education_tertiary_balance", True)
+    # The age preference needs joint campus balancing; disabling balancing keeps
+    # the existing pooled assignment rather than applying an unbalanced tilt.
+    if context.config("education_tertiary_balance") and context.config("education_tertiary_age_distance", True):
+        context.stage("data.od.tertiary_education_age")
 
 
 def validate(context):
     import hashlib
     from pathlib import Path
     import data.statent.education_institutions as institutions
+    import data.od.tertiary_education_age as age_distance
     files = [Path(__file__).with_name("tertiary.py"), Path(institutions.__file__),
-             Path(context.config("education_site_eligibility"))]
+             Path(age_distance.__file__), Path(context.config("education_site_eligibility"))]
     return {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
 
 
@@ -115,7 +121,7 @@ def integerise_flows(flows, row_totals):
     return integer
 
 
-def build_balancing(persons, active_ids, statent, registry, compatibility, zones, pdf, targets):
+def build_balancing(persons, active_ids, statent, registry, compatibility, zones, pdf, targets, age_model=None):
     cohort = domestic_cohort(persons, active_ids)
     if cohort["person_id"].duplicated().any():
         raise ValueError("Calibration cohort must contain unique person IDs")
@@ -175,7 +181,14 @@ def build_balancing(persons, active_ids, statent, registry, compatibility, zones
         alt_zones = np.array([positions[z] for z, g in alternatives], dtype=int)
         alt_groups = np.array([group_position[g] for z, g in alternatives], dtype=int)
         origins, counts, seeds = [], [], []
-        for origin, group in students.groupby("home_zone_id", sort=True, dropna=False):
+        grouping = "home_zone_id"
+        if age_model is not None:
+            # Preserve origin-by-age counts through IPF, not just origin totals.
+            # Otherwise sampling after balancing would erase the age preference.
+            students = students.assign(education_od_age_band=students.age.ge(age_model["age_limit"]).astype(int))
+            grouping = ["home_zone_id", "education_od_age_band"]
+        for origin_key, group in students.groupby(grouping, sort=True, dropna=False):
+            origin = origin_key[0] if age_model is not None else origin_key
             if pd.isna(origin) or origin not in valid_origins:
                 continue
             row = np.asarray(pdf[positions[origin]], dtype=float)
@@ -186,7 +199,11 @@ def build_balancing(persons, active_ids, statent, registry, compatibility, zones
             seed = row[alt_zones] * weights
             if seed.sum() <= 0:
                 continue
-            origins.append(origin)
+            if age_model is not None and origin_key[1] == 0:
+                distances = distance_matrix([origin], [zone for zone, _ in alternatives],
+                                            age_model["zone_centres"])[0]
+                seed = adjust_probabilities(seed, distances, age_model["decay_per_km"])
+            origins.append(origin_key)
             counts.append(len(group))
             seeds.append(seed / seed.sum())
         if not origins:
@@ -220,6 +237,8 @@ def build_balancing(persons, active_ids, statent, registry, compatibility, zones
         models[level] = {"origins": dict(zip(origins, range(len(origins)))), "probabilities": probabilities,
                          "alternatives": alternatives, "site_pools": site_pools,
                          "groups": groups, "integer_flows": integer_flows}
+        if age_model is not None:
+            models[level]["age_limit"] = age_model["age_limit"]
         for j, group in enumerate(groups):
             audits.append(dict(study_level=level, calibration_group=group, requested_students=requested[j],
                                expected_students=flows[:, j].sum(), residual=diagnostics["residual"][j],
@@ -232,6 +251,7 @@ def build_balancing(persons, active_ids, statent, registry, compatibility, zones
     diagnostics["target_method"] = "provisional_bfs_share_and_eligible_fte_calibration"
     diagnostics["coverage_assumption"] = "Equal Swiss-residence shares across pooled tertiary institutions; higher-vocational coverage incomplete"
     diagnostics["reference_assumptions_verified"] = False
+    diagnostics["young_distance_decay_per_km"] = age_model["decay_per_km"] if age_model is not None else 0.
     return {"models": models, "diagnostics": diagnostics}
 
 
@@ -243,4 +263,6 @@ def execute(context):
     return build_balancing(context.stage("synthesis.population.sampled"), None,
                            context.stage("data.statent.statent"), registry, pooled_compatibility(registry, rules),
                            context.stage("data.spatial.zones"), context.stage("data.od.tertiary_education_matrix")[0],
-                           context.stage("synthesis.population.spatial.primary.education.targets"))
+                           context.stage("synthesis.population.spatial.primary.education.targets"),
+                           context.stage("data.od.tertiary_education_age")
+                           if context.config("education_tertiary_age_distance") else None)

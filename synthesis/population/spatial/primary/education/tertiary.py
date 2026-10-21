@@ -144,7 +144,14 @@ def assign_od_locations(persons, locations, statent, compatibility, zones, pdf, 
         eligible_zones = sorted(zone for zone in pools if zone in zone_position)
         positions = np.array([zone_position[zone] for zone in eligible_zones], dtype=int)
         choices = []
-        for origin, group in students.groupby("home_zone_id", sort=True, dropna=False):
+        grouping = "home_zone_id"
+        if model is not None and "age_limit" in model:
+            # Use the same row keys as balancing, so each origin/age cohort
+            # receives exactly its reserved integer campus counts.
+            students = students.assign(education_od_age_band=students.age.ge(model["age_limit"]).astype(int))
+            grouping = ["home_zone_id", "education_od_age_band"]
+        for origin_key, group in students.groupby(grouping, sort=True, dropna=False):
+            origin = origin_key[0] if isinstance(grouping, list) else origin_key
             indices = [row_position[person] for person in group["person_id"]]
             result.loc[indices, "education_od_origin_zone_id"] = origin
             if pd.isna(origin) or origin not in valid_origins:
@@ -162,10 +169,10 @@ def assign_od_locations(persons, locations, statent, compatibility, zones, pdf, 
             if mass <= 0:
                 result.loc[indices, "education_od_status"] = "compatible_location_proxy_no_supported_destination"
                 continue
-            if model is not None and origin in model["origins"]:
+            if model is not None and origin_key in model["origins"]:
                 # Choose the campus/type group together with the zone. Choosing
                 # an unrestricted establishment afterward would undo calibration.
-                selected = sample_balanced_alternatives(model, origin, len(group), rng)
+                selected = sample_balanced_alternatives(model, origin_key, len(group), rng)
                 for person, alternative in zip(group["person_id"], selected):
                     destination, calibration_group = model["alternatives"][alternative]
                     choices.append((person, destination, int(alternative), calibration_group))

@@ -44,6 +44,13 @@ they do not fabricate support. `education_tertiary_balance: false` retains poole
 OD without balancing. Within a selected campus, the existing distance/employee
 preference chooses a compatible establishment inside the sampled destination zone.
 
+With `education_tertiary_age_distance: true` (default), a national SS-fitted
+distance preference for tertiary students under 24 is applied before balancing.
+Balancing then preserves origin-by-age rows and the same campus/type margins.
+Older students keep their original seed probabilities; no separate degree OD
+matrices are introduced. See [age-distance validation](tertiary_education_age_distance.md)
+for held-out-year evidence, the disable switch and conditional replay results.
+
 Daily attendance is determined later by the donor diary. No student is forced to
 attend every day. Matching uses the longer available work or education commute;
 reported MZ school coordinates are used even on days without an education visit.
