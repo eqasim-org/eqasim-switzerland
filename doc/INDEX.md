@@ -10,6 +10,9 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Beginner configuration template](../config.yml)
 - [Public-transport pricing inputs](PT_pricing_inputs_and_explanations.md)
 
+- [Education reference maintenance](analysis/education_reference_update.md)
+- [Education model and configuration (LaTeX)](synthesis/population/education_model.tex)
+
 ## Implementation guides
 
 - [Shared MATSim configuration](matsim/config/README.md)

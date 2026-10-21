@@ -6,6 +6,9 @@ The pipeline uses [Synpp](https://github.com/eqasim-org/synpp) to organize its s
 
 See the [documentation index](doc/INDEX.md) for module guides and changelogs.
 
+For education reference provenance, annual BFS updates and STATENT consistency
+checks, see [Maintaining education reference files](doc/analysis/education_reference_update.md).
+
 ## Main reference
 
 The main research reference for the synthetic population of Switzerland is:

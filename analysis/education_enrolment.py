@@ -19,17 +19,21 @@ def configure(context):
     context.config("education_enrolment_year", "2023/24")
 
 
-def download(input_path, academic_years):
+def download(input_path, academic_years, include_higher_vocational=False):
     """Freeze the BFS response, query and metadata together for reproducible totals."""
     input_path = Path(input_path)
     input_path.mkdir(parents=True, exist_ok=True)
     manifest = []
-    for institution_type, table in TABLES.items():
-        url = table_url(institution_type, api=True)
+    tables = [(kind, table, table_url(kind, api=True)) for kind, table in TABLES.items()]
+    if include_higher_vocational:
+        from data.statent import education_higher_vocational as higher
+        tables.append(("higher_vocational", higher.TABLE, higher.API_URL))
+    for institution_type, table, url in tables:
         with urlopen(url, timeout=60) as response:
             metadata_bytes = response.read()
         metadata = json.loads(metadata_bytes)
-        query = build_query(metadata, academic_years)
+        query = (higher.build_query(metadata, academic_years) if institution_type == "higher_vocational"
+                 else build_query(metadata, academic_years))
         query_bytes = json.dumps(query, ensure_ascii=False).encode("utf-8")
         request = Request(url, data=query_bytes, headers={"Content-Type": "application/json"})
         with urlopen(request, timeout=60) as response:
@@ -41,6 +45,10 @@ def download(input_path, academic_years):
         for suffix, content in [(".metadata.json", metadata_bytes),
                                 (".query.json", query_bytes), (".json", result_bytes)]:
             (input_path / (table + suffix)).write_bytes(content)
+        if institution_type == "higher_vocational":
+            reference, checks = higher.parse_reference(result, metadata, academic_years)
+            reference.to_csv(input_path / "education_higher_vocational_enrolment.csv", index=False)
+            checks.to_csv(input_path / "higher_vocational_conservation.csv", index=False)
         manifest.append({"institution_type": institution_type, "table_id": table,
                          "api_url": url, "academic_years": academic_years,
                          "retrieved_at": datetime.now(timezone.utc).isoformat(),
