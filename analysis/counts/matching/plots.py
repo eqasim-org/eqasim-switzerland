@@ -792,6 +792,20 @@ class Plotter:
 <div id="counts-map-controls">
   __CONSTRUCTION_CONTROL__
   __COUNT_MODE_CONTROL__
+  <div class="counts-quality-section">
+    <label><input id="counts-filter-enabled" type="checkbox"> Filter count points</label>
+    <label for="counts-filter-metric">Filter metric</label>
+    <select id="counts-filter-metric" disabled></select>
+    <label for="counts-filter-sign">Comparison</label>
+    <select id="counts-filter-sign" disabled>
+      <option value="higher">Higher than (&gt;)</option>
+      <option value="lower">Lower than (&lt;)</option>
+    </select>
+    <label for="counts-filter-value">Value (in the selected metric's units)</label>
+    <input id="counts-filter-value" type="number" step="any" value="5" disabled>
+    <div id="counts-filter-error" style="display:none">Enter a finite threshold.</div>
+    <div>Uses displayed, signed differences; points without this metric are hidden when filtering.</div>
+  </div>
   <div class="counts-control-title">Count point colors</div>
   <label for="counts-color-metric">Metric</label>
   <select id="counts-color-metric"></select>
@@ -853,6 +867,8 @@ class Plotter:
   top: 12px;
   right: 12px;
   width: min(400px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   box-sizing: border-box;
   padding: 12px;
   border-radius: 7px;
@@ -941,6 +957,11 @@ class Plotter:
   const select = document.getElementById("counts-color-metric");
   const countMode = document.getElementById("counts-count-mode");
   const constructionToggle = document.getElementById("counts-show-construction");
+  const filterEnabled = document.getElementById("counts-filter-enabled");
+  const filterMetric = document.getElementById("counts-filter-metric");
+  const filterSign = document.getElementById("counts-filter-sign");
+  const filterValue = document.getElementById("counts-filter-value");
+  const filterError = document.getElementById("counts-filter-error");
   const lowerInput = document.getElementById("counts-lower-bound");
   const upperInput = document.getElementById("counts-upper-bound");
   const lowerLabel = document.getElementById("counts-lower-label");
@@ -957,6 +978,15 @@ class Plotter:
   const deck = typeof deckInstance === "undefined" ? null : deckInstance;
   const bounds = JSON.parse(JSON.stringify(metricSettings));
   const qualityBounds = JSON.parse(JSON.stringify(metricSettings));
+  // Keep unfiltered records so every control change can restore hidden points.
+  const pointData = new Map();
+  if (deck && deck.props && deck.props.layers) {
+    deck.props.layers.forEach(function (layer) {
+      if (layer.id.startsWith("counts-points-") || layer.id.startsWith("counts-quality-")) {
+        pointData.set(layer.id, layer.props.data);
+      }
+    });
+  }
 
   function addOption(target, key, label) {
     const option = document.createElement("option");
@@ -967,6 +997,9 @@ class Plotter:
 
   Object.keys(metricSettings).forEach(function (key) {
     addOption(select, key, metricSettings[key].label);
+  });
+  ["geh", "adiff", "pdiff"].forEach(function (key) {
+    if (metricSettings[key]) addOption(filterMetric, key, metricSettings[key].label);
   });
   Object.keys(metricSettings).forEach(function (key) {
     const setting = metricSettings[key];
@@ -1110,24 +1143,38 @@ class Plotter:
     });
   }
 
-  if (countMode) {
-    countMode.addEventListener("change", function () {
+  function updatePointData() {
+      [filterMetric, filterSign, filterValue].forEach(function (input) {
+        input.disabled = !filterEnabled.checked;
+      });
+      const threshold = Number(filterValue.value);
+      const valid = filterValue.value.trim() !== "" && Number.isFinite(threshold);
+      filterError.style.display = filterEnabled.checked && !valid ? "block" : "none";
+      if (filterEnabled.checked && !valid) return;
       if (!deck || !deck.props || !deck.props.layers) return;
       const layers = deck.props.layers.map(function (layer) {
-        if (!layer.id.startsWith("counts-points-") && !layer.id.startsWith("counts-quality-")) {
-          return layer;
-        }
-        return layer.clone({data: layer.props.data.map(function (datum) {
-          const state = countMode.value === "closest"
+        if (!pointData.has(layer.id)) return layer;
+        const data = pointData.get(layer.id).map(function (datum) {
+          const state = countMode && countMode.value === "closest"
             ? (datum._closest_count || datum._original_count) : datum._original_count;
           return state ? Object.assign({}, datum, state) : datum;
-        })});
+        }).filter(function (datum) {
+          if (!filterEnabled.checked) return true;
+          const value = datum[filterMetric.value];
+          if (value === null || value === undefined || value === "" || !Number.isFinite(Number(value))) return false;
+          return filterSign.value === "higher" ? Number(value) > threshold : Number(value) < threshold;
+        });
+        return layer.clone({data: data});
       });
       deck.setProps({layers: layers});
       recolor();
       updateQualityMarkers();
-    });
   }
+  if (countMode) countMode.addEventListener("change", updatePointData);
+  filterEnabled.addEventListener("change", updatePointData);
+  filterMetric.addEventListener("change", updatePointData);
+  filterSign.addEventListener("change", updatePointData);
+  filterValue.addEventListener("input", updatePointData);
 
   select.addEventListener("change", function () {
     activeMetric = select.value;
