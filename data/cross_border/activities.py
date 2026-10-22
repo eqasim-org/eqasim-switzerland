@@ -249,9 +249,17 @@ def retime_with_travel_times(df_activities):
 
         # Backwards to the first activity
         for k in range(first_anchor - 1, first - 1, -1):
-            end[k] = max(start[k + 1] - travel_time[k], 0.0)
+            end[k] = start[k + 1] - travel_time[k]
             if k > first:
                 start[k] = end[k] - duration[k]
+
+        # The person would leave before midnight (an early first activity in Switzerland far from the origin): their
+        # activities up to the last one in Switzerland start later, keeping the travel times (clamping the departure to 0
+        # gave the border activity a start of -1 and a negative leg to it)
+        if end[first] < 0:
+            shift = -end[first]
+            start[first + 1:last_anchor + 1] += shift
+            end[first:last_anchor + 1] += shift
 
         # Forwards to the last activity
         for k in range(last_anchor + 1, stop):
