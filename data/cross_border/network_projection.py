@@ -69,7 +69,10 @@ def execute(context):
     # onto the car network wouldn't be meaningful for them.
     is_car_trip = df["trip_mode"].isin(["car", "car_passenger"])
 
-    df_origin_projected = df[(df["origin_is_projected"] == True) & is_car_trip]
+    # A missing foreign address represented at its surveyed crossing has no
+    # geographic direction to refine towards the network perimeter.
+    crossing_proxy = df.get("start_location_source", pd.Series("reported", index = df.index)).eq("crossing_proxy")
+    df_origin_projected = df[(df["origin_is_projected"] == True) & is_car_trip & ~crossing_proxy]
     if len(df_origin_projected) > 0:
         requests.append(df_origin_projected[["residence_x", "residence_y", "origin_x", "origin_y"]].rename(
             columns = {
