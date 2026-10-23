@@ -114,7 +114,7 @@ def sample_points_in_polygon(polygon, n):
     return points
 
 
-def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context, rng, mode_column = "trip_mode", interview_place_column = "interview_place", other_x = None, other_y = None, other_crs = "EPSG:4326", restrict_column = None):
+def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context, rng, mode_column = "trip_mode", interview_place_column = "interview_place", other_x = None, other_y = None, other_crs = "EPSG:4326", restrict_column = None, update_interview_point = True):
     df = df.copy()
     points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(df[x], df[y]), crs = "EPSG:4326").to_crs("EPSG:2056")
     points["record"] = range(len(points))
@@ -257,7 +257,9 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     # (one for their location, a different one for that pseudo-activity).
     # A pt gateway is not a crossing: public transport agents get no border
     # activity, and their interview point stays the crossing they were surveyed at.
-    if "interview_point_id" in df.columns and "interview_geometry_point" in df.columns:
+    # Through-trips also retain that observed point: shortening a foreign endpoint
+    # does not provide another observation of where the person crossed Switzerland.
+    if update_interview_point and "interview_point_id" in df.columns and "interview_geometry_point" in df.columns:
         mask = df[column_name + "_is_projected"] & ~df[column_name + "_is_pt_gateway"]
         df.loc[mask, "interview_point_id"]       = df.loc[mask, column_name + "_point_id"]
         df.loc[mask, "interview_geometry_point"] = df.loc[mask, column_name + "_point"]
@@ -406,10 +408,13 @@ def process_from_to_trips(df_trips, context, rng):
 def process_through_trips(through_trips, N, context, rng):
     border_offset_km = context.config("border_offset") / 1000
 
+    # Road border interviews observe entry into Switzerland. Keep that direction
+    # and any reported exit through expansion; rail has an explicit direction.
     through_od = through_trips[
         ["origin_country", "destination_country", "origin_country_raw", "destination_country_raw",
         "start_x", "start_y", "end_x", "end_y", "trip_mode", "train_category", "trip_purpose", "weight", "nb_passengers",
-        "interview_place", "interview_point_id", "interview_geometry_point"]
+        "interview_place", "interview_point_id", "interview_geometry_point", "direction_crossing",
+        "interview_id", "survey_exit_code", "survey_exit_name"]
     ]
 
     mask_missing_start = pd.to_numeric(through_od["start_x"], errors="coerce").isna()  # If start_x is missing, so is origin_place, so we cannot use one value to compensate the absence of the other.
@@ -438,13 +443,18 @@ def process_through_trips(through_trips, N, context, rng):
     df["origin_at_crossing"] = (starts.distance(crossings) <= ends.distance(crossings)).values
     df["destination_at_crossing"] = ~df["origin_at_crossing"]
 
-    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", border_offset_km, "other", "other", "origin", context, rng, other_x = "end_x", other_y = "end_y", restrict_column = "origin_at_crossing")
+    # Shortening either foreign endpoint must not replace the surveyed crossing.
+    df = project_point_series_close_to_border(df.copy(), "start_x", "start_y", border_offset_km, "other", "other", "origin", context, rng, other_x = "end_x", other_y = "end_y", restrict_column = "origin_at_crossing", update_interview_point = False)
     # The other end of the destination is the real origin. start_x/start_y (WGS84) are
     # gone after the origin projection, origin_before_projection holds it in LV95.
     df["real_origin_x"] = df["origin_before_projection"].apply(lambda p: p.x)
     df["real_origin_y"] = df["origin_before_projection"].apply(lambda p: p.y)
 
-    df = project_point_series_close_to_border(df.copy(), "end_x", "end_y", border_offset_km, "other", "other", "destination", context, rng, other_x = "real_origin_x", other_y = "real_origin_y", other_crs = "EPSG:2056", restrict_column = "destination_at_crossing")
+    df = project_point_series_close_to_border(df.copy(), "end_x", "end_y", border_offset_km, "other", "other", "destination", context, rng, other_x = "real_origin_x", other_y = "real_origin_y", other_crs = "EPSG:2056", restrict_column = "destination_at_crossing", update_interview_point = False)
+
+    # The road destination above is provisional. through_crossings uses the
+    # original destination below to place it on the correct side of the network;
+    # the sampled PT gateway and the seeded expansion order remain unchanged.
 
     df["cross_border_person_id"] = range(N, N + len(df))
     df["cross_border_person_id"] = "CBS_" + df["cross_border_person_id"].astype(str)
@@ -471,7 +481,8 @@ def process_through_trips(through_trips, N, context, rng):
         "trip_mode", "trip_purpose",
         "is_border_point_projected", "origin_is_projected", "destination_is_projected",
         "origin_point_id", "destination_point_id",
-        "interview_place", "interview_point_id", "interview_geometry_point",
+        "interview_place", "interview_point_id", "interview_geometry_point", "direction_crossing",
+        "interview_id", "survey_exit_code", "survey_exit_name",
         "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]]
 
     return df
@@ -486,6 +497,12 @@ def read_2021_data(context):
 
     df2021 = pd.read_csv(data_path, encoding="latin1", sep = ";")
 
+    # These road-route fields are separate from FAHRTRICHTUNGGU (rail only).
+    # Keep unknown/blank exit codes as missing, without inventing an exit.
+    exit_codes = pd.to_numeric(df2021.get("GUAUSREISESTRASSE", pd.Series(index = df2021.index, dtype = object)), errors = "coerce")
+    exit_codes = exit_codes.where(exit_codes.ne(9999)).astype("Int64")
+    exit_names = read_road_exit_names(Path(data_path).with_name("AGQPV21_finale_Auswertungsdatenbank_Codebuch.xlsx")) if exit_codes.notna().any() else {}
+
     df2021 = df2021[["INTERVIEWID", "BEFRAGUNGSORTID", "BEFRAGUNGSORT", "GRENZABSCHNITT", "TAGESTYP", "VERKEHRSTRAEGER", "UEBERGANGSART", "FAHRZEUGTYP", "GRUPPENGROESSE",
                  "WOHNORTLANDISO", "WOHNORT_GISCO_ID", "STARTORTLANDISO", "STARTORT_GISCO_ID", "ZIELORTLANDISO", "ZIELORT_GISCO_ID",
                  "STARTORTORTLATITUDE", "STARTORTORTLONGITUDE",
@@ -498,6 +515,9 @@ def read_2021_data(context):
                   "start_y", "start_x", "end_y", "end_x", 
                   "trip_purpose", "nb_nights", "country1", "country2", "country3",
                   "train_type", "direction_crossing", "direction_alps", "travel_cat", "weight", "weight_vehicles"]
+
+    df2021["survey_exit_code"] = exit_codes
+    df2021["survey_exit_name"] = exit_codes.map(exit_names)
 
     df2021["interview_place"] = repair_interview_place_names(
         df2021["interview_place"], context.stage("data.cross_border.interview_places")["interview_place"])
@@ -538,6 +558,12 @@ def read_2021_data(context):
     df2021["direction_crossing"] = df2021["direction_crossing"].astype(str)
     df2021.loc[df2021["direction_crossing"]=="1", "direction_crossing"] = "entering CH"
     df2021.loc[df2021["direction_crossing"]=="2", "direction_crossing"] = "leaving CH"
+
+    # BFS's road-border survey is conducted on entry. A blank rail-only field
+    # therefore does not make a road respondent's direction unknown (BFS 2023,
+    # Leistungen des privaten Personenverkehrs, p. 10, footnote 5).
+    road_border = df2021["road_type"].eq("road") & df2021["crossing_cat"].eq(1)
+    df2021.loc[road_border, "direction_crossing"] = "entering CH"
     
     # 6. For the Alps crossing, not used currently
     df2021["direction_alps"] = df2021["direction_alps"].astype(str)
@@ -931,3 +957,17 @@ def execute(context):
         del df["exclude"]
 
     return df
+
+
+def read_road_exit_names(codebook_path):
+    """Decode the official road exit codes; the codebook accompanies the CSV."""
+    if not codebook_path.exists():
+        logger.warning("Road-exit codebook is missing at %s; exit codes are retained but cannot be mapped by name.", codebook_path)
+        return {}
+    values = pd.read_excel(codebook_path, sheet_name = "Werte", header = None, usecols = [1, 2, 3])
+    values.columns = ["variable", "code", "description"]
+    exits = values[values["variable"].ffill().eq("GUAUSREISESTRASSE")].copy()
+    exits["code"] = pd.to_numeric(exits["code"], errors = "coerce")
+    exits = exits[exits["code"].notna() & exits["code"].ne(9999)]
+    names = exits["description"].astype(str).str.replace(r"^\s*\d+\s*:\s*", "", regex = True).str.strip()
+    return dict(zip(exits["code"].astype(int), names))

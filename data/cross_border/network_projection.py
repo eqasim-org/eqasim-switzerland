@@ -78,18 +78,12 @@ def execute(context):
             },
         ))
 
-    if "destination_is_projected" in df.columns:
-        df_destination_projected = df[(df["destination_is_projected"] == True) & is_car_trip]
-        if len(df_destination_projected) > 0:
-            requests.append(df_destination_projected[
-                ["destination_residence_x", "destination_residence_y", "destination_x", "destination_y"]
-            ].rename(columns = {
-                "destination_residence_x": "real_x", "destination_residence_y": "real_y",
-                "destination_x": "interview_x", "destination_y": "interview_y",
-            }))
+    # Road through-destinations are placed by data.cross_border.through_crossings.
+    # They travel FROM a known entry towards their original foreign destination;
+    # the candidate -> interview routing below is appropriate only for origins.
 
     if len(requests) == 0:
-        logger.info("No projected origins/destinations in data.cross_border.generate_od; nothing to refine.")
+        logger.info("No projected road origins in data.cross_border.generate_od; nothing to refine.")
         return pd.DataFrame(columns = RESULT_COLUMNS)
 
     df_requests = pd.concat(requests, ignore_index = True)
@@ -99,7 +93,7 @@ def execute(context):
     ).size().rename(columns = {"size": "occurrences"})
 
     logger.info(
-        "%d origin/destination-projected records collapse to %d unique (real point, assigned interview "
+        "%d origin-projected records collapse to %d unique (real point, assigned interview "
         "place) pairs.", len(df_requests), len(unique),
     )
 

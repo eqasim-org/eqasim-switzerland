@@ -20,7 +20,8 @@ attributed to it, split into three categories of person:
 Public transport agents have no border activity (it would force them off the
 train at the crossing, see data.cross_border.activities): each of their trips
 between abroad and Switzerland counts as one crossing at their surveyed
-interview point instead.
+interview point instead. A through-trip contributes once at its surveyed
+crossing; its other physical crossing requires route/event-based analysis.
 
 This intentionally reads the pre-write data.cross_border.* /
 synthesis.population.trips frames rather than the written MATSim population
@@ -50,6 +51,7 @@ import logging
 import os
 
 import folium
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 
@@ -81,6 +83,7 @@ def configure(context):
     context.config("input_downsampling")
 
     context.stage("data.cross_border.interview_places")
+    context.stage("data.cross_border.road_exit_points")
     context.stage("data.cross_border.destinations")
     context.stage("data.cross_border.activities")
     context.stage("synthesis.population.trips")
@@ -88,6 +91,12 @@ def configure(context):
 
 def execute(context):
     df_points      = context.stage("data.cross_border.interview_places").copy()
+    # Exit-only reviewed offices are absent from the entry-sampling layer.
+    # Include their IDs before reindexing counts, otherwise their visits vanish.
+    exit_points = context.stage("data.cross_border.road_exit_points")
+    extra = exit_points.loc[~exit_points["border_crossing_point_id"].isin(df_points["border_crossing_point_id"])]
+    df_points = gpd.GeoDataFrame(pd.concat([df_points, extra], ignore_index = True), geometry = "geometry", crs = df_points.crs)
+    df_points = df_points.drop_duplicates("border_crossing_point_id")
     df_trips       = context.stage("synthesis.population.trips")
     df_projected   = context.stage("data.cross_border.destinations")[
         ["cross_border_person_id", "label", "trip_mode", "is_border_point_projected",
@@ -150,28 +159,20 @@ def count_cross_border_people(df_activities, df_projected):
         "data.cross_border.destinations."
     )
 
-    # destination_id is a MATSim facility id, not necessarily a
-    # border_crossing_point_id: for a non-teleported (real, already close
-    # enough) end, data.cross_border.activities stamps the directional
-    # entry_/exit_interview_point_id (see data.cross_border.destinations'
-    # make_entry_border_facility_id / make_exit_border_facility_id -
-    # person-specific for "Through" trips), not the canonical point id.
-    # Only a teleported end already carries the raw, canonical
-    # border_crossing_point_id it was projected onto (data.cross_border.
-    # generate_od.project_point_series_close_to_border). Undo the
-    # directional renaming here so both cases group under the same
-    # border_crossing_point_id the map is keyed on.
+    # Strip direction from actual facility ids. A reported through-exit can be
+    # a different crossing from the interview entry and must keep its own point.
     on_entry = df["destination_id"] == df["entry_interview_point_id"]
     on_exit  = df["destination_id"] == df["exit_interview_point_id"]
-    df.loc[on_entry | on_exit, "destination_id"] = df.loc[on_entry | on_exit, "interview_point_id"]
+    df.loc[on_entry | on_exit, "destination_id"] = df.loc[on_entry | on_exit, "destination_id"].astype(str).str.replace(r"_(entry|exit)$", "", regex = True)
 
     # Public transport agents have no border activity: one crossing per trip between
     # abroad and Switzerland, at their surveyed interview point. "From-To" agents
     # cross on their first trip, and on their last one if they come back
-    # (3 activities or more); "Through" agents cross twice on their single trip.
+    # (3 activities or more). A "Through" trip has only one surveyed crossing;
+    # its other crossing must not be counted at the same location a second time.
     df_pt = df_projected[df_projected["trip_mode"] == "pt"]
     activity_counts = df_activities.groupby("person_id").size()
-    crossings = np.where(df_pt["label"] == "Through", 2,
+    crossings = np.where(df_pt["label"] == "Through", 1,
                          np.where(df_pt["cross_border_person_id"].map(activity_counts).fillna(0) >= 3, 2, 1))
     df_pt = df_pt.loc[df_pt.index.repeat(crossings)].assign(destination_id = lambda d: d["interview_point_id"])
 
