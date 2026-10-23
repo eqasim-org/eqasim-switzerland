@@ -99,6 +99,8 @@ def _as_foreign_resident_border_facilities(df_cross_border_destinations):
         "exit_interview_geometry_point": "geometry",
     })
     exit["direction"] = "exit"
+    if "reviewed_exit_link_id" in df_cross_border_destinations:
+        exit["preferred_link_id"] = df_cross_border_destinations["reviewed_exit_link_id"].values
 
     return pd.concat([entry, exit], ignore_index=True, sort=False)
 
@@ -141,6 +143,10 @@ def _as_border_facilities(df_cross_border_destinations, df_swiss_residents_od):
     # one link assignment.
     facilities = facilities.dropna(subset=["facility_id", "geometry"])
     facilities["facility_id"] = facilities["facility_id"].astype(str)
+    if "preferred_link_id" in facilities:
+        checked = facilities.dropna(subset=["preferred_link_id"])
+        if checked.groupby("facility_id")["preferred_link_id"].nunique().gt(1).any():
+            raise ValueError("A reviewed exit facility has conflicting preferred road links.")
     return facilities.drop_duplicates("facility_id").reset_index(drop=True)
 
 
@@ -556,9 +562,13 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
     # metres for the key, matching the int(x)/int(y) truncation MATSim I/O
     # already applies (synthesis.population.destinations), so this cannot
     # merge two facilities that would end up at genuinely different positions.
+    # Explicit reviewed links are part of the key so an ordinary nearby facility
+    # cannot inherit their assignment, or replace it during deduplication.
+    preferred = facilities.get("preferred_link_id", pd.Series(index=facilities.index, dtype=object)).fillna("").astype(str)
     facilities["dedup_key"] = list(zip(
         facilities["direction"],
         facilities["geometry"].apply(lambda g: (int(g.x), int(g.y))),
+        preferred,
     ))
     unique_facilities = facilities.drop_duplicates("dedup_key").reset_index(drop=True)
 
@@ -585,7 +595,18 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
                 len(unique_facilities),
             )
 
-        matched_link = _choose_directional_link(facility, crossing_links, local_links, border_geometry, inside_cache)
+        preferred_id = getattr(facility, "preferred_link_id", None)
+        if pd.notna(preferred_id) and str(preferred_id):
+            # through_crossings already checked this exit against the correct
+            # boundary (including LI–Austria where appropriate). The prepared
+            # network must still contain that car link; never silently resnap.
+            if facility.direction != "exit" or str(preferred_id) not in link_lookup.index:
+                raise ValueError("Reviewed exit %s has no matching car link %s in the prepared network." % (facility.facility_id, preferred_id))
+            chosen = link_lookup.loc[[str(preferred_id)]].assign(link_id=str(preferred_id))
+            chosen = _endpoint_distances_to_border(chosen, border_geometry)
+            matched_link = _attach_match_metadata(chosen.iloc[0], "reviewed_exit_link")
+        else:
+            matched_link = _choose_directional_link(facility, crossing_links, local_links, border_geometry, inside_cache)
         link_id = str(matched_link["link_id"])
         link = link_lookup.loc[link_id]
         link_geometry = LineString([(link.x_from, link.y_from), (link.x_to, link.y_to)])

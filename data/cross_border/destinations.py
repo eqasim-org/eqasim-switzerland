@@ -27,13 +27,14 @@ def configure(context):
     context.stage("data.cross_border.match_activity_chain")
     context.stage("data.spatial.municipalities")
     context.stage("data.statent.statent")
+    context.stage("data.cross_border.through_crossings")
 
 
 def execute(context):
     df_all = context.stage("data.cross_border.match_activity_chain")
 
-    df_through = df_all[df_all["label"] == "Through"]
-    df         = df_all[df_all["label"] == "From-To"]
+    df_through = df_all[df_all["label"] == "Through"].copy()
+    df         = df_all[df_all["label"] == "From-To"].copy()
 
     destinations = gpd.GeoSeries.from_xy(df["destination_x"], df["destination_y"])
     destinations = gpd.GeoDataFrame(geometry = destinations, crs = "EPSG:2056")
@@ -119,26 +120,29 @@ def execute(context):
         df.loc[df["destination_id"] == -1, "label"] == "Through"
     ).all(), "Found rows with destination_id = -1 and label != 'Through'"
 
-    # Every respondent (From-To and Through alike) is surveyed at exactly one
-    # physical border-crossing point (data.cross_border.interview_places, via
-    # sample_point in generate_od.py) - there is no second, independently
-    # observed crossing point for the way back or the way out. Both "From-To"
-    # directions and both "Through" legs (entering/leaving Switzerland) are
-    # therefore anchored at that same interview_geometry_point; the separate
-    # entry/exit IDs only let the MATSim preparation patch assign distinct
-    # one-way links while preserving the original crossing point as the
-    # common base - they do NOT mean the crossing itself differs.
-    #
-    # (origin_x/origin_y and destination_x/destination_y are NOT border
-    # points here - for "Through" trips they are the trip's real or
-    # projected-onto-interview-place endpoints, which network_projection may
-    # later refine far from this crossing; using them as the entry/exit
-    # geometry would place the "border" activity at the agent's home or
-    # destination instead of at the border.)
+    # Commuters use the surveyed crossing on their outward and return trips.
+    # Road through-trips enter there and may report a separate exit crossing.
     df["entry_interview_point_id"] = df["interview_point_id"].apply(make_entry_border_facility_id)
     df["exit_interview_point_id"] = df["interview_point_id"].apply(make_exit_border_facility_id)
     df["entry_interview_geometry_point"] = df["interview_geometry_point"]
     df["exit_interview_geometry_point"] = df["interview_geometry_point"]
+
+    # Register mapped reported exits as directional facilities for preparation.
+    # Missing/unmapped exits remain a route inference and get no extra activity.
+    crossings = context.stage("data.cross_border.through_crossings").set_index("cross_border_person_id")
+    road_through = df["label"].eq("Through") & df["trip_mode"].isin(["car", "car_passenger"])
+    for axis in ["x", "y"]:
+        df.loc[road_through, "destination_" + axis] = df.loc[road_through, "cross_border_person_id"].map(crossings["destination_point_" + axis])
+    if df.loc[road_through, ["destination_x", "destination_y"]].isna().any().any():
+        raise ValueError("Every road through-agent needs a reachable foreign destination.")
+    exit_ids = df["cross_border_person_id"].map(crossings["exit_facility_id"])
+    mapped_exit = exit_ids.notna()
+    df.loc[mapped_exit, "exit_interview_point_id"] = exit_ids[mapped_exit]
+    df.loc[mapped_exit, "exit_interview_geometry_point"] = df.loc[mapped_exit, "cross_border_person_id"].map(crossings["exit_geometry"])
+    # Reviewed inland/tunnel and LI–Austria anchors have an explicitly checked
+    # road link. Preparation must retain it instead of snapping them elsewhere.
+    reviewed_links = crossings["exit_link_id"].where(crossings["exit_mapping_source"].eq("reviewed_official_office"))
+    df["reviewed_exit_link_id"] = df["cross_border_person_id"].map(reviewed_links)
 
     df = df[["cross_border_person_id", "mz_person_id", "label",
              "residence_x", "residence_y", "destination_residence_x", "destination_residence_y",
@@ -146,9 +150,11 @@ def execute(context):
              "origin_x", "origin_y", "destination_x", "destination_y",
              "is_border_point_projected", "origin_is_projected", "destination_is_projected",
              "origin_point_id", "destination_point_id",
-             "interview_place", "interview_point_id", "interview_geometry_point",
+             "interview_place", "interview_point_id", "interview_geometry_point", "direction_crossing",
+             "interview_id", "survey_exit_code", "survey_exit_name",
              "entry_interview_point_id", "entry_interview_geometry_point",
              "exit_interview_point_id", "exit_interview_geometry_point",
+             "reviewed_exit_link_id",
              "origin_country", "destination_country", "origin_country_raw", "destination_country_raw"]]
     
     # destination_id is a canonical id string for real destinations (e.g.
