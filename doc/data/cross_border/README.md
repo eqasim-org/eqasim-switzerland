@@ -1,4 +1,4 @@
-# Road through-trips and survey crossings
+# Cross-border survey demand and crossings
 
 The 2021 A+GQPV road-border survey interviews travellers **entering Switzerland**.
 The blank `FAHRTRICHTUNGGU` field does not mean unknown road direction: that field
@@ -6,6 +6,130 @@ describes entry/exit for rail interviews only. See the BFS
 [2023 road-transport methods report](https://dam-api.bfs.admin.ch/hub/api/dam/assets/29270695/master#page=10),
 page 10, footnote 5. This rule applies to road **border** interviews, not Alpine
 interviews.
+
+## Vehicle demand calibration
+
+`data.cross_border.generate_od` builds the foreign population and
+`data.cross_border.swiss_residents_od` builds the Swiss reference pool. Both use
+the shared `survey_calibration` helpers. The 2015 survey supplies road-vehicle
+volume controls; the 2021 survey supplies the conditional purposes, countries,
+locations and reported exits. Each stage controls its own residence group.
+
+For `car` (the existing category includes motorcycles), the factor is:
+
+```
+2015 vehicle weight at interview-place ID / 2021 vehicle weight at that ID
+```
+
+Coordinates are recovered without removing observations from that denominator.
+Occupants are not used to calculate vehicle factors. This replaces the national
+mode × purpose × origin-country × destination-country person-weight ratios,
+which could transfer a large national flow onto one surviving geocoded record.
+The 2015 car record with occupancy 954 therefore contributes its vehicle weight
+only. Invalid 2015 occupancies remain visible in the diagnostic output.
+
+A local control requires at least ten positive-weight 2021 observations and an
+effective sample size of five (`sum(w)**2 / sum(w**2)`). These are broad support
+checks, not fitted crossing targets. Unsupported groups share a factor from the
+remaining 2015 and 2021 vehicle totals. A group with no 2021 observations is
+explicitly reported: pooling cannot manufacture its geographic support. A new
+2021 group with no remaining reference control uses the national ratio, flagged
+as such; it is not interpreted as an observed zero. In the configured weekday
+inputs, all 29 road groups meet the checks for both residence populations.
+
+Within each supported group, 2021 relative weights and journey patterns remain
+unchanged. Rail and coach retain the former person-based national OD/purpose
+calibration method. Invalid 2021 car occupancies (noninteger, less than one, or
+above nine; above two for motorcycles) are sampled from valid 2021 peers of the
+same vehicle type and, when supported, purpose, using the configured seed and
+original 2021 vehicle weights. This only repairs passenger expansion. It never
+changes a vehicle weight or removes its driver.
+
+## Missing endpoints and geographic scope
+
+The OD stages now also depend on the existing `data.spatial.nuts` and
+`data.cross_border.road_exit_points` stages. No new configuration option or
+external download is needed. Endpoint recovery uses the following evidence:
+
+1. A Swiss municipality code, including the existing historical-ID mapping,
+   or a NUTS identifier present in the spatial data and consistent with the
+   endpoint's reported country.
+2. For a missing foreign endpoint, a representative point of its country
+   polygon as an explicitly labelled **directional proxy**, not a town/address.
+3. If no country geometry exists, a missing road origin can start at its
+   surveyed crossing group. It is not assigned an invented foreign residence.
+4. A missing road destination without country geometry needs a mapped reported
+   exit. An outward routing proxy is constructed from that exit; the downstream
+   route still has to visit the reported crossing. Without this evidence, the
+   observation remains unresolved and its weight is reported separately.
+
+Already located Swiss endpoints are kept. If the point cannot be assigned to
+a Swiss municipality but a valid Swiss municipality code exists, that code
+supplies a representative point. No Swiss destination is inferred from another
+respondent. Remaining geographic failures are exported before expansion.
+
+`start_location_source` and `end_location_source` accompany the generated OD
+records. In visitor and Swiss reference outputs they follow the reordered
+endpoints, so `start` means the foreign end for visitors and the Swiss end for
+Swiss residents. Country/crossing/exit proxies are excluded from residence-based
+MMT filtering; crossing-only origins also bypass perimeter routing, which needs
+a meaningful geographic direction. Legacy `residence_x/y` column names continue
+to serve the downstream routing contract and must not be interpreted as known
+addresses when their source is a proxy. Geographic exclusions still apply to
+located origins, and overlapping exclusion polygons cannot duplicate records.
+
+The stages write these diagnostics into their own cache directories:
+
+| File | Meaning |
+| --- | --- |
+| `vehicle_calibration.csv` | 2015/2021/calibrated vehicle entries, raw and effective sample sizes, factors and support status by interview group |
+| `survey_demand_audit.csv` | Interview-level weights, endpoint sources, occupancy repairs, unresolved locations and supported/unsupported trip categories |
+| `survey_scope_counts.csv` | Weighted demand by group, mode, travel category and assignment scope |
+| `reference_occupancy_flags.csv` | Suspicious 2015 car occupancy records; their vehicle weight is retained |
+| `unlocated_swiss_end.csv` | Remaining Swiss endpoints that could not be placed, with their weights |
+| `assignment_counts.csv` | Expanded and retained foreign agents, or Swiss reference-pool agents, by crossing and mode |
+
+These are generated analysis files, not repository input CSVs. The stages retain
+the existing return types, identifiers and downstream assignment structure.
+
+## Counting directions and validating a rerun
+
+For a weekday, road weights are annual **inbound vehicle counts divided by 260**.
+Twice that number is a balanced two-direction benchmark. It is not a count of
+actual generated crossing events, and no factor of two is applied during this
+vehicle calibration.
+
+Foreign visitors may produce an entry and a return; transit produces an entry
+at the surveyed group and an exit elsewhere. Swiss residents currently receive
+one directional trip from the existing population model. Swiss `Within CH`
+records (Swiss-to-Swiss journeys via abroad) and Swiss through-records are not
+handled by that reference-pool assignment. They remain in calibration and are
+explicitly flagged as outside assignment scope rather than redistributed to
+visitors. Addressing this and the Swiss return-trip convention is a separate
+behavioural change; a successful calibration does not establish final all-person
+traffic agreement. The separately generated French population and actual
+through-exits also have to be included in the final event comparison.
+
+To rebuild only the two OD outputs with the working configuration:
+
+```bash
+uv run -m synpp config_dib_10.yml \
+  --run data.cross_border.generate_od \
+  --run data.cross_border.swiss_residents_od
+```
+
+The explicit `--run` arguments also avoid requesting education-only stages when
+working on the separate cross-border branch. For a subsequent full scenario,
+rerun the downstream stages normally. Never mix new OD outputs with old sampled
+agents when comparing counts.
+
+An isolated validation on the configured weekday inputs matched all 58 road
+group/residence controls. Before geographic/model-scope exclusions, the balanced
+benchmarks are 40,444.18 vehicles/day for Group O and 14,353.30 for Vallorbe road
+(ID 108; collected crossing FID 89, label 544). These include motorcycles, exclude
+car passengers, and should not be presented as final simulated crossings. Five
+foreign car observations remain unlocated, representing 117.43 inbound
+vehicles/day nationally (about 0.02% of the combined car control).
 
 ## Inputs and stages
 
