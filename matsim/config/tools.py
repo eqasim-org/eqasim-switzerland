@@ -45,11 +45,12 @@ def java_boolean(value, option_name="value"):
 
 def read_config(path):
     return etree.parse(str(path), etree.XMLParser(load_dtd=False, no_network=True,
-                                                 resolve_entities=False))
+                                                 resolve_entities=False, remove_blank_text=True))
 
 
 def write_config(tree, path):
     _remove_duplicate_config_elements(tree.getroot())
+    etree.indent(tree, space="    ")
     tree.write(str(path), xml_declaration=True, encoding="UTF-8", pretty_print=True,
                doctype=tree.docinfo.doctype)
 
@@ -114,8 +115,8 @@ def add_SBBPT_module(config_path):
     }, create=True)
 
 
-def add_ptZones_module(config_path, directory=None):
-    directory = Path(directory) if directory is not None else Path()
+def add_ptZones_module(config_path, directory=None, *, local=False):
+    directory = Path(directory) if directory is not None and not local else Path()
     change_params(config_path, {
         "ptZones.ptZonesFilePath": str(directory / "gtfs_zones.csv"),
         "ptZones.sbbDistancesPath": str(directory / "SBB_all_distances.csv"),
@@ -376,7 +377,7 @@ def modify_PCEs(transit_vehicles_input_path, transit_vehicles_output_path, scali
         f.write(xml_bytes)
 
 
-def mode_shares_calibration_parameters(context):
+def mode_shares_calibration_parameters(context, *, local=False):
     if parse_boolean(context.config("calibrate_betas_in_matsim"), "calibrate_betas_in_matsim"):
         return {
             "eqasim:calibration.activate": True,
@@ -384,7 +385,8 @@ def mode_shares_calibration_parameters(context):
             "eqasim:calibration.optimizer": "cmaes",
             "eqasim:calibration.metric": "mse",
             "eqasim:calibration.betaMomentum": 0.4,
-            "eqasim:calibration.eqasimCachePath": context.working_directory,
+            "eqasim:calibration.eqasimCachePath": (
+                os.path.relpath(context.working_directory, context.path()) if local else context.working_directory),
             "eqasim:calibration.bounds": "car.alpha_u:5.0,walk.alpha_u:5.0,bike.alpha_u:5.0,cp.alpha_u:5.0,cp.travelTimeExponent:0.3,walk.travelTimeExponent:0.3,car.betaTravelTime_u_min:0.3",
             "eqasim:calibration.distanceBins": "0,451,995,1513,2400,3853,5026,6674,9261,13788,22976,1000000",
             "eqasim:calibration.maxEval": 4000,
@@ -394,7 +396,12 @@ def mode_shares_calibration_parameters(context):
         }
     if not parse_boolean(context.config("calibrate_alphas_in_matsim"), "calibrate_alphas_in_matsim"):
         return {}
-    global_shares, cantonal_shares = context.stage("data.microcensus.shares")
+    if local:
+        prefix = context.config("output_prefix")
+        global_shares = Path(context.path()) / f"{prefix}global_mode_shares.csv"
+        cantonal_shares = f"{prefix}cantonal_mode_shares.csv"
+    else:
+        global_shares, cantonal_shares = context.stage("data.microcensus.shares")
     shares = pd.read_csv(global_shares).set_index("mode")
     params = {
         "eqasim:alphaCalibration.activate": True,
@@ -495,15 +502,21 @@ def network_calibration_parameters(context):
     return params
 
 
-def simulation_parameters(context):
-    """Settings formerly supplied as overrides by matsim.simulation.run."""
+def mode_choice_parameter_paths(context, *, local=False):
+    directory = Path() if local else Path(context.path())
+    return {
+        "eqasim.costParametersPath": str(directory / "cost_parameters.yml"),
+        "eqasim.modeParametersPath": str(directory / "dmc_parameters.yml"),
+    }
+
+
+def simulation_parameters(context, *, local=False):
+    """Simulation settings; local mode also copies calibration inputs beside the config."""
     vdf = parse_boolean(context.config("use_vdf"), "use_vdf")
     last_iteration = context.config("last_iteration")
     interval = max(int(last_iteration / 2), 1)
-    directory = Path(context.path())
     params = {
-        "eqasim.costParametersPath": str(directory / "cost_parameters.yml"),
-        "eqasim.modeParametersPath": str(directory / "dmc_parameters.yml"),
+        **mode_choice_parameter_paths(context, local=local),
         "controller.outputDirectory": "simulation_output",
         "controller.lastIteration": last_iteration,
         "controller.writeEventsInterval": interval,
@@ -517,10 +530,10 @@ def simulation_parameters(context):
     }
     if not vdf:
         params["scoring.writeExperiencedPlans"] = parse_boolean(context.config("writeexperiencedplans"))
-    params.update(mode_shares_calibration_parameters(context))
+    params.update(mode_shares_calibration_parameters(context, local=local))
     params.update(delay_parameters(context))
     params.update(network_calibration_settings(context))
-    params.update(network_calibration_parameters(context))
+    params.update(copy_network_calibration_files(context) if local else network_calibration_parameters(context))
     return params
 
 
@@ -580,3 +593,29 @@ def adapt_existing_scenario(config_path, sample_size, prefix, use_freight,*,stor
                                      {"subpopulation": group, "strategyName": strategy})
             set_param("weight", weight, item)
     write_config(tree, config_path)
+
+def copy_network_calibration_files(context):
+    """Copy calibration inputs and return paths relative to the prepared config."""
+    parameters = network_calibration_parameters(context)
+    names = {
+        "eqasim:networkCalibration.countsFile": "target_counts.csv",
+        "eqasim:networkCalibration.freespeedCalibration.observedTripsFile": "target_travel_times.csv",
+        "eqasim:networkCalibration.costCalibration.specialRegionPath": "penalties_special_region",
+        "eqasim:networkCalibration.freespeedCalibration.specialRegionPath": "freespeed_special_region",
+    }
+    local_parameters = {}
+    for parameter, sources in parameters.items():
+        local_paths = []
+        for index, source in enumerate(str(sources or "").split(";")):
+            if not source:
+                continue
+            name = names[parameter]
+            if parameter.endswith("specialRegionPath"):
+                name = f"{name}_{index}.yml"
+            relative_path = Path("network_calibration_files") / name
+            destination = Path(context.path()) / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            local_paths.append(relative_path.as_posix())
+        local_parameters[parameter] = ";".join(local_paths)
+    return local_parameters

@@ -36,4 +36,4 @@ def execute(context):
 def validate(context):
     """Regenerate a cached batch list if its Parquet files are removed or edited."""
     paths = sorted(Path(context.path()).glob(TOUR_BATCH_FILENAME.format(i="*")))
-    return [(path.name, path.stat().st_mtime_ns, path.stat().st_size) for path in paths]
+    return [[path.name, path.stat().st_mtime_ns, path.stat().st_size] for path in paths]

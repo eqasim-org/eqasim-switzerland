@@ -40,9 +40,9 @@ def test_prepare_copies_assets_and_uses_relative_calibration_paths(
     }, stages)
     java = fake_java([])
     def check_routing(ctx, command, arguments):
-        if active and command.endswith('RunPopulationRouting'):
-            assert value(ctx.directory / 'switzerland_config.xml',
-                         'eqasim:networkCalibration.countsFile') == 'network_calibration_files/target_counts.csv'
+        if command.endswith('RunPopulationRouting'):
+            assert not tools.read_config(ctx.directory / 'switzerland_config.xml').xpath(
+                "module[@name='eqasim:alphaCalibration' or @name='eqasim:calibration']/param[@name='activate'][@value='true']")
         java(ctx, command, arguments)
     monkeypatch.setattr(prepare.eqasim, 'run', check_routing)
     monkeypatch.setattr(prepare, 'patch_directional_border_links', lambda *args, **kwargs: None)

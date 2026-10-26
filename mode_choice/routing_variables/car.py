@@ -16,11 +16,14 @@ def configure(context):
 
 
 def execute(context):
+
     # If the backend is Java, we use the Java routing.
+
     if car_backend(context) == "java":
         return route_mode(context, "car")
 
     # Otherwise, pandana routing
+
     from mode_choice.routing.pandana import route
 
     trips = context.stage("mode_choice.data.prepare").rename({"trip_id": "identifier"})
@@ -31,11 +34,14 @@ def execute(context):
     routes = complete_routes(trips.rename({"identifier": "trip_id"}), routes, ["car_travel_time_min"])
 
     # Compute costs locally with DMC, keeping the same artifact contract as Java.
+
     routes = calculate_driving_costs(routes, Parameters.from_context(context), context.config("car_cost_model"))
     return save_costs(context, routes, "car")
 
 
 def validate(context):
+    if car_backend(context) == "java" and context.config("use_marouter_in_mode_choice"):
+        return None
     path = input_path(context, car_backend(context))
     if path is not None:
         stat = path.stat()
