@@ -14,8 +14,9 @@ from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.results import save_count_results
+from ..matching.detailed_statistics import read_detailed_statistics, point_details
 from ..construction_sites import configure_filter, filter_counts, annotate_counts
-from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
+from ..paths import configure_simulation_path, get_simulation_path, get_analysis_output_path, matches_found
 
 
 logger = logging.getLogger("synpp")
@@ -214,7 +215,22 @@ def save_map(context, counts, flows, network, comparison, sample_size, output_di
         on="id",
         how="left",
     )
-    points["daily_profile"] = points["profile_json"].map(Plotter.flow_profile_svg)
+    # Enrich only Transcality HTML; comparison metrics and calibration stay unchanged.
+
+    detailed = read_detailed_statistics(
+        get_simulation_path(context),
+        [link_id for ids in points.matched_link_ids for link_id in ids],
+    )
+    tooltip_fields = list(Plotter.TRANSCALITY_FLOW_MAP_TOOLTIP_FIELDS)
+    profiles = []
+    for index, row in points.iterrows():
+        details, simulated_profile = point_details(row.matched_link_ids, detailed, sample_size, peak_hours)
+        for field, value in details.items():
+            points.loc[index, field] = value
+            if field not in tooltip_fields:
+                tooltip_fields.insert(-1, field)
+        profiles.append(Plotter.flow_profile_svg(row.profile_json, simulated_profile))
+    points["daily_profile"] = profiles
     points = gpd.GeoDataFrame(points, geometry="geometry", crs=counts.counts.crs).to_crs(
         epsg=4326
     )
@@ -235,7 +251,7 @@ def save_map(context, counts, flows, network, comparison, sample_size, output_di
         colored_links.to_crs(epsg=4326),
         data_to_show=["link_id", "simulated_flow"] + (["flow_period"] if peak_hours is not None else []),
         point_gdf=[points],
-        point_data_to_show=Plotter.TRANSCALITY_FLOW_MAP_TOOLTIP_FIELDS,
+        point_data_to_show=tooltip_fields,
         border=border,
         cut_network=True,
         path_color_column="_flow_color",

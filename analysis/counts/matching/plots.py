@@ -14,6 +14,7 @@ import seaborn as sns
 import pandas as pd
 import geopandas as gpd
 from .counts import Counts
+from .detailed_statistics import DETAIL_COLOR_LABELS, SWISS_RATIO
 from .network import RoadNetwork
 import numpy as np
 import matplotlib.cm as cm
@@ -577,16 +578,18 @@ class Plotter:
                 profile = row[field]
                 if isinstance(profile, str) and profile:
                     rows.append(
-                        '<tr><td colspan="2"><b>Observed daily profile:</b><br>'
+                        '<tr><td colspan="2"><b>Daily traffic profile (vehicles/hour):</b><br>'
                         + profile
                         + "</td></tr>"
                     )
                 continue
             value = Plotter._tooltip_value(row[field])
+            if field == SWISS_RATIO and value is None:
+                value = "Undefined (zero French + cross-border, or missing statistics)"
             if value is None:
                 continue
             label = FLOW_MAP_FIELD_LABELS.get(
-                field, field.replace("_", " ").title()
+                field, DETAIL_COLOR_LABELS.get(field, field.replace("_", " ").title())
             )
             if "flow_period" in row and pd.notna(row["flow_period"]):
                 label = label.replace("vehicles/day", f"vehicles/{row['flow_period']}")
@@ -596,7 +599,7 @@ class Plotter:
         return "<table>" + "".join(rows) + "</table>"
 
     @staticmethod
-    def flow_profile_svg(profile):
+    def flow_profile_svg(profile, simulated_profile=None):
         """Render a trusted Transcality hourly profile as compact tooltip SVG."""
         if isinstance(profile, str):
             try:
@@ -617,11 +620,19 @@ class Plotter:
         if not len(hours):
             return ""
 
-        width, height = 300, 135
-        left, right, top, bottom = 36, 8, 10, 24
+        simulated_hours = np.asarray((simulated_profile or {}).get("hour", []), dtype=float)
+        simulated_flow = np.asarray((simulated_profile or {}).get("flow", []), dtype=float)
+        if len(simulated_hours) != len(simulated_flow):
+            raise ValueError("Simulated profile hours and flows must have equal lengths.")
+        valid_simulated = np.isfinite(simulated_hours) & np.isfinite(simulated_flow)
+        simulated_hours, simulated_flow = simulated_hours[valid_simulated], simulated_flow[valid_simulated]
+
+        width, height = 340, 155
+        left, right, top, bottom = 42, 8, 28, 24
         plot_width = width - left - right
         plot_height = height - top - bottom
-        maximum = max(float(np.max(upper)), float(np.max(flow)), 1.0)
+        maximum = max(float(np.max(upper)), float(np.max(flow)),
+                      float(np.max(simulated_flow)) if len(simulated_flow) else 0, 1.0)
 
         def point(hour, value):
             x = left + ((hour + 0.5) / 24) * plot_width
@@ -633,6 +644,12 @@ class Plotter:
             + [point(hour, value) for hour, value in zip(hours[::-1], lower[::-1])]
         )
         line = " ".join(point(hour, value) for hour, value in zip(hours, flow))
+        simulated_line = " ".join(point(hour, value) for hour, value in zip(simulated_hours, simulated_flow))
+        simulation_svg = (
+            f'<polyline points="{simulated_line}" fill="none" stroke="#d95f02" stroke-width="2"/>'
+            '<line x1="218" y1="10" x2="230" y2="10" stroke="#d95f02" stroke-width="2"/>'
+            '<text x="233" y="13" font-size="9" fill="#333">MATSim motor flow</text>'
+        ) if len(simulated_flow) else ""
         ticks = "".join(
             f'<text x="{left + hour / 24 * plot_width:.1f}" y="{height - 7}" '
             f'text-anchor="middle" font-size="9" fill="#333">{hour}</text>'
@@ -645,13 +662,14 @@ class Plotter:
             f'<line x1="{left}" y1="{height-bottom}" x2="{width-right}" y2="{height-bottom}" stroke="#555"/>'
             f'<polygon points="{band}" fill="#bdbdbd" fill-opacity="0.65"/>'
             f'<polyline points="{line}" fill="none" stroke="#2166ac" stroke-width="2"/>'
+            f'{simulation_svg}'
             f'<text x="3" y="{top+7}" font-size="9" fill="#333">{maximum:.0f}</text>'
             f'<text x="3" y="{height-bottom+3}" font-size="9" fill="#333">0</text>'
             f'{ticks}'
-            '<rect x="170" y="4" width="12" height="7" fill="#bdbdbd" fill-opacity="0.65"/>'
-            '<text x="185" y="11" font-size="9" fill="#333">Q25–Q75</text>'
-            '<line x1="235" y1="8" x2="247" y2="8" stroke="#2166ac" stroke-width="2"/>'
-            '<text x="250" y="11" font-size="9" fill="#333">flow</text>'
+            '<rect x="42" y="6" width="12" height="7" fill="#bdbdbd" fill-opacity="0.65"/>'
+            '<text x="57" y="13" font-size="9" fill="#333">Q25–Q75</text>'
+            '<line x1="123" y1="10" x2="135" y2="10" stroke="#2166ac" stroke-width="2"/>'
+            '<text x="138" y="13" font-size="9" fill="#333">Observed</text>'
             "</svg>"
         )
 
@@ -731,6 +749,17 @@ class Plotter:
                 "step": 1,
             }
 
+        for field, label in DETAIL_COLOR_LABELS.items():
+            if not any(field in gdf for gdf in valid_points):
+                continue
+            values = pd.concat([pd.to_numeric(gdf[field], errors="coerce")
+                                for gdf in valid_points if field in gdf])
+            finite = values[np.isfinite(values)]
+            maximum = finite.max() if not finite.empty else 0
+            # This is a ratio, not a share of all cars: it can exceed 100%.
+            upper = max(100.0 if field == SWISS_RATIO else 1.0, float(np.ceil(maximum)))
+            settings[field] = {"label": label, "lower": 0.0, "upper": upper, "step": 1}
+
         periods = {str(value) for gdf in valid_points if "flow_period" in gdf
                    for value in gdf["flow_period"].dropna().unique()}
         if len(periods) == 1 and "adiff" in settings:
@@ -755,7 +784,7 @@ class Plotter:
             return points, False
         originals, closest = [], []
         for index, row in points.iterrows():
-            fields = ["flow", "pdiff", "adiff", "geh", "_tooltip_html"]
+            fields = ["flow", "pdiff", "adiff", "geh", "_tooltip_html", "_details_html"]
             originals.append({field: row[field] for field in fields})
             if not valid.loc[index]:
                 closest.append(None)
@@ -772,11 +801,12 @@ class Plotter:
                 directions_represented=row.get("directions_represented", 2),
                 period_hours=row.get("period_hours", 24),
             )[0])
-            adjusted["_tooltip_html"] = (
+            adjusted["_details_html"] = (
                 "<b>Closest count within bounds (optimistic comparison)</b><br>"
                 + Plotter._build_tooltip_html(adjusted, tooltip_fields)
                 + "<br><b>Original traffic count:</b> " + escape(str(row["flow"]))
             )
+            adjusted["_tooltip_html"] = Plotter._build_tooltip_html(adjusted, FLOW_MAP_TOOLTIP_FIELDS)
             closest.append({field: adjusted[field] for field in fields})
         points["_original_count"] = originals
         points["_closest_count"] = closest
@@ -789,11 +819,14 @@ class Plotter:
             return
 
         controls = """
-<div id="counts-map-controls">
+<details id="counts-map-controls" open>
+  <summary>Map settings</summary>
+  <div class="counts-settings-body">
   __CONSTRUCTION_CONTROL__
   __COUNT_MODE_CONTROL__
   <div class="counts-quality-section">
     <label><input id="counts-filter-enabled" type="checkbox"> Filter count points</label>
+    <div id="counts-filter-parameters" class="counts-filter-parameters" inert><div>
     <label for="counts-filter-metric">Filter metric</label>
     <select id="counts-filter-metric" disabled></select>
     <label for="counts-filter-sign">Comparison</label>
@@ -805,6 +838,7 @@ class Plotter:
     <input id="counts-filter-value" type="number" step="any" value="5" disabled>
     <div id="counts-filter-error" style="display:none">Enter a finite threshold.</div>
     <div>Uses displayed, signed differences; points without this metric are hidden when filtering.</div>
+    </div></div>
   </div>
   <div class="counts-control-title">Count point colors</div>
   <label for="counts-color-metric">Metric</label>
@@ -843,7 +877,13 @@ class Plotter:
     </div>
     <div id="counts-quality-error">Thresholds must be non-negative numbers.</div>
   </div>
-</div>
+  </div>
+</details>
+<section id="counts-point-details" hidden aria-label="Station details">
+  <button id="counts-details-close" type="button">Back to map settings</button>
+  <h3>Station details</h3>
+  <div id="counts-details-content"></div>
+</section>
 """
         controls = controls.replace("__COUNT_MODE_CONTROL__", """
   <label for="counts-count-mode">Traffic counts</label>
@@ -861,7 +901,7 @@ class Plotter:
         ) if has_construction else "")
         style = """
 <style>
-#counts-map-controls {
+#counts-map-controls, #counts-point-details {
   position: absolute;
   z-index: 20;
   top: 12px;
@@ -876,6 +916,24 @@ class Plotter:
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
   color: #222;
   font: 13px/1.35 Arial, sans-serif;
+}
+#counts-map-controls[hidden], #counts-point-details[hidden] { display: none; }
+#counts-map-controls summary { cursor: pointer; font-weight: 700; }
+.counts-settings-body { margin-top: 12px; }
+.counts-filter-parameters {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition: grid-template-rows 0.2s ease, visibility 0.2s;
+}
+.counts-filter-parameters > div { min-height: 0; overflow: hidden; }
+.counts-filter-parameters.expanded { grid-template-rows: 1fr; visibility: visible; }
+#counts-point-details table { width: 100%; overflow-wrap: anywhere; }
+#counts-point-details td { vertical-align: top; padding: 3px; }
+#counts-point-details svg { max-width: 100%; height: auto; }
+#counts-details-close { cursor: pointer; padding: 6px 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .counts-filter-parameters { transition: none; }
 }
 #counts-map-controls .counts-control-title {
   margin-bottom: 8px;
@@ -962,6 +1020,11 @@ class Plotter:
   const filterSign = document.getElementById("counts-filter-sign");
   const filterValue = document.getElementById("counts-filter-value");
   const filterError = document.getElementById("counts-filter-error");
+  const filterParameters = document.getElementById("counts-filter-parameters");
+  const settingsPanel = document.getElementById("counts-map-controls");
+  const detailsPanel = document.getElementById("counts-point-details");
+  const detailsContent = document.getElementById("counts-details-content");
+  const detailsClose = document.getElementById("counts-details-close");
   const lowerInput = document.getElementById("counts-lower-bound");
   const upperInput = document.getElementById("counts-upper-bound");
   const lowerLabel = document.getElementById("counts-lower-label");
@@ -978,6 +1041,24 @@ class Plotter:
   const deck = typeof deckInstance === "undefined" ? null : deckInstance;
   const bounds = JSON.parse(JSON.stringify(metricSettings));
   const qualityBounds = JSON.parse(JSON.stringify(metricSettings));
+  detailsClose.addEventListener("click", function () {
+    detailsPanel.hidden = true;
+    detailsContent.innerHTML = "";
+    settingsPanel.hidden = false;
+    settingsPanel.open = true;
+  });
+  if (deck) {
+    deck.setProps({onClick: function (info) {
+      if (!info.object || !info.layer ||
+          !(info.layer.id.startsWith("counts-points-") || info.layer.id.startsWith("counts-quality-"))) return;
+      // HTML is escaped/generated in Python, not taken from arbitrary station markup.
+      detailsContent.innerHTML = info.object._details_html || info.object._tooltip_html || "";
+      settingsPanel.open = false;
+      settingsPanel.hidden = true;
+      detailsPanel.hidden = false;
+      detailsPanel.scrollTop = 0;
+    }});
+  }
   // Keep unfiltered records so every control change can restore hidden points.
   const pointData = new Map();
   if (deck && deck.props && deck.props.layers) {
@@ -1144,6 +1225,8 @@ class Plotter:
   }
 
   function updatePointData() {
+      filterParameters.classList.toggle("expanded", filterEnabled.checked);
+      filterParameters.inert = !filterEnabled.checked;
       [filterMetric, filterSign, filterValue].forEach(function (input) {
         input.disabled = !filterEnabled.checked;
       });
@@ -1373,8 +1456,12 @@ class Plotter:
                             )
                         )
 
-                    gdf["_tooltip_html"] = gdf.apply(
+                    gdf["_details_html"] = gdf.apply(
                         lambda row: Plotter._build_tooltip_html(row, point_data_to_show), axis=1
+                    )
+                    hover_fields = FLOW_MAP_TOOLTIP_FIELDS if "geh" in gdf else point_data_to_show
+                    gdf["_tooltip_html"] = gdf.apply(
+                        lambda row: Plotter._build_tooltip_html(row, hover_fields), axis=1
                     )
                     gdf, layer_has_bounds = Plotter._prepare_count_modes(gdf, point_data_to_show)
                     has_count_bounds |= layer_has_bounds
