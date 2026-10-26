@@ -247,17 +247,28 @@ exported road direction; exact within-link activity positions are unavailable
 in these cases.
 
 Kept endpoints are matched onto nearby SUMO edges on the Swiss side, preserving
-travel direction and passenger/truck/delivery permissions within
-`sumo_mapmatch_distance` (default 1000 m). MATSim IDs are never treated as SUMO
+travel direction and passenger/truck/delivery permissions.
+`sumo_mapmatch_distance: null` (the default) removes the distance cutoff. MATSim IDs are never treated as SUMO
 IDs. Lane shapes with zero geometric length cannot define a heading and are
 excluded from endpoint matching; their edges remain in the routing network.
-Matching starts with a small local search and expands only when necessary,
-up to `sumo_mapmatch_distance`. The distance-plus-heading score bounds the
-remaining search, so a large maximum radius does not force every endpoint to
-scan every road in that radius. Direction, vehicle access and Swiss-side checks
+Matching starts at 500 m and expands in 500 m increments until a valid road
+is found. The distance-plus-heading score bounds the remaining candidates,
+and nearest-road shortcuts skip provably empty searches. A positive
+`sumo_mapmatch_distance` explicitly restores a maximum distance. Direction, vehicle access and Swiss-side checks
 still apply. The demand stage logs network indexing and clipping progress.
-Unmatchable endpoints fail explicitly instead of silently increasing the
-radius or dropping demand. Supplied edge/XY endpoints are resolved lazily through
+Road-path clipping also runs in spawned worker processes. By default,
+`sumo_demand_workers: null` uses the configured `threads`, capped to roughly one
+worker per 10,000 input trips to avoid small partitions. Set a positive integer
+to override this cap (the allocation's `threads` limit still applies), or `1`
+for serial execution. Each worker reads an Arrow trip partition and only its
+referenced MATSim road geometries. The parent performs final endpoint matching
+with one SUMO network/index, merges the reports and sorts all departures before
+export. Workers exchange cache paths, and temporary Arrow parts are cleaned up.
+Trip IDs, timing, output XML and report counts are independent of worker count.
+Without a cutoff, distance alone cannot reject an endpoint. A network with
+no road satisfying vehicle access, direction and Swiss-side constraints still
+fails explicitly after the finite network has been exhausted; it cannot loop
+forever or silently drop demand. Supplied edge/XY endpoints are resolved lazily through
 the georeferenced SUMO network. Clipped inputs with `via` constraints are rejected
 because arbitrary waypoints cannot be preserved by this OD routing interface.
 

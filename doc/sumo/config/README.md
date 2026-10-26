@@ -208,8 +208,10 @@ uv run -m synpp doc/sumo/config/microscopic.example.yml --run sumo.simulation.ru
 Main input overrides are `sumo_network_file`, `sumo_route_files`, and
 `sumo_additional_files` for simulation, and `sumo_assignment_trip_files` for
 assignment. When absent, the existing network and population stages supply
-inputs. `sumo_mapmatch_distance` defaults to 1000 metres; it is a maximum mapping
-distance, not permission to silently discard out-of-area trips.
+inputs. `sumo_mapmatch_distance` defaults to `null`: matching expands from
+500 m in 500 m steps without an arbitrary distance cutoff. A positive value
+explicitly sets a maximum distance. The search retains class permissions,
+direction and Swiss-side constraints, and never silently discards trips.
 
 `sumo_network_file` accepts either prepared SUMO XML or an OSM XML/PBF source.
 The shared road-network stage detects its header and converts OSM before any

@@ -12,6 +12,7 @@ from sumo.scenario import modes
 from sumo.scenario.demand_tools import TripSpool
 from sumo.scenario.population.vehicle_tools import BATCH_SIZE
 from sumo.tables import read_table
+from sumo.cutter.parallel import clip_batches, merge_reports, worker_count
 
 logger = logging.getLogger("synpp")
 
@@ -25,10 +26,12 @@ def configure(context):
         context.stage("sumo.native.runtime")
     context.config("clip_trips_to_border_in_sumo", True)
     if context.config("clip_trips_to_border_in_sumo"):
+        context.config("threads", volatile=True)
+        context.config("sumo_demand_workers", None)
         context.stage("mode_choice.routing.sumo")
         context.stage("sumo.scenario.border")
         config_tools.configure_network(context)
-        context.config("sumo_mapmatch_distance", 2000)
+        context.config("sumo_mapmatch_distance", None)
 
 
 def execute(context):
@@ -44,32 +47,40 @@ def execute(context):
 
     # Join completed itineraries once, then keep every domestic routed visit.
 
-    clipper = None
+    settings = None
+    report = None
     if context.config("clip_trips_to_border_in_sumo"):
-        from sumo.cutter.route_tools import RoutedBorderClipper
         routed = context.stage("mode_choice.routing.sumo")
-        clipper = RoutedBorderClipper(context.stage("sumo.scenario.border"), routed["links"], routed["routes"],
-            lambda: config_tools.network_path(context), context.config("sumo_mapmatch_distance"), types)
-        frame = frame.join(clipper.paths, on="id", how="left", validate="1:1", maintain_order="left")
+        frame = frame.join(read_table(routed["routes"]), on="id", how="left", validate="1:1", maintain_order="left")
+        settings = {"border": context.stage("sumo.scenario.border"), "links": routed["links"],
+                    "routes": routed["routes"], "network": config_tools.network_path(context),
+                    "distance": context.config("sumo_mapmatch_distance"), "types": raw["types"]}
 
     # Sort the final departures and export XML only once, using the shared writer.
 
     with TripSpool(cache / "demand.arrow", native_writer=native) as records:
-        for batch in frame.iter_slices(BATCH_SIZE):
-            records.add_frame(clipper(batch) if clipper is not None else batch)
+        if settings is not None:
+            workers = worker_count(context.config("sumo_demand_workers"), context.config("threads"), frame.height)
+            for batch, partial in clip_batches(frame, settings, cache, workers):
+                records.add_frame(batch)
+                report = merge_reports(report, partial)
+        else:
+            for batch in frame.iter_slices(BATCH_SIZE):
+                records.add_frame(batch)
         result = records.write(cache / "queries.trips.xml.gz", types)
-    if clipper is not None:
-        report = cache / "border_clipping.json"
-        report.write_text(json.dumps(clipper.report, indent=2) + "\n")
-        result["border_clipping"] = str(report)
-        logger.info("SUMO routed Swiss-border clipping: %s", clipper.report)
+    if report is not None:
+        target = cache / "border_clipping.json"
+        target.write_text(json.dumps(report, indent=2) + "\n")
+        result["border_clipping"] = str(target)
+        logger.info("SUMO routed Swiss-border clipping: %s", report)
     return result
 
 
 def validate(context):
     fingerprint = hashlib.sha256()
-    from sumo.cutter import route_tools, demand_tools as cutter_tools
+    from sumo.cutter import route_tools, demand_tools as cutter_tools, parallel
     from sumo.scenario import demand_tools
-    for module in (route_tools, cutter_tools, demand_tools):
+    from sumo.scenario.network import search
+    for module in (route_tools, cutter_tools, demand_tools, parallel, search):
         fingerprint.update(Path(module.__file__).read_bytes())
     return fingerprint.hexdigest()

@@ -3,6 +3,7 @@
 import copy
 import json
 import logging
+import time
 from pathlib import Path
 
 import igraph as ig
@@ -16,6 +17,7 @@ from shapely.geometry import Point
 from shapely.ops import transform
 
 from sumo.scenario.network.tools import lane_allows, position, read_network
+from sumo.scenario.network.search import candidate_windows, distance_limit, SEARCH_STEP
 from sumo.scenario.population.tools import xml_stream
 from sumo.scenario.tools import elements
 
@@ -96,9 +98,7 @@ class EndpointIndex:
         self.lookup = {edge: index for index, edge in enumerate(self.ids)}
         self.shapes = shapely.from_wkb(self.frame["geometry"].to_numpy())
         self.lengths = self.frame["length"].to_numpy()
-        self.radius = float(radius)
-        if not np.isfinite(self.radius) or self.radius <= 0:
-            raise ValueError("sumo_mapmatch_distance must be positive")
+        self.radius = distance_limit(radius)
         self.offset = np.asarray([float(value) for value in manifest["location"].get("netOffset", "0,0").split(",")])
         projection = manifest["location"].get("projParameter")
         self.forward = None if projection in {None, "!", "-"} else Transformer.from_crs(4326, projection, always_xy=True)
@@ -151,15 +151,30 @@ class EndpointIndex:
             return self.cache[key]
         if column not in self.trees:
             indices = np.flatnonzero(self.frame[column].to_numpy())
-            self.trees[column] = indices, shapely.STRtree(self.shapes[indices])
-        indices, tree = self.trees[column]
-        nearest = tree.query_nearest(point, all_matches=True)
+            shapes = self.shapes[indices]
+            self.trees[column] = indices, shapely.STRtree(shapes), shapely.total_bounds(shapes) if len(shapes) else np.zeros(4)
+        indices, tree, bounds = self.trees[column]
+        if not len(indices):
+            raise ValueError(f"Network has no reachable {vehicle_class} {side} edges")
+        nearest, distances = tree.query_nearest(point, all_matches=True, return_distance=True)
         best = self.choose(point, indices[nearest], direction)
+        # For ordinary points the nearest permitted road is an exact solution:
+        # skip empty 500 m rings without scanning a large neighbourhood.
+        exact_nearest = (direction is None and best is not None
+                         and abs(best["distance_m"] - float(distances.min())) < 1e-8)
+        if not exact_nearest:
+            for fresh in candidate_windows(tree, point, bounds,
+                    lambda: None if best is None else best["score_m"], self.radius, seen=nearest):
+                candidate = self.choose(point, indices[fresh], direction)
+                if candidate is not None and (best is None or (candidate["score_m"], candidate["edge"])
+                                             < (best["score_m"], best["edge"])):
+                    best = candidate
         if best is None:
-            candidates = indices[tree.query(point.buffer(self.radius))]
-            best = self.choose(point, candidates, direction)
-        if best is None:
-            raise ValueError(f"No reachable {vehicle_class} {side} edge within {self.radius:g} m of {point.wkt}")
+            scope = "on the supplied network" if self.radius is None else f"within {self.radius:g} m"
+            raise ValueError(f"No reachable {vehicle_class} {side} edge {scope} satisfying Swiss-side and direction constraints at {point.wkt}")
+        best["search_radius_m"] = max(SEARCH_STEP, float(np.ceil(best["distance_m"]/SEARCH_STEP)*SEARCH_STEP))
+        if self.radius is not None:
+            best["search_radius_m"] = min(self.radius, best["search_radius_m"])
         self.cache[key] = best
         return best
 
@@ -188,16 +203,20 @@ class EndpointIndex:
                 if alignment <= 0:
                     continue
             score = (distance + 20 * (1-alignment), self.ids[index])
-            if distance <= self.radius and (best is None or score < best[0]):
-                best = score, {"edge": self.ids[index], "position": fraction * self.lengths[index], "distance_m": distance}
+            if (self.radius is None or distance <= self.radius) and (best is None or score < best[0]):
+                best = score, {"edge": self.ids[index], "position": fraction * self.lengths[index], "distance_m": distance, "score_m": score[0]}
         return None if best is None else best[1]
 
 
 def map_trips(source, target, manifest, radius, border=None):
     """Map all geographic inputs and repair unreachable explicit endpoints, preserving demand."""
+    started = time.monotonic()
+    logger.info("Loading cached SUMO road geometry for endpoint mapping")
     index = EndpointIndex(manifest, radius, border)
+    logger.info("Loaded SUMO endpoint index in %.1f seconds; maximum distance: %s",
+                time.monotonic() - started, "unlimited" if radius is None else radius)
     types = {}
-    report = {"trips": 0, "mapped_endpoints": 0, "repaired_endpoints": 0, "maximum_mapping_distance_m": 0., "examples": []}
+    report = {"trips": 0, "mapped_endpoints": 0, "repaired_endpoints": 0, "maximum_mapping_distance_m": 0., "expanded_endpoints": 0, "maximum_search_radius_m": 0., "examples": []}
     with xml_stream(target) as stream, etree.xmlfile(stream, encoding="utf-8") as writer:
         writer.write_declaration()
         with writer.element("routes"):
@@ -221,12 +240,17 @@ def map_trips(source, target, manifest, radius, border=None):
                                 report["examples"].append({"trip": element.get("id"), "side": side,
                                     "old_edge": previous, "new_edge": matched["edge"], "distance_m": matched["distance_m"]})
                         report["mapped_endpoints"] += 1
+                        report["expanded_endpoints"] += matched["distance_m"] > SEARCH_STEP
+                        report["maximum_search_radius_m"] = max(report["maximum_search_radius_m"], matched["search_radius_m"])
                         report["maximum_mapping_distance_m"] = max(report["maximum_mapping_distance_m"], matched["distance_m"])
                         for suffix in ("LonLat", "XY"):
                             element.attrib.pop(side + suffix, None)
                         element.set(side, matched["edge"])
                         element.set(pos, format(matched["position"], ".12g"))
                     report["trips"] += 1
+                    if report["trips"] % 10000 == 0:
+                        logger.info("SUMO endpoint mapping: %d trips, %d expanded endpoints, %.1f seconds",
+                                    report["trips"], report["expanded_endpoints"], time.monotonic() - started)
                 writer.write(element)
     Path(target).with_name("endpoint_mapping.json").write_text(json.dumps(report, indent=2) + "\n")
     logger.info("SUMO reachable endpoint mapping: %s", report)

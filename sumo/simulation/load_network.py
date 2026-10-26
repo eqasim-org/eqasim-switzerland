@@ -42,7 +42,7 @@ def configure(context):
     context.config("sumo_assignment_iterations", 50)
     context.config("sumo_assignment_interval", 3600)
     context.config("sumo_assignment_scale", 1.0)
-    context.config("sumo_mapmatch_distance", 2000)
+    context.config("sumo_mapmatch_distance", None)
     context.config("sumo_loading_mesoscopic", True)
     context.config("sumo_loading_route_choice", "msa")
     context.config("sumo_loading_convergence_window", 5)

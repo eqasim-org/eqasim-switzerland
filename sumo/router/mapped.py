@@ -5,6 +5,8 @@ from pathlib import Path
 from sumo.config import tools
 from sumo.router.tools import filter_loading_trips
 from sumo.runtime import sumo
+from sumo.scenario import modes
+from sumo.scenario.network.mapping import build_index, map_trips
 
 
 def configure(context):
@@ -12,7 +14,10 @@ def configure(context):
     context.stage("sumo.router.demand")
     tools.configure_network(context)
     context.config("random_seed")
-    context.config("sumo_mapmatch_distance", 2000)
+    context.config("sumo_mapmatch_distance", None)
+    modes.configure(context)
+    if context.config("clip_trips_to_border_in_sumo", True):
+        context.stage("sumo.scenario.border")
 
 
 def execute(context):
@@ -25,11 +30,17 @@ def execute(context):
     network = tools.network_path(context)
     queries = Path(context.path()).resolve() / "queries.mapped.trips.xml.gz"
 
+    # Resolve coordinates with the shared expanding, mode-aware road matcher.
+
+    index = build_index(network, context.path(), modes.vehicle_classes(modes.selected(context.config("sumo_modes"))))
+    reachable = Path(context.path()).resolve() / "queries.reachable.trips.xml.gz"
+    border = context.stage("sumo.scenario.border") if context.config("clip_trips_to_border_in_sumo") else None
+    map_trips(demand["queries"], reachable, index, context.config("sumo_mapmatch_distance"), border)
+
     # Map endpoints and validate route connectivity for every requested trip.
 
-    sumo.run(context, ["--net-file", network, "--route-files", demand["queries"], "--output-file", queries,
+    sumo.run(context, ["--net-file", network, "--route-files", reachable, "--output-file", queries,
                        "--write-trips", "true", "--ignore-errors", "false",
-                       "--mapmatch.distance", tools.positive(context.config("sumo_mapmatch_distance"), "sumo_mapmatch_distance"),
                        "--seed", context.config("random_seed"), "--log", "mapmatching.log"], binary="duarouter")
 
     # Separate road-loading trips from the full set of car-network queries.

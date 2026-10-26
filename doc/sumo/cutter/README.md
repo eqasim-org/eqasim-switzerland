@@ -75,14 +75,17 @@ weak component and incoming/outgoing degree checks instead. No network edges
 are deleted by this index.
 
 Loading maps geographic endpoints onto eligible edges. Explicit endpoints are
-preserved when eligible; otherwise they are rematched within
-`sumo_mapmatch_distance` (default 1000 m), retaining their travel direction.
+preserved when eligible; otherwise they are rematched, retaining their travel
+direction. Search expands from 500 m in 500 m steps.
+`sumo_mapmatch_distance: null` (default) imposes no distance cutoff; a positive
+value explicitly restores a maximum distance.
 Swiss-border clipping also constrains replacement positions to the Swiss side.
 This prevents a nearby road with no incoming turns from becoming an unreachable
 destination. Trips, departures, vehicle types and source metadata are preserved.
-`endpoint_mapping.json` records counts, maximum mapping distance and examples
+`endpoint_mapping.json` records counts, expanded endpoints, maximum search
+radius, maximum mapping distance and examples
 of repaired edges; the loading report includes the same summary. An endpoint
-with no suitable nearby road fails explicitly; demand is never silently dropped.
+with no suitable road anywhere on the supplied network fails explicitly; demand is never silently dropped.
 Native `duarouter` still validates the resulting trips before macroscopic
 assignment, and no route search is added after `marouter`.
 
