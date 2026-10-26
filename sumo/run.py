@@ -2,6 +2,8 @@
 
 
 def configure(context):
+    from sumo.scenario.modes import require_mode_choice
+    require_mode_choice(context)
     model = context.config("sumo_simulation_model", "microscopic")
     if model not in {"microscopic", "mesoscopic"}:
         raise ValueError("sumo_simulation_model must be 'microscopic' or 'mesoscopic'")

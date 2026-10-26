@@ -116,7 +116,38 @@ def test_actual_synpp_cut_and_run_with_unified_osm_input(tmp_path, runtime, monk
     region = tmp_path / 'region.gpkg'
     gpd.GeoDataFrame(geometry=[box(8.0005, 46.999, 8.0015, 47.002)], crs=4326).to_file(region)
     monkeypatch.setattr(sumo, 'execute', lambda context: runtime)
-    config = {'sumo_network_file': str(source), 'sumo_assignment_trip_files': [str(trips)],
+    from data.spatial import swiss_border
+    monkeypatch.setattr(swiss_border, 'execute', lambda context:
+        gpd.GeoSeries([box(8.0003, 46.999, 8.0017, 47.002)], crs=4326))
+    from mode_choice.routing import sumo as routing
+    from sumo.scenario.network.tools import read_network
+    import json
+    import numpy as np
+    import polars as pl
+    import shapely
+    def configure_routes(context):
+        context.stage('sumo.scenario.unrouted_demand')
+        context.stage('sumo.scenario.network.road_network')
+    def complete_routes(context):
+        data=read_network(context.stage('sumo.scenario.network.road_network'))
+        offset=np.asarray([float(x) for x in data['location']['netOffset'].split(',')])
+        rows=[]
+        for key,edge in data['edges'].items():
+            shape=shapely.LineString(np.asarray(edge['shape'].coords)-offset)
+            rows.append({'link_id':key,'from_node':edge['from'],'to_node':edge['to'],
+                'length':edge['length'],'freespeed':edge['speed'],'modes':['car','truck'],'geometry':shapely.to_wkb(shape)})
+        links=Path(context.path())/'links.arrow';pl.DataFrame(rows).write_ipc(links)
+        paths=Path(context.path())/'paths.arrow'
+        keys=[key for key in data['edges'] if not key.startswith('-') and key.startswith(('10','11'))]
+        keys.sort()
+        assert len(keys)==2
+        pl.DataFrame({'id':['crossing'],'travel_time':[20.],'travel_distance':[200.],
+            'route':[json.dumps({'version':1,'mode':'car','parts':[{'kind':'leg','mode':'car',
+                'route':{'type':'links','links':keys}}]})]}).write_ipc(paths)
+        return {'links':str(links),'routes':str(paths)}
+    monkeypatch.setattr(routing,'configure',configure_routes)
+    monkeypatch.setattr(routing,'execute',complete_routes)
+    config = {'enable_mode_choice': True, 'data_path': str(tmp_path), 'sumo_network_file': str(source), 'sumo_assignment_trip_files': [str(trips)],
               'sumo_region_geometry': str(region), 'sumo_modes': ['car'], 'sumo_simulation_model': model,
               'sumo_assignment_iterations': 2, 'sumo_loading_convergence_window': 2,
               'sumo_loading_convergence_tolerance': 1., 'sumo_end': 300, 'random_seed': 42,

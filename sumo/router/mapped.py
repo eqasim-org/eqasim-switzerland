@@ -12,7 +12,7 @@ def configure(context):
     context.stage("sumo.router.demand")
     tools.configure_network(context)
     context.config("random_seed")
-    context.config("sumo_mapmatch_distance", 1000)
+    context.config("sumo_mapmatch_distance", 2000)
 
 
 def execute(context):

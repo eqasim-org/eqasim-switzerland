@@ -8,6 +8,8 @@ from sumo.runtime import sumo
 
 
 def configure_regional(context, profile):
+    from sumo.scenario.modes import require_mode_choice
+    require_mode_choice(context)
     context.stage("sumo.cutter.scenario")
     context.stage("sumo.runtime.sumo")
     simulation.configure(context, inputs=False)

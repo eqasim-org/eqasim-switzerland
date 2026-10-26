@@ -14,7 +14,7 @@ vehicle composition and actual signal plans to calibrate a city scenario.
 | `sumo.config.loaded` | Dictionary containing assignment and loaded-routing configs | `marouter`, then `duarouter` |
 | `sumo.config.config` | Dictionary collecting micro, meso, macro and loaded configs | Config generation only |
 | `sumo.simulation.run` | Simulation output paths; selects micro/meso with `sumo_simulation_model` | Runs `sumo` |
-| `sumo.router.assignment` | Loaded weights, assigned flows, query routes and `trip_metrics.parquet` | Runs both assignment and routing |
+| `sumo.router.assignment` | Loaded weights, assigned flows, query routes and `trip_metrics.arrow` | Runs both assignment and routing |
 | `sumo.simulation.load_network` | Full assigned routes with edge exit times, metrics and loading report | Native macro assignment by default; simulation-based DUA opt-in |
 | `sumo.simulation.run_microscopic` | Microscopic execution using `sumo.cutter.scenario` | Runs `sumo` |
 | `sumo.simulation.run_mesoscopic` | Mesoscopic execution using `sumo.cutter.scenario` | Runs `sumo --mesosim` |

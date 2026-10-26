@@ -1,6 +1,7 @@
 """Export person attributes and daily plans together in native SUMO route XML."""
 
 import logging
+from itertools import groupby
 from pathlib import Path
 
 from sumo.scenario.population.tools import (
@@ -8,6 +9,7 @@ from sumo.scenario.population.tools import (
 )
 from sumo.scenario.population.writer import PopulationWriter
 from sumo.scenario import modes
+from sumo.tables import as_polars
 
 logger = logging.getLogger("synpp")
 SUMO_MODES = {"car": "car", "bike": "bicycle", "bicycle": "bicycle", "pt": "public", "taxi": "taxi"}
@@ -36,15 +38,15 @@ def execute(context):
 
     # Stream complete activity chains, preserving person and trip identifiers.
 
-    activity_groups = iter(population["activities"].groupby("person_id", sort=False))
+    persons, prepared_activities = as_polars(population["persons"]), as_polars(population["activities"])
+    activity_groups = iter(groupby(prepared_activities.iter_rows(named=True), key=lambda row: row["person_id"]))
     count = 0
     with PopulationWriter(output, context.config("population_compresslevel")) as writer:
-        for row in population["persons"].itertuples(index=False, name=None):
-            person = dict(zip(population["persons"].columns, row))
+        for person in persons.iter_rows(named=True):
             person_id, frame = next(activity_groups)
             if person_id != person["person_id"]:
                 raise ValueError("SUMO persons and activity chains are not aligned")
-            activities = frame.to_dict("records")
+            activities = list(frame)
             segments = modes.plan_segments(activities, modes.selected(context.config("sumo_modes")))
             for index, segment in enumerate(segments):
                 written_person = dict(person)

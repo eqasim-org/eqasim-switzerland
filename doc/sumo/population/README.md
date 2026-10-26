@@ -9,7 +9,7 @@ native demographic file that a plan references by person ID.
 
 | Stage | Cached result |
 | --- | --- |
-| `sumo.scenario.population.population` | Dictionary with copied `persons` and `activities` DataFrames |
+| `sumo.scenario.population.population` | Paths to `persons.arrow`, `activities.arrow` and `vehicle_trips.arrow` |
 | `sumo.scenario.population.plans` | Absolute path to `population.rou.xml.gz`, containing people and their plans |
 | `sumo.scenario.population.trips` | Absolute path to `vehicles.trips.xml.gz`, containing freight and commercial vehicle trips |
 
@@ -20,11 +20,36 @@ Like `matsim.scenario.population`, it chooses `mode_choice.run` when
 Final modes and corrected departures are joined by `person_id` and `trip_index`;
 sampled arrival times remain unchanged. Upstream DataFrames are never modified.
 
-`include_external_population` and `include_cross_border` select the corresponding
-existing population stages. Source person IDs, scalar person attributes, activity
+`exlude_external_population_in_sumo: true` (the spelling is intentional) excludes
+the external population from SUMO by default, independently of MATSim. Set it to
+`false` together with `include_external_population: true` to include that source.
+`include_cross_border` still selects the separate cross-border population stage. Source person IDs, scalar person attributes, activity
 indices and trip IDs are retained. The `population_source` parameter records
 `resident`, `external` or `crossborder`. Attribute names and category codes remain
 those of the source tables; no MATSim Java attribute classes are written.
+Cross-border chains use the shared [timing correction](../../data/cross_border/README.md)
+to fit inbound travel after day start while preserving activity durations.
+
+## Vehicle-demand performance
+
+Population preparation converts external tables once through
+`sumo.tables.as_polars`, performs joins and validation with Polars, and writes
+`persons.arrow`, `activities.arrow` and `vehicle_trips.arrow` in its cache.
+It returns only their paths. The full population is no longer serialized into
+Synpp's pickle, and consumers use memory-mapped Arrow IPC files.
+
+Vehicle preparation pairs adjacent activities in batches, including destinations
+across batch boundaries, and projects coordinates in bulk. Demand sorts columns
+in RAM with Polars and writes vehicle XML through the default C++/Arrow backend.
+It avoids per-person DataFrames, per-person dictionaries, SQLite and per-trip
+Python XML objects for population demand. The lxml fallback is selected with
+`sumo_native_xml: false`.
+
+See [Polars caches and native XML](../native/README.md) for contracts, compiler
+requirements, thread settings and benchmark results. The first run rebuilds the
+affected SUMO caches; running processes must be restarted to use the changes.
+
+## Mode selection and validation
 
 Exports use `sumo_modes: [car, truck]` by default; `truck` also selects LCV.
 Unselected legs are omitted and mixed chains split into contiguous selected
@@ -33,6 +58,20 @@ is invented across an omitted leg. `sumo_modes: null` exports all original modes
 in that case non-travellers remain with a single home stop. Duplicate identifiers,
 duplicate activity keys, missing chains, missing coordinates, unsupported modes
 and inconsistent activity/trip times raise errors instead of dropping people.
+Vehicle demand resolves coordinates only for selected trip endpoints. Inactive
+people and omitted legs do not require locations for vehicle export; a missing
+location on a selected leg still raises an error naming its person and activity.
+Source travel times are optional references. Missing, nonfinite or negative
+arrival times, and arrivals before departure, leave that reference unset while
+retaining the trip and its departure. SUMO computes the loaded travel time;
+simulation departure times must still be finite and nonnegative.
+
+External exports can repeat an activity after joining trip modes, including
+both `car` and `car_loop` for the same activity key. Before combining populations,
+the SUMO stage collapses those rows only when all other activity data agree and
+the modes have the same base type. It retains the first source row and its
+original mode, matching MATSim's ordering. Different times, locations or base
+modes still raise an error; source caches are left unchanged.
 
 ## Export
 
@@ -133,3 +172,101 @@ SUMO Python packages into the project environment.
 References: [SUMO persons and plans](https://sumo.dlr.de/docs/Specification/Persons.html),
 [intermodal routing](https://sumo.dlr.de/docs/IntermodalRouting.html),
 [generic parameters](https://sumo.dlr.de/docs/Simulation/GenericParameters.html).
+
+## Road-route reuse and Swiss-border demand clipping
+
+SUMO demand and simulation require `enable_mode_choice: true`. The default
+national clipping also requires the Java car backend, because aggregate travel
+times/distances do not identify border crossings. Use this configuration before
+running mode choice:
+
+```yaml
+enable_mode_choice: true
+prepare_sumo: true
+mode_choice_car_routing_backend: java
+exlude_external_population_in_sumo: true
+clip_trips_to_border_in_sumo: true
+```
+
+`prepare_sumo` defaults to `false` in the mode-choice package. Setting it to
+`true` makes the existing Java routing pass export itineraries, independently of
+`route_population_once` (which still controls MATSim facility/route reuse).
+Without pre-exported paths, SUMO preparation completes the missing routes; it
+cannot recover paths from aggregate costs alone. Ordinary non-SUMO runs retain
+their current defaults. External-population exclusion remains independent of
+cross-border inclusion: disabling it adds the external source without changing
+anyone's mode choice.
+
+The preparation stages are:
+
+| Stage | Result |
+| --- | --- |
+| `sumo.scenario.unrouted_demand` | Sorted selected demand in `demand.arrow`, plus vehicle-type definitions; no XML trip export yet |
+| `mode_choice.routing.sumo_network` | Directed MATSim road shapes, modes, lengths and speeds in `road_links.arrow` |
+| `mode_choice.routing.sumo` | Reused/completed itineraries in `road_routes.arrow`, plus `routing_report.json` |
+| `sumo.scenario.border` | Swiss polygon in LV95 WKB |
+| `sumo.scenario.demand` | Domestic vehicle trips, `demand.arrow`, XML and `border_clipping.json` |
+
+Mode-choice paths are matched by person ID, trip index, car/truck mode and
+endpoints/departure (2 m and 1 s tolerances). Missing or changed requests are
+routed together by the same Java router on its extended network, including
+selected cross-border/external trips and commercial demand. This completion
+pass performs road routing only, with macroscopic reassignment disabled; it does
+not run mode choice again or modify source modes. Its router process is stopped
+before SUMO preparation continues. The shared network reader cache is used and
+corresponding directed detailed curves are retained.
+
+The national cutter intersects **actual link paths** with Switzerland. It checks
+the whole path even if both endpoints are domestic, and retains through-trips
+whose endpoints are both foreign. Wholly foreign paths disappear. Every
+domestic visit is kept; leaving and re-entering creates IDs ending in
+`__swiss_1`, etc. Source/person/trip identifiers remain attached. Missing,
+forbidden, disconnected or incompatible itineraries cause explicit errors;
+there is no straight-line or fixed-speed fallback. Native bulk XML export and
+the existing scenario writers are shared, and final departures are sorted again.
+Person-plan XML from `population.plans` remains a separate, untrimmed export.
+
+Entry/exit locations follow the detailed road geometry. The itinerary export
+provides a total road travel time, not individual link clocks. Entry times are
+therefore **estimates**, obtained by distributing that total over the traversed
+links in proportion to their free-flow costs, including partial endpoint links.
+A retained trip departs at its original departure plus the estimated time to
+its entry. This preserves the routed total, including its aggregate congestion
+effect, but does not reconstruct congestion separately on each foreign link.
+The subsequent SUMO assignment computes loaded domestic routes/costs, and the
+Lausanne/other regional cutter uses those assigned roads and loaded entry times.
+MATSim's provisional domestic path is used to determine national visits; SUMO
+may choose another domestic path during assignment.
+
+For a single-link itinerary, Java exports the complete directed link without
+within-link activity positions. If projecting the activity coordinates would
+reverse or collapse that traversal, the cutter clips the exported full link
+using its routed travel time. It records these cases in
+`border_clipping.json` as `full_link_endpoint_fallbacks`. This preserves the
+exported road direction; exact within-link activity positions are unavailable
+in these cases.
+
+Kept endpoints are matched onto nearby SUMO edges on the Swiss side, preserving
+travel direction and passenger/truck/delivery permissions within
+`sumo_mapmatch_distance` (default 1000 m). MATSim IDs are never treated as SUMO
+IDs. Lane shapes with zero geometric length cannot define a heading and are
+excluded from endpoint matching; their edges remain in the routing network.
+Matching starts with a small local search and expands only when necessary,
+up to `sumo_mapmatch_distance`. The distance-plus-heading score bounds the
+remaining search, so a large maximum radius does not force every endpoint to
+scan every road in that radius. Direction, vehicle access and Swiss-side checks
+still apply. The demand stage logs network indexing and clipping progress.
+Unmatchable endpoints fail explicitly instead of silently increasing the
+radius or dropping demand. Supplied edge/XY endpoints are resolved lazily through
+the georeferenced SUMO network. Clipped inputs with `via` constraints are rejected
+because arbitrary waypoints cannot be preserved by this OD routing interface.
+
+Route export needs the compatible Java runtime pinned by `matsim.runtime.eqasim`.
+The old bundled `switzerland-2.0.0-cluster.jar` lacks the required flags. The SUMO
+configuration uses `eqasim_path: ""` and the pinned commit so Synpp builds and
+caches the compatible runtime; the existing JAR is left untouched.
+
+All table stages return cache paths, not DataFrames. Geometry classification is
+precomputed per link, and the route-to-demand join is performed once, rather
+than rebuilding an entire route lookup per batch. Only changed trip payloads
+are rewritten; wholly domestic trips retain the native Arrow/C++ writer path.
