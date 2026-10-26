@@ -504,7 +504,7 @@ def fill_calendar_from_dates(feed):
 
     feed["calendar"] = pd.concat([feed["calendar"], df_new], ignore_index=True) if "calendar" in feed else df_new
     logger.info(f"Added {len(df_new)} synthetic calendar entries for service_ids only in calendar_dates.")
-    
+
     return feed
 
 

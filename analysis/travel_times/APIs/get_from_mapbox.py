@@ -29,7 +29,7 @@ def configure(context):
             "mapbox",
         ),
     )
-    context.config("num_mapbox_requests", default=1000)
+    context.config("num_mapbox_requests", default=0)
     context.config("mapbox_json_batch_size", default=100)
 
 def convert_departure_time_to_iso(departure_time):

@@ -231,7 +231,8 @@ def process(context, arguments):
 
     detour_factor = context.data("detour_factor")
 
-    assignment_objective = DiscretizationErrorObjective(thresholds=thresholds, detour_factor=detour_factor)
+    assignment_objective = DiscretizationErrorObjective(
+        thresholds=thresholds, random=rng, detour_factor=detour_factor)
     assignment_solver = AssignmentSolver(
         distance_sampler=distance_sampler,
         relaxation_solver=relaxation_solver,

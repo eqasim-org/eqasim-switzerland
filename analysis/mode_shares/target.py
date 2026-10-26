@@ -11,14 +11,14 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("data.external_population.constants")
     
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     if context.config("include_external_population"):
         context.stage("data.external_population.hts_trips.trips")
 
     context.config("group_income_classes_in_analysis", default=False)
     context.config("output_path")
     context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")      
+    context.config("simulation_directory", default = 'simulation_output')
 
 
 def execute(context):

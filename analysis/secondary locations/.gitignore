@@ -1,0 +1,6 @@
+results/
+__pycache__/
+.pytest_cache/
+!*.sh
+
+!cache_io.py

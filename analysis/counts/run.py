@@ -22,7 +22,7 @@ def configure(context):
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
     configure_simulation_path(context)
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
     for run in runs:
         logger.info(f"Staging analysis.counts.runs.{run}")
         context.stage(f"analysis.counts.runs.{run}",

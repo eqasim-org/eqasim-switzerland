@@ -29,7 +29,7 @@ def configure(context):
             "tomtom",
         ),
     )
-    context.config("num_tomtom_requests", default=int(1e10))
+    context.config("num_tomtom_requests", default=0)
     context.config("tomtom_json_batch_size", default=100)
 
 def convert_departure_time_to_iso(departure_time):

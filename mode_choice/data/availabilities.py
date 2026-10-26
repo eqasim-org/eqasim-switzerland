@@ -9,6 +9,8 @@ def configure(context):
     context.stage("mode_choice.data.prepare")
     context.stage("mode_choice.routing_variables.car")
     context.stage("mode_choice.routing_variables.pt")
+    context.stage("mode_choice.routing_variables.walk")
+    context.stage("mode_choice.routing_variables.bike")
     context.stage("mode_choice.costs.pt")
 
 
@@ -20,7 +22,8 @@ def execute(context):
     )
 
     # Attach routed variables and PT fares without depending on the inputs stage.
-    for stage in ("mode_choice.routing_variables.car", "mode_choice.routing_variables.pt", "mode_choice.costs.pt"):
+    for stage in ("mode_choice.routing_variables.car", "mode_choice.routing_variables.pt",
+                  "mode_choice.routing_variables.walk", "mode_choice.routing_variables.bike", "mode_choice.costs.pt"):
         trips = join_variables(trips, context.stage(stage))
 
     # Keep a trip-keyed output so inputs can merge this stage like routing and costs.
@@ -35,7 +38,10 @@ def calculate_availabilities(trips):
     )
     pt_routed = (
         finite_nonnegative("pt_in_vehicle_time_min", "pt_access_egress_time_min",
-                           "pt_transfer_time_min", "pt_transfers", "pt_cost_CHF")
+                           "pt_transfer_time_min", "pt_transfers", "pt_cost_CHF",
+                           "pt_total_travel_time_min")
+        & (pl.col("pt_total_travel_time_min") < D.UNROUTABLE_TIME_MIN)
+        & (pl.col("pt_access_egress_time_min") < D.UNROUTABLE_TIME_MIN)
         & (pl.col("pt_in_vehicle_time_min") <= D.MAX_ROUTED_TIME_MIN)
         & (pl.col("pt_transfers") <= D.MAX_PT_TRANSFERS)
         & (pl.col("pt_transfer_time_min") <= D.MAX_PT_TRANSFER_TIME_MIN)
@@ -59,9 +65,10 @@ def calculate_availabilities(trips):
         "trip_id",
         (pl.col("car_availability") & car_available).fill_null(False).alias("car_availability"),
         pt_available.fill_null(False).alias("pt_availability"),
-        (pl.col("bike_availability") & (pl.col("euclidean_distance_km") < D.MAX_BIKE_DISTANCE_KM))
+        (pl.col("bike_availability") & (pl.col("euclidean_distance_km") < D.MAX_BIKE_DISTANCE_KM)
+         & active_route_available("bike"))
         .fill_null(False).alias("bike_availability"),
-        pl.lit(True).alias("walk_availability"),
+        active_route_available("walk").alias("walk_availability"),
         car_available.fill_null(False).alias("car_passenger_availability"),
     )
 
@@ -70,3 +77,8 @@ def finite_nonnegative(*columns):
     return pl.all_horizontal([
         pl.col(column).is_finite() & (pl.col(column) >= 0) for column in columns
     ]).fill_null(False)
+
+
+def active_route_available(mode):
+    return (finite_nonnegative(f"{mode}_travel_time_min", f"{mode}_distance_km")
+            & (pl.col(f"{mode}_travel_time_min") < D.UNROUTABLE_TIME_MIN)).fill_null(False)

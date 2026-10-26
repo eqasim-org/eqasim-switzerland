@@ -79,8 +79,8 @@ def configure(context):
     context.stage("data.cross_border.interview_places")
     context.stage("data.cross_border.pt_gateways")
 
-    context.config("border_offset", default = 20000)
-    context.config("cross_border_countries", default = "All")
+    context.config("border_offset", default = 50000)
+    context.config("cross_border_countries", default = 'All')
     context.config("cross_border_exclude_shapefiles", default=None)
 
 
@@ -626,8 +626,18 @@ def read_2021_data(context):
     # 14. Match to an interview point    
     #borders.loc[borders["interview_place"] == "Vallorbe (544)", "interview_place"] = "Gruppe O: VD/NE -> F. Dép. Jura. Doubs"
 
-    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "label"]]
+    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "label"]].to_crs("EPSG:2056")
     points["interview_point_id"] = points["border_crossing_point_id"]
+
+    # Survey endpoints are longitude/latitude; crossing distances must use Swiss
+    # metres at both ends. Keep the original columns in WGS84 for later stages.
+    matching = borders[["interview_place", "trip_mode"]].copy()
+    matching["origin_geometry"] = gpd.GeoSeries(
+        gpd.points_from_xy(borders["start_x"], borders["start_y"]), crs = "EPSG:4326"
+    ).to_crs("EPSG:2056").values
+    matching["destination_geometry"] = gpd.GeoSeries(
+        gpd.points_from_xy(borders["end_x"], borders["end_y"]), crs = "EPSG:4326"
+    ).to_crs("EPSG:2056").values
 
     # "label" indicates which mode a point was surveyed for ("road" serves car trips,
     # "pt" serves public transport trips), so candidates are grouped by place AND mode.
@@ -638,8 +648,8 @@ def read_2021_data(context):
     point_rng = np.random.RandomState(context.config("random_seed"))
 
     def sample_point(row):
-        origin      = Point(row["start_x"], row["start_y"])
-        destination = Point(row["end_x"], row["end_y"])
+        origin      = row["origin_geometry"]
+        destination = row["destination_geometry"]
 
         label = mode_to_label.get(row["trip_mode"])
         candidates = grouped_points.get((row["interview_place"], label))
@@ -668,7 +678,7 @@ def read_2021_data(context):
         closest    = same_label.loc[total_dist.idxmin()]
         return closest[["geometry", "importance", "interview_point_id", "label"]]
 
-    result = borders[["interview_place", "start_x", "start_y", "end_x", "end_y", "trip_mode"]].apply(sample_point, axis=1)
+    result = matching.apply(sample_point, axis=1)
     borders[["interview_geometry_point", "importance", "interview_point_id", "interview_point_label"]] = result
 
     # The point has to serve the mode the agent travels with, since it becomes

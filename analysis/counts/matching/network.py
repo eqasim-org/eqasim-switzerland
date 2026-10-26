@@ -35,13 +35,13 @@ def execute(context):
     logger.info("\t LOADING NETWORK FROM: %s" % network_file)
 
     # create the network object, overwrite is set to True to ensure that the latest network is loaded when this stage is run again
-    network = RoadNetwork(network_file, network_geometry_file, overwrite=True, cache_dir= context.path())
+    network = RoadNetwork(network_file, network_geometry_file, overwrite=True, cache_dir= context.path(), context=context)
 
     return network
 
 
 class RoadNetwork:
-    def __init__(self, network_file: str, geometry_file: str=None, overwrite=True, cache_dir:str="cache"):
+    def __init__(self, network_file: str, geometry_file: str=None, overwrite=True, cache_dir:str="cache", context=None):
         self.network_file = network_file
         self.geometry_file = geometry_file
         self._in_cache_class_file = os.path.join(cache_dir,"network.direct_ids.cache.pkl")
@@ -52,7 +52,7 @@ class RoadNetwork:
             logger.info(f"Loading from cache took {(time.time()-start_time):.1f} seconds.\n")
         else:
             # Load the network
-            self.net = self._load_network()
+            self.net = self._load_network(context=context)
             # Without the detailed export, only the stages that need no real road shapes work (straight_geometry)
             self.net_geo = self.read_network_geometry(geometry_file) if geometry_file else None
             self._save_to_cache()
@@ -133,19 +133,15 @@ class RoadNetwork:
     def crs(self):
         return self.get_geometry().crs
 
-    def _load_network(self, file_path: str=None):
+    def _load_network(self, file_path: str=None, context=None):
         if file_path is None:
             file_path = self.network_file
 
         logger.info(f"Reading network file: {file_path}")
-        net = read_network(file_path)
+        net = read_network(file_path, context=context)
 
         if "attributes" not in net.links and len(net.link_attrs):
-            link_attrs = net.link_attrs.groupby('link_id') \
-                .apply(lambda x: dict(zip(x['name'], x['value']))) \
-                .reset_index(name='attributes')
-            net.links = net.links.merge(link_attrs, on="link_id", how="left")
-            net.links.loc[net.links["attributes"].isna(), "attributes"] = None
+            net.put_attributes_in_links()
 
         net.filter_car_links(inplace=True)
 

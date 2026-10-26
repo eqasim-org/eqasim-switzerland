@@ -5,6 +5,7 @@ import numpy as np
 import logging
 import glob
 from matsim.readers import houshold_reader
+from pathlib import Path
 from analysis.counts.paths import get_simulation_path
 
 logger = logging.getLogger("synpp")
@@ -195,7 +196,13 @@ class ModeShareAnalyzer:
         trips = trips[trips.euclidean_distance_km > 1e-3].reset_index(drop = True)
 
         # read households
-        households = houshold_reader(households_file)
+        households = houshold_reader(households_file, convert_dataframes_types=False)
+        if ("incomeClass" not in households.households
+                or households.households["incomeClass"].isna().all()):
+            input_file = Path(get_simulation_path(context)).parent / (
+                context.config("output_prefix") + "households.xml.gz")
+            logger.info("Output households lack income classes; reading %s", input_file)
+            households = houshold_reader(str(input_file), convert_dataframes_types=False)
 
         # assign income class from households
         income_class_info = self.get_income_class(persons, households)

@@ -53,7 +53,7 @@ TO_WGS84 = Transformer.from_crs(NETWORK_CRS, "epsg:4326", always_xy = True)
 def configure(context):
     context.config("output_path")
     context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    context.config("simulation_directory", default = 'simulation_output')
     context.config("analysis.pt.transit_schedule_modes", default = [])
     context.config("analysis.pt.transit_schedule_show_schedules", default = True)
     context.config("extent_path", default = "")

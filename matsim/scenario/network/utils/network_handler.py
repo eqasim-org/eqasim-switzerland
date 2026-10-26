@@ -24,7 +24,7 @@ class NetworkHandler:
         self.network_path = network_path
         self.detailed_network_path = detailed_network_path
         self.schedule_path = schedule_path
-        self.net = read_network(network_path)
+        self.net = read_network(network_path, context=context)
         self.context = context
 
     def process_network(self, save_as_pickle:bool = False, network_pickle: str=None):
@@ -157,7 +157,7 @@ class NetworkHandler:
             self.net.links = CapacityCorrector(self.context, self.net).reduce_capacity_outside_border()
 
     def _adjust_uphill_speed_if_requested(self):
-        if not self.context.config("adjust_speed_uphill"):
+        if not self.context.config("correct_speed_uphill"):
             return
         if not self.context.config("assign_elevations"):
             raise ValueError("To correct speeds of uphill links, elevations must be assigned first.")

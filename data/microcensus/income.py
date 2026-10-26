@@ -26,7 +26,7 @@ class ColumnClipper(BaseEstimator, TransformerMixin):
         return X
 
     
-def impute(df_mz):
+def impute(df_mz, random_seed):
     """
     I modified the imputation approach in order to only use household features and not use age, sex, ... attributes because in the Mz, they as one person from that household, so this is biased
     """
@@ -70,7 +70,7 @@ def impute(df_mz):
             learning_rate=0.05,
             loss_function="MultiClass",
             verbose=False,
-            random_seed=42
+            random_seed=random_seed
         ))
     ])
 
@@ -85,9 +85,10 @@ def impute(df_mz):
     # Predict missing (probabilistic sampling)
     probas = model.predict_proba(df_pred[feature_cols])
     classes = model.named_steps["clf"].classes_
+    rng = np.random.default_rng(random_seed)
 
     imputed = np.array([
-        np.random.choice(classes, p=p) for p in probas
+        rng.choice(classes, p=p) for p in probas
     ])
 
     # Insert results

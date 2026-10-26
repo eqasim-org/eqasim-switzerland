@@ -19,6 +19,7 @@ def configure(context):
 
     context.stage("data.structural_survey.raw")
     context.config("input_downsampling")
+    context.config("random_seed")
 
 
 def execute(context):
@@ -146,6 +147,7 @@ def execute(context):
     se = context.stage("data.structural_survey.raw")
     sr = context.config("input_downsampling")
 
-    df_persons = find_truck_drivers(se, df_persons, sr)
+    df_persons = find_truck_drivers(
+        se, df_persons, sr, random_seed=context.config("random_seed"))
 
     return df_persons

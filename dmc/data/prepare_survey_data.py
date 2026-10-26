@@ -10,6 +10,7 @@ from dmc.constants import constants
 from data.statent.density import impute as impute_statent
 from data.statpop.density import impute as impute_statpop
 from data.spatial.ovgk import impute_parallel as impute_ovgk
+from dmc.pt_quality import encode_pt_quality
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -69,15 +70,14 @@ def execute(context):
     df_persons["has_car"] = (df_persons["number_of_cars_class"]>0).astype(int)
     df_persons["num_adults"] = df_persons["N_adults"].astype(int)
     # 5. pt quality
-    df_persons["good_pt_service"] = (df_persons["ovgk"].isin(["A", "B"])).astype(int)
-    df_persons["medium_pt_service"] = (df_persons["ovgk"].isin(["C","D"])).astype(int)
+    df_persons["homePtQuality"] = encode_pt_quality(df_persons["ovgk"])
     # 6. age related
     df_persons["is_retired"] = (df_persons["age"]>=65).astype(int)
     df_persons["is_junior"] = (df_persons["age"]<16).astype(int)
     # 7. merge
     cols = ["person_id","home_x","home_y", "hasGeneralSubscription","hasHalbtaxSubscription","hasRegionalSubscription", "hasJuniorSubscription", 
             "hasGleis7Subscription", "statedPreferenceRegion", 'person_weight', 'age', 'sex', 'driving_license', 'sp_region', 'ms_region', "ovgk", "has_car", "num_adults",
-            'is_car_passenger', "income", "weekend", "good_pt_service", "medium_pt_service", "car_ownership_ratio", "is_retired", "is_junior", 
+            'is_car_passenger', "income", "weekend", "homePtQuality", "car_ownership_ratio", "is_retired", "is_junior",
             "low_income", "high_income", "income_class"]
     df_persons = df_persons[cols]    
     df_trips = df_trips.merge(df_persons, on="person_id", how="left")
@@ -165,8 +165,7 @@ def execute(context):
     # ovgk at destination
     df_dest = gpd.GeoDataFrame(df_trips[['person_id', 'trip_id', 'geometry_destination']], geometry="geometry_destination", crs="EPSG:2056")
     df_dest = impute_ovgk(context, df_dest, geometry="geometry_destination", output_column="ovgk_destination", n_jobs=8)
-    df_trips["destination_good_pt_service"] = (df_dest["ovgk_destination"].isin(["A", "B"])).astype(int)
-    df_trips["destination_medium_pt_service"] = (df_dest["ovgk_destination"].isin(["C","D"])).astype(int)
+    df_trips["destinationPtQuality"] = encode_pt_quality(df_dest["ovgk_destination"])
 
     # tag destinations in zurich, geneva, basel, lausanne, luzern, Bern
     df_trips["destination_zurich"] = df_trips["destination_municipality_id"]==biggest_mun["Zürich"]
@@ -218,7 +217,7 @@ def execute(context):
     cols = ['person_id', 'trip_id', 'departure_time', 'mode', 'purpose',
             'destination_x', 'destination_y', 'origin_x', 'origin_y',
             'home_x', 'home_y', 'hasGeneralSubscription', 'hasJuniorSubscription', 'hasGleis7Subscription',
-            'hasHalbtaxSubscription', 'hasRegionalSubscription', 'ovgk', 'car_ownership_ratio', "good_pt_service", "medium_pt_service", "destination_good_pt_service", "destination_medium_pt_service",
+            'hasHalbtaxSubscription', 'hasRegionalSubscription', 'ovgk', 'car_ownership_ratio', "homePtQuality", "destinationPtQuality",
             'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','is_junior','low_income','high_income','has_car','num_adults',
             'driving_license', 'sp_region', 'ms_region', 'is_car_passenger', 'income', 'income_class',
             'destination_home', 'origin_home', 'destination_work', 'destination_education',

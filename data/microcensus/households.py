@@ -4,7 +4,7 @@ import pyproj
 
 from data.spatial.cantons import impute_sp_region
 from data.spatial.municipality_types import impute as impute_municipality_type
-import data.spatial.ovgk
+from data.spatial.ovgk import impute as impute_ovgk
 import data.spatial.utils
 import data.spatial.zones
 import data.statpop.density
@@ -98,7 +98,7 @@ def execute(context):
 
     # Impute OV Guteklasse
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
+    df_spatial = impute_ovgk(context, df_ovgk, df_spatial, ["person_id"], chunk_size=1e3, point_type="home")
     df_mz_households = pd.merge(df_mz_households, df_spatial[["person_id", "ovgk"]], on=["person_id"], how="left")
 
     # Impute household person information, such as number of children

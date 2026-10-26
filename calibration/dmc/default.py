@@ -1,17 +1,15 @@
 import os
-import yaml
+from dmc.parameters import Parameters
 
 def configure(context):
   pass
 
 def execute(context):
     mode_params_path = os.path.join(context.path(), "default_params.yml")
-    with open(mode_params_path, 'w') as f:
-       yaml.dump(default_mode_params, f, sort_keys=False)
+    Parameters(default_mode_params).to_yaml(mode_params_path)
 
     cost_params_path = os.path.join(context.path(), "default_cost_params.yml")
-    with open(cost_params_path, 'w') as f:
-       yaml.dump(default_cost_params, f, sort_keys=False)
+    Parameters(default_cost_params).to_yaml(cost_params_path)
 
     return mode_params_path, cost_params_path
 
@@ -105,10 +103,11 @@ default_mode_params = {
     "pt.betaRetired_u": 0.0,
     "pt.betaJunior_u": -0.3205,
     "pt.betaLongDistance_u": 0.0,
-    "pt.betaGoodService_u": 0.4166,
-    "pt.betaMediumService_u": 0.2127,
-    "pt.betaDestinationGoodService_u": 0.0037,
-    "pt.betaDestinationMediumService_u": 0.004,
+    # Neutral until re-estimated: old categorical coefficients cannot be converted exactly.
+    "pt.betaHomePtQuality_u": 0.0,
+    "pt.homePtQualityExponent": 1.0,
+    "pt.betaDestinationPtQuality_u": 0.0,
+    "pt.destinationPtQualityExponent": 1.0,
     "pt.betaDensities_u": 0.1063,
     "bike.alpha_u": 3.435326763816395,
     "bike.betaTravelTime_u_min": -3.2977,

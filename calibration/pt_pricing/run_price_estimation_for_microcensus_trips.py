@@ -8,7 +8,7 @@ def configure(context):
     context.stage("data.microcensus.households")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
-    context.stage("calibration.pt_pricing.generate_config")
+    context.stage("matsim.config.pt")
 
 
 def execute(context):
@@ -61,7 +61,7 @@ def execute(context):
     trips.to_csv(requests_path, index = False)
 
     output_path = context.path() + "/mzRequests_price.csv"
-    config_path = context.stage("calibration.pt_pricing.generate_config")
+    config_path = context.stage("matsim.config.pt")
 
     eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.utils.pricing.RunComputeTransitPrices",
                ["--config-path", config_path,

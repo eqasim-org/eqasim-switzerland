@@ -41,7 +41,7 @@ class FilePaths:
             "SBB_all_distances.csv": ("data.pt_pricing.pt_pricing", 0),
             "gtfs_zones.csv": ("data.pt_pricing.pt_pricing", 1),
             "pricingDescription.xml": ("data.pt_pricing.pt_pricing", 2),
-            "geometry": ("matsim.scenario.network.mapped", "geometry"),
+            "geometry": ("matsim.scenario.network.pt", "geometry"),
             "counts": ("analysis.counts.target", None),
             "travel_times": ("analysis.travel_times.APIs.target", None),
         }

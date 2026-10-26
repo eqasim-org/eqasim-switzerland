@@ -1,0 +1,17 @@
+# Native individual vehicle trips, sorted by departure; replace the input paths.
+working_directory: cache_sumo_loaded
+run:
+  - sumo.router.assignment
+config:
+  random_seed: 518745
+  sumo_network_file: data/switzerland.net.xml.gz
+  sumo_assignment_trip_files:
+    - data/cars.trips.xml.gz
+    - data/freight.trips.xml.gz
+  sumo_begin: 0
+  sumo_end: 108000
+  sumo_assignment_method: incremental
+  sumo_assignment_iterations: 50
+  sumo_assignment_interval: 3600
+  sumo_assignment_scale: 1.0  # Full demand; use 10 for a representative 10% sample.
+  sumo_mapmatch_distance: 1000

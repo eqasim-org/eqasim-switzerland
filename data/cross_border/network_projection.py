@@ -40,7 +40,7 @@ def configure(context):
     context.stage("data.cross_border.generate_od")
     context.stage("data.spatial.swiss_border")
 
-    context.config("border_offset", default = 20000)
+    context.config("border_offset", default = 50000)
     context.config("random_seed")
 
     context.config("cached_network_path", default = None)
@@ -104,7 +104,7 @@ def execute(context):
     )
 
     logger.info("Reading the car network...")
-    network   = read_network(network_path, only_car_links = True)
+    network   = read_network(network_path, only_car_links = True, context=context)
     graph     = network.as_pandana(only_car_links = False, directed = True)
     nodes     = network.nodes.reset_index(drop = True)
     node_tree = KDTree(nodes[["x", "y"]].values)

@@ -61,7 +61,7 @@ DIRECTION_FIT_DISTANCE = 20.0
 SHAPE_FIT_DISTANCE = 30.0
 SHAPE_MAX_MISSED_SHARE = 0.2
 SHAPE_KEY = "gtfs_shape"  # first item of the corridor key of a GTFS shape
- 
+
 PLATFORM_SWITCH_DISTANCE    = 100.0  # extra "distance" for using another platform of the same station
 STATION_SWITCH_MIN_DISTANCE = 50.0   # only switch platform if the stop is this far outside the corridor
 
@@ -1487,7 +1487,8 @@ def read_route_shapes(schedule, routes_path, trips_path, shapes_path, modes, lin
 def run(schedule_path, network_path, shapefile_path, report_path, corrected_schedule_path = None,
         patched_network_path = None, modes = ("bus",), fallback_modes = ("car",), buffer_m = 30.0,
         min_share = 0.9, stop_radius = 80.0, add_links = True, log = print,
-        gtfs_routes_path = None, agencies = (), gtfs_trips_path = None, gtfs_shapes_path = None):
+        gtfs_routes_path = None, agencies = (), gtfs_trips_path = None, gtfs_shapes_path = None,
+        input_geometry_path = None, output_geometry_path = None):
     """Checks (and with corrected_schedule_path also corrects) the mapped routes. If routes had
     to use links without the route mode, or links added along the reference route, a network with
     the mode added / the new links is written to patched_network_path.
@@ -1543,6 +1544,13 @@ def run(schedule_path, network_path, shapefile_path, report_path, corrected_sche
                 network_path, patched_network_path, patched_links, modes[0],
                 new_nodes, new_links, ",".join(sorted(modes)),
             ) + len(new_links)
+            if input_geometry_path and output_geometry_path:
+                from matsim.scenario.network.utils.link_geometry import copy_link_geometries_with_additions
+                copy_link_geometries_with_additions(
+                    input_geometry_path, output_geometry_path,
+                    {link_id: network.segments[link_id] for link_id in new_links},
+                    network._reverse_links,
+                )
     return rows, n_patched
 
 

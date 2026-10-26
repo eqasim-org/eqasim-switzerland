@@ -1,12 +1,14 @@
 import shutil
 import os.path
+from pathlib import Path
 import matsim.runtime.eqasim as eqasim
-from dmc.constants import constants as dmc_constants
+from matsim.config import config as shared_config
 from matsim.simulation.cross_border_links import patch_directional_border_links
 
-import matsim.simulation.config_utils as config_utils
+import matsim.config.tools as config_tools
 
 def configure(context):
+    context.stage("matsim.config.config")
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
         
@@ -21,16 +23,27 @@ def configure(context):
     context.stage("calibration.pt_routing.pt_routing_parameters")
         
     context.stage("data.microcensus.shares")
-    context.stage("dmc.params")
-    context.stage("calibration.car_routing_vot.optimal_value")
+    context.stage("dmc.parameter_files")
 
     context.config("input_downsampling")
     context.config("threads", volatile=True)
+    context.config("java_memory", "50G", volatile=True)
     context.config("random_seed")
+    context.config("use_vdf", False)
+    context.config("export_detailed_network", True)
+    context.config("last_iteration", 140)
+    context.config("calibrate_alphas_in_matsim", True)
+    context.config("alphaCalibration.level", 'canton')
+    context.config("calibrate_betas_in_matsim", False)
+    context.config("activate_traffic_light_delays", True)
+    context.config("activate_unsignalized_intersections_delays", True)
+    context.config("correct_links_capacity", True)
+    context.config("minimum_speed", 1.0)
+    context.config("preventwaitingtoentertraffic", False)
+    context.config("writeexperiencedplans", False)
     
     context.config("output_prefix", "switzerland_")
-    context.config("useScheduleBasedTransport", default = True)
-    context.config("car_cost_model", dmc_constants.CAR_COST_MODEL)
+    context.config("useScheduleBasedTransport", default = False)
     context.config("route_bike", True)
     context.config("include_cross_border", default=False)
     context.stage("data.cross_border.swiss_residents_od")
@@ -40,13 +53,13 @@ def configure(context):
         context.stage("data.cross_border.destinations")
 
     # network calibration
-    context.config("network_calibration.activate", default=False)
+    context.config("network_calibration.activate", default=True)
     context.config("network_calibration.calibrate_disutilities", default=True)
     context.config("network_calibration.calibrate_freespeed", default=True)
     context.config("network_calibration.calibrate_agents_ascs", default=True)
     context.config("network_calibration.calibrate_subpopulations", default=True)
 
-    need_counts = config_utils.need_counts_file(context)
+    need_counts = config_tools.need_counts_file(context)
     if context.config("network_calibration.activate") and need_counts:
         context.stage("analysis.counts.target")
         if context.config("network_calibration.calibrate_disutilities"):
@@ -58,6 +71,33 @@ def configure(context):
         context.stage("calibration.road_regions.freespeed_calibration")
 
 
+def _copy_network_calibration_files(context):
+    """Copy calibration inputs and return paths relative to the prepared config."""
+    parameters = config_tools.network_calibration_parameters(context)
+    names = {
+        "eqasim:networkCalibration.countsFile": "target_counts.csv",
+        "eqasim:networkCalibration.freespeedCalibration.observedTripsFile": "target_travel_times.csv",
+        "eqasim:networkCalibration.costCalibration.specialRegionPath": "penalties_special_region",
+        "eqasim:networkCalibration.freespeedCalibration.specialRegionPath": "freespeed_special_region",
+    }
+    local_parameters = {}
+    for parameter, sources in parameters.items():
+        local_paths = []
+        for index, source in enumerate(str(sources or "").split(";")):
+            if not source:
+                continue
+            name = names[parameter]
+            if parameter.endswith("specialRegionPath"):
+                name = f"{name}_{index}.yml"
+            relative_path = Path("network_calibration_files") / name
+            destination = Path(context.path()) / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            local_paths.append(relative_path.as_posix())
+        local_parameters[parameter] = ";".join(local_paths)
+    return local_parameters
+
+
 def execute(context):
     # Some files we just copy
     transit_vehicles_input_path  = context.stage("matsim.scenario.network.pt")["vehicles"]
@@ -66,7 +106,7 @@ def execute(context):
     sample_size     = context.config("input_downsampling")
 
     if context.config("input_downsampling") < 1.0 and not context.config("useScheduleBasedTransport"):
-        config_utils.modify_PCEs(transit_vehicles_input_path, transit_vehicles_output_path, sample_size)
+        config_tools.modify_PCEs(transit_vehicles_input_path, transit_vehicles_output_path, sample_size)
 
     else:
         shutil.copyfile(transit_vehicles_input_path, transit_vehicles_output_path)
@@ -100,11 +140,18 @@ def execute(context):
                     "%s/%scantonal_mode_shares.csv" % (context.path(), context.config("output_prefix")))
     
     # copy the mode choice params
-    mode_params_path, cost_params_path = context.stage("dmc.params")
+    mode_params_path, cost_params_path = context.stage("dmc.parameter_files")
     mode_parameters_path = "%s/dmc_parameters.yml" % context.path()
     cost_parameters_path = "%s/cost_parameters.yml" % context.path()
     shutil.copy(mode_params_path, mode_parameters_path)
     shutil.copy(cost_params_path, cost_parameters_path)
+
+    if context.config("export_detailed_network"):
+        shutil.copyfile(
+            context.stage("matsim.scenario.network.pt")["geometry"],
+            "%s/%sdetailed_network.csv" % (context.path(), context.config("output_prefix")),
+        )
+    local_calibration_parameters = _copy_network_calibration_files(context)
 
     # Some files we send through several preparation scripts
     
@@ -150,19 +197,11 @@ def execute(context):
         max_workers=context.config("threads"),
     )
 
-    # Generate the config file
+    # Copy the shared config before applying this scenario's local settings.
     config_path = "%sconfig.xml" % context.config("output_prefix")
-    eqasim.run(context, "org.eqasim.core.scenario.config.RunGenerateConfig", [
-        "--output-path", config_path,
-        "--prefix", context.config("output_prefix"),
-        "--sample-size", context.config("input_downsampling"),
-        "--random-seed", context.config("random_seed"),
-        "--threads", context.config("threads"),
-        "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator"
-    ])
-    
-    assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
-    
+    local_config_path = os.path.join(context.path(), config_path)
+    config_tools.copy_config(context.stage("matsim.config.config"), local_config_path)
+
     # Calculate the stop categories
     transit_schedule_input_path = context.stage("matsim.scenario.network.pt")["schedule"]
     transit_schedule_output_path = "%stransit_schedule.xml.gz" % context.config("output_prefix")
@@ -174,33 +213,9 @@ def execute(context):
     
     assert os.path.exists("%s/%stransit_schedule.xml.gz" % (context.path(), context.config("output_prefix")))
 
-    # Adapt the config
-    eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.scenario.RunAdaptConfig", [
-        "--input-path", config_path,
-        "--output-path", config_path,
-        "--downsamplingRate", context.config("input_downsampling"),
-        "--replanningRate", "0.05",
-        "--hasFreight", context.config("use_freight"),
-        "--prefix", context.config("output_prefix"),
-        "--carCostModel", context.config("car_cost_model").lower(),
-        "--routingDistanceUtility", context.stage("calibration.car_routing_vot.optimal_value"),
-        "--routeBikeInNetwork", str(context.config("route_bike")).lower()
-        ]
-        + config_utils.network_calibration_files_paths(context)
-        )
-    
-    assert os.path.exists("%s/%sconfig.xml" % (context.path(), context.config("output_prefix")))
-
-    # If we want to simulate buses, some lines have to be added to the config.
-    if not context.config("useScheduleBasedTransport"):
-        config_utils.add_SBBPT_module(context)
-
-    # Create the module for PT pricing
-    config_utils.add_ptZones_module(context)
-
-    # Write PT routing parameters within the config
-    pt_parameters = context.stage("calibration.pt_routing.pt_routing_parameters")
-    config_utils.adjust_pt_routing_parameters(context, pt_parameters)
+    shared_config.adapt_for_routing(context, local_config_path)
+    config_tools.change_params(local_config_path,
+                               local_calibration_parameters, create=True)
 
     # Route the population
     population_output_path = "%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix"))
@@ -222,7 +237,12 @@ def execute(context):
         "--config-path", config_path
     ])
     
+    # Apply runtime/calibration settings after routing so calibration does not
+    # become active inside the population router or scenario validator.
+    config_path = shared_config.adapt_for_simulation(context, local_config_path)
+    config_tools.change_params(local_config_path, local_calibration_parameters, create=True)
+
     # Cleanup
     os.remove("%s/prepared_population.xml.gz" % context.path())
 
-    return "%sconfig.xml" % context.config("output_prefix")
+    return config_path

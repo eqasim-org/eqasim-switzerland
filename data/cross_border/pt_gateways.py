@@ -36,7 +36,7 @@ MIN_DEPARTURES = 5
 
 
 def configure(context):
-    context.config("border_offset", default = 20000)
+    context.config("border_offset", default = 50000)
     context.config("cross_border_pt_gateways_file", default = None)
 
     context.stage("data.cross_border.interview_places")

@@ -41,7 +41,7 @@ def configure(context):
     context.stage("analysis.counts.matching.compare")
     context.stage("data.spatial.swiss_border")
     context.config("input_downsampling")
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
     configure_simulation_path(context)
 
 

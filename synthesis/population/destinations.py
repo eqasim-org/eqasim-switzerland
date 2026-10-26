@@ -1,8 +1,8 @@
 import pandas as pd
 import geopandas as gpd
-import data.spatial.ovgk
+from data.spatial.ovgk import impute as impute_ovgk
 from data.cross_border.destinations import make_entry_border_facility_id, make_exit_border_facility_id
-
+from synthesis.population.spatial.secondary_nn.tools import NN_ALGORITHMS, add_osm_destinations
 
 def configure(context):
     context.stage("synthesis.population.destinations_statent")
@@ -11,6 +11,10 @@ def configure(context):
     context.stage("data.spatial.ovgk")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
+    context.config("locations_algorithm", "rda")
+    context.config("secondary_nn_osm_destination_radius_m", 50.0)
+    if context.config("locations_algorithm").lower() in NN_ALGORITHMS:
+        context.stage("data.osm.secondary_features")
     context.config("generate_outbound_flows", False)
     context.config("include_cross_border", default=False)
 
@@ -78,7 +82,7 @@ def build_border_destinations(context):
         df[column] = False
 
     df_ovgk = context.stage("data.spatial.ovgk")
-    df_spatial = data.spatial.ovgk.impute(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="border_facility")
+    df_spatial = impute_ovgk(context, df_ovgk, df, ["destination_id"], chunk_size=1e3, point_type="border_facility")
     df = df.merge(df_spatial[["destination_id", "ovgk"]], how="left", on="destination_id")
 
     df_municipality_type = context.stage("data.spatial.municipality_types")
@@ -130,4 +134,13 @@ def execute(context):
     df_destinations = df_destinations.groupby("destination_id", as_index = False).agg(aggregation)
     df_destinations = gpd.GeoDataFrame(df_destinations, geometry = "geometry", crs = df_borders.crs)
 
+    # Fill gaps in the NN leisure catalogue without creating employment locations.
+    if context.config("locations_algorithm").lower() in NN_ALGORITHMS:
+        municipalities, _ = context.stage("data.spatial.municipalities")
+        municipalities = municipalities.merge(context.stage("data.spatial.municipality_types"))
+        df_destinations = add_osm_destinations(
+            df_destinations, context.stage("data.osm.secondary_features"),
+            municipalities, context.stage("data.spatial.ovgk"),
+            radius_m=float(context.config("secondary_nn_osm_destination_radius_m")),
+        )
     return df_destinations

@@ -19,10 +19,10 @@ def configure(context):
     context.stage("synthesis.population.spatial.primary.work.fixed_work_locations")
     context.stage("synthesis.population.destinations")    
 
-    if context.config("include_cross_border"):
+    if context.config("include_cross_border", False):
         context.stage("data.cross_border.destinations")
 
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     if context.config("include_external_population"):
         context.stage("data.external_population.commutes")
 

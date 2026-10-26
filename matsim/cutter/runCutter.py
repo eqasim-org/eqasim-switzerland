@@ -1,7 +1,7 @@
 """Run the selected Java cutter; scenario assembly lives in scenario.py."""
 import os.path
 import matsim.runtime.eqasim as eqasim
-from .cutter_tools import change_params
+from matsim.config.tools import change_params
 from .file_paths import simulation_root
 
 
@@ -18,7 +18,8 @@ def configure(context):
     cutter_version(context)
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
-
+    context.config("java_memory", "50G", volatile=True)
+    
     # If this path is provided, we just use it to get the parent model and cut it
     if not context.config("cutter.scenario_path"):
         context.stage("matsim.simulation.run")    

@@ -16,12 +16,12 @@ def configure(context):
     context.stage("analysis.travel_times.matsim.get")
     context.stage("analysis.travel_times.APIs.get")
 
-    context.config("travel_times_from", default="tomtom")
+    context.config("travel_times_from", default='tomtom')
     # assert context.config("travel_times_from").lower() != "all", \
     #     "travel_times_from must be either 'google', 'tomtom', 'mapbox' for calibration process"
     context.config("output_path")
     context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    context.config("simulation_directory", default = 'simulation_output')
 
 def load_and_merge_data(context):
     """

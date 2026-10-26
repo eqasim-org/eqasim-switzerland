@@ -11,7 +11,6 @@ config:
     threads: 24
     random_seed: 0
     hot_deck_matching_runners: 24
-    disable_progress_bar: true
     java_memory: 100G
     input_downsampling: 0.001
     enable_scaling: true

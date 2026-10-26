@@ -11,18 +11,25 @@ import torch
 from .location_helpers import (_prepare_primary_locations, _prepare_person_attributes, _euclidean, SECONDARY_SET, _get_first_location)
 from .model_wrappers import HierarchicalLocationChoiceModel
 from .short_range_model import SHORT_RANGE_MODEL_THRESHOLD
+from .hierarchical_utils import DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION
+from .tools import MOBILITY_FEATURES, mobility_features
+from .chain_state import chain_state_vector
+
 logger = logging.getLogger("synpp")
 
 _WORKER_STATE = {}
 _WORKER_PROGRESS_QUEUE = None
 _WORKER_PROGRESS_FLUSH_EVERY = 100
 _CHUNCK_SIZE_PERSONS = 10000
-DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 10.0  # meters
 
 def configure(context):
+    context.config("secondary_nn_use_target_distance", True)
     context.stage("data.constants")
+    context.stage("data.spatial.ovgk")
     context.stage("synthesis.population.trips")
     context.stage("synthesis.population.enriched")
+    context.stage("synthesis.population.models.subscriptions")
+    context.stage("synthesis.population.sampled")
     context.stage("synthesis.population.spatial.home.locations")
     context.stage("synthesis.population.spatial.primary.locations")
     context.stage("synthesis.population.destinations")
@@ -34,6 +41,8 @@ def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.subregional_model")
     context.stage("synthesis.population.spatial.secondary_nn.local_model")
     context.stage("synthesis.population.spatial.secondary_nn.short_range_model")
+    if not context.config("secondary_nn_use_target_distance"):
+        context.stage("synthesis.population.spatial.secondary_nn.short_trip_classifier")
 
     context.config("random_seed")
     context.config("threads", volatile=True)
@@ -42,6 +51,9 @@ def configure(context):
     context.config("secondary_nn_short_min_candidates", 6)
 
 def execute(context):
+
+    # Load models and bind purpose masks to their actual destination pools.
+
     logger.info("Starting secondary_nn location assignment")
     constants = context.stage("data.constants")
     crs = constants.LV95    
@@ -56,6 +68,16 @@ def execute(context):
     logger.info("\t Loading population data")    
     df_primary = _prepare_primary_locations(context)
     df_person = _prepare_person_attributes(context)
+    source_persons = context.stage("synthesis.population.models.subscriptions").copy()
+    # Use actual home accessibility and the synthetic person's mobility resources.
+    home_coords = df_primary[["person_id", "home"]].copy()
+    home_coords["home_x"] = home_coords.home.map(lambda p: p.x)
+    home_coords["home_y"] = home_coords.home.map(lambda p: p.y)
+    source_persons = source_persons.drop(columns=["home_x", "home_y"], errors="ignore").merge(
+        home_coords[["person_id", "home_x", "home_y"]], on="person_id", validate="one_to_one")
+    mobility = mobility_features(source_persons, ovgk=context.stage("data.spatial.ovgk"))
+    mobility["person_id"] = source_persons.person_id.to_numpy()
+    df_person = df_person.merge(mobility, on="person_id", validate="one_to_one")
     df_meta = df_primary.merge(df_person, on="person_id", how="left")    
 
     # Precompute numeric coordinates once to reduce repeated Point -> xy conversions in hot loops.
@@ -74,7 +96,7 @@ def execute(context):
     
     df_meta = df_meta[["person_id","home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", 
                        "sex", "employed", "income_class", "car_availability","has_work", "has_education",
-                       "work_destination_id","education_destination_id", "home_destination_id"]]
+                       "work_destination_id","education_destination_id", "home_destination_id"] + MOBILITY_FEATURES]
     
     # remove nans from meta data, they can provoke an error or loss of performance with numba
     df_meta.loc[~df_meta["has_work"], ["work_x","work_y"]] = 0.0
@@ -102,13 +124,17 @@ def execute(context):
                                     "departure_time_normalized", "daily_longest_distance_from_work",
                                     "activity_duration_h", "target_distance", "trip_origin_distance_from_home", "activity_chain"]].rename(columns={"person_id": "mz_person_id"})
 
-    df_trips = df_trips.merge(mz_chains, how="left", on=["mz_person_id", "trip_id"])
-    df_trips = df_trips.sort_values(by=["person_id", "trip_id"]).reset_index(drop=True)
+    df_trips = df_trips.merge(mz_chains, how="left", on=["mz_person_id", "trip_id"], validate="many_to_one", indicator=True)
+    missing = df_trips["_merge"] != "both"
+    if missing.any():
+        raise RuntimeError(f"Missing microcensus chain features for {int(missing.sum())} synthetic trips")
+    df_trips = df_trips.drop(columns="_merge")
+    df_trips = df_trips.sort_values(by=["person_id", "trip_index"]).reset_index(drop=True)
 
     # chunk by person_id to ensure all trips of a person are processed together, and to enable efficient parallelization without shared state
     logger.info("Assigning secondary locations with secondary_nn")
     worker_torch_threads = 2
-    num_processes = int(context.config("threads")/worker_torch_threads)    
+    num_processes = max(1, int(context.config("threads")/worker_torch_threads))
     chunk_size_persons = max(1, int(_CHUNCK_SIZE_PERSONS))    
     progress_flush_persons = max(1, int(_WORKER_PROGRESS_FLUSH_EVERY))
 
@@ -361,7 +387,7 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
     
     meta_cols = ["home_x", "home_y", "work_x", "work_y", "edu_x", "edu_y", "age", "sex", "employed", "income_class", 
                 "car_availability", "has_work", "has_education",
-                "work_destination_id","education_destination_id","home_destination_id"]
+                "work_destination_id","education_destination_id","home_destination_id"] + MOBILITY_FEATURES
     meta_lookup = df_meta_chunk.set_index("person_id")[meta_cols].to_dict("index")
     person_groups = df_trips_chunk.groupby("person_id", sort=False)
     pending_progress = 0
@@ -436,7 +462,14 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
                                                         target_distance=target_distance,
                                                         activity_chain_vector=activity_chain_vector,
                                                         origin_purpose=origin_purpose,
-                                                        purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng)
+                                                        purpose=following_purpose, has_work=has_work, has_education=has_education, rng=rng,
+                                                        mobility_vector=np.asarray([info[c] for c in MOBILITY_FEATURES], dtype=np.float32),
+                                                        chain_state_vector=chain_state_vector(
+                                                            chain_daily_total, consumed_fore_trip_start,
+                                                            following_purpose_arr[local_idx:], current_x, current_y,
+                                                            primary_locations={"home": (home_x, home_y),
+                                                                               "work": (work_x, work_y) if has_work else None,
+                                                                               "education": (edu_x, edu_y) if has_education else None}))
 
                     # sample a destination point within the predicted level 2 cell                 
 

@@ -8,8 +8,8 @@ from shapely.ops import unary_union
 def configure(context):
     context.config("data_path")
 
-    context.config("include_external_population", default = False)
-    if context.config("include_external_population", default = False):
+    context.config("include_external_population", default = True)
+    if context.config("include_external_population"):
         context.config("outbound_flows_perimeter", default=None)
         context.stage("data.external_population.constants")
 

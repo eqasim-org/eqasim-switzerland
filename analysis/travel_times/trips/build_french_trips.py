@@ -13,7 +13,7 @@ def configure(context):
     context.config("french_trip_distance_max_m", default=30_000)
     context.config("random_seed")
     
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     context.stage("data.external_population.constants")
 
     # here we check if any of the stages that require the network from prepare are requested, to avoid unnecessary dependencies and re-running prepare when not needed

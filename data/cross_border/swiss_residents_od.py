@@ -28,7 +28,7 @@ def configure(context):
     context.stage("data.cross_border.pt_gateways")
     context.stage("data.spatial.swiss_border")
 
-    context.config("border_offset", default = 20000)
+    context.config("border_offset", default = 50000)
 
 
 def process_from_to_trips(df_trips, context, rng):

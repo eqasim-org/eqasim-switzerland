@@ -14,10 +14,10 @@ def configure(context):
     context.stage("data.constants")
     context.stage("data.spatial.cantons")
 
-    if context.config("include_cross_border"):
+    if context.config("include_cross_border", False):
         context.stage("data.cross_border.generate_cross_border_traffic")        
 
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     if context.config("include_external_population"):
         context.stage("data.external_population.read_outputs")
         context.stage("data.external_population.constants")

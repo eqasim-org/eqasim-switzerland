@@ -8,9 +8,9 @@ logger = logging.getLogger("synpp")
 def configure(context):
     context.config("output_path")
     context.config("output_id")
-    context.config("simulation_directory", default = "simulation_output")
+    context.config("simulation_directory", default = 'simulation_output')
 
-    context.config("travel_times_from", default="tomtom")
+    context.config("travel_times_from", default='tomtom')
     if not context.config("travel_times_from").lower() in ["google", "tomtom", "mapbox"]:
         logger.warning("Invalid value for 'travel_times_from'. Defaulting to 'tomtom'.")
     

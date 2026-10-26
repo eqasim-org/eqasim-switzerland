@@ -10,6 +10,7 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
+    context.config("random_seed")
 
     context.stage("data.microcensus.households")
     context.stage("data.microcensus.trips")
@@ -203,7 +204,8 @@ def execute(context):
     df_mz_trips, filterout_person_ids, persons_outside_ch, persons_crossing_the_border = context.stage("data.microcensus.trips")
 
     df_mz_persons = pd.merge(df_mz_persons, df_mz_households)
-    df_mz_persons = data.microcensus.income.impute(df_mz_persons)
+    df_mz_persons = data.microcensus.income.impute(
+        df_mz_persons, random_seed=context.config("random_seed"))
 
     initial_size = len(df_mz_persons)
 

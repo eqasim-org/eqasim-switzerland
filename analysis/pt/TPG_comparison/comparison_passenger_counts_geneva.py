@@ -52,10 +52,10 @@ def configure(context):
     context.config("analysis.pt.include_lemanis",   default = True)
     context.config("analysis.pt.lemanis_year",      default = 2022)  # 2022 or 2024
 
-    if context.config("analysis.pt.include_lemanis") and context.config("analysis.pt.lemanis_year") == 2024: 
+    if context.config("analysis.pt.include_lemanis") and context.config("analysis.pt.lemanis_year") == 2024:
         context.config("analysis.pt.lemanis_path_2024", default = "Geneva_passenger_counts/Lemanis/2024")
-    
-    elif context.config("analysis.pt.include_lemanis") and context.config("analysis.pt.lemanis_year") == 2022: 
+
+    elif context.config("analysis.pt.include_lemanis") and context.config("analysis.pt.lemanis_year") == 2022:
         context.config("analysis.pt.lemanis_path_2022", default = "Geneva_passenger_counts/Lemanis/2022")
 
 
@@ -66,7 +66,7 @@ def run(gtfs_path, perimeter_shapefile, tpg_data_path, matsim_output_folder, inp
         sbb_path = None, sbb_year = 2024,
         stop_line_comparison = False, stop = "Genève, gare Cornavin", line = None,
         use_schedule_stops = True, stop_all_lines = None, skip_global_comparison = False, counts_source = "auto"):
-    
+
     if include_lemanis and not lemanis_path:
         raise RuntimeError("include_lemanis is true but lemanis_path is not set")
 

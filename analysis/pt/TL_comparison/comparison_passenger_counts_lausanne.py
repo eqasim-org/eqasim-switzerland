@@ -63,7 +63,7 @@ def configure(context):
 
     context.config("analysis.pt.include_sbb", default = True)
     context.config("analysis.pt.sbb_path",    default = "Geneva_passenger_counts/SBB/passagierfrequenz.csv")
-    context.config("analysis.pt.sbb_year",    default = 2024)
+    context.config("analysis.pt.tl_sbb_year",    default = 2024)
 
     context.config("specific_day_scenario", default = "workday")
 
@@ -332,7 +332,7 @@ def execute(context):
         night_hours             = context.config("analysis.pt.night_hours"),
         sbb_path                = (os.path.join(data_path, context.config("analysis.pt.sbb_path"))
                                    if context.config("analysis.pt.include_sbb") else None),
-        sbb_year                = context.config("analysis.pt.sbb_year"),
+        sbb_year                = context.config("analysis.pt.tl_sbb_year"),
         counts_source           = context.config("analysis.pt.counts_source"),
         day_scenario            = context.config("specific_day_scenario"),
     )

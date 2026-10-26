@@ -10,11 +10,13 @@ import logging
 logger = logging.getLogger("synpp")
 
 def configure(context):
+    context.config("random_seed")
     context.config("data_path")
     context.stage("synthesis.population.models.income")
     context.stage("data.structural_survey.structural_survey")
 
 def execute(context):
+    random_seed = int(context.config("random_seed"))
 
     # =========================================================
     # CONFIG FOR ANALYSIS
@@ -124,7 +126,7 @@ def execute(context):
             max_depth=4,
             learning_rate=0.1,
             max_iter=100,
-            random_state=42
+            random_state=random_seed
         )
         student_model.fit(X_student_survey, y_student, sample_weight=w_student)
 
@@ -133,7 +135,7 @@ def execute(context):
             n_estimators=300,
             max_depth=15,
             min_samples_leaf=5,
-            random_state=42,
+            random_state=random_seed,
             n_jobs=1
         )
         student_model.fit(X_student_survey, y_student, sample_weight=w_student)
@@ -145,7 +147,7 @@ def execute(context):
             learning_rate=0.04,
             depth=10,
             l2_leaf_reg=6.0,
-            random_seed=42,
+            random_seed=random_seed,
             verbose=100,
             bootstrap_type="Bernoulli",
             subsample=0.8
@@ -279,7 +281,7 @@ def execute(context):
     # =========================================================
 
     pop_df['STUDENT_draw'] = np.nan
-    SEED_STUDENT = 789
+    SEED_STUDENT = random_seed
 
     classes_stu = student_model.classes_.astype('int64')
 

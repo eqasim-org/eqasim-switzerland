@@ -37,7 +37,7 @@ def configure(context):
     context.stage("analysis.counts.cross_border_flow_events")
     configure_simulation_path(context)
     configure_flow_map_extents(context)
-    context.config("only_weekday", default=False)
+    context.config("only_weekday", default=True)
     context.config("input_downsampling")
     context.config("pt_flow_min_daily_count", default=1)
 

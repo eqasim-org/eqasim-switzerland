@@ -35,7 +35,7 @@ def configure(context):
     context.config("random_seed")
     context.config("data_path")
     context.config("lcv_poisson_sampling", default=False)
-    context.config("use_freight")    
+    context.config("use_freight", True)
 
 # -----------------------------------------------------------------------------
 # HELPER FUNCTIONS

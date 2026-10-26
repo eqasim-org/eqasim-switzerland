@@ -28,7 +28,7 @@ def configure(context):
     context.stage("analysis.counts.cross_border_flow_events")
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
-    context.config("only_weekday", default = False)
+    context.config("only_weekday", default=True)
     context.config("input_downsampling")
     context.config("cross_border_flow_min_daily_count", default = 20)
     # Roads outside Switzerland are drawn up to this distance (m) from the extent of the map
@@ -93,7 +93,7 @@ def _find_output_file(simulation_path, filename):
 
 def load_cross_border_person_ids(persons_path):
     df = pd.read_csv(
-        persons_path, sep = ";", usecols = ["person", "subpopulation"], 
+        persons_path, sep = ";", usecols = ["person", "subpopulation"],
         dtype = {"person": str}, low_memory = False,
     )
     return set(df.loc[df.subpopulation == "crossborder", "person"])

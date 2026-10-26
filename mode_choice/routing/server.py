@@ -14,7 +14,7 @@ def configure(context):
     context.stage("mode_choice.defaults")
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
-    context.stage("matsim.scenario.network.mapped")
+    context.stage("matsim.scenario.network.pt")
     context.stage("mode_choice.routing.config")
     context.stage("calibration.car_routing_vot.optimal_value")
     context.config("threads", volatile=True)
@@ -60,7 +60,7 @@ def execute(context):
     # Start asynchronously; routing stages wait for readiness when needed.
     command = [binary, "-cp", jar, "-Xmx" + xmx, "-Xms" + xms, "-XX:+UseParallelGC",
                "-Djava.io.tmpdir=" + str(temporary), "-Dmatsim.useLocalDtds=true", "-Djava.awt.headless=true",
-               ROUTER_SERVER_CLASS, "--network-path", str(context.stage("matsim.scenario.network.mapped")["network"]),
+               ROUTER_SERVER_CLASS, "--network-path", str(context.stage("matsim.scenario.network.pt")["network"]),
                "--config-path", config, "--routingDistanceUtility", str(float(distance_utility)),
                "--compute-cost", "true", "--car-cost-model", cost_model,
                "--host", "127.0.0.1", "--port", "0",

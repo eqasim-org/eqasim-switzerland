@@ -28,8 +28,8 @@ def configure(context):
     context.stage("synthesis.population.activities")
     context.stage("synthesis.population.spatial.locations")
     context.stage("data.spatial.cantons")
-    context.config("use_freight", default = False)
-    context.config("use_lcv", default = False)
+    context.config("use_freight", default = True)
+    context.config("use_lcv", default = True)
     context.stage("synthesis.freight.trips")
     context.stage("synthesis.lcv.trips")
     context.stage("data.constants")
@@ -43,7 +43,7 @@ def configure(context):
     if context.config("include_cross_border"):
         context.stage("data.cross_border.generate_cross_border_traffic")
 
-    context.config("include_external_population", default = False)
+    context.config("include_external_population", default = True)
     if context.config("include_external_population"):
         context.stage("data.external_population.read_outputs")
         context.stage("data.external_population.constants")

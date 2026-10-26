@@ -16,7 +16,7 @@ def configure(context):
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.swiss_border")
 
-    context.config("include_external_population", default=False)
+    context.config("include_external_population", default=True)
     if context.config("include_external_population"):
         context.stage("data.external_population.hts_trips.trips")
         context.stage("data.external_population.constants")

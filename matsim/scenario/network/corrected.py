@@ -5,6 +5,7 @@ import matsim.scenario.network.utils.pt_route_check as pt_route_check
 def configure(context):
     context.stage("matsim.scenario.network.mapped")
     context.config("data_path")
+    context.config("export_detailed_network", True)
     # Official line routes, by GTFS agency_id: {agency_id: shapefile}, paths absolute or relative to data_path. The lines
     # of a shapefile are only compared with the lines of its agency (Geneva and Lausanne both have lines 1 to 9...).
     # Also accepted: one path (used for the lines of all the agencies).
@@ -54,6 +55,8 @@ def execute(context):
     gtfs_path = "%s/output" % context.path("data.gtfs.cleaned") if agencies or by_agency or context.config("pt_route_gtfs_shapes") else None
     use_shapes = context.config("pt_route_gtfs_shapes") and os.path.exists("%s/shapes.txt" % gtfs_path)
 
+    geometry_path = "%s/detailed_network.csv" % context.path()
+
     _, n_patched = pt_route_check.run(
         schedule_path           = paths["schedule"], network_path = paths["network"],
         shapefile_path          = shapefile_path,
@@ -68,6 +71,8 @@ def execute(context):
         agencies                = agencies,
         gtfs_trips_path         = "%s/trips.txt" % gtfs_path if use_shapes else None,
         gtfs_shapes_path        = "%s/shapes.txt" % gtfs_path if use_shapes else None,
+        input_geometry_path     = paths["geometry"] if context.config("export_detailed_network") else None,
+        output_geometry_path    = geometry_path if context.config("export_detailed_network") else None,
     )
 
     assert os.path.exists(corrected_schedule_path)
@@ -77,5 +82,6 @@ def execute(context):
         schedule     = corrected_schedule_path,
         road_network = paths["road_network"],
         vehicles     = paths["vehicles"],
+        geometry     = geometry_path if n_patched > 0 and context.config("export_detailed_network") else paths["geometry"],
         report       = "%s/route_correction.csv" % context.path(),
     )

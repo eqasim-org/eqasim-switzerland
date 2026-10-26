@@ -10,7 +10,7 @@ def configure_simulation_path(context):
     context.config("analysis.counts.detailed_network_path", default="")
     context.config("output_path")
     context.config("output_id")
-    context.config("simulation_directory", default="simulation_output")
+    context.config("simulation_directory", default='simulation_output')
 
 
 def get_simulation_path(context):

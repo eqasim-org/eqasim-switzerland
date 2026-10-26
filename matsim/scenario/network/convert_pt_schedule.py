@@ -1,5 +1,5 @@
 def configure(context):
-    pt_schedule = context.config("pt_schedule", "gtfs")
+    pt_schedule = context.config("pt_schedule", 'gtfs')
 
     if pt_schedule == "hafas":
         context.stage("matsim.scenario.network.convert_hafas", alias = "pt_schedule")
