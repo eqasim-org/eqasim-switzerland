@@ -1,0 +1,4 @@
+results/
+paper/
+__pycache__/
+.pytest_cache/
