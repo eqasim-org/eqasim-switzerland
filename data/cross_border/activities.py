@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -5,6 +7,8 @@ from shapely import LineString
 
 from data.cross_border.destinations import make_entry_border_facility_id, make_exit_border_facility_id
 from data.cross_border.travel_times import estimate_travel_time
+
+logger = logging.getLogger("synpp")
 
 
 def merge_refined_points(population, network_projection, real_x_col, real_y_col,
@@ -208,7 +212,10 @@ def retime_with_travel_times(df_activities):
     The trip times come from a microcensus chain (a Swiss resident's trips, mostly
     short), whereas the trips of the cross-border agents start or end abroad, up to
     border_offset away, or at a pt gateway station. The activities in Switzerland
-    (the middle activities of the "From-To" agents) keep their microcensus times;
+    (the middle activities of the "From-To" agents) keep their microcensus times
+    unless reaching the first one would require departing before the day starts.
+    In that case, delay the whole Swiss activity block by the minimum required
+    offset, preserving its durations and relative timing;
     the trips around them get a duration from their distance (data.cross_border.
     travel_times): computed backwards from the arrival at the first activity in
     Switzerland, and forwards from the departure from the last one. The border
@@ -238,6 +245,8 @@ def retime_with_travel_times(df_activities):
     person_starts = np.flatnonzero(np.append(True, df["person_id"].values[1:] != df["person_id"].values[:-1]))
     person_ends = np.append(person_starts[1:], len(df))
 
+    delayed_people = 0
+    maximum_delay = 0.0
     for first, stop in zip(person_starts, person_ends):
         last = stop - 1
         anchors = [k for k in range(first + 1, last) if is_anchor[k]]
@@ -249,9 +258,17 @@ def retime_with_travel_times(df_activities):
 
         # Backwards to the first activity
         for k in range(first_anchor - 1, first - 1, -1):
-            end[k] = max(start[k + 1] - travel_time[k], 0.0)
+            end[k] = start[k + 1] - travel_time[k]
             if k > first:
                 start[k] = end[k] - duration[k]
+
+        # Keep the initial activity's start fixed and delay infeasible chains as a block.
+        delay = max(start[first] - end[first], 0.0)
+        if delay > 0:
+            start[first + 1:last_anchor + 1] += delay
+            end[first:last_anchor + 1] += delay
+            delayed_people += 1
+            maximum_delay = max(maximum_delay, delay)
 
         # Forwards to the last activity
         for k in range(last_anchor + 1, stop):
@@ -264,6 +281,11 @@ def retime_with_travel_times(df_activities):
     df["start_time"] = start
     df["end_time"] = end
     df["duration"] = end - start
+
+    if delayed_people:
+        logger.info("Delayed %d cross-border activity chains to fit inbound travel after day start "
+                    "(maximum delay %.0f seconds); retained activity durations and one-second border stops.",
+                    delayed_people, maximum_delay)
 
     return df
 
