@@ -61,6 +61,17 @@ def prepare(caches, output):
     return manifest
 
 
+
+def replay_input_fingerprint(inputs):
+    # Hash array-valued chain features by content without changing replay inputs.
+
+    frame = inputs.copy()
+    for column in ['activity_chain', 'chain_state']:
+        if column in frame:
+            frame[column] = frame[column].map(tuple)
+    return hashlib.sha256(pd.util.hash_pandas_object(frame, index=False).values.tobytes()).hexdigest()
+
+
 def replay_models(caches, settings, output, prepared):
     from replay import select_cohort, replay, prepare_inputs
     observed = pd.read_parquet(output / 'survey.parquet')
@@ -70,9 +81,7 @@ def replay_models(caches, settings, output, prepared):
     cohort.to_parquet(output / 'replay_observed.parquet', index=False)
     reference = next((c for c in caches if c.kind == 'rda'), caches[0])
     inputs = prepare_inputs(reference, cohort)
-    fingerprint_frame = inputs.copy()
-    fingerprint_frame['activity_chain'] = fingerprint_frame.activity_chain.map(tuple)
-    input_sha256 = hashlib.sha256(pd.util.hash_pandas_object(fingerprint_frame, index=False).values.tobytes()).hexdigest()
+    input_sha256 = replay_input_fingerprint(inputs)
     predictions, detour = [], None
     provenance = {}
     for cache in caches:
@@ -102,7 +111,7 @@ CAPTIONS = {
 '04_home_to_destination_accessibility': 'Residential-to-destination accessibility transition probabilities, separately by car access. Each home-class row sums to 100% before independent rounding; absent cells are blank rather than evidence of a zero probability. Every panel uses the same color scale. Destination accessibility is evaluated from the same cached ÖV polygon source.',
 '05_person_level_activity_spaces': 'Secondary-destination radius of gyration and repeated-visit share among people with at least two secondary arrival legs. Radius is computed around each person’s mean secondary destination, counting repeated visits. Revisited cells use a fixed 250 m LV95 grid. Each person contributes once with their person weight, rather than once per trip. These statistics describe secondary destinations, not a complete daily activity space.',
 '06_observed_origin_survey_replay': 'Saved NN models evaluated on exactly the same sampled survey people and trips, resetting each trip to its observed origin and using observed chain features. Multiple destination draws are averaged for paired NN differences and have total weight equal to the observed trip weight. Histograms pool differences beyond ±40 km into the outer bins. The same income imputation and other observed inputs are held fixed across both NNs. Existing survey records may have been used to fit the models: this is a conditional diagnostic, not an out-of-sample performance estimate. It does not reproduce sequential synthetic-population rollout.',
-'08_model_selection_diagnostic': 'Observed-origin replay diagnostic: share of nonstationary survey trips routed to the short-range model, by observed distance and car access. The dotted separator marks 1.5 km. The learned selector does not receive the plotted trip distance as an input; distance is used here only for retrospective stratification. This is not held-out classifier performance. Lines average fitted local-expert probabilities when available, with historical decisions as a fallback. The table counts actual weighted draws; routing is probabilistic when distance is absent. Stationary trips below 10 m are excluded.',
+'08_model_selection_diagnostic': 'Observed-origin replay diagnostic: share of nonstationary survey trips routed to the short-range branch, by observed distance and car access. The distance-input pipeline may use direct distance-conditioned facility sampling in that branch; consult the recorded run policy. The dotted separator marks 1.5 km. The learned selector does not receive the plotted trip distance as an input; distance is used here only for retrospective stratification. This is not held-out classifier performance. Lines average fitted local-expert probabilities when available, with historical decisions as a fallback. The table counts actual weighted draws; routing is probabilistic when distance is absent. Stationary trips below 10 m are excluded.',
 '07_map': 'Spatial distribution of secondary destinations for the indicated purpose and city-origin cohort. Top: the same sampled microcensus trips, observed destinations versus observed-origin NN replay. Bottom: independently generated synthetic populations, RDA versus the two NNs. Every panel uses identical LV95 extent, 500 m cells and a shared square-root color normalization. Cell values are weighted destination mass per 1,000 eligible city-origin trips; out-of-frame destinations remain in the denominator and their visible share is annotated. Survey draw weights sum to the observed trip weight. Rows compare distributional patterns rather than identical population compositions. Zero cells are transparent. Roads, lakes and municipal boundaries are local inputs; no tile server is contacted.'}
 
 
@@ -194,6 +203,10 @@ def figures_and_report(caches, settings, output, prepared):
         'The compared simulations have one seed each. Person-cluster intervals do not measure between-seed model variability or the complete complex-survey design; very narrow population intervals should not be read as model certainty.',
         'Population weights are uniform within each sampled synthetic population. Survey trip statistics use person weights per trip; activity-space summaries use one person weight per person. Household clustering and survey strata are unavailable to this comparison.',
         'Car access is not car ownership. ÖV A/B indicates high accessibility and D/no-class low accessibility; no class is not treated as a missing value. Extent clipping excludes international secondary legs from statistical comparisons.']
+    distance_cache = next((cache for cache in caches if cache.kind == 'nn_distance'), None)
+    if distance_cache is not None and distance_cache.config('secondary_nn_short_sampling') == 'distance':
+        threshold = distance_cache.config('secondary_nn_short_trip_threshold_m', 1500.)
+        caveats.insert(0, f'The distance-input NN pipeline samples short-trip facilities directly by compatibility with the supplied distance, up to {threshold/1000:g} km. Purpose eligibility and the origin H3 neighbourhood are preserved. Its short-distance distribution is therefore constrained by input distances, rather than independently learned. Longer trips use the neural hierarchy; the distance-free pipeline retains its learned experts and selector.')
     findings += ['', '## Interpretation and limits', ''] + ['- ' + line for line in caveats]
     (output / 'findings.md').write_text('\n'.join(findings) + '\n')
     overview = overall[['dataset', 'trips', 'persons', 'mean_km', 'median_km', 'p90_km', 'short_share', 'long_share_20km']]
@@ -210,7 +223,7 @@ def figures_and_report(caches, settings, output, prepared):
     if replay_manifest and replay_manifest['generation'] == prepared['generation']:
         effective_settings['actual_replay'] = {key: replay_manifest[key] for key in ['seed', 'draws', 'max_replay_people', 'selected_people', 'selected_trips']}
     write_json(output / 'analysis_settings.json', effective_settings)
-    write_json(output / 'analysis_provenance.json', dict(created_utc=datetime.now(timezone.utc).isoformat(), python=sys.version, packages={name: importlib.metadata.version(name) for name in ['numpy', 'pandas', 'geopandas', 'matplotlib', 'torch', 'scikit-learn']}, code_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.glob('*.py')}, pipeline_code_sha256={name: hashlib.sha256((REPOSITORY/'synthesis/population/spatial/secondary_nn'/name).read_bytes()).hexdigest() for name in ['mz_chains.py', 'model_wrappers.py', 'feature_encoding.py', 'h3.py']}))
+    write_json(output / 'analysis_provenance.json', dict(created_utc=datetime.now(timezone.utc).isoformat(), python=sys.version, packages={name: importlib.metadata.version(name) for name in ['numpy', 'pandas', 'geopandas', 'matplotlib', 'torch', 'scikit-learn']}, code_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.glob('*.py')}, pipeline_code_sha256={name: hashlib.sha256((REPOSITORY/'synthesis/population/spatial/secondary_nn'/name).read_bytes()).hexdigest() for name in ['mz_chains.py', 'model_wrappers.py', 'feature_encoding.py', 'h3.py', 'tools.py', 'locations.py']}))
     LOG.info('Report: %s', output / 'report.html')
 
 

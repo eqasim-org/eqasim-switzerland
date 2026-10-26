@@ -165,3 +165,212 @@ probability for each draw. Selection-diagnostic lines average fitted probabiliti
 when available; the CSV table counts actual weighted draws. A trip can therefore
 contribute to both experts in that table. Historical deterministic outputs fall
 back to averaging their recorded decisions.
+
+## Distance-loss weight experiment
+
+Run one sequential job for weights **0.2, 0.3 and 0.5**, followed by a comparison
+against the completed **0.1** distance-enabled run:
+
+```bash
+bash "analysis/secondary locations/submit_loss_sweep.sh"
+```
+
+The default source is `config_dib_10_nn_distance.yml`. The submitter first pins
+its completed assignment, model checkpoints and upstream artifact identities.
+The original YAML, pipeline metadata, fitted 0.1 models and input caches remain
+read only. A private snapshot is written under the ignored results directory;
+it can contain private configuration values and must not be published.
+
+Each weight retrains the existing regional, subregional, local and short-range
+expert stages, in that order, and reruns secondary-location assignment. The
+changed weight is `secondary_nn_distribution_loss_weight`, multiplying the sum
+of origin-distance CRPS, home-distance CRPS and spatial energy. It applies to
+all four experts in the distance-enabled experiment. Population synthesis,
+primary locations, destinations, OSM, H3 and detour factors are read from the
+same frozen completed run. The job does not build or simulate MATSim. The
+no-distance experiment is unaffected.
+
+The runner executes the normal stage `configure`/`execute` functions through a
+restricted context which can only read the pinned upstream stages and results
+of the preceding expert stages. This avoids invalidating unrelated caches when
+other pipeline code changes. Stage completion records support restarting a
+failed job: completed stages are reused after checking their output identities;
+partial stages run again. Changes to frozen input files, model code or trial
+settings cause a clear failure. One experiment directory cannot run twice
+concurrently. Trial processes run sequentially and release memory between trials.
+
+Slurm requests 24 CPUs, 11,947 MiB per CPU (approximately 280 GiB total), and 48
+hours. Pipeline stages use 12 threads. Logs are written to
+`logs/secondary_loss_weights_<job-id>.log`.
+
+The final comparison is written to:
+
+```text
+analysis/secondary locations/results/loss_weight_sweep/report.html
+```
+
+It includes population ECDFs, short-distance detail, errors around the 1.5 km
+expert switch, car/ÖV-class gradients, standardized behavioral contrasts, and
+paired error improvements over weight 0.1 with person-cluster intervals.
+Matched replay uses the same 1,000 city-origin survey people, three draws per
+trip, and one input realization from the frozen distance-enabled run. The
+baseline is replayed using its existing models; it is not retrained. Each
+weight's population locations and replay predictions are retained. Four figures
+are exported as PDF, SVG and 600-dpi PNG, with CSV statistics and JSON provenance.
+The replay is an observed-origin fitting-data diagnostic, not independent
+held-out validation. Compare physical errors and behavior rather than training
+loss values, whose weights differ between trials.
+
+To inspect or prepare the experiment without requesting a job:
+
+```bash
+uv run python "analysis/secondary locations/loss_sweep.py" --phase plan
+```
+
+Optional `--config`, `--output`, `--weights`, `--threads`, `--replay-people` and
+`--draws` arguments can be passed to the submitter. Use a new output directory
+when changing an existing experiment's settings. Resubmit the same command to
+resume after a failure.
+
+The completed experiment's [findings and short-range diagnosis](loss_weight_findings.md)
+explain why 0.1 was retained. To reproduce the geographic choice-set check:
+
+```bash
+uv run python "analysis/secondary locations/diagnose_short_range.py"
+```
+
+This check reads the cached H3 representative points and common survey cohort;
+its counts describe occupied cells before purpose filtering. It writes
+`results/loss_weight_sweep/short_range_diagnosis.json` without editing run caches.
+
+## Short-range-only hybrid trial
+
+To change only the distance-enabled short expert, reuse the completed sweep:
+
+```bash
+bash "analysis/secondary locations/submit_short_loss_trial.sh" \
+  --distribution-weight 0.05 --relative-weight 0.05 \
+  --output "analysis/secondary locations/results/short_loss_0.05_0.05"
+```
+
+The pair means **(short distribution coefficient, short relative-distance Huber
+coefficient)**. The hierarchy keeps its three saved 0.1 expert models. The runner
+fits only the short expert and reruns its secondary assignment, then predicts the
+same survey people and draws as the original study. All four reference
+populations and replay-error tables are reused. The new report compares five
+cases, with a separate settings table that distinguishes the short-only pair
+from the earlier global 0.1/0.2/0.3/0.5 coefficients.
+
+The job requests 24 CPUs and 11,947 MiB per CPU, uses 12 pipeline threads, and has
+a 12-hour limit. It does not execute the full Synpp graph. Its plan records the
+updated model source and checks the unchanged hierarchy stage identities and
+frozen reference artifacts. The original sweep plan and checkpoints are kept
+read only. The new coefficient pair and output directory must match a saved
+plan when resuming. New short models and predictions remain in that experiment's
+`trial/` folder; `report.html` and the five-case tables/figures are written at its
+root. Figures include the fifth case and distinguish global versus short-only
+coefficients in their legends. As before, the observed-origin replay is a
+fitting-data diagnostic rather than independent held-out validation.
+
+The corresponding pipeline controls are
+`secondary_nn_short_distribution_loss_weight` and
+`secondary_nn_short_relative_distance_loss_weight`. Both default to 0.05 for the
+distance-enabled short expert. Neither adds a short-specific penalty to the
+no-distance experiment; its distribution coefficient remains the shared value.
+
+## Original loss with independent fold validation
+
+The legacy-only short trial uses zero distribution scoring and the original
+0.07 relative-distance coefficient:
+
+```bash
+bash "analysis/secondary locations/submit_short_loss_trial.sh" \
+  --output "analysis/secondary locations/results/short_loss_legacy_cv5" \
+  --distribution-weight 0 --relative-weight 0.07 --loss-kind relative \
+  --validation-strategy cross_validation --min-epochs 20 --folds 5 \
+  --reference-focused "analysis/secondary locations/results/short_loss_0.05_0.05"
+```
+
+For `relative`, the 0.07 coefficient multiplies the original Huber penalties on
+expected distance from both origin and home. CRPS, spatial energy, and the
+separate auxiliary origin penalty are disabled. Target distance remains an
+input, the hierarchy remains its fitted 0.1 version, and routing still switches
+experts at 1.5 km.
+
+Five independent person-fold models validate after every epoch; each permanently
+excludes its own validation people from training. They explore at least 20
+epochs before stopping, then their weighted aggregate validation curve selects
+the duration of a fresh full-data production refit. Earlier epochs remain
+eligible if later exploration does not improve the score. This avoids the
+leakage from rotating folds through one continuously trained network.
+
+The report reuses the four global-weight references and the saved hybrid
+(0.05, 0.05) case, adding the new legacy/CV case as a sixth model configuration.
+It records the original-versus-auxiliary relative-loss scope, validation strategy,
+minimum exploration period and actual selected/refit epochs, and includes the
+five-fold learning curves. The new loss and training procedure change together;
+its difference from earlier trials cannot be attributed to the loss alone.
+Upstream feature transforms stay frozen, and the observed-origin replay remains
+a fitting-data diagnostic, not independent held-out validation.
+
+`--reference-focused` can be repeated for additional completed focused cases
+with the identical common-input fingerprint. Their source files are pinned and
+read only. Resume with the same arguments; changing loss kind, validation
+settings or references requires a new output directory. No full Synpp graph is
+executed by these focused jobs.
+
+### Controlled comparison of short-expert losses with five-fold training
+
+Run `bash "analysis/secondary locations/submit_cv_loss_sweep.sh"` to train the
+short expert sequentially with proper-score weights 0.1, 0.2, 0.3 and 0.5, then
+the (0.05, 0.05) hybrid. Each uses five independent person folds, validation
+every epoch, at least 20 exploration epochs before early stopping, and a final
+full-data refit for the selected duration. The completed legacy (0, 0.07) CV5
+trial is reused. All three hierarchy experts remain the original 0.1 models,
+which isolates changes to the short expert. Inputs, survey trips and draw seeds
+remain frozen. This is a short-expert experiment, not a new global weight sweep.
+
+The sequential job requests 24 CPUs and 11947M per CPU, uses 12 model threads,
+and has a 24-hour time limit. Completed stages are resumable. Outputs go to
+`analysis/secondary locations/results/short_loss_cv_sweep/report.html`.
+The report includes six CV cases, the original fixed-validation 0.1 baseline,
+training curves and duration selections, and paired before/after short-trip
+errors with person-cluster intervals. Historical 0.2/0.3/0.5 runs used different
+hierarchies; their before/after comparisons therefore cover only trips at or
+below 1.5 km. The report also records endpoint errors and car/OVGK patterns.
+Replay remains a fitting-record diagnostic; the independent folds select the
+training duration but do not make this replay an independent test set.
+
+Use `uv run python "analysis/secondary locations/cv_loss_sweep.py" --phase compare`
+to regenerate the combined report from completed predictions, without training.
+
+## Regenerate the three-way report
+
+From the repository root, run:
+
+```bash
+"analysis/secondary locations/generate_report"
+```
+
+From `analysis/secondary locations`, run `./generate_report`. This runs the
+existing analysis on the latest completed RDA, distance-input NN, and
+distance-free NN assignments, and writes `results/report.html`. All normal
+`run.py` arguments are forwarded. Use `./generate_report --slurm` inside this
+folder to submit the analysis with its existing 4-CPU, 8G-per-CPU launcher.
+To regenerate only after a successful pipeline job:
+
+```bash
+"analysis/secondary locations/generate_report" --slurm --after-job JOB_ID
+```
+
+The dependency must be a numeric Slurm job ID. The analysis never retrains models
+or starts a simulation. Completed assignment metadata determines short-trip
+sampling policy; editing the YAML after a run cannot silently change replay.
+
+`diagnose_distance_short.py` records the distance-input short-trip investigation
+using preserved pre-correction artifacts in `results/distance_short_investigation`.
+It exports the completed training history, candidate-radius coverage, and a paired
+counterfactual using distance-only facility sampling on identical observed origins,
+purposes and draw seeds. Hierarchy predictions above 1.5 km remain identical in
+that diagnostic. The counterfactual is not a sequential synthetic rollout or an
+independent held-out evaluation.

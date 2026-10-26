@@ -1,0 +1,21 @@
+#!/bin/bash
+# Regenerate the RDA, distance-input NN and distance-free NN comparison.
+set -euo pipefail
+analysis_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repository_directory="$(cd "$analysis_directory/../.." && pwd)"
+cd "$repository_directory"
+if [[ ${1:-} == --slurm ]]; then
+    shift
+    if [[ ${1:-} == --after-job ]]; then
+        [[ ${2:-} =~ ^[0-9]+$ ]] || { echo 'Expected a numeric Slurm job ID after --after-job' >&2; exit 2; }
+        pipeline_job_id="$2"
+        shift 2
+        mkdir -p "$repository_directory/logs"
+        exec sbatch --dependency="afterok:$pipeline_job_id" --chdir="$repository_directory" \
+            --output="$repository_directory/logs/secondary_analysis_%j.log" \
+            --error="$repository_directory/logs/secondary_analysis_%j.log" \
+            "$analysis_directory/run_slurm.sh" "$repository_directory" "$@"
+    fi
+    exec bash "$analysis_directory/submit.sh" "$@"
+fi
+exec uv run python "$analysis_directory/run.py" "$@"
