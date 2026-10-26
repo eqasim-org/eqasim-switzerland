@@ -36,6 +36,130 @@ PASSENGER_AERIALWAYS = {
 NN_ALGORITHMS = {"nn", "neural_network", "v2", "v.2", "locations_v2"}
 
 
+def model_validation_options(context, *, folds=None, strategy=None, min_epochs=None, val_every=1):
+    """Read declared controls; independent folds select duration before a full refit."""
+    strategy = context.config("secondary_nn_model_validation_strategy") if strategy is None else strategy
+    if strategy not in ("fixed", "cross_validation"):
+        raise ValueError("Model validation strategy must be fixed or cross_validation")
+    cross_validate = strategy == "cross_validation"
+    return dict(
+        n_val_folds=int(context.config("secondary_nn_model_validation_folds") if folds is None else folds),
+        early_stopping_min_epochs=int(context.config("secondary_nn_model_min_epochs") if min_epochs is None else min_epochs),
+        cross_validate=cross_validate, validation_seed=int(context.config("random_seed")),
+        val_every=1 if cross_validate else int(val_every),
+        refit_full=cross_validate or not bool(context.config("secondary_nn_use_target_distance")))
+
+
+def origin_candidate_indices(tree, origin_x, origin_y, support_mask, *, radius_m,
+                             min_candidates, expand_step_m=200., pad_to_min=True):
+    """Use identical origin-centred, purpose-eligible H3 neighbourhoods in both phases."""
+    support = np.asarray(support_mask, dtype=bool)
+    if support.ndim != 1 or not support.any():
+        raise ValueError("No eligible destinations for the requested short-range purpose")
+    if len(support) != tree.data.shape[0]:
+        raise ValueError("Short-range purpose mask must align with the H3 catalogue")
+    if not np.isfinite([origin_x, origin_y, radius_m]).all() or radius_m < 0:
+        raise ValueError("Short-range origin and radius must be finite, with nonnegative radius")
+    if int(min_candidates) < 1:
+        raise ValueError("Short-range minimum candidates must be positive")
+    center = np.array([[origin_x, origin_y]], dtype=float)
+
+    # Expand only around the origin, never toward the observed destination.
+
+    if expand_step_m is None:
+        nearby = tree.query_radius(center, r=radius_m)[0]
+        result = nearby[support[nearby]]
+        if pad_to_min and len(result) < min_candidates:
+            eligible = np.flatnonzero(support)
+            # The full nearest ordering is needed only in this compatibility path.
+            nearest = tree.query(center, k=len(support))[1][0]
+            result = np.union1d(result, nearest[support[nearest]][:min(min_candidates, len(eligible))])
+        return np.sort(result).astype(np.int64)
+    if not np.isfinite(expand_step_m) or expand_step_m <= 0:
+        raise ValueError("Short-range expansion step must be finite and positive")
+    required = min(int(min_candidates), int(support.sum()))
+    radius = float(radius_m)
+    while True:
+        nearby = tree.query_radius(center, r=radius)[0]
+        result = nearby[support[nearby]]
+        if len(result) >= required:
+            return np.sort(result).astype(np.int64)
+        radius += float(expand_step_m)
+
+
+def origin_training_choice_sets(frame, cell_ids, tree, support_masks, *, target_column,
+                                radius_m, min_candidates, expand_step_m):
+    """Audit observations against origin-only queries without inserting their target cells."""
+    leaf_index = {str(cell): i for i, cell in enumerate(cell_ids)}
+    valid_rows, choices, audit_rows = [], [], []
+    for i, (_, row) in enumerate(frame.iterrows()):
+        reason, indices = None, np.empty(0, dtype=np.int64)
+        chosen = leaf_index.get(str(row[target_column]))
+        mask = require_purpose_mask(support_masks, row.purpose)
+        if not np.isfinite([row.origin_x, row.origin_y]).all():
+            reason = "invalid_origin"
+        elif chosen is None:
+            reason = "observed_leaf_not_in_catalogue"
+        elif not mask[chosen]:
+            reason = "observed_leaf_has_no_eligible_facility"
+        else:
+            indices = origin_candidate_indices(tree, row.origin_x, row.origin_y, mask,
+                radius_m=radius_m, min_candidates=min_candidates, expand_step_m=expand_step_m)
+            if chosen not in indices:
+                reason = "observed_leaf_outside_origin_neighbourhood"
+        audit_rows.append(dict(person_id=row.person_id, trip_id=row.trip_id,
+                               reason=reason or "included", candidates=len(indices)))
+        if reason is None:
+            valid_rows.append(i)
+            choices.append(indices)
+    audit = pd.DataFrame(audit_rows, columns=["person_id", "trip_id", "reason", "candidates"])
+    return valid_rows, choices, audit
+
+
+class DistanceDestinationSampler:
+    """Sample actual facilities by target-radius compatibility across origin H3 cells."""
+
+    def __init__(self, cell_ids, pools, coordinates):
+        counts = np.asarray([len(pools.get(cell, ())) for cell in cell_ids], dtype=np.int64)
+        self.offsets = np.r_[0, np.cumsum(counts)]
+        self.facilities = [facility for cell in cell_ids for facility in pools.get(cell, ())]
+        self.xy = (np.concatenate([coordinates[cell] for cell, count in zip(cell_ids, counts) if count])
+                   if counts.any() else np.empty((0, 2)))
+        if self.xy.shape != (len(self.facilities), 2) or not np.isfinite(self.xy).all():
+            raise ValueError("Short-range facility coordinates must be finite and aligned with their pools")
+
+    def distribution(self, cells, origin_x, origin_y, target_distance, *, sigma_fraction=.1, sigma_min_m=25.):
+        if (not np.isfinite([origin_x, origin_y, target_distance, sigma_fraction, sigma_min_m]).all()
+                or target_distance < 0 or sigma_fraction <= 0 or sigma_min_m <= 0):
+            raise ValueError("Distance sampling needs finite coordinates, a nonnegative target and positive widths")
+        cells = np.asarray(cells, dtype=np.int64)
+        if len(np.unique(cells)) != len(cells):
+            raise ValueError("Short-range candidate cells must be unique")
+        starts = self.offsets[cells]
+        counts = self.offsets[cells + 1] - starts
+        total = int(counts.sum())
+        if not total:
+            raise ValueError("No purpose-eligible facilities in the short-range origin neighbourhood")
+
+        # Gather variable cell pools without scanning the whole facility catalogue per trip.
+
+        indices = np.repeat(starts - (np.cumsum(counts) - counts), counts) + np.arange(total)
+        distances = np.hypot(self.xy[indices, 0] - origin_x, self.xy[indices, 1] - origin_y)
+        sigma = max(sigma_min_m, sigma_fraction * target_distance)
+        error = np.abs(distances - target_distance)
+
+        # Subtract the best radial error so distant/sparse pools never become a uniform fallback.
+
+        relative_error = (error - error.min()) / sigma
+        log_weight = -.5 * relative_error * ((error + error.min()) / sigma)
+        weights = np.exp(log_weight)
+        return indices, weights / weights.sum()
+
+    def sample(self, cells, origin_x, origin_y, target_distance, rng, **widths):
+        indices, probability = self.distribution(cells, origin_x, origin_y, target_distance, **widths)
+        return self.facilities[int(rng.choice(indices, p=probability))]
+
+
 def empty_features():
     return gpd.GeoDataFrame(columns=["osm_id", "kind", "name", "public", "access_reason",
                                          "access", "foot", "garden_type", "geometry"],

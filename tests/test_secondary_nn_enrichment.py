@@ -153,7 +153,7 @@ def test_selector_validation_is_person_disjoint_and_features_match_inference():
     for expert in ['short', 'hierarchy']:
         comparisons[expert + '_mean_distance_m'] = 1000.
         comparisons[expert + '_long_share'] = 0.
-    model, audit = selector.train_selector(frame, comparisons, tools.OriginContext(context_cells()), seed=1, max_iter=10)
+    model, audit = selector.train_selector(frame, comparisons, tools.OriginContext(context_cells()), seed=1, max_iter=10, min_epochs=0)
     assert audit.groupby("person_id").partition.nunique().eq(1).all()
     assert set(audit.partition) == {"train", "stopping", "validation"}
     assert "target_distance" not in model.feature_names
@@ -353,6 +353,9 @@ def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch
         module = importlib.import_module("synthesis.population.spatial.secondary_nn." + name)
         module.configure(context)
         context.configs[name + "_epochs"] = 1
+        context.configs["secondary_nn_model_min_epochs"] = 0
+        if name == "short_range_model":
+            context.configs["short_range_model_min_epochs"] = 0
         context.directory = tmp_path / name
         monkeypatch.setattr(module, "plot_distance_analysis" if name == "short_range_model" else "plot_analysis", lambda *args, **kwargs: None)
         original_mobility = module.training_mobility
@@ -370,11 +373,51 @@ def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch
             seen.append(name)
             return _original(*args, **kwargs)
         monkeypatch.setattr(module, "fit_person_trip_matrix", fit)
+        if name == "short_range_model":
+            original_train = module.train_choice_model
+            def check_short_choices(*args, _train=original_train, **kwargs):
+                from sklearn.neighbors import KDTree
+                audit = pd.read_parquet(context.directory / "short_range_choice_sets.parquet")
+                used = audit.loc[audit.reason.eq("included")]
+                raw = pd.DataFrame(records).merge(used[["person_id", "trip_id"]],
+                    on=["person_id", "trip_id"], how="right", validate="one_to_one")
+                np.testing.assert_array_equal(kwargs["validation_groups"], raw.person_id)
+                cells = context.stages["synthesis.population.spatial.secondary_nn.h3"][1]["level_2"]
+                ids = cells.h3_index.astype(str).tolist()
+                centres = np.column_stack([cells["centroid"].x, cells["centroid"].y])
+                mapped = context.stages["synthesis.population.spatial.secondary_nn.h3"][0]["destinations"]
+                eligible_ids = mapped.merge(destinations.loc[destinations.offers_leisure, ["destination_id"]],
+                    on="destination_id").level_2.astype(str)
+                support = np.isin(ids, eligible_ids)
+                query_tree = KDTree(centres)
+                for i, row in raw.iterrows():
+                    selected = tools.origin_candidate_indices(query_tree, row.origin_x, row.origin_y,
+                        support, radius_m=1800, min_candidates=6, expand_step_m=200)
+                    assert kwargs["valid_mask"][i].sum() == len(selected)
+                    if kwargs["candidate_xy"] is not None:
+                        np.testing.assert_allclose(kwargs["candidate_xy"][i, :len(selected)], centres[selected])
+                    assert kwargs["valid_mask"][i, kwargs["y"][i]]
+                return _train(*args, **kwargs)
+            monkeypatch.setattr(module, "train_choice_model", check_short_choices)
         context.path()
         context.stages["synthesis.population.spatial.secondary_nn." + name] = module.execute(context)
         import json
         history = json.loads((context.directory / "loss_history.json").read_text())
-        assert history["distance_loss_kind"] == loss_kind
+        expected_kind = (context.configs.get("secondary_nn_short_distance_loss_kind") or loss_kind) if name == "short_range_model" and distance_enabled else loss_kind
+        assert history["distance_loss_kind"] == expected_kind
+        expected_auxiliary = .02 if name == "short_range_model" and distance_enabled and expected_kind == "crps_energy" else 0.
+        expected_auxiliary = context.configs.get("secondary_nn_short_relative_distance_loss_weight", .02) if expected_auxiliary else 0.
+        assert history["auxiliary_relative_distance_loss_weight"] == expected_auxiliary
+        expected_distribution = context.configs.get("secondary_nn_distribution_loss_weight", .1)
+        if name == "short_range_model" and distance_enabled:
+            override = context.configs.get("secondary_nn_short_distribution_loss_weight")
+            if override is not None:
+                expected_distribution = override
+        expected_weight = expected_distribution if expected_kind == "crps_energy" else context.configs.get("secondary_nn_distance_loss_weight", .07)
+        assert history["distance_loss_weight"] == expected_weight
+        expected_factor = (context.configs.get("secondary_nn_short_relative_underestimation_factor", 2.)
+            if name == "short_range_model" and distance_enabled and expected_kind == "relative" else 1.)
+        assert history["relative_distance_underestimation_factor"] == expected_factor
         assert np.isfinite(history["train_losses"]).all()
     assert len(seen) == 4
     if distance_enabled:

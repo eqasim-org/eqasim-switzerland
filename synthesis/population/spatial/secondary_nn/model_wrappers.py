@@ -10,7 +10,8 @@ from .feature_encoding import (CANDIDATE_FEATURES, STATIC_CANDIDATE_FEATURES, DY
 
 from .choice_model import NeuralChoiceModel, predict_choice_proba
 from .hierarchical_utils import build_dynamic_vector, ORIGIN_PURPOSE_REMAP
-from .tools import base_activity_purpose, destination_support_masks, require_purpose_mask
+from .tools import (base_activity_purpose, destination_support_masks, require_purpose_mask,
+                    origin_candidate_indices, DistanceDestinationSampler)
 
 def _torch_load_checkpoint(path, map_location=None):
     try:
@@ -609,68 +610,13 @@ class ShortRangeChoiceWrapper:
     def _query_candidate_indices(self, origin_x, origin_y, radius_m, min_candidates, pad_to_min=True,
                                  expand_step_m=None, support_mask=None):
         if self._kdtree is None:
-            return np.arange(len(self.all_h3), dtype=np.int64)
-
-        center = np.array([[float(origin_x), float(origin_y)]], dtype=np.float64)
-        radius = float(max(radius_m, 0.0))
-        min_candidates = max(1, int(min_candidates))
-        support_mask = support_mask if support_mask is not None else self.mask["statent"]
-        if not bool(torch.as_tensor(support_mask).any().item()):
-            raise ValueError("No eligible destinations for the requested short-range purpose")
-
-        # Simple one-shot query path (legacy behavior).
-        if expand_step_m is None:
-            nearby = self._kdtree.query_radius(center, r=radius, return_distance=False)[0]
-            if pad_to_min and nearby.size < min_candidates:
-                k = min(min_candidates, len(self.all_h3))
-                nearest = self._kdtree.query(center, k=k, return_distance=False)[0]
-                nearby = np.unique(np.concatenate([nearby, nearest]))
-
-            if nearby.size == 0:
-                fallback_n = min(len(self.all_h3), min_candidates)
-                nearby = np.arange(fallback_n, dtype=np.int64)
-
-            return nearby.astype(np.int64)
-
-        step_radius = max(1.0, float(expand_step_m))
-        search_radius = radius
-
-        candidate_indices = np.empty(0, dtype=np.int64)
-        while True:
-            nearby_all = self._kdtree.query_radius(center, r=search_radius, return_distance=False)[0].astype(np.int64)
-            if nearby_all.size > 0:
-                probe_idx = torch.as_tensor(nearby_all, dtype=torch.long)
-                local_support = support_mask.index_select(0, probe_idx)
-                candidate_indices = nearby_all[local_support.cpu().numpy()]
-            else:
-                candidate_indices = np.empty(0, dtype=np.int64)
-
-            if candidate_indices.size > 0:
-                break
-            if nearby_all.size >= len(self.all_h3):
-                break
-            search_radius += step_radius
-
-        while candidate_indices.size < min_candidates:
-            search_radius += step_radius
-            nearby_all = self._kdtree.query_radius(center, r=search_radius, return_distance=False)[0].astype(np.int64)
-
-            if nearby_all.size > 0:
-                probe_idx = torch.as_tensor(nearby_all, dtype=torch.long)
-                local_support = support_mask.index_select(0, probe_idx)
-                expanded = nearby_all[local_support.cpu().numpy()]
-                if expanded.size > 0:
-                    candidate_indices = np.unique(np.concatenate([candidate_indices, expanded])).astype(np.int64)
-
-            if nearby_all.size >= len(self.all_h3):
-                break
-
-        if candidate_indices.size == 0 and pad_to_min:
-            # Last-resort path: return at least some nearby zones so caller remains callable.
-            k = min(min_candidates, len(self.all_h3))
-            candidate_indices = self._kdtree.query(center, k=k, return_distance=False)[0].astype(np.int64)
-
-        return candidate_indices.astype(np.int64)
+            raise ValueError("No H3 cells are available for short-range prediction")
+        support = self.mask["statent"] if support_mask is None else support_mask
+        if isinstance(support, torch.Tensor):
+            support = support.detach().cpu().numpy()
+        return origin_candidate_indices(
+            self._kdtree, origin_x, origin_y, support, radius_m=radius_m,
+            min_candidates=min_candidates, expand_step_m=expand_step_m, pad_to_min=pad_to_min)
 
     def _build_candidate_dynamic(self, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work, candidate_indices):
         cx = self.centroid_x[candidate_indices]
@@ -762,9 +708,12 @@ class HierarchicalLocationChoiceModel:
             self.wrappers["short"] = short_wrapper
         self.use_target_distance = "target_distance" in self.c.person_trip_cols
         self.short_trip_classifier = None
-        self.short_trip_threshold_m = 1000.0
+        self.short_trip_threshold_m = 1500.0
         self.short_query_radius_m = 200.0
-        self.short_min_candidates = 12
+        self.short_min_candidates = 6
+        self.short_sampling = "neural"
+        self.short_distance_sigma_fraction = 0.1
+        self.short_distance_sigma_min_m = 25.0
         self.same_person_scaler = self.check_if_similar_person_scalers()
         self.build_internal_state()
         assert self.same_person_scaler, ("Person scalers differ across model levels; this may lead to inconsistent predictions if the same person features are used at multiple levels. "+
@@ -786,6 +735,7 @@ class HierarchicalLocationChoiceModel:
         self.level2_to_level1 = None
         self.l1_siblings = None  # {level1_h3: [sibling_level1_h3s]} — built once, used for O(1) fallback widening
         self.short_destination_support_masks = None
+        self._short_distance_samplers = {}
         self.detour_factor = None
         self._current_origin_detour_index = None
         self._coarse_detour_indices = None
@@ -848,6 +798,18 @@ class HierarchicalLocationChoiceModel:
         if not use_target_distance and load_selector and not hasattr(obj.short_trip_classifier, "feature_scaler"):
             raise ValueError("Retrain the distance-free selector as a cross-fitted probabilistic mixture")
         obj.build_candidates_and_trees(context)
+        if use_target_distance:
+            # Missing controls identify legacy completed runs, which used neural leaf selection.
+            obj.short_sampling = context.config("secondary_nn_short_sampling") or "neural"
+            if obj.short_sampling not in ("distance", "neural"):
+                raise ValueError("secondary_nn_short_sampling must be distance or neural")
+            fraction = context.config("secondary_nn_short_distance_sigma_fraction")
+            floor = context.config("secondary_nn_short_distance_sigma_min_m")
+            obj.short_distance_sigma_fraction = 0.1 if fraction is None else float(fraction)
+            obj.short_distance_sigma_min_m = 25.0 if floor is None else float(floor)
+            if (not np.isfinite([obj.short_distance_sigma_fraction, obj.short_distance_sigma_min_m]).all()
+                    or min(obj.short_distance_sigma_fraction, obj.short_distance_sigma_min_m) <= 0):
+                raise ValueError("Short-range distance kernel widths must be finite and positive")
         return obj
     
     def build_candidates_and_trees(self, context):
@@ -1189,6 +1151,20 @@ class HierarchicalLocationChoiceModel:
         self.last_short_probability = probability
         return bool(rng.random() < probability)
 
+    def sample_short_by_distance(self, purpose, origin_x, origin_y, target_distance, rng):
+        """Match supplied distance before selecting a leaf, using actual eligible facilities."""
+        base = base_activity_purpose(purpose)
+        cells = self.s._query_candidate_indices(
+            origin_x, origin_y, self.short_trip_threshold_m + self.short_query_radius_m * 1.5,
+            self.short_min_candidates, expand_step_m=self.short_query_radius_m,
+            support_mask=require_purpose_mask(self.short_destination_support_masks, purpose))
+        if base not in self._short_distance_samplers:
+            self._short_distance_samplers[base] = DistanceDestinationSampler(
+                self.s.all_h3, self.destination_index[base], self.destination_index_xy[base])
+        return self._short_distance_samplers[base].sample(
+            cells, origin_x, origin_y, target_distance, rng,
+            sigma_fraction=self.short_distance_sigma_fraction, sigma_min_m=self.short_distance_sigma_min_m)
+
     ##################### Main prediction method that runs the full three-level prediction process #####################
 
     def predict(self, person_id, home_x, home_y, work_x, work_y, origin_x, origin_y, age, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work,
@@ -1221,6 +1197,11 @@ class HierarchicalLocationChoiceModel:
         self.last_selected_expert = "short" if use_short else "hierarchy"
         if force_expert is not None:
             self.last_short_probability = float(use_short)
+
+        # A supplied short-trip radius selects facilities directly, without a neural leaf bottleneck.
+
+        if use_short and self.use_target_distance and self.short_sampling == "distance":
+            return self.sample_short_by_distance(purpose, origin_x, origin_y, safe_target_distance, rng)
 
         if use_short:
             level2_h3 = self._predict_short_level2_from_person(

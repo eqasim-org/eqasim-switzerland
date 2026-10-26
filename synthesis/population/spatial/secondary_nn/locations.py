@@ -49,6 +49,9 @@ def configure(context):
     context.config("secondary_nn_short_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
     context.config("secondary_nn_short_query_radius_m", 200.0)
     context.config("secondary_nn_short_min_candidates", 6)
+    context.config("secondary_nn_short_sampling", "neural")
+    context.config("secondary_nn_short_distance_sigma_fraction", 0.1)
+    context.config("secondary_nn_short_distance_sigma_min_m", 25.0)
 
 def execute(context):
 

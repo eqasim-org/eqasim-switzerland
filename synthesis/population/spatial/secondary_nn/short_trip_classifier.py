@@ -22,6 +22,7 @@ from .feature_encoding import fit_person_trip_matrix, transform_person_static_ve
 from .hierarchical_utils import SECONDARY_ACTIVITIES, ORIGIN_PURPOSE_REMAP, DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION
 from .tools import MOBILITY_FEATURES, OriginContext, training_mobility, selector_origin_context
 from .distribution_scores import ensemble_score_components, mixture_score
+from .cross_validation import train_cross_validated
 
 logger = logging.getLogger('synpp: expert_selector')
 MODEL_NAME = 'expert_selector.pkl'
@@ -29,6 +30,9 @@ MODEL_NAME = 'expert_selector.pkl'
 
 def configure(context):
     context.config('secondary_nn_use_target_distance', True)
+    context.config('secondary_nn_model_validation_folds', 5)
+    context.config('secondary_nn_model_min_epochs', 20)
+    context.config('secondary_nn_model_validation_strategy', 'cross_validation')
     if context.config('secondary_nn_use_target_distance'):
         return
     for stage in ['data.microcensus.trips', 'data.microcensus.persons', 'data.constants',
@@ -86,7 +90,10 @@ def execute(context):
         weight_decay=float(context.config('secondary_nn_selector_weight_decay')),
         patience=int(context.config('secondary_nn_selector_patience')),
         crps_weight=float(context.config('secondary_nn_selector_crps_weight')),
-        energy_weight=float(context.config('secondary_nn_selector_energy_weight')))
+        energy_weight=float(context.config('secondary_nn_selector_energy_weight')),
+        min_epochs=int(context.config('secondary_nn_model_min_epochs')),
+        folds=int(context.config('secondary_nn_model_validation_folds')),
+        validation_strategy=context.config('secondary_nn_model_validation_strategy'), path=context.path())
 
     # Persist validation coverage, distribution diagnostics and the fitted mixture.
 
@@ -245,9 +252,12 @@ def mixture_objective(logits, statistics, crps_weight=.1, energy_weight=.1):
 
 
 def train_selector(frame, comparisons, origin_context, *, seed, max_iter=300, learning_rate=.01,
-                   weight_decay=.001, patience=20, crps_weight=.1, energy_weight=.1):
+                   weight_decay=.001, patience=20, crps_weight=.1, energy_weight=.1,
+                   min_epochs=20, folds=5, validation_strategy="cross_validation", path=None):
     if max_iter < 1 or learning_rate <= 0 or min(weight_decay, crps_weight, energy_weight) < 0 or patience < 1:
         raise ValueError('Invalid probabilistic selector controls')
+    if not 0 <= min_epochs <= max_iter or folds < 2 or validation_strategy not in ('fixed', 'cross_validation'):
+        raise ValueError('Invalid selector minimum epochs, validation strategy or folds')
     if len(frame) != len(comparisons):
         raise ValueError('Every eligible trip requires exactly one expert comparison')
     frame = frame.merge(comparisons, on=['person_id', 'trip_id'], how='left', validate='one_to_one', indicator=True)
@@ -284,41 +294,74 @@ def train_selector(frame, comparisons, origin_context, *, seed, max_iter=300, le
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)
         network = _network(x.shape[1])
-        initial = copy.deepcopy(network.state_dict())
-        optimizer = torch.optim.AdamW(network.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        best, best_epoch, checks = np.inf, 0, 0
-        for epoch in range(max_iter):
-            network.train()
-            order = fit[torch.randperm(len(fit)).numpy()]
-            for start in range(0, len(order), 512):
-                optimizer.zero_grad(set_to_none=True)
-                objective = loss(network, order[start:start + 512])
-                objective.backward()
-                nn.utils.clip_grad_norm_(network.parameters(), 5.)
-                optimizer.step()
-            network.eval()
-            with torch.inference_mode():
-                stopping = float(loss(network, indices['stopping']))
-            if stopping < best - 1e-5:
-                best, best_epoch, checks = stopping, epoch + 1, 0
-            else:
-                checks += 1
-            if checks >= patience:
-                break
+        if validation_strategy == 'cross_validation':
 
-        # Refit for the selected epoch count using all out-of-fold development rows.
+            # Keep outer people untouched while independent development folds select duration.
 
-        network.load_state_dict(initial)
-        optimizer = torch.optim.AdamW(network.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        rows = np.flatnonzero(development)
-        for epoch in range(best_epoch):
-            order = rows[torch.randperm(len(rows)).numpy()]
-            for start in range(0, len(order), 512):
-                optimizer.zero_grad(set_to_none=True)
-                objective = loss(network, order[start:start + 512])
-                objective.backward()
-                nn.utils.clip_grad_norm_(network.parameters(), 5.)
-                optimizer.step()
+            rows = np.flatnonzero(development)
+            groups = frame.iloc[rows].person_id.to_numpy()
+            unique = np.unique(groups)
+            if len(unique) < folds:
+                raise ValueError('Not enough development people for selector validation folds')
+            group_folds = np.array_split(np.random.default_rng(seed).permutation(unique), folds)
+            fold_rows = [torch.as_tensor(np.flatnonzero(np.isin(groups, ids)), dtype=torch.long)
+                         for ids in group_folds]
+            development_x = x[rows]
+            development_stats = {key: value[rows] for key, value in statistics.items()}
+            def score_samples(indices, logits):
+                return mixture_objective(logits,
+                    {key: value[indices] for key, value in development_stats.items()}, crps_weight, energy_weight)
+            training_history = train_cross_validated(
+                network, (None, None, None, None, None, weight[rows]), fold_rows, groups, score_samples,
+                epochs=max_iter, batch_size=512, lr=learning_rate, weight_decay=weight_decay,
+                lr_step_size=max_iter + 1, lr_gamma=1., grad_clip=5., patience=patience,
+                min_delta=1e-5, min_epochs=min_epochs, seed=seed, logger=logger, path=path,
+                history_settings=dict(objective='probabilistic_expert_mixture'),
+                predict_utilities=lambda model, indices: model(development_x[indices]).squeeze(-1))
+            best_epoch = training_history['best_epoch']
+        else:
+            initial = copy.deepcopy(network.state_dict())
+            optimizer = torch.optim.AdamW(network.parameters(), lr=learning_rate, weight_decay=weight_decay)
+            best, best_epoch, checks = np.inf, 0, 0
+            for epoch in range(max_iter):
+                network.train()
+                order = fit[torch.randperm(len(fit)).numpy()]
+                for start in range(0, len(order), 512):
+                    optimizer.zero_grad(set_to_none=True)
+                    objective = loss(network, order[start:start + 512])
+                    objective.backward()
+                    nn.utils.clip_grad_norm_(network.parameters(), 5.)
+                    optimizer.step()
+                network.eval()
+                with torch.inference_mode():
+                    stopping = float(loss(network, indices['stopping']))
+                if stopping < best - 1e-5:
+                    best, best_epoch, checks = stopping, epoch + 1, 0
+                elif epoch + 1 > min_epochs:
+                    checks += 1
+                else:
+                    checks = 0
+                if checks >= patience:
+                    break
+
+            epoch_count = epoch + 1
+
+            # Refit for the selected epoch count using all out-of-fold development rows.
+
+            network.load_state_dict(initial)
+            optimizer = torch.optim.AdamW(network.parameters(), lr=learning_rate, weight_decay=weight_decay)
+            rows = np.flatnonzero(development)
+            for epoch in range(best_epoch):
+                order = rows[torch.randperm(len(rows)).numpy()]
+                for start in range(0, len(order), 512):
+                    optimizer.zero_grad(set_to_none=True)
+                    objective = loss(network, order[start:start + 512])
+                    objective.backward()
+                    nn.utils.clip_grad_norm_(network.parameters(), 5.)
+                    optimizer.step()
+            training_history = dict(validation_mode='fixed', validation_folds=1,
+                                    early_stopping_min_epochs=min_epochs,
+                                    epochs_completed=epoch_count, best_epoch=best_epoch, refit_epochs=best_epoch)
         network.eval()
         with torch.inference_mode():
             probability = torch.sigmoid(network(x)).squeeze(-1).numpy()
@@ -331,6 +374,10 @@ def train_selector(frame, comparisons, origin_context, *, seed, max_iter=300, le
     metrics = dict(validation_rows=len(validation), validation_persons=int(validation.person_id.nunique()),
                    development_rows=int(development.sum()), development_persons=int(frame.loc[development, 'person_id'].nunique()),
                    refit_epochs=int(best_epoch), outer_mixture_objective=outer_loss,
+                   validation_mode=training_history['validation_mode'],
+                   validation_folds=training_history['validation_folds'],
+                   early_stopping_min_epochs=min_epochs,
+                   epochs_completed=training_history['epochs_completed'],
                    validation_short_expert_probability=average(g),
                    validation_mean_distance_m=average(expected_distance), validation_observed_mean_distance_m=average(observed),
                    validation_mean_distance_ratio=average(expected_distance) / max(average(observed), 1.),
@@ -340,6 +387,10 @@ def train_selector(frame, comparisons, origin_context, *, seed, max_iter=300, le
                    gate_uses_target_distance=False, experts_exclude_outer_validation=True,
                    development_predictions_are_cross_fitted=True, probabilistic_routing=True)
     audit = frame[['person_id', 'trip_id', 'partition', 'fold', 'prediction_fold']].copy()
+    audit['selector_validation_fold'] = -1
+    if validation_strategy == 'cross_validation':
+        for number, indices in enumerate(fold_rows):
+            audit.loc[audit.index[rows[indices.numpy()]], 'selector_validation_fold'] = number
     audit['short_probability'] = probability
     return ExpertSelector(network, static, dynamic, scaler, origin_context, names, metrics), audit
 

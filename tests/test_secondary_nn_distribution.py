@@ -138,13 +138,13 @@ def test_fitted_mixture_recovers_long_trip_frequency_without_distance_input():
 def test_outer_validation_targets_cannot_change_the_fitted_gate():
     torch.set_num_threads(2)
     frame, comparisons, cells = mixture_fixture()
-    first, _ = selector.train_selector(frame, comparisons, OriginContext(cells), seed=6, max_iter=8)
+    first, _ = selector.train_selector(frame, comparisons, OriginContext(cells), seed=6, max_iter=8, min_epochs=0)
     other = comparisons.copy()
     validation = frame.partition.eq('validation')
     other.loc[validation, 'short_leaf_probability'] = .999
     other.loc[validation, 'hierarchy_leaf_probability'] = .001
     other.loc[validation, 'energy_short_target'] = 999.
-    second, _ = selector.train_selector(frame, other, OriginContext(cells), seed=6, max_iter=8)
+    second, _ = selector.train_selector(frame, other, OriginContext(cells), seed=6, max_iter=8, min_epochs=0)
     for a,b in zip(first.network.parameters(), second.network.parameters()):
         torch.testing.assert_close(a,b,atol=0,rtol=0)
 
@@ -206,3 +206,128 @@ def test_remaining_plan_and_distance_features_match_batch_and_online_encoding(us
         np.testing.assert_allclose(online[0], full[i], rtol=1e-6, atol=1e-6)
     with pytest.raises(ValueError, match='remaining-chain'):
         encoding.transform_person_dynamic_vector(0, 0, 0, 1, 1000, [1], [1], dynamic_scaler)
+
+
+class ConstantChoiceModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.logits = torch.nn.Parameter(torch.zeros(3))
+        self._device = torch.device('cpu')
+        self.dropout_rate = 0.
+
+    def forward(self, person_static, person_dynamic, candidate_static, candidate_dynamic):
+        return self.logits.expand(len(person_static), -1)
+
+
+def hybrid_training_inputs():
+    n = 10
+    return dict(person_static_x=np.zeros((n, 1)), person_dynamic_x=np.zeros((n, 1)),
+        candidate_static_x=np.zeros((1, 3, 1)), candidate_dynamic_x=np.zeros((n, 3, 1)),
+        y=np.zeros(n, dtype=int), valid_mask=np.tile([True, True, False], (n, 1)),
+        distance_candidates=np.tile([50., 300., 9999.], (n, 1)),
+        distance_targets=np.full(n, 100.),
+        candidate_xy=np.tile([[50., 0.], [300., 0.], [9999., 0.]], (n, 1, 1)),
+        observed_xy=np.tile([100., 0.], (n, 1)),
+        distance_loss_kind='crps_energy', distance_loss_weight=.1,
+        epochs=1, lr=0., num_threads=2, n_val_folds=2, val_every=1, grad_clip=None,
+        validation_groups=np.arange(n), rotate_validation=False,
+        weights=np.arange(n, dtype=np.float32)+1)
+
+
+@pytest.mark.parametrize('refit', [False, True])
+def test_auxiliary_relative_loss_matches_objective_and_gradients_in_all_fitting_paths(tmp_path, refit):
+    import json
+    from synthesis.population.spatial.secondary_nn.choice_model import train_choice_model
+    from synthesis.population.spatial.secondary_nn.distribution_scores import relative_mean_distance_loss
+
+    model = ConstantChoiceModel()
+    inputs = hybrid_training_inputs()
+    train_choice_model(model, **inputs, refit_full=refit, path=str(tmp_path),
+                       auxiliary_relative_distance_loss_weight=.02)
+
+    # Compute the objective independently with masked probabilities and a known radial error.
+
+    logits = torch.zeros(3, requires_grad=True)
+    masked = logits.masked_fill(torch.tensor([False, False, True]), -1e9)
+    probabilities = torch.softmax(masked, dim=0)[None, :]
+    distances = torch.tensor([[50., 300., 9999.]])
+    target = torch.tensor([100.])
+    crps = discrete_crps(probabilities, distances, target)
+    energy = projected_energy_score(probabilities, torch.tensor([[[50.,0.],[300.,0.],[9999.,0.]]]),
+                                    torch.tensor([[100.,0.]]))
+    auxiliary = relative_mean_distance_loss(probabilities, distances, target)
+    assert auxiliary.item() == pytest.approx(.5 * ((175.-100.)/200.)**2)
+    expected = -torch.log_softmax(masked, dim=0)[0] + .1*(crps+energy).sum()/1000 + .02*auxiliary.sum()
+    expected.backward()
+    history = json.loads((tmp_path/'loss_history.json').read_text())
+    assert history['train_losses'][0] == pytest.approx(expected.item(), abs=1e-6)
+    assert history['val_losses'][0] == pytest.approx(expected.item(), abs=1e-6)
+    assert history['auxiliary_relative_distance_loss_weight'] == .02
+    assert history['refit_full'] == refit
+    torch.testing.assert_close(model.logits.grad, logits.grad, atol=1e-6, rtol=1e-5)
+    assert model.logits.grad[2].item() == 0.
+
+
+@pytest.mark.parametrize('weight', [-.01, float('nan'), float('inf')])
+def test_auxiliary_loss_rejects_invalid_weights(weight):
+    from synthesis.population.spatial.secondary_nn.choice_model import train_choice_model
+    with pytest.raises(ValueError, match='finite and nonnegative'):
+        train_choice_model(ConstantChoiceModel(), **hybrid_training_inputs(),
+                           auxiliary_relative_distance_loss_weight=weight)
+
+
+def test_auxiliary_loss_requires_valid_origin_distance_supervision():
+    from synthesis.population.spatial.secondary_nn.choice_model import train_choice_model
+    inputs = hybrid_training_inputs()
+    inputs['distance_candidates'] = None
+    with pytest.raises(ValueError, match='requires origin-distance tensors'):
+        train_choice_model(ConstantChoiceModel(), **inputs,
+                           auxiliary_relative_distance_loss_weight=.02)
+
+
+def test_auxiliary_relative_loss_supplies_correct_radius_gradient():
+    from synthesis.population.spatial.secondary_nn.distribution_scores import relative_mean_distance_loss
+    logits = torch.zeros((1, 2), requires_grad=True)
+    probabilities = torch.softmax(logits, dim=1)
+    loss = relative_mean_distance_loss(probabilities, torch.tensor([[50., 300.]]), torch.tensor([100.]))
+    loss.sum().backward()
+    assert logits.grad[0, 0] < 0 < logits.grad[0, 1]
+    assert relative_mean_distance_loss(torch.tensor([[.8, .2]]), torch.tensor([[50., 300.]]), torch.tensor([100.])).item() == 0.
+
+
+def test_short_range_checkpoint_uses_its_stage_cache(tmp_path):
+    from synthesis.population.spatial.secondary_nn import short_range_model
+    shared = tmp_path/'shared'
+    stage = tmp_path/'stage'
+    shared.mkdir()
+    stage.mkdir()
+    (shared/short_range_model.MODEL_NAME).write_text('baseline')
+    (stage/short_range_model.MODEL_NAME).write_text('trial')
+    context = SimpleNamespace(working_directory=str(shared), path=lambda:str(stage),
+                              config=lambda key:False)
+    result = short_range_model.execute(context)
+    assert result == (str(stage/short_range_model.MODEL_NAME),)
+    assert (shared/short_range_model.MODEL_NAME).read_text() == 'baseline'
+
+
+def test_selector_uses_independent_folds_and_minimum_exploration(tmp_path):
+    import json
+    torch.set_num_threads(2)
+    frame, comparisons, cells = mixture_fixture()
+    fitted, audit = selector.train_selector(frame, comparisons, OriginContext(cells), seed=9,
+        max_iter=8, patience=1, min_epochs=3, folds=5, learning_rate=1e-15, path=tmp_path)
+    assert fitted.metrics['validation_mode']=='independent_kfold'
+    assert fitted.metrics['validation_folds']==5
+    assert fitted.metrics['epochs_completed']==4
+    assert fitted.metrics['refit_epochs']==1
+    outer=set(frame.loc[frame.partition.eq('validation'),'person_id'])
+    folds=json.loads((tmp_path/'cross_validation_folds.json').read_text())
+    held_out=[]
+    for fold in folds:
+        assert set(fold['train_people']).isdisjoint(fold['validation_people'])
+        assert outer.isdisjoint(fold['train_people'])
+        assert outer.isdisjoint(fold['validation_people'])
+        held_out.extend(fold['validation_people'])
+    assert sorted(held_out)==sorted(frame.loc[frame.partition.ne('validation'),'person_id'].unique())
+    assert audit.loc[audit.partition.eq('validation'),'selector_validation_fold'].eq(-1).all()
+    assert set(audit.loc[audit.partition.ne('validation'),'selector_validation_fold'])==set(range(5))
