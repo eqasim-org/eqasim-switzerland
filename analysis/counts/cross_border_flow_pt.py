@@ -1,40 +1,30 @@
 import logging
 import os
-from collections import Counter, defaultdict
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pydeck as pdk
 import shapely
 import xml.etree.ElementTree as ET
 import xopen
-from pydeck.data_utils.viewport_helpers import compute_view
 from shapely.geometry import LineString
 from shapely.ops import unary_union
 
-from .cross_border_flow_cars import (
-    _find_output_file, _polygon_outline_layer,
-    load_cross_border_person_ids, load_french_resident_person_ids,
-    load_swiss_resident_cross_border_person_ids,
+from . import flow_map_page
+from .cross_border_flow_cars import _extent_bounds, _find_output_file, _outline_rings
+from .flow_metrics import share_column
+from .cross_border_flow_events import GROUPS as EVENT_GROUPS
+from .paths import (
+    configure_flow_map_extents, configure_simulation_path, get_analysis_output_path, get_flow_map_extents,
+    get_simulation_path,
 )
-from .flow_metrics import add_metric_columns, inject_metric_dropdown_legend, share_column
-from .matching.plots import Plotter
-from .paths import configure_simulation_path, get_analysis_output_path, get_simulation_path
 
 logger = logging.getLogger("synpp")
 
-PERSON_ENTERS_VEHICLE_EVENT = "PersonEntersVehicle"
-PERSON_LEAVES_VEHICLE_EVENT = "PersonLeavesVehicle"
-
-VEHICLE_DEPARTS_EVENT = "VehicleDepartsAtFacility"
-VEHICLE_ARRIVES_EVENT = "VehicleArrivesAtFacility"
-PROGRESS_EVERY = 2_000_000
-
 STOP_COORDINATE_CRS = "epsg:2056"
 
-# Rider-group flow columns produced by count_pt_stop_segment_riders /
-# build_hourly_dataframe, on top of total_flow. "crossborder_pt_flow" is
+# Rider-group flow columns (the counts of analysis.counts.cross_border_flow_events),
+# on top of total_flow. "crossborder_pt_flow" is
 # non-Swiss cross-border residents only (foreign commuters/travelers) -
 # Swiss residents crossing the border for an activity get their own
 # swiss_crossborder_pt_flow instead, so the two never overlap (see execute).
@@ -44,11 +34,12 @@ RIDER_GROUP_FLOW_COLUMNS = ["crossborder_pt_flow", "swiss_crossborder_pt_flow", 
 
 
 def configure(context):
+    context.stage("analysis.counts.cross_border_flow_events")
     configure_simulation_path(context)
+    configure_flow_map_extents(context)
     context.config("only_weekday", default=False)
     context.config("input_downsampling")
     context.config("pt_flow_min_daily_count", default=1)
-    context.config("extent_path", default="")
 
 
 def execute(context):
@@ -56,34 +47,17 @@ def execute(context):
     output_path = get_analysis_output_path(context)
     os.makedirs(output_path, exist_ok=True)
 
-    persons_path = _find_output_file(simulation_path, "output_persons.csv.gz")
-    events_path = _find_output_file(simulation_path, "output_events.xml.gz")
     schedule_path = _find_output_file(simulation_path, "output_transitSchedule.xml.gz")
+    stop_coords, stop_names, _ = load_transit_schedule(schedule_path)
+    logger.info("Loaded %d transit stops from %s", len(stop_coords), schedule_path)
 
-    cross_border_ids = load_cross_border_person_ids(persons_path)
-    swiss_crossborder_ids = load_swiss_resident_cross_border_person_ids(persons_path)
-    french_resident_ids = load_french_resident_person_ids(persons_path)
-    foreign_crossborder_ids = cross_border_ids - swiss_crossborder_ids
-    logger.info(
-        "Found %d cross-border persons (%d Swiss-resident) and %d non-cross-border France-resident persons in %s",
-        len(cross_border_ids), len(swiss_crossborder_ids), len(french_resident_ids), persons_path,
-    )
-
-    stop_coords, stop_names, vehicle_lines = load_transit_schedule(schedule_path)
-    logger.info("Loaded %d transit stops and %d vehicle-to-line mappings from %s",
-                len(stop_coords), len(vehicle_lines), schedule_path)
-
-    rider_group_ids = {
-        "crossborder_pt_flow": foreign_crossborder_ids,
-        "swiss_crossborder_pt_flow": swiss_crossborder_ids,
-        "french_pt_flow": french_resident_ids,
-    }
-    total_counts, group_counts, lines_by_segment = count_pt_stop_segment_riders(
-        events_path, rider_group_ids, vehicle_lines,
-    )
-    logger.info("Counted PT ridership on %d distinct stop-to-stop segments", len(total_counts))
-
-    df_hourly = build_hourly_dataframe(total_counts, group_counts)
+    # the events are read once for the car and PT maps (analysis.counts.cross_border_flow_events)
+    events = context.stage("analysis.counts.cross_border_flow_events")
+    df_hourly = pd.read_csv(events["pt_hourly"], dtype={"from_stop": str, "to_stop": str})
+    df_hourly = df_hourly.rename(columns={"total": "total_flow", **dict(zip(EVENT_GROUPS, RIDER_GROUP_FLOW_COLUMNS))})
+    segment_lines = pd.read_csv(events["pt_lines"], dtype=str, keep_default_na=False)
+    lines_by_segment = {(a, b): lines.split(", ") for a, b, lines in segment_lines.itertuples(index=False)}
+    logger.info("PT ridership on %d distinct stop-to-stop segments", len(df_hourly.groupby(["from_stop", "to_stop"])))
 
     sample_size = context.config("input_downsampling")
     for column in ["total_flow", *RIDER_GROUP_FLOW_COLUMNS]:
@@ -94,13 +68,13 @@ def execute(context):
 
     stop_totals = load_official_pt_stop_totals(simulation_path, sample_size)
     df_daily = attach_official_stop_totals(df_daily, stop_totals)
+    df_daily.to_csv(os.path.join(output_path, "cross_border_pt_segment_flow_daily.csv"), index=False)
 
     min_daily_count = context.config("pt_flow_min_daily_count")
     df_plot = df_daily[df_daily.total_flow >= min_daily_count].copy()
 
-    plot_crossborder_pt_flow_map(
-        df_plot, stop_coords, context.config("extent_path"), output_path, stop_names, stop_totals,
-    )
+    for name, extent_path in get_flow_map_extents(context).items():
+        plot_crossborder_pt_flow_map(df_plot, stop_coords, extent_path, output_path, stop_names, stop_totals, name=name)
 
     return dict(done=True, path=output_path)
 
@@ -140,89 +114,8 @@ def load_transit_schedule(schedule_path):
 
 
 # ---------------------------------------------------------------------------
-# Streaming events parsing
-# ---------------------------------------------------------------------------
-
-def count_pt_stop_segment_riders(events_path, rider_group_ids, vehicle_lines):
-    """rider_group_ids: {flow_column_name: set_of_person_ids} - e.g.
-    RIDER_GROUP_FLOW_COLUMNS mapped to their id sets. Returns total_counts,
-    {flow_column_name: Counter} (one per rider_group_ids entry), and
-    lines_by_segment."""
-    total_counts = Counter()
-    group_counts = {group: Counter() for group in rider_group_ids}
-    lines_by_segment = defaultdict(set)
-
-    onboard = defaultdict(set)
-    last_departure_facility = {}
-
-    processed = 0
-    with xopen.xopen(events_path, "r") as f:
-        parser = ET.iterparse(f, events=["start", "end"])
-        _, root = next(parser)  # <events> start tag, kept to periodically release finished events
-
-        for event, elem in parser:
-            if event != "end" or elem.tag != "event":
-                continue
-
-            processed += 1
-            if processed % PROGRESS_EVERY == 0:
-                logger.info("Processed %d events...", processed)
-
-            etype = elem.attrib.get("type")
-
-            if etype == PERSON_ENTERS_VEHICLE_EVENT:
-                onboard[elem.attrib["vehicle"]].add(elem.attrib["person"])
-            elif etype == PERSON_LEAVES_VEHICLE_EVENT:
-                onboard[elem.attrib["vehicle"]].discard(elem.attrib["person"])
-            elif etype == VEHICLE_DEPARTS_EVENT:
-                last_departure_facility[elem.attrib["vehicle"]] = elem.attrib["facility"]
-            elif etype == VEHICLE_ARRIVES_EVENT:
-                vehicle = elem.attrib["vehicle"]
-                arrival_facility = elem.attrib["facility"]
-                departure_facility = last_departure_facility.get(vehicle)
-
-                if departure_facility is not None and departure_facility != arrival_facility:
-                    riders = onboard.get(vehicle, ())
-                    if riders:
-                        hour = int(float(elem.attrib["time"]) // 3600) % 24
-                        segment = (departure_facility, arrival_facility)
-                        key = (*segment, hour)
-
-                        total_counts[key] += len(riders)
-                        for group, ids in rider_group_ids.items():
-                            n = sum(1 for person in riders if person in ids)
-                            if n:
-                                group_counts[group][key] += n
-
-                        line = vehicle_lines.get(vehicle)
-                        if line:
-                            lines_by_segment[segment].add(line)
-
-            elem.clear()
-            if processed % PROGRESS_EVERY == 0:
-                root.clear()
-
-    logger.info("Finished streaming %d events from %s", processed, events_path)
-    return total_counts, group_counts, lines_by_segment
-
-
-# ---------------------------------------------------------------------------
 # Aggregation
 # ---------------------------------------------------------------------------
-
-def build_hourly_dataframe(total_counts, group_counts):
-    rows = [
-        dict(
-            from_stop=from_stop, to_stop=to_stop, hour=hour, total_flow=count,
-            **{group: counts.get((from_stop, to_stop, hour), 0) for group, counts in group_counts.items()},
-        )
-        for (from_stop, to_stop, hour), count in total_counts.items()
-    ]
-    df = pd.DataFrame(
-        rows, columns=["from_stop", "to_stop", "hour", "total_flow", *RIDER_GROUP_FLOW_COLUMNS],
-    )
-    return df.sort_values(["from_stop", "to_stop", "hour"]).reset_index(drop=True)
-
 
 def aggregate_daily(df_hourly):
     df_daily = df_hourly.groupby(["from_stop", "to_stop"], as_index=False)[
@@ -331,12 +224,10 @@ METRICS = [
 DEFAULT_METRIC = "crossborder_pt_flow"
 
 
-def plot_crossborder_pt_flow_map(df_daily, stop_coords, extent_path, output_path, stop_names=None, stop_totals=None):
-    if not extent_path:
-        logger.info("extent_path is not configured; skipping cross-border PT flow map.")
-        return
+def plot_crossborder_pt_flow_map(df_daily, stop_coords, extent_path, output_path, stop_names=None, stop_totals=None, name=None):
+    """Writes cross_border_pt_flow_map_<name>.html: the segments that intersect the extent."""
     if not os.path.exists(extent_path):
-        logger.warning("extent_path %s does not exist; skipping cross-border PT flow map.", extent_path)
+        logger.warning("Extent %s does not exist; skipping cross-border PT flow map %s.", extent_path, name)
         return
 
     has_coords = df_daily.from_stop.isin(stop_coords) & df_daily.to_stop.isin(stop_coords)
@@ -366,117 +257,49 @@ def plot_crossborder_pt_flow_map(df_daily, stop_coords, extent_path, output_path
         logger.info("No cross-border PT segments intersect the scenario extent; skipping map.")
         return
 
-    line_fields = [
-        "from_stop_name", "to_stop_name", "lines", "total_flow",
-        *[field for column in RIDER_GROUP_FLOW_COLUMNS for field in (column, share_column(column))],
-        "from_stop_total_activity", "to_stop_total_activity",
+    # Compact page (flow_map_page): the data once, the colors/widths/tooltips of the selected metric computed in the browser
+    flow_columns = ["total_flow", *RIDER_GROUP_FLOW_COLUMNS]
+    group_tooltip = [
+        (m["label"], m["key"], "pct" if m["key"].endswith("_share_pct") else "int") for m in METRICS if m["key"] != "total_flow"
     ]
-    path_data = Plotter._prepare_path_data(segments.to_crs(epsg=4326), line_fields)
-    path_data["_tooltip_html"] = path_data.apply(
-        lambda row: Plotter._build_tooltip_html(row, line_fields), axis=1,
+
+    segments = segments.to_crs(epsg=4326)
+    line_layer = flow_map_page.layer(
+        "path", [list(g.coords) for g in segments.geometry],
+        {**{c: segments[c].to_numpy() for c in flow_columns},
+         "from_stop_total_activity": segments["from_stop_total_activity"].to_numpy(),
+         "to_stop_total_activity": segments["to_stop_total_activity"].to_numpy()},
+        texts={"from": segments.from_stop_name.tolist(), "to": segments.to_stop_name.tolist(), "lines": segments.lines.tolist()},
+        tooltip=[("From", "from", "text"), ("To", "to", "text"), ("Lines", "lines", "text"),
+                 ("Total PT flow", "total_flow", "int"), *group_tooltip,
+                 ("Boardings + alightings at origin", "from_stop_total_activity", "int"),
+                 ("Boardings + alightings at destination", "to_stop_total_activity", "int")],
+        size_scale=12, size_base=2, metrics=METRICS,
     )
 
-    # Points at every stop, sized/colored by the same three metrics as the
-    # lines - see analysis/pt_passenger_counts/TPG_comparison/interactive_map.py's
-    # CircleMarker-per-stop maps for the display this is modeled on (a
-    # marker per stop, sized by sqrt(ridership), colored by the metric).
+    # Points at every stop, sized/colored by the same metrics as the lines
     stops = aggregate_stop_level(
         df_daily, stop_coords,
         stop_names if stop_names is not None else {},
         stop_totals if stop_totals is not None else pd.Series(dtype=float),
     )
-    point_gdf = gpd.GeoDataFrame(
-        stops, geometry=gpd.points_from_xy(stops.x, stops.y), crs=STOP_COORDINATE_CRS,
-    )
+    point_gdf = gpd.GeoDataFrame(stops, geometry=gpd.points_from_xy(stops.x, stops.y), crs=STOP_COORDINATE_CRS)
     point_gdf = point_gdf[point_gdf.intersects(region)].to_crs(epsg=4326)
-
-    point_fields = [
-        "stop_name", "total_flow",
-        *[field for column in RIDER_GROUP_FLOW_COLUMNS for field in (column, share_column(column))],
-        "official_total_activity",
-    ]
-    point_data = point_gdf[point_fields].copy()
-    # get_position needs one column of [lon, lat] pairs, not two separate
-    # column names - passing ["lon", "lat"] as get_position (two column
-    # names) is not a valid accessor and was rendering every point huge.
-    point_data["coordinates"] = list(zip(point_gdf.geometry.x, point_gdf.geometry.y))
-    point_data["_tooltip_html"] = point_data.apply(
-        lambda row: Plotter._build_tooltip_html(row, point_fields), axis=1,
+    point_layer = flow_map_page.layer(
+        "point", list(zip(point_gdf.geometry.x, point_gdf.geometry.y)),
+        {**{c: point_gdf[c].to_numpy() for c in flow_columns},
+         "official_total_activity": point_gdf["official_total_activity"].to_numpy()},
+        texts={"stop": point_gdf.stop_name.tolist()},
+        tooltip=[("Stop", "stop", "text"), ("Total PT flow", "total_flow", "int"), *group_tooltip,
+                 ("Boardings + alightings", "official_total_activity", "int")],
+        size_scale=14, size_base=5, metrics=METRICS,
     )
 
-    metric_maxima = {}
-    line_layers = []
-    point_layers = []
-    for metric in METRICS:
-        key = metric["key"]
-        metric_maxima[key] = add_metric_columns(path_data, metric, size_scale=12, size_base=2)
-        add_metric_columns(point_data, metric, size_scale=14, size_base=5)
-
-        line_layers.append(pdk.Layer(
-            "PathLayer",
-            path_data,
-            id=f"pt-line::{key}::0",
-            visible=key == DEFAULT_METRIC,
-            pickable=True,
-            auto_highlight=True,
-            get_path="path",
-            get_width=f"{key}_size",
-            get_color=f"{key}_color",
-            highlight_color=[0, 200, 255],
-            width_min_pixels=2,
-            width_scale=3,
-        ))
-        point_layers.append(pdk.Layer(
-            "ScatterplotLayer",
-            point_data,
-            id=f"pt-point::{key}::0",
-            visible=key == DEFAULT_METRIC,
-            pickable=True,
-            auto_highlight=True,
-            get_position="coordinates",
-            get_radius=f"{key}_size",
-            get_fill_color=f"{key}_color",
-            get_line_color=[50, 50, 50],
-            line_width_min_pixels=1,
-            stroked=True,
-            # Plain pdk.types.String, not a bare Python string: pydeck
-            # auto-wraps a bare string kwarg value as a "@@=<value>" data
-            # accessor (right for get_color="some_column", wrong for a
-            # literal deck.gl enum like this) - a bare "pixels" here silently
-            # became the accessor "d => d.pixels" (always undefined), which
-            # is what made every point render at a wildly wrong huge size.
-            radius_units=pdk.types.String("pixels"),
-            radius_min_pixels=4,
-            radius_max_pixels=20,
-        ))
-
-    extent_layer = _polygon_outline_layer(region, segments.crs, color=[0, 0, 0], width=2)
-
-    extent_bounds_ll = gpd.GeoSeries([region], crs=segments.crs).to_crs(epsg=4326).total_bounds
-    minx, miny, maxx, maxy = extent_bounds_ll
-    margin_x, margin_y = (maxx - minx) * 0.05, (maxy - miny) * 0.05
-    view_state = compute_view([
-        [minx - margin_x, miny - margin_y],
-        [maxx + margin_x, maxy + margin_y],
-    ])
-    view_state.pitch = 0
-
-    tooltip = {
-        "html": "{_tooltip_html}",
-        "style": {"color": "white", "background-color": "black", "padding": "10px"},
-    }
-    deck = pdk.Deck(
-        layers=[extent_layer, *line_layers, *point_layers],
-        initial_view_state=view_state,
-        tooltip=tooltip,
-        map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+    output_file = os.path.join(output_path, f"cross_border_pt_flow_map_{name}.html" if name else "cross_border_pt_flow_map.html")
+    flow_map_page.write_page(
+        output_file, f"Cross-border PT flows{' - ' + name if name else ''}", [line_layer, point_layer], METRICS, DEFAULT_METRIC,
+        outlines=[(_outline_rings(region, STOP_COORDINATE_CRS), [0, 0, 0], 2)],
+        bounds=_extent_bounds(region, STOP_COORDINATE_CRS),
+        legend_lines=[("Black outline = scenario extent", "color:#222;")],
     )
-
-    output_file = os.path.join(output_path, "cross_border_pt_flow_map.html")
-    deck.to_html(output_file, notebook_display=False)
-    inject_metric_dropdown_legend(
-        output_file, METRICS, metric_maxima, DEFAULT_METRIC,
-        layer_prefixes=["pt-line::", "pt-point::"], dom_id_prefix="pt",
-        extra_legend_lines=[("Black outline = scenario extent", "color:#222;")],
-    )
-    logger.info("Saved cross-border PT flow map to %s", output_file)
+    logger.info("Saved cross-border PT flow map of %s to %s", name, output_file)

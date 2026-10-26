@@ -39,18 +39,28 @@ _COUNT_COLUMNS = [("NbMontees", "boardings"), ("NbDescentes", "alightings")]
 
 def aggregate_workday_stats(raw_counts_path, tpg_data_path,
                              bank_holidays = _BANK_HOLIDAYS_2025, school_holidays = ()):
+    """Returns (stats per stop, line and hour, the same per stop, line, direction and hour). The raw counts have no
+    direction: the direction of a run is the station (first 4 letters of CodeLong) of its last stop, and line_direction
+    is "<line>_<station>" in the second table (used by the line comparison, analysis.pt.TPG_comparison.line_comparison)."""
 
     print(f"Reading raw TPG counts from {raw_counts_path} (this is large, ~4.85GB)...")
     raw = pd.read_csv(
         raw_counts_path,
-        usecols = ["DExploitCourse", "Ligne", "CodeLong", "NbMontees", "NbDescentes",
+        usecols = ["IdCourse", "DExploitCourse", "Ligne", "RangArretAsc", "CodeLong", "NbMontees", "NbDescentes",
                   "FlagOk", "DTEntreeFenetreArretReal"],
         dtype = {
             "Ligne": "category", "CodeLong": "category", "FlagOk": "category",
-            "NbMontees": "float32", "NbDescentes": "float32",
+            "NbMontees": "float32", "NbDescentes": "float32", "RangArretAsc": "int16",
         },
     )
     print(f"  -> {len(raw)} rows")
+
+    print("Direction of each run: the station of its last stop (all the rows of the run, before the FlagOk filter)...")
+    last = raw.loc[raw.groupby(["DExploitCourse", "IdCourse"], observed = True)["RangArretAsc"].idxmax(),
+                   ["DExploitCourse", "IdCourse", "CodeLong"]]
+    last["direction"] = last["CodeLong"].astype(str).str[:4]
+    raw = raw.merge(last[["DExploitCourse", "IdCourse", "direction"]], on = ["DExploitCourse", "IdCourse"], how = "left")
+    raw = raw.drop(columns = ["IdCourse", "RangArretAsc"])
 
     print("Filtering to FlagOk == 'Y'...")
     flag_counts = raw["FlagOk"].value_counts()
@@ -81,6 +91,14 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path,
 
     raw = raw.rename(columns = {"Ligne": "line_direction"})  # bare line number, no direction - see docstring point 3
     raw["line_direction"] = raw["line_direction"].astype(str)
+    raw["line_with_direction"] = raw["line_direction"] + "_" + raw["direction"].fillna("")
+
+    return _aggregate(raw, "line_direction"), _aggregate(raw, "line_with_direction")
+
+
+def _aggregate(raw, line_column):
+    raw = raw.drop(columns = [c for c in ("line_direction", "line_with_direction") if c != line_column])
+    raw = raw.rename(columns = {line_column: "line_direction"})
 
     print("Summing to one total per stop/line/hour/day (hour is real-arrival-time here, so a single "
           "day can have several distinct bus/tram passes landing in the same hour - see docstring point 5b)...")
@@ -122,7 +140,7 @@ def configure(context):
     context.config("data_path")
 
     context.config("analysis.pt.tpg_data",                  default = "Geneva_passenger_counts/TPG")
-    context.config("analysis.pt.tpg_raw_counts_2025",       default = "Geneva_passenger_counts/TPG/raw/2025/raw_transit_data_2025.csv")
+    context.config("analysis.pt.tpg_raw_counts_path",       default = "Geneva_passenger_counts/TPG/raw/2025/raw_transit_data_2025.csv")
     context.config("analysis.pt.tpg_processed_counts_path", default = "Geneva_passenger_counts/TPG/processed")
 
 
@@ -130,15 +148,17 @@ def execute(context):
     data_path = context.config("data_path")
     out_dir   = os.path.join(data_path, context.config("analysis.pt.tpg_processed_counts_path"))
 
-    result = aggregate_workday_stats(
-        os.path.join(data_path, context.config("analysis.pt.tpg_raw_counts_2025")),
+    result, by_direction = aggregate_workday_stats(
+        os.path.join(data_path, context.config("analysis.pt.tpg_raw_counts_path")),
         os.path.join(data_path, context.config("analysis.pt.tpg_data")),
     )
 
-    # the comparison reads the latest tpg2025_agg_workday_<date>.csv of the folder
+    # the comparison reads the latest tpg2025_agg_workday_<date>.csv of the folder, the line comparison the latest
+    # tpg2025_agg_workday_<date>_by_direction.csv
     path = os.path.join(out_dir, f"tpg2025_agg_workday_{datetime.date.today():%Y%m%d}.csv")
     result.to_csv(path, index = False)
-    print(f"Wrote {path} ({result.shape[0]} rows)")
+    by_direction.to_csv(path.replace(".csv", "_by_direction.csv"), index = False)
+    print(f"Wrote {path} ({result.shape[0]} rows) and its _by_direction version ({by_direction.shape[0]} rows)")
 
     return dict(done = True, path = path)
 
@@ -149,17 +169,18 @@ def main():
     parser.add_argument("--tpg-data-path", required = True, help = "Path to the Geneva_passenger_counts/TPG folder (crosswalk files in TPG_stops_info)")
     parser.add_argument(
         "--out", required = True,
-        help = "Where to write the rebuilt tpg2025_agg_workday_*.csv - drop it into config.Config.tpg_processed_counts_path",
+        help = "Where to write the rebuilt tpg2025_agg_workday_*.csv - drop it into config.Config.processed_counts_path",
     )
     args = parser.parse_args()
 
-    result = aggregate_workday_stats(args.raw_counts_path, args.tpg_data_path)
+    result, by_direction = aggregate_workday_stats(args.raw_counts_path, args.tpg_data_path)
     print(result.shape)
     print(result.head())
 
     if args.out:
         result.to_csv(args.out, index = False)
-        print(f"Wrote {args.out}")
+        by_direction.to_csv(args.out.replace(".csv", "_by_direction.csv"), index = False)
+        print(f"Wrote {args.out} and its _by_direction version")
 
 
 if __name__ == "__main__":

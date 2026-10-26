@@ -1,7 +1,6 @@
 import glob
 import logging
 import os
-from collections import Counter
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -9,63 +8,44 @@ import numpy as np
 import pandas as pd
 import pydeck as pdk
 import shapely
-import xml.etree.ElementTree as ET
-import xopen
-from pydeck.data_utils.viewport_helpers import compute_view
 from shapely.ops import unary_union
 
-from .flow_metrics import add_metric_columns, inject_metric_dropdown_legend, share_column
-from .matching.plots import Plotter
-from .paths import configure_simulation_path, get_analysis_output_path, get_simulation_path
+from . import flow_map_page
+from .flow_metrics import share_column
+from .cross_border_flow_events import GROUPS as EVENT_GROUPS
+from .paths import (
+    configure_flow_map_extents, configure_simulation_path, get_analysis_output_path, get_flow_map_extents,
+)
 
 logger = logging.getLogger("synpp")
 
-CAR_VEHICLE_SUFFIX         = ":car"
-LINK_ENTRY_EVENT_TYPES     = {"entered link"}
 ROAD_TYPES_FOR_MAP         = ["motorway", "trunk", "primary", "motorway_link", "trunk_link", "primary_link"]
-PROGRESS_EVERY             = 2_000_000
 MIN_SPEED_KMH_FOR_FLOW_MAP = 50
 RIDER_GROUP_FLOW_COLUMNS   = ["crossborder_flow", "swiss_crossborder_flow", "french_flow"]
 
 
 def configure(context):
+    context.stage("analysis.counts.cross_border_flow_events")
     context.stage("analysis.counts.matching.network")
     context.stage("data.spatial.swiss_border")
     context.config("only_weekday", default = False)
     context.config("input_downsampling")
     context.config("cross_border_flow_min_daily_count", default = 20)
-    context.config("extent_path", default = "")
+    # Roads outside Switzerland are drawn up to this distance (m) from the extent of the map
+    context.config("cross_border_flow_foreign_distance", default = 50_000)
 
     configure_simulation_path(context)
+    configure_flow_map_extents(context)
 
 
 def execute(context):
-    simulation_path = get_simulation_path(context)
-    output_path     = get_analysis_output_path(context)
+    output_path = get_analysis_output_path(context)
     os.makedirs(output_path, exist_ok=True)
 
-    persons_path = _find_output_file(simulation_path, "output_persons.csv.gz")
-    events_path  = _find_output_file(simulation_path, "output_events.xml.gz")
-
-    cross_border_ids        = load_cross_border_person_ids(persons_path)
-    swiss_crossborder_ids   = load_swiss_resident_cross_border_person_ids(persons_path)
-    french_resident_ids     = load_french_resident_person_ids(persons_path)
-
-    foreign_crossborder_ids = cross_border_ids - swiss_crossborder_ids
-    logger.info(
-        "Found %d cross-border persons (%d Swiss-resident) and %d non-cross-border France-resident persons in %s",
-        len(cross_border_ids), len(swiss_crossborder_ids), len(french_resident_ids), persons_path,
-    )
-
-    rider_group_ids = {
-        "crossborder_flow":       foreign_crossborder_ids,
-        "swiss_crossborder_flow": swiss_crossborder_ids,
-        "french_flow":            french_resident_ids,
-    }
-    total_counts, group_counts = count_car_link_entries(events_path, rider_group_ids)
-    logger.info("Counted car entries on %d distinct links", len(total_counts))
-
-    df_hourly = build_hourly_dataframe(total_counts, group_counts)
+    # the events are read once for the car and PT maps (analysis.counts.cross_border_flow_events)
+    df_hourly = pd.read_csv(context.stage("analysis.counts.cross_border_flow_events")["car_hourly"], dtype = {"link_id": str})
+    df_hourly = df_hourly.rename(columns = {"total": "total_flow", **dict(zip(EVENT_GROUPS, RIDER_GROUP_FLOW_COLUMNS))})
+    logger.info("Car entries on %d distinct links", df_hourly.link_id.nunique())
 
     sample_size = context.config("input_downsampling")
     for column in ["total_flow", *RIDER_GROUP_FLOW_COLUMNS]:
@@ -78,14 +58,19 @@ def execute(context):
 
     hourly_csv = os.path.join(output_path, "cross_border_link_flow_hourly.csv")
     daily_csv  = os.path.join(output_path, "cross_border_link_flow_daily.csv")
+    df_hourly.to_csv(hourly_csv, index = False)
+    df_daily.to_csv(daily_csv, index = False)
 
     min_daily_count = context.config("cross_border_flow_min_daily_count")
     df_plot = df_daily[df_daily.total_flow >= min_daily_count].copy()
 
     swiss_border = context.stage("data.spatial.swiss_border")
-    plot_crossborder_flow_map(
-        df_plot, network, context.config("extent_path"), swiss_border, output_path,
-    )
+    geometry = network.straight_geometry()
+    for name, extent_path in get_flow_map_extents(context).items():
+        plot_crossborder_flow_map(
+            df_plot, network, extent_path, swiss_border, output_path, name = name, geometry = geometry,
+            foreign_distance = context.config("cross_border_flow_foreign_distance"),
+        )
 
     return dict(done=True, path=output_path, daily_csv=daily_csv, hourly_csv=hourly_csv)
 
@@ -130,59 +115,6 @@ def load_french_resident_person_ids(persons_path):
     )
     is_french_resident = df.isExternalFR.astype(str).str.lower().eq("true")
     return set(df.loc[is_french_resident, "person"])
-
-
-def count_car_link_entries(events_path, rider_group_ids):
-    total_counts = Counter()
-    group_counts = {group: Counter() for group in rider_group_ids}
-
-    processed = 0
-    with xopen.xopen(events_path, "r") as f:
-        parser = ET.iterparse(f, events=["start", "end"])
-        _, root = next(parser)  # <events> start tag, kept to periodically release finished events
-
-        for event, elem in parser:
-            if event != "end" or elem.tag != "event":
-                continue
-
-            processed += 1
-            if processed % PROGRESS_EVERY == 0:
-                logger.info("Processed %d events...", processed)
-
-            if elem.attrib.get("type") in LINK_ENTRY_EVENT_TYPES:
-                vehicle = elem.attrib.get("vehicle", "")
-                if vehicle.endswith(CAR_VEHICLE_SUFFIX):
-                    link_id = elem.attrib["link"]
-                    hour    = int(float(elem.attrib["time"]) // 3600) % 24
-                    key     = (link_id, hour)
-
-                    total_counts[key] += 1
-
-                    person_id = vehicle[: -len(CAR_VEHICLE_SUFFIX)]
-                    for group, ids in rider_group_ids.items():
-                        if person_id in ids:
-                            group_counts[group][key] += 1
-
-            elem.clear()
-            if processed % PROGRESS_EVERY == 0:
-                root.clear()
-
-    logger.info("Finished streaming %d events from %s", processed, events_path)
-    
-    return total_counts, group_counts
-
-
-def build_hourly_dataframe(total_counts, group_counts):
-    rows = [
-        dict(
-            link_id = link_id, hour = hour, total_flow = count,
-            **{group: counts.get((link_id, hour), 0) for group, counts in group_counts.items()},
-        )
-        for (link_id, hour), count in total_counts.items()
-    ]
-    df = pd.DataFrame(rows, columns = ["link_id", "hour", "total_flow", *RIDER_GROUP_FLOW_COLUMNS])
-    
-    return df.sort_values(["link_id", "hour"]).reset_index(drop = True)
 
 
 def aggregate_daily(df_hourly):
@@ -250,7 +182,7 @@ def plot_share_by_road_type(df_daily, output_path):
 
 
 def plot_share_map(df_daily, network, output_path):
-    geometry = network.get_ways(road_types=ROAD_TYPES_FOR_MAP)
+    geometry = network.get_ways(geo_df=network.straight_geometry(), road_types=ROAD_TYPES_FOR_MAP)
     if geometry.empty:
         logger.info("No major-road geometry available; skipping cross-border share map.")
         return
@@ -319,13 +251,12 @@ METRICS = [
 DEFAULT_METRIC = "crossborder_flow"
 
 
-def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, output_path):
-
-    if not extent_path:
-        logger.info("extent_path is not configured; skipping cross-border flow map.")
-        return
+def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, output_path, name = None, geometry = None,
+                              foreign_distance = 50_000):
+    """Writes cross_border_flow_map_<name>.html: the flows inside the extent, and outside Switzerland up to
+    foreign_distance metres from it. geometry: network.straight_geometry(), if already computed."""
     if not os.path.exists(extent_path):
-        logger.warning("extent_path %s does not exist; skipping cross-border flow map.", extent_path)
+        logger.warning("Extent %s does not exist; skipping cross-border flow map %s.", extent_path, name)
         return
 
     boundary = gpd.read_file(extent_path)
@@ -338,11 +269,11 @@ def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, outp
     # so silently fails to join there, while cross-border links added later
     # never got simplified and happen to join correctly - which is exactly
     # why only the cross-border side of the extent showed flow before this
-    # fix. Passing an empty geometry_file forces straight node-to-node link
+    # fix. straight_geometry() gives straight node-to-node link
     # geometry, built from the same link table the flow counts use, so the
     # join is correct everywhere.
-    geometry = network.read_network_geometry(file_path="").copy()
-    geometry["link_id"] = geometry["link_id"].astype(str)
+    if geometry is None:
+        geometry = network.straight_geometry()
 
     if boundary.crs != geometry.crs:
         boundary = boundary.to_crs(geometry.crs)
@@ -353,8 +284,8 @@ def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, outp
     # map, which is what was actually breaking the render.
     region = shapely.force_2d(unary_union(boundary.geometry))
 
-    # The extent only cuts off the Swiss side; the French side is shown as
-    # far as the network actually extends. So a link is kept if it's inside
+    # The extent only cuts off the Swiss side; the foreign side is shown up to
+    # foreign_distance from the extent. So a link is kept if it's inside
     # the extent OR it isn't in Switzerland at all - only interior-CH links
     # beyond the extent get dropped.
     swiss_border_full = shapely.force_2d(unary_union(gpd.GeoSeries(swiss_border).to_crs(geometry.crs)))
@@ -363,10 +294,10 @@ def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, outp
     links["link_id"] = links["link_id"].astype(str)
     fast_link_ids = set(links.loc[links.freespeed >= MIN_SPEED_KMH_FOR_FLOW_MAP / 3.6, "link_id"])
 
-    keep_mask = geometry.link_id.isin(fast_link_ids) & (
-        geometry.intersects(region) | ~geometry.intersects(swiss_border_full)
-    )
-    geometry = geometry[keep_mask]
+    # the cheap filters first (fast links with flow, close to the extent), then the exact geometric ones
+    geometry = geometry[geometry.link_id.isin(fast_link_ids) & geometry.link_id.isin(set(df_daily.link_id))]
+    geometry = geometry[geometry.intersects(region.buffer(foreign_distance))]
+    geometry = geometry[geometry.intersects(region) | ~geometry.intersects(swiss_border_full)]
     if geometry.empty:
         logger.info(
             "No roads with freespeed >= %d km/h found inside the scenario extent; skipping cross-border flow map.",
@@ -390,116 +321,49 @@ def plot_crossborder_flow_map(df_daily, network, extent_path, swiss_border, outp
         logger.info("No flow recorded on qualifying roads inside the scenario extent; skipping map.")
         return
 
-    tooltip_fields = ["link_id", *flow_columns, *share_columns]
-    path_data = Plotter._prepare_path_data(merged.to_crs(epsg=4326), tooltip_fields)
-    path_data["_tooltip_html"] = path_data.apply(
-        lambda row: Plotter._build_tooltip_html(row, tooltip_fields), axis=1,
-    )
-
-    # Same METRICS-driven color/width scheme as cross_border_flow_pt.py's
-    # map (add_metric_columns), so the two maps' layers read consistently -
-    # a single-hue gray-to-color ramp per metric, width tracking that
-    # metric's width_basis (its own flow for an absolute layer, total_flow
-    # for a share layer), square-root-normalized so moderate-flow interior
-    # links don't get compressed into a barely-different shade/width near
-    # the low end.
-    #
-    # Unlike cross_border_flow_pt.py (a few hundred stop-to-stop segments,
-    # cheap to just duplicate per metric), this map can have 100k+ link
-    # rows - one PathLayer per metric would embed a full independent copy of
-    # the path geometry and tooltip HTML into the HTML per metric (7x the
-    # data for 7 metrics). Instead every metric's *_color/*_size columns
-    # (small numeric columns) are added to the SAME path_data, and a single
-    # set of chunked PathLayers is built once; switching the selected metric
-    # in the browser just re-clones those layers with a different
-    # getColor/getWidth accessor (see inject_metric_dropdown_legend's
-    # mode="accessor") rather than toggling visibility across per-metric
-    # duplicates. The chunking itself is still needed regardless of metric
-    # count: a single PathLayer with this many rows can silently render
-    # incompletely in the browser - deck.gl/WebGL attribute buffers have
-    # practical size limits.
-    metric_maxima = {
-        metric["key"]: add_metric_columns(path_data, metric, size_scale=16, size_base=3) for metric in METRICS
-    }
-
-    FLOW_LAYER_CHUNK_SIZE = 20_000
-    path_layers = [
-        pdk.Layer(
-            "PathLayer",
-            chunk,
-            id=f"car-path::{start}",
-            pickable=True,
-            auto_highlight=True,
-            get_path="path",
-            get_width=f"{DEFAULT_METRIC}_size",
-            get_color=f"{DEFAULT_METRIC}_color",
-            highlight_color=[0, 200, 255],
-            # A hard pixel floor, not just a meters-scaled width: interior
-            # Swiss links are individually much shorter than France's long,
-            # unbroken motorway/trunk segments (dense intersections vs. long
-            # highway stretches), so at country-scale zoom even a correctly
-            # colored minimum-width segment covers too few pixels to
-            # register visually. This keeps every segment visible as a
-            # solid mark regardless of its real-world length or zoom level.
-            width_min_pixels=3,
-            width_scale=3,
-        )
-        for start in range(0, len(path_data), FLOW_LAYER_CHUNK_SIZE)
-        for chunk in [path_data.iloc[start:start + FLOW_LAYER_CHUNK_SIZE]]
+    # Compact page (flow_map_page): the data once, the colors/widths/tooltips of the selected metric computed in
+    # the browser; only links with flow are written (zero-flow links would render as uninformative gray lines)
+    merged = merged.to_crs(epsg=4326)
+    flows = {column: merged[column].to_numpy() for column in flow_columns}
+    tooltip = [("Link", "link_id", "text"), ("Total car flow", "total_flow", "int")] + [
+        (label, key, "pct" if key.endswith("_share_pct") else "int")
+        for key, label in ((m["key"], m["label"]) for m in METRICS) if key != "total_flow"
     ]
+    flow_layer = flow_map_page.layer(
+        "path", [list(g.coords) for g in merged.geometry], flows, texts={"link_id": merged.link_id.tolist()},
+        tooltip=tooltip, size_scale=16, size_base=3, metrics=METRICS,
+    )
 
-    extent_layer = _polygon_outline_layer(region, geometry.crs, color=[0, 0, 0], width=2)
-    # Only the part of the national border that actually runs through the
-    # extent is relevant here; the rest of the country outline is just noise.
-    # (swiss_border_full itself was already computed above, for the France-
-    # side link filter.)
+    # Only the part of the national border that actually runs through the extent is relevant here
     swiss_border_geometry = swiss_border_full.intersection(region)
-    swiss_border_layer = (
-        _polygon_outline_layer(swiss_border_geometry, geometry.crs, color=[178, 24, 43], width=1.5)
-        if not swiss_border_geometry.is_empty
-        else None
-    )
+    outlines = [(_outline_rings(region, geometry.crs), [0, 0, 0], 2)]
+    if not swiss_border_geometry.is_empty:
+        outlines.insert(0, (_outline_rings(swiss_border_geometry, geometry.crs), [178, 24, 43], 1.5))
 
-    # Fit the view to the extent boundary itself, not the mean of every link
-    # vertex: qualifying links are denser outside Switzerland than inside it,
-    # so an unweighted vertex average pulls the camera toward the French side
-    # and (at a fixed zoom) crops the Swiss portion out of the initial view.
-    # A small margin keeps the extent from sitting flush against the window
-    # edge; compute_view's zoom formula assumes a square viewport, so no
-    # further manual zoom-out is applied on top of that.
-    extent_bounds_ll = gpd.GeoSeries([region], crs=geometry.crs).to_crs(epsg=4326).total_bounds
-    minx, miny, maxx, maxy = extent_bounds_ll
-    margin_x, margin_y = (maxx - minx) * 0.05, (maxy - miny) * 0.05
-    view_state = compute_view([
-        [minx - margin_x, miny - margin_y],
-        [maxx + margin_x, maxy + margin_y],
-    ])
-    view_state.pitch = 0
-    tooltip = {
-        "html": "{_tooltip_html}",
-        "style": {"color": "white", "background-color": "black", "padding": "10px"},
-    }
-
-    deck = pdk.Deck(
-        layers             = [
-            l for l in [swiss_border_layer, extent_layer, *path_layers] if l is not None
-        ],
-        initial_view_state = view_state,
-        tooltip            = tooltip,
-        map_style          = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-    )
-
-    output_file = os.path.join(output_path, "cross_border_flow_map.html")
-    deck.to_html(output_file, notebook_display=False)
-    inject_metric_dropdown_legend(
-        output_file, METRICS, metric_maxima, DEFAULT_METRIC,
-        layer_prefixes=["car-path::"], dom_id_prefix="car", mode="accessor",
-        extra_legend_lines=[
+    output_file = os.path.join(output_path, f"cross_border_flow_map_{name}.html" if name else "cross_border_flow_map.html")
+    flow_map_page.write_page(
+        output_file, f"Cross-border car flows{' - ' + name if name else ''}", [flow_layer], METRICS, DEFAULT_METRIC,
+        outlines=outlines, bounds=_extent_bounds(region, geometry.crs),
+        legend_lines=[
             ("Red outline = Swiss national border", "color:#b2182b;"),
             ("Black outline = scenario extent", "color:#222;"),
         ],
     )
-    logger.info("Saved cross-border flow map to %s", output_file)
+    logger.info("Saved cross-border flow map of %s to %s", name, output_file)
+
+
+def _outline_rings(geometry, crs, tolerance=20.0):
+    """Exterior rings (lon, lat) of the polygons of geometry, simplified to tolerance metres"""
+    geometry = gpd.GeoSeries([geometry.simplify(tolerance)], crs=crs).to_crs(epsg=4326).iloc[0]
+    parts = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
+    return [list(part.exterior.coords) for part in parts if part.geom_type == "Polygon"]
+
+
+def _extent_bounds(region, crs, margin=0.05):
+    """(min lon, min lat, max lon, max lat) of the extent, with a margin"""
+    minx, miny, maxx, maxy = gpd.GeoSeries([region], crs=crs).to_crs(epsg=4326).total_bounds
+    dx, dy = (maxx - minx) * margin, (maxy - miny) * margin
+    return minx - dx, miny - dy, maxx + dx, maxy + dy
 
 
 def _polygon_outline_layer(geometry, crs, color, width):

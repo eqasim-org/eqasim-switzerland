@@ -37,15 +37,22 @@ STATION_DISTANCE = 150.0
 
 
 def configure(context):
+    # The stops and routes are the ones of the GTFS of the simulation (the same stage as the comparison in Geneva)
+    context.stage("data.gtfs.cleaned")
+
     context.config("data_path")
     context.config("input_downsampling")
     context.config("output_path")
     context.config("output_id")
     context.config("simulation_directory", default = "simulation_output")
 
-    context.config("analysis.pt.tl_processed_path", default = "Lausanne_passenger_counts/tl data 2024/processed")
-    context.config("analysis.pt.tl_gtfs_zip",       default = "gtfs/gtfs_fp2024_2024-11-11.zip")
-    context.config("analysis.pt.tl_perimeter",      default = "spatial/LausanneExtent/LausanneExtent.shp")
+    context.config("analysis.pt.tl_processed_counts_path", default = "Lausanne_passenger_counts/tl data 2024/processed")
+    context.config("analysis.pt.tl_perimeter",             default = "spatial/LausanneExtent/LausanneExtent.shp")
+
+    # Rebuild the processed TL counts from the raw ones first (analysis.pt.TL_comparison.tl_2024)
+    context.config("analysis.pt.tl_rebuild_counts", default = False)
+    if context.config("analysis.pt.tl_rebuild_counts"):
+        context.stage("analysis.pt.TL_comparison.tl_2024")
 
     context.config("analysis.pt.min_stop_avg_events",   default = 10.0)
     context.config("analysis.pt.min_stop_active_hours", default = 6)
@@ -57,6 +64,8 @@ def configure(context):
     context.config("analysis.pt.include_sbb", default = True)
     context.config("analysis.pt.sbb_path",    default = "Geneva_passenger_counts/SBB/passagierfrequenz.csv")
     context.config("analysis.pt.sbb_year",    default = 2024)
+
+    context.config("specific_day_scenario", default = "workday")
 
 
 def resolve_tl_stats_path(processed_dir):
@@ -242,19 +251,18 @@ def build_tl_mofr(data, tl_stats_path):
     return tl_mofr
 
 
-def run(gtfs_zip, perimeter_shapefile, tl_processed_path, matsim_output_folder, input_downsampling,
+def run(gtfs_path, perimeter_shapefile, tl_processed_counts_path, matsim_output_folder, input_downsampling,
         output_dir = None, min_stop_avg_events = 10.0, min_stop_active_hours = 6, map_hour_start = 6, map_hour_end = 22,
-        night_hours = 5, sbb_path = None, sbb_year = 2024, counts_source = "auto"):
+        night_hours = 5, sbb_path = None, sbb_year = 2024, counts_source = "auto", day_scenario = "workday"):
 
     tpg_data.counts_source_available(matsim_output_folder, counts_source)
 
     cfg = Config(
-        gtfs_zip                  = gtfs_zip,
+        gtfs_path                 = gtfs_path,
         perimeter_shapefile       = perimeter_shapefile,
         tpg_data_path             = "",
         matsim_output_folder      = matsim_output_folder,
-        output_path               = os.path.dirname(os.path.abspath(matsim_output_folder)),
-        tpg_processed_counts_path = tl_processed_path,
+        processed_counts_path     = tl_processed_counts_path,
         input_downsampling        = input_downsampling,
         min_stop_avg_events       = min_stop_avg_events,
         min_stop_active_hours     = min_stop_active_hours,
@@ -269,7 +277,7 @@ def run(gtfs_zip, perimeter_shapefile, tl_processed_path, matsim_output_folder, 
     output_dir = output_dir or os.path.join(matsim_output_folder, "pt_comparison_tl_2024")
     os.makedirs(output_dir, exist_ok = True)
 
-    tl_mofr = build_tl_mofr(data, resolve_tl_stats_path(tl_processed_path))
+    tl_mofr = build_tl_mofr(data, resolve_tl_stats_path(tl_processed_counts_path))
 
     stop_hour_df     = comparison.build_stop_hour_table(tl_mofr, data.gtfs_stops, data.stops_in_perimeter)
     global_hourly_df = comparison.build_global_hourly_table(stop_hour_df)
@@ -278,24 +286,24 @@ def run(gtfs_zip, perimeter_shapefile, tl_processed_path, matsim_output_folder, 
     windowed_stop_hour_df = stop_hour_df[stop_hour_df["hour"].between(*hour_range)]
     windowed_full_day_df  = comparison.build_full_day_table(windowed_stop_hour_df)
 
-    stop_hour_df.to_csv(os.path.join(output_dir, "stop_hour_comparison.csv"), index = False)
-    windowed_full_day_df.to_csv(os.path.join(output_dir, "stop_full_day_comparison.csv"), index = False)
+    stop_hour_df.to_csv(os.path.join(output_dir, "tl_stop_hour_comparison.csv"), index = False)
+    windowed_full_day_df.to_csv(os.path.join(output_dir, "tl_stop_full_day_comparison.csv"), index = False)
 
     plotting.plot_global_hourly_comparison(
-        global_hourly_df, os.path.join(output_dir, "global_hourly_comparison.png"), reference_name = REFERENCE_NAME,
+        global_hourly_df, os.path.join(output_dir, "tl_global_hourly_comparison.png"), reference_name = REFERENCE_NAME,
     )
     interactive_map.build_hourly_map(
-        stop_hour_df, os.path.join(output_dir, "pt_stop_map_by_hour.html"),
+        stop_hour_df, os.path.join(output_dir, "tl_stop_map_by_hour.html"),
         perimeter_shapefile = perimeter_shapefile, hour_range = hour_range, reference_name = REFERENCE_NAME,
     )
 
     sbb_station_df = None
     if sbb_path:
         print(f"Running the SBB station passenger counts comparison -> {output_dir}")
-        sbb_station_df = stages.run_sbb_stations(data, output_dir, year = sbb_year)
+        sbb_station_df = stages.run_sbb_stations(data, output_dir, year = sbb_year, day = day_scenario, prefix = "tl")
 
     interactive_map.build_full_day_map(
-        windowed_stop_hour_df, windowed_full_day_df, os.path.join(output_dir, f"pt_stop_map_{map_hour_start}_{map_hour_end}.html"),
+        windowed_stop_hour_df, windowed_full_day_df, os.path.join(output_dir, f"tl_stop_map_{map_hour_start}_{map_hour_end}.html"),
         perimeter_shapefile = perimeter_shapefile, reference_name = REFERENCE_NAME, sbb_station_df = sbb_station_df,
     )
 
@@ -312,9 +320,9 @@ def execute(context):
     )
 
     output_dir = run(
-        gtfs_zip                = os.path.join(data_path, context.config("analysis.pt.tl_gtfs_zip")),
-        perimeter_shapefile     = os.path.join(data_path, context.config("analysis.pt.tl_perimeter")),
-        tl_processed_path       = os.path.join(data_path, context.config("analysis.pt.tl_processed_path")),
+        gtfs_path                = "%s/output" % context.path("data.gtfs.cleaned"),
+        perimeter_shapefile      = os.path.join(data_path, context.config("analysis.pt.tl_perimeter")),
+        tl_processed_counts_path = os.path.join(data_path, context.config("analysis.pt.tl_processed_counts_path")),
         matsim_output_folder    = matsim_output_folder,
         input_downsampling      = context.config("input_downsampling"),
         min_stop_avg_events     = context.config("analysis.pt.min_stop_avg_events"),
@@ -326,6 +334,7 @@ def execute(context):
                                    if context.config("analysis.pt.include_sbb") else None),
         sbb_year                = context.config("analysis.pt.sbb_year"),
         counts_source           = context.config("analysis.pt.counts_source"),
+        day_scenario            = context.config("specific_day_scenario"),
     )
 
     return dict(done = True, path = output_dir)
@@ -337,7 +346,7 @@ def main(argv = None):
     parser.add_argument("--counts-source", default = "auto", choices = tpg_data.COUNTS_SOURCES,
                         help = "file: pt_passenger_counts.csv.gz, events: count the passengers in output_events.xml.gz, "
                                "auto: the file if it exists")
-    parser.add_argument("--gtfs-zip", required = True)
+    parser.add_argument("--gtfs", required = True, help = "GTFS of the simulated schedule: output folder of data.gtfs.cleaned (or a zip)")
     parser.add_argument("--perimeter", required = True, help = "Shapefile of the Lausanne perimeter")
     parser.add_argument("--tl-processed", required = True, help = "Folder with tl2024_agg_workday_<date>.csv")
     parser.add_argument("--input-downsampling", type = float, required = True)
@@ -348,17 +357,18 @@ def main(argv = None):
     parser.add_argument("--map-hour-end", type = int, default = 22)
     parser.add_argument("--sbb-path", default = None, help = "SBB passagierfrequenz.csv: station counts are added to the map")
     parser.add_argument("--sbb-year", type = int, default = 2024)
+    parser.add_argument("--day-scenario", default = "workday", help = "workday, weekend or a day name (Monday ...): days of the SBB counts")
     parser.add_argument("--night-hours", type = int, default = 5,
                         help = "The MATSim counts of the hours 0 to N-1 are replaced by the ones of the hours 24 to 24+N-1")
     args = parser.parse_args(argv)
 
     output_dir = run(
-        gtfs_zip = args.gtfs_zip, perimeter_shapefile = args.perimeter, tl_processed_path = args.tl_processed,
+        gtfs_path = args.gtfs, perimeter_shapefile = args.perimeter, tl_processed_counts_path = args.tl_processed,
         matsim_output_folder = args.matsim_output, input_downsampling = args.input_downsampling,
         output_dir = args.output_dir, min_stop_avg_events = args.min_stop_avg_events,
         min_stop_active_hours = args.min_stop_active_hours,
         map_hour_start = args.map_hour_start, map_hour_end = args.map_hour_end, night_hours = args.night_hours,
-        sbb_path = args.sbb_path, sbb_year = args.sbb_year, counts_source = args.counts_source,
+        sbb_path = args.sbb_path, sbb_year = args.sbb_year, counts_source = args.counts_source, day_scenario = args.day_scenario,
     )
     print("Results written to", output_dir)
 

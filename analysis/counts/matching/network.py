@@ -2,6 +2,7 @@ from matsim.readers import read_network
 import numpy as np
 import geopandas as gpd
 import pandas as pd
+import shapely
 from shapely.geometry import MultiLineString
 from shapely import from_wkt, get_point, get_x, get_y
 import logging
@@ -52,7 +53,8 @@ class RoadNetwork:
         else:
             # Load the network
             self.net = self._load_network()
-            self.net_geo = self.read_network_geometry(geometry_file)
+            # Without the detailed export, only the stages that need no real road shapes work (straight_geometry)
+            self.net_geo = self.read_network_geometry(geometry_file) if geometry_file else None
             self._save_to_cache()
             logger.info(f"Reading and processing took {(time.time()-start_time):.1f} seconds.\n")
 
@@ -68,9 +70,17 @@ class RoadNetwork:
             self.__dict__.update(cached.__dict__)
 
     def get_geometry(self):
-        if not hasattr(self, "net_geo"):
+        if getattr(self, "net_geo", None) is None:
             self.net_geo = self.read_network_geometry()
         return self.net_geo
+
+    def straight_geometry(self, crs='EPSG:2056'):
+        """Straight node-to-node shapes of the links, keyed by the simulation link IDs (for flow maps, not count matching)."""
+        nodes = self.nodes.set_index('node_id')[['x', 'y']].astype(float)
+        start = nodes.loc[self.links.from_node].to_numpy()
+        end = nodes.loc[self.links.to_node].to_numpy()
+        lines = shapely.linestrings(np.stack([start, end], axis=1))
+        return gpd.GeoDataFrame({'link_id': self.links.link_id.astype(str).to_numpy()}, geometry=lines, crs=crs)
 
     @property
     def links(self):
