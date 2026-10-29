@@ -5,7 +5,9 @@ import hashlib
 import json
 from pathlib import Path
 
-import geopandas as gpd
+import numpy as np
+import pyogrio
+import shapely
 import igraph as ig
 from lxml import etree
 from pyproj import CRS, Transformer
@@ -32,21 +34,22 @@ def geometry_token(filename):
 
 
 def load_region(filename, layer, location, region_crs=None, network_crs=None):
-    frame = gpd.read_file(filename, **({"layer": layer} if layer is not None else {}))
-    if frame.crs is None:
-        if region_crs is None:
-            raise ValueError("Region geometry has no CRS; set sumo_region_crs explicitly")
-        frame = frame.set_crs(region_crs)
-    polygons = frame.geometry[frame.geometry.geom_type.isin(["Polygon", "MultiPolygon"])]
-    if polygons.empty or polygons.is_empty.any() or not polygons.is_valid.all():
+    metadata, table = pyogrio.read_arrow(filename, **({"layer": layer} if layer is not None else {}))
+    crs = metadata.get("crs") or region_crs
+    if crs is None:
+        raise ValueError("Region geometry has no CRS; set sumo_region_crs explicitly")
+    column = metadata.get("geometry_name") or "wkb_geometry"
+    geometry = shapely.from_wkb(table[column].to_numpy())
+    polygons = geometry[np.isin(shapely.get_type_id(geometry), [3, 6])]
+    if not len(polygons) or shapely.is_empty(polygons).any() or not shapely.is_valid(polygons).all():
         raise ValueError("Region geometry must contain valid, nonempty polygons")
     projection = location.get("projParameter")
     if projection in {None, "!", "-"}:
         projection = network_crs
     if projection is None:
         raise ValueError("Network has no usable CRS; set sumo_network_crs for its unshifted coordinates")
-    transformer = Transformer.from_crs(frame.crs, CRS.from_user_input(projection), always_xy=True)
-    geometry = transform(transformer.transform, union_all(polygons.to_numpy()))
+    transformer = Transformer.from_crs(crs, CRS.from_user_input(projection), always_xy=True)
+    geometry = transform(transformer.transform, union_all(polygons))
     offset = [float(value) for value in location.get("netOffset", "0,0").split(",")]
     return translate(geometry, xoff=offset[0], yoff=offset[1])
 

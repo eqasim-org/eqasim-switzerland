@@ -60,6 +60,9 @@ client are implementation helpers, not additional data stages.
 | `tours.build` | `trip_id`, `tour_index`, `mode_choice_eligible` |
 | `data.prepare` | Eligible trips with person, location and spatial features |
 | `routing.requests` | Path to the shared Java request CSV |
+| `routing.freight` | Freight/LCV requests with population person IDs |
+| `routing.preparation` | Prepared network, facility endpoints and freight endpoints; conditional on route reuse |
+| `routing.road_requests` | One mixed car/freight/LCV CSV for joint assignment |
 | `routing_variables.car` | `trip_id`, car time and distance |
 | `routing_variables.car_passenger` | Car variables renamed for passengers; no routing call |
 | `routing_variables.pt` | `trip_id`, PT time/distance components and totals |
@@ -170,8 +173,8 @@ The context manager and calibration cleanup release reservations on errors too.
 PT uses Java. Walk and bike are selected independently with
 `mode_choice_walk_routing_backend` and `mode_choice_bike_routing_backend`:
 
-- `java` (default): reuse the server and the MATSim routing configuration.
-- `python`: compute distance as Euclidean distance × detour factor, then time
+- `java`: reuse the server and the MATSim routing configuration.
+- `python` (default): compute distance as Euclidean distance × detour factor, then time
   as distance ÷ average speed, using vectorized Polars expressions.
 
 Python defaults match `origin/eqasim-mode-choice`: walking uses
@@ -185,8 +188,58 @@ mode_choice_walk_routing_backend: python
 mode_choice_bike_routing_backend: python
 ```
 
-Walk/bike no longer inherit the car backend. When using Pandana, explicitly set
-their backends to `python` to retain the previous detour/speed behavior.
+Walk/bike do not inherit the car backend.
+
+### Macroscopic road assignment and route reuse
+
+The default `use_marouter_in_mode_choice: true` enables the incremental BPR road
+assignment in eqasim commit `74b85c14c7ae9ac7d4d4f3daf253591af76fe444`.
+`routing.road_requests` combines the eligible population's car alternatives and
+all enabled `synthesis.freight.trips` / `synthesis.lcv.trips` in **one** request.
+Every Java request starts with zero flows; splitting trucks into another request
+would lose their congestion contribution. Freight IDs match the population writer
+(`freight_<agent_id>` and `lcv_<trip_id>`, trip index zero). Cost and utility tables
+retain only the passenger population's car rows.
+
+The server receives the configured `random_seed` and `input_downsampling`, so
+assignment is reproducible and capacity is scaled to the population sample once.
+It uses the existing MATSim `eqasim:vdf` settings. Recorded events are used only
+when MARouter is disabled. This assignment uses all eligible car alternatives as
+demand before mode selection; calibration reuses these routes and does not rerun
+assignment with each set of choices.
+
+Set `route_population_once: true` (default false) to reuse the Java itineraries:
+
+```yaml
+enable_mode_choice: true
+use_marouter_in_mode_choice: true
+route_population_once: true
+mode_choice_car_routing_backend: java
+```
+
+`routing.preparation` runs Java's normal facility placement and freight relocation
+before starting the server, without routing trips. It writes private prepared
+network and endpoint files. `routing.requests` joins those facility endpoints and
+uses the population writer's whole-second departure times. Requests carry
+`person_id` and the original zero-based `trip_index`, including gaps left by trips
+excluded from mode choice. The server then starts with `--export-routes true`.
+
+In `matsim.simulation.prepare`, `routing.exports.population_routes(context)` streams
+the selected modes and truck routes into `mode_choice_routes.csv` and returns its
+path for `RunPopulationRouting --routes-path`. Upstream CSVs remain untouched.
+The combined file omits mode choice's globally unique `trip_id`: Java matches on
+`person_id` plus `trip_index`. Selected car passengers reuse the car itinerary with
+the appropriate passenger mode. Walk/bike routed in Python, excluded population
+trips, and incompatible or missing itineraries use Java's normal routing fallback.
+Java reports reuse and fallback counts. Route reuse also derives PT components
+from the saved itinerary and fare data, avoiding a second detailed PT routing pass.
+Endpoint links that forbid a requested network mode are omitted from that mode's
+request, so Java does not abort a whole batch. Missing population-mode results
+receive the normal unavailable-route times; missing truck exports fall back to
+population routing.
+
+Pandana requires both `use_marouter_in_mode_choice: false` and
+`route_population_once: false`. Invalid combinations fail during graph setup.
 
 Car passengers always reuse the car route. `costs.parking` uses complete person
 chains, the existing charging window and destination-specific rates/search times.
@@ -200,7 +253,7 @@ travel times to `UNROUTABLE_TIME_MIN` (1e9 minutes), and log the failure count.
 Other failed-route fields use finite zero placeholders. Availability excludes
 these routes explicitly, giving them utility `-inf` for both sampling methods
 and during calibration. Car passengers inherit failed car routes; PT requires
-valid results from both its total and component routers. If a tour has no
+valid totals and components. If a tour has no
 feasible mode sequence, selection reports an error identifying the person and
 tour. Duplicate or unknown routing identifiers remain errors.
 
@@ -231,12 +284,13 @@ costs. This saved itinerary remains in `pt_routes.csv` and can be passed to
 The usual cost stages still read `cost.parquet`. No `savePtCostData` request or
 `--save-pt-cost-data` launch option is needed with the updated API.
 
-**Current Java API limitation:** the multimodal server supplies PT total time and
+When `route_population_once` is false, the multimodal server supplies PT total time and
 distance and fares but not the separately weighted time/distance components
-required by DMC. `routing_variables.pt` therefore also calls the detailed PT router,
-excluding initial waiting from transfer time. This supplemental routing remains
-until the server exposes these fields. The standalone fare calculator is no longer
-called. Totals are never substituted for in-vehicle times, and string trip IDs
+required by DMC as separate columns. `routing_variables.pt` also calls the detailed
+PT router in this case. With route reuse enabled, it obtains in-vehicle time,
+distance, access/egress walking, transfers and transfer walking/waiting from the
+same exported itinerary instead. Both paths exclude initial waiting from transfer
+time. Totals are never substituted for in-vehicle times, and string trip IDs
 are preserved throughout routing and pricing.
 
 The supplemental router receives `detailed_pt_requests.csv` with only identifier,
@@ -332,10 +386,13 @@ remain sampled; exporters align activity end times with the chosen trip departur
 
 ## Main options
 
-Defaults and stage contracts are centralized in `defaults.py`:
+Model defaults and stage contracts are in `defaults.py`. The new routing flags
+are declared and checked by `routing.options.configure(context)`:
 
 ```yaml
 mode_choice_car_routing_backend: java
+use_marouter_in_mode_choice: true
+route_population_once: false
 mode_choice_person_batch_size: 10000
 mode_choice_sampling_method: probability  # or gumbel
 mode_choice_max_trips_per_tour: 8
@@ -376,3 +433,34 @@ graph causes about 28 million visits per pass. The standard dry run was interrup
 after several minutes. A temporary, in-process topological traversal completed the
 read-only audit; the installed framework was not changed. This framework startup
 bottleneck is separate from routing or mode-choice computation.
+
+
+## Preparing road paths for SUMO
+
+Set `prepare_sumo: true` with the Java car backend to save road itineraries during
+normal mode-choice routing. This does not require `route_population_once` and
+does not alter mode choices. SUMO's `sumo.scenario.unrouted_demand` supplies only
+selected demand to `mode_choice.routing.sumo`, which reuses matching paths and
+routes missing/changed trips, including selected external/cross-border and
+commercial trips. These additional routing-only trips never enter the choice
+model. `mode_choice.routing.sumo_network` caches corresponding directed detailed
+road geometries from the exact routing network. Both stages return Arrow paths.
+See [SUMO route reuse and border clipping](../sumo/population/README.md#road-route-reuse-and-swiss-border-demand-clipping)
+for matching keys, timing assumptions and runtime requirements.
+
+
+## Routing request timeout
+
+`mode_choice_server_request_timeout` controls how long the Python HTTP client
+waits for one CSV routing or cost request to complete. Its default is **86400
+seconds (24 hours)**, allowing full-population PT and road routing to take several
+hours. Override it in the pipeline configuration when needed:
+
+```yaml
+mode_choice_server_request_timeout: 86400
+```
+
+This applies to PT, car/truck routing and SUMO's missing-route completion. It is
+independent of the server startup timeout and of the Slurm job time allocation.
+Restart the pipeline job to load a changed timeout; a running request keeps the
+value with which it started.

@@ -213,3 +213,106 @@ def test_selector_diagnostics_keep_probabilities_and_actual_draws_separate():
     table,trips=selector_diagnostics(observed,predictions)
     assert trips.iloc[0].selected_short==pytest.approx(.2)
     assert table.loc[table.selected_short,'row_share'].iloc[0]==pytest.approx(1/3)
+
+
+def test_replay_fingerprint_hashes_chain_arrays_by_content_without_mutating_inputs():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('secondary_report_run', Path(__file__).with_name('run.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    frame = pd.DataFrame(dict(person_id=[1, 2], activity_chain=[np.array([1, 2]), np.array([2, 1])],
+                              chain_state=[np.array([100., 2.]), np.array([200., 3.])]))
+    fingerprint = module.replay_input_fingerprint(frame)
+    copied = frame.copy()
+    copied['chain_state'] = copied.chain_state.map(np.copy)
+    assert module.replay_input_fingerprint(copied) == fingerprint
+    copied.loc[0, 'chain_state'][0] += 1.
+    assert module.replay_input_fingerprint(copied) != fingerprint
+    assert frame.loc[0, 'chain_state'][0] == 100.
+    assert isinstance(frame.loc[0, 'activity_chain'], np.ndarray)
+
+
+def test_short_range_diagnosis_uses_saved_representative_points():
+    import geopandas as gpd
+    from shapely.geometry import Point
+    from diagnose_short_range import diagnose
+    from synthesis.population.spatial.secondary_nn.h3 import H3_LEVEL_NAMES
+
+    # Geometry centroids are deliberately far away; inference uses the saved point column.
+
+    leaves = gpd.GeoDataFrame(dict(
+        h3_index=['root/a/1', 'root/a/2', 'root/b/3', 'root/b/4'], num_statent=[1]*4),
+        geometry=[Point(10000+i*100, 0) for i in range(4)], crs=2056)
+    leaves['centroid'] = gpd.GeoSeries([Point(-1000,0), Point(1000,0), Point(0,1000), Point(0,-1000)], crs=2056)
+    labels = pd.DataFrame({'person_id':[1], 'trip_id':[0],
+                           'destination_'+H3_LEVEL_NAMES[1]:['root/a']})
+    class Cache:
+        root = 'frozen'
+        def config(self, key, default=None):
+            return default
+        def stage(self, name):
+            return {'microcensus_trips':labels}, {H3_LEVEL_NAMES[-1]:leaves}, None
+    observed = pd.DataFrame(dict(person_id=[1], trip_id=[0], origin_x=[0.], origin_y=[0.], crowfly_distance=[100.]))
+    result = diagnose(Cache(), observed)
+    assert result['median_origin_candidate_cells'] == 4
+    assert result['median_observed_branch_candidate_cells'] == 2
+    assert result['median_fraction_origin_candidates_outside_training_branch'] == .5
+    assert result['share_trips_with_origin_candidates_outside_training_branch'] == 1.
+
+
+def test_sampling_policy_comes_from_the_completed_assignment_not_edited_yaml(tmp_path):
+    root='synthesis.population.spatial.secondary.locations__root'
+    linked='synthesis.population.spatial.secondary_nn.locations__linked'
+    unrelated='synthesis.population.spatial.secondary_nn.locations__unrelated'
+    metadata={root:dict(updated=10,dependencies={linked:1},config={}),
+        linked:dict(updated=5,dependencies={},config={}),
+        unrelated:dict(updated=20,dependencies={},config={'secondary_nn_short_sampling':'distance'})}
+    for key in metadata:
+        (tmp_path/(key+'.p')).write_bytes(pickle.dumps(None))
+    path=tmp_path/'config.yml'
+    path.write_text(yaml.safe_dump(dict(working_directory=str(tmp_path),config={'secondary_nn_short_sampling':'distance'})))
+    (tmp_path/'pipeline.json').write_text(json.dumps(metadata))
+    assert RunCache(path).config('secondary_nn_short_sampling')=='neural'
+    metadata[linked]['config']['secondary_nn_short_sampling']='distance'
+    metadata[linked]['config']['secondary_nn_short_distance_sigma_min_m']=15.
+    (tmp_path/'pipeline.json').write_text(json.dumps(metadata))
+    assert RunCache(path).config('secondary_nn_short_sampling')=='distance'
+    assert RunCache(path).config('secondary_nn_short_distance_sigma_min_m')==15.
+
+
+def test_historical_assignment_can_be_selected_for_reproducible_diagnosis(tmp_path):
+    old='synthesis.population.spatial.secondary.locations__old'
+    new='synthesis.population.spatial.secondary.locations__new'
+    metadata={old:dict(updated=1,dependencies={},config={'secondary_nn_short_sampling':'neural'}),
+              new:dict(updated=2,dependencies={},config={'secondary_nn_short_sampling':'distance'})}
+    for key in metadata:
+        (tmp_path/(key+'.p')).write_bytes(pickle.dumps(None))
+    (tmp_path/'pipeline.json').write_text(json.dumps(metadata))
+    path=tmp_path/'config.yml'
+    path.write_text(yaml.safe_dump(dict(working_directory=str(tmp_path),config={})))
+    assert RunCache(path).root==new
+    assert RunCache(path,root=old).config('secondary_nn_short_sampling')=='neural'
+    with pytest.raises(ValueError,match='not available'):
+        RunCache(path,root='missing')
+
+
+def test_short_loss_provenance_uses_completed_checkpoint_history(tmp_path):
+    root='synthesis.population.spatial.secondary.locations__root'
+    stage='synthesis.population.spatial.secondary_nn.short_range_model'
+    short=stage+'__trained'
+    checkpoint=tmp_path/'short.pt'
+    checkpoint.write_bytes(b'checkpoint')
+    (tmp_path/'loss_history.json').write_text(json.dumps(dict(distance_loss_kind='relative',
+        distance_loss_weight=.07,relative_distance_underestimation_factor=2.,best_epoch=21)))
+    metadata={root:dict(updated=2,dependencies={short:1},config={}),
+              short:dict(updated=1,dependencies={},config={})}
+    (tmp_path/(root+'.p')).write_bytes(pickle.dumps(None))
+    (tmp_path/(short+'.p')).write_bytes(pickle.dumps((str(checkpoint),)))
+    (tmp_path/'pipeline.json').write_text(json.dumps(metadata))
+    config=tmp_path/'config.yml'
+    config.write_text(yaml.safe_dump(dict(working_directory=str(tmp_path),config={})))
+    cache=RunCache(config)
+    cache.stage(stage)
+    recorded=cache.provenance()['artifacts'][stage]['training_settings']
+    assert recorded['relative_distance_underestimation_factor']==2.
+    assert recorded['distance_loss_kind']=='relative' and recorded['distance_loss_weight']==.07

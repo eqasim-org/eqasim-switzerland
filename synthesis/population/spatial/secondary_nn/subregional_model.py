@@ -13,7 +13,7 @@ from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import DistrictChoiceWrapper
 
-from .tools import training_mobility, enrich_candidate_tensor, attach_candidate_features
+from .tools import model_validation_options, training_mobility, enrich_candidate_tensor, attach_candidate_features
 from .training_split import expert_persons
 
 logger = logging.getLogger("synpp: subregional_model")
@@ -23,6 +23,9 @@ MODEL_NAME = "subregional_model.pt"
 
 def configure(context):
     context.config("secondary_nn_use_target_distance", True)
+    context.config("secondary_nn_model_validation_folds", 5)
+    context.config("secondary_nn_model_min_epochs", 20)
+    context.config("secondary_nn_model_validation_strategy", "cross_validation")
     context.stage("data.spatial.ovgk")
     context.config("secondary_nn_distance_loss_kind", "crps_energy")
     context.config("secondary_nn_distribution_loss_weight", 0.1)
@@ -59,7 +62,7 @@ def execute(context):
     logger.info("Training subregional model (neural choice) for level1-within-level0 secondary location choice...")
 
     overwrite_model = context.config("overwrite_subregional_model_if_exists")
-    model_path = os.path.join(context.working_directory, MODEL_NAME)
+    model_path = os.path.join(context.path(), MODEL_NAME)
 
     if os.path.exists(model_path) and not overwrite_model:
         logger.info("Model %s already exists.", MODEL_NAME)
@@ -315,6 +318,7 @@ def execute(context):
         path=context.path(),
         validation_groups=df["person_id"].to_numpy(),
         rotate_validation=False,
+        **model_validation_options(context),
         restore_best_weights=True,
         early_stopping_patience=5,
         distance_candidates=candidate_dist_last_m,
@@ -330,7 +334,6 @@ def execute(context):
         candidate_xy=np.stack([cand_x, cand_y], axis=-1) if loss_kind == "crps_energy" else None,
         observed_xy=df[["destination_x", "destination_y"]].to_numpy(dtype=np.float32, copy=True)
             if loss_kind == "crps_energy" else None,
-        refit_full=not bool(context.config("secondary_nn_use_target_distance")),
         distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")))
 
     ########## Building wrapper and saving model ##########

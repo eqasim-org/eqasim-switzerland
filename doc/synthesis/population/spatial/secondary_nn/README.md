@@ -144,32 +144,133 @@ inputs. The shared daily budget is retained as an existing synthesis input.
 
 ## Destination distribution loss
 
-Both target-distance configurations use destination cross-entropy regularized
+The hierarchy and distance-free experts use destination cross-entropy regularized
 by exact discrete CRPS for origin/home distances and a spatial energy-score
-approximation by default (`secondary_nn_distance_loss_kind: crps_energy`).
+approximation by default (`secondary_nn_distance_loss_kind: crps_energy`). The
+distance-enabled short expert overrides this with asymmetric relative-distance
+scoring, described below.
 The score evaluates the full predicted distribution instead of just its mean.
 Distance scores reward the correct radius; spatial scores additionally penalize
 wrong directions. Target distance remains an input when enabled, and the 1.5 km
 expert-routing threshold and final facility distance reweighting are preserved.
 No cross-fitting or mixture gate is scheduled for distance-conditioned models.
+All destination experts use independent validation folds for choosing their
+training duration; these are distinct from the distance-free gate's expert
+cross-fitting stages.
 
 Set `secondary_nn_distance_loss_kind: relative` to compare against the previous
 relative Huber penalty on expected origin/home distances. This selects the
 legacy `secondary_nn_distance_loss_weight` (default 0.07) and
 `secondary_nn_distance_loss_short_floor_m` (default 100 m). The new loss uses
-`secondary_nn_distribution_loss_weight` (default 0.1). Both options retain the
+`secondary_nn_distribution_loss_weight` (default 0.1) for the hierarchy and
+distance-free experts. The distance-enabled short expert has its own
+`secondary_nn_short_distribution_loss_weight` (default 0.05). Set this option
+to null to inherit the shared coefficient. The override is ignored without
+target distance. Both options retain the
 new remaining-chain features, so this comparison isolates the loss choice.
+`secondary_nn_short_distance_loss_kind: relative` switches only the
+distance-enabled short expert to relative scoring, leaving the hierarchy's loss
+choice unchanged. This is now its default: `secondary_nn_distance_loss_weight`
+(0.07) multiplies both origin and home penalties, and the origin underestimation
+multiplier is 2. Set `secondary_nn_short_relative_underestimation_factor: 1` to
+recover the symmetric legacy objective. There is no CRPS, energy or auxiliary
+term in relative mode.
 
-For the default distribution loss, spatial energy uses fixed angular projections of exact CRPS, multiplied by pi/2: each
+The completed 0.1/0.2/0.3/0.5 distance-enabled comparison selected **0.1** by
+matched trip-distance errors; it remains the shared distribution-loss default.
+See the [weight findings](<../../../../analysis/secondary locations/loss_weight_findings.md>).
+
+In optional `secondary_nn_short_distance_loss_kind: crps_energy` mode, the
+distance-enabled **short-range expert only** additionally uses
+`secondary_nn_short_relative_distance_loss_weight` (default 0.05) times:
+
+```text
+Huber((sum_j p_j * distance_from_origin_j - observed_trip_distance)
+      / (observed_trip_distance + 100 m))
+```
+
+This restores a smaller version of the legacy expected-distance penalty,
+targeting the supplied trip radius. The home-distance penalty is not duplicated.
+The auxiliary term is added independently of the short distribution coefficient,
+and the same combined objective is used for fitting, validation/stopping and
+any full-data refit. Its coefficient is a conservative starting value, not a
+winner established by the completed sweep. Set the auxiliary weight to zero and
+the short distribution override to null to recover the sweep's shared-coefficient
+pure distribution objective. It is disabled when target distance is omitted or
+when `secondary_nn_distance_loss_kind: relative` already selects the legacy loss.
+Retrain the short-range expert and rerun assignment to evaluate the addition.
+New short-range checkpoints are saved under their stage cache path, so trials
+with different loss configurations do not overwrite the previous shared model.
+
+For the default distribution loss, spatial energy uses fixed angular projections
+of exact CRPS, multiplied by pi/2: each
 projection is a proper score and their angular average approximates Euclidean
-energy without quadratic memory in the candidate count. All scores use the
+energy without quadratic memory in the candidate count. Distribution scores use the
 fixed `secondary_nn_distribution_scale_m`, never the observed trip length as a
 normalizer. The same objective selects stopping epochs. This removes the earlier
 asymmetry between equal absolute over- and under-prediction errors.
 
-For the distance-free configuration, after selecting an epoch count on an
-internal person-separated holdout, an expert is reinitialized and fitted for
-that many epochs on every supplied development row. The outer validation and excluded cross-fitting fold never enter this refit.
+## Shared validation and minimum exploration
+
+All four destination experts, with and without target distance, and the learned
+selector default to `secondary_nn_model_validation_strategy: cross_validation`,
+`secondary_nn_model_validation_folds: 5` and
+`secondary_nn_model_min_epochs: 20`. Every fold has its own model and optimizer;
+its validation people are never in that model's training set. All fold models
+train and validate at every epoch. The stopping score pools held-out losses
+with survey weights.
+
+The minimum is an exploration period before patience can stop training. Best
+epoch selection still includes earlier epochs: the procedure allows later
+recovery without forcing an overfitted checkpoint. Once duration is selected,
+the production model restarts from its initial weights and trains on all input
+rows for that duration. Expert cross-fitting exclusions and the selector's outer
+validation people never enter this refit. Internal five-fold validation is
+separate from `secondary_nn_crossfit_folds`, which remains three by default for
+constructing the gate's out-of-fold expert predictions.
+
+The stages save fold membership in `cross_validation_folds.json`, per-fold loss
+curves in `loss_history.json`, and PNG/PDF/SVG learning curves. Checkpoints and
+regional person scalers live in their producing stage directories, so separate
+folds/configurations cannot overwrite a shared checkpoint. Feature transforms
+remain fixed during CV; the curves select network duration and do not establish
+independent full-pipeline accuracy. The outer gate validation remains untouched.
+
+Set the shared strategy to `fixed` to retain a permanent holdout. Optional
+`local_model_validation_folds`, `short_range_model_validation_folds`,
+`short_range_model_validation_strategy` and `short_range_model_min_epochs`
+override the shared controls; null means inherit. The maximum epochs for each
+stage must be at least its minimum exploration period. Rotating validation people
+through one continuously trained model is not used for early stopping.
+
+## Short-range origin choice sets
+
+Short-range training and prediction call the same origin-neighbourhood query
+in `tools.py`, in both target-distance modes. Alternatives are finest H3 cells
+around the origin, across all hierarchy branches. Both phases start at
+`secondary_nn_short_trip_threshold_m + 1.5 * secondary_nn_short_query_radius_m`
+(default 1,800 m), filter cells using actual facility offers for the requested
+purpose, and expand by `secondary_nn_short_query_radius_m` (default 200 m) until
+at least `secondary_nn_short_min_candidates` (default six) eligible cells are
+available, or all eligible cells have been included. The candidate order is
+stable; padded training slots remain masked. Secondary purpose names use the
+same base facility offers as inference.
+
+The observed destination never determines the neighbourhood or adds an extra
+alternative. Training observations with an unsupported observed cell, missing
+cell, invalid origin, or observed cell outside the origin neighbourhood are
+excluded with explicit reasons. `short_range_choice_sets.parquet` preserves the
+person/trip audit, while `short_range_choice_sets.json` contains counts and query
+settings. Neither the observed middle-level H3 parent nor its children restrict
+the short expert. The default training lower distance bound is the same 10 m
+stationary-trip cutoff used during assignment.
+
+The earlier CV-tested hybrid (distribution 0.05 plus origin relative-distance
+0.05) remains available with an explicit short `crps_energy` override. The
+current default is cross-entropy plus asymmetric relative-distance scoring.
+Hierarchy and distance-free experts retain the shared distribution weight 0.1.
+Previous sweep reports used earlier choice-set/training versions; their rankings
+do not establish performance of the current model.
 
 ## Cross-fitted probabilistic expert mixture
 
@@ -238,6 +339,18 @@ Optional controls and defaults:
 | `secondary_nn_selector_context_radii_m` | [1500.0, 5000.0, 20000.0] |
 | `secondary_nn_distance_loss_kind` | `crps_energy` |
 | `secondary_nn_distribution_loss_weight` | 0.1 |
+| `secondary_nn_short_distribution_loss_weight` | 0.05 (distance-enabled short-range only) |
+| `secondary_nn_short_relative_distance_loss_weight` | 0.05 (distance-enabled short-range only) |
+| `secondary_nn_short_distance_loss_kind` | `relative` (distance-enabled short expert only) |
+| `secondary_nn_short_relative_underestimation_factor` | 2.0 (origin radius only) |
+| `secondary_nn_short_sampling` | `neural` |
+| `secondary_nn_model_validation_strategy` | `cross_validation` (all destination experts and selector) |
+| `secondary_nn_model_min_epochs` | 20 |
+| `secondary_nn_model_validation_folds` | 5 |
+| `short_range_model_validation_strategy` | null (inherit shared strategy) |
+| `short_range_model_min_epochs` | null (inherit shared minimum) |
+| `short_range_model_validation_folds` | null (inherit shared folds) |
+| `local_model_validation_folds` | null (inherit shared folds) |
 | `secondary_nn_distribution_scale_m` | 1000.0 |
 | `secondary_nn_energy_projections` | 8 |
 | `secondary_nn_selector_crps_weight` | 0.1 |
@@ -285,3 +398,77 @@ Run focused checks, including calibration and a small real stage chain:
 ```sh
 uv run -m pytest tests/test_secondary_nn_distribution.py tests/test_secondary_nn_enrichment.py -q
 ```
+
+## Distance-conditioned short-trip sampling
+
+The assignment default is `secondary_nn_short_sampling: neural`, retaining learned
+attractiveness. `secondary_nn_short_sampling: distance` remains an optional
+geometric diagnostic. For trips from 10 m through the configured short threshold
+(default 1.5 km), it queries the same purpose-eligible H3 neighbourhood around the
+origin and evaluates **actual facility coordinates across all returned cells**.
+A facility at radius r receives weight exp(-0.5 ((r - target) / sigma)^2), with
+sigma = max(`secondary_nn_short_distance_sigma_min_m`,
+`secondary_nn_short_distance_sigma_fraction` * target). Defaults are 25 m and 0.1.
+Employee counts, car-access weights and neural leaf probabilities do not enter
+this distance-only branch. Purpose offers still determine facility eligibility.
+
+Weights are normalized after subtracting the best radial log-weight. If all
+available facilities are far from the target, this retains preference for the
+closest feasible radius instead of reverting to a uniform or neural fallback.
+The chosen facility comes directly from the shared pools; there is no second
+within-cell sampling step. Sparse catalogues can still prevent exact matching.
+
+The neural hierarchy above the short threshold and the distance-free short expert
+and selector are unchanged. Set `secondary_nn_short_sampling: neural` to use the
+learned short expert. Its current distance-enabled training objective is
+cross-entropy plus asymmetric relative-distance loss, described below. Training and CV remain
+available with either assignment policy; switching this policy only requires
+reassigning locations, so completed expert checkpoints can be reused.
+
+The October 26 diagnostic found systematic short-distance underprediction after
+origin-based training: observed trips averaging 843 m were predicted at 482 m,
+and trips averaging 1,231 m at 852 m. Validation loss continued improving to about
+epoch 42, so this did not provide strong evidence that overfitting explains this bias.
+Distance weighting had only acted after the neural model chose a leaf and could
+not recover facilities in other cells. The paired distance-only counterfactual
+predicted 851 m and 1,231 m for those same bands. This supports addressing the
+sampling bottleneck, rather than treating another loss weight as a sufficient fix.
+
+The paired short-trip diagnostic reduced mean absolute radius error from 201.7 m
+to 45.0 m. The closest feasible facility radius differed from the target by a
+median 0.8 m (90th percentile 8.1 m), so missing facilities were not the main
+cause of the large systematic errors in this city replay. These are conditional
+fitting-record diagnostics, not estimates of independent generalization accuracy.
+
+## Asymmetric relative-distance loss for the distance-enabled short expert
+
+The default learned short expert trains on observed trips from 10 m to 1.5 km.
+Training and inference both obtain alternatives from H3 cells around the origin,
+starting at 1.8 km and expanding by 200 m until the configured minimum number of
+purpose-eligible options is available. The wider alternative set permits
+predictions beyond 1.5 km; this is deliberate and is separate from the observed
+trip threshold used to choose training examples and route inference.
+
+With `secondary_nn_short_distance_loss_kind: relative`, the per-trip objective is
+
+```text
+L = -log p(observed cell) + 0.07 * [a(e_origin) Huber(e_origin) + Huber(e_home)]
+e_origin = (sum_j p_j distance(origin, cell_j) - target_distance) / (target_distance + 100 m)
+e_home   = (sum_j p_j distance(home, cell_j) - observed_home_distance) / (observed_home_distance + 100 m)
+a(e) = 2 if e < 0, otherwise 1
+```
+
+`secondary_nn_short_relative_underestimation_factor` sets the multiplier (default
+2, minimum 1). Equal relative errors therefore cost twice as much when the mean
+origin radius is too short. The home-radius term remains symmetric. Cross-entropy
+retains supervision for destination attractiveness; CRPS, spatial energy and the
+auxiliary hybrid term are absent in this setting. The main relative coefficient
+is `secondary_nn_distance_loss_weight` (default 0.07).
+
+The same objective and masks apply during fold fitting, validation, early stopping
+and full-data refitting. Loss history records the multiplier and other loss
+settings. Five independent person folds and minimum 20-epoch exploration remain
+in effect. The hierarchy and distance-free short expert use their existing losses
+with multiplier 1; the learned selector is unchanged. A multiplier of 1 recovers
+the symmetric legacy relative loss. Historical focused loss-trial runners pin 1
+explicitly so their old labels do not silently acquire asymmetric scoring.

@@ -5,6 +5,7 @@ from mode_choice.defaults import ROUTING_DEFAULTS, CAR_ROUTING_BACKENDS, ROUTING
 from mode_choice.routing.server import ensure_server_started
 from mode_choice.routing.RoutingServer import RoutingServer
 from mode_choice.routing.results import complete_routes
+from mode_choice.routing import options, endpoints
 
 
 def car_backend(context):
@@ -15,21 +16,30 @@ def car_backend(context):
 
 
 def configure_mode(context, mode):
+    options.configure(context)
     context.stage("mode_choice.defaults")
     context.stage("mode_choice.data.prepare")
     for name, default in ROUTING_DEFAULTS.items():
         context.config(name, default)
-    if car_backend(context) == "java" or mode == "pt":
+    if car_backend(context) == "java" or mode == "pt":        
         context.stage("mode_choice.routing.server")
         context.stage("mode_choice.routing.requests")
+    if context.config("route_population_once"):
+        context.stage("mode_choice.routing.preparation")
+        context.stage("mode_choice.routing.config")
+    if mode == "car" and (context.config("use_marouter_in_mode_choice") or context.config("route_population_once")):
+        context.stage("mode_choice.routing.road_requests")
 
 
-def read_results(path, identifier, mapping):
+def read_results(path, identifier, mapping, *, mode=None):
     try:
-        frame = pl.read_csv(path, columns=[identifier, *mapping], schema_overrides={identifier: pl.String},
+        frame = pl.read_csv(path, columns=[identifier, *mapping, *(["mode"] if mode else [])], schema_overrides={identifier: pl.String},
                             null_values=["NaN", "nan", "Infinity"])
     except pl.exceptions.NoDataError:
-        frame = pl.DataFrame(schema={identifier: pl.String, **{column: pl.Float64 for column in mapping}})
+        frame = pl.DataFrame(schema={identifier: pl.String, **{column: pl.Float64 for column in mapping},
+                                     **({"mode": pl.String} if mode else {})})
+    if mode:
+        frame = frame.filter(pl.col("mode") == mode)
     frame = frame.select(pl.col(identifier).alias("trip_id"),
                          *[pl.col(source).cast(pl.Float64).alias(target) for source, target in mapping.items()])
     if frame["trip_id"].null_count() or frame["trip_id"].n_unique() != frame.height:
@@ -49,8 +59,12 @@ def route_mode(context, mode):
     try:
         ensure_server_started(context)
         output = Path(context.path()) / f"{mode}_routes.csv"
-        RoutingServer.route_csv(context.stage("mode_choice.routing.requests"), output, mode, compute_cost=compute_cost)
-        result = read_results(output, "identifier", columns).with_columns(
+        mixed = mode == "car" and (context.config("use_marouter_in_mode_choice") or context.config("route_population_once"))
+        source = context.stage("mode_choice.routing.road_requests" if mixed else "mode_choice.routing.requests")
+        if context.config("route_population_once") and mode != "pt":
+            source = endpoints.compatible_requests(context, source, Path(context.path()) / "routable_requests.csv", None if mixed else mode)
+        RoutingServer.route_csv(source, output, None if mixed else mode, compute_cost=compute_cost)
+        result = read_results(output, "identifier", columns, mode="car" if mixed else None).with_columns(
             pl.col(f"{mode}_travel_time_min") / 60, pl.col(f"{mode}_distance_km") / 1000)
         result = complete_routes(trips, result, [f"{mode}_travel_time_min"])
         return save_costs(context, result, mode) if compute_cost else result

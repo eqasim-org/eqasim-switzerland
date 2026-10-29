@@ -37,5 +37,8 @@ def execute(context):
     # Run the simulation with the prepared config. The main class is chosen based on the engine.
     main_class= "org.eqasim.switzerland.ch_cmdp.RunVDFSimulation" if vdf else "org.eqasim.switzerland.ch_cmdp.RunSimulation"
     eqasim.run(context, main_class, ["--config-path", config_path, *arguments])
-    assert os.path.exists(os.path.join(context.path(), "simulation_output", "output_events.xml.gz"))
+
+    # when using dsim, and with matsim 2026, the default compression is zst, withthe older version it was gz
+    assert (os.path.exists(os.path.join(context.path(), "simulation_output", "output_events.xml.gz")) or
+            os.path.exists(os.path.join(context.path(), "simulation_output", "output_events.xml.zst")))
     return context.path()

@@ -17,7 +17,7 @@ def run_macroscopic(context, network, trips, method):
         raise ValueError("Loading requires scale >= 1 so every original trip retains a route")
     mapped = cache / "mapped.trips.xml.gz"
     sumo.run(context, ["--net-file", network, "--route-files", trips, "--output-file", mapped,
-                      "--write-trips", "true", "--mapmatch.distance", context.config("sumo_mapmatch_distance"),
+                      "--write-trips", "true",
                       "--seed", context.config("random_seed")], binary="duarouter")
     departures = [float(trip.get("depart")) for trip in elements(mapped, "trip")]
     demand = {"network": network, "loading": str(mapped), "queries": str(mapped), "count": len(departures),
@@ -62,7 +62,6 @@ def run_iterations(context, network, trips):
     if context.config("sumo_loading_mesoscopic"):
         arguments += ["--mesosim", "--meso-junctioncontrol", "--meso-multiqueue"]
     arguments += ["sumo--seed", context.config("random_seed"), "duarouter--seed", context.config("random_seed"),
-                  "duarouter--mapmatch.distance", context.config("sumo_mapmatch_distance"),
                   "sumo--scale", scale, "sumo--vehroute-output.intended-depart", "false",
                   "sumo--vehroute-output.write-unfinished", "true", "sumo--tripinfo-output.write-unfinished", "true",
                   "sumo--tripinfo-output.write-undeparted", "true"]

@@ -24,12 +24,18 @@ omitted legs instead of connecting activities across missing travel. Passenger
 trips do not create additional cars. `sumo_modes: null` retains the previous
 all-mode export/query behavior; it does not create a transit fleet.
 
+Demand preparation defaults to `exlude_external_population_in_sumo: true` and
+`clip_trips_to_border_in_sumo: true`. The latter reuses/completes mode-choice road paths before
+loading and cuts their actual crossings, with estimated border-entry times. See [Swiss-border demand clipping](../population/README.md#road-route-reuse-and-swiss-border-demand-clipping).
+The routed regional cutter below still follows assigned roads and loaded times.
+
 ## Stages
 
 | Stage | Result |
 | --- | --- |
 | `sumo.scenario.demand` | Selected individual vehicle loading trips and optional car-network queries |
-| `sumo.simulation.load_network` | Full network, explicit routes with edge exit times, edge weights, `trip_metrics.parquet` and `loading_report.json` |
+| `sumo.scenario.network.routing` | Cached Arrow road geometry and per-class origin/destination reachability on the full assignment network |
+| `sumo.simulation.load_network` | Full network, explicit routes with edge exit times, edge weights, `trip_metrics.arrow` and `loading_report.json` |
 | `sumo.cutter.geometry` | Polygon union in the network CRS and local offset, preserving holes |
 | `sumo.cutter.split_network` | Full network split at polygon boundaries, before loading |
 | `sumo.cutter.network` | Region-only directed network and `edge_mapping.json` |
@@ -53,6 +59,35 @@ clips the geometry and igraph computes components. No additional C++ extension
 or installation in the project UV environment is needed. SUMO's standard
 `cut_net.py` and `cutRoutes.py` work at whole-edge boundaries; fractional crossing
 edges need the additional mapping used here.
+
+## Reachable trip endpoints
+
+Before assignment, `sumo.scenario.network.routing` indexes the exact full
+network, including any regional boundary splits. Its `routing_edges.arrow`
+contains road shapes and separate origin/destination masks for each simulated
+vehicle class. The graph uses permitted lane-to-lane turns, rather than only
+geometric proximity or shared junctions.
+
+Origins must be able to reach the main strongly connected road core;
+destinations must be reachable from it. One-way entry and exit branches remain
+eligible for their respective roles. Small acyclic networks use their main
+weak component and incoming/outgoing degree checks instead. No network edges
+are deleted by this index.
+
+Loading maps geographic endpoints onto eligible edges. Explicit endpoints are
+preserved when eligible; otherwise they are rematched, retaining their travel
+direction. Search expands from 500 m in 500 m steps.
+`sumo_mapmatch_distance: null` (default) imposes no distance cutoff; a positive
+value explicitly restores a maximum distance.
+Swiss-border clipping also constrains replacement positions to the Swiss side.
+This prevents a nearby road with no incoming turns from becoming an unreachable
+destination. Trips, departures, vehicle types and source metadata are preserved.
+`endpoint_mapping.json` records counts, expanded endpoints, maximum search
+radius, maximum mapping distance and examples
+of repaired edges; the loading report includes the same summary. An endpoint
+with no suitable road anywhere on the supplied network fails explicitly; demand is never silently dropped.
+Native `duarouter` still validates the resulting trips before macroscopic
+assignment, and no route search is added after `marouter`.
 
 ## Cutting behavior
 
@@ -131,7 +166,7 @@ class and permitted turns. An invalid native assignment fails explicitly;
 use `sumo_loading_method: dua` when class restrictions require class-aware
 assignment. The exporter does not reroute or silently modify assigned flows.
 
-`trip_metrics.parquet` contains source IDs, original travel-time references,
+`trip_metrics.arrow` contains source IDs, original travel-time references,
 loaded travel time and distance. DUA time measures actual departure to arrival;
 its distance uses native simulated route length where available. Macroscopic
 and regional cut distances sum travelled normal-edge lengths, with endpoint

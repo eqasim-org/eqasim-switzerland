@@ -29,12 +29,34 @@ def write_trips(path, types, records, loading_only=False):
             for record in records:
                 if loading_only and not record["load"]:
                     continue
-                element = etree.Element("trip", attrib=record["attributes"])
-                for key, value in record["parameters"].items():
-                    text = scalar_text(value)
-                    if text is not None:
-                        etree.SubElement(element, "param", key=key, value=text)
-                writer.write(element)
+                writer.write(trip_element(record))
+
+
+def trip_element(record):
+    """Build a safely escaped native trip using the common metadata rules."""
+    element = etree.Element("trip", attrib=record["attributes"])
+    for key, value in record["parameters"].items():
+        text = scalar_text(value)
+        if text is not None:
+            etree.SubElement(element, "param", key=key, value=text)
+    return element
+
+
+def write_serialized_trips(path, types, payloads):
+    """Stream already serialized XML elements with buffered compression."""
+    with xml_stream(path) as stream:
+        stream.write(b'<?xml version="1.0" encoding="utf-8"?>\n<routes>\n')
+        for element in types.values():
+            stream.write(etree.tostring(element))
+        pending = bytearray()
+        for payload in payloads:
+            pending.extend(payload)
+            if len(pending) >= 1024 * 1024:
+                stream.write(pending)
+                pending.clear()
+        if pending:
+            stream.write(pending)
+        stream.write(b'\n</routes>\n')
 
 
 def filter_loading_trips(source, destination):

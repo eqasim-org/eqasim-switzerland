@@ -4,9 +4,11 @@ from numbers import Real
 import polars as pl
 from mode_choice.defaults import RUN_DEFAULTS, ACTIVE_ROUTING_DEFAULTS, ACTIVE_ROUTING_BACKENDS
 from mode_choice.routing.java import route_mode
+from mode_choice.routing import options
 
 
 def configure(context, mode):
+    options.configure(context)
     context.stage("mode_choice.defaults")
     context.stage("mode_choice.data.prepare")
     name = f"mode_choice_{mode}_routing_backend"
@@ -14,18 +16,29 @@ def configure(context, mode):
     if routing_backend(context, mode) == "java":
         context.stage("mode_choice.routing.server")
         context.stage("mode_choice.routing.requests")
+        if context.config("route_population_once"):
+            context.stage("mode_choice.routing.preparation")
+            context.stage("mode_choice.routing.config")
     else:
         for name in (f"{mode}_speed_m_per_s", f"{mode}_distance_factor"):
             context.config(name, RUN_DEFAULTS[name])
 
 
 def execute(context, mode):
+
+    # Route with the shared Java server when requested.
+
     if routing_backend(context, mode) == "java":
         return route_mode(context, mode)
+
+    # Validate the speed and detour factor used by Python routing.
+
     speed, factor = (context.config(f"{mode}_{name}") for name in ("speed_m_per_s", "distance_factor"))
     if not all(isinstance(value, Real) and not isinstance(value, bool)
                and math.isfinite(value) and value > 0 for value in (speed, factor)):
         raise ValueError(f"{mode} speed and distance factor must be positive and finite")
+    # Compute distance and time with vectorized expressions.
+
     trips = context.stage("mode_choice.data.prepare")
     if trips.is_empty():
         return trips.select("trip_id").with_columns([pl.lit(None, dtype=pl.Float64).alias(f"{mode}_{c}")

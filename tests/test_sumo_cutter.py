@@ -101,16 +101,16 @@ def test_modes_and_holes():
 def test_regional_dispatch_dependencies_and_invalid_model():
     from synpp.pipeline import ConfigurationContext
     for model in ('microscopic', 'mesoscopic'):
-        context = ConfigurationContext({'sumo_simulation_model': model})
+        context = ConfigurationContext({"enable_mode_choice": True, 'sumo_simulation_model': model})
         selected_run.configure(context)
         assert [stage['descriptor'] for stage in context.required_stages] == ['sumo.simulation.run_' + model]
-    context = ConfigurationContext({})
+    context = ConfigurationContext({"enable_mode_choice": True, })
     selected_run.configure(context)
     assert context.required_config['sumo_simulation_model'] == 'microscopic'
     with pytest.raises(ValueError, match='sumo_simulation_model'):
-        selected_run.configure(ConfigurationContext({'sumo_simulation_model': 'macroscopic'}))
+        selected_run.configure(ConfigurationContext({"enable_mode_choice": True, 'sumo_simulation_model': 'macroscopic'}))
     for module in (run_microscopic, run_mesoscopic):
-        context = ConfigurationContext({'random_seed': 42})
+        context = ConfigurationContext({"enable_mode_choice": True, 'random_seed': 42})
         module.configure(context)
         assert {stage['descriptor'] for stage in context.required_stages} == {'sumo.cutter.scenario', 'sumo.runtime.sumo'}
 
@@ -144,10 +144,10 @@ def test_mode_filter_vehicle_classes_and_conditional_dependencies(tmp_path, runt
         {'sumo.runtime.sumo': runtime, 'sumo.scenario.demand': result}))
     assert loaded['count'] == 3
     assert {vehicle['attributes']['type'] for vehicle in read_routes(loaded['routes'])[1]} == {'passenger', 'truck', 'delivery'}
-    context = ConfigurationContext({'sumo_modes': ['car']})
+    context = ConfigurationContext({"enable_mode_choice": True, 'sumo_modes': ['car']})
     commercial.configure(context)
     assert not context.required_stages
-    context = ConfigurationContext({'sumo_modes': ['lcv']})
+    context = ConfigurationContext({"enable_mode_choice": True, 'sumo_modes': ['lcv']})
     commercial.configure(context)
     assert [stage['descriptor'] for stage in context.required_stages] == ['synthesis.lcv.trips']
 

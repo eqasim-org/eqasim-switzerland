@@ -145,6 +145,9 @@ explicit CRS names such as `EPSG:2056`.
 
 ## Population and demand
 
+[Polars caches and native XML](native/README.md) describes the shared conversion
+boundary, memory-mapped IPC tables, parallel sorting and compiled vehicle writer.
+
 [Population and plan export](population/README.md) describes the person-plan
 file, separate freight/commercial trips, shared tools, and XML writer.
 [Simulation presets and loaded assignment](config/README.md) covers microscopic,
@@ -155,6 +158,8 @@ macroscopic assignment, shared `sumo_modes`, polygon clipping, estimated
 crossing-trip entry times and runnable regional bundles. Its default passes
 `marouter`'s assigned paths directly to the cutter and preserves them in the
 regional run; simulation-based full-network DUA is an explicit option.
+Vehicle demand defaults to excluding the external population and clipping completed
+road paths to Switzerland before assignment. See [route reuse and Swiss-border timing](population/README.md#road-route-reuse-and-swiss-border-demand-clipping).
 `sumo.run` executes that cut scenario; `sumo_simulation_model` selects
 `microscopic` (default) or `mesoscopic`. See the
 [regional execution commands](cutter/README.md#run-the-cut-scenario).

@@ -8,6 +8,8 @@ from sumo.runtime import sumo
 
 
 def configure(context):
+    from sumo.scenario.modes import require_mode_choice
+    require_mode_choice(context)
     context.config("sumo_simulation_model", "microscopic")
     model = context.config("sumo_simulation_model")
     if model not in {"microscopic", "mesoscopic"}:

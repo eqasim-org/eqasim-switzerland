@@ -16,6 +16,8 @@ from shapely.geometry import Point
 from synpp.pipeline import ConfigurationContext
 
 from sumo.runtime import sumo
+from sumo.tables import as_polars
+from shapely import from_wkb
 from sumo.scenario.network import road_network
 from sumo.scenario.population import plans, population, tools, trips
 from sumo.scenario.population.writer import PopulationWriter
@@ -32,7 +34,7 @@ OSM = '''<osm version="0.6">
 
 class Context:
     def __init__(self, module, path, config=None, stages=None):
-        configured = ConfigurationContext({"sumo_modes": None, **(config or {})})
+        configured = ConfigurationContext({"enable_mode_choice": True, "sumo_modes": None, **(config or {})})
         module.configure(configured)
         self.values = configured.required_config
         self.stages = stages or {}
@@ -42,7 +44,11 @@ class Context:
     def config(self, key):
         return self.values[key]
 
-    def path(self):
+    def path(self, stage=None):
+        if stage is not None:
+            result = self.stages.get(stage, {})
+            if isinstance(result, dict) and "vehicle_trips" in result:
+                return str(Path(result["vehicle_trips"]).parent)
         return str(self.cache)
 
     def stage(self, key):
@@ -79,7 +85,18 @@ def fixture_population():
 
 def prepared(fixture_population):
     persons, activities, locations, final_trips = fixture_population
-    return tools.combine_populations([(persons, tools.prepare_activities(activities, locations, final_trips), "resident")])
+    return pandas_population(tools.combine_populations([(persons, tools.prepare_activities(activities, locations, final_trips), "resident")]))
+
+
+def pandas_population(result):
+    # Legacy rendering fixtures use pandas; production stage contracts are IPC paths/Polars.
+    materialized = {}
+    for name in ('persons', 'activities'):
+        frame = as_polars(result[name]).to_pandas()
+        if 'geometry' in frame:
+            frame['geometry'] = from_wkb(frame['geometry'].to_numpy())
+        materialized[name] = frame
+    return materialized
 
 
 def read_xml(path):
@@ -150,7 +167,7 @@ def test_passenger_vehicle_reference_and_explicit_taxi_option(fixture_population
 @pytest.mark.parametrize("chosen", [True, False])
 def test_conditional_population_dependencies(chosen):
     context = ConfigurationContext({"enable_mode_choice": chosen, "include_external_population": chosen,
-                                    "include_cross_border": chosen})
+                                    "include_cross_border": chosen, "exlude_external_population_in_sumo": False})
     population.configure(context)
     stages = [stage["descriptor"] for stage in context.required_stages]
     assert ("mode_choice.run" in stages) == chosen
@@ -170,8 +187,8 @@ def test_population_stage_includes_external_and_crossborder(fixture_population, 
               "synthesis.population.spatial.locations": locations, "population_trips": final_trips,
               "data.external_population.read_outputs": (external, nontraveller.assign(person_id=30), None),
               "data.cross_border.generate_cross_border_traffic": (crossing, nontraveller.assign(person_id=40), None)}
-    context = Context(population, tmp_path, {"include_cross_border": True}, stages)
-    result = population.execute(context)
+    context = Context(population, tmp_path, {"include_cross_border": True, "exlude_external_population_in_sumo": False}, stages)
+    result = pandas_population(population.execute(context))
     assert set(result["persons"]["person_id"]) == {"11", "12", "30", "40"}
     assert set(result["persons"]["population_source"]) == {"resident", "external", "crossborder"}
 
@@ -187,6 +204,34 @@ def test_invalid_keys_and_chronology_fail(fixture_population, tmp_path):
     context = Context(plans, tmp_path, stages={"sumo.scenario.population.population": result})
     with pytest.raises(ValueError, match="Inconsistent activity/trip times"):
         plans.execute(context)
+
+
+def test_equivalent_external_activity_rows_preserve_first_mode_and_source(fixture_population, tmp_path):
+    persons, activities, locations, final_trips = fixture_population
+    external_person = persons.iloc[:1].copy().assign(person_id=30)
+    activity = activities.iloc[:1].copy().assign(person_id=30, following_mode='car_loop')
+    repeated = pd.concat([activity, activity.assign(following_mode='car'), activity, activity.assign(following_mode='car')])
+    original = repeated.copy(deep=True)
+    stages = {'synthesis.population.models.subscriptions': persons,
+              'synthesis.population.activities': activities,
+              'synthesis.population.spatial.locations': locations, 'population_trips': final_trips,
+              'data.external_population.read_outputs': (external_person, repeated, None)}
+    result = pandas_population(population.execute(Context(population, tmp_path, {"exlude_external_population_in_sumo": False}, stages=stages)))
+    external = result['activities'].query("person_id == '30'")
+    assert len(external) == 1
+    assert external.iloc[0].following_mode == 'car_loop'
+    assert len(result['persons']) == len(persons) + 1
+    assert_frame_equal(repeated, original)
+
+
+@pytest.mark.parametrize('column,value', [('following_mode', 'bike'), ('end_time', 50.), ('geometry', Point(1, 1))])
+def test_external_activity_conflicts_still_fail(column, value):
+    activity = pd.DataFrame([{'person_id': 1, 'activity_index': 0, 'following_mode': 'car',
+                              'end_time': 10., 'geometry': Point(0, 0)}])
+    different = activity.copy()
+    different[column] = value
+    with pytest.raises(ValueError, match='conflicting activity data or transport modes'):
+        tools.coalesce_external_activities(pd.concat([activity, different]))
 
 
 def test_departure_sorting_and_missing_chain():
@@ -211,6 +256,14 @@ def test_scalar_ids_and_coordinate_conversion():
     assert lonlat == pytest.approx([8, 47], abs=1e-7)
     with pytest.raises(ValueError, match="coordinates"):
         tools.finite_coordinates(None, 1)
+
+
+@pytest.mark.parametrize('arrival,expected', [
+    (-1, None), (None, None), (float('nan'), None), (float('inf'), None),
+    (float('-inf'), None), (5, None), ('unknown', None), (10, 0), (30, 20),
+])
+def test_optional_source_reference_time(arrival, expected):
+    assert tools.reference_travel_time(arrival, 10) == expected
 
 
 def test_deterministic_gzip_and_xml_escaping(tmp_path):
@@ -291,3 +344,16 @@ def test_writer_all_supported_plan_elements_validate(tmp_path, runtime):
             writer.person_trip("8.002,47", "8,47", "public")
     schema = etree.XMLSchema(etree.parse(str(Path(runtime["home"]) / "data/xsd/routes_file.xsd")))
     schema.assertValid(read_xml(path))
+
+
+def test_sumo_excludes_external_population_by_default(fixture_population, tmp_path):
+    persons, activities, locations, final_trips = fixture_population
+    stages = {"synthesis.population.models.subscriptions": persons,
+              "synthesis.population.activities": activities,
+              "synthesis.population.spatial.locations": locations, "population_trips": final_trips}
+    configured = ConfigurationContext({"include_external_population": True})
+    population.configure(configured)
+    assert configured.required_config["exlude_external_population_in_sumo"] is True
+    assert "data.external_population.read_outputs" not in [s["descriptor"] for s in configured.required_stages]
+    result = pandas_population(population.execute(Context(population, tmp_path, stages=stages)))
+    assert set(result["persons"]["population_source"]) == {"resident"}

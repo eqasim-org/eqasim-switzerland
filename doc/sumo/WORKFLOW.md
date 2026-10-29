@@ -25,16 +25,22 @@ flowchart TB
         NETWORK[/"OSM XML or PBF,<br/>or prepared SUMO network"/]
         REGION[/"Region polygon: SHP, GPKG or GeoJSON"/]
         VEHICLES[/"Optional existing vehicle-trip files"/]
+        SWISS[/"Swiss border polygon"/]
+        PATHS[/"Extended road paths from mode choice<br/>reused and completed for selected demand"/]
     end
 
     subgraph SUMO["SUMO stages"]
         POP["sumo.scenario.population.population"]
         TRIPS["sumo.scenario.population.trips"]
+        RAW["sumo.scenario.unrouted_demand"]
         DEMAND["sumo.scenario.demand"]
+        BORDER["sumo.scenario.border"]
         RUNTIME["sumo.runtime.sumo"]
+        NATIVE["sumo.native.runtime"]
         NET["sumo.scenario.network.road_network"]
         GEO["sumo.cutter.geometry"]
         SPLIT["sumo.cutter.split_network"]
+        INDEX["sumo.scenario.network.routing"]
         LOAD["sumo.simulation.load_network"]
         CUTNET["sumo.cutter.network"]
         CUTTRIPS["sumo.cutter.trips"]
@@ -46,9 +52,15 @@ flowchart TB
 
     PEOPLE --> POP
     COMMERCIAL --> TRIPS
-    POP --> DEMAND
-    TRIPS --> DEMAND
-    VEHICLES -. "sumo_assignment_trip_files replaces population inputs" .-> DEMAND
+    SWISS --> BORDER
+    BORDER -. "default road-path clipping before assignment" .-> DEMAND
+    POP --> RAW
+    TRIPS --> RAW
+    RAW --> PATHS
+    RAW --> DEMAND
+    PATHS --> DEMAND
+    NATIVE -. "default bulk XML writer" .-> DEMAND
+    VEHICLES -. "sumo_assignment_trip_files replaces population inputs" .-> RAW
     NETWORK --> NET
     RUNTIME -. "OSM conversion only" .-> NET
     REGION --> GEO
@@ -57,6 +69,8 @@ flowchart TB
     GEO --> SPLIT
     DEMAND --> LOAD
     SPLIT --> LOAD
+    SPLIT --> INDEX
+    INDEX --> LOAD
     RUNTIME --> LOAD
     LOAD --> CUTNET
     GEO --> CUTNET
@@ -71,7 +85,7 @@ flowchart TB
 
     classDef input fill:#f3f4f6,stroke:#9ca3af,color:#374151;
     classDef entry fill:#dcfce7,stroke:#16a34a,color:#14532d;
-    class PEOPLE,COMMERCIAL,NETWORK,REGION,VEHICLES input;
+    class PEOPLE,COMMERCIAL,NETWORK,REGION,VEHICLES,SWISS,PATHS input;
     class RUN entry;
 ```
 
@@ -87,7 +101,17 @@ The stages perform the following steps:
    directly, while OSM is converted with `netconvert`. Population tables become
    individual car trips, and commercial demand supplies truck/LCV trips.
    `sumo_modes`, defaulting to `[car, truck]`, selects exported demand; `truck`
-   also includes LCV. Supplied vehicle-trip files bypass population preparation.
+   also includes LCV. External people are excluded by default through
+   `exlude_external_population_in_sumo: true`; cross-border people remain selected
+   by `include_cross_border`. Supplied vehicle-trip files bypass population preparation.
+   `enable_mode_choice: true` is required. Set `prepare_sumo: true` so the normal
+   mode-choice routing pass saves paths. `unrouted_demand` caches selected trips,
+   then the mode-choice routing package completes only missing/changed paths on
+   its extended MATSim network. Demand defaults to
+   `clip_trips_to_border_in_sumo: true`: actual directed road paths determine all
+   domestic visits, and retained endpoints are matched to compatible SUMO edges.
+   Border entry clocks are estimated from routed total times and per-link
+   free-flow proportions. See [route reuse and border timing](population/README.md#road-route-reuse-and-swiss-border-demand-clipping).
 2. **Insert region boundaries before loading.**
    `geometry` transforms the polygon into the network coordinate frame.
    `split_network` splits crossing edges but retains the full inside and outside
@@ -206,7 +230,8 @@ have different stage dependencies and returned results.
 | --- | --- | --- |
 | `sumo.runtime` | Private SUMO installation and native tool execution | Runtime paths and version |
 | `sumo.scenario.network` | Format detection and OSM conversion or prepared-network reuse | Full SUMO network path |
-| `sumo.scenario.population` | Person tables, person plans, commercial trip export | Tables and SUMO demand XML |
+| `sumo.scenario.population` | Polars person/activity preparation, plans and commercial trips | IPC table paths and SUMO demand XML |
+| `sumo.native` | Compiled Arrow-to-XML writer | Cached C++ executable |
 | `sumo.scenario.demand` | Individual vehicle queries, shared mode filtering and source metadata | Query XML and loading/query counts |
 | `sumo.config` | Native XML recipes and the config bundle | Config paths; generated additional files |
 | `sumo.router` | Endpoint mapping and standalone macroscopic assignment | Loaded routes, weights and trip metrics |
@@ -218,7 +243,8 @@ Modules such as `tools.py`, `modes.py`, `writer.py` and `simulation/loading.py`
 provide shared functions or classes. They are not independent Synpp stages and
 are intentionally absent from the graphs.
 
-Stage results can be filenames, dictionaries or tables. Consumers use the
+Stage results are filenames or small dictionaries; tabular results are IPC file
+paths, not DataFrames. See [Polars and native XML](native/README.md). Consumers use the
 producer's return value; a stage's cache directory alone does not identify its
 result. The regional execution result includes `config`, `network`,
 `input_routes`, `tripinfo`, `edge_data`, `summary` and simulated `routes` paths.

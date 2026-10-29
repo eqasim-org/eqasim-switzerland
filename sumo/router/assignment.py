@@ -34,7 +34,7 @@ def execute(context):
     # Export source identifiers, reference times, loaded travel times and distances.
 
     routes = cache / "loaded.routes.xml.gz"
-    metrics = cache / "trip_metrics.parquet"
+    metrics = cache / "trip_metrics.arrow"
     count = write_trip_metrics(routes, metrics, settings["count"])
     recipe = etree.parse(assignment)
     result = {"metrics": str(metrics), "weights": str(cache / "loaded.edges.xml.gz"),

@@ -12,14 +12,18 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 
 ## Implementation guides
 
+- [Cross-border activity timing](data/cross_border/README.md)
 - [Shared MATSim configuration](matsim/config/README.md)
 - [SUMO overview and stage flowcharts](sumo/WORKFLOW.md)
 - [SUMO runtime and road network](sumo/README.md)
 - [SUMO population and plans](sumo/population/README.md)
+- [SUMO Polars caches and native XML](sumo/native/README.md)
 - [SUMO simulation presets and loaded assignment](sumo/config/README.md)
 - [SUMO network loading and regional cutter](sumo/cutter/README.md)
 - [Native network reader and binary cache](matsim/native/README.md)
 - [Population mode choice](mode_choice/README.md)
+- [Microcensus diary matching: learned V2 inputs and masks](synthesis/population/matching/README.md)
+- [Matching predictive validation and embedding analysis](analysis/matching/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
 - [Secondary-location behavior comparison](<analysis/secondary locations/README.md>)

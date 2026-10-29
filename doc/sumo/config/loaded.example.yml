@@ -14,4 +14,4 @@ config:
   sumo_assignment_iterations: 50
   sumo_assignment_interval: 3600
   sumo_assignment_scale: 1.0  # Full demand; use 10 for a representative 10% sample.
-  sumo_mapmatch_distance: 1000
+  sumo_mapmatch_distance: null # Expand by 500 m until a valid road is found.

@@ -28,6 +28,7 @@ plt.rcParams.update(
 
 
 def configure(context):
+    context.stage("analysis.mode_shares.trip_distributions")
     context.stage("analysis.mode_shares.target")
     context.stage("analysis.mode_shares.simulated")
     context.stage("data.spatial.cantons")

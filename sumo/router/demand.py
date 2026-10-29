@@ -1,6 +1,6 @@
 """Compatibility stage: scenario demand is prepared under sumo.scenario."""
 
-from sumo.scenario.demand import _population_trips
+from sumo.scenario.unrouted_demand import _population_trips
 
 
 def configure(context):
