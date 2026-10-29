@@ -2,6 +2,8 @@ __pycache__
 tests/
 cache*
 output*
+!sumo/output.py
+!sumo/output_tools.py
 .idea
 .vscode
 config*.yml
@@ -37,3 +39,30 @@ CuttingBoundries
 !mode_choice/routing/
 !mode_choice/routing/*.py
 
+
+# SUMO routing stages and helpers are source code.
+!sumo/routing/
+!sumo/routing/*.py
+
+# The SUMO network cache reader is source code.
+!sumo/scenario/network/cache.py
+
+# Generated SUMO native artifacts; keep .cpp, .py and .patch sources visible.
+/sumo/**/*.pyc
+/sumo/**/*.pyo
+/sumo/**/*.o
+/sumo/**/*.obj
+/sumo/**/*.a
+/sumo/**/*.so
+/sumo/**/*.so.*
+/sumo/**/*.dylib
+/sumo/**/*.dll
+/sumo/**/*.exe
+/sumo/native/build/
+/sumo/native/CMakeFiles/
+/sumo/native/CMakeCache.txt
+/sumo/native/compile_commands.json
+/sumo/native/write_trips
+/sumo/native/route_kernel
+/sumo/native/marouter
+/sumo/**/_sumo_networks/

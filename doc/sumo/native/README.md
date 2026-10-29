@@ -48,6 +48,36 @@ Set `sumo_native_xml: false` to use the shared lxml writer when a compiler is
 unavailable. Both paths retain the same trip IDs, modes, times and metadata;
 equivalent numeric spellings such as `10` and `10.0` may differ in the XML.
 
+## Class-aware macroscopic assignment
+
+`sumo.native.marouter` builds a private SUMO 1.28.0 assignment executable.
+Upstream marouter retains vehicle type IDs in its demand matrix but ignores
+their definitions and routes every cell with the default passenger vehicle.
+This rejects legal delivery-only endpoints and can assign freight to roads
+that exclude it.
+
+The patch in `sumo/native/marouter.patch` loads type definitions and uses the
+cell's actual type for path search, costs and route probabilities. Bulk search
+reuse includes both origin and type. Car, truck and delivery flows still share
+the same link costs and congestion calculation. No permissions are relaxed and
+the regional workflow does not reroute after assignment.
+
+Trips whose endpoints occupy the same directed edge are grouped separately
+when their arrival position precedes their departure position. Those groups
+use SUMO's native loop search during assignment, so their return paths also
+contribute to congestion. Forward trips on that edge retain their direct path.
+Loop search disables bulk-tree reuse while testing different successor edges.
+
+Both `sumo.simulation.load_network` and `sumo.router.assignment` use this binary.
+The stage verifies the pinned source archive checksum, compiles only marouter,
+and returns its cached executable path. Patch changes invalidate the build.
+Build logs remain under its `build/` directory. The first run downloads and
+compiles the source; subsequent runs reuse it. The standard launcher loads
+`cmake`, `xerces-c`, `fox` and `mesa-glu`, in addition to GCC, and the assignment
+configuration uses the pipeline's `threads` value for native routing threads.
+Keep these modules available when running the cached executable too.
+The supported version is currently `sumo_version: 1.28.0`.
+
 ## Local benchmarks
 
 On a 200,000-row synthetic table, with local cached reads:

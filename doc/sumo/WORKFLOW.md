@@ -26,39 +26,61 @@ flowchart TB
         REGION[/"Region polygon: SHP, GPKG or GeoJSON"/]
         VEHICLES[/"Optional existing vehicle-trip files"/]
         SWISS[/"Swiss border polygon"/]
-        PATHS[/"Extended road paths from mode choice<br/>reused and completed for selected demand"/]
+        HOMES[/"STATPOP homes and eligible activity destinations"/]
+        MC[/"Mode-choice road link sequences and extended MATSim network"/]
     end
 
     subgraph SUMO["SUMO stages"]
         POP["sumo.scenario.population.population"]
         TRIPS["sumo.scenario.population.trips"]
         RAW["sumo.scenario.unrouted_demand"]
+        SELECTED["sumo.scenario.selected"]
+        PATHS["sumo.routing.paths"]
+        ROADSHAPES["sumo.routing.network"]
+        CLIPPED["sumo.scenario.clipped"]
+        SCALED["sumo.scenario.scaled"]
         DEMAND["sumo.scenario.demand"]
         BORDER["sumo.scenario.border"]
         RUNTIME["sumo.runtime.sumo"]
         NATIVE["sumo.native.runtime"]
+        MAROUTER["sumo.native.marouter"]
         NET["sumo.scenario.network.road_network"]
         GEO["sumo.cutter.geometry"]
         SPLIT["sumo.cutter.split_network"]
         INDEX["sumo.scenario.network.routing"]
+        PREP["sumo.simulation.prepare_loading"]
+        ASSIGN["sumo.simulation.assign_network"]
+        REALIZE["sumo.simulation.realize_routes"]
         LOAD["sumo.simulation.load_network"]
         CUTNET["sumo.cutter.network"]
+        PARTS["sumo.cutter.route_parts"]
         CUTTRIPS["sumo.cutter.trips"]
         SCENARIO["sumo.cutter.scenario"]
         MICRO["sumo.simulation.run_microscopic"]
         MESO["sumo.simulation.run_mesoscopic"]
         RUN["sumo.run"]
+        OUTPUT["sumo.output"]
     end
 
     PEOPLE --> POP
     COMMERCIAL --> TRIPS
     SWISS --> BORDER
-    BORDER -. "default road-path clipping before assignment" .-> DEMAND
+    BORDER --> SELECTED
+    BORDER --> ROADSHAPES
+    BORDER --> CLIPPED
     POP --> RAW
     TRIPS --> RAW
-    RAW --> PATHS
-    RAW --> DEMAND
-    PATHS --> DEMAND
+    RAW --> SELECTED
+    SELECTED --> PATHS
+    SELECTED --> CLIPPED
+    MC --> PATHS
+    MC --> ROADSHAPES
+    ROADSHAPES --> PATHS
+    ROADSHAPES --> CLIPPED
+    PATHS --> CLIPPED
+    CLIPPED --> SCALED
+    HOMES --> SCALED
+    SCALED --> DEMAND
     NATIVE -. "default bulk XML writer" .-> DEMAND
     VEHICLES -. "sumo_assignment_trip_files replaces population inputs" .-> RAW
     NETWORK --> NET
@@ -67,25 +89,31 @@ flowchart TB
     NET --> GEO
     NET --> SPLIT
     GEO --> SPLIT
-    DEMAND --> LOAD
-    SPLIT --> LOAD
+    DEMAND --> PREP
+    PREP --> ASSIGN
+    ASSIGN --> REALIZE
+    REALIZE --> LOAD
+    SPLIT --> PREP
     SPLIT --> INDEX
-    INDEX --> LOAD
-    RUNTIME --> LOAD
+    INDEX --> PREP
+    RUNTIME --> ASSIGN
+    MAROUTER -. "class-aware macroscopic assignment" .-> ASSIGN
     LOAD --> CUTNET
     GEO --> CUTNET
-    LOAD --> CUTTRIPS
-    CUTNET --> CUTTRIPS
+    LOAD --> PARTS
+    CUTNET --> PARTS
+    PARTS --> CUTTRIPS
     CUTNET --> SCENARIO
     CUTTRIPS --> SCENARIO
     SCENARIO --> MICRO
     SCENARIO --> MESO
     MICRO -. "microscopic" .-> RUN
     MESO -. "mesoscopic" .-> RUN
+    RUN --> OUTPUT
 
     classDef input fill:#f3f4f6,stroke:#9ca3af,color:#374151;
     classDef entry fill:#dcfce7,stroke:#16a34a,color:#14532d;
-    class PEOPLE,COMMERCIAL,NETWORK,REGION,VEHICLES,SWISS,PATHS input;
+    class PEOPLE,COMMERCIAL,NETWORK,REGION,VEHICLES,SWISS,MC,HOMES input;
     class RUN entry;
 ```
 
@@ -105,11 +133,14 @@ The stages perform the following steps:
    `exlude_external_population_in_sumo: true`; cross-border people remain selected
    by `include_cross_border`. Supplied vehicle-trip files bypass population preparation.
    `enable_mode_choice: true` is required. Set `prepare_sumo: true` so the normal
-   mode-choice routing pass saves paths. `unrouted_demand` caches selected trips,
-   then the mode-choice routing package completes only missing/changed paths on
-   its extended MATSim network. Demand defaults to
-   `clip_trips_to_border_in_sumo: true`: actual directed road paths determine all
-   domestic visits, and retained endpoints are matched to compatible SUMO edges.
+   mode-choice routing pass saves paths. `unrouted_demand` caches selected trips;
+   `selected` checks original origins/destinations in vectors. Domestic trips pass
+   through; outside-to-outside trips (including transit) are dropped. Only
+   inbound/outbound originals reuse or complete extended MATSim road paths in
+   `sumo.routing.paths`. `sumo.routing.network` indexes directed link/border
+   intersections once. `clipped` retains their domestic visits, then `scaled`
+   expands the retained demand to 100%. Border endpoints remain fixed and moved
+   activity endpoints stay in Switzerland. `demand` only sorts and writes queries.
    Border entry clocks are estimated from routed total times and per-link
    free-flow proportions. See [route reuse and border timing](population/README.md#road-route-reuse-and-swiss-border-demand-clipping).
 2. **Insert region boundaries before loading.**
@@ -119,7 +150,8 @@ The stages perform the following steps:
 3. **Load and route traffic on the full network.**
    `load_network` defaults to native macroscopic `incremental` assignment;
    `SUE` is another macro option. Assigned route distributions are realized
-   reproducibly as individual routes, without a subsequent `duarouter` search.
+   reproducibly as individual routes. Mapped endpoints feed `marouter` directly;
+   there is no preliminary or subsequent `duarouter` search in this workflow.
    Entry times accumulate loaded departure-slice edge costs. Full-network
    iterative routing/simulation requires explicit `sumo_loading_method: dua`.
    The stage records routes, estimated or experienced exit times, weights and metrics.
@@ -132,8 +164,9 @@ The stages perform the following steps:
 5. **Package and simulate the region.**
    `cutter.scenario` copies the regional network, routes and edge mapping into
    a bundle. The selected final run stage generates its own local config from
-   those inputs and executes SUMO, retaining assigned paths by default
-   (`sumo_rerouting_probability: 0`). `sumo.run` returns its output paths.
+   those inputs and executes SUMO with regional GPS rerouting enabled by default
+   (`sumo_rerouting_probability: 1`); gridlock recovery defaults to 600 seconds.
+   `sumo.run` returns cached paths; `sumo.output` exports a portable copy.
 
 The final run stages reuse config-writing helpers directly. They do not depend
 on the standalone `sumo.config.*` stages shown in the next diagram. The bundle
@@ -285,3 +318,5 @@ graph varies with input files, mode selection, optional external populations,
 the region and selected model. A prepared network skips OSM conversion;
 external trip/route files can skip synthesis exports; only the selected final
 regional run stage is required by `sumo.run`.
+
+For cache boundaries, native fallbacks and thread budgets, see [performance](performance.md).

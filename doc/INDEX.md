@@ -17,6 +17,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [SUMO overview and stage flowcharts](sumo/WORKFLOW.md)
 - [SUMO runtime and road network](sumo/README.md)
 - [SUMO population and plans](sumo/population/README.md)
+- [SUMO demand upsampling and portable export](sumo/scaling.md)
 - [SUMO Polars caches and native XML](sumo/native/README.md)
 - [SUMO simulation presets and loaded assignment](sumo/config/README.md)
 - [SUMO network loading and regional cutter](sumo/cutter/README.md)
@@ -35,3 +36,5 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Dib's changelog](CHANGELOG_dib.md)
 
 Tests remain in the local `tests/` directory and are intentionally excluded from Git.
+
+- [SUMO performance and stage caches](sumo/performance.md)

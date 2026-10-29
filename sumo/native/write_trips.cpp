@@ -6,6 +6,8 @@
 #include <charconv>
 #include <cmath>
 #include <fstream>
+#include <future>
+#include <deque>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -63,12 +65,34 @@ std::string number(double value, int precision = 0) {
     return std::string(buffer, result.ptr);
 }
 
+std::string compress_block(std::string data) {
+    z_stream stream{};
+    if (deflateInit2(&stream, 1, Z_DEFLATED, 15+16, 8, Z_DEFAULT_STRATEGY)!=Z_OK)
+        throw std::runtime_error("Cannot initialize gzip compressor");
+    std::string result(deflateBound(&stream,data.size()), '\0');
+    stream.next_in=reinterpret_cast<Bytef*>(data.data()); stream.avail_in=data.size();
+    stream.next_out=reinterpret_cast<Bytef*>(result.data()); stream.avail_out=result.size();
+    int status=deflate(&stream,Z_FINISH); auto size=stream.total_out; deflateEnd(&stream);
+    if(status!=Z_STREAM_END) throw std::runtime_error("gzip block compression failed");
+    result.resize(size); return result;
+}
+
 class Output {
     gzFile gzip = nullptr;
     std::ofstream plain;
+    int workers;
+    bool parallel=false;
+    std::deque<std::future<std::string>> pending;
+    void flush_one() {
+        auto value=pending.front().get(); pending.pop_front();
+        plain.write(value.data(),value.size());
+        if(!plain) throw std::runtime_error("Error writing gzip block");
+    }
 public:
-    explicit Output(const std::string& path) {
+    explicit Output(const std::string& path, int threads=1):workers(threads) {
         if (path.size() >= 3 && path.substr(path.size() - 3) == ".gz") {
+            if(workers>1){ parallel=true; plain.open(path,std::ios::binary);
+                if(!plain) throw std::runtime_error("Cannot open gzip output"); return; }
             gzip = gzopen(path.c_str(), "wb1");
             if (!gzip) throw std::runtime_error("Cannot open gzip output");
             gzbuffer(gzip, 1024 * 1024);
@@ -79,6 +103,11 @@ public:
     }
     ~Output() { if (gzip) gzclose(gzip); }
     void write(std::string_view data) {
+        if(parallel) {
+            pending.push_back(std::async(std::launch::async,compress_block,std::string(data)));
+            if(pending.size()>=static_cast<size_t>(workers)) flush_one();
+            return;
+        }
         if (gzip) {
             if (gzwrite(gzip, data.data(), static_cast<unsigned>(data.size())) != static_cast<int>(data.size()))
                 throw std::runtime_error("Error writing gzip XML");
@@ -88,6 +117,7 @@ public:
         }
     }
     void finish() {
+        while(!pending.empty()) flush_one();
         if (gzip) { auto file = gzip; gzip = nullptr; if (gzclose(file) != Z_OK) throw std::runtime_error("Error closing gzip XML"); }
         else { plain.close(); if (!plain) throw std::runtime_error("Error closing XML"); }
     }
@@ -95,13 +125,15 @@ public:
 
 int main(int argc, char** argv) {
     try {
-        if (argc != 4) throw std::runtime_error("Usage: write_trips trips.arrow vehicle-types.xml output.xml[.gz]");
+        if (argc != 4 && argc != 5) throw std::runtime_error("Usage: write_trips trips.arrow vehicle-types.xml output.xml[.gz]");
         auto input = checked(arrow::io::MemoryMappedFile::Open(argv[1], arrow::io::FileMode::READ));
         auto reader = checked(arrow::ipc::RecordBatchFileReader::Open(input));
         std::ifstream prelude(argv[2], std::ios::binary);
         if (!prelude) throw std::runtime_error("Cannot open vehicle type definitions");
         std::string header((std::istreambuf_iterator<char>(prelude)), std::istreambuf_iterator<char>());
-        Output output(argv[3]);
+        int workers=argc==5?std::stoi(argv[4]):1;
+        if(workers<1 || workers>256) throw std::runtime_error("Invalid XML compression thread count");
+        Output output(argv[3],workers);
         output.write("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<routes>\n");
         output.write(header);
         std::string buffer; buffer.reserve(2 * 1024 * 1024);
