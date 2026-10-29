@@ -633,38 +633,39 @@ def execute(context):
                                    "geometry", "destination_id", "following_mode"
                                    ]]
 
-    df_sorted = df_activities.sort_values(["person_id", "activity_index"])
+    # Unused: trips of the cross-border agents, for writing them out for inspection.
+    # df_sorted = df_activities.sort_values(["person_id", "activity_index"])
 
-    # Shift to get origin and destination activity side by side
-    trips = pd.DataFrame({
-        "person_id"       : df_sorted["person_id"],
-        "trip_index"      : df_sorted["activity_index"],
-        "origin_id"       : df_sorted["destination_id"],
-        "departure_time"  : df_sorted["end_time"],
-        "geom_origin"     : df_sorted["geometry"].values,
-        "mode"            : df_sorted["following_mode"],
-        "geom_destination": df_sorted.groupby("person_id")["geometry"].shift(-1).values,
-        "destination_id"  : df_sorted.groupby("person_id")["destination_id"].shift(-1).values,
-        "arrival_time"    : df_sorted.groupby("person_id")["start_time"].shift(-1).values,
-    })
+    # # Shift to get origin and destination activity side by side
+    # trips = pd.DataFrame({
+    #     "person_id"       : df_sorted["person_id"],
+    #     "trip_index"      : df_sorted["activity_index"],
+    #     "origin_id"       : df_sorted["destination_id"],
+    #     "departure_time"  : df_sorted["end_time"],
+    #     "geom_origin"     : df_sorted["geometry"].values,
+    #     "mode"            : df_sorted["following_mode"],
+    #     "geom_destination": df_sorted.groupby("person_id")["geometry"].shift(-1).values,
+    #     "destination_id"  : df_sorted.groupby("person_id")["destination_id"].shift(-1).values,
+    #     "arrival_time"    : df_sorted.groupby("person_id")["start_time"].shift(-1).values,
+    # })
 
-    # Drop last activity of each person (no outgoing trip)
-    trips = trips[trips["mode"].notna()].copy()
+    # # Drop last activity of each person (no outgoing trip)
+    # trips = trips[trips["mode"].notna()].copy()
 
-    # Compute trip duration
-    trips["trip_duration"] = trips["arrival_time"] - trips["departure_time"]
+    # # Compute trip duration
+    # trips["trip_duration"] = trips["arrival_time"] - trips["departure_time"]
 
-    # Build LineString geometry
-    trips["geometry"] = trips.apply(
-        lambda r: LineString([r["geom_origin"], r["geom_destination"]]), axis=1
-    )
+    # # Build LineString geometry
+    # trips["geometry"] = trips.apply(
+    #     lambda r: LineString([r["geom_origin"], r["geom_destination"]]), axis=1
+    # )
 
-    # Drop helper columns and convert to GeoDataFrame
-    trips = trips.drop(columns=["geom_origin", "geom_destination"])
-    trips = gpd.GeoDataFrame(trips, geometry="geometry", crs = "EPSG:2056")
+    # # Drop helper columns and convert to GeoDataFrame
+    # trips = trips.drop(columns=["geom_origin", "geom_destination"])
+    # trips = gpd.GeoDataFrame(trips, geometry="geometry", crs = "EPSG:2056")
 
-    # Reindex trip index as integer
-    trips["trip_index"] = trips.groupby("person_id").cumcount() + 1
+    # # Reindex trip index as integer
+    # trips["trip_index"] = trips.groupby("person_id").cumcount() + 1
 
     #trips.to_file(f"{context.config("output_path")}/trips_crossborder.shp")
 

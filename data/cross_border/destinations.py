@@ -53,17 +53,16 @@ def execute(context):
 
     statent["offers_work"]           = True
     statent["offers_other"]          = True
-    statent["offers_work_secondary"] = True
     statent["offers_leisure"]        = statent["noga"].str.startswith("90") | statent["noga"].str.startswith("56")
     statent["offers_education"]      = statent["noga"].str.startswith("85")
     statent["offers_shop"]           = statent["noga"].str.startswith("47")
 
     # One shared, seeded RNG rather than the same random_state for every group:
-    # "work", "work_secondary" and "other" are offered by every STATENT entry,
+    # "work" and "other" are offered by every STATENT entry,
     # so with a fixed seed they drew the very same facilities in the same order.
     rng = np.random.RandomState(context.config("random_seed"))
 
-    for purpose in ["work", "work_secondary", "other", "education", "leisure", "shop"]:
+    for purpose in ["work", "other", "education", "leisure", "shop"]:
         mask_purpose         = (df["trip_purpose"] == purpose)
         mask_statent_purpose = statent[f"offers_{purpose}"]
 

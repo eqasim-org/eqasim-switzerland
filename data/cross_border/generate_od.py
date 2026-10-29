@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import Point
 import geopandas as gpd
-import random
 from pathlib import Path
 import logging
 import re
@@ -102,16 +101,6 @@ def sample_rows_by_weight(df2, rng, weight_col="weight"):
     # Combine both
     sampled_df = pd.concat([repeated, fractional], ignore_index=True)
     return sampled_df
-
-
-def sample_points_in_polygon(polygon, n):
-    points = []
-    minx, miny, maxx, maxy = polygon.bounds
-    while len(points) < n:
-        p = Point(random.uniform(minx, maxx), random.uniform(miny, maxy))
-        if polygon.contains(p):
-            points.append(p)
-    return points
 
 
 def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context, rng, mode_column = "trip_mode", interview_place_column = "interview_place", other_x = None, other_y = None, other_crs = "EPSG:4326", restrict_column = None):
@@ -477,154 +466,13 @@ def process_through_trips(through_trips, N, context, rng):
     return df
 
 
-def read_2021_data(context):
-    # Load data
-    # We are using the 2021 release because the 2015 one doesn't provide reliable destination coordinates.
-
-    data_path = context.config("data_path")
-    data_path = f"{data_path}/crossborder/AuGQPV_2021/AGQPV21_finale_Auswertungsdatenbank.csv"
-
-    df2021 = pd.read_csv(data_path, encoding="latin1", sep = ";")
-
-    df2021 = df2021[["INTERVIEWID", "BEFRAGUNGSORTID", "BEFRAGUNGSORT", "GRENZABSCHNITT", "TAGESTYP", "VERKEHRSTRAEGER", "UEBERGANGSART", "FAHRZEUGTYP", "GRUPPENGROESSE",
-                 "WOHNORTLANDISO", "WOHNORT_GISCO_ID", "STARTORTLANDISO", "STARTORT_GISCO_ID", "ZIELORTLANDISO", "ZIELORT_GISCO_ID",
-                 "STARTORTORTLATITUDE", "STARTORTORTLONGITUDE",
-                 "ZIELORTORTLATITUDE", "ZIELORTORTLONGITUDE",
-                 "FAHRTZWECK", "ANZAHLUEBERNACHTUNGEN", "AUFENTHALTSLAND1ISO", "AUFENTHALTSLAND2ISO", "AUFENTHALTSLAND3ISO",
-                 "ZUGTYP", "FAHRTRICHTUNGGU", "FAHRTRICHTUNGAU", "VERKEHRSART", "GEWICHT_Personen", "GEWICHT_Fahrzeuge"]]
-
-    df2021.columns = ["interview_id", "interview_place_id", "interview_place", "neighbor_country", "day_cat", "road_type", "crossing_cat", "vehicle_type", "nb_passengers",
-                  "residence_country", "residence_place", "origin_country", "origin_place", "destination_country", "destination_place",
-                  "start_y", "start_x", "end_y", "end_x", 
-                  "trip_purpose", "nb_nights", "country1", "country2", "country3",
-                  "train_type", "direction_crossing", "direction_alps", "travel_cat", "weight", "weight_vehicles"]
-
-    df2021["interview_place"] = repair_interview_place_names(
-        df2021["interview_place"], context.stage("data.cross_border.interview_places")["interview_place"])
-    
-    # Process the columns
-    # 1. Rename countries
-    # Keep the unprocessed country codes around, since the grouping below collapses
-    # everything outside of swiss_neighbors into "other".
-    df2021["origin_country_raw"]      = df2021["origin_country"]
-    df2021["destination_country_raw"] = df2021["destination_country"]
-
-    swiss_neighbors = ["CH", "FR", "DE", "IT", "AT", "LI"]
-    for column in ["residence_country", "origin_country", "destination_country"]:
-        df2021.loc[:, column] = df2021[column].apply(lambda x: x if x in swiss_neighbors else "other")
-    
-    # 2. Separate road and rail observations
-    df2021["road_type"] = df2021["road_type"].astype(str)
-    df2021.loc[df2021["road_type"]=="1", "road_type"] = "road"
-    df2021.loc[df2021["road_type"]=="2", "road_type"] = "rail"
-    
-    # 3. Identify vehicles
-    df2021["vehicle_type"] = df2021["vehicle_type"].astype(str)
-    df2021.loc[df2021["vehicle_type"]=="1", "vehicle_type"] = "car"
-    df2021.loc[df2021["vehicle_type"]=="2", "vehicle_type"] = "car" #"motorcycle"
-    df2021.loc[df2021["vehicle_type"]=="3", "vehicle_type"] = "pt"  #"long distance bus"
-    
-    # 4. Identify trip purpose
-    df2021["trip_purpose"] = df2021["trip_purpose"].astype(str)
-    df2021.loc[df2021["trip_purpose"]=="1", "trip_purpose"] = "work"
-    df2021.loc[df2021["trip_purpose"]=="2", "trip_purpose"] = "education"
-    df2021.loc[df2021["trip_purpose"]=="3", "trip_purpose"] = "shop"
-    df2021.loc[df2021["trip_purpose"]=="4", "trip_purpose"] = "work"
-    df2021.loc[df2021["trip_purpose"]=="5", "trip_purpose"] = "leisure"
-    df2021.loc[df2021["trip_purpose"]=="6", "trip_purpose"] = "other"
-    df2021.loc[df2021["trip_purpose"]=="7", "trip_purpose"] = "freight"
-    
-    # 5. Is the respondent entering or leaving CH?
-    df2021["direction_crossing"] = df2021["direction_crossing"].astype(str)
-    df2021.loc[df2021["direction_crossing"]=="1", "direction_crossing"] = "entering CH"
-    df2021.loc[df2021["direction_crossing"]=="2", "direction_crossing"] = "leaving CH"
-    
-    # 6. For the Alps crossing, not used currently
-    df2021["direction_alps"] = df2021["direction_alps"].astype(str)
-    df2021.loc[df2021["direction_alps"]=="1", "direction_alps"] = "North"
-    df2021.loc[df2021["direction_alps"]=="2", "direction_alps"] = "South"
-    
-    # 7. More detailed compared to direction_crossing, but obviously there are inconsistencies betweeen these two columns
-    df2021["travel_cat"] = df2021["travel_cat"].astype(str)
-    df2021.loc[df2021["travel_cat"]=="1", "travel_cat"] = "Within CH"
-    df2021.loc[df2021["travel_cat"]=="2", "travel_cat"] = "Through CH"
-    df2021.loc[df2021["travel_cat"]=="3", "travel_cat"] = "From CH"
-    df2021.loc[df2021["travel_cat"]=="4", "travel_cat"] = "To CH"
-    
-    # 8. Identify the observation day
-    df2021.loc[df2021["day_cat"]=="Werktag", "day_cat"]    = "Mo-Fr"
-    df2021.loc[df2021["day_cat"]=="Samstag", "day_cat"]    = "WE"
-    df2021.loc[df2021["day_cat"]=="Sonntag", "day_cat"]    = "WE"
-    df2021.loc[df2021["day_cat"]=="Wochenende", "day_cat"] = "WE"
-    
-    # 9. Identify the train category for rail observations (kept as train_category:
-    # long-distance travellers are sent to a gateway station served by long-distance
-    # trains, see data.cross_border.pt_gateways)
-    df2021["train_type"] = df2021["train_type"].astype(str).str.strip()
-    df2021["train_category"] = df2021["train_type"].map(TRAIN_CATEGORIES)
-    df2021.loc[df2021["train_type"]=="1", "train_type"] = "pt" #"long distance train"
-    df2021.loc[df2021["train_type"]=="2", "train_type"] = "pt" #"regional train"
-
-    # 10. Aggregate vehicle_type and train_type
-    df2021["trip_mode"] = np.where(df2021["vehicle_type"].str.strip() != '', df2021["vehicle_type"], df2021["train_type"])
-
-    df2021["weight"]          = df2021["weight"].astype(float)
-    df2021["weight_vehicles"] = df2021["weight_vehicles"].replace("", 0).replace(" ", 0).fillna(0).astype(float)
-    df2021.loc[df2021["road_type"]=="road", "weight"] = 2 * df2021[df2021["road_type"]=="road"]["weight_vehicles"]
-
-    df2021.loc[:, "group_weight"] = df2021["weight"]
-    df2021.loc[df2021["road_type"]=="road", "group_weight"] = df2021[df2021["road_type"]=="road"]["weight"] * df2021[df2021["road_type"]=="road"]["nb_passengers"]
-    df2021["group_weight"] = df2021["group_weight"].astype(float)
-
-    del df2021["road_type"]
-    del df2021["vehicle_type"]
-    del df2021["train_type"]
-
-    # 11. Adjust weight
-    days    = {"Mo-Fr": 5, "WE": 2}
-
-    day = context.config("specific_day_scenario")
-
-    if day == "weekend":
-        day_key = "WE"
-    elif day == "workday":
-        day_key = "Mo-Fr"
-    elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
-        # The survey only distinguishes Mo-Fr from the weekend, so a single
-        # weekday gets the regular workday demand (and a single weekend day
-        # the regular weekend demand).
-        day_key = "Mo-Fr"
-    elif day in ["Saturday", "Sunday"]:
-        day_key = "WE"
-    else:
-        raise ValueError(f"Unsupported specific_day_scenario: '{day}'")
-
-    day_value = days[day_key]
-    df_days   = df2021[df2021["day_cat"]==day_key].copy()
-    df_days["weight"] = df_days["weight"] / (52 * day_value)
-    df_days["weight"] = df_days["weight"] / 2 # Because the persons entering the country have to leave it too
-    df_days["group_weight"] = df_days["group_weight"] / (52 * day_value)
-    df_days["group_weight"] = df_days["group_weight"] / 2
-    del df_days["day_cat"]
-
-    # 12. Only select border crossing data - remove Alps crossing data
-    borders = df_days[df_days["crossing_cat"]==1].copy()
-    
-    del borders["crossing_cat"]
-    del borders["direction_alps"]
-
-    # 13. Remove Swiss residents, their mobility should be covered in the Microcensus
-    residents_ch_mask = borders["residence_country"] == "CH"
-    borders = borders[~ residents_ch_mask].copy()
-
-    for col in ["start_x", "start_y", "end_x", "end_y"]:
-        borders[col] = pd.to_numeric(borders[col].str.strip(), errors="coerce")
-
-    borders = borders[borders["start_x"].notna() & borders["start_y"].notna()]
-    borders = borders[borders["end_x"].notna() & borders["end_y"].notna()]
-
-    # 14. Match to an interview point    
-    #borders.loc[borders["interview_place"] == "Vallorbe (544)", "interview_place"] = "Gruppe O: VD/NE -> F. Dép. Jura. Doubs"
+def match_interview_points(borders, context):
+    """
+    Gives every survey record (start_x/start_y and end_x/end_y in WGS84) the border
+    crossing point it was surveyed at: one of the points of its interview_place
+    serving its mode, close to the shortest origin -> point -> destination path.
+    Shared with data.cross_border.swiss_residents_od.
+    """
 
     points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "label"]].to_crs("EPSG:2056")
     points["interview_point_id"] = points["border_crossing_point_id"]
@@ -701,6 +549,163 @@ def read_2021_data(context):
     return borders
 
 
+def read_2021_data(context):
+    # Load data
+    # We are using the 2021 release because the 2015 one doesn't provide reliable destination coordinates.
+
+    data_path = context.config("data_path")
+    data_path = f"{data_path}/crossborder/AuGQPV_2021/AGQPV21_finale_Auswertungsdatenbank.csv"
+
+    df2021 = pd.read_csv(data_path, encoding="latin1", sep = ";")
+
+    df2021 = df2021[["INTERVIEWID", "BEFRAGUNGSORTID", "BEFRAGUNGSORT", "GRENZABSCHNITT", "TAGESTYP", "VERKEHRSTRAEGER", "UEBERGANGSART", "FAHRZEUGTYP", "GRUPPENGROESSE",
+                 "WOHNORTLANDISO", "WOHNORT_GISCO_ID", "STARTORTLANDISO", "STARTORT_GISCO_ID", "ZIELORTLANDISO", "ZIELORT_GISCO_ID",
+                 "STARTORTORTLATITUDE", "STARTORTORTLONGITUDE",
+                 "ZIELORTORTLATITUDE", "ZIELORTORTLONGITUDE",
+                 "FAHRTZWECK", "ANZAHLUEBERNACHTUNGEN", "AUFENTHALTSLAND1ISO", "AUFENTHALTSLAND2ISO", "AUFENTHALTSLAND3ISO",
+                 "ZUGTYP", "FAHRTRICHTUNGGU", "FAHRTRICHTUNGAU", "VERKEHRSART", "GEWICHT_Personen", "GEWICHT_Fahrzeuge"]]
+
+    df2021.columns = ["interview_id", "interview_place_id", "interview_place", "neighbor_country", "day_cat", "road_type", "crossing_cat", "vehicle_type", "nb_passengers",
+                  "residence_country", "residence_place", "origin_country", "origin_place", "destination_country", "destination_place",
+                  "start_y", "start_x", "end_y", "end_x", 
+                  "trip_purpose", "nb_nights", "country1", "country2", "country3",
+                  "train_type", "direction_crossing", "direction_alps", "travel_cat", "weight", "weight_vehicles"]
+
+    df2021["interview_place"] = repair_interview_place_names(
+        df2021["interview_place"], context.stage("data.cross_border.interview_places")["interview_place"])
+    
+    # Process the columns
+    # 1. Rename countries
+    # Keep the unprocessed country codes around, since the grouping below collapses
+    # everything outside of swiss_neighbors into "other".
+    df2021["origin_country_raw"]      = df2021["origin_country"]
+    df2021["destination_country_raw"] = df2021["destination_country"]
+
+    swiss_neighbors = ["CH", "FR", "DE", "IT", "AT", "LI"]
+    for column in ["residence_country", "origin_country", "destination_country"]:
+        df2021.loc[:, column] = df2021[column].apply(lambda x: x if x in swiss_neighbors else "other")
+    
+    # 2. Separate road and rail observations
+    df2021["road_type"] = df2021["road_type"].astype(str)
+    df2021.loc[df2021["road_type"]=="1", "road_type"] = "road"
+    df2021.loc[df2021["road_type"]=="2", "road_type"] = "rail"
+    
+    # 3. Identify vehicles
+    df2021["vehicle_type"] = df2021["vehicle_type"].astype(str)
+    df2021.loc[df2021["vehicle_type"]=="1", "vehicle_type"] = "car"
+    df2021.loc[df2021["vehicle_type"]=="2", "vehicle_type"] = "car" #"motorcycle"
+    
+    # 4. Identify trip purpose
+    df2021["trip_purpose"] = df2021["trip_purpose"].astype(str)
+    df2021.loc[df2021["trip_purpose"]=="1", "trip_purpose"] = "work"
+    df2021.loc[df2021["trip_purpose"]=="2", "trip_purpose"] = "education"
+    df2021.loc[df2021["trip_purpose"]=="3", "trip_purpose"] = "shop"
+    df2021.loc[df2021["trip_purpose"]=="4", "trip_purpose"] = "work"
+    df2021.loc[df2021["trip_purpose"]=="5", "trip_purpose"] = "leisure"
+    df2021.loc[df2021["trip_purpose"]=="6", "trip_purpose"] = "other"
+    df2021.loc[df2021["trip_purpose"]=="7", "trip_purpose"] = "freight"
+    
+    # 5. Is the respondent entering or leaving CH?
+    df2021["direction_crossing"] = df2021["direction_crossing"].astype(str)
+    df2021.loc[df2021["direction_crossing"]=="1", "direction_crossing"] = "entering CH"
+    df2021.loc[df2021["direction_crossing"]=="2", "direction_crossing"] = "leaving CH"
+    
+    # 6. For the Alps crossing, not used currently
+    df2021["direction_alps"] = df2021["direction_alps"].astype(str)
+    df2021.loc[df2021["direction_alps"]=="1", "direction_alps"] = "North"
+    df2021.loc[df2021["direction_alps"]=="2", "direction_alps"] = "South"
+    
+    # 7. More detailed compared to direction_crossing, but obviously there are inconsistencies betweeen these two columns
+    df2021["travel_cat"] = df2021["travel_cat"].astype(str)
+    df2021.loc[df2021["travel_cat"]=="1", "travel_cat"] = "Within CH"
+    df2021.loc[df2021["travel_cat"]=="2", "travel_cat"] = "Through CH"
+    df2021.loc[df2021["travel_cat"]=="3", "travel_cat"] = "From CH"
+    df2021.loc[df2021["travel_cat"]=="4", "travel_cat"] = "To CH"
+    
+    # 8. Identify the observation day
+    df2021.loc[df2021["day_cat"]=="Werktag", "day_cat"]    = "Mo-Fr"
+    df2021.loc[df2021["day_cat"]=="Samstag", "day_cat"]    = "WE"
+    df2021.loc[df2021["day_cat"]=="Sonntag", "day_cat"]    = "WE"
+    df2021.loc[df2021["day_cat"]=="Wochenende", "day_cat"] = "WE"
+    
+    # 9. Identify the train category for rail observations (kept as train_category:
+    # long-distance travellers are sent to a gateway station served by long-distance
+    # trains, see data.cross_border.pt_gateways)
+    df2021["train_type"] = df2021["train_type"].astype(str).str.strip()
+    df2021["train_category"] = df2021["train_type"].map(TRAIN_CATEGORIES)
+    df2021.loc[df2021["train_type"]=="1", "train_type"] = "pt" #"long distance train"
+    df2021.loc[df2021["train_type"]=="2", "train_type"] = "pt" #"regional train"
+
+    # 10. Aggregate vehicle_type and train_type
+    df2021["trip_mode"] = np.where(df2021["vehicle_type"].str.strip() != '', df2021["vehicle_type"], df2021["train_type"])
+
+    df2021["weight"]          = df2021["weight"].astype(float)
+    df2021["weight_vehicles"] = df2021["weight_vehicles"].replace("", 0).replace(" ", 0).fillna(0).astype(float)
+    df2021.loc[df2021["road_type"]=="road", "weight"] = 2 * df2021[df2021["road_type"]=="road"]["weight_vehicles"]
+
+    df2021.loc[:, "group_weight"] = df2021["weight"]
+    df2021.loc[df2021["road_type"]=="road", "group_weight"] = df2021[df2021["road_type"]=="road"]["weight"] * df2021[df2021["road_type"]=="road"]["nb_passengers"]
+    df2021["group_weight"] = df2021["group_weight"].astype(float)
+
+    # The rail weight is already a person weight (it does not grow with the group
+    # size), so a rail respondent stands for one person: expanding the record by
+    # its group size would count the other members of the group twice.
+    df2021.loc[df2021["road_type"]=="rail", "nb_passengers"] = 1
+
+    del df2021["road_type"]
+    del df2021["vehicle_type"]
+    del df2021["train_type"]
+
+    # 11. Adjust weight
+    days    = {"Mo-Fr": 5, "WE": 2}
+
+    day = context.config("specific_day_scenario")
+
+    if day == "weekend":
+        day_key = "WE"
+    elif day == "workday":
+        day_key = "Mo-Fr"
+    elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
+        # The survey only distinguishes Mo-Fr from the weekend, so a single
+        # weekday gets the regular workday demand (and a single weekend day
+        # the regular weekend demand).
+        day_key = "Mo-Fr"
+    elif day in ["Saturday", "Sunday"]:
+        day_key = "WE"
+    else:
+        raise ValueError(f"Unsupported specific_day_scenario: '{day}'")
+
+    day_value = days[day_key]
+    df_days   = df2021[df2021["day_cat"]==day_key].copy()
+    df_days["weight"] = df_days["weight"] / (52 * day_value)
+    df_days["weight"] = df_days["weight"] / 2 # Because the persons entering the country have to leave it too
+    df_days["group_weight"] = df_days["group_weight"] / (52 * day_value)
+    df_days["group_weight"] = df_days["group_weight"] / 2
+    del df_days["day_cat"]
+
+    # 12. Only select border crossing data - remove Alps crossing data
+    borders = df_days[df_days["crossing_cat"]==1].copy()
+    
+    del borders["crossing_cat"]
+    del borders["direction_alps"]
+
+    # 13. Remove Swiss residents, their mobility should be covered in the Microcensus
+    residents_ch_mask = borders["residence_country"] == "CH"
+    borders = borders[~ residents_ch_mask].copy()
+
+    for col in ["start_x", "start_y", "end_x", "end_y"]:
+        borders[col] = pd.to_numeric(borders[col].str.strip(), errors="coerce")
+
+    borders = borders[borders["start_x"].notna() & borders["start_y"].notna()]
+    borders = borders[borders["end_x"].notna() & borders["end_y"].notna()]
+
+    # 14. Match to an interview point
+
+    borders = match_interview_points(borders, context)
+
+    return borders
+
+
 def read_2015_data(context):
     data_path = context.config("data_path")
     data_path = f"{data_path}/crossborder/AuGQPV_2015/Finale_Auswertungsdatenbank_AGQPV2015_V2.csv"
@@ -733,10 +738,12 @@ def read_2015_data(context):
     df2015.loc[df2015["road_type"]=="1", "road_type"] = "road"
     df2015.loc[df2015["road_type"]=="2", "road_type"] = "rail"
 
+    # Coaches (4) are dropped: the 2021 survey has none, so counting them as pt
+    # inflated the 2015/2021 pt scaling factors of the trips entering CH.
     df2015["vehicle_type"] = df2015["vehicle_type"].astype(str)
+    df2015 = df2015[df2015["vehicle_type"]!="4"].copy()
     df2015.loc[df2015["vehicle_type"]=="1", "vehicle_type"] = "car"
     df2015.loc[df2015["vehicle_type"]=="3", "vehicle_type"] = "car"
-    df2015.loc[df2015["vehicle_type"]=="4", "vehicle_type"] = "pt"
 
     df2015["trip_purpose"] = df2015["trip_purpose"].astype(str)
     df2015.loc[df2015["trip_purpose"]=="1", "trip_purpose"] = "work"
@@ -921,13 +928,11 @@ def execute(context):
         exclude_region = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs="EPSG:2056")
         residences     = gpd.GeoDataFrame(df.copy(), geometry=gpd.points_from_xy(df["residence_x"], df["residence_y"]), crs="EPSG:2056")
 
-        joined           = gpd.sjoin(residences, exclude_region[["geometry"]], how = "left", predicate = "within")
-        is_within_region = joined["index_right"].notna()
-        df["exclude"]    = is_within_region.values
-
-        excluded_ids = df.loc[df["exclude"], "cross_border_person_id"].unique()
+        # A residence inside several overlapping regions comes out of the join once
+        # per region, so the persons are read from the join rather than aligned
+        # row by row with df.
+        joined       = gpd.sjoin(residences, exclude_region[["geometry"]], how = "inner", predicate = "within")
+        excluded_ids = joined["cross_border_person_id"].unique()
         df = df[~df["cross_border_person_id"].isin(excluded_ids)].copy()
-
-        del df["exclude"]
 
     return df

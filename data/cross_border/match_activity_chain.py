@@ -1,5 +1,16 @@
 import numpy as np
 
+# Only adult microcensus respondents are matched, whatever the mode or purpose
+MINIMUM_AGE = 18
+
+# The main activity (the middle one of home-X-home) of a matched chain lasts at least
+# this long, starts after MAIN_ACTIVITY_EARLIEST_START and ends before
+# MAIN_ACTIVITY_LATEST_END: shorter stops made agents cross the border to turn back at
+# once, and night shifts brought them home after the end of the simulation. [s]
+MINIMUM_MAIN_ACTIVITY_DURATION = 30 * 60
+MAIN_ACTIVITY_EARLIEST_START = 4 * 3600
+MAIN_ACTIVITY_LATEST_END = 21 * 3600
+
 def configure(context):
     context.config("data_path")
     context.config("input_downsampling")
@@ -9,15 +20,18 @@ def configure(context):
     context.stage("data.cross_border.sample")
     context.stage("data.microcensus.activity_chains")
     context.stage("data.microcensus.persons")
-    context.stage("data.constants")
+    context.stage("data.microcensus.trips")
 
 
 def execute(context):
+
+    # Load the cross-border records and the microcensus chains of adults.
+
     df           = context.stage("data.cross_border.sample").copy()
     mz_actchains = context.stage("data.microcensus.activity_chains")
     mz_persons   = context.stage("data.microcensus.persons")[['person_id', 'age']]
     mz_actchains = mz_actchains.merge(mz_persons, on = "person_id", how = "left")
-    cst          = context.stage("data.constants")
+    mz_actchains = mz_actchains[mz_actchains["age"] >= MINIMUM_AGE]
 
     # One shared, seeded RNG for every (purpose, mode) group: re-passing the
     # same random_seed to each .sample() call made groups drawing from the same
@@ -26,7 +40,6 @@ def execute(context):
 
     purpose_to_actchain = {
         "work": ["home-work-home"],
-        "work_secondary":  ["home-work_secondary-home"],
         "shop": ["home-shop-home", "home-other-home"],
         "leisure": ["home-leisure-home"],
         "education": ["home-education-home"],
@@ -41,20 +54,23 @@ def execute(context):
     elif day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
         mz_actchains = mz_actchains[mz_actchains["day"]==day]
 
-    mode_age_limit = {"car": 18, "pt": cst.MZ_AGE_THRESHOLD, "car_passenger": cst.MZ_AGE_THRESHOLD}
-    purpose_age_limit = {"work": 18, "work_secondary": 18, "shop": cst.MZ_AGE_THRESHOLD, "leisure": cst.MZ_AGE_THRESHOLD, 
-                         "education": cst.MZ_AGE_THRESHOLD, "other": cst.MZ_AGE_THRESHOLD}
-    
+    # Keep the chains whose main activity has a usable timing.
+
+    main_activities = main_activity_times(context.stage("data.microcensus.trips")[0])
+    valid_ids = main_activities.index[
+        (main_activities["end_time"] - main_activities["start_time"] >= MINIMUM_MAIN_ACTIVITY_DURATION) &
+        (main_activities["start_time"] >= MAIN_ACTIVITY_EARLIEST_START) &
+        (main_activities["end_time"] <= MAIN_ACTIVITY_LATEST_END)
+    ]
+    mz_actchains = mz_actchains[mz_actchains["person_id"].isin(valid_ids)]
+
+    # Draw a microcensus chain for every cross-border record.
+
     for purpose, chains in purpose_to_actchain.items():
-        age_limit = purpose_age_limit.get(purpose, cst.MZ_AGE_THRESHOLD)
-
         for trip_mode in ["car", "pt", "car_passenger"]:
-            age_limit = max(age_limit, mode_age_limit.get(trip_mode, cst.MZ_AGE_THRESHOLD))
-
             mask_cb    = (df["trip_purpose"] == purpose) & (df["trip_mode"] == trip_mode)
             candidates = mz_actchains[(mz_actchains["activity_chain"].isin(chains)) &
-                                       (mz_actchains["mode_chain"]==f"{trip_mode}-{trip_mode}") & 
-                                       (mz_actchains["age"] > age_limit)][["person_id", "person_weight"]]
+                                       (mz_actchains["mode_chain"]==f"{trip_mode}-{trip_mode}")][["person_id", "person_weight"]]
 
             candidates.columns = ["mz_person_id", "mz_person_weight"]
             N_sample           = np.sum(mask_cb)
@@ -85,3 +101,18 @@ def execute(context):
     assert len(df[df["mz_person_id"].isna()]) == 0
 
     return df
+
+
+def main_activity_times(mz_trips):
+    """
+    Start and end [s] of the activity between the first and the second trip of every
+    microcensus person, indexed by person_id. Only used for home-X-home chains, which
+    have exactly these two trips.
+    """
+
+    trips = mz_trips.sort_values(["person_id", "trip_id"]).groupby("person_id")
+
+    first  = trips.nth(0).set_index("person_id")["arrival_time"]
+    second = trips.nth(1).set_index("person_id")["departure_time"]
+
+    return first.to_frame("start_time").join(second.rename("end_time"), how = "inner")

@@ -10,6 +10,7 @@ import logging
 from data.cross_border.generate_od import (
     TRAIN_CATEGORIES,
     expand_and_sample,
+    match_interview_points,
     repair_interview_place_names,
     sample_gateway,
     sjoin_within_unique,
@@ -245,7 +246,6 @@ def read_2021_data(context):
     df2021["vehicle_type"] = df2021["vehicle_type"].astype(str)
     df2021.loc[df2021["vehicle_type"]=="1", "vehicle_type"] = "car"
     df2021.loc[df2021["vehicle_type"]=="2", "vehicle_type"] = "car" #"motorcycle"
-    df2021.loc[df2021["vehicle_type"]=="3", "vehicle_type"] = "pt"  #"long distance bus"
     
     # 4. Identify trip purpose
     df2021["trip_purpose"] = df2021["trip_purpose"].astype(str)
@@ -296,7 +296,12 @@ def read_2021_data(context):
     df2021.loc[:, "group_weight"] = df2021["weight"]
     df2021.loc[df2021["road_type"]=="road", "group_weight"] = df2021[df2021["road_type"]=="road"]["weight"] * df2021[df2021["road_type"]=="road"]["nb_passengers"]
     df2021["group_weight"] = df2021["group_weight"].astype(float)
-    
+
+    # The rail weight is already a person weight (it does not grow with the group
+    # size), so a rail respondent stands for one person: expanding the record by
+    # its group size would count the other members of the group twice.
+    df2021.loc[df2021["road_type"]=="rail", "nb_passengers"] = 1
+
     del df2021["road_type"]
     del df2021["vehicle_type"]
     del df2021["train_type"]
@@ -346,38 +351,7 @@ def read_2021_data(context):
 
     # 14. Match to an interview point
 
-    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "label"]]
-    points["interview_point_id"] = points["border_crossing_point_id"]
-
-    # "label" indicates which mode a point was surveyed for ("road" serves car trips,
-    # "pt" serves public transport trips), so candidates are grouped by place AND mode.
-    mode_to_label = {"car": "road", "pt": "pt"}
-
-    grouped_points = {k: v for k, v in points.groupby(["interview_place", "label"])}
-
-    # Shared, seeded RNG: passing it to every .sample() call keeps the draws
-    # reproducible while still giving each row its own draw.
-    point_rng = np.random.RandomState(context.config("random_seed"))
-
-    def sample_point(row):
-        label = mode_to_label.get(row["trip_mode"])
-        candidates = grouped_points.get((row["interview_place"], label))
-        if candidates is not None and "importance" in candidates.columns:
-            sampled = candidates.sample(n=1, weights=candidates["importance"], random_state=point_rng)
-            return sampled.iloc[0][["geometry", "importance", "interview_point_id"]]
-
-        # Fall back to the closest point that still matches the trip's mode, if any exist
-        same_label = points[points["label"] == label] if label is not None else points
-        if len(same_label) == 0:
-            same_label = points
-
-        origin    = Point(row["start_x"], row["start_y"])
-        distances = same_label["geometry"].apply(lambda geom: origin.distance(geom))
-        closest   = same_label.loc[distances.idxmin()]
-        return closest[["geometry", "importance", "interview_point_id"]]
-
-    result = borders[["interview_place", "start_x", "start_y", "trip_mode"]].apply(sample_point, axis=1)
-    borders[["interview_geometry_point", "importance", "interview_point_id"]] = result
+    borders = match_interview_points(borders, context)
 
     return borders
 
@@ -414,10 +388,12 @@ def read_2015_data(context):
     df2015.loc[df2015["road_type"]=="1", "road_type"] = "road"
     df2015.loc[df2015["road_type"]=="2", "road_type"] = "rail"
 
+    # Coaches (4) are dropped: the 2021 survey has none, so counting them as pt
+    # inflated the 2015/2021 pt scaling factors of the trips entering CH.
     df2015["vehicle_type"] = df2015["vehicle_type"].astype(str)
+    df2015 = df2015[df2015["vehicle_type"]!="4"].copy()
     df2015.loc[df2015["vehicle_type"]=="1", "vehicle_type"] = "car"
     df2015.loc[df2015["vehicle_type"]=="3", "vehicle_type"] = "car"
-    df2015.loc[df2015["vehicle_type"]=="4", "vehicle_type"] = "pt"
 
     df2015["trip_purpose"] = df2015["trip_purpose"].astype(str)
     df2015.loc[df2015["trip_purpose"]=="1", "trip_purpose"] = "work"
