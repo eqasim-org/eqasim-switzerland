@@ -101,6 +101,8 @@ class RunCache:
             return .1
         if key == 'secondary_nn_short_distance_sigma_min_m':
             return 25.
+        if key == 'secondary_nn_no_car_no_pt_weight':
+            return 1.
         return self.yaml['config'].get(key, default)
 
     @property
@@ -112,7 +114,7 @@ class RunCache:
     def provenance(self):
         keys = ['locations_algorithm', 'secondary_nn_use_target_distance', 'random_seed',
                 'input_downsampling', 'scaling_year', 'census', 'specific_day_scenario',
-                'secondary_nn_short_trip_threshold_m', 'secondary_nn_short_sampling',
+                'secondary_nn_short_trip_threshold_m', 'secondary_nn_short_sampling', 'secondary_nn_no_car_no_pt_weight',
                 'secondary_nn_short_distance_sigma_fraction', 'secondary_nn_short_distance_sigma_min_m']
         return dict(config=str(self.path), config_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest(),
                     cache=str(self.directory), root=self.root, method=self.kind,

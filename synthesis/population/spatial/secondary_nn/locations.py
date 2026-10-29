@@ -52,6 +52,7 @@ def configure(context):
     context.config("secondary_nn_short_sampling", "neural")
     context.config("secondary_nn_short_distance_sigma_fraction", 0.1)
     context.config("secondary_nn_short_distance_sigma_min_m", 25.0)
+    context.config("secondary_nn_no_car_no_pt_weight", 0.05)
 
 def execute(context):
 
@@ -64,7 +65,8 @@ def execute(context):
     
     ########## Loading NN models ##########
     logger.info("\t Loading the models")
-    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=False)    
+    wrapper = HierarchicalLocationChoiceModel.build(
+        context, optimize=False, accessibility_weight=float(context.config("secondary_nn_no_car_no_pt_weight")))
     wrapper.assert_ready_for_prediction()
 
     ########## Loading population data ##########

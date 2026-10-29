@@ -7,7 +7,7 @@ cd "$repository_directory"
 if [[ ${1:-} == --slurm ]]; then
     shift
     if [[ ${1:-} == --after-job ]]; then
-        [[ ${2:-} =~ ^[0-9]+$ ]] || { echo 'Expected a numeric Slurm job ID after --after-job' >&2; exit 2; }
+        [[ ${2:-} =~ ^[0-9]+(:[0-9]+)*$ ]] || { echo 'Expected numeric Slurm job IDs separated by colons after --after-job' >&2; exit 2; }
         pipeline_job_id="$2"
         shift 2
         mkdir -p "$repository_directory/logs"

@@ -113,14 +113,14 @@ def test_accessibility_prefers_highest_overlapping_class():
     assert list(result) == ['A','B','None']
 
 
-def test_replay_prepares_common_income_and_chain_inputs_once():
+def test_replay_prepares_common_income_and_chain_inputs_once(monkeypatch):
     from replay import prepare_inputs
     from data.constants import Constants
     import geopandas as gpd
     from shapely.geometry import box
     cohort = pd.DataFrame({'person_id':[1], 'trip_id':[1], 'origin_x':[1.], 'origin_y':[2.],
                           'purpose':['shop'], 'origin_purpose':['home']})
-    chains = pd.DataFrame({'person_id':[1],'trip_id':[1],'activity_chain':[np.ones(6)],'target_distance':[100.], 'chain_state':[np.zeros(16)]})
+    chains = pd.DataFrame({'person_id':[1],'trip_id':[1],'activity_chain':[np.ones(6)],'target_distance':[100.], 'chain_state':[np.zeros(17)]})
     persons = pd.DataFrame({'person_id':[1],'age':[30],'sex':[0],'employed':[1], 'income_class':[3],
                            'car_availability':[0], 'home_x':[1.],'home_y':[2.],'work_x':[3.],'work_y':[4.]})
     persons['bike_availability'] = 0
@@ -138,7 +138,21 @@ def test_replay_prepares_common_income_and_chain_inputs_once():
 
     assert inputs.iloc[0].pt_ga == 1
     assert inputs.iloc[0].bike_available == 1
-    assert inputs.iloc[0].home_ovgk_a == 1
+    assert inputs.iloc[0].home_ovgk == 0
+
+    # Legacy RDA diaries must be rebuilt without changing the cached source.
+
+    from synthesis.population.spatial.secondary_nn import mz_chains
+    from synthesis.population.spatial.secondary_nn.chain_state import CHAIN_STATE_FEATURES
+    current = chains.copy()
+    current['chain_state'] = [np.zeros(len(CHAIN_STATE_FEATURES))]
+    chains['chain_state'] = [np.zeros(len(CHAIN_STATE_FEATURES)-1)]
+    rebuilt = []
+    monkeypatch.setattr(mz_chains, 'execute', lambda source: (rebuilt.append(True) or current))
+    refreshed = prepare_inputs(Reference(), cohort)
+    assert rebuilt == [True]
+    assert len(refreshed.iloc[0].chain_state) == len(CHAIN_STATE_FEATURES)
+    assert len(chains.iloc[0].chain_state) == len(CHAIN_STATE_FEATURES)-1
 
 
 def test_cache_uses_latest_secondary_assignment_and_its_dependencies(tmp_path):

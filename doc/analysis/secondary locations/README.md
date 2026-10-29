@@ -19,6 +19,21 @@ uv run python "analysis/secondary locations/run.py" --phase status
 uv run python "analysis/secondary locations/run.py"
 ```
 
+To provide the source configurations explicitly, use `--configs`. Include the
+RDA configuration to retain its comparison panels:
+
+```bash
+uv run python "analysis/secondary locations/run.py" --configs \
+  config_dib_10_rda.yml \
+  config_dib_10_nn_distance.yml \
+  config_dib_10_nn_no_distance.yml
+```
+
+The same arguments work with `generate_report --slurm` to submit only the
+report generation to Slurm. Supplying just the two NN configurations produces
+a comparison without RDA. The command reads completed assignment caches and
+does not rerun the population pipeline or train models.
+
 The default command prepares data, performs survey replay using saved models,
 and creates `results/report.html`, `results/findings.md`, figure captions,
 machine-readable tables, and PDF/SVG/600-dpi PNG figures. Results stay in this
@@ -374,3 +389,16 @@ counterfactual using distance-only facility sampling on identical observed origi
 purposes and draw seeds. Hierarchy predictions above 1.5 km remain identical in
 that diagnostic. The counterfactual is not a sequential synthetic rollout or an
 independent held-out evaluation.
+
+The report dependency command also accepts several successful prerequisite jobs:
+
+```bash
+"analysis/secondary locations/generate_report" --slurm --after-job DISTANCE_JOB:NO_DISTANCE_JOB
+```
+
+Replace both placeholders with numeric job IDs. Slurm starts the analysis only
+when both runs succeed. The completed NN assignment records
+`secondary_nn_no_car_no_pt_weight`; report replay uses that value, while older
+assignments default to their historical policy. The report notes that the soft
+accessibility rule is an imposed prediction rule, rather than an independently
+learned OVGK effect.

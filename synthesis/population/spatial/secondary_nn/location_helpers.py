@@ -79,18 +79,18 @@ def _build_level_attributes(h3_data, h3_geo_level0, all_h3):
     return attrs
 
 
-def build_probability(num_employees, ovgk_none, car_available, alpha=0.7):
+def build_probability(num_employees, ovgk_none, car_available, alpha=0.7, no_pt_weight=0.01):
     employees = np.asarray(num_employees, dtype=float)
     employees = np.where(np.isfinite(employees), np.maximum(employees, 0.0), 1.0)
     weight = employees ** alpha
     if not car_available:
-        weight[ovgk_none] *= 0.01  # penalize locations with no OVGK if no car available
+        weight[ovgk_none] *= no_pt_weight
     total_weight = weight.sum()
     return weight / total_weight if total_weight > 0 else np.ones_like(weight) / len(weight)
 
 
 
-def _prepare_destination_level2_index(context, h3_data, h3_geo):
+def _prepare_destination_level2_index(context, h3_data, h3_geo, no_pt_weight=0.01):
     df_dest = h3_data["destinations"][["destination_id", H3_LEVEL_NAMES[1], H3_LEVEL_NAMES[-1]]]
     
     destinations = context.stage("synthesis.population.destinations")
@@ -99,7 +99,7 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
     df_dest = df_dest.merge(df_dest_attributes, on="destination_id", how="left", validate="one_to_one")
 
     # Reusable full-frame arrays (boolean/numeric only — indexed with boolean mask below).
-    no_ovgk = (df_dest["ovgk"].fillna("None").to_numpy() == "None")
+    no_ovgk = ~df_dest["ovgk"].isin(["A", "B", "C", "D"]).to_numpy()
     employees = pd.to_numeric(df_dest["number_employees"], errors="coerce").to_numpy(dtype=float)
     employees = np.where(np.isfinite(employees), np.maximum(employees, 0.0), 1.0)
     dest_ids = df_dest["destination_id"].to_numpy()
@@ -133,7 +133,7 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
             emp = sub_employees[idx]
             nov = sub_no_ovgk[idx]
             car_available_probabilities[purpose][level_2] = build_probability(emp, nov, car_available=True)
-            no_car_available_probabilities[purpose][level_2] = build_probability(emp, nov, car_available=False)
+            no_car_available_probabilities[purpose][level_2] = build_probability(emp, nov, car_available=False, no_pt_weight=no_pt_weight)
 
         # ---- middle level ----
         for level_1, idx in sub.groupby(H3_LEVEL_NAMES[1]).indices.items():
@@ -145,7 +145,7 @@ def _prepare_destination_level2_index(context, h3_data, h3_geo):
             emp = sub_employees[idx]
             nov = sub_no_ovgk[idx]
             car_available_probabilities[purpose][level_1] = build_probability(emp, nov, car_available=True)
-            no_car_available_probabilities[purpose][level_1] = build_probability(emp, nov, car_available=False)
+            no_car_available_probabilities[purpose][level_1] = build_probability(emp, nov, car_available=False, no_pt_weight=no_pt_weight)
 
     # Base and diary labels refer to the same eligible facility pools.
     pools = (index, fallback, car_available_probabilities, no_car_available_probabilities, index_xy, fallback_xy)
