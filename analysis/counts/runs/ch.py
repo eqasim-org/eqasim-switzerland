@@ -74,16 +74,7 @@ def execute(context):
     # Plot the network and highligh these links in green  
     plotter = Plotter()
     roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link']
-    matched_links = plotter.plot_network_with_counts( 
-                                    counts, matched, network,
-                                    output=os.path.join(path_to_images, f"{city}_network.png"),
-                                    lw = 0.7,
-                                    markersize = 8, 
-                                    figsize = (80,80),                                                    
-                                    road_types = roads_to_show,
-                                    cut = True,
-                                    highlight_stations = stations_to_drop,
-                                    return_matched_links = True)
+    matched_links = network.get_link_geometries(matched.link_id.tolist())
 
     # filter out stations to drop and save results
     all_flows = flows.copy()
