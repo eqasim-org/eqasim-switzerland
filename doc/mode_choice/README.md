@@ -456,11 +456,11 @@ bottleneck is separate from routing or mode-choice computation.
 
 Set `prepare_sumo: true` with the Java car backend to save road itineraries during
 normal mode-choice routing. This does not require `route_population_once` and
-does not alter mode choices. SUMO's `sumo.scenario.unrouted_demand` supplies only
-selected demand to `mode_choice.routing.sumo`, which reuses matching paths and
+does not alter mode choices. SUMO's `sumo.scenario.selected` supplies only
+original trips with exactly one endpoint in Switzerland to `sumo.routing.paths`, which reuses matching paths and
 routes missing/changed trips, including selected external/cross-border and
 commercial trips. These additional routing-only trips never enter the choice
-model. `mode_choice.routing.sumo_network` caches corresponding directed detailed
+model. `sumo.routing.network` caches corresponding directed detailed
 road geometries from the exact routing network. Both stages return Arrow paths.
 See [SUMO route reuse and border clipping](../sumo/population/README.md#road-route-reuse-and-swiss-border-demand-clipping)
 for matching keys, timing assumptions and runtime requirements.

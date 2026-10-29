@@ -29,6 +29,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Matching predictive validation and embedding analysis](analysis/matching/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
+- [French population and trip explorer](analysis/french_activities.md)
 - [Secondary-location behavior comparison](<analysis/secondary locations/README.md>)
 
 ## Changelogs

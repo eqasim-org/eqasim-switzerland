@@ -20,7 +20,7 @@ Each consumer copies the config into its own directory before editing it:
 | --- | --- |
 | `matsim.simulation.prepare` | Local pricing paths, calibrated PT parameters, counts and travel-time targets, calibration regions, simulation and calibration settings |
 | `matsim.config.pt` | Local network/schedule/vehicles/pricing files and PT parameters; remove population inputs and freight replanning |
-| `mode_choice.routing.config` | Copy the prepared PT config, resolve its transit/pricing paths and select fitted cost parameters |
+| `mode_choice.routing.java.config` | Copy the prepared PT config, resolve its transit/pricing paths and select fitted cost parameters |
 | Cutter and output stages | Edit their existing cut or simulation-output config using shared tools; preserve fitted scenario settings |
 | `matsim.simulation.run_from_inputs` | Copy the supplied already-adapted config, preserve custom/fitted settings, resolve supporting paths and update local files, sampling and freight strategies |
 
@@ -60,6 +60,14 @@ gzip, Zstandard or mixed inputs. Simulation completion checks use the same
 resolver.
 
 ## Portable prepared scenarios
+
+When `only_french_tolls` is enabled, `NetworkHandler` excludes toll candidates
+whose full geometry intersects the Swiss boundary, including its 10 m buffer.
+Detailed curves are used when available; otherwise link endpoints define the
+shape. Existing toll attributes are removed from excluded links as well.
+French OSM extract names alone do not establish that a link is outside
+Switzerland, since these extracts overlap the border. This guard applies when
+building the scenario network; existing simulation results are not rewritten.
 
 Preparation uses `adapt_for_routing(..., local=True)` before population routing,
 then `adapt_for_simulation(..., local=True)` once routing and validation finish.

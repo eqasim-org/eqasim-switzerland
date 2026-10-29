@@ -11,7 +11,7 @@ def configure(context):
     context.stage("data.osm.traffic_lights")
     context.stage("data.spatial.municipality_types") # used in speed correction
     context.stage("data.spatial.municipalities") # used in speed correction
-    context.stage("data.spatial.swiss_border") # used in speed correction
+    context.stage("data.spatial.swiss_border") # used in speed correction and geographic toll exclusion
     context.stage("calibration.road_regions.penalty_calibration")
 
     context.config("data_path")
@@ -46,7 +46,7 @@ def configure(context):
     context.config("protect_pt_stop_nodes", True)
     # Radius (in meters) around a PT stop within which a network node is protected.
     context.config("network_stop_protection_radius", 100.0)
-    # Tools (in France)
+    # Tolls: French extracts are filtered again geographically in NetworkHandler.
     context.stage("data.tolls.osm_links")
     context.config("include_tolls", True)
     context.config("average_tolls_prices_per_km", default = 0.12)
