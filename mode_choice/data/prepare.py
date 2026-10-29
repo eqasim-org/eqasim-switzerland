@@ -107,7 +107,8 @@ def prepare_persons(persons, c, p, cantons):
     df = df.with_columns(
         (pl.col("income_class").replace_strict(c.INCOME_CLASS_MAP, return_dtype=pl.Float64) / equivalent_size).alias("income"),
         pl.col("canton_id").replace_strict(constants.MS_REGIONS["cluster"].to_dict()).alias("ms_region"),
-        ((pl.col("car_availability") == 1) & pl.col("driving_license") & (pl.col("age") >= D.DRIVING_AGE)).alias("car_availability"),
+        ((pl.col("car_availability") == 1) & (pl.col("number_of_cars_class") > 0)
+         & pl.col("driving_license") & (pl.col("age") >= D.DRIVING_AGE)).alias("car_availability"),
         (pl.col("bike_availability") == 1).alias("bike_availability"),
         (1 - pl.col("number_of_cars_class") / (pl.col("household_size") - pl.col("N_children_under_18")).clip(lower_bound=1)).clip(0, 1).alias("car_ownership_ratio"),
         (pl.col("number_of_cars_class") > 0).alias("has_car"),

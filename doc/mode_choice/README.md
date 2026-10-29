@@ -62,6 +62,7 @@ client are implementation helpers, not additional data stages.
 | `routing.java.requests` | Path to the shared Java request CSV |
 | `routing.java.freight` | Freight/LCV requests with population person IDs |
 | `routing.java.preparation` | Prepared network, facility endpoints and freight endpoints; conditional on route reuse |
+| `routing.java.weights` | Trip weights and `canton_weights.parquet` diagnostics; MARouter only |
 | `routing.java.road_requests` | One mixed car/freight/LCV CSV for joint assignment |
 | `routing_variables.car` | `trip_id`, car time and distance |
 | `routing_variables.car_passenger` | Car variables renamed for passengers; no routing call |
@@ -193,7 +194,7 @@ Walk/bike do not inherit the car backend.
 ### Macroscopic road assignment and route reuse
 
 The default `use_marouter_in_mode_choice: true` enables the incremental BPR road
-assignment in eqasim commit `74b85c14c7ae9ac7d4d4f3daf253591af76fe444`.
+assignment in eqasim commit `ffcd5ade6a596c0f8a586cdd9de09e06fc2e3253`.
 `routing.java.road_requests` combines the eligible population's car alternatives and
 all enabled `synthesis.freight.trips` / `synthesis.lcv.trips` in **one** request.
 Every Java request starts with zero flows; splitting trucks into another request
@@ -204,9 +205,30 @@ retain only the passenger population's car rows.
 The server receives the configured `random_seed` and `input_downsampling`, so
 assignment is reproducible and capacity is scaled to the population sample once.
 It uses the existing MATSim `eqasim:vdf` settings. Recorded events are used only
-when MARouter is disabled. This assignment uses all eligible car alternatives as
-demand before mode selection; calibration reuses these routes and does not rerun
-assignment with each set of choices.
+when MARouter is disabled. `routing.java.weights` is a separate Synpp stage,
+registered only for MARouter. For each residence canton it computes:
+
+```text
+target_car_trips = eligible_trips * target_car_driver_share
+driver_weight = target_car_trips / car_available_trips
+```
+
+All eligible trips count in the numerator, including minors, people without a
+licence and households without cars. Only available drivers receive this weight.
+Non-drivers are sent as `car_passenger` probes with weight zero: they do not add
+traffic flow, but their passenger alternatives still need travel times. Car
+availability also requires at least one household car. Existing mode-share
+calibration still counts non-drivers and uses the full eligible population.
+
+Freight and LCV requests receive weight 1 because they already represent vehicle
+trips. Java multiplies weight by the vehicle PCU (cars 1, trucks normally 2).
+Weights never include `input_downsampling`; sample size scales capacity separately.
+`routing.java.weights/canton_weights.parquet` records the counts, shares and
+weights. Missing targets or positive demand without any available drivers raise
+an explicit error. Weights greater than one are allowed as vehicle-equivalent
+assignment multipliers, with a warning that the target exceeds available trips.
+Calibration reuses these weighted routes; it does not reassign roads for each ASC
+iteration. This is a target-based congestion approximation before final choices.
 
 Set `route_population_once: true` (default false) to reuse the Java itineraries:
 
