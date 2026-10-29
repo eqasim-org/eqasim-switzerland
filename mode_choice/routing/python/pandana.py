@@ -2,7 +2,8 @@
 import numpy as np
 import polars as pl
 from scipy.spatial import cKDTree
-from mode_choice.routing.congestion import input_path, departure_hours, read_linkstats, hourly_links
+from mode_choice.routing.options import input_path
+from mode_choice.routing.python.congestion import departure_hours, read_linkstats, hourly_links
 
 
 class CarRouter:

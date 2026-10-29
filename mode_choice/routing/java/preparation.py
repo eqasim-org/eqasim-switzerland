@@ -13,7 +13,7 @@ import pyarrow.parquet as pq
 
 import matsim.runtime.eqasim as eqasim
 from matsim.writers import PopulationWriter
-from mode_choice.routing.freight import REQUEST_SCHEMA
+from mode_choice.routing.java.freight import REQUEST_SCHEMA
 
 FACILITY_SCHEMA = {"facility_id": pl.String, "x": pl.Float64, "y": pl.Float64, "link_id": pl.String}
 FREIGHT_SCHEMA = {**REQUEST_SCHEMA, "origin_link_id": pl.String, "destination_link_id": pl.String}
@@ -25,7 +25,7 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.scenario.network.pt")
     context.stage("matsim.scenario.facilities")
-    context.stage("mode_choice.routing.freight")
+    context.stage("mode_choice.routing.java.freight")
     context.config("threads", volatile=True)
     context.config("java_memory", "50G", volatile=True)
 
@@ -36,7 +36,7 @@ def execute(context):
 
     directory = Path(context.path()).resolve()
     population = directory / "freight_input.xml.gz"
-    write_freight(context.stage("mode_choice.routing.freight"), population)
+    write_freight(context.stage("mode_choice.routing.java.freight"), population)
     network = directory / "network.xml.gz"
     facilities = directory / "facilities.xml.gz"
     prepared = directory / "freight_prepared.xml.gz"

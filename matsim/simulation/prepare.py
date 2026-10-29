@@ -5,7 +5,8 @@ from matsim.config import config as shared_config
 from matsim.simulation.cross_border_links import patch_directional_border_links
 
 import matsim.config.tools as config_tools
-from mode_choice.routing import options as routing_options, exports as routing_exports
+from mode_choice.routing import options as routing_options
+from mode_choice.routing.java import exports as routing_exports
 
 def configure(context):
     context.stage("matsim.config.config")

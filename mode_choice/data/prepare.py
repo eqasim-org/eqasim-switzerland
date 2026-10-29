@@ -9,11 +9,11 @@ from dmc.constants import constants
 from mode_choice import defaults as D
 from dmc.parameters import Parameters
 from dmc.pt_quality import pt_quality_expression
-from mode_choice.routing.server import ensure_server_started
-from mode_choice.routing.RoutingServer import RoutingServer
+from mode_choice.routing.java.server import ensure_server_started
+from mode_choice.routing.java.client import RoutingServer
 
 def configure(context):
-    context.stage("mode_choice.routing.server")
+    context.stage("mode_choice.routing.java.server")
     context.stage("mode_choice.defaults")
     for stage in ("mode_choice.data.trips", "mode_choice.tours.build", "synthesis.population.spatial.locations",
                   "synthesis.population.models.subscriptions", "data.constants", "dmc.parameter_files",

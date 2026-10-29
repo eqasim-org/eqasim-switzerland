@@ -2,7 +2,8 @@
 from pathlib import Path
 import polars as pl
 from mode_choice.defaults import PT_GA, PT_HALBTAX, PT_VERBUND, PT_SUBSCRIPTIONS
-from mode_choice.routing import options, endpoints
+from mode_choice.routing import options
+from mode_choice.routing.java import endpoints
 
 
 def configure(context):
@@ -10,8 +11,8 @@ def configure(context):
     context.stage("mode_choice.data.prepare")
     context.stage("mode_choice.defaults")
     if context.config("route_population_once"):
-        context.stage("mode_choice.routing.preparation")
-        context.stage("mode_choice.routing.config")
+        context.stage("mode_choice.routing.java.preparation")
+        context.stage("mode_choice.routing.java.config")
         context.stage("synthesis.population.spatial.locations")
         context.stage("synthesis.population.models.subscriptions")
 

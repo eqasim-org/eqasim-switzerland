@@ -1,6 +1,6 @@
 """Car time and distance, from Java or the hourly Pandana network."""
-from mode_choice.routing.java import configure_mode, car_backend, route_mode, save_costs
-from mode_choice.routing.congestion import input_path
+from mode_choice.routing.java.router import configure_mode, car_backend, route_mode, save_costs
+from mode_choice.routing.options import input_path
 from mode_choice.costs.car import calculate_driving_costs
 from dmc.parameters import Parameters
 from mode_choice.defaults import RUN_DEFAULTS
@@ -24,7 +24,7 @@ def execute(context):
 
     # Otherwise, pandana routing
 
-    from mode_choice.routing.pandana import route
+    from mode_choice.routing.python.pandana import route
 
     trips = context.stage("mode_choice.data.prepare").rename({"trip_id": "identifier"})
     if trips.is_empty():

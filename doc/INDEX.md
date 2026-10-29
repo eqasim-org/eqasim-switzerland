@@ -23,6 +23,8 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [SUMO network loading and regional cutter](sumo/cutter/README.md)
 - [Native network reader and binary cache](matsim/native/README.md)
 - [Population mode choice](mode_choice/README.md)
+- [Experimental FLASH-TB routing and benchmarks](mode_choice/routing/flash/README.md)
+- [Java / FLASH population PT router comparison](analysis/pt_routers/README.md)
 - [Microcensus diary matching: learned V2 inputs and masks](synthesis/population/matching/README.md)
 - [Matching predictive validation and embedding analysis](analysis/matching/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)

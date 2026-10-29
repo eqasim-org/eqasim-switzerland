@@ -2,10 +2,11 @@
 from pathlib import Path
 import polars as pl
 from mode_choice.defaults import ROUTING_DEFAULTS, CAR_ROUTING_BACKENDS, ROUTING_COST_FILENAME
-from mode_choice.routing.server import ensure_server_started
-from mode_choice.routing.RoutingServer import RoutingServer
+from mode_choice.routing.java.server import ensure_server_started
+from mode_choice.routing.java.client import RoutingServer
 from mode_choice.routing.results import complete_routes
-from mode_choice.routing import options, endpoints
+from mode_choice.routing import options
+from mode_choice.routing.java import endpoints
 
 
 def car_backend(context):
@@ -21,14 +22,14 @@ def configure_mode(context, mode):
     context.stage("mode_choice.data.prepare")
     for name, default in ROUTING_DEFAULTS.items():
         context.config(name, default)
-    if car_backend(context) == "java" or mode == "pt":        
-        context.stage("mode_choice.routing.server")
-        context.stage("mode_choice.routing.requests")
+    if car_backend(context) == "java" or mode == "pt":
+        context.stage("mode_choice.routing.java.server")
+        context.stage("mode_choice.routing.java.requests")
     if context.config("route_population_once"):
-        context.stage("mode_choice.routing.preparation")
-        context.stage("mode_choice.routing.config")
+        context.stage("mode_choice.routing.java.preparation")
+        context.stage("mode_choice.routing.java.config")
     if mode == "car" and (context.config("use_marouter_in_mode_choice") or context.config("route_population_once")):
-        context.stage("mode_choice.routing.road_requests")
+        context.stage("mode_choice.routing.java.road_requests")
 
 
 def read_results(path, identifier, mapping, *, mode=None):
@@ -39,7 +40,7 @@ def read_results(path, identifier, mapping, *, mode=None):
         frame = pl.DataFrame(schema={identifier: pl.String, **{column: pl.Float64 for column in mapping},
                                      **({"mode": pl.String} if mode else {})})
     if mode:
-        frame = frame.filter(pl.col("mode") == mode)
+        frame = frame.filter(pl.col("mode").is_in([mode] if isinstance(mode, str) else mode))
     frame = frame.select(pl.col(identifier).alias("trip_id"),
                          *[pl.col(source).cast(pl.Float64).alias(target) for source, target in mapping.items()])
     if frame["trip_id"].null_count() or frame["trip_id"].n_unique() != frame.height:
@@ -47,10 +48,11 @@ def read_results(path, identifier, mapping, *, mode=None):
     return frame
 
 
-def route_mode(context, mode):
+def route_mode(context, mode, *, compute_cost=None):
     trips = context.stage("mode_choice.data.prepare")
     columns = {"travel_time": f"{mode}_travel_time_min", "travel_distance": f"{mode}_distance_km"}
-    compute_cost = mode in ("car", "pt")
+    if compute_cost is None:
+        compute_cost = mode in ("car", "pt")
     if compute_cost:
         columns["cost"] = f"{mode}_cost_CHF"
     if trips.is_empty():
@@ -60,11 +62,13 @@ def route_mode(context, mode):
         ensure_server_started(context)
         output = Path(context.path()) / f"{mode}_routes.csv"
         mixed = mode == "car" and (context.config("use_marouter_in_mode_choice") or context.config("route_population_once"))
-        source = context.stage("mode_choice.routing.road_requests" if mixed else "mode_choice.routing.requests")
+        source = context.stage("mode_choice.routing.java.road_requests" if mixed else "mode_choice.routing.java.requests")
         if context.config("route_population_once") and mode != "pt":
             source = endpoints.compatible_requests(context, source, Path(context.path()) / "routable_requests.csv", None if mixed else mode)
         RoutingServer.route_csv(source, output, None if mixed else mode, compute_cost=compute_cost)
-        result = read_results(output, "identifier", columns, mode="car" if mixed else None).with_columns(
+        # Non-drivers carry passenger-only results. Ownership availability still
+        # forbids driving; the passenger stage can reuse these zero-flow probes.
+        result = read_results(output, "identifier", columns, mode=["car", "car_passenger"] if mixed else None).with_columns(
             pl.col(f"{mode}_travel_time_min") / 60, pl.col(f"{mode}_distance_km") / 1000)
         result = complete_routes(trips, result, [f"{mode}_travel_time_min"])
         return save_costs(context, result, mode) if compute_cost else result

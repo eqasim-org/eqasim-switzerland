@@ -3,7 +3,9 @@ import polars as pl
 
 from mode_choice.routing.results import complete_routes
 
-PART = pl.Struct({"kind": pl.String, "mode": pl.String, "travelTime": pl.Float64})
+PART = pl.Struct({"kind": pl.String, "mode": pl.String, "travelTime": pl.Float64,
+                  "departureTime": pl.Float64,
+                  "route": pl.Struct({"distance": pl.Float64, "travelTime": pl.Float64, "description": pl.String})})
 PT_LEG = pl.Struct({"departureTime": pl.Float64, "boardingTime": pl.Float64,
                     "travelTime": pl.Float64, "distance": pl.Float64})
 
@@ -21,8 +23,23 @@ def read_components(path, trips):
     walks = legs.group_by("trip_id").agg(
         pl.col("travelTime").filter(walking & endpoint).sum().truediv(60).alias("pt_access_egress_time_min"),
         pl.col("travelTime").filter(walking & ~endpoint).sum().truediv(60).alias("transfer_walk"))
-    fares = saved.select("trip_id", pl.col("pt_cost_data").str.json_decode(
-        pl.Struct({"legs": pl.List(PT_LEG)})).struct.field("legs").alias("legs"))
+    if saved['pt_cost_data'].drop_nulls().is_empty():
+        # Pricing is disabled: boarding times are also encoded in MATSim's
+        # TransitPassengerRoute description, so no fare computation is needed.
+        transit = legs.filter(pl.col('mode') == 'pt').select(
+            'trip_id', 'departureTime',
+            pl.col('route').struct.field('description').str.json_decode(
+                pl.Struct({'boardingTime': pl.Float64})).struct.field('boardingTime').alias('boardingTime'),
+            pl.col('route').struct.field('travelTime').alias('travelTime'),
+            pl.col('route').struct.field('distance').alias('distance'))
+        fares = saved.select('trip_id').join(
+            transit.group_by('trip_id', maintain_order=True).agg(pl.struct(
+                'departureTime', 'boardingTime', 'travelTime', 'distance').alias('legs')),
+            on='trip_id', how='left', validate='1:1').with_columns(
+                pl.col('legs').fill_null(pl.lit([], dtype=pl.List(PT_LEG))))
+    else:
+        fares = saved.select('trip_id', pl.col('pt_cost_data').str.json_decode(
+            pl.Struct({'legs': pl.List(PT_LEG)})).struct.field('legs').alias('legs'))
     part = pl.element().struct
     waiting = part.field("boardingTime") - part.field("departureTime")
     metrics = fares.select(

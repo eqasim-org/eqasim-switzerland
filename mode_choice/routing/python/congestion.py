@@ -9,17 +9,6 @@ from mode_choice.defaults import (
 )
 
 
-def input_path(context, backend):
-    key = "mode_choice_car_linkstats_path" if backend == "pandana" else "mode_choice_car_events_path"
-    value = context.config(key)
-    if not value:
-        return None
-    path = Path(value).expanduser().resolve()
-    if not path.is_file():
-        raise FileNotFoundError(f"{key}: file does not exist: {path}")
-    return path
-
-
 def departure_hours(trips):
     times = trips["departure_time"]
     if times.null_count() or not times.is_finite().all() or (times < 0).any():

@@ -6,19 +6,19 @@ from mode_choice.routing import options
 
 def configure(context):
     options.configure(context)
-    context.stage("mode_choice.routing.requests")
-    context.stage("mode_choice.routing.freight")
+    context.stage("mode_choice.routing.java.requests")
+    context.stage("mode_choice.routing.java.freight")
     if context.config("route_population_once"):
-        context.stage("mode_choice.routing.preparation")
+        context.stage("mode_choice.routing.java.preparation")
 
 
 def execute(context):
 
     # Use prepared freight coordinates when routes will be reused in MATSim.
 
-    freight = (pl.read_parquet(context.stage("mode_choice.routing.preparation")["freight"])
-               if context.config("route_population_once") else context.stage("mode_choice.routing.freight"))
-    cars = pl.scan_csv(context.stage("mode_choice.routing.requests"),
+    freight = (pl.read_parquet(context.stage("mode_choice.routing.java.preparation")["freight"])
+               if context.config("route_population_once") else context.stage("mode_choice.routing.java.freight"))
+    cars = pl.scan_csv(context.stage("mode_choice.routing.java.requests"),
                        schema_overrides={"identifier": pl.String, "person_id": pl.String}).with_columns(pl.lit("car").alias("mode"))
 
     # Send all demand together: each MARouter request starts with zero flow.

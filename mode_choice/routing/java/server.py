@@ -3,12 +3,11 @@ from pathlib import Path
 import math
 from numbers import Real
 import shutil
-import zipfile
 
 from matsim.runtime.java import get_memories
 from mode_choice.defaults import ROUTING_DEFAULTS, SERVER_DEFAULTS, ROUTER_SERVER_CLASS, RUN_DEFAULTS
-from mode_choice.routing.RoutingServer import RoutingServer
-from mode_choice.routing.congestion import input_path
+from mode_choice.routing.java.client import RoutingServer
+from mode_choice.routing.options import input_path
 from mode_choice.routing import options
 
 
@@ -18,7 +17,7 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.stage("matsim.scenario.network.pt")
-    context.stage("mode_choice.routing.config")
+    context.stage("mode_choice.routing.java.config")
     context.stage("calibration.car_routing_vot.optimal_value")
     context.config("threads", volatile=True)
     context.config("car_cost_model", RUN_DEFAULTS["car_cost_model"])
@@ -27,7 +26,7 @@ def configure(context):
     context.config("random_seed")
     context.config("input_downsampling")
     if context.config("route_population_once"):
-        context.stage("mode_choice.routing.preparation")
+        context.stage("mode_choice.routing.java.preparation")
 
 
 def execute(context):
@@ -38,9 +37,10 @@ def execute(context):
     binary = shutil.which(runtime["binary"])
     if binary is None:
         raise FileNotFoundError(f"Java binary not found: {runtime['binary']}")
-    config = str(Path(context.stage("mode_choice.routing.config")).resolve())
+    config = str(Path(context.stage("mode_choice.routing.java.config")).resolve())
     jar = str((Path(context.path("matsim.runtime.eqasim")) / context.stage("matsim.runtime.eqasim")).resolve())
     if context.config("prepare_sumo"):
+        from sumo.routing.runtime import validate_sumo_runtime
         validate_sumo_runtime(jar)
     directory = Path(context.path()).resolve()
     temporary = directory / "java_tmp"
@@ -73,7 +73,7 @@ def execute(context):
 
     # Start asynchronously; routing stages wait for readiness when needed.
 
-    network = (context.stage("mode_choice.routing.preparation")["network"] if context.config("route_population_once")
+    network = (context.stage("mode_choice.routing.java.preparation")["network"] if context.config("route_population_once")
                else context.stage("matsim.scenario.network.pt")["network"])
     command = [binary, "-cp", jar, "-Xmx" + xmx, "-Xms" + xms, "-XX:+UseParallelGC",
                "-Djava.io.tmpdir=" + str(temporary), "-Dmatsim.useLocalDtds=true", "-Djava.awt.headless=true",
@@ -109,15 +109,4 @@ def validate(context):
 def ensure_server_started(context):
     # Synpp may load this stage's dictionary from disk in a new Python process.
     # Never mistake that cached dictionary for a live server.
-    RoutingServer.run_server_if_not_running(context.stage("mode_choice.routing.server"))
-
-
-def validate_sumo_runtime(jar):
-    try:
-        with zipfile.ZipFile(jar) as archive:
-            data = archive.read(ROUTER_SERVER_CLASS.replace(".", "/") + ".class")
-    except (OSError, KeyError, zipfile.BadZipFile) as error:
-        raise ValueError("prepare_sumo requires a valid Java runtime containing MultiModeRouterServer") from error
-    if b"export-routes" not in data or b"marouter" not in data:
-        raise ValueError("The configured eqasim JAR predates reusable route export; set eqasim_path: '' "
-                         "to build the pinned runtime, or provide a compatible JAR")
+    RoutingServer.run_server_if_not_running(context.stage("mode_choice.routing.java.server"))

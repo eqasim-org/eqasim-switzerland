@@ -47,6 +47,24 @@ CuttingBoundries
 # The SUMO network cache reader is source code.
 !sumo/scenario/network/cache.py
 
+# FLASH cache implementation and routing documentation are source files.
+!mode_choice/routing/flash/cache.py
+!doc/mode_choice/routing/
+!doc/mode_choice/routing/flash/
+!doc/mode_choice/routing/flash/README.md
+
+# Generated PT benchmark outputs and native build artifacts.
+/mode_choice/routing/flash/benchmark_results/
+/analysis/pt_routers/**/*.class
+/analysis/pt_routers/**/*.log
+/analysis/pt_routers/**/*.parquet
+/analysis/pt_routers/**/*.pstats
+/mode_choice/routing/flash/**/*.class
+/mode_choice/routing/flash/**/*.log
+/mode_choice/routing/flash/**/*.parquet
+/mode_choice/routing/flash/**/timetable.binary*
+/mode_choice/routing/flash/**/flash_tb_router
+
 # Generated SUMO native artifacts; keep .cpp, .py and .patch sources visible.
 /sumo/**/*.pyc
 /sumo/**/*.pyo
@@ -66,3 +84,5 @@ CuttingBoundries
 /sumo/native/route_kernel
 /sumo/native/marouter
 /sumo/**/_sumo_networks/
+
+/doc/mode_choice/routing/flash/benchmark_results.json
