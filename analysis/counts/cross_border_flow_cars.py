@@ -1,4 +1,3 @@
-import glob
 import logging
 import os
 from collections import Counter
@@ -11,6 +10,7 @@ import pydeck as pdk
 import shapely
 import xml.etree.ElementTree as ET
 import xopen
+from matsim.config.tools import find_simulation_output
 from pydeck.data_utils.viewport_helpers import compute_view
 from shapely.ops import unary_union
 
@@ -91,19 +91,7 @@ def execute(context):
 
 
 def _find_output_file(simulation_path, filename):
-
-    direct_path = os.path.join(simulation_path, filename)
-    if os.path.exists(direct_path):
-        return direct_path
-
-    _, _, suffix = filename.partition(".")
-    candidates = glob.glob(os.path.join(simulation_path, "ITERS", "*", f"*.{suffix}"))
-    if not candidates:
-        raise FileNotFoundError(f"Could not find {filename} in {simulation_path} (or its ITERS folder)")
-
-    candidate = max(candidates, key=os.path.getmtime)
-    logger.warning("%s not found at %s, using latest iteration snapshot %s instead", filename, direct_path, candidate)
-    return candidate
+    return find_simulation_output(simulation_path, filename)
 
 
 def load_cross_border_person_ids(persons_path):
@@ -137,7 +125,7 @@ def count_car_link_entries(events_path, rider_group_ids):
     group_counts = {group: Counter() for group in rider_group_ids}
 
     processed = 0
-    with xopen.xopen(events_path, "r") as f:
+    with xopen.xopen(events_path, "rb") as f:
         parser = ET.iterparse(f, events=["start", "end"])
         _, root = next(parser)  # <events> start tag, kept to periodically release finished events
 

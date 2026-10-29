@@ -42,6 +42,23 @@ launch switches because the runners require them.
 PT2MATSim converter and mapper templates are different config formats and remain
 in their respective stages; they use the same shared XML helpers.
 
+## Compression of simulation files
+
+`matsim.config.tools.resolve_output_file` resolves each requested file as `.gz`,
+`.zst`, or uncompressed, in that order. Mixed-compression folders are supported;
+no files are renamed or recompressed. `glob_output_files` deduplicates variants
+of the same logical file; `find_simulation_output` also searches iteration
+outputs when the final output is absent. The analysis package's former
+`analysis.output_files` module forwards to these shared functions for compatibility.
+
+The cutter resolves all parent simulation inputs and events before launching
+Java, and resolves the generated regional network before filtering counts and
+geometry. Export and external-input simulation stages preserve actual suffixes
+when copying scenario files. `scenario_input_parameters` supplies relative input
+paths matching those copied files, so exported configs remain portable with
+gzip, Zstandard or mixed inputs. Simulation completion checks use the same
+resolver.
+
 ## Portable prepared scenarios
 
 Preparation uses `adapt_for_routing(..., local=True)` before population routing,

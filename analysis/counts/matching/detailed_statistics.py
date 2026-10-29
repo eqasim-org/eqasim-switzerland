@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from matsim.config.tools import resolve_output_file
 
 
 VEHICLE_COLUMNS = (
@@ -27,7 +28,7 @@ def read_detailed_statistics(simulation_path, link_ids):
     Missing links remain unavailable, rather than being reported as zero.
     For represented links, absent hourly records are treated as zero passages.
     """
-    path = Path(simulation_path) / "output_detailed_link_statistics.csv.gz"
+    path = Path(resolve_output_file(Path(simulation_path) / "output_detailed_link_statistics.csv.gz", required=False))
     if not path.is_file():
         logging.getLogger("synpp").warning("No %s; Transcality detailed hover statistics omitted.", path)
         return {}
