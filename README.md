@@ -229,16 +229,33 @@ classifications for all municipalities on 01.01.2024
     - Contract: Open data available in the `opendata` folder in this repository.
 
 **Projections are used currently only for the population and not freight; need an update to the code**
+
+Population and household scaling use unchanged official BFS CSV exports under
+`projections/raw/`. Download them explicitly into a new directory:
+
+```bash
+uv run python -m data.statpop.projections.download \
+  --output-path /path/to/data/projections/raw
+```
+
+The downloader archives the original response bytes, queries, metadata and
+checksums. Normal pipeline runs work offline: `data.statpop.projections.raw`
+reads these exports and writes normalized tables into its cache. These inputs
+are required only when `enable_scaling: true`. Share the entire raw directory;
+the previous prepared `households_2025.csv` and `population_year_end_2025.csv`
+files are no longer used. See the [raw projection guide](doc/data/statpop/projections.md)
+for source details and update instructions.
+
 - Households:
-    - Content: `projections/households/households_2025.csv` contains private-household counts from the BFS reference scenario **AM-00-2025**, for 2025–2055. Use the code-based SDMX CSV export from [DF_SCEN_MENAGES](https://stats.swiss/vis?lc=en&df%5bds%5d=disseminate&df%5bid%5d=DF_SCEN_MENAGES&df%5bag%5d=CH1.SCEN&df%5bvs%5d=1.0.0).
-    - Select `SCENARIO=AM-00-2025`, all cantons, `SIZE_HOUSEHOLD=_T`, `NUMBER_HOUSEHOLD_PERSON=MEN`, `FREQ=A`, `TIME_HORIZ=P`, and the desired years. The reader also accepts exports containing the national total and other measures, but selects only private-household counts for the 26 cantons. The old AM-00-2020 workbook is no longer used.
+    - Content: `projections/raw/DF_SCEN_MENAGES.csv` is the original UTF-8 SDMX CSV response for BFS reference scenario **AM-00-2025**, covering household projections for 2025–2055.
+    - The processing stage selects `SCENARIO=AM-00-2025`, `SIZE_HOUSEHOLD=_T`, `NUMBER_HOUSEHOLD_PERSON=MEN`, `FREQ=A`, `TIME_HORIZ=P`, and `scaling_year`. The raw export retains national totals and person counts; only private-household counts for the 26 cantons become household controls. The old AM-00-2020 workbook is no longer used.
     - Recovered residents' synthetic singleton households are excluded from this private-household margin. They remain in the total-person controls and in household replication after fitting.
     - State: 2025
     - Contract:
         - Projections: [Open Data](https://www.bfs.admin.ch/asset/en/DF_SCEN_MENAGES)
 - Population:
-    - Content: `projections/population/population_year_end_2025.csv` contains population by canton, nationality, sex and single age for 2024–2055 from reference scenario **AR-00-2025**. The suffix identifies the projection vintage; `scaling_year` selects the target year.
-    - Select Kanton: all except Schweiz; Staatsangehörigkeit (Kategorie): Schweiz and Ausland; Geschlecht: Mann and Frau; Alter: ages 0 through 100+ without Total; Jahr: all; Beobachtungseinheit: **Bevölkerungsstand am 31. Dezember**. Save as a semicolon-delimited CSV with German labels (Latin-1 encoding) at the path above.
+    - Content: `projections/raw/px-x-0104020000_101_*.csv` contains original population CSV responses for 2024–2055 from reference scenario **AR-00-2025**, downloaded in four-year chunks. `scaling_year` selects the target year.
+    - The download selects all 26 cantons, Swiss/foreign nationality, both sexes, ages 0 through 100+ without totals, and **Bevölkerungsstand am 31. Dezember**. Preserve the official comma-delimited Windows-1252 files unchanged; the raw stage decodes and combines them. No manual CSV conversion is needed.
     - `scaling_year: 2025` now means **31 December 2025**. January stocks use age attained during the coming year and cannot be substituted directly. The reader rejects a January-only extract; it preserves actual STATPOP ages and constructs year-end control groups instead.
     - State: 2025
     - Contract:
@@ -278,10 +295,13 @@ Finally your data folder should look something like this:
 |   +--- etappen.csv
 |   +--- haushaltspersonen.csv
 +--- projections
-|   +--- households
-|   |   +--- households_2025.csv
-|   +--- population
-|   |   +--- population_year_end_2025.csv
+|   +--- raw
+|   |   +--- DF_SCEN_MENAGES.csv
+|   |   +--- px-x-0104020000_101.metadata.json
+|   |   +--- px-x-0104020000_101_2024_2027.csv
+|   |   +--- px-x-0104020000_101_2024_2027.query.json
+|   |   +--- ... remaining four-year CSV chunks and query files through 2055 ...
+|   |   +--- manifest.json
 +--- spatial
 |   +--- municipality
 |   |   +--- 2023
