@@ -42,6 +42,32 @@ launch switches because the runners require them.
 PT2MATSim converter and mapper templates are different config formats and remain
 in their respective stages; they use the same shared XML helpers.
 
+## Default PT routing preferences
+
+With `calibrate_pt_routing_params: false` (the default), the parameter stage uses
+the fixed preferences integrated from `cmdp_new_version_locations`:
+
+| Parameter | Value |
+| --- | ---: |
+| Rail travel time, utility/hour | -1.00 |
+| Bus and other travel time, utility/hour | -1.29 |
+| Tram and subway travel time, utility/hour | -0.95 |
+| Waiting time, utility/hour | -1.29 |
+| Walking time, utility/hour | -1.35 |
+| Generic per-transfer utility | 0.00 |
+| Rail/non-rail transfer penalty | 0.16 |
+| Rail/rail transfer penalty | 0.07 |
+| Other transfer penalty | 0.12 |
+
+These settings reduce the previous penalties for walking, waiting, bus travel
+and transfers; the rail travel-time coefficient stays unchanged. They affect
+PT route selection and are not new discrete mode-choice coefficients. Their
+effect on route choice and passenger counts still requires simulation validation.
+Setting `calibrate_pt_routing_params: true` continues to use the calibration
+stage's estimated values instead. Both routing and prepared simulation configs
+receive these parameters through the shared config helpers. Existing exported
+configs are unchanged until rebuilt or explicitly updated.
+
 ## Compression of simulation files
 
 `matsim.config.tools.resolve_output_file` resolves each requested file as `.gz`,
