@@ -1,8 +1,7 @@
 """Select microscopic or mesoscopic execution of the cut SUMO scenario."""
+from sumo.scenario.modes import require_mode_choice
 
-
-def configure(context):
-    from sumo.scenario.modes import require_mode_choice
+def configure(context):    
     require_mode_choice(context)
     model = context.config("sumo_simulation_model", "microscopic")
     if model not in {"microscopic", "mesoscopic"}:

@@ -10,7 +10,8 @@ from matsim.simulation.border_endpoints import patch_border_endpoints
 from matsim.simulation.border_route_choice import repair_grouped_crossings
 
 import matsim.config.tools as config_tools
-from mode_choice.routing import options as routing_options, exports as routing_exports
+from mode_choice.routing import options as routing_options
+from mode_choice.routing.java import exports as routing_exports
 
 def configure(context):
     context.stage("matsim.config.config")

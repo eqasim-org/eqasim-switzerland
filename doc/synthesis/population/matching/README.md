@@ -68,9 +68,11 @@ survey-age eligibility and its existing removal/output conventions. For
 pipeline settings already declared by `configure`, use
 `MatchingOptions.from_context(context)` instead of `from_config`.
 
-The former `embedding_v2.py`, `features_v2.py` and `donors_v2.py` modules are thin
-import forwarders for existing local scripts. New code imports `V2` directly.
-Private stage helpers also forward for older callers; analysis uses the public
+The matching package contains the `matched_v1.py` and `matched_v2.py` stages;
+all reusable V2 code lives in `V2/`. Import features from `V2.features`, donor
+selection from `V2.donors`, and neural components from `V2.model`, `V2.targets`
+and `V2.training`. The public estimator is `V2.DiaryMatcher`.
+Private stage helpers still forward for older callers; analysis uses the public
 estimator. There is one model implementation and one matching path.
 
 The reorganization preserves the network, objective weights, targets, scaling,

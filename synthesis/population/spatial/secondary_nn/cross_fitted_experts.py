@@ -14,6 +14,7 @@ def configure(context):
     context.config('secondary_nn_use_target_distance', True)
     if context.config('secondary_nn_use_target_distance'):
         return
+    context.stage("synthesis.population.spatial.secondary_nn.mobility")
     context.config('secondary_nn_crossfit_folds', 3)
     context.config('secondary_nn_selector_draws', 10)
     context.config('secondary_nn_distribution_scale_m', 1000.0)

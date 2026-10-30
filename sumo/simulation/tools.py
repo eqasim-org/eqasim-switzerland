@@ -1,6 +1,7 @@
 """Shared execution of microscopic and mesoscopic regional scenarios."""
 
 import json
+import hashlib
 from pathlib import Path
 
 from sumo.config import simulation, tools
@@ -35,5 +36,9 @@ def run_regional(context, profile, model):
     return result
 
 
-def validate_regional(context):
-    return tools.external_token(context, ("sumo_additional_files",))
+def validate_regional(context, profile):
+    fingerprint = hashlib.sha256()
+    for module in (profile, simulation, tools):
+        fingerprint.update(Path(module.__file__).read_bytes())
+    return {"external_inputs": tools.external_token(context, ("sumo_additional_files",)),
+            "profile": fingerprint.hexdigest()}

@@ -3,7 +3,7 @@ from typing import Optional, Union, List
 import numpy as np
 import logging
 import os
-import glob
+from matsim.config.tools import glob_output_files
 
 from ..paths import configure_simulation_path, get_simulation_path
 
@@ -19,8 +19,8 @@ def execute(context):
     iterations_directory = os.path.join(simulation_path, "ITERS")
     
     # searching for link stats file 
-    linkstats_file = glob.glob(os.path.join(iterations_directory, "it.*", f"*.linkstats.txt.gz"))
-    counts_file = glob.glob(os.path.join(iterations_directory, "it.*", f"*.traffic_flow_daily_counts.csv"))
+    linkstats_file = glob_output_files(os.path.join(iterations_directory, "it.*", "*.linkstats.txt"))
+    counts_file = glob_output_files(os.path.join(iterations_directory, "it.*", "*.traffic_flow_daily_counts.csv"))
     files = counts_file if counts_file else linkstats_file
 
     if not files:
@@ -38,7 +38,7 @@ def execute(context):
             combined_df = pd.concat(dfs).groupby("linkId", as_index=False).mean()            
             
             # Save the averaged data to a temporary file for comparison
-            temp_file = files[-1].replace(".csv", "_averagedOverLast10Iterations.csv")
+            temp_file = os.path.join(context.path(), "traffic_flow_daily_counts_averaged.csv")
             combined_df.to_csv(temp_file, index=False, sep=";")
             logger.info(f"Averaged counts file saved to {temp_file}")
             file = temp_file

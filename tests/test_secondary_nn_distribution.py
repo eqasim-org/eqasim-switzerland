@@ -157,13 +157,15 @@ def test_observed_leaf_in_an_unsupported_branch_has_zero_likelihood(monkeypatch)
         mask={'leisure':torch.tensor([False,True])},model=object())
     s=SimpleNamespace(predict_level2_short=lambda *args,**kwargs:(['valid/mid/leaf'],np.array([1.])))
     wrapper=SimpleNamespace(c=c,m=object(),d=object(),s=s,
+        _with_origin_accessibility=lambda state,x,y:state,
+        _set_accessibility_person=lambda *args:None,_pt_weights=lambda *args:None,
         _get_cached_person_static=lambda *args:np.zeros((1,encoding.N_PERSON_STATIC)),
         _build_person_dynamic=lambda *args,**kwargs:np.zeros((1,1)),
         detour_factor=SimpleNamespace(get_cell_indices=lambda *args:np.array([0])),
         _coarse_detour_indices=np.array([0,0]),_add_cached_detour_feature=lambda x,*args:x,
         short_trip_threshold_m=1500.,short_query_radius_m=200.,short_min_candidates=6,
         short_destination_support_masks={'leisure':np.array([True])})
-    monkeypatch.setattr(wrappers,'predict_choice_proba',lambda *args:torch.tensor([[0.,1.]]))
+    monkeypatch.setattr(wrappers,'predict_choice_proba',lambda *args,**kwargs:torch.tensor([[0.,1.]]))
     inputs={key:0. for key in ['person_id','age','income_class','daily_longest_distance_from_home',
         'daily_crowfly_total','daily_longest_distance_from_work','sex','employed','car_availability',
         'crowfly_consumed_before_trip','trip_position_class','departure_time_normalized','activity_duration_h',
@@ -315,7 +317,7 @@ def test_selector_uses_independent_folds_and_minimum_exploration(tmp_path):
     torch.set_num_threads(2)
     frame, comparisons, cells = mixture_fixture()
     fitted, audit = selector.train_selector(frame, comparisons, OriginContext(cells), seed=9,
-        max_iter=8, patience=1, min_epochs=3, folds=5, learning_rate=1e-15, path=tmp_path)
+        max_iter=8, patience=1, min_epochs=3, folds=5, learning_rate=1e-15, path=tmp_path, validation_strategy="cross_validation")
     assert fitted.metrics['validation_mode']=='independent_kfold'
     assert fitted.metrics['validation_folds']==5
     assert fitted.metrics['epochs_completed']==4
@@ -331,3 +333,23 @@ def test_selector_uses_independent_folds_and_minimum_exploration(tmp_path):
     assert sorted(held_out)==sorted(frame.loc[frame.partition.ne('validation'),'person_id'].unique())
     assert audit.loc[audit.partition.eq('validation'),'selector_validation_fold'].eq(-1).all()
     assert set(audit.loc[audit.partition.ne('validation'),'selector_validation_fold'])==set(range(5))
+
+
+def test_selector_uses_one_model_and_keeps_reserved_people_out_of_rotation(tmp_path):
+    import json
+    torch.set_num_threads(2)
+    frame, comparisons, cells = mixture_fixture()
+    fitted, audit = selector.train_selector(frame, comparisons, OriginContext(cells), seed=9,
+        max_iter=8, patience=1, min_epochs=3, folds=5, learning_rate=1e-15, path=tmp_path,
+        validation_strategy="rotating_holdout", rotation_epochs=3, holdout_fraction=.1)
+    assert fitted.metrics['validation_mode']=='rotating_holdout'
+    assert fitted.metrics['refit_epochs']==0
+    assert fitted.metrics['epochs_completed']==5
+    recorded=json.loads((tmp_path/'cross_validation_folds.json').read_text())
+    outer=set(frame.loc[frame.partition.eq('validation'),'person_id'])
+    reserved=set(recorded['reserved_people'])
+    rotating=set().union(*map(set,recorded['rotation_person_folds']))
+    assert outer.isdisjoint(reserved|rotating)
+    assert reserved.isdisjoint(rotating)
+    assert audit.loc[audit.selector_reserved_holdout,'selector_validation_fold'].eq(-1).all()
+    assert not audit.loc[audit.partition.eq('validation'),'selector_reserved_holdout'].any()

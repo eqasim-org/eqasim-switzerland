@@ -173,7 +173,7 @@ def load_network_geometry(network_path):
     node_coords = {}
     link_node_ids = {}
 
-    with xopen.xopen(network_path, "r") as f:
+    with xopen.xopen(network_path, "rb") as f:
         for _, elem in ET.iterparse(f, events=["end"]):
             if elem.tag == "node":
                 node_coords[elem.attrib["id"]] = (float(elem.attrib["x"]), float(elem.attrib["y"]))
@@ -226,7 +226,7 @@ def find_stop_events(events_path, target_facilities, start_time, end_time):
     vehicle_at_facility = {}
 
     processed = 0
-    with xopen.xopen(events_path, "r") as f:
+    with xopen.xopen(events_path, "rb") as f:
         parser = ET.iterparse(f, events=["start", "end"])
         _, root = next(parser)  # <events> start tag, kept to periodically release finished events
 
@@ -277,7 +277,7 @@ def trace_agent_trips(events_path, boarding_events, alighting_events, link_endpo
     completed_trips = []
 
     processed = 0
-    with xopen.xopen(events_path, "r") as f:
+    with xopen.xopen(events_path, "rb") as f:
         parser = ET.iterparse(f, events=["start", "end"])
         _, root = next(parser)  # <events> start tag, kept to periodically release finished events
 

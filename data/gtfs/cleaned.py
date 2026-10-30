@@ -1,7 +1,8 @@
 import data.gtfs.utils as gtfs
-import os, pathlib
+import os
 import pandas as pd
 import logging
+from data.gtfs.sources import get_input_files, selected_inputs, source_signatures
 
 logger = logging.getLogger("synpp")
 
@@ -39,33 +40,11 @@ def configure(context):
 
 
 def execute(context):
-    gtfs_folder = context.config("gtfs_folder")
-    # gtfs_folder is relative to data_path, or absolute
-    all_input_files = get_input_files(os.path.join(context.config("data_path"), gtfs_folder))
 
-    if context.config("gtfs_name") == "":
-        # Keep all files
-        input_files = all_input_files
+    # Resolve exactly the sources used by the cache validation.
 
-    else:
-        # Look for the specified file name
-        input_files = []
-        for file in all_input_files:
-            if context.config("gtfs_name") in file:
-                input_files = [file]
-
-        # If the specified file name was not found
-        if len(input_files) == 0:
-            raise RuntimeError("Did not find any GTFS data matching the specified name.")
-
+    input_files, tpg_file = selected_inputs(context)
     filter_date = context.config("gtfs_filter_date")
-
-    tpg_file = context.config("gtfs_tpg_file")
-    if tpg_file:
-        tpg_file = tpg_file if os.path.isabs(tpg_file) else os.path.join(context.config("data_path"), gtfs_folder, tpg_file)
-        if not os.path.exists(tpg_file):
-            raise RuntimeError(f"gtfs_tpg_file not found: {tpg_file}")
-        input_files = [f for f in input_files if os.path.abspath(f) != os.path.abspath(tpg_file)]
 
     # Load feeds
     feeds = []
@@ -246,21 +225,5 @@ def _write_diagnostics(path, feed, sources, ids_by_feed, transfers_feeds, transf
         transfers.to_csv(os.path.join(folder, "transfers.csv"), index = False)
 
 
-def get_input_files(base_path):
-    gtfs_paths = [
-        str(child)
-        for child in pathlib.Path(base_path).glob("*")
-        if child.suffix.lower() == ".zip"
-    ]
-
-    if len(gtfs_paths) == 0:
-        raise RuntimeError("Did not find any GTFS data (.zip) in {}".format(base_path))
-
-    return gtfs_paths
-
 def validate(context):
-    input_files = get_input_files(os.path.join(context.config("data_path"), context.config("gtfs_folder")))
-    total_size = 0
-    for path in input_files:
-        total_size += os.path.getsize(path)
-    return total_size
+    return source_signatures(context)

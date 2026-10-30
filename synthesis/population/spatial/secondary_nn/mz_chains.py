@@ -2,8 +2,10 @@ import numpy as np
 import pandas as pd
 from .hierarchical_utils import encode_purpose
 from .chain_state import survey_chain_states
+from .tools import accessibility_at_points, encode_ovgk
 
 def configure(context):
+    context.stage("data.spatial.ovgk")
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.secondary_trips")
 
@@ -86,6 +88,8 @@ def execute(context):
     
     # Build remaining plan state using only known primary anchors.
 
+    trips_sorted["origin_ovgk"] = encode_ovgk(accessibility_at_points(
+        trips_sorted.origin_x, trips_sorted.origin_y, context.stage("data.spatial.ovgk")))
     trips_sorted["chain_state"] = survey_chain_states(trips_sorted)
 
     # target distances

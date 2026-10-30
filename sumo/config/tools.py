@@ -36,6 +36,16 @@ def positive(value, name, integer=False):
     return int(number) if integer else number
 
 
+def time_window(context):
+    """A null end lets SUMO finish all demand; explicit windows stay strict."""
+    begin = float(context.config("sumo_begin"))
+    end = context.config("sumo_end")
+    end = None if end is None else positive(end, "sumo_end")
+    if not math.isfinite(begin) or begin < 0 or (end is not None and begin >= end):
+        raise ValueError("Require finite sumo_begin >= 0 and sumo_end > sumo_begin (or null)")
+    return begin, end
+
+
 def write_config(path, root_name, sections, overrides=None):
     sections = {section: dict(options) for section, options in sections.items()}
     for section, options in (overrides or {}).items():
