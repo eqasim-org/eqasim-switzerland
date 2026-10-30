@@ -1,17 +1,18 @@
 import os
 import logging
+import json
 
 import joblib
 import numpy as np
 import pandas as pd
 import torch
 import matplotlib.pyplot as plt
+from sklearn.neighbors import KDTree
 
 from .h3 import H3_LEVEL_NAMES
 from .hierarchical_utils import (
     SECONDARY_ACTIVITIES,
-    build_level2_children_by_level1,
-    build_level2_candidate_attributes_by_level1,
+    DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION,
     sanitize_work_coordinates,
     build_hierarchical_candidate_batch_numba,
 )
@@ -27,20 +28,28 @@ from .feature_encoding import (
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import ShortRangeChoiceWrapper
 
-from .tools import training_mobility, enrich_candidate_tensor, attach_candidate_features
+from .tools import (model_validation_options, training_mobility, enrich_candidate_tensor,
+                    destination_offer_masks, destination_support_masks, origin_training_choice_sets)
 from .training_split import expert_persons
 
 logger = logging.getLogger("synpp: short_range_model")
 
 MODEL_NAME = "short_range_model.pt"
-DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION = 1.0
 SHORT_RANGE_MODEL_THRESHOLD = 1500.0
 
 def configure(context):
     context.config("secondary_nn_use_target_distance", True)
+    context.config("secondary_nn_model_validation_folds", 5)
+    context.config("secondary_nn_model_min_epochs", 20)
+    context.config("secondary_nn_model_validation_strategy", "cross_validation")
     context.stage("data.spatial.ovgk")
+    context.stage("synthesis.population.destinations")
     context.config("secondary_nn_distance_loss_kind", "crps_energy")
     context.config("secondary_nn_distribution_loss_weight", 0.1)
+    context.config("secondary_nn_short_distribution_loss_weight", 0.05)
+    context.config("secondary_nn_short_relative_distance_loss_weight", 0.05)
+    context.config("secondary_nn_short_distance_loss_kind", "relative")
+    context.config("secondary_nn_short_relative_underestimation_factor", 2.0)
     context.config("secondary_nn_distribution_scale_m", 1000.0)
     context.config("secondary_nn_energy_projections", 8)
     if not context.config("secondary_nn_use_target_distance"):
@@ -64,11 +73,15 @@ def configure(context):
     context.config("short_range_model_learning_rate", 4e-3)
     context.config("short_range_model_dropout_rate", 0.35)
     context.config("short_range_model_weight_decay", 1e-2)
-    context.config("short_range_model_validation_folds", 5)
+    context.config("short_range_model_validation_folds", None)
+    context.config("short_range_model_validation_strategy", None)
+    context.config("short_range_model_min_epochs", None)
     context.config("short_range_model_validation_every", 2)
     context.config("short_range_model_early_stopping_patience", 5)
     context.config("short_range_model_early_stopping_min_delta", 1e-3)
     context.config("secondary_nn_short_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
+    context.config("secondary_nn_short_query_radius_m", 200.0)
+    context.config("secondary_nn_short_min_candidates", 6)
     context.config("short_range_trip_min_m", DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION)
     context.config("secondary_nn_distance_loss_weight", 0.07)
     context.config("secondary_nn_distance_loss_short_floor_m", 100.0)
@@ -81,7 +94,7 @@ def execute(context):
     logger.info("Training short-range level2 model (<= threshold distance)...")
 
     overwrite_model = context.config("overwrite_short_range_model_if_exists")
-    model_path = os.path.join(context.working_directory, MODEL_NAME)
+    model_path = os.path.join(context.path(), MODEL_NAME)
     if os.path.exists(model_path) and not overwrite_model:
         logger.info("Model %s already exists.", MODEL_NAME)
         return (model_path,)
@@ -109,163 +122,112 @@ def execute(context):
     mz_trips = mz_trips[~mz_trips["person_id"].isin(weekend_persons)].reset_index(drop=True)
     mz_persons = mz_persons[~mz_persons["person_id"].isin(weekend_persons)].drop(columns=["weekend"]).reset_index(drop=True)
 
-    h3_data, h3_geo, h3_tree = context.stage("synthesis.population.spatial.secondary_nn.h3")
-    trips_h3 = h3_data["microcensus_trips"][["person_id", "trip_id", f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}", f"destination_{H3_LEVEL_NAMES[-1]}"]]
-    h3_geo_level2 = h3_geo[H3_LEVEL_NAMES[-1]]
+    # Build the same global leaf catalogue and facility eligibility as prediction.
 
-    required_h3_cols = [
-        "centroid", "outside_fraction", "num_statent", "employees", "urban_core", "urban", "education", "shop", "leisure",
-        "sport", "gastronomy", "accommodation", "cultural",
-        "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none",
-    ]
-    missing_h3_cols = [col for col in required_h3_cols if col not in h3_geo_level2.columns]
-    if missing_h3_cols:
-        raise RuntimeError("Missing required destination-derived H3 columns in h3 stage: " + ", ".join(missing_h3_cols))
+    h3_data, h3_geo, _ = context.stage("synthesis.population.spatial.secondary_nn.h3")
+    leaf_name = H3_LEVEL_NAMES[-1]
+    target_column = f"destination_{leaf_name}"
+    trips_h3 = h3_data["microcensus_trips"][["person_id", "trip_id", target_column]]
+    h3_geo_level2 = h3_geo[leaf_name]
+    required = ["centroid", *STATIC_CANDIDATE_FEATURES]
+    missing = [name for name in required if name not in h3_geo_level2]
+    if missing:
+        raise RuntimeError("Missing destination-derived H3 columns: " + ", ".join(missing))
+    all_h3 = h3_geo_level2["h3_index"].astype(str).tolist()
+    h3_all_indexed = h3_geo_level2.set_index("h3_index").loc[all_h3]
+    centroid_x = h3_all_indexed["centroid"].x.to_numpy(dtype=np.float64)
+    centroid_y = h3_all_indexed["centroid"].y.to_numpy(dtype=np.float64)
+    tree = KDTree(np.column_stack([centroid_x, centroid_y]), leaf_size=32)
+    leaf_index = {cell: i for i, cell in enumerate(all_h3)}
+    destinations = context.stage("synthesis.population.destinations")
+    offer_columns = [name for name in destinations if name.startswith("offers_")]
+    mapped = h3_data["destinations"][["destination_id", leaf_name]].merge(
+        destinations[["destination_id", *offer_columns]], on="destination_id", how="left", validate="one_to_one")
+    offers = destination_offer_masks(mapped)
+    pools = {purpose: dict.fromkeys(mapped.loc[mask, leaf_name].dropna().astype(str).unique(), True)
+             for purpose, mask in offers.items()}
+    support = destination_support_masks(all_h3, pools, SECONDARY_ACTIVITIES)
 
-    h3_level2_indexed = h3_geo_level2.set_index("h3_index")
-    centroids = h3_level2_indexed["centroid"]
-    centroid_x_by_l2 = centroids.x.to_dict()
-    centroid_y_by_l2 = centroids.y.to_dict()
-    outside_fraction_by_l2 = h3_level2_indexed["outside_fraction"].to_dict()
-    statent_count_l2 = h3_level2_indexed["num_statent"].to_dict()
-    employees_count_l2 = h3_level2_indexed["employees"].to_dict()
-    urban_core_count_l2 = h3_level2_indexed["urban_core"].to_dict()
-    urban_count_l2 = h3_level2_indexed["urban"].to_dict()
-    education_count_l2 = h3_level2_indexed["education"].to_dict()
-    shop_count_l2 = h3_level2_indexed["shop"].to_dict()
-    leisure_count_l2 = h3_level2_indexed["leisure"].to_dict()
-    sport_count_l2 = h3_level2_indexed["sport"].to_dict()
-    gastronomy_count_l2 = h3_level2_indexed["gastronomy"].to_dict()
-    accommodation_count_l2 = h3_level2_indexed["accommodation"].to_dict()
-    cultural_count_l2 = h3_level2_indexed["cultural"].to_dict()
-    ovgk_share_a_by_l2 = h3_level2_indexed["ovgk_share_a"].to_dict()
-    ovgk_share_b_by_l2 = h3_level2_indexed["ovgk_share_b"].to_dict()
-    ovgk_share_c_by_l2 = h3_level2_indexed["ovgk_share_c"].to_dict()
-    ovgk_share_d_by_l2 = h3_level2_indexed["ovgk_share_d"].to_dict()
-    ovgk_share_none_by_l2 = h3_level2_indexed["ovgk_share_none"].to_dict()
+    # Query origin neighbourhoods without conditioning alternatives on the observed destination.
 
-    if h3_tree is None:
-        raise RuntimeError("H3 hierarchy tree is missing from H3 stage output. Cannot train short-range model.")
-    children_by_level1 = build_level2_children_by_level1(h3_tree, centroid_x_by_l2, centroid_y_by_l2)
-    if len(children_by_level1) == 0:
-        raise RuntimeError("H3 hierarchy tree has no valid level2 children with centroids. Cannot train short-range model.")
-
-    level2_candidate_attributes_by_level1 = build_level2_candidate_attributes_by_level1(
-        children_by_level1,
-        centroid_x_by_l2,
-        centroid_y_by_l2,
-        statent_count_l2,
-        employees_count_l2,
-        urban_core_count_l2,
-        urban_count_l2,
-        education_count_l2,
-        shop_count_l2,
-        leisure_count_l2,
-        sport_count_l2,
-        gastronomy_count_l2,
-        accommodation_count_l2,
-        cultural_count_l2,
-        ovgk_share_a_by_l2,
-        ovgk_share_b_by_l2,
-        ovgk_share_c_by_l2,
-        ovgk_share_d_by_l2,
-        ovgk_share_none_by_l2,
-        outside_fraction_by_l2,
-    )
-
-    logger.info("\t Preparing short-range training set...")
-    attach_candidate_features(level2_candidate_attributes_by_level1, h3_geo_level2)
-    df = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left")
-    df = df.merge(mz_persons, on="person_id", how="left")
-    df = df[
-        df["purpose"].isin(SECONDARY_ACTIVITIES)
-    ].dropna(
-        subset=[f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}", f"destination_{H3_LEVEL_NAMES[-1]}"]
-    ).reset_index(drop=True)
-
+    df = mz_trips.merge(trips_h3, on=["person_id", "trip_id"], how="left", validate="one_to_one")
+    df = df.merge(mz_persons, on="person_id", how="left", validate="many_to_one")
     short_max = float(context.config("secondary_nn_short_trip_threshold_m"))
     short_min = float(context.config("short_range_trip_min_m"))
-    td = df["target_distance"].to_numpy(dtype=np.float64)
-    td_valid = np.isfinite(td)
-    df = df.loc[td_valid].copy()
-    df = df[(df["target_distance"] >= short_min) & (df["target_distance"] <= short_max)].reset_index(drop=True)
-    if len(df) == 0:
-        raise RuntimeError("No short-range training samples remain after target-distance filtering.")
-
-    valid_rows = []
-    for idx, row in df.iterrows():
-        key = (row[f"destination_{H3_LEVEL_NAMES[0]}"], row[f"destination_{H3_LEVEL_NAMES[1]}"])
-        children = children_by_level1.get(key, [])
-        if len(children) < 2:
-            continue
-        if row[f"destination_{H3_LEVEL_NAMES[-1]}"] not in children:
-            continue
-        valid_rows.append(idx)
-
-    if len(valid_rows) == 0:
-        raise RuntimeError("No valid short-range samples after filtering by hierarchy.")
+    if not np.isfinite([short_min, short_max]).all() or not 0 <= short_min < short_max:
+        raise ValueError("Short-range training distance bounds must be finite and ordered")
+    td = df["target_distance"].to_numpy(dtype=float)
+    eligible = (df.purpose.isin(SECONDARY_ACTIVITIES) & np.isfinite(td)
+                & (td >= short_min) & (td <= short_max))
+    df = df.loc[eligible].reset_index(drop=True)
+    radius_step = float(context.config("secondary_nn_short_query_radius_m"))
+    radius = short_max + radius_step * 1.5
+    minimum = int(context.config("secondary_nn_short_min_candidates"))
+    valid_rows, choices, audit = origin_training_choice_sets(
+        df, all_h3, tree, support, target_column=target_column,
+        radius_m=radius, min_candidates=minimum, expand_step_m=radius_step)
+    audit_path = os.path.join(context.path(), "short_range_choice_sets.parquet")
+    audit.to_parquet(audit_path, index=False)
+    os.chmod(audit_path, 0o600)
+    counts = audit.reason.value_counts().to_dict()
+    with open(os.path.join(context.path(), "short_range_choice_sets.json"), "w") as stream:
+        json.dump(dict(scope="origin_neighbourhood", initial_radius_m=radius,
+                       expansion_step_m=radius_step, minimum_candidates=minimum, rows=counts), stream, indent=2)
+    logger.info("Short-range origin choice sets: %s", counts)
+    if not valid_rows:
+        raise RuntimeError("No short-range samples have an observed eligible leaf in their origin neighbourhood")
     df = df.iloc[valid_rows].reset_index(drop=True)
 
-    max_children = max(
-        len(children_by_level1[(l0, l1)])
-        for l0, l1 in df[[f"destination_{H3_LEVEL_NAMES[0]}", f"destination_{H3_LEVEL_NAMES[1]}"]].itertuples(index=False)
-    )
-    n_samples = len(df)
+    # Pack variable neighbourhoods with masked padding for model training.
 
+    n_samples, max_children = len(df), max(map(len, choices))
     cand_x = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_y = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_statent = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_employees = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_urban_core = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_urban = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_education = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_shop = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_leisure = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_sport = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_gastronomy = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_accommodation = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_cultural = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_ovgk_share_a = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_ovgk_share_b = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_ovgk_share_c = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_ovgk_share_d = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_ovgk_share_none = np.zeros((n_samples, max_children), dtype=np.float64)
-    cand_outside_fraction = np.zeros((n_samples, max_children), dtype=np.float64)
-    valid_mask = np.zeros((n_samples, max_children), dtype=np.bool_)
+    cand_y = np.zeros_like(cand_x)
+    cand_statent = np.zeros_like(cand_x)
+    cand_employees = np.zeros_like(cand_x)
+    cand_urban_core = np.zeros_like(cand_x)
+    cand_urban = np.zeros_like(cand_x)
+    cand_education = np.zeros_like(cand_x)
+    cand_shop = np.zeros_like(cand_x)
+    cand_leisure = np.zeros_like(cand_x)
+    cand_sport = np.zeros_like(cand_x)
+    cand_gastronomy = np.zeros_like(cand_x)
+    cand_accommodation = np.zeros_like(cand_x)
+    cand_cultural = np.zeros_like(cand_x)
+    cand_ovgk_share_a = np.zeros_like(cand_x)
+    cand_ovgk_share_b = np.zeros_like(cand_x)
+    cand_ovgk_share_c = np.zeros_like(cand_x)
+    cand_ovgk_share_d = np.zeros_like(cand_x)
+    cand_ovgk_share_none = np.zeros_like(cand_x)
+    cand_outside_fraction = np.zeros_like(cand_x)
+    valid_mask = np.zeros(cand_x.shape, dtype=bool)
     y = np.zeros(n_samples, dtype=np.int64)
     weights = df["person_weight"].to_numpy(dtype=np.float32)
-
-    with context.progress(total=n_samples, label="Short-range model: building level2 choice sets") as progress:
-        for i, row in df.iterrows():
-            key = (row[f"destination_{H3_LEVEL_NAMES[0]}"], row[f"destination_{H3_LEVEL_NAMES[1]}"])
-            chosen_level2 = row[f"destination_{H3_LEVEL_NAMES[-1]}"]
-            attrs = level2_candidate_attributes_by_level1[key]
-            children = attrs["children"]
-            n_children = len(children)
-
-            valid_mask[i, :n_children] = True
-            cand_x[i, :n_children] = attrs["x"]
-            cand_y[i, :n_children] = attrs["y"]
-            cand_statent[i, :n_children] = attrs["num_statent"]
-            cand_employees[i, :n_children] = attrs["employees"]
-            cand_urban_core[i, :n_children] = attrs["urban_core"]
-            cand_urban[i, :n_children] = attrs["urban"]
-            cand_education[i, :n_children] = attrs["education"]
-            cand_shop[i, :n_children] = attrs["shop"]
-            cand_leisure[i, :n_children] = attrs["leisure"]
-            cand_sport[i, :n_children] = attrs["sport"]
-            cand_gastronomy[i, :n_children] = attrs["gastronomy"]
-            cand_accommodation[i, :n_children] = attrs["accommodation"]
-            cand_cultural[i, :n_children] = attrs["cultural"]
-            cand_ovgk_share_a[i, :n_children] = attrs["ovgk_share_a"]
-            cand_ovgk_share_b[i, :n_children] = attrs["ovgk_share_b"]
-            cand_ovgk_share_c[i, :n_children] = attrs["ovgk_share_c"]
-            cand_ovgk_share_d[i, :n_children] = attrs["ovgk_share_d"]
-            cand_ovgk_share_none[i, :n_children] = attrs["ovgk_share_none"]
-            cand_outside_fraction[i, :n_children] = attrs["outside_fraction"]
-
-            y[i] = attrs["index_by_child"][chosen_level2]
-            progress.update()
+    attributes = h3_all_indexed[STATIC_CANDIDATE_FEATURES]
+    attribute_arrays = {name: attributes[name].to_numpy(dtype=float) for name in STATIC_CANDIDATE_FEATURES}
+    for i, indices in enumerate(choices):
+        n = len(indices)
+        cand_x[i, :n], cand_y[i, :n] = centroid_x[indices], centroid_y[indices]
+        valid_mask[i, :n] = True
+        chosen = leaf_index[str(df.iloc[i][target_column])]
+        y[i] = int(np.flatnonzero(indices == chosen)[0])
+        cand_statent[i, :n] = attribute_arrays["num_statent"][indices]
+        cand_employees[i, :n] = attribute_arrays["employees"][indices]
+        cand_urban_core[i, :n] = attribute_arrays["urban_core"][indices]
+        cand_urban[i, :n] = attribute_arrays["urban"][indices]
+        cand_education[i, :n] = attribute_arrays["education"][indices]
+        cand_shop[i, :n] = attribute_arrays["shop"][indices]
+        cand_leisure[i, :n] = attribute_arrays["leisure"][indices]
+        cand_sport[i, :n] = attribute_arrays["sport"][indices]
+        cand_gastronomy[i, :n] = attribute_arrays["gastronomy"][indices]
+        cand_accommodation[i, :n] = attribute_arrays["accommodation"][indices]
+        cand_cultural[i, :n] = attribute_arrays["cultural"][indices]
+        cand_ovgk_share_a[i, :n] = attribute_arrays["ovgk_share_a"][indices]
+        cand_ovgk_share_b[i, :n] = attribute_arrays["ovgk_share_b"][indices]
+        cand_ovgk_share_c[i, :n] = attribute_arrays["ovgk_share_c"][indices]
+        cand_ovgk_share_d[i, :n] = attribute_arrays["ovgk_share_d"][indices]
+        cand_ovgk_share_none[i, :n] = attribute_arrays["ovgk_share_none"][indices]
+        cand_outside_fraction[i, :n] = attribute_arrays["outside_fraction"][indices]
 
     home_x = df["home_x"].to_numpy(dtype=np.float64)
     home_y = df["home_y"].to_numpy(dtype=np.float64)
@@ -393,6 +355,19 @@ def execute(context):
     # Select the destination distribution loss.
 
     loss_kind = context.config("secondary_nn_distance_loss_kind")
+    if context.config("secondary_nn_use_target_distance"):
+        loss_kind = context.config("secondary_nn_short_distance_loss_kind") or loss_kind
+    validation = model_validation_options(context,
+        folds=context.config("short_range_model_validation_folds"),
+        strategy=context.config("short_range_model_validation_strategy"),
+        min_epochs=context.config("short_range_model_min_epochs"),
+        val_every=context.config("short_range_model_validation_every"))
+    distribution_weight = float(context.config("secondary_nn_distribution_loss_weight"))
+    short_weight = context.config("secondary_nn_short_distribution_loss_weight")
+    if context.config("secondary_nn_use_target_distance") and short_weight is not None:
+        distribution_weight = float(short_weight)
+        if not np.isfinite(distribution_weight) or distribution_weight < 0:
+            raise ValueError("Short-range distribution weight must be finite and nonnegative")
     train_choice_model(
         model=model,
         person_static_x=static_matrix,
@@ -409,8 +384,7 @@ def execute(context):
         weight_decay=float(context.config("short_range_model_weight_decay")),
         num_threads=int(context.config("threads")),
         path=context.path(),
-        n_val_folds=int(context.config("short_range_model_validation_folds")),
-        val_every=int(context.config("short_range_model_validation_every")),
+        **validation,
         validation_groups=df["person_id"].to_numpy(),
         rotate_validation=False,
         early_stopping_patience=int(context.config("short_range_model_early_stopping_patience")),
@@ -420,24 +394,23 @@ def execute(context):
         distance_targets=target_distance.astype(np.float32),
         distance_candidates_home=candidate_dist_home_m,
         distance_targets_home=target_home_distance.astype(np.float32),
-        distance_loss_weight=float(context.config(
-            "secondary_nn_distribution_loss_weight" if loss_kind == "crps_energy"
-            else "secondary_nn_distance_loss_weight")),
+        distance_loss_weight=(distribution_weight if loss_kind == "crps_energy"
+                              else float(context.config("secondary_nn_distance_loss_weight"))),
         distance_loss_kind=loss_kind,
         distribution_scale_m=float(context.config("secondary_nn_distribution_scale_m")),
         energy_projections=int(context.config("secondary_nn_energy_projections")),
         candidate_xy=np.stack([cand_x, cand_y], axis=-1) if loss_kind == "crps_energy" else None,
         observed_xy=df[["destination_x", "destination_y"]].to_numpy(dtype=np.float32, copy=True)
             if loss_kind == "crps_energy" else None,
-        refit_full=not bool(context.config("secondary_nn_use_target_distance")),
         distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")),
+        relative_distance_underestimation_factor=(
+            float(context.config("secondary_nn_short_relative_underestimation_factor"))
+            if context.config("secondary_nn_use_target_distance") and loss_kind == "relative" else 1.0),
+        auxiliary_relative_distance_loss_weight=(
+            float(context.config("secondary_nn_short_relative_distance_loss_weight"))
+            if context.config("secondary_nn_use_target_distance") and loss_kind == "crps_energy"
+            else 0.0),
     )
-
-    all_h3 = h3_geo_level2["h3_index"].astype(str).tolist()
-    h3_all_indexed = h3_geo_level2.set_index("h3_index").loc[all_h3]
-    all_centroids = h3_all_indexed["centroid"]
-    centroid_x = all_centroids.x.to_numpy(dtype=np.float64)
-    centroid_y = all_centroids.y.to_numpy(dtype=np.float64)
 
     static_candidate_features = np.column_stack([
         h3_all_indexed[name].to_numpy(dtype=np.float64) for name in STATIC_CANDIDATE_FEATURES
@@ -467,9 +440,9 @@ def execute(context):
             candidate_tensor=candidate_tensor,
             valid_mask=valid_mask,
             df=df,
-            children_by_level1=children_by_level1,
-            centroid_x_by_l2=centroid_x_by_l2,
-            centroid_y_by_l2=centroid_y_by_l2,
+            choices=choices,
+            centroid_x_by_l2=dict(zip(all_h3, centroid_x)),
+            centroid_y_by_l2=dict(zip(all_h3, centroid_y)),
         )
 
     logger.info("Short-range model saved to %s", model_path)
@@ -477,7 +450,7 @@ def execute(context):
 
 
 def plot_distance_analysis(context, wrapper, person_trip_matrix, candidate_tensor,
-                           valid_mask, df, children_by_level1,
+                           valid_mask, df, choices,
                            centroid_x_by_l2, centroid_y_by_l2):
     """Plot real and predicted short-range distances without count maps."""
     logger.info("Plotting short-range distance distributions...")
@@ -486,18 +459,12 @@ def plot_distance_analysis(context, wrapper, person_trip_matrix, candidate_tenso
         candidate_tensor[:, :, N_CANDIDATE_DYNAMIC:],
         candidate_tensor[:, :, :N_CANDIDATE_DYNAMIC],
         valid_mask,
-        rng=None,
+        rng=np.random.default_rng(int(context.config("random_seed"))),
         return_probabilities=False,
     )
 
-    predicted_level2 = []
-    hierarchy_columns = [
-        f"destination_{H3_LEVEL_NAMES[0]}",
-        f"destination_{H3_LEVEL_NAMES[1]}",
-    ]
-    for i, (level0, level1) in enumerate(df[hierarchy_columns].itertuples(index=False)):
-        children = children_by_level1[(level0, level1)]
-        predicted_level2.append(children[int(pred_idx[i])])
+    predicted_level2 = [wrapper.all_h3[indices[int(pred_idx[i])]]
+                        for i, indices in enumerate(choices)]
 
     real_level2 = df[f"destination_{H3_LEVEL_NAMES[-1]}"].astype(str).to_numpy()
     predicted_level2 = np.asarray(predicted_level2, dtype=str)

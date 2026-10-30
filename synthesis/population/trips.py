@@ -17,9 +17,6 @@ BORDER_MATCH_COLUMNS = [
     "border_crossing_point", "border_crossing_direction", "border_interview_place",
 ]
 
-ORIGINAL_PURPOSE_COLUMNS = ["original_preceding_purpose", "original_following_purpose"]
-
-
 def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("data.microcensus.trips")
@@ -31,9 +28,21 @@ def configure(context):
     context.config("specific_day_scenario", default = "workday")
 
 
+ORIGINAL_PURPOSE_COLUMNS = ["original_preceding_purpose", "original_following_purpose"]
+
+
+def validate(context):
+    # Synpp hashes this stage, but imported helpers also change its output.
+    import hashlib
+    from pathlib import Path
+    import data.microcensus.secondary_trips
+    return hashlib.sha256(Path(data.microcensus.secondary_trips.__file__).read_bytes()).hexdigest()
+
+
 def execute(context):
 
     # Load recipients and donor trips, preserving the assigned crossing event.
+
 
     c      = context.stage("data.constants")
 
@@ -298,14 +307,6 @@ def sample_border_trip_times(context, df_cb_persons, is_leaving, rng):
                 np.nanmedian(travel_time) / 60, int(is_leaving.sum()), int((~is_leaving).sum()), len(pool))
 
     return pd.DataFrame({"departure_time": np.round(departure_time), "arrival_time": np.round(arrival_time)})
-
-
-def validate(context):
-    # Synpp hashes this stage, but imported helpers also change its output.
-    import hashlib
-    from pathlib import Path
-    import data.microcensus.secondary_trips
-    return hashlib.sha256(Path(data.microcensus.secondary_trips.__file__).read_bytes()).hexdigest()
 
 
 def _write_border_trip_audit(context, persons, generated):

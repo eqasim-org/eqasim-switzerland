@@ -9,6 +9,7 @@ from sumo.config import macroscopic, tools
 from sumo.scenario import modes
 from sumo.scenario.assignment import source_trip_id
 from sumo.scenario.network.tools import read_network, route_length, validate_routes
+from sumo.scenario.network.mapping import map_trips
 from sumo.scenario.tools import elements, filter_loading_trips, read_routes, write_routes
 from sumo.runtime import sumo
 from sumo.router.tools import write_trip_metrics
@@ -18,9 +19,14 @@ logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    modes.require_mode_choice(context)
     modes.configure(context)
     context.stage("sumo.runtime.sumo")
     context.stage("sumo.scenario.demand")
+    context.stage("sumo.scenario.network.routing")
+    context.config("clip_trips_to_border_in_sumo", True)
+    if context.config("clip_trips_to_border_in_sumo"):
+        context.stage("sumo.scenario.border")
     tools.configure_network(context)
     context.config("sumo_region_geometry", None)
     if context.config("sumo_region_geometry") is not None:
@@ -36,7 +42,7 @@ def configure(context):
     context.config("sumo_assignment_iterations", 50)
     context.config("sumo_assignment_interval", 3600)
     context.config("sumo_assignment_scale", 1.0)
-    context.config("sumo_mapmatch_distance", 1000)
+    context.config("sumo_mapmatch_distance", None)
     context.config("sumo_loading_mesoscopic", True)
     context.config("sumo_loading_route_choice", "msa")
     context.config("sumo_loading_convergence_window", 5)
@@ -63,6 +69,14 @@ def execute(context):
         from sumo.cutter.tools import remap_trip_endpoints
         remap_trip_endpoints(loading, split["mapping"], cache / "split.trips.xml.gz")
         loading = cache / "split.trips.xml.gz"
+
+    # Match every endpoint to roads connected to the mode's main directed core.
+
+    mapped = cache / "reachable.trips.xml.gz"
+    border = context.stage("sumo.scenario.border") if context.config("clip_trips_to_border_in_sumo") else None
+    endpoint_mapping = map_trips(loading, mapped, context.stage("sumo.scenario.network.routing"),
+                                 context.config("sumo_mapmatch_distance"), border)
+    loading = mapped
 
     # Assign traffic macroscopically, or run simulation-based DUA when requested.
 
@@ -99,7 +113,7 @@ def execute(context):
     validate_routes(vehicles, data, types)
     output = cache / "loaded.routes.xml.gz"
     write_routes(output, types, vehicles)
-    metrics = cache / "trip_metrics.parquet"
+    metrics = cache / "trip_metrics.arrow"
     write_trip_metrics(output, metrics, len(vehicles))
     final_weights = cache / "loaded.edges.xml.gz"
     if Path(weights).resolve() != final_weights:
@@ -109,7 +123,8 @@ def execute(context):
 
     result = {"network": str(network), "routes": str(output), "weights": str(final_weights), "metrics": str(metrics),
               "count": len(vehicles), "source_count": count, "timing": timing,
-              "boundary_split": split is not None, "convergence": convergence}
+              "boundary_split": split is not None, "convergence": convergence,
+              "endpoint_mapping": endpoint_mapping}
     (cache / "loading_report.json").write_text(json.dumps(result, indent=2) + "\n")
     if convergence.get("stable") is False:
         message = "Loading reached its iteration limit before the requested travel-time stability threshold"

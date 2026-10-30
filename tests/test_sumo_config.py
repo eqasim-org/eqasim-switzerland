@@ -12,7 +12,7 @@ from shapely.geometry import Point
 
 from sumo.config import loaded, macroscopic, mesoscopic, microscopic
 from sumo.router import assignment, mapped
-from sumo.scenario import demand
+from sumo.scenario import demand, unrouted_demand
 from sumo.scenario.network.tools import detect_network_format, resolve_input_path
 from sumo.runtime import sumo
 from sumo.simulation import run
@@ -22,9 +22,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class Context:
     def __init__(self, module, path, config=None, stages=None):
-        context = ConfigurationContext(config or {})
+        self.base = {"sumo_assignment_all_as_car": False, "sumo_population_crs": "EPSG:2056", "enable_mode_choice": True, "sumo_native_xml": False, "clip_trips_to_border_in_sumo": False, **(config or {})}
+        context = ConfigurationContext(self.base)
         module.configure(context)
-        self.config_values = context.required_config
+        self.config_values = {**self.base, **context.required_config}
         self.cache = Path(path)
         self.cache.mkdir(parents=True, exist_ok=True)
         self.stages = stages or {}
@@ -35,10 +36,19 @@ class Context:
     def config(self, option):
         return self.config_values[option]
 
-    def path(self):
+    def path(self, stage=None):
+        if stage is not None:
+            result = self.stages.get(stage, {})
+            if isinstance(result, dict) and "vehicle_trips" in result:
+                return str(Path(result["vehicle_trips"]).parent)
         return str(self.cache)
 
     def stage(self, name):
+        if name == "sumo.scenario.unrouted_demand" and name not in self.stages:
+            self.stages[name] = unrouted_demand.execute(Context(unrouted_demand, self.cache / "raw", self.base, self.stages))
+        if name == "sumo.scenario.network.routing" and name not in self.stages:
+            from sumo.scenario.network import routing
+            self.stages[name] = routing.execute(Context(routing, self.cache / "routing", self.base, self.stages))
         return self.stages[name]
 
 
@@ -99,9 +109,9 @@ def test_external_files_avoid_synthesis_dependencies(tmp_path):
     context = ConfigurationContext({"sumo_network_file": "/network.xml", "sumo_route_files": ["/trips.xml"], "random_seed": 42})
     microscopic.configure(context)
     assert [stage['descriptor'] for stage in context.required_stages] == ['sumo.scenario.network.road_network']
-    context = ConfigurationContext({"sumo_assignment_trip_files": ["/trips.xml"]})
+    context = ConfigurationContext({"enable_mode_choice": True, "sumo_assignment_trip_files": ["/trips.xml"], "sumo_native_xml": False, "clip_trips_to_border_in_sumo": False})
     demand.configure(context)
-    assert not context.required_stages
+    assert [s["descriptor"] for s in context.required_stages] == ["sumo.scenario.unrouted_demand"]
 
 
 def prepare_workflow(tmp_path, runtime, network, scale=1):
@@ -130,7 +140,8 @@ def test_loaded_assignment_reports_every_trip_and_responds_to_flow(tmp_path, run
         before = {path: Path(path).read_bytes() for path in (config["assignment_config"], config["routing_config"])}
         result = assignment.execute(Context(assignment, root / "execution", stages={
             "sumo.runtime.sumo": runtime, "sumo.config.loaded": config}))
-        metrics = pd.read_parquet(result["metrics"])
+        from sumo.tables import read_table
+        metrics = read_table(result["metrics"]).to_pandas()
         assert len(metrics) == 200
         assert metrics["trip_id"].is_unique
         assert set(metrics["distance_m"]) == {300}
@@ -200,6 +211,51 @@ def test_multiple_trip_files_share_equivalent_vehicle_types(tmp_path):
                       '<trip id="b" type="car" depart="1" from="in" to="out"/></routes>')
     context = Context(demand, tmp_path / "cache", {"sumo_assignment_trip_files": [str(first), str(second)]})
     assert demand.execute(context)["count"] == 2
+
+
+def test_demand_reads_coordinates_only_for_selected_trip_endpoints(tmp_path):
+    persons = pd.DataFrame({'person_id': ['p', 'inactive'], 'home_x': [float('nan')] * 2,
+                            'home_y': [float('nan')] * 2})
+    activities = pd.DataFrame([
+        {'person_id': 'p', 'activity_index': 0, 'purpose': 'work', 'end_time': 10,
+         'geometry': Point(2600000, 1200000), 'following_mode': 'car'},
+        {'person_id': 'p', 'activity_index': 1, 'purpose': 'work', 'start_time': 30, 'end_time': 50,
+         'geometry': Point(2600100, 1200000), 'following_mode': 'pt'},
+        {'person_id': 'p', 'activity_index': 2, 'purpose': 'other', 'geometry': None},
+        {'person_id': 'inactive', 'activity_index': 0, 'purpose': 'international', 'geometry': None},
+    ])
+    original = activities.copy(deep=True)
+    context = Context(demand, tmp_path, {'sumo_modes': ['car']},
+        {'sumo.scenario.population.population': {'persons': persons, 'activities': activities}})
+    trips = list(unrouted_demand._population_trips(context))
+    assert len(trips) == 1
+    assert trips[0]['attributes']['id'] == 'person_p_0'
+    assert trips[0]['parameters']['source_travel_time_s'] == 20
+    pd.testing.assert_frame_equal(activities, original)
+    activities.loc[1, 'geometry'] = None
+    with pytest.raises(ValueError, match='person p, activity 1, selected trip mode car'):
+        list(unrouted_demand._population_trips(context))
+
+
+@pytest.mark.parametrize('arrival', [-1, None, float('nan'), float('inf'), 5, 30])
+def test_invalid_reference_arrival_does_not_remove_or_retime_trip(tmp_path, arrival):
+    persons = pd.DataFrame({'person_id': ['p']})
+    activities = pd.DataFrame([
+        {'person_id': 'p', 'activity_index': 0, 'purpose': 'other', 'end_time': 10,
+         'geometry': Point(2600000, 1200000), 'following_mode': 'car'},
+        {'person_id': 'p', 'activity_index': 1, 'purpose': 'other', 'start_time': arrival,
+         'geometry': Point(2600100, 1200000)},
+    ])
+    context = Context(demand, tmp_path, {'sumo_modes': ['car']},
+        {'sumo.scenario.population.population': {'persons': persons, 'activities': activities}})
+    trips = list(unrouted_demand._population_trips(context))
+    assert len(trips) == 1
+    assert trips[0]['attributes']['id'] == 'person_p_0'
+    assert float(trips[0]['attributes']['depart']) == 10
+    assert trips[0]['parameters']['source_travel_time_s'] == (20 if arrival == 30 else None)
+    activities.loc[0, 'end_time'] = -1
+    with pytest.raises(ValueError, match='nonnegative seconds'):
+        list(unrouted_demand._population_trips(context))
 
 
 @pytest.mark.parametrize("all_as_car,expected_load", [(False, 1), (True, 3)])

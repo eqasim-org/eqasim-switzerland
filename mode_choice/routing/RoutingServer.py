@@ -142,8 +142,6 @@ class RoutingServer:
 
     @staticmethod
     def _csv_request(endpoint, input_csv_path, output_csv_path, mode, *, compute_cost=None):
-        if mode == "car_passenger":
-            mode = "car"
         if mode is not None and mode not in ROUTER_SERVER_MODES:
             raise ValueError(f"Unsupported routing mode: {mode}")
         RoutingServer.wait_until_ready(mode)

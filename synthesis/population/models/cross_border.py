@@ -90,11 +90,10 @@ def configure(context):
 
 def execute(context):
 
-    # Keep the agreed home-only population outside behavioural modelling.
+    # Older home-only residents bypass prediction; younger recovered residents
+    # receive the same crossing model as the ordinary population.
 
     from synthesis.population.models.non_private import execute_without_home_only
-    # Only the agreed older home-only group bypasses this model. Younger
-    # recovered residents receive the ordinary cross-border prediction too.
     return execute_without_home_only(context, "synthesis.population.models.education", _execute_model,
         {"is_crossing_the_border": 0, "destination_country_raw": pd.NA, "employment_status": 0})
 
@@ -539,6 +538,7 @@ def _iterative_spatial_calibration(pop_df: pd.DataFrame, proba: np.ndarray, od_c
 # ---------------------------------------------------------------------------
 
 def _execute_model(context):
+
     random_seed = int(context.config("random_seed"))
     c               = context.stage("data.constants")
     day_scenario    = context.config("specific_day_scenario")

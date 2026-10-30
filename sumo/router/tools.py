@@ -3,7 +3,7 @@
 from pathlib import Path
 
 import pyarrow as pa
-import pyarrow.parquet as pq
+import polars as pl
 
 from sumo.scenario.tools import elements, write_trips, filter_loading_trips
 
@@ -16,8 +16,9 @@ def write_trip_metrics(routes, output, expected_count):
         ("loaded_travel_time_s", pa.float64()), ("distance_m", pa.float64()),
         ("loads_network", pa.bool_()),
     ])
+    polars_schema = pl.from_arrow(pa.Table.from_batches([], schema=schema)).schema
     count, batch = 0, []
-    with pq.ParquetWriter(output, schema) as writer:
+    with pa.OSFile(str(output), "wb") as stream, pa.ipc.new_file(stream, schema) as writer:
         for vehicle in elements(routes, "vehicle"):
             route = vehicle.find("route")
             if route is None or route.get("cost") is None or route.get("routeLength") is None:
@@ -34,10 +35,10 @@ def write_trip_metrics(routes, output, expected_count):
             })
             count += 1
             if len(batch) >= 10000:
-                writer.write_table(pa.Table.from_pylist(batch, schema=schema))
+                writer.write_table(pl.DataFrame(batch, schema=polars_schema).to_arrow().cast(schema))
                 batch.clear()
         if batch:
-            writer.write_table(pa.Table.from_pylist(batch, schema=schema))
+            writer.write_table(pl.DataFrame(batch, schema=polars_schema).to_arrow().cast(schema))
     if count != expected_count:
         Path(output).unlink(missing_ok=True)
         raise ValueError(f"Expected {expected_count} trip metrics, received {count}")

@@ -49,7 +49,7 @@ vocational education.
 `<data_path>/education_enrolment/education_institution_links.csv` contains source institution type,
 BFS institution code, anonymous enterprise ID, name, evidence URL/note and
 `proposed` or `verified` status. EPFL, UNIL and ZHAW are spatially reviewed
-proposals (see `analysis/education_institution_matching.md`). Public campus
+proposals (see `doc/analysis/education_institution_matching.md`). Public campus
 addresses support the location interpretation but do
 not prove the identities of anonymous source enterprises; neither proposal is
 marked verified.

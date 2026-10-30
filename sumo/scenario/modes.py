@@ -53,3 +53,9 @@ def plan_segments(activities, modes):
             segments.append(activities[start:stop])
             start = None
     return segments
+
+
+def require_mode_choice(context):
+    context.config("enable_mode_choice", False)
+    if not context.config("enable_mode_choice"):
+        raise ValueError("SUMO requires enable_mode_choice: true so selected modes and reusable road routes are available")

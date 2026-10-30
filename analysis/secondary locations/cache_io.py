@@ -13,7 +13,7 @@ ROOT_STAGES = ('synthesis.population.spatial.locations',
 
 
 class RunCache:
-    def __init__(self, config_path):
+    def __init__(self, config_path, *, root=None):
         self.path = Path(config_path).resolve()
         self.yaml = yaml.safe_load(self.path.read_text())
         self.directory = Path(self.yaml['working_directory'])
@@ -21,7 +21,9 @@ class RunCache:
         roots = [key for stage in ROOT_STAGES for key in self.candidates(stage)]
         if not roots:
             raise FileNotFoundError(f'No completed spatial assignment in {self.directory}')
-        self.root = max(roots, key=lambda k: self.meta[k]['updated'])
+        if root is not None and root not in roots:
+            raise ValueError(f'Requested historical assignment is not available: {root}')
+        self.root = root if root is not None else max(roots, key=lambda k: self.meta[k]['updated'])
         self.closure, self.depth = set(), {}
         pending = deque([(self.root, 0)])
         while pending:
@@ -67,6 +69,16 @@ class RunCache:
         self.used[stage]['module_hash'] = self.meta[key].get('module_hash')
         if isinstance(obj, tuple) and all(isinstance(v, str) for v in obj):
             self.used[stage]['referenced_files'] = [dict(path=str(v), size_bytes=Path(v).stat().st_size, mtime_ns=Path(v).stat().st_mtime_ns) for v in obj if Path(v).is_file()]
+            if obj and stage == 'synthesis.population.spatial.secondary_nn.short_range_model':
+                history_path = Path(obj[0]).parent / 'loss_history.json'
+                if history_path.is_file():
+                    history = json.loads(history_path.read_text())
+                    fields = ['distance_loss_kind', 'distance_loss_weight', 'auxiliary_relative_distance_loss_weight',
+                              'relative_distance_underestimation_factor', 'validation_mode', 'validation_folds',
+                              'early_stopping_min_epochs', 'best_epoch', 'refit_epochs']
+                    settings = {key: history.get(key) for key in fields}
+                    settings['relative_distance_underestimation_factor'] = history.get('relative_distance_underestimation_factor', 1.)
+                    self.used[stage]['training_settings'] = settings
         if retain:
             self.keep[key] = obj
         return obj
@@ -75,9 +87,20 @@ class RunCache:
         # Completed-stage metadata wins over subsequently edited YAML settings.
         if key in self.settings:
             return self.settings[key]
-        candidates = self.candidates('synthesis.population.spatial.secondary_nn.locations')
-        if len(candidates) == 1 and key in self.meta[candidates[0]]['config']:
-            return self.meta[candidates[0]]['config'][key]
+        candidates = [candidate for candidate in self.candidates('synthesis.population.spatial.secondary_nn.locations')
+                      if candidate in self.closure]
+        if candidates:
+            nearest = min(self.depth[candidate] for candidate in candidates)
+            candidates = [candidate for candidate in candidates if self.depth[candidate] == nearest]
+            if len(candidates) == 1 and key in self.meta[candidates[0]]['config']:
+                return self.meta[candidates[0]]['config'][key]
+        # Historical assignments must not replay with a newly edited sampling policy.
+        if key == 'secondary_nn_short_sampling':
+            return 'neural'
+        if key == 'secondary_nn_short_distance_sigma_fraction':
+            return .1
+        if key == 'secondary_nn_short_distance_sigma_min_m':
+            return 25.
         return self.yaml['config'].get(key, default)
 
     @property
@@ -89,7 +112,8 @@ class RunCache:
     def provenance(self):
         keys = ['locations_algorithm', 'secondary_nn_use_target_distance', 'random_seed',
                 'input_downsampling', 'scaling_year', 'census', 'specific_day_scenario',
-                'secondary_nn_short_trip_threshold_m']
+                'secondary_nn_short_trip_threshold_m', 'secondary_nn_short_sampling',
+                'secondary_nn_short_distance_sigma_fraction', 'secondary_nn_short_distance_sigma_min_m']
         return dict(config=str(self.path), config_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest(),
                     cache=str(self.directory), root=self.root, method=self.kind,
                     recorded_settings={k: self.config(k) for k in keys}, artifacts=dict(self.used))

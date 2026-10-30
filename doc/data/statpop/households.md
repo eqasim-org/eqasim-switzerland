@@ -35,7 +35,7 @@ The existing minimum-household-age rule still applies: households whose oldest
 member is under 16 are excluded. Handling younger synthetic singletons requires
 a separate decision about technical representatives and household-model support.
 The agreed follow-up explicitly keeps recovered under-16s excluded. The residence
-scenario for retained people is documented in `analysis/non_private_residents.md`:
+scenario for retained people is documented in `doc/analysis/non_private_residents.md`:
 selected ages 16–38 receive a descriptive dorm-candidate flag and ages 39+ use an unmodelled home-only
 scenario. All younger recovered residents continue through ordinary modelling.
 Missing household records alone do not establish student or employment status.

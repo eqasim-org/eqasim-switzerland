@@ -51,7 +51,7 @@ FH and PH cannot be separated with this NOGA code alone. Institutional mapping i
 needed. The broader prefix `854` also includes post-secondary non-tertiary
 education (`8541`), so it should not become the new definition of tertiary study.
 
-The supplied [2023 BFS codebook](</Users/balacm/Downloads/do-d-40-se_user-code-2023 (2).xlsx>)
+The supplied [2023 BFS codebook](../../../../../../Users/balacm/Downloads/do-d-40-se_user-code-2023 (2).xlsx>)
 confirms the education code list on sheet 25:
 
 | Code | Education |

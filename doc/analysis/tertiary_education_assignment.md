@@ -54,7 +54,7 @@ for held-out-year evidence, the disable switch and conditional replay results.
 Daily attendance is determined later by the donor diary. No student is forced to
 attend every day. Matching uses the longer available work or education commute;
 reported MZ school coordinates are used even on days without an education visit.
-See `data/microcensus/commute.md` for missing-distance handling.
+See `doc/data/microcensus/commute.md` for missing-distance handling.
 
 ## Analysis and implementation validation
 

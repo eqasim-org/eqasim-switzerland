@@ -7,6 +7,7 @@ from mode_choice.routing.RoutingServer import RoutingServer
 from mode_choice.data.frames import join_variables
 from mode_choice.defaults import PT_ROUTING_COLUMNS
 from mode_choice.routing.results import complete_routes
+from mode_choice.routing.pt_components import read_components
 
 
 def configure(context):
@@ -19,6 +20,9 @@ def configure(context):
 
 
 def execute(context):
+
+    # Stop the shared server if routing or component preparation fails.
+
     try:
         return route_public_transport(context)
     except BaseException:
@@ -32,6 +36,8 @@ def route_public_transport(context):
                                              "pt_distance_km": "pt_total_distance_km"})
     if trips.is_empty():
         return trips.select("trip_id").with_columns([pl.lit(None, dtype=pl.Float64).alias(c) for c in PT_ROUTING_COLUMNS])
+    if context.config("route_population_once"):
+        return join_variables(totals, read_components(Path(context.path()) / "pt_routes.csv", trips))
     # Until MultiModeRouterServer exposes PT components, the detailed router
     # remains necessary. Total travel time is not in-vehicle travel time.
     directory = Path(context.path())

@@ -48,16 +48,18 @@ def execute(context):
     return path
 
 
-def adapt_for_routing(context, config_path):
+def adapt_for_routing(context, config_path, *, local=False):
     """Set local pricing files and PT parameters before routing any trips."""
-    tools.add_ptZones_module(config_path, context.path())
+    tools.add_ptZones_module(config_path, context.path(), local=local)
+    if local:
+        tools.change_params(config_path, tools.mode_choice_parameter_paths(context, local=True), create=True)
     tools.adjust_pt_routing_parameters(
         config_path, context.stage("calibration.pt_routing.pt_routing_parameters"))
 
 
-def adapt_for_simulation(context, config_path):
+def adapt_for_simulation(context, config_path, *, local=False):
     """Finish a prepared scenario's config; run only needs to launch Java."""
-    adapt_for_routing(context, config_path)
-    tools.change_params(config_path, tools.simulation_parameters(context), create=True)
+    adapt_for_routing(context, config_path, local=local)
+    tools.change_params(config_path, tools.simulation_parameters(context, local=local), create=True)
 
     return str(Path(config_path).resolve())

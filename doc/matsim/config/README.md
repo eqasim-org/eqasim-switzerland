@@ -42,6 +42,26 @@ launch switches because the runners require them.
 PT2MATSim converter and mapper templates are different config formats and remain
 in their respective stages; they use the same shared XML helpers.
 
+## Portable prepared scenarios
+
+Preparation uses `adapt_for_routing(..., local=True)` before population routing,
+then `adapt_for_simulation(..., local=True)` once routing and validation finish.
+The `local` option uses filenames beside the config for pricing and DMC inputs,
+and the configured prefix for cantonal mode shares. Simulation settings copy
+count targets, travel-time targets and special-region files into
+`network_calibration_files/` once and reference them with relative paths.
+
+Moving the whole prepared folder preserves these references. Optional beta
+calibration also needs the pipeline cache: its `eqasimCachePath` is relative to
+the prepared directory in local mode, so retain the same relative cache layout.
+The default `local=False` behavior remains available for other consumers.
+The pipeline resolves legacy Java calibration paths in launch arguments when the
+simulation runs from a different directory; the prepared XML remains unchanged.
+For a direct Java invocation, run from the prepared scenario directory.
+
+Shared XML writes enable pretty printing and normalize indentation to four
+spaces, including after editing compact XML. Comments and the DOCTYPE survive.
+
 ## Editing
 
 All XML editing helpers and simulation configuration helpers live in

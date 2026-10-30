@@ -8,7 +8,7 @@ annual versus daily cohort definitions and SS OD assignment.
 
 Students under 15 use existing school-age pools and independent weighted MZ
 reference distances. Domestic secondary students aged 15+ retain programme codes
-2–8 and the documented NOGA pools in `synthesis/population/spatial/primary/education/secondary.md`.
+2–8 and the documented NOGA pools in `doc/synthesis/population/spatial/primary/education/secondary.md`.
 A separate pooled secondary SS matrix chooses a compatible destination zone.
 
 All tertiary programmes form one model outcome and one SS OD cohort.

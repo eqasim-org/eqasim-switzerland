@@ -120,10 +120,10 @@ def execute(context):
     return {**RUN_DEFAULTS, **CALIBRATION_DEFAULTS}
 
 ROUTER_SERVER_CLASS = "org.eqasim.switzerland.ch_cmdp.utils.routing.MultiModeRouterServer"
-ROUTER_SERVER_MODES = ("car", "pt", "walk", "bike")
+ROUTER_SERVER_MODES = ("car", "truck", "car_passenger", "pt", "walk", "bike")
 SERVER_DEFAULTS = {
     "mode_choice_server_startup_timeout": 1800.0,
-    "mode_choice_server_request_timeout": 7200.0,
+    "mode_choice_server_request_timeout": 86400.0,  # Full-population CSV routing can take hours.
     "mode_choice_server_shutdown_timeout": 30.0,
     "mode_choice_server_poll_interval": 0.5,
     "mode_choice_server_chunk_size": 65536,

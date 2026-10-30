@@ -14,7 +14,7 @@ from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import LocalChoiceWrapper
 
-from .tools import training_mobility, enrich_candidate_tensor, attach_candidate_features
+from .tools import model_validation_options, training_mobility, enrich_candidate_tensor, attach_candidate_features
 from .training_split import expert_persons
 
 logger = logging.getLogger("synpp: local_model")
@@ -28,6 +28,9 @@ COUNT_ZOOM_AREAS = {
 
 def configure(context):
     context.config("secondary_nn_use_target_distance", True)
+    context.config("secondary_nn_model_validation_folds", 5)
+    context.config("secondary_nn_model_min_epochs", 20)
+    context.config("secondary_nn_model_validation_strategy", "cross_validation")
     context.stage("data.spatial.ovgk")
     context.config("secondary_nn_distance_loss_kind", "crps_energy")
     context.config("secondary_nn_distribution_loss_weight", 0.1)
@@ -55,7 +58,7 @@ def configure(context):
     context.config("local_model_learning_rate", 4e-3)
     context.config("local_model_dropout_rate", 0.30)
     context.config("local_model_weight_decay", 1e-2)
-    context.config("local_model_validation_folds", 5)
+    context.config("local_model_validation_folds", None)
     context.config("local_model_validation_every", 2)
     context.config("local_model_early_stopping_patience", 5)
     context.config("local_model_early_stopping_min_delta", 1e-3)
@@ -70,7 +73,7 @@ def execute(context):
     logger.info("Training local model (neural choice) for level2-within-level1 secondary location choice...")
 
     overwrite_model = context.config("overwrite_local_model_if_exists")
-    model_path = os.path.join(context.working_directory, MODEL_NAME)
+    model_path = os.path.join(context.path(), MODEL_NAME)
     if os.path.exists(model_path) and not overwrite_model:
         logger.info("Model %s already exists.", MODEL_NAME)
         return (model_path,)
@@ -329,8 +332,8 @@ def execute(context):
         weight_decay=float(context.config("local_model_weight_decay")),
         num_threads=int(context.config("threads")),
         path=context.path(),
-        n_val_folds=int(context.config("local_model_validation_folds")),
-        val_every=int(context.config("local_model_validation_every")),
+        **model_validation_options(context, folds=context.config("local_model_validation_folds"),
+                                   val_every=context.config("local_model_validation_every")),
         validation_groups=df["person_id"].to_numpy(),
         rotate_validation=False,
         early_stopping_patience=int(context.config("local_model_early_stopping_patience")),
@@ -349,7 +352,6 @@ def execute(context):
         candidate_xy=np.stack([cand_x, cand_y], axis=-1) if loss_kind == "crps_energy" else None,
         observed_xy=df[["destination_x", "destination_y"]].to_numpy(dtype=np.float32, copy=True)
             if loss_kind == "crps_energy" else None,
-        refit_full=not bool(context.config("secondary_nn_use_target_distance")),
         distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")))
 
     ########## Building wrapper and saving model ##########

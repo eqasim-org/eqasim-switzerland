@@ -2,6 +2,19 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F
+
+
+def relative_mean_distance_loss(probabilities, candidate_distances, observed_distance, floor_m=100.0,
+                                underestimation_factor=1.0):
+    """Relative Huber loss on mean radius, optionally emphasizing underestimation."""
+    if not np.isfinite(underestimation_factor) or underestimation_factor < 1:
+        raise ValueError("Relative-distance underestimation factor must be finite and at least one")
+    expected = (probabilities * candidate_distances).sum(dim=-1)
+    scale = (observed_distance + floor_m).clamp_min(floor_m)
+    error = (expected - observed_distance) / scale
+    penalty = F.smooth_l1_loss(error, torch.zeros_like(error), reduction="none")
+    return penalty * torch.where(error < 0, underestimation_factor, 1.)
 
 
 def discrete_crps(probabilities, values, observation):
