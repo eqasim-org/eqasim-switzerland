@@ -4,14 +4,15 @@ from typing import Optional
 
 @dataclass
 class Config:
-    gtfs_zip: str
+    # GTFS the simulated schedule was built from: the output folder of data.gtfs.cleaned (or a zip). Its stops are the
+    # reference stops, and the stop order of the routes missing from the transit schedule is read there.
+    gtfs_path: str
     perimeter_shapefile: str
     tpg_data_path: str
     matsim_output_folder: str
-    output_path: str
 
-    # Folder holding tpg{year}_agg_workday_*.csv files
-    tpg_processed_counts_path: str
+    # Folder of the processed counts: tpg{year}_agg_workday_*.csv (TPG) or tl2024_agg_workday_*.csv (TL)
+    processed_counts_path: str
 
     # MATSim population sample rate
     input_downsampling: float = 1.0
@@ -44,7 +45,3 @@ class Config:
     # know, e.g. the French stops of the Leman Express, are matched to GTFS stops by name and
     # position or added, so that their passengers are not dropped.
     use_schedule_stops: bool = True
-
-    # GTFS (zip) whose trip ids are the route ids of the simulation, e.g. the merged Swiss and French feed. The stop order
-    # of the routes of the counts that are missing from the transit schedule is read there.
-    route_gtfs_zip: Optional[str] = None

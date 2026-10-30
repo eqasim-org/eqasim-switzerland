@@ -10,71 +10,36 @@ import numpy as np
 import pandas as pd
 from shapely import Point
 
-REQUIRED_SLOTS = [
-    "agency", "stops", "routes", "trips", "stop_times"
-]
+def open_gtfs_file(gtfs_path, name):
+    """Opens the file name (e.g. "stops.txt") of a GTFS: a folder (the output of data.gtfs.cleaned) or a zip."""
+    if os.path.isdir(gtfs_path):
+        return open(os.path.join(gtfs_path, name), "rb")
 
-OPTIONAL_SLOTS = [
-    "calendar", "calendar_dates", "fare_attributes", "fare_rules",
-    "shapes", "frequencies", "transfers", "pathways", "levels",
-    "feed_info", "translations", "attributions"
-]
+    zf = ZipFile(gtfs_path)
+    member = next((n for n in zf.namelist() if n == name or n.endswith("/" + name)), None)
+    if member is None:
+        raise RuntimeError(f"No {name} in the GTFS {gtfs_path}")
+    return zf.open(member)
 
 
-def read_gtfs(gtfs_path):
-    feed = {}
+def read_gtfs_stops(gtfs_path):
+    """Stops of a GTFS (folder or zip), in EPSG:2056."""
+    print(f"Loading the GTFS stops of {gtfs_path} ...")
+    with open_gtfs_file(gtfs_path, "stops.txt") as f:
+        df_stops = pd.read_csv(f, skipinitialspace = True, dtype = {"stop_id": str, "parent_station": str})
 
-    with ZipFile(gtfs_path, "r") as zf:
-        available_slots = zf.namelist()
-        prefix = None
+    if "parent_station" not in df_stops:
+        print("Missing parent_station in stops, setting to NaN")
+        df_stops["parent_station"] = np.nan
+    if "location_type" not in df_stops:
+        df_stops["location_type"] = 0
 
-        if "agency.txt" in available_slots:
-            prefix = ""
-        else:
-            for slot in available_slots:
-                if slot.endswith("agency.txt"):
-                    prefix = slot.replace("agency.txt", "")
-                    print(f"GTFS files seem to be located in: {prefix}")
-                    break
+    df_stops["location_type"]  = df_stops["location_type"].fillna(0).astype(int)
+    df_stops["parent_station"] = df_stops["parent_station"].fillna("").astype(str)
 
-            if prefix is None:
-                raise RuntimeError("No GTFS data found in archive")
-
-        for slot in REQUIRED_SLOTS:
-            if not "%s%s.txt" % (prefix, slot) in available_slots:
-                raise RuntimeError("Missing GTFS information: %s" % slot)
-
-        if not "%scalendar.txt" % prefix in available_slots and not "%scalendar_dates.txt" % prefix in available_slots:
-            raise RuntimeError("At least calendar.txt or calendar_dates.txt must be specified.")
-
-        print(f"Loading GTFS data from {gtfs_path} ...")
-
-        for slot in REQUIRED_SLOTS + OPTIONAL_SLOTS:
-            if "%s%s.txt" % (prefix, slot) in available_slots:
-                print(f"  Loading {slot}.txt ...")
-
-                with zf.open("%s%s.txt" % (prefix, slot)) as f:
-                    feed[slot] = pd.read_csv(f, skipinitialspace = True)
-            else:
-                print(f"  Not loading {slot}.txt")
-
-    if "stops" in feed:
-        df_stops = feed["stops"]
-
-        if "parent_station" not in df_stops:
-            print("Missing parent_station in stops, setting to NaN")
-            df_stops["parent_station"] = np.nan
-
-        df_stops["location_type"]  = df_stops["location_type"].fillna(0).astype(int)
-        df_stops["parent_station"] = df_stops["parent_station"].fillna("").astype(str)
-
-        gtfs_geometry = [Point(xy) for xy in zip(df_stops["stop_lon"], df_stops["stop_lat"])]
-        gdf = gpd.GeoDataFrame(df_stops, geometry = gtfs_geometry, crs = "EPSG:4326")
-        gdf = gdf.to_crs("EPSG:2056")
-
-        return gdf
-
-    raise RuntimeError("GTFS archive did not contain stops.txt")
+    gtfs_geometry = [Point(xy) for xy in zip(df_stops["stop_lon"], df_stops["stop_lat"])]
+    gdf = gpd.GeoDataFrame(df_stops, geometry = gtfs_geometry, crs = "EPSG:4326")
+    return gdf.to_crs("EPSG:2056")
 
 
 def add_missing_base_stops(gtfs_stops):
@@ -178,18 +143,17 @@ def read_schedule_route_stops(schedule_path):
     return routes
 
 
-def read_gtfs_route_stops(gtfs_zip, route_ids, chunk_size = 5_000_000):
+def read_gtfs_route_stops(gtfs_path, route_ids, chunk_size = 5_000_000):
     """{route id: [stop ids in the order of the trip]} for the GTFS trips whose trip_id is one of route_ids (the
     pt2matsim route ids are the trip ids of the GTFS the schedule was built from)."""
     route_ids = set(route_ids)
     parts = []
 
-    with ZipFile(gtfs_zip) as zf:
-        with zf.open("stop_times.txt") as f:
-            for chunk in pd.read_csv(f, usecols = ["trip_id", "stop_id", "stop_sequence"], dtype = str, chunksize = chunk_size):
-                chunk = chunk[chunk["trip_id"].isin(route_ids)]
-                if len(chunk):
-                    parts.append(chunk)
+    with open_gtfs_file(gtfs_path, "stop_times.txt") as f:
+        for chunk in pd.read_csv(f, usecols = ["trip_id", "stop_id", "stop_sequence"], dtype = str, chunksize = chunk_size):
+            chunk = chunk[chunk["trip_id"].isin(route_ids)]
+            if len(chunk):
+                parts.append(chunk)
 
     if not parts:
         return {}

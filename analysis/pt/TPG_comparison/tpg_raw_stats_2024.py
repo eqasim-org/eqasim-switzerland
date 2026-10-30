@@ -140,7 +140,7 @@ def main():
     parser = argparse.ArgumentParser(description = __doc__, formatter_class = argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--raw-counts-path", required = True, help = "Path to TPG's raw 2024 daily passenger counts (data.txt)")
     parser.add_argument("--tpg-data-path", required = True, help = "Path to the Geneva_passenger_counts/TPG folder (crosswalk files in TPG_stops_info)")
-    parser.add_argument("--out", required = True, help = "Where to write the rebuilt tpg2024_agg_workday_*.csv - drop it into config.Config.tpg_processed_counts_path")
+    parser.add_argument("--out", required = True, help = "Where to write the rebuilt tpg2024_agg_workday_*.csv - drop it into config.Config.processed_counts_path")
     args = parser.parse_args()
 
     result = aggregate_workday_stats(args.raw_counts_path, args.tpg_data_path)

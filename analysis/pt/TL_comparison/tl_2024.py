@@ -2,11 +2,15 @@ import datetime
 import glob
 import os
 import re
+import sys
 import unicodedata
-import zipfile
 from concurrent.futures import ProcessPoolExecutor
 
 import pandas as pd
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "TPG_comparison"))
+
+import gtfs_utils # pyright: ignore[reportMissingImports]
 
 # All the workdays, school holidays included (public holidays are DI, Saturdays SA). Most lines have SU for the school
 # term and SHU/VHU/VU for the holidays; the LEB (line 77) has LJ (Monday to Thursday) and VE (Friday), and Vlj/Vlv/Vve
@@ -21,6 +25,31 @@ _DIRECTION_LETTER = {"A": "H", "R": "R"}
 _COUNT_COLUMNS = [("monte", "boardings"), ("descendu", "alightings")]
 _STATS = ["min", "max", "mean", "std", "q10", "q20", "q50", "q80", "q90"]
 _QUANTILES = {"q10": 0.1, "q20": 0.2, "q50": 0.5, "q80": 0.8, "q90": 0.9}
+
+
+def configure(context):
+    # TL stops are matched to the stops of the GTFS of the simulation
+    context.stage("data.gtfs.cleaned")
+    context.config("data_path")
+
+    context.config("analysis.pt.tl_raw_counts_path",       default = "Lausanne_passenger_counts/tl data 2024/raw")
+    context.config("analysis.pt.tl_processed_counts_path", default = "Lausanne_passenger_counts/tl data 2024/processed")
+    context.config("analysis.pt.tl_workers",               default = 8)
+
+def execute(context):
+    data_path = context.config("data_path")
+    out_dir   = os.path.join(data_path, context.config("analysis.pt.tl_processed_counts_path"))
+
+    result, directions, crosswalk = aggregate_workday_stats(
+        os.path.join(data_path, context.config("analysis.pt.tl_raw_counts_path")),
+        "%s/output" % context.path("data.gtfs.cleaned"),
+        context.config("analysis.pt.tl_workers"),
+    )
+
+    base = write_outputs(result, directions, crosswalk, out_dir)
+    print(f"Wrote {base}.csv and its companion files")
+
+    return dict(done = True, path = out_dir)
 
 
 def _normalize_name(name):
@@ -141,11 +170,9 @@ def fill_missing_days(per_day, line_dates, count_columns):
     return filled
 
 
-def build_stop_crosswalk(gtfs_zip, tl_stops):
-    with zipfile.ZipFile(gtfs_zip) as zf:
-        slot = next(n for n in zf.namelist() if n.endswith("stops.txt"))
-        with zf.open(slot) as f:
-            gtfs = pd.read_csv(f, dtype = {"stop_id": str, "stop_name": str}, usecols = ["stop_id", "stop_name", "stop_lat", "stop_lon"])
+def build_stop_crosswalk(gtfs_path, tl_stops):
+    with gtfs_utils.open_gtfs_file(gtfs_path, "stops.txt") as f:
+        gtfs = pd.read_csv(f, dtype = {"stop_id": str, "stop_name": str}, usecols = ["stop_id", "stop_name", "stop_lat", "stop_lon"])
 
     gtfs["gtfs_code"] = gtfs["stop_id"].str.replace("^Parent", "", regex = True).str.split(":").str[0]
     gtfs["name"]      = gtfs["stop_name"].map(_normalize_name)
@@ -183,12 +210,12 @@ def build_stop_crosswalk(gtfs_zip, tl_stops):
     return stops[["code_arret", "libelle_arret", "gtfs_code", "match"]]
 
 
-def aggregate_workday_stats(results_dir, gtfs_zip, workers = 8):
+def aggregate_workday_stats(results_dir, gtfs_path, workers = 8):
     daily, runs = read_daily_counts(results_dir, workers)
 
     print("Mapping stops to GTFS ids...")
     stops = daily[["code_arret", "libelle_arret"]].drop_duplicates()
-    crosswalk = build_stop_crosswalk(gtfs_zip, stops)
+    crosswalk = build_stop_crosswalk(gtfs_path, stops)
 
     movements = daily.groupby("code_arret")[["monte", "descendu"]].sum().sum(axis = 1)
     crosswalk["movements"] = crosswalk["code_arret"].map(movements)
@@ -252,26 +279,5 @@ def write_outputs(result, directions, crosswalk, out_dir):
     return base
 
 
-def configure(context):
-    context.config("data_path")
-
-    context.config("analysis.pt.tl_path",   default = "Lausanne_passenger_counts/tl data 2024/raw")
-    context.config("analysis.pt.tl_processed_path", default = "Lausanne_passenger_counts/tl data 2024/processed")
-    context.config("analysis.pt.tl_gtfs_zip",       default = "gtfs/gtfs_fp2024_2024-11-11.zip")
-    context.config("analysis.pt.tl_workers",        default = 8)
 
 
-def execute(context):
-    data_path = context.config("data_path")
-    out_dir   = os.path.join(data_path, context.config("analysis.pt.tl_processed_path"))
-
-    result, directions, crosswalk = aggregate_workday_stats(
-        os.path.join(data_path, context.config("analysis.pt.tl_path")),
-        os.path.join(data_path, context.config("analysis.pt.tl_gtfs_zip")),
-        context.config("analysis.pt.tl_workers"),
-    )
-
-    base = write_outputs(result, directions, crosswalk, out_dir)
-    print(f"Wrote {base}.csv and its companion files")
-
-    return dict(done = True, path = out_dir)

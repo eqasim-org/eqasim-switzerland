@@ -1,5 +1,6 @@
 import glob
 import os
+import re
 import pandas as pd
 import comparison
 import gtfs_utils
@@ -12,9 +13,13 @@ import plotting
 import tpg_data
 
 
-def _resolve_tpg_stats_path(processed_counts_dir, year):
-    pattern    = os.path.join(processed_counts_dir, f"tpg{year}_agg_workday_*.csv")
-    candidates = sorted(glob.glob(pattern))
+def _resolve_tpg_stats_path(processed_counts_dir, year, suffix = ""):
+    """Latest tpg<year>_agg_workday_<date><suffix>.csv (suffix "_by_direction": the counts per direction)"""
+    pattern    = os.path.join(processed_counts_dir, f"tpg{year}_agg_workday_*{suffix}.csv")
+    candidates = sorted(
+        path for path in glob.glob(pattern)
+        if re.fullmatch(rf"tpg{year}_agg_workday_\d{{8}}{suffix}\.csv", os.path.basename(path))
+    )
 
     if not candidates:
         raise FileNotFoundError(
@@ -121,7 +126,7 @@ def _build_tpg_mofr(data, year):
     counts_ge["boardings"]  = counts_ge["boardings"]  / cfg.input_downsampling
     counts_ge["alightings"] = counts_ge["alightings"] / cfg.input_downsampling
 
-    tpg_stats_path = _resolve_tpg_stats_path(cfg.tpg_processed_counts_path, year)
+    tpg_stats_path = _resolve_tpg_stats_path(cfg.processed_counts_path, year)
     print(f"Loading {year} TPG stats from {tpg_stats_path}")
     tpg_mofr = pd.read_csv(tpg_stats_path)
     tpg_mofr["gtfs_code"] = tpg_mofr["gtfs_code"].astype(str)
@@ -185,13 +190,13 @@ def run_stop_line_comparison(data, output_dir, year, stop = "Genève, gare Corna
     plotting.plot_comparison_for_stop_and_line(
         tpg_mofr, 
         option = "boardings", line = line, stop = stop,
-        output_path = f"{output_dir}/comparison_{stop}_{line}.pdf",
+        output_path = f"{output_dir}/tpg_comparison_{stop}_{line}.pdf",
     )
 
     plotting.plot_heatmap_for_line(
         tpg_mofr, 
         option = "boardings", line = line,
-        output_path = f"{output_dir}/heatmap_{line}.pdf",
+        output_path = f"{output_dir}/tpg_heatmap_{line}.pdf",
     )
 
     return tpg_mofr
@@ -225,7 +230,7 @@ def run_stop_all_lines(data, output_dir, stop = "Annemasse"):
     os.makedirs(output_dir, exist_ok = True)
     slug = gtfs_utils._normalize_stop_name(stop)
 
-    counts.to_csv(f"{output_dir}/stop_all_lines_{slug}.csv", index = False)
+    counts.to_csv(f"{output_dir}/tpg_stop_all_lines_{slug}.csv", index = False)
     lemanis_df = None
     if cfg.include_lemanis:
         stop_bases = set(selected["stop_id"].astype(str).str.split(":").str[0])
@@ -239,16 +244,16 @@ def run_stop_all_lines(data, output_dir, stop = "Annemasse"):
                                                         "boardings_raw_mean": "boardings",
                                                         "alightings_raw_mean": "alightings"})
             lemanis_df = lemanis_df[["line_name", "period", "boardings", "alightings"]]
-            lemanis_df.to_csv(f"{output_dir}/stop_all_lines_{slug}_lemanis.csv", index = False)
+            lemanis_df.to_csv(f"{output_dir}/tpg_stop_all_lines_{slug}_lemanis.csv", index = False)
             print(f"Lemanis comparison available for line(s): {sorted(lemanis_df['line_name'].unique())}")
 
-    plotting.plot_stop_all_lines(counts, ", ".join(stop_names), f"{output_dir}/stop_all_lines_{slug}.png",
+    plotting.plot_stop_all_lines(counts, ", ".join(stop_names), f"{output_dir}/tpg_stop_all_lines_{slug}.png",
                                  lemanis_df = lemanis_df)
 
     return counts
 
 
-def run_sbb_stations(data, output_dir, year = 2024, day = "workday"):
+def run_sbb_stations(data, output_dir, year = 2024, day = "workday", prefix = "tpg"):
     """MATSim passenger movements (boardings + alightings, all lines) of the train stations of the
     perimeter against the SBB passenger frequency of the stations."""
     import geopandas as gpd
@@ -276,7 +281,7 @@ def run_sbb_stations(data, output_dir, year = 2024, day = "workday"):
           f"{(stations['matsim_total'] > 0).sum()} with MATSim passengers")
 
     os.makedirs(output_dir, exist_ok = True)
-    stations.to_csv(f"{output_dir}/sbb_station_counts.csv", index = False)
+    stations.to_csv(f"{output_dir}/{prefix}_sbb_station_counts.csv", index = False)
 
     return stations
 
@@ -300,10 +305,10 @@ def run_lemanis_border_crossing(data, output_dir, day = "workday"):
     print(result.to_string(index = False))
 
     os.makedirs(output_dir, exist_ok = True)
-    result.to_csv(f"{output_dir}/lemanis_{cfg.lemanis_year}_border_crossing_load.csv", index = False)
+    result.to_csv(f"{output_dir}/tpg_lemanis_{cfg.lemanis_year}_border_crossing_load.csv", index = False)
     plotting.plot_border_crossing_loads(
         result, f"Leman Express load at the border, {day} (Lemanis {cfg.lemanis_year} vs MATSim)",
-        f"{output_dir}/lemanis_{cfg.lemanis_year}_border_crossing_load.png",
+        f"{output_dir}/tpg_lemanis_{cfg.lemanis_year}_border_crossing_load.png",
     )
 
     return result
@@ -319,11 +324,15 @@ def run_global_comparison(data, output_dir, year, border_crossing_df = None, sbb
     full_day_df      = comparison.build_full_day_table(stop_hour_df)
     global_hourly_df = comparison.build_global_hourly_table(stop_hour_df)
 
-    plotting.plot_global_hourly_comparison(global_hourly_df, f"{output_dir}/global_hourly_comparison.png")
+    plotting.plot_global_hourly_comparison(global_hourly_df, f"{output_dir}/tpg_global_hourly_comparison.png")
 
     hour_range = (cfg.map_hour_start, cfg.map_hour_end)
     windowed_stop_hour_df = stop_hour_df[stop_hour_df["hour"].between(*hour_range)]
     windowed_full_day_df  = comparison.build_full_day_table(windowed_stop_hour_df)
+
+    # same tables as the TL comparison
+    stop_hour_df.to_csv(f"{output_dir}/tpg_stop_hour_comparison.csv", index = False)
+    windowed_full_day_df.to_csv(f"{output_dir}/tpg_stop_full_day_comparison.csv", index = False)
 
     lemanis_stop_period_df   = None
     lemanis_stop_full_day_df = None
@@ -333,11 +342,11 @@ def run_global_comparison(data, output_dir, year, border_crossing_df = None, sbb
         lemanis_stop_full_day_df = comparison.build_lemanis_stop_full_day_table(lemanis_stop_period_df)
 
     interactive_map.build_hourly_map(
-        stop_hour_df, f"{output_dir}/pt_stop_map_by_hour.html",
+        stop_hour_df, f"{output_dir}/tpg_stop_map_by_hour.html",
         perimeter_shapefile = cfg.perimeter_shapefile, hour_range = hour_range,
     )
     interactive_map.build_full_day_map(
-        windowed_stop_hour_df, windowed_full_day_df, f"{output_dir}/pt_stop_map_6am_10pm.html",
+        windowed_stop_hour_df, windowed_full_day_df, f"{output_dir}/tpg_stop_map_{cfg.map_hour_start}_{cfg.map_hour_end}.html",
         perimeter_shapefile      = cfg.perimeter_shapefile,
         lemanis_stop_period_df   = lemanis_stop_period_df,
         lemanis_stop_full_day_df = lemanis_stop_full_day_df,
@@ -363,7 +372,7 @@ def run_global_comparison(data, output_dir, year, border_crossing_df = None, sbb
         line_geometries_df    = pd.concat([line_geometries_df, lemanis_geometries_df], ignore_index = True)
 
     interactive_map.build_line_map(
-        windowed_line_hour_df, line_base_df, line_geometries_df, f"{output_dir}/pt_line_map_6am_10pm.html",
+        windowed_line_hour_df, line_base_df, line_geometries_df, f"{output_dir}/tpg_line_map_{cfg.map_hour_start}_{cfg.map_hour_end}.html",
         perimeter_shapefile = cfg.perimeter_shapefile,
         lemanis_line_period_df = lemanis_line_period_df,
     )

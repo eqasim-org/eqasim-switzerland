@@ -27,7 +27,7 @@ class PtData:
 
     @cached_property
     def _stops_and_alias(self):
-        gtfs_stops = gtfs_utils.add_missing_base_stops(gtfs_utils.read_gtfs(self.cfg.gtfs_zip))
+        gtfs_stops = gtfs_utils.add_missing_base_stops(gtfs_utils.read_gtfs_stops(self.cfg.gtfs_path))
         stop_alias = {}
 
         if self.cfg.use_schedule_stops:
@@ -115,17 +115,16 @@ class PtData:
         routes = gtfs_utils.read_schedule_route_stops(self.require_schedule_path())
 
         # The schedule of the output folder can be older than the simulation: the routes of the counts that it does
-        # not have are read from the GTFS (cfg.route_gtfs_zip), where their route id is a trip id
-        if self.cfg.route_gtfs_zip:
-            counts = self.matsim_counts[["line_id", "route_id"]].drop_duplicates()
-            missing = {route_id: line_id for line_id, route_id in zip(counts["line_id"], counts["route_id"])
-                       if (line_id, route_id) not in routes}
+        # not have are read from the GTFS (cfg.gtfs_path), where their route id is a trip id
+        counts = self.matsim_counts[["line_id", "route_id"]].drop_duplicates()
+        missing = {route_id: line_id for line_id, route_id in zip(counts["line_id"], counts["route_id"])
+                   if (line_id, route_id) not in routes}
 
-            if missing:
-                print(f"{len(missing)} routes of the counts are not in the transit schedule: reading their stops from {self.cfg.route_gtfs_zip}")
-                found = gtfs_utils.read_gtfs_route_stops(self.cfg.route_gtfs_zip, missing)
-                routes.update({(missing[route_id], route_id): stops for route_id, stops in found.items()})
-                print(f"  -> {len(found)} found in the GTFS, {len(missing) - len(found)} still unknown")
+        if missing:
+            print(f"{len(missing)} routes of the counts are not in the transit schedule: reading their stops from {self.cfg.gtfs_path}")
+            found = gtfs_utils.read_gtfs_route_stops(self.cfg.gtfs_path, missing)
+            routes.update({(missing[route_id], route_id): stops for route_id, stops in found.items()})
+            print(f"  -> {len(found)} found in the GTFS, {len(missing) - len(found)} still unknown")
 
         return routes
 
