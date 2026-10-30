@@ -34,6 +34,9 @@ def execute(context):
             "--config:dsim.threads", str(context.config("threads"))
         ])
 
+    # Keep the explicit replanning limit even when preparation came from cache.
+    arguments.extend(["--config:global.numberOfThreads", str(context.config("threads"))])
+
     # Run the simulation with the prepared config. The main class is chosen based on the engine.
     main_class= "org.eqasim.switzerland.ch_cmdp.RunVDFSimulation" if vdf else "org.eqasim.switzerland.ch_cmdp.RunSimulation"
     eqasim.run(context, main_class, ["--config-path", config_path, *arguments])

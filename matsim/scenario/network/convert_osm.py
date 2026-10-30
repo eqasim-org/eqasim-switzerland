@@ -25,6 +25,8 @@ def configure(context):
     context.config("assign_elevations", True)
     context.config("simplify_network_in_eqasim", True)
     context.config("only_important_roads_outside_border", True)
+    # Register the buffer on the stage so Synpp invalidates older 2 km networks.
+    context.config("minor_road_border_buffer", 5000.0)
     # only if simplify network is true
     context.config("remove_network_loops", True)
     context.config("remove_replicate_links", False)
