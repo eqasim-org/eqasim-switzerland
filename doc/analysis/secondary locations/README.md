@@ -402,3 +402,31 @@ when both runs succeed. The completed NN assignment records
 assignments default to their historical policy. The report notes that the soft
 accessibility rule is an imposed prediction rule, rather than an independently
 learned OVGK effect.
+
+## RDA survey replay and city-centre visitation
+
+The report now includes RDA alongside both NNs in the survey-map row. It reuses
+`locations_rda.process` with its calibrated mode/travel-time distance sampler,
+employee-weighted destination discretization, car-plus-licence PT mask, and
+configured detour objective. Each survey trip is a single-leg tail anchored at
+its observed origin. The reached activity keeps its observed purpose and duration;
+its observed destination is never supplied to the solver. This is a conditional
+single-leg diagnostic, distinct from full-chain population assignment with future
+primary anchors. RDA convergence is recorded in `replay_predictions.parquet`.
+The map's second row includes the full survey reference and all three synthetic
+populations. All eight panels share grid, extent and normalization.
+
+Two additional figures compare city-centre visitation for Geneva and Zürich:
+one for full synthetic populations versus the survey, and one for the common
+survey replay cohort. For all secondary purposes, shopping, and leisure, each
+curve is the weighted share of people with at least one eligible visit inside a
+catchment of 0–5 km around the configured city centre. People count once per
+purpose and draw; repeated visits do not increase their contribution. For replay,
+these person-level indicators are averaged over draws. Eligibility uses the same
+city-origin window in every method; destinations outside the map stay in the
+denominator. Centres use the original configured coordinates, without grid snapping.
+Dashed circles on maps and dotted figure lines mark a 2 km reference radius.
+`tables/city_centre_visitation.csv` exports the full radius sensitivity, and
+`findings.md` states the measured 2 km contrasts, including negative contrasts.
+These descriptive single-run figures carry no between-seed uncertainty intervals.
+The ordinary `generate_report` command produces all of these additions.

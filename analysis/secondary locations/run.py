@@ -86,6 +86,9 @@ def replay_models(caches, settings, output, prepared):
     provenance = {}
     for cache in caches:
         if cache.kind == 'rda':
+            from rda_replay import replay_rda
+            predictions.append(replay_rda(cache,cohort,inputs,settings['survey_draws'],settings['seed']))
+            provenance[cache.kind] = cache.provenance()
             continue
         frame, detour = replay(cache, cohort, inputs, settings['survey_draws'], settings['seed'], settings['threads'], detour)
         predictions.append(frame)
@@ -100,6 +103,7 @@ def replay_models(caches, settings, output, prepared):
         max_replay_people=settings['max_replay_people'], selected_people=int(cohort.person_id.nunique()),
         selected_trips=len(cohort), regions=settings['regions'], runs=provenance,
         common_survey_inputs=reference.provenance(), common_input_sha256=input_sha256,
+        rda_replay_design='Production RDA single-leg tails anchored at observed origins, observed mode/travel time, calibrated distance sampler, car/licence PT mask and configured detour objective; no future primary anchors or observed destination inputs',
         paired_controls='Identical survey demographics, income imputation, home/work coordinates, origins, purposes and observed chain features for both NNs',
         interpretation='Observed-origin diagnostic replay on existing survey records; not independent held-out validation'))
 
@@ -112,7 +116,9 @@ CAPTIONS = {
 '05_person_level_activity_spaces': 'Secondary-destination radius of gyration and repeated-visit share among people with at least two secondary arrival legs. Radius is computed around each person’s mean secondary destination, counting repeated visits. Revisited cells use a fixed 250 m LV95 grid. Each person contributes once with their person weight, rather than once per trip. These statistics describe secondary destinations, not a complete daily activity space.',
 '06_observed_origin_survey_replay': 'Saved NN models evaluated on exactly the same sampled survey people and trips, resetting each trip to its observed origin and using observed chain features. Multiple destination draws are averaged for paired NN differences and have total weight equal to the observed trip weight. Histograms pool differences beyond ±40 km into the outer bins. The same income imputation and other observed inputs are held fixed across both NNs. Existing survey records may have been used to fit the models: this is a conditional diagnostic, not an out-of-sample performance estimate. It does not reproduce sequential synthetic-population rollout.',
 '08_model_selection_diagnostic': 'Observed-origin replay diagnostic: share of nonstationary survey trips routed to the short-range branch, by observed distance and car access. The distance-input pipeline may use direct distance-conditioned facility sampling in that branch; consult the recorded run policy. The dotted separator marks 1.5 km. The learned selector does not receive the plotted trip distance as an input; distance is used here only for retrospective stratification. This is not held-out classifier performance. Lines average fitted local-expert probabilities when available, with historical decisions as a fallback. The table counts actual weighted draws; routing is probabilistic when distance is absent. Stationary trips below 10 m are excluded.',
-'07_map': 'Spatial distribution of secondary destinations for the indicated purpose and city-origin cohort. Top: the same sampled microcensus trips, observed destinations versus observed-origin NN replay. Bottom: independently generated synthetic populations, RDA versus the two NNs. Every panel uses identical LV95 extent, 500 m cells and a shared square-root color normalization. Cell values are weighted destination mass per 1,000 eligible city-origin trips; out-of-frame destinations remain in the denominator and their visible share is annotated. Survey draw weights sum to the observed trip weight. Rows compare distributional patterns rather than identical population compositions. Zero cells are transparent. Roads, lakes and municipal boundaries are local inputs; no tile server is contacted.'}
+'09_city_centre_population': 'Person-level share making at least one secondary visit within the indicated city-centre radius, among people with eligible city-origin trips. Fixed centres use the configured coordinates; the dotted line is 2 km. Each person counts once per purpose, rather than once per trip. All destinations remain in the denominator, including those outside the map. These are independently synthesized populations; differences can include population composition. Radius sensitivity avoids selecting a single catchment to favor a model. Single-run descriptive curves have no between-seed uncertainty intervals.',
+'10_city_centre_survey_replay': 'Same person-level city-centre visitation measure for identical sampled microcensus people/trips. For each draw, a person qualifies if any eligible trip visits the catchment; draw-specific indicators are averaged using person weights. This controls the surveyed cohort, while methods use their own assignment rules. RDA uses observed-origin single-leg tails, not full-chain assignment. The results are diagnostic and not independent held-out validation.',
+'07_map': 'Spatial distribution of secondary destinations for the indicated purpose and city-origin cohort. Top: the same sampled microcensus trips, observed destinations versus observed-origin RDA and NN replay. RDA reuses the production solver on single-leg tails with observed mode/travel time, and does not use future primary anchors. Bottom: full observed survey reference and independently generated synthetic populations, RDA versus the two NNs. Dashed circles mark the same fixed 2 km centre catchment. Every panel uses identical LV95 extent, 500 m cells and a shared square-root color normalization. Cell values are weighted destination mass per 1,000 eligible city-origin trips; out-of-frame destinations remain in the denominator and their visible share is annotated. Survey draw weights sum to the observed trip weight. Rows compare distributional patterns rather than identical population compositions. Zero cells are transparent. Roads, lakes and municipal boundaries are local inputs; no tile server is contacted.'}
 
 
 def figures_and_report(caches, settings, output, prepared):
@@ -160,13 +166,21 @@ def figures_and_report(caches, settings, output, prepared):
         replay_summary.to_csv(tables / 'paired_replay_summary.csv', index=False)
         paired.to_parquet(output / 'paired_replay_distances.parquet', index=False)
         figures.replay_figure(observed, predictions, images)
-        selector_table, selector_trips = selector_diagnostics(observed, predictions)
+        selector_table, selector_trips = selector_diagnostics(observed, predictions.loc[predictions.dataset.isin(['nn_distance','nn_no_distance'])])
         selector_table.to_csv(tables / 'selector_diagnostic.csv', index=False)
         figures.selector_figure(selector_trips, images)
         LOG.info('Preparing offline basemap layers')
         basemap = figures.prepare_basemap(caches, settings['regions'])
         write_json(output / 'basemap_provenance.json', {**basemap[3], 'projection': 'EPSG:2056', 'grid_metres': 500})
         figures.maps(datasets, observed, predictions, settings['regions'], settings['map_purposes'], basemap, images)
+        from city_centres import centre_visits
+        centre_table = pd.concat([
+            centre_visits(datasets,settings['regions'],settings['map_purposes'],'population'),
+            centre_visits({'survey':observed,**{str(k):v for k,v in predictions.groupby('dataset',observed=True)}},
+                          settings['regions'],settings['map_purposes'],'survey_replay')],ignore_index=True)
+        centre_table.to_csv(tables/'city_centre_visitation.csv',index=False)
+        for cohort,stem in [('population','09_city_centre_population'),('survey_replay','10_city_centre_survey_replay')]:
+            figures.centre_visit_figure(centre_table,settings['regions'],settings['map_purposes'],images,cohort,stem)
     else:
         LOG.warning('No replay from this prepared-data generation; survey replay and maps are omitted. Run --phase replay then --phase figures.')
     captions = []
@@ -174,7 +188,7 @@ def figures_and_report(caches, settings, output, prepared):
     # Only present figures generated for this cohort generation.
     stems = list(CAPTIONS)[:5]
     if replay_manifest and replay_manifest['generation'] == prepared['generation']:
-        stems += ['06_observed_origin_survey_replay', '08_model_selection_diagnostic']
+        stems += ['06_observed_origin_survey_replay', '08_model_selection_diagnostic', '09_city_centre_population', '10_city_centre_survey_replay']
         stems += [f'07_map_{city}_{purpose}' for city in settings['regions'] for purpose in settings['map_purposes']]
     for stem in stems:
         if not (images / (stem + '.png')).exists(): continue
@@ -186,6 +200,16 @@ def figures_and_report(caches, settings, output, prepared):
     overall = summary.loc[summary.dimension == 'all'].copy()
     for row in overall.itertuples():
         findings.append(f'- {LABELS[row.dataset]}: mean {row.mean_km:.2f} km, median {row.median_km:.2f} km; {row.short_share:.1%} within 1.5 km, {row.long_share_20km:.1%} beyond 20 km ({row.persons:,} people, {row.trips:,} secondary legs).')
+    if replay_manifest and replay_manifest['generation'] == prepared['generation']:
+        findings += ['', '## City-centre visitation (2 km catchment)', '']
+        central = centre_table.loc[np.isclose(centre_table.radius_km,2)&centre_table.purpose.eq('all')]
+        for (city,cohort),group in central.groupby(['city','cohort']):
+            values = group.set_index('dataset').share_people_visiting
+            findings.append('- '+settings['regions'][city]['label']+' / '+cohort+': '+', '.join(
+                f'{LABELS[method]} {value:.1%}' for method,value in values.items())+'.')
+            if all(method in values for method in ['rda','nn_distance','nn_no_distance']):
+                findings.append(f'  NN with distance minus RDA: {100*(values.nn_distance-values.rda):+.1f} percentage points; '
+                                f'NN without distance minus NN with distance: {100*(values.nn_no_distance-values.nn_distance):+.1f} percentage points.')
     findings += ['', '## Standardized behavioral contrasts', '']
     for label, table in [('Car access', car), ('Home accessibility', pt)]:
         for row in table.itertuples():

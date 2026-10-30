@@ -149,6 +149,7 @@ def execute(context):
     assert os.path.exists(config_file), "Config file does not exist: %s" % config_file
     change_params(config_path = config_file,
                   output_path = config_file,
+                  create = True, # If these parameters don't exist, create them
                   params = [*scenario_input_parameters(output_path, context.config("extent_prefix")).items(),
                         ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
                         ("eqasim:networkCalibration.objective", config_tools.get_network_calibration_objectives(context)),
