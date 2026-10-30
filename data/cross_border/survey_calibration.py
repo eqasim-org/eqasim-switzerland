@@ -19,6 +19,21 @@ MIN_OBSERVATIONS = 10
 MIN_EFFECTIVE_OBSERVATIONS = 5
 
 
+def set_person_expansion_units(observations):
+    """Keep road occupancy expansion, but do not expand rail person weights twice.
+
+    The 2021 codebook defines GEWICHT_Personen as persons per year. Rail records
+    already carry that weight; GRUPPENGROESSE describes their travelling party,
+    not another expansion factor. Retain it for audits and keep the carrier so
+    2015 coaches cannot become rail demand when 2021 has no coach observations.
+    """
+    result = observations.copy()
+    result["survey_transport"] = result["road_type"]
+    result["reported_group_size"] = result["nb_passengers"]
+    result.loc[result["road_type"].eq("rail"), "nb_passengers"] = 1
+    return result
+
+
 def calibrate_demand(reference, observations):
     """Return calibrated observations and a ledger including unsupported targets.
 
@@ -28,6 +43,7 @@ def calibrate_demand(reference, observations):
     """
     result = observations.copy()
     result["uncalibrated_weight"] = result["weight"]
+    result["uncalibrated_group_weight"] = result["group_weight"]
     result["scaling_factor"] = 1.0
     result["calibration_source"] = "uncontrolled"
     records = []
@@ -76,9 +92,11 @@ def calibrate_demand(reference, observations):
                             calibrated_entries = raw * factor if raw else 0.0,
                             scaling_factor = factor, calibration_source = source))
 
-    # PT controls are outside this road-volume correction. Preserve their unit
-    # and former strata rather than mixing coach vehicle counts with train users.
+    # Compare like-for-like passenger coverage. In particular, 2015 road coaches
+    # must not inflate rail controls when that carrier has no 2021 observations.
     keys = ["trip_mode", "trip_purpose", "origin_country", "destination_country"]
+    if "survey_transport" in reference and "survey_transport" in result:
+        keys.insert(0, "survey_transport")
     old_pt = reference.loc[~reference["trip_mode"].eq("car")].groupby(keys)["group_weight"].sum()
     new_pt = result.loc[~result["trip_mode"].eq("car")].groupby(keys)["group_weight"].sum()
     factors = (old_pt.reindex(new_pt.index) / new_pt.replace(0, np.nan)).fillna(1.0)
@@ -94,6 +112,25 @@ def calibrate_demand(reference, observations):
         "interview_place_id", "observations_2021", "effective_observations_2021",
         "entries_2015", "entries_2021", "calibrated_entries", "scaling_factor", "calibration_source",
     ])
+
+
+def pt_person_control_audit(reference, observations):
+    """Expose unsupported PT reference demand separately from road-vehicle totals."""
+    keys = ["trip_mode", "trip_purpose", "origin_country", "destination_country"]
+    if "survey_transport" in reference and "survey_transport" in observations:
+        keys.insert(0, "survey_transport")
+    old = reference.loc[reference["trip_mode"].eq("pt")]
+    new = observations.loc[observations["trip_mode"].eq("pt")]
+    audit = pd.concat([
+        old.groupby(keys)["group_weight"].sum().rename("reference_person_weight"),
+        new.groupby(keys)["uncalibrated_group_weight"].sum().rename("available_2021_person_weight"),
+        new.groupby(keys)["group_weight"].sum().rename("calibrated_person_weight"),
+    ], axis=1).fillna(0)
+    audit["status"] = np.select([
+        audit["reference_person_weight"].gt(0) & audit["available_2021_person_weight"].eq(0),
+        audit["reference_person_weight"].eq(0) & audit["available_2021_person_weight"].gt(0),
+    ], ["no_2021_support", "no_2015_control"], default="matched_person_control")
+    return audit.reset_index()
 
 
 def repair_car_occupancy(observations, rng):
@@ -129,11 +166,14 @@ def write_survey_audit(context, reference, observations, ledger, swiss_residents
     """Write lightweight, pre-expansion diagnostics in this stage's own folder."""
     folder = Path(context.path())
     ledger.to_csv(folder / "vehicle_calibration.csv", index = False)
+    pt_person_control_audit(reference, observations).to_csv(folder / "pt_person_calibration.csv", index=False)
     columns = ["interview_id", "interview_place_id", "interview_place", "trip_mode", "travel_cat",
                "origin_country_raw", "destination_country_raw", "weight", "uncalibrated_weight",
                "scaling_factor", "calibration_source", "reported_occupancy", "nb_passengers", "occupancy_source",
                "start_x", "start_y", "end_x", "end_y", "origin_place", "destination_place",
                "start_location_source", "end_location_source", "location_usable", "location_issue"]
+    columns += [key for key in ("survey_transport", "reported_group_size", "uncalibrated_group_weight")
+                if key in observations]
     audit = observations[columns].copy()
     supported_categories = ["From CH", "To CH"] if swiss_residents else ["From CH", "To CH", "Through CH"]
     audit["assignment_scope"] = np.where(audit["travel_cat"].isin(supported_categories), "supported_category", "unsupported_category")

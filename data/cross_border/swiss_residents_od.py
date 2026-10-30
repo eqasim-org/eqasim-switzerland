@@ -17,7 +17,7 @@ from data.cross_border.generate_od import (
 )
 
 from data.cross_border.survey_calibration import (
-    calibrate_demand, repair_car_occupancy, write_survey_audit,
+    calibrate_demand, repair_car_occupancy, set_person_expansion_units, write_survey_audit,
 )
 from data.cross_border.survey_locations import recover_locations, recover_unlocated_swiss_end
 
@@ -354,6 +354,9 @@ def read_2021_data(context):
     df2021.loc[df2021["road_type"]=="road", "group_weight"] = df2021[df2021["road_type"]=="road"]["weight"] * df2021[df2021["road_type"]=="road"]["nb_passengers"]
     df2021["group_weight"] = df2021["group_weight"].astype(float)
     
+    # Rail weights already count individuals; road occupancy still expands passengers.
+    df2021 = set_person_expansion_units(df2021)
+
     del df2021["road_type"]
     del df2021["vehicle_type"]
     del df2021["train_type"]
@@ -550,6 +553,9 @@ def read_2015_data(context):
     df2015.loc[df2015["road_type"]=="road", "weight"] = df2015[df2015["road_type"]=="road"]["weight"] * 2
     df2015.loc[:, "group_weight"] = df2015["weight"] 
     df2015.loc[df2015["road_type"]=="road", "group_weight"] = df2015[df2015["road_type"]=="road"]["weight"] * df2015[df2015["road_type"]=="road"]["nb_passengers"]
+
+    # Rail weights already count individuals; road occupancy still expands passengers.
+    df2015 = set_person_expansion_units(df2015)
 
     del df2015["vehicle_type"]
     del df2015["train_type"]

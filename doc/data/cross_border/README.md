@@ -786,3 +786,36 @@ original first departure and is scheduled forwards.
 The stage logs the number of delayed chains and the maximum delay. This rule
 applies to both MATSim and SUMO inputs. Rerunning the pipeline detects the stage
 change and rebuilds dependent caches; existing cache files need no manual edits.
+
+## Rail person weights and coach coverage
+
+The 2021 local codebook (`AGQPV21_finale_Auswertungsdatenbank_Codebuch.xlsx`,
+`Variablen`, rows 14 and 62–63) describes `GRUPPENGROESSE` as vehicle occupancy /
+travelling-party size, `GEWICHT_Personen` as annual person expansion weight, and
+`GEWICHT_Fahrzeuge` as annual vehicle weight for road traffic only.
+
+Rail records therefore use one row per weighted person before sampling. Their
+reported party size is retained as `reported_group_size`, while the internal
+`nb_passengers` expansion factor becomes one. Road occupancy and driver controls
+are unchanged. Both Swiss-resident and foreign-resident readers apply this rule.
+The existing survey-day and direction normalization is unchanged.
+
+PT calibration now keeps `survey_transport` (road versus rail) in its strata.
+The local input extracts contain 410 border-interview coach records in 2015 and
+none in 2021. Those reference coach passengers must not become additional rail
+passengers. They are retained in `pt_person_calibration.csv` with
+`no_2021_support`, rather than silently transferred to rail or removed from the
+reference. The vehicle-calibration report remains exclusively road-driver demand.
+Unsupported PT purpose/origin/destination cells are also visible in this audit.
+
+A read-only check of all 39,518 rail border-interview records in the 2021 input
+found 10,147 travelling parties larger than one. Multiplying their person weights
+by party size inflated the raw weighted total by a factor of about 1.371 (1.334
+for foreign residents, 1.438 for Swiss residents). These are diagnostics before
+calendar normalization, 2015 calibration, location exclusions and population
+sampling, not predicted daily counts after a new pipeline run.
+
+Local fixtures verify one expansion per rail person, unchanged road-driver and
+passenger counts, reproducible road calibration, missing rail party sizes, and
+separate unsupported coach controls. Cross-border donor-age/time restrictions
+and PT routing utility coefficients are unchanged by this correction.
