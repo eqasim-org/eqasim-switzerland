@@ -153,8 +153,6 @@ def execute(context):
                         ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
                         ("eqasim:networkCalibration.objective", config_tools.get_network_calibration_objectives(context)),
                         ("eqasim:networkCalibration.calibrate", config_tools.get_network_calibration_calibrate(context, ignore=("penalty","freespeed"))), # we do not calibrate penalty and freespeed here
-                        ("eqasim:networkCalibration.costCalibration.activate","false"),
-                        ("eqasim:networkCalibration.freespeedCalibration.activate","false"),
                         ("eqasim:alphaCalibration.filePath","cantonal_target_mode_shares.csv"),
                         ("eqasim.modeParametersPath",dmc_params),
                         ("eqasim.costParametersPath","cost_parameters.yml"),
