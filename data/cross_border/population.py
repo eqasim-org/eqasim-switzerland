@@ -46,8 +46,8 @@ def execute(context):
     # no origin-projected records, or ran before some rows existed).
     #
     # network_projection's output uses generic real_x/y + interview_x/y
-    # column names (it refines both "From-To"/"Through" origins and "Through"
-    # destinations with the same algorithm) - alias this population's own
+    # column names (it refines both "From-To" and "Through" origins; through
+    # destinations are handled separately by through_crossings) - alias this population's own
     # origin-side columns to those names before merging.
     #
     # Merge keys are cast to int first to match data.cross_border.destinations'
