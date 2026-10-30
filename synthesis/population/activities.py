@@ -28,6 +28,10 @@ def execute(context):
         "purpose": df_trips["preceding_purpose"],
         "following_mode": df_trips["mode"]
     })
+    # Preserve reported purpose after education -> other recoding, including
+    # initial activities. Older trip inputs can lack these provenance columns.
+    activities["original_purpose"] = df_trips.get(
+        "original_preceding_purpose", df_trips["preceding_purpose"])
 
     activities["start_time"] = df_trips.groupby("person_id")["arrival_time"].shift()
     first_trip_idx = df_trips.groupby("person_id")["trip_index"].idxmin()
@@ -42,6 +46,8 @@ def execute(context):
         "purpose": last_activities["following_purpose"],
         "following_mode": None
     })
+    final_activities["original_purpose"] = last_activities.get(
+        "original_following_purpose", last_activities["following_purpose"])
 
     df_activities = pd.concat([activities, final_activities], ignore_index=True)
     df_activities = df_activities.sort_values(by=["person_id", "activity_index"]).reset_index(drop=True)
@@ -52,6 +58,10 @@ def execute(context):
 
     # We're still missing activities for people who don't have a any trips
     df_persons = context.stage("synthesis.population.enriched")#[["person_id"]]
+    from synthesis.population.models.non_private import home_only_mask
+    home_only_ids = set(df_persons.loc[home_only_mask(df_persons), "person_id"])
+    if df_activities.person_id.isin(home_only_ids).any():
+        raise ValueError("Home-only residents unexpectedly received donor trips")
 
     missing_ids = set(np.unique(df_persons["person_id"])) - set(np.unique(df_activities["person_id"]))
     logger.info(f"Found {len(missing_ids)} persons without activities")
@@ -102,13 +112,24 @@ def execute(context):
     
     assert (len(np.unique(df_persons["person_id"])) == len(np.unique(df_activities["person_id"])))
 
+    # Home-only, international and truck-driver replacement activities retain
+    # their own purpose; they are not recoded education visits.
+    df_activities["original_purpose"] = df_activities["original_purpose"].fillna(df_activities["purpose"])
+    df_activities["nonstudent_education_recoded"] = (
+        df_activities["original_purpose"].isin(["education", "education_main", "education_secondary"])
+        & df_activities["purpose"].eq("other"))
+
     # Some cleanup
     df_activities = df_activities.sort_values(by=["person_id", "activity_index"])
     df_activities["start_time"] = df_activities["start_time"].fillna(0)
+    # Explicitly represent the complete simulation day for unmodelled residents.
+    # They remain present in the population with zero trips and one home activity.
+    df_activities.loc[df_activities.person_id.isin(home_only_ids), "end_time"] = 30 * 3600.
     df_activities.loc[:, "duration"] = df_activities.loc[:, "end_time"] - df_activities.loc[:, "start_time"]
 
     df_activities = df_activities[[
-        "person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last"
+        "person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last",
+        "original_purpose", "nonstudent_education_recoded"
     ]]
     
     return df_activities

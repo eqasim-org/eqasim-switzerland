@@ -1,0 +1,13 @@
+# Secondary education assignment audit
+
+Run `analysis.secondary_education_assignment` to inspect education-active people aged 15–17 using the existing stage inputs. The stage follows the repository's `configure` / `execute` structure and writes to `<analysis_path>/secondary_education_assignment`.
+
+The analysis compares assigned straight-line home-to-education distances with the matched MZ donor distances as a post-match diagnostic. Anchors are now assigned before donor selection, so donor distances are not the assignment target. Each person counts once regardless of repeated education activities. Means are population means with equal person weights; donor means include donor reuse and therefore differ from weighted MZ survey means.
+
+For `classified_secondary` and `age_secondary`, it retains legacy counterfactual diagnostics: whether the donor distance exceeds the seventh-nearest secondary establishment, the smallest distance mismatch among seven versus 100 candidates, and whether all seven legacy distance weights hit the probability floor. Kernel diagnostics reconstruct the full assignment group across all ages because the bandwidth uses a group-wide minimum. These fields describe the former algorithm, not the new compatible assignment's probabilities.
+
+The 100-candidate calculation is a diagnostic, not a revised assignment. Both legacy candidate lists use the broad secondary pool. Additional fields check the assigned school code against the documented compatible pool, its nearest-school distance, and the minimum achievable donor-distance mismatch within that pool. Compatibility is a modelling assumption, not a verified programme list. Summaries include medians, the 90th and 95th percentiles, mean absolute mismatch, municipality types and assignment methods. Abroad, unknown, nonstudent and age-based tertiary proxy groups are reported separately. Missing donor distances are excluded from paired statistics.
+
+Study labels are the population's imputed classifications, not necessarily the matched donor's reported programme. Outputs are `person_diagnostics.csv`, `summary.csv`, `secondary_school_types.csv`, `assigned_school_types_by_study.csv` and an explanatory `README.md`. The stage does not modify assignments or run the synthesis pipeline.
+
+With structural-survey targets enabled, the person diagnostics and summaries also retain the actual target, its mean/median, assigned-minus-target error, best achievable target mismatch, source/backoff label and effective sample size. Donor comparisons remain historical diagnostics and must not be interpreted as the new assignment objective.

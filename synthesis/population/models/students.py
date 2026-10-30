@@ -6,6 +6,9 @@ from catboost import CatBoostClassifier
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 import logging
+from pathlib import Path
+
+from data.structural_survey.apprenticeship import model_apprentice_diagnostics
 
 logger = logging.getLogger("synpp")
 
@@ -13,9 +16,15 @@ def configure(context):
     context.config("random_seed")
     context.config("data_path")
     context.stage("synthesis.population.models.income")
-    context.stage("data.structural_survey.structural_survey")
+    context.stage("data.structural_survey.student_training")
 
 def execute(context):
+    from synthesis.population.models.non_private import execute_without_home_only
+    return execute_without_home_only(context, "synthesis.population.models.income", _execute_model,
+                                     {"is_student": 0, "student_probability": 0.})
+
+
+def _execute_model(context):
     random_seed = int(context.config("random_seed"))
 
     # =========================================================
@@ -38,8 +47,10 @@ def execute(context):
     # =========================================================
     # 0. PREP: CLEAN + ALIGN EMPLOYMENT INFO
     # =========================================================
-    survey_df = context.stage("data.structural_survey.structural_survey")
-    pop_df    = context.stage("synthesis.population.models.income")
+    # A dedicated copy uses school-departure geography for students, residence
+    # fallback otherwise. Other models retain the original survey geography.
+    survey_df = context.stage("data.structural_survey.student_training").copy()
+    pop_df    = context.stage("synthesis.population.models.income").copy()
 
     survey_df['employed']     = survey_df['employed'].astype('int64')
     survey_df['job_position'] = survey_df['job_position'].astype('int64')
@@ -53,6 +64,13 @@ def execute(context):
 
     pop_df['employed']     = pop_df['employed'].astype('int64')
     pop_df['job_position'] = pop_df['job_position'].astype('int64')
+
+    # Both inputs retain SS job codes (50 = apprentice); income restores these
+    # codes after its own modelling. Learn student participation conditional on
+    # apprenticeship as well as employment, rather than forcing extra students
+    # after the draw and inflating the national student stock.
+    for df in (survey_df, pop_df):
+        df['is_apprentice'] = df['job_position'].eq(50).astype('int64')
 
     survey_df['age_sq'] = survey_df['age'] ** 2
     pop_df['age_sq'] = pop_df['age'] ** 2
@@ -99,6 +117,7 @@ def execute(context):
         #'nationality',
         'municipality_type',
         'employed',
+        'is_apprentice',
         'district_id',
         'canton_id'
     ]
@@ -287,6 +306,10 @@ def execute(context):
 
     n = len(pop_df)
     stu_out = np.empty(n, dtype=int)
+    # Retain classifier probabilities for diagnostics and any later review of
+    # matched dorm swaps. They do not impose student status or stock quotas.
+    student_probability = np.empty(n, dtype=float)
+    student_class = np.flatnonzero(classes_stu == 1)
 
     logger.info(f"Predicting students in chunks: n={n:,}, CHUNK_SIZE={CHUNK_SIZE:,}")
 
@@ -301,17 +324,16 @@ def execute(context):
 
         X_chunk = X_chunk.reindex(columns=student_feature_cols, fill_value=0).astype(float)
 
+        # Recovered residents use the same probabilities and draws as private
+        # residents. Dorm proximity does not establish student participation.
         proba_stu = student_model.predict_proba(X_chunk)
-
+        student_probability[start:end] = proba_stu[:, student_class[0]] if len(student_class) else 0.
         stu_draw = draw_multinomial_from_proba(
-            proba_stu,
-            classes_stu,
-            seed=SEED_STUDENT + start
-        ).astype('int64')
+            proba_stu, classes_stu, seed=SEED_STUDENT + start).astype('int64')
 
         stu_out[start:end] = stu_draw
 
-        del X_chunk, proba_stu, stu_draw
+        del X_chunk, stu_draw
         gc.collect()
 
         if (start // CHUNK_SIZE) % 20 == 0:
@@ -321,6 +343,7 @@ def execute(context):
 
     pop_df['STUDENT_draw'] = pop_df['STUDENT_draw'].astype('int64')
     pop_df = pop_df.rename(columns={"STUDENT_draw": "is_student"})
+    pop_df["student_probability"] = student_probability
     pop_df.loc[pop_df['age'] < 15, 'is_student'] = 1
     # plot_student_share_by_agebin_and_district(
     #     survey_df=survey_df,
@@ -331,6 +354,13 @@ def execute(context):
     # )
     logger.info("Final STUDENT distribution in population:")
     logger.info(pop_df['is_student'].value_counts(normalize=True))
+
+    # Check the national stock and any remaining apprentice/nonstudent conflicts
+    # after learning their joint status. This diagnostic does not override draws.
+    apprentice_diagnostics = model_apprentice_diagnostics(survey_df, pop_df)
+    apprentice_diagnostics.to_csv(Path(context.path()) / "national_apprentice_stock.csv", index=False)
+    logger.info("National apprenticeship after student assignment:\n%s",
+                apprentice_diagnostics.to_string(index=False))
 
     # =========================================================
     # 6. DIAGNOSTICS: COMPARE STUDENT RATES
@@ -428,7 +458,7 @@ def execute(context):
             build_compare_table(survey_one, pop_one, 'municipality_type', 'municipality_type')
 
     # Remove helper features created only for modeling/diagnostics.
-    pop_df = pop_df.drop(columns=["age_sq", "is_school_age", "age_bin"], errors="ignore")
+    pop_df = pop_df.drop(columns=["age_sq", "is_school_age", "age_bin", "is_apprentice"], errors="ignore")
 
     pop_df['canton_id'] = pop_df['canton_id'].astype("int64")
     return pop_df

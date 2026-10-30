@@ -337,6 +337,8 @@ def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch
     context.stages.update({
         "data.constants": constants, "data.microcensus.persons": persons,
         "data.microcensus.trips": (pd.DataFrame(records), None, None, None),
+        # These leisure trips are unchanged by nonstudent education recoding.
+        "data.microcensus.secondary_trips": pd.DataFrame(records),
         "synthesis.population.destinations": destinations,
         "data.statent.statent": pd.DataFrame(dict(enterprise_id=np.arange(len(xy)), noga="93")),
         "data.spatial.swiss_border": gpd.GeoDataFrame(geometry=[box(2600000, 1200000, 2750000, 1300000)], crs=2056),

@@ -19,7 +19,9 @@ def execute(context):
 
     df["quarter_id"] = df["GMDEQNR"]
     df["quarter_name"] = df["NAME"]
-    df = df[["quarter_id", "quarter_name", "geometry"]]
+    # Source municipality identifies the parent in the quarter boundary release.
+    df["source_municipality_id"] = df["GMDE"]
+    df = df[["quarter_id", "quarter_name", "geometry", "source_municipality_id"]]
 
     return df
 

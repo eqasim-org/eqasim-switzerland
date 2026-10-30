@@ -120,13 +120,14 @@ def execute(context):
     df_households = (context.stage("synthesis.population.enriched").copy()
         .rename(columns={"income_class": "income"})
         .drop_duplicates("household_id"))
+    household_flags = [name for name in df_households if name.startswith("non_private_") or name == "is_synthetic_household"]
     df_households = df_households[[
         "household_id",
         "number_of_cars_class",
         "ovgk",
         "income",
         "statpop_household_id"
-    ]]
+    ] + household_flags]
     df_households = _cast_export_columns(df_households, HOUSEHOLD_DTYPES, "households")
 
     df_households.to_csv("%s/%shouseholds.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")
@@ -134,12 +135,13 @@ def execute(context):
     # Prepare persons
     df_persons = (context.stage("synthesis.population.models.subscriptions").copy()
         .rename(columns={"driving_license": "has_driving_license"}))
+    person_flags = [name for name in df_persons if name.startswith("non_private_") or name == "is_synthetic_household"]
     df_persons = df_persons[[
         "person_id", "household_id",
         "age", "employed", "sex","municipality_type",
         "has_driving_license","pt_subscription",
         "mz_person_id", "canton_id"
-    ]]
+    ] + person_flags]
     df_persons = _cast_export_columns(df_persons, PERSON_DTYPES, "persons")
 
     if df_persons["person_id"].duplicated().any():
@@ -162,12 +164,16 @@ def execute(context):
     # relying on dataframe row order (and on shift's temporary float dtype).
     df_activities["preceding_trip_index"] = df_activities["activity_index"] - 1
 
+    # Retain reported education purpose in CSV inspection after modelling the
+    # visit as other. Optional selection also supports older activity inputs.
+    activity_provenance = [name for name in ["original_purpose", "nonstudent_education_recoded"]
+                           if name in df_activities]
     df_activities = df_activities[[
         "person_id", "household_id", "activity_index",
         "preceding_trip_index", "following_trip_index",
         "purpose", "start_time", "end_time",
         "is_last"
-    ]]
+    ] + activity_provenance]
     df_activities["is_last"] = coerce_boolean_series(
         df_activities["is_last"], name="activities.is_last"
     )
@@ -182,12 +188,14 @@ def execute(context):
     df_trips["preceding_activity_index"] = df_trips["trip_index"]
     df_trips["following_activity_index"] = df_trips["trip_index"] + 1
 
+    trip_provenance = [name for name in ["original_preceding_purpose", "original_following_purpose"]
+                       if name in df_trips]
     df_trips = df_trips[[
         "person_id", "trip_index",
         "preceding_activity_index", "following_activity_index",
         "departure_time", "arrival_time", "mode",
         "preceding_purpose", "following_purpose"
-    ]]
+    ] + trip_provenance]
     df_trips = _cast_export_columns(df_trips, TRIP_DTYPES, "trips")
 
     df_trips.to_csv("%s/%strips.csv" % (output_path, output_prefix), sep = ";", index = None, lineterminator = "\n")

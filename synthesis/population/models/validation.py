@@ -165,6 +165,8 @@ def execute(context):
     survey_df["canton_id"] = pd.to_numeric(survey_df["canton_id"], errors="coerce").astype("Int64")
     survey_df["district_id"] = pd.to_numeric(survey_df["district_id"], errors="coerce").astype("Int64")
     pop_df = context.stage("synthesis.population.models.students").copy()
+    from synthesis.population.models.non_private import home_only_mask
+    pop_df = pop_df.loc[~home_only_mask(pop_df)].copy()
     pop_df["canton_id"] = pd.to_numeric(pop_df["canton_id"], errors="coerce").astype("Int64")
     pop_df["district_id"] = pd.to_numeric(pop_df["district_id"], errors="coerce").astype("Int64")
 

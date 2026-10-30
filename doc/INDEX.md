@@ -10,6 +10,9 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Beginner configuration template](../config.yml)
 - [Public-transport pricing inputs](PT_pricing_inputs_and_explanations.md)
 
+- [Education reference maintenance](analysis/education_reference_update.md)
+- [Education model and configuration (LaTeX)](synthesis/population/education_model.tex)
+
 ## Implementation guides
 
 - [Cross-border activity timing](data/cross_border/README.md)
@@ -29,8 +32,12 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Matching predictive validation and embedding analysis](analysis/matching/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
+- [Road-user map and activity-purpose shares](analysis/counts/road_users/README.md)
+- [Cross-border survey entries and through-trip exits](data/cross_border/README.md)
 - [French population and trip explorer](analysis/french_activities.md)
 - [Secondary-location behavior comparison](<analysis/secondary locations/README.md>)
+
+- [SUMO performance and stage caches](sumo/performance.md)
 
 ## Changelogs
 
@@ -40,4 +47,29 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 
 Tests remain in the local `tests/` directory and are intentionally excluded from Git.
 
-- [SUMO performance and stage caches](sumo/performance.md)
+## Education model and diagnostics
+
+- [Education model and configuration (LaTeX)](synthesis/population/education_model.tex)
+- [Education audit](analysis/education_audit.md)
+- [Education campus weights](analysis/education_campus_weights.md)
+- [Education classification](analysis/education_classification.md)
+- [Education distances](analysis/education_distances.md)
+- [Education doctoral scope](analysis/education_doctoral_scope.md)
+- [Education enrolment](analysis/education_enrolment.md)
+- [Education institution matching](analysis/education_institution_matching.md)
+- [Education institutions](analysis/education_institutions.md)
+- [Education location eligibility](analysis/education_location_eligibility.md)
+- [Education student stock](analysis/education_student_stock.md)
+- [Non private residents](analysis/non_private_residents.md)
+- [Secondary education assignment](analysis/secondary_education_assignment.md)
+- [Tertiary education age distance](analysis/tertiary_education_age_distance.md)
+- [Tertiary education assignment](analysis/tertiary_education_assignment.md)
+- [Tertiary education distance regularisation](analysis/tertiary_education_distance_regularisation.md)
+- [Tertiary education od](analysis/tertiary_education_od.md)
+- [Tertiary education od smoothing](analysis/tertiary_education_od_smoothing.md)
+- [GWR residence reference](data/gwr/README.md)
+- [Commute](data/microcensus/commute.md)
+- [Secondary trips](data/microcensus/secondary_trips.md)
+- [Households](data/statpop/households.md)
+- [Secondary](synthesis/population/spatial/primary/education/secondary.md)
+- [Secondary distances](synthesis/population/spatial/primary/education/secondary_distances.md)

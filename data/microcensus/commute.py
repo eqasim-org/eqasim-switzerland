@@ -7,6 +7,47 @@ def configure(context):
     context.stage("data.microcensus.persons")
 
 
+def use_diary_home(commutes, trips, persons):
+    """Anchor education distance to an observed home in the diary, when possible.
+
+    Prefer the last home activity before the primary education activity, then
+    the first home afterwards. This follows diary order, not proximity to school,
+    and includes home_secondary activities. Household coordinates remain an
+    explicit fallback and a separate comparison distance.
+    """
+    result = commutes.merge(persons[["person_id", "home_x", "home_y"]],
+                            on="person_id", validate="one_to_one")
+    result["commute_household_home_distance"] = result["commute_home_distance"]
+    result["commute_home_source"] = "household_fallback"
+    diaries = {person: diary.sort_values("trip_id", kind="stable")
+               for person, diary in trips.loc[trips.person_id.isin(result.person_id)].groupby("person_id")}
+    for row in result.itertuples():
+        diary = diaries.get(row.person_id)
+        if diary is None:
+            continue
+        events, anchor = [], None
+        for position, trip in enumerate(diary.itertuples()):
+            for offset, purpose, x, y in [(0, trip.origin_purpose, trip.origin_x, trip.origin_y),
+                                          (1, trip.purpose, trip.destination_x, trip.destination_y)]:
+                if isinstance(purpose, str) and purpose.startswith("home") and np.isfinite(x) and np.isfinite(y):
+                    events.append((2 * position + offset, x, y))
+            if trip.trip_id == row.commute_trip_id:
+                # Origin-only education is selected when no education destination
+                # was recorded. Its activity precedes the selected trip.
+                anchor = 2 * position + (1 if trip.purpose == "education" else 0)
+        if anchor is None or not events:
+            continue
+        before = [event for event in events if event[0] < anchor]
+        after = [event for event in events if event[0] > anchor]
+        selected = before[-1] if before else (after[0] if after else None)
+        if selected is None:
+            continue
+        result.loc[row.Index, ["home_x", "home_y"]] = selected[1:]
+        result.loc[row.Index, "commute_home_source"] = "diary_preceding_home" if before else "diary_following_home"
+    result["commute_home_distance"] = np.hypot(result.home_x - result.commute_x, result.home_y - result.commute_y)
+    return result.rename(columns={"home_x": "commute_home_x", "home_y": "commute_home_y"})
+
+
 def execute(context):
     df_trips = context.stage("data.microcensus.trips")[0].copy()
     df_persons = context.stage("data.microcensus.persons")
@@ -80,6 +121,9 @@ def execute(context):
                                  "commute_activity_duration", "commute_x", "commute_y"]]
         
         df_commute = pd.concat([df_commute, df_commute_remaining])
+
+        if primary_purpose == "education":
+            df_commute = use_diary_home(df_commute, df_trips, df_persons)
 
         commutes.update({primary_purpose: df_commute})
 
