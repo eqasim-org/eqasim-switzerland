@@ -783,7 +783,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "shapely", specifier = ">=2.1.2" },
     { name = "statsmodels", specifier = ">=0.14.6" },
-    { name = "synpp", git = "https://github.com/Dib-AEK/synpp.git?rev=638adc5ea847eef97a8637c8620ea636b436ae8a" },
+    { name = "synpp", git = "https://github.com/Dib-AEK/synpp.git?rev=e747ebc5ba928164e92ef94eb4ca18693da1dc8a" },
     { name = "tables", specifier = ">=3.7.0" },
     { name = "torch", specifier = ">=2.11.0", index = "https://download.pytorch.org/whl/cpu" },
     { name = "tqdm", specifier = ">=4.67.3" },
@@ -3569,7 +3569,7 @@ wheels = [
 [[package]]
 name = "synpp"
 version = "1.7.3"
-source = { git = "https://github.com/Dib-AEK/synpp.git?rev=638adc5ea847eef97a8637c8620ea636b436ae8a#638adc5ea847eef97a8637c8620ea636b436ae8a" }
+source = { git = "https://github.com/Dib-AEK/synpp.git?rev=e747ebc5ba928164e92ef94eb4ca18693da1dc8a#e747ebc5ba928164e92ef94eb4ca18693da1dc8a" }
 dependencies = [
     { name = "networkx" },
     { name = "pyyaml" },
