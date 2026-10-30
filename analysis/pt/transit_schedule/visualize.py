@@ -14,6 +14,7 @@ from shapely.ops import unary_union
 
 import matsim.scenario.network.utils.pt_route_check as pt_route_check
 from analysis.pt.transit_schedule import page
+from analysis.output_files import find_simulation_output
 
 NETWORK_CRS = "epsg:2056"
 
@@ -39,7 +40,12 @@ DEFAULT_VISIBLE_MODES = {"bus"}
 LINE_ROUTE_COLOR      = "#ff8c00"
 CHECK_OK_COLOR        = "#2a9d3a"
 CHECK_DEVIATES_COLOR  = "#c0392b"
-DEFAULT_LINE_ROUTES   = "PT_line_routes/Geneva/TPG_LIGNES.shp"
+CHECK_MINOR_COLOR     = "#d68910"
+# Severity of a route check: "bad" (red) if the route leaves its reference route, turns back, does not serve a stop or
+# drives a long loop; "minor" (orange) if it only drives off the lane of its GTFS shape (the shape can be drawn next to
+# the only carriageway) or a short loop; else "ok" (green).
+BAD_MIN_SHARE       = 0.9
+BAD_REPEATED_LENGTH = 200.0
 SELECTED_COLOR        = "#e34948"
 
 TO_WGS84 = Transformer.from_crs(NETWORK_CRS, "epsg:4326", always_xy = True)
@@ -52,8 +58,12 @@ def configure(context):
     context.config("analysis.pt.transit_schedule_modes", default = [])
     context.config("analysis.pt.transit_schedule_show_schedules", default = True)
     context.config("extent_path", default = "")
+    # Areas of the map (their union), e.g. the Geneva and Lausanne extents; empty: extent_path
+    context.config("analysis.pt.transit_schedule_extent_paths", default = [])
     context.config("data_path")
-    context.config("analysis.pt.transit_schedule_line_routes_path", default = "PT_line_routes/Geneva/TPG_LIGNES.shp")
+    # Official line routes by GTFS agency_id, shown when a line is selected (if its route has no GTFS shape): the same
+    # setting as matsim.scenario.network.corrected (TPG and TL by default), see pt_route_check.line_route_sources
+    context.config("pt_line_routes_path", pt_route_check.DEFAULT_LINE_ROUTES)
     context.config("analysis.pt.transit_schedule_source", default = "simulation")
 
     # Compares the routes with the official line routes (report in route_check.csv)
@@ -61,8 +71,11 @@ def configure(context):
     context.config("pt_route_modes", ["bus"])
     context.config("pt_route_buffer", 30.0)
     context.config("pt_route_min_share", 0.9)
-    context.config("pt_route_agencies", ["881"])
-    if context.config("analysis.pt.transit_schedule_route_check") and context.config("pt_route_agencies"):
+    context.config("pt_route_agencies", ["881", "151"])  # same default as matsim.scenario.network.corrected
+    # Reference of a route: the GTFS shape of its trip, else the official line route (line_routes_path)
+    context.config("pt_route_gtfs_shapes", True)
+    if context.config("pt_route_gtfs_shapes") or isinstance(context.config("pt_line_routes_path"), dict) or (
+            context.config("analysis.pt.transit_schedule_route_check") and context.config("pt_route_agencies")):
         context.stage("data.gtfs.cleaned")
 
     source = context.config("analysis.pt.transit_schedule_source")
@@ -101,23 +114,27 @@ def execute(context):
         network_path = _find_output_file(matsim_output_folder, "output_network.xml.gz")
         output_dir = os.path.join(matsim_output_folder, "pt_transit_schedule")
 
-    # Absolute, or relative to data_path
-    line_routes_path = os.path.join(
-        context.config("data_path"),
-        context.config("analysis.pt.transit_schedule_line_routes_path") or DEFAULT_LINE_ROUTES,
-    )
-    if not os.path.exists(line_routes_path):
-        print(f"WARNING: official line routes not found at {line_routes_path}: "
-              "they are not shown on the map and the routes are not checked")
-        line_routes_path = None
+    # {agency_id: path} (absolute, or relative to data_path), or one path
+    line_routes_path = pt_route_check.resolve_line_routes(context.config("pt_line_routes_path"), context.config("data_path"))
+    if line_routes_path is None:
+        print("WARNING: no official line routes: they are not shown on the map and only the routes with a GTFS shape are checked")
 
     os.makedirs(output_dir, exist_ok = True)
     output_file = os.path.join(output_dir, "transit_schedule_map.html")
 
+    agencies = [str(a) for a in context.config("pt_route_agencies")]
+    gtfs_routes_path = gtfs_trips_path = gtfs_shapes_path = None
+    # Operator-specific references still need the route-to-agency table without shapes.
+    if context.config("pt_route_gtfs_shapes") or isinstance(context.config("pt_line_routes_path"), dict) or (
+            context.config("analysis.pt.transit_schedule_route_check") and agencies):
+        gtfs_path = "%s/output" % context.path("data.gtfs.cleaned")
+        gtfs_routes_path = "%s/routes.txt" % gtfs_path
+        if context.config("pt_route_gtfs_shapes") and os.path.exists("%s/shapes.txt" % gtfs_path):
+            gtfs_trips_path, gtfs_shapes_path = "%s/trips.txt" % gtfs_path, "%s/shapes.txt" % gtfs_path
+
     route_check_rows = None
     report_path = None
-    if line_routes_path and context.config("analysis.pt.transit_schedule_route_check"):
-        agencies = [str(a) for a in context.config("pt_route_agencies")]
+    if (line_routes_path or gtfs_shapes_path) and context.config("analysis.pt.transit_schedule_route_check"):
         report_path = os.path.join(output_dir, "route_check.csv")
         route_check_rows, _ = pt_route_check.run(
             schedule_path = schedule_path, network_path = network_path,
@@ -125,32 +142,24 @@ def execute(context):
             modes = tuple(context.config("pt_route_modes")),
             buffer_m = context.config("pt_route_buffer"), min_share = context.config("pt_route_min_share"),
             agencies = agencies,
-            gtfs_routes_path = "%s/output/routes.txt" % context.path("data.gtfs.cleaned") if agencies else None,
+            gtfs_routes_path = gtfs_routes_path,
+            gtfs_trips_path = gtfs_trips_path, gtfs_shapes_path = gtfs_shapes_path,
         )
 
     plot_transit_schedule(
         schedule_path = schedule_path, network_path = network_path,
         output_path = output_file, modes = modes, show_schedules = show_schedules,
-        extent_path = context.config("extent_path"), line_routes_path = line_routes_path,
-        route_check_rows = route_check_rows,
+        extent_path = context.config("analysis.pt.transit_schedule_extent_paths") or context.config("extent_path"),
+        line_routes_path = line_routes_path,
+        route_check_rows = route_check_rows, gtfs_routes_path = gtfs_routes_path,
+        gtfs_trips_path = gtfs_trips_path, gtfs_shapes_path = gtfs_shapes_path,
     )
 
     return dict(done = True, path = output_file, route_check = report_path)
 
 
 def _find_output_file(simulation_path, filename):
-    direct_path = os.path.join(simulation_path, filename)
-    if os.path.exists(direct_path):
-        return direct_path
-
-    stem, _, suffix = filename.partition(".")
-    candidates = glob.glob(os.path.join(simulation_path, "ITERS", "*", f"*.{suffix}"))
-    if not candidates:
-        raise FileNotFoundError(f"Could not find {filename} in {simulation_path} (or its ITERS folder)")
-
-    candidate = max(candidates, key=os.path.getmtime)
-    print(f"{filename} not found at {direct_path}, using latest iteration snapshot {candidate} instead")
-    return candidate
+    return find_simulation_output(simulation_path, filename)
 
 
 # ---------------------------------------------------------------------------
@@ -190,38 +199,46 @@ def is_bus_reserved_link(modes_string):
 
 
 def load_extent(extent_path):
-    if not extent_path:
+    """The area of the map: one polygon file, or the union of several (a list of paths). None: everything."""
+    paths = [extent_path] if isinstance(extent_path, str) else list(extent_path or [])
+    paths = [path for path in paths if path]
+    if not paths:
         return None
-    if not os.path.exists(extent_path):
-        raise FileNotFoundError(f"extent_path {extent_path} does not exist")
 
-    boundary = gpd.read_file(extent_path)
-    if boundary.crs is not None and boundary.crs != NETWORK_CRS:
-        boundary = boundary.to_crs(NETWORK_CRS)
-    return shapely.force_2d(unary_union(boundary.geometry))
+    parts = []
+    for path in paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"extent {path} does not exist")
+        boundary = gpd.read_file(path)
+        if boundary.crs is not None and boundary.crs != NETWORK_CRS:
+            boundary = boundary.to_crs(NETWORK_CRS)
+        parts.append(shapely.force_2d(unary_union(boundary.geometry)))
+    return unary_union(parts)
 
 
 def load_line_routes(line_routes_path, region = None):
-    """Official line routes by normalized line name: list of dicts with the terminus names
-    the route runs towards ("DIRECTION", possibly several separated by "/") and its paths."""
-    gdf = gpd.read_file(line_routes_path)
-    gdf = gdf.to_crs(epsg = 4326) if gdf.crs is not None else gdf.set_crs(epsg = 4326)
-
-    if region is not None:
-        region_4326 = gpd.GeoSeries([region], crs = NETWORK_CRS).to_crs(epsg = 4326).iloc[0]
-        gdf = gdf[gdf.intersects(region_4326)]
-
+    """Official line routes by (GTFS agency or None, normalized line name), see pt_route_check.line_route_sources (one
+    path, or {agency_id: path}): list of dicts with the terminus names the route runs towards ("DIRECTION", possibly
+    several separated by "/") and its paths."""
     line_routes = defaultdict(list)
-    geometries_2056 = gdf.geometry.to_crs(NETWORK_CRS)
-    for line, direction, geometry, geometry_2056 in zip(*pt_route_check.read_line_columns(gdf), gdf.geometry, geometries_2056):
-        if geometry is None or geometry.is_empty:
-            continue
-        parts = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
-        line_routes[pt_route_check.normalize_line(line)].append({
-            "directions": {pt_route_check.normalize_name(d) for d in str(direction).split("/")},
-            "centerline": shapely.force_2d(geometry_2056),
-            "paths": [[[c[1], c[0]] for c in part.coords] for part in parts],
-        })
+    for agency, path in pt_route_check.line_route_sources(line_routes_path):
+        gdf = gpd.read_file(path)
+        gdf = gdf.to_crs(epsg = 4326) if gdf.crs is not None else gdf.set_crs(epsg = 4326)
+
+        if region is not None:
+            region_4326 = gpd.GeoSeries([region], crs = NETWORK_CRS).to_crs(epsg = 4326).iloc[0]
+            gdf = gdf[gdf.intersects(region_4326)]
+
+        geometries_2056 = gdf.geometry.to_crs(NETWORK_CRS)
+        for line, direction, geometry, geometry_2056 in zip(*pt_route_check.read_line_columns(gdf), gdf.geometry, geometries_2056):
+            if geometry is None or geometry.is_empty:
+                continue
+            parts = geometry.geoms if hasattr(geometry, "geoms") else [geometry]
+            line_routes[(agency, pt_route_check.normalize_line(line))].append({
+                "directions": {pt_route_check.normalize_name(d) for d in str(direction).split("/")},
+                "centerline": shapely.force_2d(geometry_2056),
+                "paths": [[[c[1], c[0]] for c in part.coords] for part in parts],
+            })
     return line_routes
 
 
@@ -433,9 +450,14 @@ def plot_transit_schedule(
     extent_path = None,
     line_routes_path = None,
     route_check_rows = None,
+    gtfs_routes_path = None,
+    gtfs_trips_path = None,
+    gtfs_shapes_path = None,
 ):
-    """route_check_rows: rows of pt_route_check.run (comparison with the official line routes),
-    shown next to the routes in the search and the line details."""
+    """route_check_rows: rows of pt_route_check.run (comparison with the reference routes),
+    shown next to the routes in the search and the line details. The reference route shown with a route is the
+    GTFS shape of the route (gtfs_routes_path, gtfs_trips_path, gtfs_shapes_path; see pt_route_check.Corridors.shape_id),
+    else the official line route (line_routes_path)."""
     if schedule_path is None or network_path is None:
         if simulation_path is None:
             raise ValueError(
@@ -513,16 +535,28 @@ def plot_transit_schedule(
     line_routes = select_representative_routes(routes, stops)
     print(f"  -> {len(line_routes)} representative route(s) (from {len(routes)} total patterns)")
 
-    official_routes = {}
+    official_routes, line_agencies = {}, {}
     if line_routes_path:
         print(f"Reading official line routes from {line_routes_path} ...")
         official_routes = load_line_routes(line_routes_path, region)
         print(f"  -> routes for {len(official_routes)} line(s)")
+        # the official routes of an agency are only shown for its lines (Geneva and Lausanne have lines with the same names)
+        if gtfs_routes_path and any(agency for agency, _ in official_routes):
+            line_agencies = pt_route_check.read_line_agencies(gtfs_routes_path)
+
+    trip_shapes, line_shapes, shapes = {}, {}, {}
+    if gtfs_routes_path and gtfs_trips_path and gtfs_shapes_path:
+        print(f"Reading the GTFS shapes of the representative routes from {gtfs_shapes_path} ...")
+        trip_shapes, line_shapes, shapes = pt_route_check.read_gtfs_shapes(
+            gtfs_routes_path, gtfs_trips_path, gtfs_shapes_path,
+            [rep["route_id"] for rep in line_routes], [rep["line_id"] for rep in line_routes])
+        print(f"  -> {len(shapes)} shape(s) for {len(line_shapes)} line(s)")
 
     print("Building the map data...")
     data = build_page_data(
         stops, routes, link_geometry, bus_lane_link_ids, group_keys, group_members, group_index, group_key_of,
         line_routes, official_routes, route_check_rows, show_schedules, region,
+        pt_route_check.Corridors(None, 0.0, trip_shapes, shapes, line_shapes), line_agencies,
     )
     if show_schedules:
         print(f"  -> {sum(len(route[4]) for route in data['routes'])} departure(s) of {len(data['routes'])} route(s) "
@@ -535,8 +569,27 @@ def plot_transit_schedule(
     print(f"Done - saved to {output_path} ({os.path.getsize(output_path) / 1e6:.1f} MB)")
 
 
+def check_summary(row):
+    """The figures of a row of the route check shown on the map, and its severity (see BAD_MIN_SHARE)."""
+    number = lambda key: float(row.get(key) or 0)
+    check = {
+        "share_inside": number("share_inside"), "n_uturns": int(number("n_uturns")),
+        "n_stops_off": int(number("n_stops_off")), "repeated_m": round(number("repeated_m")),
+        "off_lane_m": round(number("off_lane_m")), "reference_matched": row.get("reference_matched") in (True, "True"),
+    }
+    if check["share_inside"] < BAD_MIN_SHARE or check["n_uturns"] or check["n_stops_off"] \
+            or check["repeated_m"] > BAD_REPEATED_LENGTH:
+        check["severity"] = "bad"
+    elif check["repeated_m"] > pt_route_check.MAX_REPEATED_LENGTH or check["off_lane_m"] > pt_route_check.MAX_OFF_LANE_LENGTH:
+        check["severity"] = "minor"
+    else:
+        check["severity"] = "ok"
+    return check
+
+
 def build_page_data(stops, routes, link_geometry, bus_lane_link_ids, group_keys, group_members, group_index,
-                    group_key_of, line_routes, official_routes, route_check_rows, show_schedules, region):
+                    group_key_of, line_routes, official_routes, route_check_rows, show_schedules, region,
+                    gtfs_shapes = None, line_agencies = None):
     """The data of the page (see page.py), coordinates in WGS84:
     - stops: one per station [name, lat, lon, modes]
     - routes: every route [line, mode, origin, destination, departure times (s), [[stop, offset (s)], ...], representative]
@@ -581,13 +634,7 @@ def build_page_data(stops, routes, link_geometry, bus_lane_link_ids, group_keys,
         stop_rows.append([name_id(label), *positions[k], sorted(station_modes[k]) or [0]])
 
     # Representative routes, with their path on the network, the platforms they serve and their official routes
-    route_checks = {
-        (row["line_id"], row["route_id"]): {
-            "status": row["status"], "share_inside": row["share_inside"],
-            "n_uturns": row["n_uturns"], "reference_matched": row["reference_matched"],
-        }
-        for row in route_check_rows or []
-    }
+    route_checks = {(row["line_id"], row["route_id"]): check_summary(row) for row in route_check_rows or []}
     references, reps, rep_of_key = {}, [], {}
     for rep in line_routes:
         path_2056 = _route_path(rep, link_geometry, stops)
@@ -595,15 +642,21 @@ def build_page_data(stops, routes, link_geometry, bus_lane_link_ids, group_keys,
             continue
         line_label = rep["line_name"] or rep["line_id"]
         from_name, to_name = stop_name(rep["stop_ids"][0]), stop_name(rep["stop_ids"][-1])
-        platforms = [(stops[s]["x"], stops[s]["y"]) for s in rep["stop_ids"] if stops.get(s, {}).get("x") is not None]
+        platform_ids = [s for s in rep["stop_ids"] if stops.get(s, {}).get("x") is not None]
+        platforms = [(stops[s]["x"], stops[s]["y"]) for s in platform_ids]
 
-        # Same official route as the route check: matched on the terminus and the stops; if none
-        # matches, every route of the line is shown rather than none.
-        features = official_routes.get(pt_route_check.normalize_line(line_label), [])
+        # Same reference as the route check: the GTFS shape of the route's trip, else the official route matched
+        # on the terminus and the stops; if none matches, every route of the line is shown rather than none.
+        shape_id = gtfs_shapes.shape_id(rep["route_id"], shapely.points(platforms), rep["line_id"]) if gtfs_shapes and platforms else None
+        reference_ids = []
+        if shape_id is not None:
+            references["shape:" + shape_id] = [to_latlon(list(gtfs_shapes.shapes[shape_id].coords))]
+            reference_ids.append("shape:" + shape_id)
+        official_key = pt_route_check.official_line_key(official_routes, line_label, (line_agencies or {}).get(rep["line_id"]))
+        features = official_routes.get(official_key, []) if shape_id is None and official_key else []
         selected, _ = pt_route_check.select_directions(
             [f["directions"] for f in features], [f["centerline"] for f in features], to_name, shapely.points(platforms),
         ) if features and platforms else ([], False)
-        reference_ids = []
         for feature in (features[i] for i in selected):
             references[str(id(feature))] = [[[round(a, 6), round(b, 6)] for a, b in path] for path in feature["paths"]]
             reference_ids.append(str(id(feature)))
@@ -613,7 +666,9 @@ def build_page_data(stops, routes, link_geometry, bus_lane_link_ids, group_keys,
         reps.append({
             "label": f"{line_label} ({rep['mode']}): {from_name} → {to_name}" + (f" [via {rep['via']}]" if rep.get("via") else ""),
             "line": name_id(line_label), "mode": mode_index[rep["mode"]],
-            "path": to_latlon(path_2056), "platforms": to_latlon(platforms),
+            "path": to_latlon(path_2056),
+            "platforms": [[*latlon, group_index[group_key_of[s]] if s in group_key_of else -1]
+                          for latlon, s in zip(to_latlon(platforms), platform_ids)],
             "check": route_checks.get((rep["line_id"], rep["route_id"])),
             "references": reference_ids, "route": None, "key": (rep["line_id"], rep["route_id"]),
         })
@@ -673,10 +728,11 @@ def build_page_data(stops, routes, link_geometry, bus_lane_link_ids, group_keys,
         "links": link_rows, "busLanes": bus_lanes, "schedules": bool(show_schedules),
         "modes": mode_names, "modeColors": {m: MODE_COLORS.get(m, DEFAULT_MODE_COLOR) for m in mode_names},
         "defaultModes": default_modes, "perimeter": perimeter,
-        "routeCheck": {"deviating": sum(row["status"] != "ok" for row in route_check_rows),
+        "routeCheck": {"bad": sum(check_summary(row)["severity"] == "bad" for row in route_check_rows),
+                       "minor": sum(check_summary(row)["severity"] == "minor" for row in route_check_rows),
                        "total": len(route_check_rows)} if route_check_rows else None,
         "colors": {"busLane": BUS_LANE_COLOR, "reference": LINE_ROUTE_COLOR, "selected": SELECTED_COLOR,
-                   "ok": CHECK_OK_COLOR, "deviates": CHECK_DEVIATES_COLOR},
+                   "ok": CHECK_OK_COLOR, "minor": CHECK_MINOR_COLOR, "bad": CHECK_DEVIATES_COLOR},
     }
 
 
@@ -703,21 +759,27 @@ if __name__ == "__main__":
     parser.add_argument("--output", default = "transit_schedule_map.html", help = "Output HTML path")
     parser.add_argument("--modes", nargs = "*", default = None,
                          help = "Restrict to these transportMode values (default: all modes)")
-    parser.add_argument("--extent", default = None,
-                         help = "Path to a polygon file; only the PT schedule within it is plotted")
-    parser.add_argument("--line-routes", default = None,
-                         help = "Shapefile of official line routes (columns LIGNE, DIRECTION) shown when a line is selected")
+    parser.add_argument("--extent", action = "append", default = [],
+                         help = "Path to a polygon file; only the PT schedule within it (within all of them if repeated) is plotted")
+    parser.add_argument("--line-routes", action = "append", default = [],
+                         help = "Official line routes shown when a line is selected: PATH, or AGENCY_ID=PATH for the lines "
+                                "of one GTFS agency only (repeatable; with agencies, --gtfs-routes is needed)")
     parser.add_argument("--no-schedules", action = "store_true",
                          help = "Skip building per-stop departure-time popups (faster, smaller output)")
     parser.add_argument("--no-route-check", action = "store_true",
                          help = "Do not compare the routes with the official line routes (--line-routes)")
     parser.add_argument("--gtfs-routes", default = None, help = "GTFS routes.txt (to filter the route check by agency)")
+    parser.add_argument("--gtfs-trips", default = None, help = "GTFS trips.txt (with --gtfs-shapes: the trip shapes are the reference routes)")
+    parser.add_argument("--gtfs-shapes", default = None, help = "GTFS shapes.txt")
     parser.add_argument("--agency", action = "append", default = [],
                          help = "Only check the lines of this GTFS agency_id (repeatable)")
     args = parser.parse_args()
+    args.line_routes = {(s.split("=", 1)[0] if "=" in s else ""): s.split("=", 1)[-1] for s in args.line_routes} or None
+    if args.line_routes and list(args.line_routes) == [""]:
+        args.line_routes = args.line_routes[""]
 
     route_check_rows = None
-    if args.line_routes and not args.no_route_check:
+    if (args.line_routes or args.gtfs_shapes) and not args.no_route_check:
         if args.schedule is None:
             args.schedule = _find_output_file(args.simulation_path, "output_transitSchedule.xml.gz")
         if args.network is None:
@@ -727,6 +789,7 @@ if __name__ == "__main__":
             args.schedule, args.network, args.line_routes,
             os.path.join(os.path.dirname(args.output) or ".", "route_check.csv"),
             gtfs_routes_path = args.gtfs_routes, agencies = args.agency,
+            gtfs_trips_path = args.gtfs_trips, gtfs_shapes_path = args.gtfs_shapes,
         )
 
     plot_transit_schedule(
@@ -737,4 +800,5 @@ if __name__ == "__main__":
         show_schedules = not args.no_schedules,
         extent_path = args.extent, line_routes_path = args.line_routes,
         route_check_rows = route_check_rows,
+        gtfs_routes_path = args.gtfs_routes, gtfs_trips_path = args.gtfs_trips, gtfs_shapes_path = args.gtfs_shapes,
     )

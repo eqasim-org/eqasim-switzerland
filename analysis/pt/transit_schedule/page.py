@@ -26,7 +26,7 @@ MENU = r"""
       <details class="row" open><summary>Layers</summary><div class="legend" id="legend"></div></details>
     </div>
     <div id="panel"><div class="muted">Click on or near a stop on the map, or search it, to see its timetable. Search a line
-      to highlight its route, its stops and its official route.</div></div>
+      to highlight its route, its stops and its reference route.</div></div>
   </div>
 """
 
@@ -125,7 +125,7 @@ function legend() {
   html += `<div><label><input type="checkbox" data-show="stops" ${show.stops ? "checked" : ""}> <span class="dot" style="background:#fff;border:1px solid #0b0b0b"></span>` +
     `Stops, coloured by mode <span class="muted">(${fmt(STOPS.length)})</span></label></div>`;
   html += `<div class="muted" style="margin-top:6px"><span class="swatch" style="background:${C.selected}"></span>selected route ` +
-    (Object.keys(DATA.references).length ? `&nbsp; <span class="swatch" style="background:${C.reference};opacity:.6"></span>official line route` : "") + "</div>";
+    (Object.keys(DATA.references).length ? `&nbsp; <span class="swatch" style="background:${C.reference};opacity:.6"></span>reference route (GTFS shape)` : "") + "</div>";
   byId("legend").innerHTML = html;
   byId("legend").querySelectorAll("input[data-mode]").forEach(el => el.addEventListener("change", () => {
     el.checked ? visibleModes.add(+el.dataset.mode) : visibleModes.delete(+el.dataset.mode); draw(); }));
@@ -138,24 +138,42 @@ function legend() {
 
 let selectedRep = null, selectedStop = null;
 
+// The issues of a route check, most important first: [short label, sentence, important]
+function checkIssues(check) {
+  const issues = [];
+  if (check.n_uturns) issues.push([`↺${check.n_uturns}`, `${check.n_uturns} U-turn(s)`, true]);
+  if (check.n_stops_off) issues.push([`${check.n_stops_off} stop(s) off`, `${check.n_stops_off} stop(s) more than 30 m from the route`, true]);
+  if (check.repeated_m > 50) issues.push([`loop ${check.repeated_m} m`, `${check.repeated_m} m driven twice`, check.severity === "bad" && check.repeated_m > 200]);
+  if (check.off_lane_m > 50) issues.push([`off lane ${check.off_lane_m} m`, `${check.off_lane_m} m away from the lane of the GTFS shape`, false]);
+  return issues;
+}
+
 function checkSummary(check) {
-  let text = Math.round(check.share_inside * 100) + "% on the official route";
-  if (check.n_uturns) text += ", " + check.n_uturns + " U-turn(s)";
+  let text = Math.round(check.share_inside * 100) + "% on the reference route";
+  checkIssues(check).forEach(([, sentence]) => text += ", " + sentence);
   if (!check.reference_matched) text += " (no official route towards this terminus: compared with all the routes of the line)";
   return text;
 }
-const checkBadge = check => check ? ` <b style="color:${check.status === "ok" ? C.ok : C.deviates}" title="${esc(checkSummary(check))}">` +
-  `${Math.round(check.share_inside * 100)}%${check.n_uturns ? " ↺" + check.n_uturns : ""}</b>` : "";
+// Same format for every route: share on the reference route, then the issues; coloured by severity
+const checkColor = check => C[check.severity];
+const checkBadge = check => check ? ` <b style="color:${checkColor(check)}" title="${esc(checkSummary(check))}">` +
+  [Math.round(check.share_inside * 100) + "%", ...checkIssues(check).map(([label]) => label)].join(" · ") + "</b>" : "";
 
 function drawSelection() {
   selectionLayer.clearLayers();
   if (selectedRep != null) {
     const rep = REPS[selectedRep];
     rep.references.forEach(id => (DATA.references[id] || []).forEach(path =>
-      L.polyline(path, {color: C.reference, weight: 11, opacity: 0.55}).bindTooltip("Official line route").addTo(selectionLayer)));
+      L.polyline(path, {color: C.reference, weight: 11, opacity: 0.55}).bindTooltip("Reference route (GTFS shape or official line route)").addTo(selectionLayer)));
     const line = L.polyline(rep.path, {color: C.selected, weight: 6, opacity: 1}).addTo(selectionLayer);
     line.bindTooltip(`<b>${esc(rep.label)}</b>` + (rep.check ? "<br>" + esc(checkSummary(rep.check)) : ""), {sticky: true});
-    rep.platforms.forEach(p => L.circleMarker(p, {radius: 6, color: C.selected, weight: 2, fillColor: "#fff", fillOpacity: 1, interactive: false}).addTo(selectionLayer));
+    // the platforms of the route [lat, lon, stop]: a click shows the timetable of their stop
+    rep.platforms.forEach(([la, lo, stop]) => {
+      const marker = L.circleMarker([la, lo], {radius: 6, color: C.selected, weight: 2, fillColor: "#fff", fillOpacity: 1,
+                                               interactive: stop >= 0, bubblingMouseEvents: false}).addTo(selectionLayer);
+      if (stop >= 0) marker.bindTooltip(`<b>${esc(NAMES[STOPS[stop][0]])}</b><br>click for the departure times`)
+        .on("click", () => { marker.closeTooltip(); showStop(stop, false); });
+    });
   }
   if (selectedStop != null) {
     const [, la, lo] = STOPS[selectedStop];
@@ -181,7 +199,7 @@ function showLine(i) {
   const stops = rep.route != null ? ROUTES[rep.route][5] : [];
   let html = `<h2><span class="swatch" style="background:${color}"></span>${esc(rep.label)}</h2>`;
   html += `<button class="link" id="clearLine">clear the selection</button>`;
-  if (rep.check) html += `<div class="row">Route check: <b style="color:${rep.check.status === "ok" ? C.ok : C.deviates}">${esc(checkSummary(rep.check))}</b></div>`;
+  if (rep.check) html += `<div class="row">Route check: <b style="color:${checkColor(rep.check)}">${esc(checkSummary(rep.check))}</b></div>`;
   html += `<div class="muted">${fmt(sum(hours))} departures, ${stops.length} stops` + (routes.length > 1 ? `, ${routes.length} route variants` : "") + "</div>";
   if (DATA.schedules) html += hourBars("Departures per hour (first stop)", hours, color);
   html += `<table class="t"><tr><th class="n">min</th><th>stop</th></tr>` + stops.map(([stop, offset]) =>
@@ -240,7 +258,7 @@ function search() {
   if (!text && !onlyDeviating()) { byId("results").innerHTML = ""; return; }
   const lines = REPS.map((rep, i) => [rep, i])
     .filter(([rep]) => (!text || NAMES[rep.line].toLowerCase().startsWith(text) || rep.label.toLowerCase().includes(text)) &&
-                       (!onlyDeviating() || (rep.check && rep.check.status !== "ok")))
+                       (!onlyDeviating() || (rep.check && rep.check.severity === "bad")))
     .sort((a, b) => byNumber(a[0].label, b[0].label)).slice(0, 200);
   const stops = text && !onlyDeviating() ? STOPS.map((s, k) => [s, k]).filter(([s]) => NAMES[s[0]].toLowerCase().includes(text)).slice(0, 100) : [];
   byId("results").innerHTML =
@@ -252,8 +270,10 @@ function search() {
 }
 
 if (DATA.routeCheck) {
-  byId("check").innerHTML = `<div class="muted">Route check: ${DATA.routeCheck.deviating} of ${DATA.routeCheck.total} route(s) deviate from the official route ` +
-    `(share of the length in its corridor, U-turns; details in route_check.csv)</div><label><input type="checkbox" id="deviating"> list the deviating routes only</label>`;
+  byId("check").innerHTML = `<div class="muted">Route check of ${DATA.routeCheck.total} route(s): ` +
+    `<b style="color:${C.bad}">${DATA.routeCheck.bad} bad</b> (under 90% on the reference route, U-turn, stop not served or loop over 200 m), ` +
+    `<b style="color:${C.minor}">${DATA.routeCheck.minor} minor</b> (off the lane of the GTFS shape or short loop); details in route_check.csv</div>` +
+    `<label><input type="checkbox" id="deviating"> list the bad routes only</label>`;
   byId("deviating").addEventListener("change", search);
 }
 
