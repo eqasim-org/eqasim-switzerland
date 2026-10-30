@@ -42,3 +42,23 @@ def matches_found(data, city, source="simulation network"):
 
     logger.warning("No count links for %s matched the %s; skipping.", city, source)
     return False
+
+
+# Areas of the cross-border flow maps (one map per area): name -> shapefile/geopackage, absolute or relative to data_path
+DEFAULT_FLOW_MAP_EXTENTS = {
+    "geneva":   "spatial/MMT/MMT_extent_cleaned.gpkg",
+    "lausanne": "spatial/LausanneExtent/LausanneExtent.shp",
+}
+
+
+def configure_flow_map_extents(context):
+    context.config("data_path")
+    context.config("cross_border_flow_extents", default = DEFAULT_FLOW_MAP_EXTENTS)
+
+
+def get_flow_map_extents(context):
+    """{name: path of the extent}, the paths made absolute"""
+    return {
+        name: path if os.path.isabs(path) else os.path.join(context.config("data_path"), path)
+        for name, path in context.config("cross_border_flow_extents").items()
+    }

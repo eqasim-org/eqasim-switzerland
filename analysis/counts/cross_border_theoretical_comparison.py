@@ -3,7 +3,7 @@ Stage: analysis.counts.cross_border_theoretical_comparison
 
 One counts_on_network_{city}.html-style map per extent (Switzerland/Geneva/
 Annemasse, via analysis.counts.runs.ch/.geneva/.annemasse), with
-crossborder_share_pct (from analysis.counts.cross_border_flow) added as a
+crossborder_share_pct (from analysis.counts.cross_border_flow_cars) added as a
 selectable point-color metric alongside pdiff/adiff/geh. "Theoretical" means
 the real, non-MATSim count-station data already used in analysis/counts, not
 the A+GQPV survey data in data/cross_border.
@@ -45,7 +45,7 @@ CROSSBORDER_TOOLTIP_FIELDS = ["crossborder_share_pct"]
 
 def configure(context):
     context.stage("analysis.counts.matching.network")
-    context.stage("analysis.counts.cross_border_flow")
+    context.stage("analysis.counts.cross_border_flow_cars")
     context.stage("data.spatial.swiss_border")
     configure_simulation_path(context)
     context.config("only_weekday", default=True)
@@ -60,7 +60,7 @@ def execute(context):
 
     network = context.stage("analysis.counts.matching.network")
 
-    daily_csv = context.stage("analysis.counts.cross_border_flow")["daily_csv"]
+    daily_csv = context.stage("analysis.counts.cross_border_flow_cars")["daily_csv"]
     df_cb = pd.read_csv(daily_csv, dtype={"link_id": str})
     total_flow_by_link = dict(zip(df_cb.link_id, df_cb.total_flow))
     crossborder_flow_by_link = dict(zip(df_cb.link_id, df_cb.crossborder_flow))
