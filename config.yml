@@ -7,6 +7,9 @@ dryrun: false # Set true to inspect the pipeline without running its stages.
 run:
     - synthesis.output # Export the synthetic population.
     - matsim.output # Build, simulate, and export the MATSim scenario.
+    # Optional education inspection (uses the existing analysis_path):
+    #- analysis.tertiary_education_assignment
+    #- analysis.education_distances
 
 config:
     # Files and folders
@@ -24,6 +27,7 @@ config:
     enable_scaling: false # Scale population totals to a target year.
     scaling_year: 2025 # Target population year when scaling is enabled.
     census: statpop # Population source; statpop uses Swiss population-register data.
+    # Education references: data_path/education_enrolment; residence candidates: data_path/gwr.
     specific_day_scenario: workday # Day to model: workday, weekend, or a weekday name.
 
     # Network and public-transport inputs

@@ -197,7 +197,14 @@ def execute(context):
     
     df_persons["is_car_passenger"] = df_persons["is_car_passenger"].fillna(False)
     
-    df_persons    = df_persons[PERSON_FIELDS]
+    # Extra scenario markers stay available to PersonWriter; imported external
+    # populations have no such classification and receive explicit False defaults.
+    residence_flags = ["non_private_dorm_candidate_households", "non_private_home_only_households", "is_synthetic_household"]
+    for column in residence_flags:
+        df_persons[column] = coerce_boolean_series(df_persons.get(column, pd.Series(False, index=df_persons.index)), name=column)
+    df_persons["non_private_model_status"] = df_persons.get(
+        "non_private_model_status", pd.Series("ordinary_models", index=df_persons.index)).fillna("ordinary_models")
+    df_persons    = df_persons[PERSON_FIELDS + residence_flags + ["non_private_model_status"]]
     df_activities = df_activities[ACTIVITY_FIELDS]
     df_vehicles   = df_vehicles[VEHICLE_FIELDS]
     df_vehicles["owner_id"] = df_vehicles["owner_id"].astype(int)
@@ -524,6 +531,11 @@ class PersonWriter:
         writer.add_attribute("subscriptions", "java.lang.String", ["none", "GA", "VA", "HT", "VA+HT"][int(p.pt_subscription)])
 
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(getattr(p, "is_car_passenger", False)))
+        # Keep assumptions discoverable in the final population XML, not only
+        # intermediate CSVs. These flags do not alter simulation subpopulation.
+        for field in ["non_private_dorm_candidate_households", "non_private_home_only_households", "is_synthetic_household"]:
+            writer.add_attribute(field, "java.lang.Boolean", writer.true_false(getattr(p, field, False)))
+        writer.add_attribute("non_private_model_status", "java.lang.String", getattr(p, "non_private_model_status", "ordinary_models"))
 
         # loop trip flags may or may not exist -> default False
         writer.add_attribute("hasWalkLoopTrip", "java.lang.Boolean", writer.true_false(getattr(p, "has_walk_loop_trip", False)))

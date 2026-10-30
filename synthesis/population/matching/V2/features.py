@@ -108,7 +108,9 @@ def prepare_features(source, population, const):
             raw = numeric(frame, column)
             frame[column] = raw.where(raw >= 0)
             frame[column + "_log"] = np.log1p(frame[column])
-        frame.loc[frame["employed"].ne(1), ["commute_distance", "commute_distance_log"]] = np.nan
+        # Students without employment can still have a usual education commute.
+        frame.loc[frame["employed"].ne(1) & frame["is_student"].ne(1),
+                  ["commute_distance", "commute_distance_log"]] = np.nan
         for column in ("canton_id", "sp_region", "number_of_cars_class", "marital_status", "job_position"):
             frame[column] = numeric(frame, column).fillna(-1).astype(int)
         if is_source:

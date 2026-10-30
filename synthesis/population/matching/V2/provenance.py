@@ -6,7 +6,9 @@ from pathlib import Path
 
 def implementation_token():
     digest = hashlib.sha256()
-    for path in sorted(Path(__file__).parent.glob("*.py")):
+    # Include the shared work/education predictor used by the input adapter.
+    paths = [*Path(__file__).parent.glob("*.py"), Path(__file__).parent.parent / "commute.py"]
+    for path in sorted(paths):
         digest.update(path.name.encode())
         digest.update(path.read_bytes())
     return digest.hexdigest()

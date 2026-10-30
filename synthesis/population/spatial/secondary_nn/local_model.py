@@ -42,7 +42,7 @@ def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.h3")
     context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
-    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.secondary_trips")
     context.stage("data.microcensus.persons")
     context.stage("data.constants")
     context.stage("data.spatial.swiss_border")
@@ -86,7 +86,8 @@ def execute(context):
     constants = context.stage("data.constants")
     mz_persons["car_availability"] = (mz_persons["car_availability"] != constants.CAR_AVAILABILITY_NEVER)
 
-    mz_trips, _, _, _ = context.stage("data.microcensus.trips")
+    # Preserve nonstudent education recoding in the filtered NN training pool.
+    mz_trips = context.stage("data.microcensus.secondary_trips")
     mz_trips = mz_trips.loc[mz_trips.person_id.isin(mz_persons.person_id)].copy()
     mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "purpose", "origin_purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
