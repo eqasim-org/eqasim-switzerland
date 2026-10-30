@@ -6,7 +6,6 @@ logger = logging.getLogger("synpp")
 # Use completed ages at year end, as in the STATPOP source. January stocks in
 # this BFS table use age attained during the coming year and cannot be grouped
 # directly with STATPOP ages (their age-zero count is structurally zero).
-PROJECTION_FILE = "projections/population/population_year_end_2025.csv"
 STOCK_COLUMN = "Bevölkerungsstand am 31. Dezember"
 
 CANTON_TO_ID = {"Zürich": 1,
@@ -41,19 +40,22 @@ def configure(context):
     context.config("scaling_year")
     context.config("enable_scaling")
     context.stage("data.constants")
+    if context.config("enable_scaling"):
+        context.stage("data.statpop.projections.raw")
 
 def execute(context):
+
+    # Scaling-disabled runs do not require or read the raw projection inputs.
+
     if not context.config("enable_scaling"):
         logger.info("Skipping projecting population as scaling is disabled!")
         return
-    data_path = context.config("data_path")
     c         = context.stage("data.constants")
 
-    # Select year in the future to project to
-    scaling_year = context.config("scaling_year")
+    # Build the target-year controls from the normalized official raw exports.
 
-    # load csv projection data
-    df = pd.read_csv("%s/%s" % (data_path, PROJECTION_FILE), sep=";", encoding="latin1")
+    scaling_year = context.config("scaling_year")
+    df = context.stage("data.statpop.projections.raw")["population"]
     return prepare_controls(df, scaling_year, c.AGE_CLASS_UPPER_BOUNDS), scaling_year
 
 

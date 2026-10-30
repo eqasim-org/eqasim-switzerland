@@ -5,13 +5,29 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger("synpp")
-PROJECTION_FILE = "projections/households/households_2025.csv"
 
 
 def configure(context):
     context.config("data_path")
     context.config("scaling_year")
     context.config("enable_scaling")
+    if context.config("enable_scaling"):
+        context.stage("data.statpop.projections.raw")
+
+
+def execute(context):
+
+    # Scaling-disabled runs do not require or read the raw projection inputs.
+
+    if not context.config("enable_scaling"):
+        logger.info("Skipping projecting households as scaling is disabled!")
+        return
+
+    # Select the target year's private-household controls from the official CSV.
+
+    year = context.config("scaling_year")
+    df = context.stage("data.statpop.projections.raw")["households"]
+    return prepare_controls(df, year), year
 
 
 def prepare_controls(df, scaling_year):
@@ -42,12 +58,3 @@ def prepare_controls(df, scaling_year):
         raise ValueError("Household projection weights must be finite non-negative integers")
     out["weight"] = out["weight"].astype("int64")
     return out.sort_values("canton_id").reset_index(drop=True)
-
-
-def execute(context):
-    if not context.config("enable_scaling"):
-        logger.info("Skipping projecting households as scaling is disabled!")
-        return
-    year = context.config("scaling_year")
-    df = pd.read_csv("%s/%s" % (context.config("data_path"), PROJECTION_FILE))
-    return prepare_controls(df, year), year

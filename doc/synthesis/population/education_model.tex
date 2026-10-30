@@ -623,6 +623,15 @@ see Section~\ref{sec:constants}. \\
 \end{longtable}
 \normalsize
 
+Scaling inputs are unchanged official BFS CSV exports under
+\code{<data_path>/projections/raw/}. The stage
+\code{data.statpop.projections.raw} decodes and combines these files before the
+population and household stages build target-year controls. The previously
+prepared \code{population_year_end_2025.csv} and \code{households_2025.csv} are
+no longer required. Download and sharing instructions are in
+\code{doc/data/statpop/projections.md}. With scaling disabled, these raw inputs
+are not required.
+
 \subsection{Important choices that are not YAML switches}
 \label{sec:constants}
 
