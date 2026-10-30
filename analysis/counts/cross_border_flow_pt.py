@@ -115,7 +115,7 @@ def load_transit_schedule(schedule_path):
     vehicle_lines = {}
     current_line_label = None
 
-    with xopen.xopen(schedule_path, "r") as f:
+    with xopen.xopen(schedule_path, "rb") as f:
         for event, elem in ET.iterparse(f, events=["start", "end"]):
             if event == "start":
                 if elem.tag == "transitLine":
@@ -156,7 +156,7 @@ def count_pt_stop_segment_riders(events_path, rider_group_ids, vehicle_lines):
     last_departure_facility = {}
 
     processed = 0
-    with xopen.xopen(events_path, "r") as f:
+    with xopen.xopen(events_path, "rb") as f:
         parser = ET.iterparse(f, events=["start", "end"])
         _, root = next(parser)  # <events> start tag, kept to periodically release finished events
 

@@ -27,10 +27,13 @@ COUNT_ZOOM_AREAS = {
 
 
 def configure(context):
+    context.config("secondary_nn_model_validation_rotation_epochs", 3)
+    context.config("secondary_nn_model_validation_holdout_fraction", 0.1)
+    context.stage("synthesis.population.spatial.secondary_nn.mobility")
     context.config("secondary_nn_use_target_distance", True)
     context.config("secondary_nn_model_validation_folds", 5)
-    context.config("secondary_nn_model_min_epochs", 20)
-    context.config("secondary_nn_model_validation_strategy", "cross_validation")
+    context.config("secondary_nn_model_min_epochs", 30)
+    context.config("secondary_nn_model_validation_strategy", "rotating_holdout")
     context.stage("data.spatial.ovgk")
     context.config("secondary_nn_distance_loss_kind", "crps_energy")
     context.config("secondary_nn_distribution_loss_weight", 0.1)

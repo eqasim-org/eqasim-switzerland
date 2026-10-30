@@ -1,4 +1,5 @@
 from matsim.readers import read_network
+from matsim.config.tools import resolve_output_file
 import numpy as np
 import geopandas as gpd
 import pandas as pd
@@ -19,14 +20,14 @@ def configure(context):
 
 def execute(context):
     simulation_path = get_simulation_path(context)
-    network_file = os.path.join(simulation_path, "output_network.xml.gz")
+    network_file = resolve_output_file(os.path.join(simulation_path, "output_network.xml.gz"), required=False)
 
     if not os.path.exists(network_file) and not context.config("analysis.counts.simulation_path"):
-        network_file = os.path.join(
+        network_file = resolve_output_file(os.path.join(
             context.config("output_path"),
             context.config("output_id"),
             context.config("output_prefix") + "network.xml.gz",
-        )
+        ), required=False)
 
     network_geometry_file = _resolve_detailed_network_path(context, simulation_path)
 

@@ -75,7 +75,14 @@ def lane_allows(lane, vehicle_class):
     return (allow is None or "all" in allow.split() or vehicle_class in allow.split()) and "all" not in disallow and vehicle_class not in disallow
 
 
-def read_network(path):
+def read_network(path, context=None):
+    if context is not None:
+        from sumo.scenario.network.cache import read_cached
+        return read_cached(path, context, _read_network_xml)
+    return _read_network_xml(path)
+
+
+def _read_network_xml(path):
     edges, connections, location = {}, [], {}
     for element in elements(path, ("location", "edge", "connection")):
         if element.tag == "location":
@@ -95,9 +102,12 @@ def read_network(path):
     return {"edges": edges, "connections": connections, "location": location}
 
 
-def validate_routes(vehicles, network, types=None):
-    transitions = {(connection["from"], connection["to"]) for connection in network["connections"]}
-    class_transitions = {}
+def validate_routes(vehicles, network, types=None, state=None):
+    state = {} if state is None else state
+    if "transitions" not in state:
+        state["transitions"] = {(connection["from"], connection["to"]) for connection in network["connections"]}
+    transitions = state["transitions"]
+    class_transitions = state.setdefault("classes", {})
     for vehicle in vehicles:
         edges = vehicle["edges"]
         if any(edge not in network["edges"] for edge in edges):
@@ -113,7 +123,8 @@ def validate_routes(vehicles, network, types=None):
                 class_transitions[vehicle_class] = {
                     (connection["from"], connection["to"]) for connection in network["connections"]
                     if lane_allows(network["edges"][connection["from"]]["lanes"][int(connection["fromLane"])], vehicle_class)
-                    and lane_allows(network["edges"][connection["to"]]["lanes"][int(connection["toLane"])], vehicle_class)}
+                    and lane_allows(network["edges"][connection["to"]]["lanes"][int(connection["toLane"])], vehicle_class)
+                    and lane_allows(connection, vehicle_class)}
             if any(pair not in class_transitions[vehicle_class] for pair in zip(edges, edges[1:])):
                 raise ValueError(f"Route {vehicle['attributes']['id']} has a turn forbidden to {vehicle_class}")
 

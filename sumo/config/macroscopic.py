@@ -1,6 +1,8 @@
 """Generate a native marouter configuration for flow-dependent road assignment."""
 
 from pathlib import Path
+import logging
+import math
 
 from sumo.config import tools
 
@@ -18,11 +20,12 @@ def execute(context):
 
 
 def configure_profile(context):
+    context.config("threads", volatile=True)
     context.config("random_seed")
     context.config("sumo_begin", 0)
-    context.config("sumo_end", 108000)
+    context.config("sumo_end", None)
     context.config("sumo_assignment_method", "incremental")
-    context.config("sumo_assignment_iterations", 50)
+    context.config("sumo_assignment_iterations", 20)
     context.config("sumo_assignment_interval", 3600)
     context.config("sumo_assignment_scale", 1.0)
     context.config("sumo_assignment_previous_weights", None)
@@ -37,12 +40,9 @@ def write(context, demand, method=None):
     method = context.config("sumo_assignment_method") if method is None else method
     if method not in {"incremental", "SUE"}:
         raise ValueError("sumo_assignment_method must be 'incremental' or 'SUE'; native UE is not implemented")
-    begin = float(context.config("sumo_begin"))
-    end = tools.positive(context.config("sumo_end"), "sumo_end")
-    if not 0 <= begin < end:
-        raise ValueError("Require 0 <= sumo_begin < sumo_end")
-    if demand.get("first_departure", begin) < begin or demand.get("last_departure", begin) >= end:
-        raise ValueError("sumo_begin/sumo_end must include every trip departure")
+    begin, end = time_bounds(context, demand)
+    logging.getLogger("synpp").info("SUMO assignment window: %.3f to %.3f seconds (%s end)",
+                                   begin, end, "automatic" if context.config("sumo_end") is None else "configured")
     adaption = float(context.config("sumo_assignment_weight_adaption"))
     if not 0 <= adaption < 1:
         raise ValueError("sumo_assignment_weight_adaption must be in [0, 1) so new flow can update costs")
@@ -60,10 +60,11 @@ def write(context, demand, method=None):
             "max-iterations": tools.positive(context.config("sumo_assignment_iterations"), "sumo_assignment_iterations", integer=True),
             "aggregation-interval": tools.positive(context.config("sumo_assignment_interval"), "sumo_assignment_interval"),
             "scale": tools.positive(context.config("sumo_assignment_scale"), "sumo_assignment_scale"),
-            "routing-algorithm": "dijkstra", "capacities.default": True,
+            "routing-algorithm": "astar", "capacities.default": True,
+            "routing-threads": tools.positive(context.config("threads"), "threads", integer=True),
         },
         "output": {"output-file": "assigned.flows.xml.gz", "netload-output": "loaded.edges.xml.gz", "precision": 8},
-        "report": {"ignore-errors": False, "log": "assignment.log"},
+        "report": {"ignore-errors": False, "log": "assignment.log", "verbose": True},
         "random_number": {"seed": context.config("random_seed")},
     }
     return tools.write_config(Path(context.path()) / "macroscopic.marocfg", "marouterConfiguration", sections,
@@ -72,3 +73,22 @@ def write(context, demand, method=None):
 
 def validate(context):
     return tools.external_token(context, ("sumo_assignment_previous_weights",))
+
+
+def time_bounds(context, demand):
+    """Resolve an exclusive assignment end on the departure aggregation grid."""
+    begin, end = tools.time_window(context)
+    first = demand.get("first_departure")
+    last = demand.get("last_departure")
+    first = begin if first is None else float(first)
+    last = begin if last is None else float(last)
+    if not math.isfinite(first) or not math.isfinite(last) or first < 0 or last < first:
+        raise ValueError("SUMO demand departure bounds must be finite, nonnegative and ordered")
+    if end is None:
+        interval = tools.positive(context.config("sumo_assignment_interval"), "sumo_assignment_interval")
+        end = begin + (math.floor((max(begin, last)-begin)/interval)+1)*interval
+    if first < begin or last >= end:
+        raise ValueError(f"sumo_begin/sumo_end must include every trip departure: "
+                         f"demand [{first:g}, {last:g}], configured window [{begin:g}, {end:g}). "
+                         "Set sumo_end: null for automatic coverage.")
+    return begin, end

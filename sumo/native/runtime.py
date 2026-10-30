@@ -35,5 +35,5 @@ def build_writer(output):
     output.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run([compiler, "-O3", "-std=c++17", str(Path(__file__).with_name("write_trips.cpp")),
                     "-I", pa.get_include(), str(library), "-Wl,-rpath," + str(library_dir),
-                    "-lz", "-o", str(output)], check=True)
+                    "-lz", "-pthread", "-o", str(output)], check=True)
     return str(output)

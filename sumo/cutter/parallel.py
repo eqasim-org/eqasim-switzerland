@@ -1,6 +1,8 @@
 """Process-parallel road-path clipping with one shared parent endpoint index."""
 
 from concurrent.futures import ProcessPoolExecutor
+from contextlib import contextmanager
+import os
 import json
 import logging
 import math
@@ -56,7 +58,7 @@ def clip_batches(frame, settings, cache, workers):
             write_table(batch, source)
             inputs.append(source)
         # Spawn avoids inheriting Polars' already running native thread pool.
-        with ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn")) as pool:
+        with _worker_environment(), ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn")) as pool:
             futures = [pool.submit(_clip_partition, str(source), settings) for source in inputs]
             completed = 0
             for future in futures:
@@ -127,3 +129,17 @@ def merge_reports(total, report):
         elif total[key] != value:
             raise ValueError(f"Inconsistent parallel clipping report: {key}")
     return total
+
+
+@contextmanager
+def _worker_environment():
+    """Limit child pools before spawn imports Polars or numerical libraries."""
+    keys = ('POLARS_MAX_THREADS','OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS','NUMEXPR_NUM_THREADS')
+    previous = {key: os.environ.get(key) for key in keys}
+    try:
+        for key in keys: os.environ[key] = '1'
+        yield
+    finally:
+        for key,value in previous.items():
+            if value is None: os.environ.pop(key,None)
+            else: os.environ[key] = value

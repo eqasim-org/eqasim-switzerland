@@ -4,37 +4,44 @@ from pathlib import Path
 import math
 import statistics
 
-from sumo.config import macroscopic
-from sumo.config.tools import positive
+from sumo.config import macroscopic, tools
+from sumo.scenario import modes
+from sumo.config.tools import positive, time_window
 from sumo.runtime import sumo
 from sumo.scenario.tools import elements
 from sumo.scenario.assignment import materialize_assignment
 
 
-def run_macroscopic(context, network, trips, method):
+def run_macroscopic(context, network, trips, method, realize=True):
     cache = Path(context.path()).resolve()
     if positive(context.config("sumo_assignment_scale"), "sumo_assignment_scale") < 1:
         raise ValueError("Loading requires scale >= 1 so every original trip retains a route")
-    mapped = cache / "mapped.trips.xml.gz"
-    sumo.run(context, ["--net-file", network, "--route-files", trips, "--output-file", mapped,
-                      "--write-trips", "true",
-                      "--seed", context.config("random_seed")], binary="duarouter")
-    departures = [float(trip.get("depart")) for trip in elements(mapped, "trip")]
-    demand = {"network": network, "loading": str(mapped), "queries": str(mapped), "count": len(departures),
+    # Read departure bounds once; mapped endpoints go directly into assignment.
+
+    departures = [float(trip.get("depart")) for trip in elements(trips, "trip")]
+    if not departures:
+        raise ValueError("No trips available for macroscopic assignment")
+    demand = {"network": network, "loading": str(trips), "queries": str(trips), "count": len(departures),
               "first_departure": min(departures), "last_departure": max(departures)}
+
+    # Validate the time window and run class- and position-aware marouter.
+
     assignment = macroscopic.write(context, demand, method=method)
-    sumo.run(context, ["-c", assignment], binary="marouter")
+    sumo.run(context, ["-c", assignment], binary="marouter",
+             executable=context.stage("sumo.native.marouter"))
     routes, weights = cache / "assigned.routes.xml.gz", cache / "loaded.edges.xml.gz"
-    report = materialize_assignment(cache / "assigned.flows.xml.gz", weights, mapped, network,
+    if not realize:
+        return cache / "assigned.flows.xml.gz", weights, None
+    report = materialize_assignment(cache / "assigned.flows.xml.gz", weights, trips, network,
                                     routes, context.config("random_seed"), context.config("sumo_begin"),
                                     context.config("sumo_assignment_interval"))
     return routes, weights, report
 
 
 def run_iterations(context, network, trips):
-    begin, end = float(context.config("sumo_begin")), float(context.config("sumo_end"))
+    begin, end = time_window(context)
     departures = [float(trip.get("depart")) for trip in elements(trips, "trip")]
-    if not 0 <= begin < end or min(departures) < begin or max(departures) >= end:
+    if min(departures) < begin or (end is not None and max(departures) >= end):
         raise ValueError("sumo_begin/sumo_end must include every selected trip departure")
     iterations = positive(context.config("sumo_assignment_iterations"), "sumo_assignment_iterations", integer=True)
     window = positive(context.config("sumo_loading_convergence_window"), "sumo_loading_convergence_window", integer=True)
@@ -51,10 +58,12 @@ def run_iterations(context, network, trips):
     if choice not in {"msa", "gawron", "logit"}:
         raise ValueError("sumo_loading_route_choice must be 'msa', 'gawron', or 'logit'")
     arguments = ["--net-file", network, "--trips", trips, "--path", str(Path(settings["home"]) / "bin"),
-                 "--begin", context.config("sumo_begin"), "--end", context.config("sumo_end"),
+                 "--begin", begin,
                  "--last-step", iterations, "--aggregation", context.config("sumo_assignment_interval"),
                  "--vehroute-file", "detailed", "--output-lastRoute", "--time-to-teleport=-1",
                  "--convergence-iterations", window, "--max-convergence-deviation", tolerance]
+    if end is not None:
+        arguments += ["--end", end]
     if choice in {"msa", "logit"}:
         arguments += ["--logit"]
     if choice == "msa":
@@ -91,3 +100,36 @@ def run_iterations(context, network, trips):
     return routes, weights[0], {"method": "simulation-based DUA", "route_choice": choice,
         "iterations": len(means), "mean_travel_times_s": means, "relative_stddev": deviation,
         "stable": stable, "stability_tolerance": tolerance, "equilibrium_guaranteed": False}
+
+
+def configure_loading(context):
+    modes.require_mode_choice(context)
+    modes.configure(context)
+    context.stage("sumo.runtime.sumo")
+    context.stage("sumo.scenario.demand")
+    context.stage("sumo.scenario.network.routing")
+    context.config("clip_trips_to_border_in_sumo", True)
+    if context.config("clip_trips_to_border_in_sumo"):
+        context.stage("sumo.scenario.border")
+    tools.configure_network(context)
+    context.config("sumo_region_geometry", None)
+    if context.config("sumo_region_geometry") is not None:
+        context.stage("sumo.cutter.split_network")
+    method = context.config("sumo_loading_method", "incremental")
+    if method not in {"dua", "incremental", "SUE"}:
+        raise ValueError("sumo_loading_method must be 'dua', 'incremental' or 'SUE'")
+    if method != "dua":
+        context.stage("sumo.native.marouter")
+        macroscopic.configure_profile(context)
+    context.config("random_seed")
+    context.config("sumo_begin", 0)
+    context.config("sumo_end", None)
+    context.config("sumo_assignment_iterations", 20)
+    context.config("sumo_assignment_interval", 3600)
+    context.config("sumo_assignment_scale", 1.0)
+    context.config("sumo_mapmatch_distance", None)
+    context.config("sumo_loading_mesoscopic", True)
+    context.config("sumo_loading_route_choice", "msa")
+    context.config("sumo_loading_convergence_window", 5)
+    context.config("sumo_loading_convergence_tolerance", 0.01)
+    context.config("sumo_loading_require_convergence", False)

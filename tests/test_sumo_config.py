@@ -22,13 +22,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class Context:
     def __init__(self, module, path, config=None, stages=None):
-        self.base = {"sumo_assignment_all_as_car": False, "sumo_population_crs": "EPSG:2056", "enable_mode_choice": True, "sumo_native_xml": False, "clip_trips_to_border_in_sumo": False, **(config or {})}
+        self.base = {"input_downsampling": 1., "threads": 2, "sumo_assignment_all_as_car": False, "sumo_population_crs": "EPSG:2056", "enable_mode_choice": True, "sumo_native_xml": False, "clip_trips_to_border_in_sumo": False, **(config or {})}
         context = ConfigurationContext(self.base)
         module.configure(context)
         self.config_values = {**self.base, **context.required_config}
         self.cache = Path(path)
         self.cache.mkdir(parents=True, exist_ok=True)
-        self.stages = stages or {}
+        self.stages = dict(stages or {})
         network = (config or {}).get('sumo_network_file')
         if network and Path(network).is_file() and detect_network_format(network) == 'sumo':
             self.stages.setdefault('sumo.scenario.network.road_network', str(Path(network).resolve()))
@@ -44,6 +44,26 @@ class Context:
         return str(self.cache)
 
     def stage(self, name):
+        if name in ("sumo.native.routes", "sumo.cutter.route_parts", "sumo.simulation.prepare_loading", "sumo.simulation.assign_network", "sumo.simulation.realize_routes") and name not in self.stages:
+            import importlib
+            module = importlib.import_module(name)
+            self.stages[name] = module.execute(Context(module, self.cache / name.split(".")[-1], self.base, self.stages))
+        if name == "sumo.native.marouter" and name not in self.stages:
+            import os
+            binary = os.environ.get("SUMO_TEST_MAROUTER")
+            if binary is None:
+                manifests = list((ROOT / "cache_sumo").glob("sumo.native.marouter__*.p"))
+                if not manifests:
+                    pytest.skip("Build sumo.native.marouter or set SUMO_TEST_MAROUTER first")
+                binary = pickle.loads(manifests[0].read_bytes())
+            self.stages[name] = binary
+        if name == "sumo.scenario.scaled" and name not in self.stages:
+            from sumo.scenario import scaled
+            self.stages[name] = scaled.execute(Context(scaled, self.cache / "scaled", self.base, self.stages))
+        if name in ("sumo.scenario.selected", "sumo.scenario.clipped") and name not in self.stages:
+            from sumo.scenario import selected, clipped
+            module = selected if name.endswith("selected") else clipped
+            self.stages[name] = module.execute(Context(module, self.cache / name.split(".")[-1], self.base, self.stages))
         if name == "sumo.scenario.unrouted_demand" and name not in self.stages:
             self.stages[name] = unrouted_demand.execute(Context(unrouted_demand, self.cache / "raw", self.base, self.stages))
         if name == "sumo.scenario.network.routing" and name not in self.stages:
@@ -96,6 +116,13 @@ def test_simulation_configs_validate_run_and_keep_producers_readonly(tmp_path, r
         "sumo_route_files": [str(routes)], "random_seed": 42, "sumo_end": 100})
     config = Path(module.execute(context))
     validate_schema(config, runtime, "sumo")
+    document = etree.parse(str(config))
+    if model == "mesoscopic":
+        assert document.find("processing/no-internal-links").get("value") == "true"
+        assert document.find("mesoscopic/meso-lane-queue").get("value") == "true"
+        assert document.find("mesoscopic/meso-ltm").get("value") == "true"
+    else:
+        assert document.find("processing/no-internal-links") is None
     before = {path.name: path.read_bytes() for path in config.parent.iterdir()}
     execution = Context(run, tmp_path / "simulation", {"sumo_simulation_model": model},
                          {"sumo.config.config": {model: str(config)}, "sumo.runtime.sumo": runtime})
@@ -106,12 +133,12 @@ def test_simulation_configs_validate_run_and_keep_producers_readonly(tmp_path, r
 
 
 def test_external_files_avoid_synthesis_dependencies(tmp_path):
-    context = ConfigurationContext({"sumo_network_file": "/network.xml", "sumo_route_files": ["/trips.xml"], "random_seed": 42})
+    context = ConfigurationContext({"threads": 2, "sumo_network_file": "/network.xml", "sumo_route_files": ["/trips.xml"], "random_seed": 42})
     microscopic.configure(context)
     assert [stage['descriptor'] for stage in context.required_stages] == ['sumo.scenario.network.road_network']
     context = ConfigurationContext({"enable_mode_choice": True, "sumo_assignment_trip_files": ["/trips.xml"], "sumo_native_xml": False, "clip_trips_to_border_in_sumo": False})
     demand.configure(context)
-    assert [s["descriptor"] for s in context.required_stages] == ["sumo.scenario.unrouted_demand"]
+    assert [s["descriptor"] for s in context.required_stages] == ["sumo.scenario.scaled"]
 
 
 def prepare_workflow(tmp_path, runtime, network, scale=1):

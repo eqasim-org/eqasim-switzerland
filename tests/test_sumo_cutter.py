@@ -110,7 +110,7 @@ def test_regional_dispatch_dependencies_and_invalid_model():
     with pytest.raises(ValueError, match='sumo_simulation_model'):
         selected_run.configure(ConfigurationContext({"enable_mode_choice": True, 'sumo_simulation_model': 'macroscopic'}))
     for module in (run_microscopic, run_mesoscopic):
-        context = ConfigurationContext({"enable_mode_choice": True, 'random_seed': 42})
+        context = ConfigurationContext({"enable_mode_choice": True, 'threads': 2, 'random_seed': 42})
         module.configure(context)
         assert {stage['descriptor'] for stage in context.required_stages} == {'sumo.cutter.scenario', 'sumo.runtime.sumo'}
 
@@ -337,26 +337,24 @@ def test_default_macro_keeps_assignment_distribution_without_postrouting(tmp_pat
                 'sumo_end': 3600, 'sumo_assignment_scale': 10}
     context = Context(load_network, tmp_path / 'load', settings, stages)
     assert context.config('sumo_loading_method') == 'incremental'
-    if restricted:
-        with pytest.raises(ValueError, match='Invalid native marouter assignment.*forbidden to truck'):
-            load_network.execute(context)
-        assert calls == ['duarouter', 'marouter']
-        return
     result = load_network.execute(context)
-    assert calls == ['duarouter', 'marouter']
+    assert calls == ['marouter']
+    recipe = etree.parse(str(next(context.cache.rglob('macroscopic.marocfg'))))
+    assert recipe.find('input/route-files').get('value') == str(next(context.cache.rglob('reachable.trips.xml.gz')))
+    assert not (context.cache / 'mapped.trips.xml.gz').exists()
     assert result['source_count'] == 200
     assert result['count'] == 2000
     _, vehicles = read_routes(result['routes'])
     assert {vehicle['parameters']['sumo_original_trip_id'] for vehicle in vehicles} == {f't{i}' for i in range(200)}
     assert all(vehicle['parameters']['source_travel_time_s'] == '32' for vehicle in vehicles)
-    assigned_paths = {tuple(route.get('edges').split()) for vehicle in elements(context.cache / 'assigned.flows.xml.gz', 'vehicle')
+    assigned_paths = {tuple(route.get('edges').split()) for vehicle in elements(next(context.cache.rglob('assigned.flows.xml.gz')), 'vehicle')
                       for route in vehicle.findall('routeDistribution/route') if float(route.get('probability')) > 0}
     assert {tuple(vehicle['edges']) for vehicle in vehicles} == assigned_paths
     weighted = {edge.get('id'): (float(edge.get('entered')), float(edge.get('traveltime')))
                 for interval in elements(result['weights'], 'interval') for edge in interval.findall('edge')}
     for edge in ('fast', 'slow1'):
         count = sum(edge in vehicle['edges'] for vehicle in vehicles)
-        assert count > 0
+        assert count == 0 if restricted and edge == 'fast' else count > 0
         assert abs(count - weighted[edge][0]) < 1
     for vehicle in vehicles:
         duration = vehicle['exit_times'][-1] - float(vehicle['attributes']['depart'])
@@ -392,3 +390,13 @@ def test_macro_clock_uses_departure_slice_and_partial_endpoints(tmp_path):
     tree.write(str(weights))
     with pytest.raises(ValueError, match='No loaded travel time'):
         materialize_assignment(assigned, weights, source, network, output, seed=42)
+
+
+def test_component_filter_honours_connection_permissions():
+    from sumo.cutter.tools import connected_edges
+    edges={name:etree.fromstring(f'<edge id="{name}"><lane index="0" allow="passenger delivery"/></edge>')
+           for name in ['a','b']}
+    connections=[etree.fromstring('<connection from="a" to="b" fromLane="0" toLane="0" allow="delivery"/>')]
+    with pytest.raises(ValueError,match='2 disconnected'):
+        connected_edges(edges,connections,{'car'},'error')
+    assert connected_edges(edges,connections,{'lcv'},'error')[1]==1

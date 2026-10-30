@@ -45,19 +45,23 @@ interval or a vehicle's `tau`, check their consistency; changing these parameter
 changes behavior and capacity. [SUMO time and integration settings](https://sumo.dlr.de/docs/Simulation/Basic_Definition.html),
 [car-following parameters](https://sumo.dlr.de/docs/Car-Following-Models.html).
 
-It records junction collisions as warnings, disables jam teleportation, and
-retains unfinished and undeparted trips in tripinfo. The default horizon is
-30 hours. An unfinished trip is not a completed travel-time observation.
+It records junction collisions as warnings, enables gridlock teleportation after
+600 seconds by default (`sumo_time_to_teleport`; use -1 to disable), and
+retains unfinished and undeparted trips in tripinfo. By default,
+`sumo_end: null` leaves the end time unset, so SUMO runs until all demand has
+finished. A positive value sets an explicit simulation cutoff. An unfinished
+trip is not a completed travel-time observation.
 Tripinfo contains simulated travel time and route length; summary, vehicle-route
 and 15-minute edge statistics are also written.
 [Tripinfo output](https://sumo.dlr.de/docs/Simulation/Output/TripInfo.html).
 
-Both simulation presets retain assigned paths by default
-(`sumo_rerouting_probability: 0`). Enabling this probability models informed
-drivers: observations update every 60 seconds over five observations and
-rerouting is allowed every 300 seconds. Set `sumo_rerouting_probability` and
-`sumo_rerouting_period` for that behavior explicitly. Online adaptation does
-not establish user equilibrium.
+Both simulation presets equip all vehicles with GPS rerouting by default
+(`sumo_rerouting_probability: 1`). Routes are reconsidered every 60 seconds
+using observations updated every 10 seconds over six observations. Set
+`sumo_rerouting_probability: 0` to retain assigned paths throughout simulation.
+Gridlock teleportation is a recovery mechanism and can distort travel-time
+measurements; inspect teleport warnings when evaluating results. Online
+adaptation does not establish user equilibrium.
 [SUMO routing device](https://sumo.dlr.de/docs/Simulation/Routing.html).
 
 For Zurich, supply a Zurich network and compatible demand. Guessed OSM traffic
@@ -72,7 +76,12 @@ queues, multiple turning queues, and the standard 98 m maximum segment length.
 Signal travel-time and flow penalties are zero because the signal controller
 itself is active; positive TLS penalties can replace that behavior.
 LTM models upstream gap propagation and is suitable for urban queuing. Separate
-lane queues retain lane/mode permissions. The native headway parameters remain
+lane queues retain lane/mode permissions.
+The preset sets `processing.no-internal-links: true` to avoid a SUMO 1.28 native
+crash with lane queues on internal junction links. Junction control still models
+traffic lights and priority; explicit traversal of internal junction links is
+omitted in mesoscopic simulation. Microscopic simulation retains those links.
+The native headway parameters remain
 unchanged as an initial baseline. This model has less detail than microscopic
 simulation, and passenger boarding durations and several lane-level outputs
 are unavailable. [SUMO mesoscopic model and limitations](https://sumo.dlr.de/docs/Simulation/Meso.html).
@@ -92,13 +101,19 @@ selected with `sumo.config.loaded`) performs these steps:
 
 1. Prepare individual road demand and queries for every source trip.
 2. Map geographic endpoints to connected SUMO edges, failing on invalid routes.
-3. Run `marouter` incremental assignment: load demand in 50 equal increments,
+3. Run `marouter` incremental assignment: load demand in 20 equal increments,
    updating costs from assigned flow in hourly intervals.
 4. Write final edge travel times and volumes to `loaded.edges.xml.gz`.
 5. Route every query using those costs with `duarouter`, without adding the
    queries to road flow a second time.
 6. Export loaded time in seconds and full-edge route length in metres for every
    query, retaining identifiers and source travel-time references.
+
+Assignment execution uses the cached [class-aware marouter build](../native/README.md#class-aware-macroscopic-assignment).
+Cars, trucks and vans retain their access restrictions while contributing to
+shared congestion costs. Native assignment routing uses A* with `threads` workers. Interval and iteration
+progress is written to the job log and `assignment.log`. Override native
+settings through `sumo_assignment_options` if needed.
 
 `assigned.flows.xml.gz` describes the assignment's route distribution. Final
 query routes are shortest-path skims on the resulting loaded network; their

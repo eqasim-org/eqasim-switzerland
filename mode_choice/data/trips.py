@@ -1,10 +1,10 @@
 """Read the population once and assign a stable mode-choice trip identifier."""
 import polars as pl
 from mode_choice.defaults import SOURCE_TRIP_ID
-from mode_choice.routing.server import ensure_server_started
+from mode_choice.routing.java.server import ensure_server_started
 
 def configure(context):
-    context.stage("mode_choice.routing.server")
+    context.stage("mode_choice.routing.java.server")
     context.stage("synthesis.population.trips_with_departures")
 
 

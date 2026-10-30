@@ -7,10 +7,12 @@ def configure(context):
     context.stage("matsim.simulation.prepare")
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
+
     context.config("java_memory", "50G", volatile=True)
     context.config("threads", volatile=True)
     context.config("use_vdf", False)
     context.config("use_dsim", False)
+    context.config("preventwaitingtoentertraffic", False)
 
 
 def execute(context):

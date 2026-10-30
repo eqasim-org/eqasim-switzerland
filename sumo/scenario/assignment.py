@@ -9,7 +9,7 @@ from sumo.scenario.network.tools import position, read_network, validate_routes
 from sumo.scenario.tools import elements, write_routes
 
 
-def materialize_assignment(assigned, weights, trips, network, output, seed, begin=0, interval=3600):
+def materialize_assignment(assigned, weights, trips, network, output, seed, begin=0, interval=3600, context=None, kernel=None):
     """Keep assigned paths, balance integer route shares, and estimate edge clocks.
 
     marouter's probabilities can be flow counts rather than normalized fractions.
@@ -66,12 +66,12 @@ def materialize_assignment(assigned, weights, trips, network, output, seed, begi
             offset += count
     if not vehicles:
         raise ValueError("Macroscopic assignment produced no individual vehicles")
-    data = read_network(network)
+    data = read_network(network, context=context)
     try:
         validate_routes(vehicles, data, types)
     except ValueError as error:
-        raise ValueError(f"Invalid native marouter assignment: {error}. SUMO marouter may ignore vehicle-class "
-                         "restrictions; use sumo_loading_method: dua for class-aware assignment. "
+        raise ValueError(f"Invalid native marouter assignment: {error}. Check class permissions and turn "
+                         "connectivity in the assignment network. "
                          "Assigned paths are never silently replaced.") from error
 
     # Accumulate loaded costs on the selected paths, correcting partial endpoint edges.
@@ -88,6 +88,17 @@ def materialize_assignment(assigned, weights, trips, network, output, seed, begi
         begin, end, costs = current
         if depart < begin:
             raise ValueError(f"Loaded edge costs do not cover departure {depart}")
+        if kernel is not None:
+            lengths = [data["edges"][edge]["length"] for edge in edges]
+            missing = next((edge for edge in edges if edge not in costs), None)
+            if missing is not None:
+                raise ValueError(f"No loaded travel time for assigned edge {missing} in [{begin}, {end})")
+            vehicle["exit_times"], distance = kernel.clocks(lengths, [costs[edge] for edge in edges], depart,
+                position(attributes.get("departPos", "0"), lengths[0]),
+                position(attributes.get("arrivalPos", "max"), lengths[-1]))
+            vehicle["route_attributes"]["routeLength"] = format(distance, ".12g")
+            vehicle["parameters"]["sumo_timing"] = "macroscopic_departure_slice"
+            continue
         clock = depart
         for index, edge_id in enumerate(edges):
             length = data["edges"][edge_id]["length"]

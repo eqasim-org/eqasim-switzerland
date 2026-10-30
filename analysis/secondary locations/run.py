@@ -207,6 +207,11 @@ def figures_and_report(caches, settings, output, prepared):
     if distance_cache is not None and distance_cache.config('secondary_nn_short_sampling') == 'distance':
         threshold = distance_cache.config('secondary_nn_short_trip_threshold_m', 1500.)
         caveats.insert(0, f'The distance-input NN pipeline samples short-trip facilities directly by compatibility with the supplied distance, up to {threshold/1000:g} km. Purpose eligibility and the origin H3 neighbourhood are preserved. Its short-distance distribution is therefore constrained by input distances, rather than independently learned. Longer trips use the neural hierarchy; the distance-free pipeline retains its learned experts and selector.')
+    for cache in caches:
+        if cache.kind.startswith('nn'):
+            weight = cache.config('secondary_nn_no_car_no_pt_weight', 1.)
+            if weight < 1:
+                caveats.insert(0, f'{LABELS[cache.kind]} uses a prediction-time accessibility rule: without both car availability and a driving licence, cell probabilities receive weight {weight:g} when no purpose-eligible A–D facility exists. The rule is soft and preserves positive mass. Accessibility patterns therefore reflect both learned attractiveness and this specified mobility rule.')
     findings += ['', '## Interpretation and limits', ''] + ['- ' + line for line in caveats]
     (output / 'findings.md').write_text('\n'.join(findings) + '\n')
     overview = overall[['dataset', 'trips', 'persons', 'mean_km', 'median_km', 'p90_km', 'short_share', 'long_share_20km']]
@@ -223,13 +228,15 @@ def figures_and_report(caches, settings, output, prepared):
     if replay_manifest and replay_manifest['generation'] == prepared['generation']:
         effective_settings['actual_replay'] = {key: replay_manifest[key] for key in ['seed', 'draws', 'max_replay_people', 'selected_people', 'selected_trips']}
     write_json(output / 'analysis_settings.json', effective_settings)
-    write_json(output / 'analysis_provenance.json', dict(created_utc=datetime.now(timezone.utc).isoformat(), python=sys.version, packages={name: importlib.metadata.version(name) for name in ['numpy', 'pandas', 'geopandas', 'matplotlib', 'torch', 'scikit-learn']}, code_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.glob('*.py')}, pipeline_code_sha256={name: hashlib.sha256((REPOSITORY/'synthesis/population/spatial/secondary_nn'/name).read_bytes()).hexdigest() for name in ['mz_chains.py', 'model_wrappers.py', 'feature_encoding.py', 'h3.py', 'tools.py', 'locations.py']}))
+    write_json(output / 'analysis_provenance.json', dict(created_utc=datetime.now(timezone.utc).isoformat(), python=sys.version, packages={name: importlib.metadata.version(name) for name in ['numpy', 'pandas', 'geopandas', 'matplotlib', 'torch', 'scikit-learn']}, code_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.glob('*.py')}, pipeline_code_sha256={name: hashlib.sha256((REPOSITORY/'synthesis/population/spatial/secondary_nn'/name).read_bytes()).hexdigest() for name in ['mz_chains.py', 'model_wrappers.py', 'feature_encoding.py', 'h3.py', 'tools.py', 'locations.py', 'choice_model.py', 'location_helpers.py']}))
     LOG.info('Report: %s', output / 'report.html')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--settings', type=Path, default=Path(__file__).with_name('comparison.yml'))
+    parser.add_argument('--configs', nargs='+', metavar='YAML',
+                        help='Pipeline configurations to compare (overrides the settings file list)')
     parser.add_argument('--phase', choices=['all', 'status', 'prepare', 'replay', 'figures'], default='all')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--survey-draws', type=int)
@@ -239,6 +246,8 @@ def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     logging.getLogger('fontTools').setLevel(logging.WARNING)
     settings = yaml.safe_load(args.settings.read_text())
+    if args.configs is not None:
+        settings['configs'] = args.configs
     for option in ['survey_draws', 'max_replay_people', 'threads']:
         if getattr(args, option) is not None: settings[option] = getattr(args, option)
         if settings[option] < 1: parser.error(f'{option} must be at least 1')

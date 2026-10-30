@@ -1,11 +1,12 @@
 """Compare peak totals using hourly linkstats, never daily count files."""
 
-import glob
 import logging
 import os
 
 import numpy as np
 import pandas as pd
+from xopen import xopen
+from matsim.config.tools import glob_output_files
 
 from .compare import Compare
 from ..cantons.transcality_peak_hour import configure_peak_hours, get_peak_hours
@@ -26,9 +27,7 @@ def read_peak_linkstats(path, start, end):
         raise ValueError(f"Peak linkstats is missing columns: {sorted(missing)}")
     # Detect delimiter once; use the fast parser for the full network.
     import csv
-    import gzip
-    opener = gzip.open if os.fspath(path).endswith(".gz") else open
-    with opener(path, "rt") as stream:
+    with xopen(os.fspath(path), "rt") as stream:
         delimiter = csv.Sniffer().sniff(stream.readline(), delimiters="\t,;").delimiter
     data = pd.read_csv(path, sep=delimiter, usecols=["LINK", *columns], dtype={"LINK": str})
     values = data[columns].apply(pd.to_numeric, errors="raise")
@@ -43,9 +42,9 @@ def execute(context):
     start, end = get_peak_hours(context)
     root = get_simulation_path(context)
     files = []
-    for pattern in ("*.linkstats.txt.gz", "*.linkstats.txt", "*.linkstats.csv.gz", "*.linkstats.csv"):
-        files.extend(glob.glob(os.path.join(root, "ITERS", "it.*", pattern)))
-        files.extend(glob.glob(os.path.join(root, pattern)))
+    for pattern in ("*.linkstats.txt", "*.linkstats.csv"):
+        files.extend(glob_output_files(os.path.join(root, "ITERS", "it.*", pattern)))
+        files.extend(glob_output_files(os.path.join(root, pattern)))
     if not files:
         raise FileNotFoundError(f"No hourly linkstats files found in {root}")
     path = max(files, key=os.path.getmtime)
