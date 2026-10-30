@@ -7,6 +7,61 @@ describes entry/exit for rail interviews only. See the BFS
 page 10, footnote 5. This rule applies to road **border** interviews, not Alpine
 interviews.
 
+## Choosing a road within an interview place
+
+`data.cross_border.road_candidates` supplies both foreign and Swiss OD sampling
+with **capacity × importance** weights. The existing reference `importance` is
+retained; there is no additional road-class multiplier and no new required config
+parameter. Survey vehicle/person weights and interview-group controls are not
+changed. The existing foreign-OD detour eligibility test and random seed remain
+in use. The Swiss reference pool retains its existing within-group eligibility.
+PT continues to use its original importance/gateway rules.
+
+The capacity comes from the final `matsim.scenario.network.pt` road network,
+before artificial border terminals are added. MATSim's link capacity is already
+for all lanes: **do not multiply it by `permlanes` again**. Since the road survey
+observes inbound traffic, the selection weight uses the inbound capacity, not
+the sum of entry and exit capacities. This is an attractiveness assumption,
+not a measured traffic share or a hard traffic quota.
+
+Before applying these weights, the directional matcher identifies the road under
+the reference point from detailed geometry. It looks for an anchor within 100 m,
+allows nearby parallel links of the same OSM road class within 25 m of the closest
+anchor, and follows directed continuity of that class for up to 2 km to find the
+border link. If a point is already beyond the crossing in travel direction, it
+searches backwards. These bounds are geometric safeguards, not fitted traffic
+parameters. It uses the minimum capacity along this short anchor-to-border
+corridor, so a wide customs-plaza link cannot inflate a narrower approach's
+weight. It does not perform agent routing or replace turn restrictions. If the
+road cannot be followed, the existing directional matcher remains the fallback;
+its match type is recorded. Explicit reviewed exit links remain authoritative.
+The same matcher is used by through-trip construction and scenario preparation.
+
+Points sharing the same entry/exit link pair **within one interview group** count
+as one physical choice. Their strongest original importance represents that
+choice; duplicate importance is not added. All original point coordinates stay
+available to the detour test. After filtering, the physical choice's weight is
+divided over its eligible aliases, so extra reference points cannot gain extra
+traffic. Different interview groups are never combined. If a group's capacity
+is missing or invalid, that entire group uses importance-only weights and emits
+a warning; all-zero importance uses equal physical-road weights.
+
+The stage writes:
+
+- `road_candidate_weights.csv`: original points, canonical aliases, entry/exit
+  links, inbound capacities, original importance, physical selection weights,
+  and expected alias shares before the detour filter.
+- `directional_links.csv`: anchors, matched road classes, corridor distances,
+  direction checks and fallback types for every road reference.
+
+For the reviewed St-Louis points and the network checked on 2026-10-25, the
+motorway approach has capacity 2,000 and the side road 500 vehicles/hour. Both
+points have importance 5, giving an **80% / 20%** split when both are eligible.
+The motorway now matches entry `2233381` and exit `2075581`; the side road keeps
+`121456` / `121455`. These are candidate probabilities, not results from a rebuilt
+population. Rerun the pipeline through `matsim.simulation.prepare` to inspect the
+realised sampled flows. Existing inputs/caches were only read during validation.
+
 ## Vehicle demand calibration
 
 `data.cross_border.generate_od` builds the foreign population and
@@ -44,6 +99,30 @@ above nine; above two for motorcycles) are sampled from valid 2021 peers of the
 same vehicle type and, when supported, purpose, using the configured seed and
 original 2021 vehicle weights. This only repairs passenger expansion. It never
 changes a vehicle weight or removes its driver.
+
+## Sampling the foreign population
+
+`data.cross_border.sample` samples the expanded foreign population within each
+**interview place × visitor/transit category (`label`) × travel mode**. Drivers
+and passengers remain separate, so passenger counts cannot alter vehicle demand.
+This replaces independent Bernoulli retention, which could noticeably change
+local crossing volumes in a small population sample even with correct survey
+weights.
+
+Each stratum receives either the floor or ceiling of
+`input_downsampling × full stratum population`. Largest fractional remainders
+receive the remaining places, preserving the nearest integer to the requested
+national sample size. Ties and random selection within strata use `random_seed`;
+selection is without replacement and independent of input row order. Small
+strata may round to zero. All rows of a selected person retain their original
+identifiers, values and input order. A fraction of one retains everyone.
+
+The stage writes `sampling_counts.csv` with full counts, fractional sample
+targets, selected counts and expanded sample counts. It requires no new config
+parameter and does not change survey weights, Swiss household sampling or
+destination/routing rules. It preserves incoming demand proportions, not exact
+two-direction traffic at each crossing: transit exits and routes can still add
+passages at other interview places.
 
 ## Missing endpoints and geographic scope
 
@@ -100,15 +179,80 @@ actual generated crossing events, and no factor of two is applied during this
 vehicle calibration.
 
 Foreign visitors may produce an entry and a return; transit produces an entry
-at the surveyed group and an exit elsewhere. Swiss residents currently receive
-one directional trip from the existing population model. Swiss `Within CH`
+at the surveyed group and an exit elsewhere. Swiss residents receive one
+explicit directional event per selected resident, using the controls below. Swiss `Within CH`
 records (Swiss-to-Swiss journeys via abroad) and Swiss through-records are not
 handled by that reference-pool assignment. They remain in calibration and are
 explicitly flagged as outside assignment scope rather than redistributed to
-visitors. Addressing this and the Swiss return-trip convention is a separate
-behavioural change; a successful calibration does not establish final all-person
+visitors. Supporting these journey types is a separate behavioural change;
+a successful calibration does not establish final all-person
 traffic agreement. The separately generated French population and actual
 through-exits also have to be included in the final event comparison.
+
+### Swiss directional event allocation
+
+`synthesis.population.models.cross_border` converts each retained incoming
+road-driver reference into one entry event and one balancing exit event.
+Expanded car-passenger references receive the same treatment, separately from
+drivers. PT retains its historical total, split as evenly as possible by
+canton/interview group/mode; an odd residual direction is seeded. This change
+does not reinterpret PT survey weights or change the survey-calibration stage.
+
+With the existing `cross_border_use_spatial_calibration: true` default, the fitted
+model and raking supply selection weights. Event quotas set the volumes by
+origin canton, interview group, mode and direction. Residents are selected
+without replacement, first in the reference municipality and then, if needed,
+from the remaining eligible residents of the same canton. Municipality IDs are
+normalized across census and survey inputs. Driver events are allocated to
+adults first. Unsupported demand remains a reported shortfall; it is not moved
+to another canton, assigned to an underage driver or turned into an extra trip.
+Setting spatial calibration to false retains unconstrained Bernoulli selection
+and reference matching; exact event quotas are then not enforced.
+
+This is an **event-accounting assumption**, not a survey estimate of distinct
+travellers. For example, 1,000 retained incoming car references require 1,000
+entries and 1,000 exits. The existing one-trip design represents these with
+2,000 distinct selected residents, replacing their ordinary diary chains.
+No residents are added to the population and no same-day return is inferred.
+Inferring complete cross-border tours would require a separate behavioural model.
+
+`synthesis.population.trips` consumes the matched direction instead of drawing
+entry/exit again. Existing directional MZ departure-time sampling is retained.
+The original OD IDs and directional facility IDs are reused, so event expansion
+does not duplicate the facility inventory. New matched attributes are
+`border_crossing_direction` and `border_interview_place`.
+
+Overlap prevention remains based on residence: the foreign survey reader
+excludes Swiss residents; the Swiss model removes residents and reference
+origins inside `cross_border_exclude_shapefiles`, which are covered by the
+external population. The polygon exclusion in both the foreign generator and
+the Swiss model is applied only when `include_external_population: true`.
+With `false`, retain the configured polygon if reusing a network cache: it
+does not remove survey demand, Swiss training observations or event targets.
+Changing the polygon itself can still invalidate network/geography stages
+because they also declare this setting. MZ border-crossing donors are excluded from ordinary
+matching. Incidental crossings of domestic routes are not another explicitly
+assigned survey event and must be examined separately in routed-link counts.
+
+Additional diagnostics in the model cache are:
+
+| File | Meaning |
+| --- | --- |
+| `crossing_event_scope.csv` | Road entry/exit targets before and after geographic exclusion; unchanged legacy PT total |
+| `crossing_event_assignment.csv` | Full-population targets, assigned events and shortfalls by canton/group/mode/direction |
+| `crossing_origin_matching.csv` | Municipality matches versus canton fallbacks for those cells |
+
+The trips cache also contains `swiss_crossing_trip_counts.csv`: selected sampled
+events, mutually exclusive truck-driver/outside-Switzerland exclusions, and
+generated events by group/mode/direction. Household downsampling, optional
+population scaling, matching losses and later exclusions can change final totals.
+In particular, a 5% sample need not contain exactly 5% of each small directional
+cell. Compare the model ledger, sampled trips and routed passages separately.
+
+No new configuration parameter is required. Rerun from the changed model through
+`matsim.simulation.prepare`, allowing Synpp to rebuild downstream stages. When
+testing the Java final-turn/length fixes as well, select the corrected JAR with
+`eqasim_path`; the default older JAR does not include those fixes.
 
 To rebuild only the two OD outputs with the working configuration:
 
@@ -425,3 +569,200 @@ Adding independently identified smaller crossings improves reported-exit
 coverage without fitting routing rules to individual observations. The optional
 `cross_border_reference_path` selects an input release; it does not change the
 direction-inference method or its thresholds.
+
+## Boundary endpoints for foreign car visitors and transit
+
+`matsim.simulation.prepare` replaces the foreign approaches of
+**all survey-generated From-To car visitors and Through car agents**, regardless
+of origin distance, with short directional terminal links.
+`cross_border_boundary_endpoints` defaults to `true` when cross-border demand is
+included; set it to `false` to keep the original foreign origins and approaches.
+Car passengers, PT, the separate French
+population and Swiss residents are unchanged.
+
+Transit uses its surveyed entry and mapped reported exit. When no mapped exit
+facility exists, its existing route-inferred exit link supplies the sink instead;
+the diagnostics retain `exit_source` and `inferred_exit_link` so this is distinguishable
+from a reported exit. The default return-crossing field on destinations is never
+used as a transit exit fallback. Missing or unsuitable exit links retain the original
+plan with a diagnostic reason. Explicit entry/exit activities and their times stay
+fixed. For inferred exits there is no explicit planned exit time: the final activity
+keeps its original start time, while routing and QSim determine actual arrival.
+Terminals do not prevent intermediate exits/re-entries on the route through CH.
+
+The change runs after directional crossing assignment and before population
+routing. A source link joins the exterior node of the assigned entry link; a
+separate sink leaves the exterior node of the assigned exit link. They normally
+extend 100 m outside Switzerland, with shorter/rotated alternatives where the
+border bends. These are artificial injection/removal links, not real roads or
+residential locations. Both connectors must remain wholly outside Switzerland;
+ambiguous directional matches retain their original treatment and are reported.
+Existing links, restrictions, facilities and Swiss destinations are preserved.
+New terminal facilities keep the relocated activities' coordinates and link IDs
+consistent with eqasim's scenario validator; they offer the original endpoint
+activity types.
+Connector speeds use the corresponding crossing link. Artificial terminals have
+at least 1,000,000 vehicles/hour of flow capacity and 75,000 lane-metres of storage
+(about 10,000 cars at the usual 7.5 m cell size), before QSim's sampling factors.
+The lane count is a technical storage provision, not a physical road width:
+it increases for shorter fallback connectors without changing their geometry or
+travel time. At 5% sampling these provisions give about 13.9 vehicles/second and
+500 cars of storage. Existing roads keep their original capacities. These finite
+buffers avoid imposing an additional artificial bottleneck; congestion on the
+real network can still delay admission. Connectors carry no toll or intersection
+attributes and are classified as outside for network calibration. Their geometry
+is appended to the local prepared detailed-network CSV with matching directed IDs.
+
+A standalone QSim regression using the scenario's MATSim 2026.0 JAR compared
+old/new terminals in six fixtures (12 runs): clustered injection at 1%, 5% and
+10% sampling, sink receiving capacity, a 1 m fallback, and a real-road storage
+bottleneck. All 1,240 simulated trips completed. With 100 simultaneous departures
+at 5% and sufficient receiving-road storage, maximum source injection delay fell
+from 14,256 s to 7 s; the real-road bottleneck kept the final arrival times
+identical. In the sink fixture, maximum additional upstream waiting fell from
+7 s to zero. The narrow-road fixture still backpressured the source, confirming
+that generous terminals do not bypass congestion on real links. These deliberately
+clustered stress tests are not forecasts of national travel-time savings. They
+use standard queue dynamics and a long stuck-time threshold so forced movements
+cannot hide blocked links; nationwide performance still requires simulation.
+
+The first departure is moved to the existing planned entry time minus the
+short approach's free-flow time. Entry, Swiss-activity and exit times stay fixed;
+the final external activity starts after the short return leg. This preserves a
+**nominal** entry time, not a guarantee of realised QSim arrival times. Queueing
+at injection and actual crossing counts still require simulation validation.
+
+Preparation writes `border_endpoints_persons.csv` (patched, unsupported or absent
+persons, reasons and timing) and `border_endpoints_links.csv` (terminal geometry
+and reference crossing links). All modifications affect prepared copies only.
+Before adding terminals, it checks directed connectivity separately for every
+configured network-routing mode and writes `border_endpoints_connectivity.csv`.
+An unrelated disconnected road component raises an error. Once terminals are
+added, the prepared config sets `routing.networkRouteConsistencyCheck=disable`:
+MATSim's default check removes intentional one-way sources/sinks and then aborts.
+The setting remains in the exported simulation config; no manual override is
+needed. Without added terminals, preparation leaves the setting unchanged.
+Regenerate preparation and its network dependencies after changing the road
+buffer; existing scenario outputs do not acquire these changes automatically.
+The minor-road retention buffer is now 5 km around the modelled region,
+registered as `minor_road_border_buffer=5000.0` (metres) in
+`matsim.scenario.network.convert_osm` so changes invalidate the network cache.
+A local
+turn-aware check retained both BCP_190 directions with 5 km; they were removed
+with 2 km. This does not guarantee that every border crossing is preserved.
+
+### Repairing detours within grouped interview places
+
+`cross_border_route_repair` defaults to `true` in `matsim.simulation.prepare`.
+Set it to `false` to retain the original capacity/importance-weighted crossing
+choices without this preparation-time repair. No additional input file is needed.
+The repair operates **after** directional facility matching, when the actual Swiss
+activity links are known, and **before** boundary terminals and final population
+routing. Upstream OD tables, sampling weights, people, interview groups and Swiss
+activity locations are unchanged. Consequently, upstream assignment tables show
+the original sampled crossings; the prepared plans and repair audit show final
+crossings.
+
+Only car drivers assigned to an explicit `Gruppe ...` interview place with more
+than one eligible physical road crossing are considered. Individually named
+interview offices, passengers, PT, the separate French population and ordinary
+Swiss travellers without a survey-assigned border activity are not redistributed.
+Capacity and road importance still determine the initial sampling. Duplicate
+reference points for the same directed road pair remain one physical candidate.
+
+1. Route the existing domestic journey with the configured eqasim JAR's
+   free-flow, link-to-link SpeedyALT router, retaining car turn restrictions.
+   Count crossings using the geographic Swiss border, including roads absent
+   from the crossing reference. Keep valid existing assignments.
+2. For a problematic assignment, compare candidates **within the same group**.
+   A Swiss resident's one-way leg must have exactly the expected entry or exit;
+   a visitor must have one entry on arrival and one exit on return; transit must
+   have one entry and one exit. A route with a forbidden car turn is ineligible.
+   The real domestic network is not restricted to Swiss roads or otherwise edited.
+3. For visitors, prefer the fastest supported whole return journey: foreign
+   approach, Swiss visit and foreign return. Use unprojected survey coordinates
+   with `reported` provenance, retaining their original precision from the sample.
+   These can represent towns/regions rather than exact addresses. Attach to the
+   nearest car-road detailed geometry within 1 km, keeping tied directed links.
+   Approach/return times use the existing directed Pandana model on a temporary
+   exterior-only graph, so they cannot enter Switzerland at a different crossing
+   first. These are approximate ranking costs without turn restrictions; the
+   domestic route checks in steps 1–2 remain turn-aware. Crossing links shared between
+   query segments are counted only once in whole-journey time. If no candidate
+   has supported foreign legs, visitors fall back to the valid domestic journey.
+4. Transit changes require a mapped **survey** exit and supported foreign origin
+   and destination. Keep that exit fixed; only the ambiguous grouped entry may
+   change. Exclude the same physical entry/exit pair from inferred group choices,
+   rather than interpreting a very short turnaround as a successful transit trip.
+   Unmapped or network-inferred exits remain unchanged and explicitly flagged.
+   This does not override an individually observed entry office.
+5. Select the fastest valid candidate, with stable point-ID tie-breaking. Keep
+   the original plan when no supported candidate exists. No traveller is dropped
+   and there is no national/cantonal crossing-count target in the selection rule.
+
+Repaired people receive local `borderRouteChoice:...` facilities. Shared original
+facilities are not moved. The local visitor destination copy supplies matching
+entry/exit IDs to the existing terminal writer; mapped transit exits stay intact.
+Activity times are retained, followed by the usual terminal departure adjustment.
+When `cross_border_boundary_endpoints: false`, repair is limited to Swiss residents:
+foreign approaches would otherwise remain attached to their old crossing-dependent
+projections.
+
+The preparation cache's `border_route_choice/` directory contains:
+
+- `persons.csv`: original/selected crossing, category and interview place, outcome
+  (`kept_valid`, `repaired`, or an explicit unresolved reason), crossing counts,
+  domestic travel times, choice basis and available whole-journey travel time.
+- `candidates.csv`: feasible alternatives and their domestic/whole-journey times
+  for problematic assignments only.
+- `foreign_attachments.csv`: coordinates, attached directed links and snap distance.
+- `*_queries.csv` / `*_routes.csv.gz`: deduplicated routing queries and metrics.
+  Domestic queries include turn-violation checks. Exterior results identify
+  `routing_method=pandana_exterior` and leave distance/turn-violation metrics blank
+  because those queries estimate time only. `inside_nodes.txt` records geographic
+  classification.
+
+`BorderRouteQueries.java` is a small JDK source-launch helper using the pipeline's
+existing JAR; it does not build or modify a second eqasim version. Domestic queries
+run with one routing worker and the configured Java heap. Preparation
+therefore adds routing work, primarily for problematic grouped assignments. The
+selection is based on free-flow routes; realised QSim/replanning crossings still
+need validation after rebuilding and running the scenario.
+
+Both routing paths reject topologically unreachable pairs before routing. They
+collapse the directed graph into strongly connected components and test reachability
+between components; distinct components can still be connected in one direction.
+The check ignores turn bans and therefore rejects only paths that are impossible
+even without those bans. Reachable domestic pairs still require SpeedyALT. For
+foreign approaches, Pandana computes the remaining approximate travel times in a
+batch. Start/end link traversal is included, with no intermediate Swiss roads or
+border links. Equal/adjacent endpoints do not require an intermediate routing query.
+The original scenario network is never cleaned or modified by these checks.
+
+Initial implementation validation (27 October 2026, before replacing exterior
+ranking costs with Pandana) used copies and saved routing batches
+from the Group A experiment, not a new national preparation. The production
+selector repaired the same 792 Swiss/visitor assignments and the same 80 supported
+transit cases. For the 2,301 Swiss/visitor test people, geographic crossing passages
+fell from 5,012 to 2,996; 19 unsupported cases retained their original assignment.
+The 80 repaired transit cases fell from 268 to 160 geographic passages while
+retaining their survey exits. All 2,610 fixture people and their non-border
+activities/times were preserved. Correcting double-counted border-link time in
+whole-journey comparisons changed four visitor candidate choices relative to the
+initial experiment, without changing the repaired cohort or crossing totals.
+The JDK source helper reproduced 80 full-network and 40 exterior route metrics
+exactly; 32 local regression checks passed, including compatibility with the
+existing terminal writer. A read-only dependency check found no cycles. Nationwide
+results and congested simulation performance remain to be checked after rerunning.
+
+The subsequent performance check used all 3,356 exterior queries from the first
+national rerun. Pandana completed them in 57 seconds including network reading
+and graph construction: 3,061 had an approximate path and 295 were unavailable.
+For 261 pairs shared with the earlier exact exterior test, none of the previously
+reachable pairs became unreachable; the median time reduction was 0.88 seconds,
+but 98 pairs differed by more than a minute. These costs are therefore explicitly
+approximations and can change rankings. Domestic turn-aware eligibility is retained.
+The directed reachability implementations were checked against independent BFS
+on 145,200 Java pairs and 64,000 Python pairs, including one-way component bridges;
+34 local regression tests passed. No active pipeline process is hot-patched by
+these code changes; restarting preparation is required to use them.

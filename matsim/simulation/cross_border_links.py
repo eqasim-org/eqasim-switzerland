@@ -57,6 +57,8 @@ def _read_network_nodes_links(network_path):
                     "from_node": str(elem.attrib["from"]),
                     "to_node": str(elem.attrib["to"]),
                     "modes": str(elem.attrib.get("modes", "")),
+                    "capacity": float(elem.attrib.get("capacity", "nan")),
+                    "length": float(elem.attrib.get("length", "nan")),
                 })
                 # Clearing as we stream keeps memory bounded on full Switzerland networks.
                 elem.clear()
@@ -295,13 +297,18 @@ def _merge_link_endpoint_coordinates(nodes, links):
         .merge(nodes, left_on="to_node", right_on="node_id", suffixes=("_from", "_to"))
     )[[
         "link_id", "from_node", "to_node", "x_from", "y_from", "x_to", "y_to",
-    ]]
+    ] + [name for name in ["capacity", "length"] if name in links]]
 
 
-def _build_candidate_link_sets(network_path, swiss_border, facilities=None, facility_search_radius=3000.0):
-    # The patcher has a tiny network reader so it does not depend on optional reader
-    # dependencies while matsim.simulation.prepare is imported.
-    nodes, links = _read_network_nodes_links(network_path)
+def _build_candidate_link_sets(network_path, swiss_border, facilities=None, facility_search_radius=3000.0, context=None):
+    # Reuse the shared binary reader when called from a stage. Import lazily so
+    # the XML patch helpers can still be used without optional reader packages.
+    if context is not None:
+        from matsim.readers import read_network
+        network = read_network(network_path, skip_attributes=True, context=context)
+        nodes, links = network.nodes, network.links
+    else:
+        nodes, links = _read_network_nodes_links(network_path)
     links = links[links["modes"].apply(_is_car_link)].copy().reset_index(drop=True)
     if len(links) == 0:
         raise RuntimeError("Cannot assign directional cross-border facilities: network has no car links.")
@@ -534,17 +541,18 @@ def _choose_directional_link(facility, crossing_links, local_links, swiss_border
     return _attach_match_metadata(candidates.iloc[0], "fallback_nearest_link")
 
 
-def assign_directional_border_links(df_cross_border_destinations, df_swiss_residents_od, network_path, swiss_border):
+def assign_directional_border_links(df_cross_border_destinations, df_swiss_residents_od, network_path, swiss_border, geometry_path=None, context=None):
     assignments = build_directional_border_link_table(
         df_cross_border_destinations,
         df_swiss_residents_od,
         network_path,
         swiss_border,
+        geometry_path=geometry_path, context=context,
     )
     return dict(zip(assignments["facility_id"], assignments["link_id"]))
 
 
-def build_directional_border_link_table(df_cross_border_destinations, df_swiss_residents_od, network_path, swiss_border):
+def build_directional_border_link_table(df_cross_border_destinations, df_swiss_residents_od, network_path, swiss_border, geometry_path=None, context=None):
     facilities = _as_border_facilities(df_cross_border_destinations, df_swiss_residents_od)
     if len(facilities) == 0:
         return facilities.assign(link_id=None, link_geometry=None, distance=None)
@@ -576,7 +584,11 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
         network_path,
         border_geometry,
         facilities=unique_facilities,
+        context=context,
     )
+    if geometry_path is not None:
+        from matsim.simulation.border_road_matching import attach_road_details
+        local_links = attach_road_details(local_links, network_path, geometry_path)
 
     # Build a tabular assignment so preparation can patch XML and analysis stages
     # can export the exact same directional matching result.
@@ -606,10 +618,18 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
             chosen = _endpoint_distances_to_border(chosen, border_geometry)
             matched_link = _attach_match_metadata(chosen.iloc[0], "reviewed_exit_link")
         else:
-            matched_link = _choose_directional_link(facility, crossing_links, local_links, border_geometry, inside_cache)
+            matched_link = None
+            if geometry_path is not None:
+                from matsim.simulation.border_road_matching import match_road_corridor
+                matched_link = match_road_corridor(facility.geometry, facility.direction, local_links)
+            if matched_link is not None:
+                matched_link = _attach_match_metadata(matched_link, "road_corridor")
+            else:
+                matched_link = _choose_directional_link(facility, crossing_links, local_links, border_geometry, inside_cache)
+
         link_id = str(matched_link["link_id"])
         link = link_lookup.loc[link_id]
-        link_geometry = LineString([(link.x_from, link.y_from), (link.x_to, link.y_to)])
+        link_geometry = matched_link.get("road_geometry", LineString([(link.x_from, link.y_from), (link.x_to, link.y_to)]))
         rows.append({
             "dedup_key": facility.dedup_key,
             "geometry": facility.geometry,
@@ -622,6 +642,10 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
             "to_border_distance": float(matched_link["to_border_distance"]),
             "crosses_swiss_border": bool(matched_link["crosses_swiss_border"]),
             "match_type": matched_link["match_type"],
+            "anchor_link_id": matched_link.get("anchor_link_id", link_id),
+            "selection_capacity": matched_link.get("selection_capacity", link.get("capacity", np.nan)),
+            "road_class": matched_link.get("road_class", ""),
+            "corridor_distance": matched_link.get("corridor_distance", np.nan),
         })
 
     logger.info("Classified %d unique candidate link endpoints against the Swiss border.", len(inside_cache))
@@ -713,6 +737,8 @@ def patch_directional_border_links(
     facilities_path,
     population_path,
     max_workers=None,
+    geometry_path=None,
+    context=None,
 ):
     if max_workers is not None:
         global POINT_CLASSIFICATION_MAX_WORKERS
@@ -723,11 +749,12 @@ def patch_directional_border_links(
         df_swiss_residents_od,
         network_path,
         swiss_border,
+        geometry_path=geometry_path, context=context,
     )
 
     if len(facility_links) == 0:
         logger.info("No directional cross-border facilities found to patch.")
-        return
+        return {}
 
     patched_facilities = _patch_facilities_xml(facilities_path, facility_links)
     patched_activities = _patch_population_xml(population_path, facility_links)
@@ -737,3 +764,4 @@ def patch_directional_border_links(
         patched_facilities,
         patched_activities,
     )
+    return facility_links

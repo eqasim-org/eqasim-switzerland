@@ -1,9 +1,12 @@
 import shutil
 import os.path
+import hashlib
 from pathlib import Path
 import matsim.runtime.eqasim as eqasim
 from matsim.config import config as shared_config
 from matsim.simulation.cross_border_links import patch_directional_border_links
+from matsim.simulation.border_endpoints import patch_border_endpoints
+from matsim.simulation.border_route_choice import repair_grouped_crossings
 
 import matsim.config.tools as config_tools
 
@@ -48,9 +51,19 @@ def configure(context):
     context.config("include_cross_border", default=False)
     context.stage("data.cross_border.swiss_residents_od")
     context.stage("data.spatial.swiss_border")
+    context.config("cross_border_route_repair", True)
+    if context.config("cross_border_route_repair"):
+        context.stage("data.cross_border.road_candidates")
 
     if context.config("include_cross_border"):
         context.stage("data.cross_border.destinations")
+        context.config("cross_border_boundary_endpoints", True)
+        if context.config("cross_border_boundary_endpoints"):
+            context.stage("data.cross_border.through_crossings")
+            context.stage("data.cross_border.population")
+            context.stage("data.cross_border.generate_cross_border_traffic")
+            if context.config("cross_border_route_repair"):
+                context.stage("data.cross_border.sample")
 
     # network calibration
     context.config("network_calibration.activate", default=True)
@@ -71,35 +84,10 @@ def configure(context):
         context.stage("calibration.road_regions.freespeed_calibration")
 
 
-def _copy_network_calibration_files(context):
-    """Copy calibration inputs and return paths relative to the prepared config."""
-    parameters = config_tools.network_calibration_parameters(context)
-    names = {
-        "eqasim:networkCalibration.countsFile": "target_counts.csv",
-        "eqasim:networkCalibration.freespeedCalibration.observedTripsFile": "target_travel_times.csv",
-        "eqasim:networkCalibration.costCalibration.specialRegionPath": "penalties_special_region",
-        "eqasim:networkCalibration.freespeedCalibration.specialRegionPath": "freespeed_special_region",
-    }
-    local_parameters = {}
-    for parameter, sources in parameters.items():
-        local_paths = []
-        for index, source in enumerate(str(sources or "").split(";")):
-            if not source:
-                continue
-            name = names[parameter]
-            if parameter.endswith("specialRegionPath"):
-                name = f"{name}_{index}.yml"
-            relative_path = Path("network_calibration_files") / name
-            destination = Path(context.path()) / relative_path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, destination)
-            local_paths.append(relative_path.as_posix())
-        local_parameters[parameter] = ";".join(local_paths)
-    return local_parameters
-
-
 def execute(context):
-    # Some files we just copy
+
+    # Copy shared scenario inputs into this stage before preparing them.
+
     transit_vehicles_input_path  = context.stage("matsim.scenario.network.pt")["vehicles"]
     transit_vehicles_output_path = "%s/%stransit_vehicles.xml.gz" % (context.path(), context.config("output_prefix"))
 
@@ -187,7 +175,7 @@ def execute(context):
     if context.config("include_cross_border"):
         cross_border_destinations = context.stage("data.cross_border.destinations")
 
-    patch_directional_border_links(
+    border_links = patch_directional_border_links(
         cross_border_destinations,
         context.stage("data.cross_border.swiss_residents_od"),
         context.stage("data.spatial.swiss_border"),
@@ -195,7 +183,53 @@ def execute(context):
         "%s/%sfacilities.xml.gz" % (context.path(), context.config("output_prefix")),
         "%s/prepared_population.xml.gz" % context.path(),
         max_workers=context.config("threads"),
+        geometry_path=context.stage("matsim.scenario.network.pt")["geometry"],
+        context=context,
     )
+
+    # Repair ambiguous grouped crossings using the actual Swiss activity links.
+    # Keep these overrides local: upstream demand and facility caches are shared.
+    # Foreign repairs require boundary endpoints, which align their approach with
+    # the new crossing. Without them, only the Swiss one-way plans are repaired.
+
+    if context.config("cross_border_route_repair"):
+        repair_foreign = (context.config("include_cross_border")
+                          and context.config("cross_border_boundary_endpoints"))
+        repaired_destinations = repair_grouped_crossings(
+            context, Path(context.path()) / network_output_path,
+            Path(context.path()) / population_prepared_path,
+            Path(context.path()) / facilities_output_path,
+            context.stage("matsim.scenario.network.pt")["geometry"], border_links,
+            destinations=cross_border_destinations if repair_foreign else None)
+        if repair_foreign:
+            cross_border_destinations = repaired_destinations
+
+    # Replace foreign car visitors' and transit agents' approaches only after their
+    # surveyed crossings have received directional links on the prepared network.
+    # Give only these terminal buffers generous flow/storage capacity; the real
+    # crossing links retain their capacity and remain the physical bottlenecks.
+
+    boundary_endpoint_count = 0
+    if context.config("include_cross_border") and context.config("cross_border_boundary_endpoints"):
+        routing_config = config_tools.get_module(
+            config_tools.read_config(context.stage("matsim.config.config")), "routing")
+        network_modes = config_tools.get_param("networkModes", routing_config)
+        network_modes = (network_modes.get("value") if network_modes is not None else "car")
+        boundary_endpoint_count = patch_border_endpoints(
+            cross_border_destinations,
+            context.stage("data.cross_border.population"),
+            context.stage("data.cross_border.generate_cross_border_traffic")[0],
+            border_links,
+            context.stage("data.spatial.swiss_border"),
+            Path(context.path()) / network_output_path,
+            Path(context.path()) / population_prepared_path,
+            (Path(context.path()) / (context.config("output_prefix") + "detailed_network.csv")
+             if context.config("export_detailed_network") else None),
+            context=context,
+            facilities_path=Path(context.path()) / facilities_output_path,
+            network_modes=[mode.strip() for mode in network_modes.split(",") if mode.strip()],
+            through_crossings=context.stage("data.cross_border.through_crossings"),
+        )
 
     # Copy the shared config before applying this scenario's local settings.
     config_path = "%sconfig.xml" % context.config("output_prefix")
@@ -217,11 +251,17 @@ def execute(context):
     config_tools.change_params(local_config_path,
                                local_calibration_parameters, create=True)
 
+    # The real road network was checked before adding the boundary terminals.
+    # MATSim's default check would remove these intentional one-way sources and
+    # sinks, then abort. Keep this setting in the exported simulation config too.
+    if boundary_endpoint_count:
+        config_tools.change_params(local_config_path,
+                                   {"routing.networkRouteConsistencyCheck": "disable"}, create=True)
+
     # Route the population
     population_output_path = "%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix"))
 
-    # routing class does not work with turn restrictions; it seems something to do with multi-threading as
-    # it works when we use 1 thread; this ius however not an issue as MATSim routes teverything in iteration 0
+    # The pinned router preserves car turn restrictions, including at end links.
     eqasim.run(context, "org.eqasim.core.scenario.routing.RunPopulationRouting", [
         "--config-path", config_path,
         "--output-path", population_output_path,
@@ -246,3 +286,41 @@ def execute(context):
     os.remove("%s/prepared_population.xml.gz" % context.path())
 
     return config_path
+
+
+def validate(context):
+    # Synpp hashes this stage module, but imported helpers/source-launch Java are
+    # separate files. Include them so a repair update cannot reuse stale plans.
+    if context.config("cross_border_route_repair"):
+        digest = hashlib.sha256()
+        for name in ["border_route_choice.py", "BorderRouteQueries.java"]:
+            digest.update(Path(__file__).with_name(name).read_bytes())
+        return digest.hexdigest()
+    return None
+
+
+def _copy_network_calibration_files(context):
+    """Copy calibration inputs and return paths relative to the prepared config."""
+    parameters = config_tools.network_calibration_parameters(context)
+    names = {
+        "eqasim:networkCalibration.countsFile": "target_counts.csv",
+        "eqasim:networkCalibration.freespeedCalibration.observedTripsFile": "target_travel_times.csv",
+        "eqasim:networkCalibration.costCalibration.specialRegionPath": "penalties_special_region",
+        "eqasim:networkCalibration.freespeedCalibration.specialRegionPath": "freespeed_special_region",
+    }
+    local_parameters = {}
+    for parameter, sources in parameters.items():
+        local_paths = []
+        for index, source in enumerate(str(sources or "").split(";")):
+            if not source:
+                continue
+            name = names[parameter]
+            if parameter.endswith("specialRegionPath"):
+                name = f"{name}_{index}.yml"
+            relative_path = Path("network_calibration_files") / name
+            destination = Path(context.path()) / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            local_paths.append(relative_path.as_posix())
+        local_parameters[parameter] = ";".join(local_paths)
+    return local_parameters
