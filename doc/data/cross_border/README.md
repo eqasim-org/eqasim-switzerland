@@ -817,5 +817,26 @@ sampling, not predicted daily counts after a new pipeline run.
 
 Local fixtures verify one expansion per rail person, unchanged road-driver and
 passenger counts, reproducible road calibration, missing rail party sizes, and
-separate unsupported coach controls. Cross-border donor-age/time restrictions
-and PT routing utility coefficients are unchanged by this correction.
+separate unsupported coach controls. The rail-weight correction itself does not
+change donor eligibility or PT routing utility coefficients.
+
+## Cross-border activity-chain donor eligibility
+
+`data.cross_border.match_activity_chain` draws MZ donors aged **18 or older** for
+all purposes and modes. Eligible home-X-home chains must have at least **30
+minutes** between arrival from the first trip and departure on the second trip.
+There is **no clock-time window**: activities starting before 04:00 or ending
+after 21:00 remain eligible. Missing or negative main-activity durations fail the
+duration check. These are donor eligibility rules; downstream travel-time
+adjustments remain unchanged.
+
+Selection still matches survey purpose, transport mode on both trips and the
+configured scenario day. Shopping accepts home-shop-home and home-other-home.
+Donors are sampled with replacement using MZ person weights and the configured
+random seed. An empty eligible pool for a required purpose/mode raises an error
+rather than relaxing the rules. The unused work_secondary mapping is removed:
+both survey readers already map business trips and commuting to work.
+
+This replaces the former mode-loop age threshold, which inadvertently required
+age strictly greater than 18 for every mode. It does not alter the ordinary
+Swiss population's donor matching.
