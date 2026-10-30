@@ -9,6 +9,7 @@ import logging
 # country swap in process_from_to_trips).
 from data.cross_border.generate_od import (
     TRAIN_CATEGORIES,
+    crossing_sampling_weights,
     expand_and_sample,
     repair_interview_place_names,
     sample_gateway,
@@ -31,6 +32,7 @@ def configure(context):
     context.stage("data.spatial.municipalities")
     context.stage("data.spatial.cantons")
     context.stage("data.cross_border.interview_places")
+    context.stage("data.cross_border.road_candidates")
     context.stage("data.cross_border.pt_gateways")
     context.stage("data.spatial.swiss_border")
     context.stage("data.spatial.nuts")
@@ -408,7 +410,7 @@ def read_2021_data(context):
 
     # 14. Match to an interview point
 
-    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "label"]].to_crs(2056)
+    points = context.stage("data.cross_border.road_candidates").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "selection_weight", "canonical_point_id", "label"]].to_crs(2056)
     points["interview_point_id"] = points["border_crossing_point_id"]
 
     # "label" indicates which mode a point was surveyed for ("road" serves car trips,
@@ -425,7 +427,7 @@ def read_2021_data(context):
         label = mode_to_label.get(row["trip_mode"])
         candidates = grouped_points.get((row["interview_place"], label))
         if candidates is not None and "importance" in candidates.columns:
-            sampled = candidates.sample(n=1, weights=candidates["importance"], random_state=point_rng)
+            sampled = candidates.sample(n=1, weights=crossing_sampling_weights(candidates), random_state=point_rng)
             return sampled.iloc[0][["geometry", "importance", "interview_point_id"]]
 
         # Fall back to the closest point that still matches the trip's mode, if any exist

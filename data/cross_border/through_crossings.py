@@ -73,7 +73,9 @@ def execute(context):
     # Match crossings with the same directional links later used in preparation.
 
     network_path = context.stage("matsim.scenario.network.pt")["network"]
-    assignments = build_crossing_link_assignments(points, network_path, border, liechtenstein)
+    assignments = build_crossing_link_assignments(
+        points, network_path, border, liechtenstein,
+        geometry_path=context.stage("matsim.scenario.network.pt")["geometry"], context=context)
     checked = assignments[assignments["facility_id"].isin(reviewed["border_crossing_point_id"] + "_exit")]
     if (checked["facility_id"].nunique() != reviewed["border_crossing_point_id"].nunique()
             or not (checked["from_inside_ch"] & ~checked["to_inside_ch"]).all()):
@@ -134,7 +136,7 @@ def execute(context):
     return result
 
 
-def build_crossing_link_assignments(points, network_path, border, liechtenstein = None):
+def build_crossing_link_assignments(points, network_path, border, liechtenstein = None, geometry_path=None, context=None):
     """Keep the national matcher; use CH+LI only for reviewed LI–Austria exits."""
     points = points.copy()
     if "border_scope" not in points:
@@ -156,7 +158,8 @@ def build_crossing_link_assignments(points, network_path, border, liechtenstein 
         facilities["entry_interview_geometry_point"] = facilities["geometry"]
         facilities["exit_interview_geometry_point"] = facilities["geometry"]
         facilities["trip_mode"] = "car"
-        assignments = build_directional_border_link_table(facilities, None, network_path, boundary)
+        assignments = build_directional_border_link_table(
+            facilities, None, network_path, boundary, geometry_path=geometry_path, context=context)
         # Inside flags describe the declared scope here. Swiss route-exit
         # diagnostics below continue to use the Swiss national polygon alone.
         assignments["border_scope"] = scope

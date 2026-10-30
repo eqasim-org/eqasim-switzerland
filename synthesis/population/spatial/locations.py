@@ -129,7 +129,7 @@ def execute(context):
         validate="one_to_one",
     )[["municipality_type", "municipality_id", "geometry"]]
     assert df_locations_unique.crs == df_municipalities.crs
-    df_locations_unique = gpd.sjoin_nearest(df_locations_unique, df_municipalities, how="left").drop(columns=["index_right"])
+    df_locations_unique = attach_nearest_municipality(df_locations_unique, df_municipalities)
     
     # 2. attache densities to activities
     df_locations_unique["x"] = df_locations_unique.geometry.x
@@ -170,3 +170,21 @@ def execute(context):
         raise ValueError("Attaching spatial attributes changed the number of activities")
     
     return df_locations
+
+
+def attach_nearest_municipality(locations, municipalities):
+    """Attach one municipality per location without moving its coordinates."""
+
+    # Shared boundaries/corners can give several equally near polygons, especially
+    # for points abroad without an external-region polygon. Keep one match using
+    # the lowest municipality ID, so polygon order cannot change the tie-break.
+
+    locations = locations.copy()
+    locations["_location_row"] = range(len(locations))
+    joined = gpd.sjoin_nearest(locations, municipalities, how="left")
+    joined = joined.sort_values(["_location_row", "municipality_id"], kind="stable")
+    joined = joined.drop_duplicates("_location_row")
+
+    # Preserve input order (including repeated indices) and unmatched locations.
+
+    return joined.drop(columns=["_location_row", "index_right"])

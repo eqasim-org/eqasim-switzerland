@@ -58,7 +58,7 @@ config:
     last_iteration: 140 # Final MATSim iteration; smaller values run faster.
 
     # Optional local inputs
-    # cross_border_exclude_shapefiles: [...] # Extra region polygons to include around Switzerland.
+    # cross_border_exclude_shapefiles: [...] # External-population area: extends the network and prevents overlapping survey demand when included.
     # tomtom_api_key: ... # Needed only when enabling new TomTom requests; requests default to zero.
     # eqasim_path: .../switzerland.jar # Use an existing eqasim JAR instead of building it.
     # extent_path: .../region.gpkg # Region boundary for exporting a smaller cut scenario.

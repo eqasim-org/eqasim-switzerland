@@ -36,11 +36,13 @@ def configure(context):
     context.stage("data.spatial.nuts")
     context.stage("data.cross_border.road_exit_points")
     context.stage("data.cross_border.interview_places")
+    context.stage("data.cross_border.road_candidates")
     context.stage("data.cross_border.pt_gateways")
 
     context.config("border_offset", default = 50000)
     context.config("cross_border_countries", default = 'All')
     context.config("cross_border_exclude_shapefiles", default=None)
+    context.config("include_external_population", default=True)
 
 
 def execute(context):
@@ -113,6 +115,12 @@ def execute(context):
     # to sit inside it.
     exclude_file = context.config("cross_border_exclude_shapefiles")
 
+    # This polygon prevents overlap with the separate external population.
+    # Keep its network-extent setting available, but retain survey residents
+    # when that population is disabled: otherwise nobody replaces their trips.
+    if not context.config("include_external_population"):
+        exclude_file = None
+
     if not exclude_file is None:
         if isinstance(exclude_file, (str, Path)):
             exclude_file = [exclude_file]
@@ -153,6 +161,21 @@ def execute(context):
     write_assignment_audit(context, before_exclusion, df)
 
     return df
+
+
+def crossing_sampling_weights(candidates):
+    """One weight per physical road, even after filtering aliases by detour.
+
+    PT has no canonical road ID and keeps its original importance weight. Road
+    aliases retain their original coordinates/IDs; their combined probability
+    equals one physical crossing's capacity × importance, however many survive.
+    """
+    weights = candidates["selection_weight"].copy()
+    canonical = candidates["canonical_point_id"]
+    road = canonical.notna()
+    counts = canonical[road].groupby(canonical[road]).transform("size")
+    weights.loc[road] = weights.loc[road] / counts
+    return weights
 
 
 def repair_interview_place_names(names, known):
@@ -279,15 +302,15 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
 
     # Points too far from the border are projected onto a surveyed interview
     # place instead of using their own (real, but far away) coordinate - same
-    # distance+importance selection as read_2021_data.sample_point, minimizing
-    # the origin->crossing->destination detour and drawing (importance-weighted)
+    # distance and capacity × importance selection as read_2021_data.sample_point, minimizing
+    # the origin->crossing->destination detour and drawing (capacity × importance)
     # among the candidates within 20% of that minimum. This is independently
     # re-drawn here rather than reusing sample_point's own pick: this function
     # runs after expand_and_sample/sample_rows_by_weight, so the several expanded
     # copies of one respondent (occupants, weight duplicates) can each land on a
     # different, similarly-good crossing instead of collapsing onto a single one.
-    interview_points = context.stage("data.cross_border.interview_places").copy()[
-        ["geometry", "border_crossing_point_id", "label", "interview_place", "importance"]].reset_index(drop = True)
+    interview_points = context.stage("data.cross_border.road_candidates").copy()[
+        ["geometry", "border_crossing_point_id", "label", "interview_place", "importance", "selection_weight", "canonical_point_id"]].reset_index(drop = True)
     grouped_points = {k: v for k, v in interview_points.groupby(["label", "interview_place"])}
 
     # Public transport points are not moved onto the interview place, a station on
@@ -332,7 +355,7 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
 
         eligible = candidates[total_dist <= total_dist.min() * 1.2]
 
-        weights = eligible["importance"]
+        weights = crossing_sampling_weights(eligible)
         if not np.isfinite(weights).all() or weights.sum() <= 0:
             weights = None
 
@@ -794,7 +817,7 @@ def read_2021_data(context):
     # 14. Match to an interview point    
     #borders.loc[borders["interview_place"] == "Vallorbe (544)", "interview_place"] = "Gruppe O: VD/NE -> F. Dép. Jura. Doubs"
 
-    points = context.stage("data.cross_border.interview_places").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "label"]].to_crs("EPSG:2056")
+    points = context.stage("data.cross_border.road_candidates").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "selection_weight", "canonical_point_id", "label"]].to_crs("EPSG:2056")
     points["interview_point_id"] = points["border_crossing_point_id"]
 
     # Survey endpoints are longitude/latitude; crossing distances must use Swiss
@@ -823,12 +846,12 @@ def read_2021_data(context):
         candidates = grouped_points.get((row["interview_place"], label))
         if candidates is not None and "importance" in candidates.columns:
             # Minimize the detour through the crossing (origin -> point -> destination),
-            # then draw importance-weighted among the candidates within 20% of that
+            # then draw capacity × importance-weighted among the candidates within 20% of that
             # minimum (the minimizing candidate is always included).
             total_dist = candidates["geometry"].apply(lambda g: origin.distance(g) + destination.distance(g))
             eligible   = candidates[total_dist <= total_dist.min() * 1.2]
 
-            weights = eligible["importance"]
+            weights = crossing_sampling_weights(eligible)
             if not np.isfinite(weights).all() or weights.sum() <= 0:
                 weights = None
 
