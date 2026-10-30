@@ -2,6 +2,8 @@ __pycache__
 tests/
 cache*
 output*
+!sumo/output.py
+!sumo/output_tools.py
 .idea
 .vscode
 config*.yml
@@ -13,6 +15,8 @@ slurm*
 *.sh
 *.pickle
 *.iter
+*.html
+!analysis/french_activities_map.html
 !docker_run.sh
 logs
 run*.sh
@@ -37,3 +41,50 @@ CuttingBoundries
 !mode_choice/routing/
 !mode_choice/routing/*.py
 
+
+# SUMO routing stages and helpers are source code.
+!sumo/routing/
+!sumo/routing/*.py
+
+# The SUMO network cache reader is source code.
+!sumo/scenario/network/cache.py
+
+# FLASH cache implementation and routing documentation are source files.
+!mode_choice/routing/flash/cache.py
+!doc/mode_choice/routing/
+!doc/mode_choice/routing/flash/
+!doc/mode_choice/routing/flash/README.md
+
+# Generated PT benchmark outputs and native build artifacts.
+/mode_choice/routing/flash/benchmark_results/
+/analysis/pt_routers/**/*.class
+/analysis/pt_routers/**/*.log
+/analysis/pt_routers/**/*.parquet
+/analysis/pt_routers/**/*.pstats
+/mode_choice/routing/flash/**/*.class
+/mode_choice/routing/flash/**/*.log
+/mode_choice/routing/flash/**/*.parquet
+/mode_choice/routing/flash/**/timetable.binary*
+/mode_choice/routing/flash/**/flash_tb_router
+
+# Generated SUMO native artifacts; keep .cpp, .py and .patch sources visible.
+/sumo/**/*.pyc
+/sumo/**/*.pyo
+/sumo/**/*.o
+/sumo/**/*.obj
+/sumo/**/*.a
+/sumo/**/*.so
+/sumo/**/*.so.*
+/sumo/**/*.dylib
+/sumo/**/*.dll
+/sumo/**/*.exe
+/sumo/native/build/
+/sumo/native/CMakeFiles/
+/sumo/native/CMakeCache.txt
+/sumo/native/compile_commands.json
+/sumo/native/write_trips
+/sumo/native/route_kernel
+/sumo/native/marouter
+/sumo/**/_sumo_networks/
+
+/doc/mode_choice/routing/flash/benchmark_results.json

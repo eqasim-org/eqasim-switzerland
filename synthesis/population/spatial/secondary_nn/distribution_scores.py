@@ -78,3 +78,26 @@ def mixture_score(probability, statistics, name):
             - .5 * (g.square() * statistics[name + '_short_pair']
                      + (1 - g).square() * statistics[name + '_hierarchy_pair']
                      + 2 * g * (1 - g) * statistics[name + '_cross_pair']))
+
+
+class PreparedCRPS:
+    """Precompute fixed geometry once; reuse exact scores and gradients in every fold."""
+
+    def __init__(self, values, observation, chunk_size=1024):
+        self.order = torch.empty(values.shape, dtype=torch.int32, device=values.device)
+        self.values = torch.empty_like(values)
+        self.absolute = torch.empty_like(values)
+        with torch.no_grad():
+            for start in range(0, len(values), chunk_size):
+                rows = slice(start, start + chunk_size)
+                sorted_values, order = values[rows].sort(dim=-1)
+                self.order[rows] = order.to(torch.int32)
+                self.values[rows] = sorted_values
+                self.absolute[rows] = (sorted_values - observation[rows, None]).abs()
+
+    def score(self, probabilities, rows):
+        masses = probabilities.gather(-1, self.order[rows].long())
+        cumulative = masses.cumsum(dim=-1)
+        first = (masses * self.absolute[rows]).sum(dim=-1)
+        pair = (masses * self.values[rows] * (2 * cumulative - masses - 1)).sum(dim=-1)
+        return (first - pair).clamp_min(0)

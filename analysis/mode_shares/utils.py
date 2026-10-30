@@ -3,10 +3,10 @@ from data.microcensus.shares import load_clean_trips
 import os
 import numpy as np
 import logging
-import glob
 from matsim.readers import houshold_reader
 from pathlib import Path
 from analysis.counts.paths import get_simulation_path
+from matsim.config.tools import resolve_output_file, glob_output_files
 
 logger = logging.getLogger("synpp")
 
@@ -76,10 +76,10 @@ class ModeShareAnalyzer:
         )
         
         # get the trips file, if simulation not finished, get one from the intermediate iterations
-        trips_path_matsim = os.path.join(simulation_path, "output_trips.csv.gz")
+        trips_path_matsim = resolve_output_file(os.path.join(simulation_path, "output_trips.csv.gz"), required=False)
 
         if not os.path.exists(trips_path_matsim):
-            candidate_files = glob.glob(os.path.join(simulation_path, "ITERS", "**", "*.trips.csv.gz"), recursive=True)
+            candidate_files = glob_output_files(os.path.join(simulation_path, "ITERS", "**", "*.trips.csv.gz"))
 
             if candidate_files:
                 trips_path_matsim = max(candidate_files, key=os.path.getctime)  # Get the most recently created file
@@ -89,10 +89,10 @@ class ModeShareAnalyzer:
                 raise FileNotFoundError(f"MATSIM trips file not found as an output file and no candidate files found in {simulation_path}/ITERS/")
         
         # get the persons file
-        persons_path_matsim = os.path.join(simulation_path, "output_persons.csv.gz")
+        persons_path_matsim = resolve_output_file(os.path.join(simulation_path, "output_persons.csv.gz"), required=False)
 
         if not os.path.exists(persons_path_matsim):
-            candidate_files = glob.glob(os.path.join(population_search_path, "**", "output_persons.csv.gz"), recursive=True)
+            candidate_files = glob_output_files(os.path.join(population_search_path, "**", "output_persons.csv.gz"))
 
             if candidate_files:
                 persons_path_matsim = max(candidate_files, key=os.path.getctime)  # Get the most recently created file
@@ -102,10 +102,10 @@ class ModeShareAnalyzer:
                 raise FileNotFoundError(f"MATSIM persons file not found as an output file and no candidate files found in {population_search_path}")
 
         # get the households file
-        households_path_matsim = os.path.join(simulation_path, "output_households.xml.gz")
+        households_path_matsim = resolve_output_file(os.path.join(simulation_path, "output_households.xml.gz"), required=False)
 
         if not os.path.exists(households_path_matsim):
-            candidate_files = glob.glob(os.path.join(population_search_path, "**", "output_households.xml.gz"), recursive=True)
+            candidate_files = glob_output_files(os.path.join(population_search_path, "**", "output_households.xml.gz"))
 
             if candidate_files:
                 households_path_matsim = max(candidate_files, key=os.path.getctime)  # Get the most recently created file
@@ -199,8 +199,8 @@ class ModeShareAnalyzer:
         households = houshold_reader(households_file, convert_dataframes_types=False)
         if ("incomeClass" not in households.households
                 or households.households["incomeClass"].isna().all()):
-            input_file = Path(get_simulation_path(context)).parent / (
-                context.config("output_prefix") + "households.xml.gz")
+            input_file = resolve_output_file(Path(get_simulation_path(context)).parent / (
+                context.config("output_prefix") + "households.xml.gz"))
             logger.info("Output households lack income classes; reading %s", input_file)
             households = houshold_reader(str(input_file), convert_dataframes_types=False)
 

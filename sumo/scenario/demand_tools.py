@@ -19,7 +19,8 @@ DEMAND_SCHEMA = {**SCHEMA, "xml": pl.Binary}
 class TripSpool:
     """Hold Arrow-backed columns in RAM and sort them in parallel, without SQLite."""
 
-    def __init__(self, path, batch_size=100000, native_writer=None, clipper=None, endpoint_resolver=None):
+    def __init__(self, path, batch_size=100000, native_writer=None, clipper=None, endpoint_resolver=None, native_threads=1):
+        self.native_threads = native_threads
         self.path, self.batch_size, self.native_writer = Path(path), batch_size, native_writer
         self.clipper = clipper
         self.endpoint_resolver = endpoint_resolver
@@ -87,7 +88,7 @@ class TripSpool:
         if not write_xml:
             pass
         elif self.native_writer:
-            subprocess.run([self.native_writer, table, str(prelude), str(path)], check=True)
+            subprocess.run([self.native_writer, table, str(prelude), str(path), str(self.native_threads)], check=True)
         else:
             def payloads():
                 for batch in frame.iter_slices(100000):

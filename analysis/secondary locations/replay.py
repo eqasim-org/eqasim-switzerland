@@ -29,10 +29,12 @@ def prepare_inputs(source, cohort):
     Holding IDs fixed alone would therefore not isolate model differences.
     """
     from synthesis.population.spatial.secondary_nn import mz_chains
+    from synthesis.population.spatial.secondary_nn.chain_state import CHAIN_STATE_FEATURES
     from synthesis.population.spatial.secondary_nn.tools import MOBILITY_FEATURES, mobility_features
     name = 'synthesis.population.spatial.secondary_nn.mz_chains'
     chains = source.stage(name) if source.candidates(name) else mz_chains.execute(source)
-    if 'chain_state' not in chains:
+    if ('chain_state' not in chains or
+            any(np.asarray(state).shape != (len(CHAIN_STATE_FEATURES),) for state in chains.chain_state)):
         # Reconstruct missing diagnostic features locally; never rewrite an old run cache.
         chains = mz_chains.execute(source)
     survey_persons = source.stage('data.microcensus.persons')
@@ -70,7 +72,8 @@ def replay(cache, cohort, inputs, draws, seed, threads, shared_detour=None):
     context = Context()
     torch.set_num_threads(threads)
     LOG.info('Loading saved %s models for %d survey persons', cache.kind, cohort.person_id.nunique())
-    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=False)
+    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=False,
+        accessibility_weight=float(cache.config('secondary_nn_no_car_no_pt_weight', 1.)))
     wrapper.assert_ready_for_prediction()
     # Inputs are prepared once from the reference survey realization. Each trip
     # starts at its observed origin; this is not a sequential rollout.

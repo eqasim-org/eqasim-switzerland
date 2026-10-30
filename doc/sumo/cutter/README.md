@@ -4,9 +4,9 @@
 default method is native `marouter` **incremental macroscopic assignment**.
 Demand is loaded in increments and route choice responds to flow-dependent
 edge costs. A seeded, balanced integer realization retains its assigned route
-distribution. There is no full-network traffic simulation and no `duarouter`
-route search after assignment. `duarouter` only maps and validates endpoints
-before `marouter`. The cutter uses those assigned paths and estimated entry
+distribution. Connected endpoint mapping feeds `marouter` directly, without a
+separate `duarouter` pass before or after assignment. Assigned routes are checked
+for vehicle permissions and turn connectivity. The cutter uses those paths and estimated entry
 times, then the regional stage runs microscopic or mesoscopic traffic.
 
 Set `sumo_loading_method: SUE` for native stochastic assignment, or explicitly
@@ -66,7 +66,11 @@ Before assignment, `sumo.scenario.network.routing` indexes the exact full
 network, including any regional boundary splits. Its `routing_edges.arrow`
 contains road shapes and separate origin/destination masks for each simulated
 vehicle class. The graph uses permitted lane-to-lane turns, rather than only
-geometric proximity or shared junctions.
+geometric proximity or shared junctions. A transition must permit the vehicle
+class on both lanes **and on the connection itself** (`allow`/`disallow`).
+A delivery-only turn between two otherwise car-accessible roads is not a car
+connection. The same checks apply to route validation and regional component
+filtering.
 
 Origins must be able to reach the main strongly connected road core;
 destinations must be reachable from it. One-way entry and exit branches remain
@@ -86,8 +90,8 @@ destination. Trips, departures, vehicle types and source metadata are preserved.
 radius, maximum mapping distance and examples
 of repaired edges; the loading report includes the same summary. An endpoint
 with no suitable road anywhere on the supplied network fails explicitly; demand is never silently dropped.
-Native `duarouter` still validates the resulting trips before macroscopic
-assignment, and no route search is added after `marouter`.
+Mapped trips feed native `marouter` directly. Its assigned routes are validated
+for vehicle permissions and turn connectivity without an additional route search.
 
 ## Cutting behavior
 
@@ -133,13 +137,20 @@ and labels interpolated times explicitly.
 | `sumo_loading_method` | `incremental` | Native macro `incremental` or `SUE`; simulation-based `dua` is opt-in |
 | `sumo_loading_mesoscopic` | `true` | For `dua` only: mesoscopic loading; false uses microscopic loading |
 | `sumo_loading_route_choice` | `msa` | `msa`, `gawron` or `logit`, for DUA |
-| `sumo_assignment_iterations` | `50` | Maximum DUA iterations or native macro increments/iterations |
+| `sumo_assignment_iterations` | `20` | Maximum DUA iterations or native macro increments/iterations |
 | `sumo_assignment_interval` | `3600` s | Aggregation of loaded edge costs |
 | `sumo_assignment_scale` | `1` | Demand expansion; use 10 only for representative 10% demand |
 | `sumo_loading_convergence_window` | `5` | DUA mean travel-time observation window |
 | `sumo_loading_convergence_tolerance` | `0.01` | Relative standard deviation threshold; zero disables early stopping |
 | `sumo_loading_require_convergence` | `false` | Fail when DUA misses this stability threshold |
-| `sumo_begin` / `sumo_end` | `0` / `108000` s | All departures must be covered; DUA additionally requires completed trips |
+| `sumo_begin` / `sumo_end` | `0` / `null` | Automatic departure coverage for macro assignment; simulations finish all vehicles; a positive end sets a strict cutoff |
+
+With `sumo_end: null`, macroscopic assignment computes an exclusive end at the
+next aggregation boundary after the last selected departure. For example, a
+last departure at 129510 s and hourly aggregation give an assignment end of
+129600 s. This window covers departure-based edge costs; regional simulations
+and DUA omit the end time and run until all vehicles have finished. Explicit
+windows must cover all departures and are checked before native routing begins.
 
 For DUA, the convergence report includes iteration means, relative standard deviation
 and `equilibrium_guaranteed: false`. Stable mean travel time alone does not prove
@@ -183,10 +194,10 @@ Use the existing synthesis cache and working settings:
 
 ```bash
 uv run -m synpp config_dib_10.yml --run sumo.simulation.load_network \
-    --config sumo_assignment_scale 10
+    --config sumo_assignment_scale 1
 
 uv run -m synpp config_dib_10.yml --run sumo.cutter.scenario \
-    --config sumo_assignment_scale 10 \
+    --config sumo_assignment_scale 1 \
     --config sumo_region_geometry /path/to/zurich_region.gpkg
 ```
 
@@ -196,8 +207,10 @@ The local ignored `config_sumo_load.yml` selects the loading stage using the
 current 10% synthesis configuration. The portable
 [cut.example.yml](cut.example.yml) demonstrates existing network/trip inputs.
 Use the returned bundle config with the isolated runtime's `sumo.run` helper.
-Both regional presets default to `sumo_rerouting_probability: 0`, preserving
-the extracted paths. Enable online rerouting explicitly if desired.
+Both regional presets enable GPS rerouting (`sumo_rerouting_probability: 1`)
+every 60 seconds and gridlock recovery (`sumo_time_to_teleport: 600`). Set
+rerouting probability to 0 to preserve extracted paths, or teleport time to -1
+to disable teleporting. Review teleport warnings when interpreting travel times.
 
 ## Run the cut scenario
 
@@ -227,7 +240,8 @@ These targets can build missing upstream demand, loading and cutter caches.
 Each fixed stage returns `model`, `config`, `network`, `input_routes`, input
 `count`, and output paths `tripinfo`, `edge_data`, `summary` and `routes`.
 `simulation_report.json` records those paths. `count` describes the input demand;
-inspect tripinfo for completed, unfinished and undeparted vehicles at `sumo_end`.
+inspect tripinfo for completed, unfinished and undeparted vehicles, especially
+when an explicit `sumo_end` is set.
 The shared additional statistics file and all standard simulation outputs are
 written in the run stage cache. The cached cutter network and routes are read
 without modification; switching models keeps separate execution caches.

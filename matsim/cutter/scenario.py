@@ -3,7 +3,7 @@ import os
 import shutil
 import glob
 import logging
-from matsim.config.tools import change_params, get_regions_path
+from matsim.config.tools import change_params, get_regions_path, resolve_output_file, scenario_input_parameters
 from .cutter_tools import cut_csv_to_region, cut_csv_to_network, cut_and_save_network_geometry
 import matsim.config.tools as config_tools
 from .file_paths import FilePaths, simulation_root
@@ -58,6 +58,7 @@ def execute(context):
     output_path = os.path.join(context.path(), "output")
     # Keep the raw cut stage immutable when adding files and editing config.
     shutil.copytree(cut_output, output_path, dirs_exist_ok=True)
+    network_path = resolve_output_file(os.path.join(output_path, context.config("extent_prefix") + "network.xml"))
 
     # Copy supporting files to make the scenario self contained.
     # 1. mode parameters
@@ -119,7 +120,7 @@ def execute(context):
         target_counts_file = files.get("counts")
         if target_counts_file!="":
             cut_csv_to_network(csv_path = target_counts_file, context=context,
-                               network_path = "%s/%snetwork.xml.gz" % (output_path, context.config("extent_prefix")),
+                               network_path = network_path,
                                output_path = f"{region_dir}/target_counts.csv")
             if os.path.exists(f"{region_dir}/target_counts.csv"):
                 regional_counts_file = "network_calibration_files/target_counts.csv"
@@ -133,7 +134,6 @@ def execute(context):
                         shutil.copy(region, f"{region_dir}/penalties_special_region_{i}.yml" )
 
     # 5. copy the detailed geometry
-    network_path = "%s/%snetwork.xml.gz" % (output_path, context.config("extent_prefix"))
     geometry_path = "%s/%snetwork_geometry.csv" % (output_path, context.config("extent_prefix"))
     if context.config("export_detailed_network"):
         geometry_file = files.get("geometry")
@@ -149,12 +149,10 @@ def execute(context):
     assert os.path.exists(config_file), "Config file does not exist: %s" % config_file
     change_params(config_path = config_file,
                   output_path = config_file,
-                  params = [
+                  params = [*scenario_input_parameters(output_path, context.config("extent_prefix")).items(),
                         ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
                         ("eqasim:networkCalibration.objective", config_tools.get_network_calibration_objectives(context)),
                         ("eqasim:networkCalibration.calibrate", config_tools.get_network_calibration_calibrate(context, ignore=("penalty","freespeed"))), # we do not calibrate penalty and freespeed here
-                        ("eqasim:networkCalibration.costCalibration.activate","false"),
-                        ("eqasim:networkCalibration.freespeedCalibration.activate","false"),
                         ("eqasim:alphaCalibration.filePath","cantonal_target_mode_shares.csv"),
                         ("eqasim.modeParametersPath",dmc_params),
                         ("eqasim.costParametersPath","cost_parameters.yml"),

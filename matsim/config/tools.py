@@ -15,6 +15,62 @@ TRUE_VALUES = frozenset({"1", "true", "t", "yes", "y", "on"})
 FALSE_VALUES = frozenset({"0", "false", "f", "no", "n", "off", ""})
 
 
+def compression_variants(path):
+    """Return gzip, Zstandard and plain variants of one logical filename."""
+    path = os.fspath(path)
+    base = path[:-4] if path.endswith(".zst") else path[:-3] if path.endswith(".gz") else path
+    # Preserve legacy preference when both copies are present; never count both.
+    return [base + ".gz", base + ".zst", base]
+
+
+def resolve_output_file(path, required=True):
+    """Resolve each file independently, including mixed-compression folders."""
+    for candidate in compression_variants(path):
+        if Path(candidate).is_file():
+            return candidate
+    if required:
+        raise FileNotFoundError(f"No output file found; tried {compression_variants(path)}")
+    return os.fspath(path)
+
+
+def glob_output_files(pattern):
+    """Find compressed/uncompressed variants, once per logical output file."""
+    selected = {}
+    for variant in compression_variants(pattern):
+        for path in sorted(glob.glob(variant, recursive=True)):
+            if Path(path).is_file():
+                base = compression_variants(path)[-1]
+                selected.setdefault(base, path)
+    return list(selected.values())
+
+
+def find_simulation_output(directory, filename):
+    direct = resolve_output_file(Path(directory) / filename, required=False)
+    if Path(direct).is_file():
+        return direct
+    # output_events.xml -> ITERS/it.N/N.events.xml (not *.xml).
+    base = Path(compression_variants(filename)[-1]).name.removeprefix("output_")
+    candidates = glob_output_files(Path(directory) / "ITERS" / "**" / f"*.{base}")
+    if not candidates:
+        raise FileNotFoundError(f"No {filename} (.gz/.zst/plain) in {directory} or ITERS")
+    return max(candidates, key=os.path.getmtime)
+
+
+def scenario_input_parameters(directory, prefix):
+    """Relative config inputs matching the files actually present in a scenario."""
+    filenames = {
+        "plans.inputPlansFile": "population.xml",
+        "households.inputFile": "households.xml",
+        "facilities.inputFacilitiesFile": "facilities.xml",
+        "network.inputNetworkFile": "network.xml",
+        "transit.transitScheduleFile": "transit_schedule.xml",
+        "transit.vehiclesFile": "transit_vehicles.xml",
+        "vehicles.vehiclesFile": "vehicles.xml",
+    }
+    return {parameter: Path(resolve_output_file(Path(directory) / (prefix + filename))).name
+            for parameter, filename in filenames.items()}
+
+
 def parse_boolean(value, option_name="value"):
     """Parse booleans without treating non-empty strings such as ``"no"`` as true."""
     if isinstance(value, bool):
