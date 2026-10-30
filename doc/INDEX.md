@@ -25,6 +25,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Population mode choice](mode_choice/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
+- [Road-user map and activity-purpose shares](analysis/counts/road_users/README.md)
 - [Cross-border survey entries and through-trip exits](data/cross_border/README.md)
 - [Secondary-location behavior comparison](<analysis/secondary locations/README.md>)
 
