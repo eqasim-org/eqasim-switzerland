@@ -1,0 +1,902 @@
+% Standalone report. Compile from the repository root with:
+% pdflatex -interaction=nonstopmode -halt-on-error -output-directory=BUILD doc/synthesis/population/education_model.tex
+% Run twice to resolve the table of contents and cross-references.
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=23mm]{geometry}
+\usepackage{amsmath,booktabs,array,longtable}
+\usepackage{listings}
+\usepackage[colorlinks=true,linkcolor=blue,urlcolor=blue]{hyperref}
+\urlstyle{tt}
+\newcommand{\code}[1]{\nolinkurl{#1}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\setlength{\emergencystretch}{3em}
+\lstset{basicstyle=\ttfamily\small,breaklines=true,columns=fullflexible,
+  keepspaces=true,showstringspaces=false,frame=single}
+\title{Education modelling in the Swiss synthetic population\\
+\large Implemented methodology and configuration reference}
+\author{eqasim-switzerland}
+\date{21 October 2026}
+
+\begin{document}
+\maketitle
+
+\textbf{Implementation snapshot.} Branch
+\code{feature/education-destination-calibration}, commit \code{ed19479}.
+This report describes the current \code{census: statpop} workflow, including
+the education, apprenticeship and projection changes committed on this date.
+It distinguishes active behaviour from diagnostic calculations and earlier
+approaches that are no longer used. Defaults below are read from the source
+code; individual YAML configurations can override them. No model or population
+was changed to prepare this report.
+
+\textbf{Central distinction.} Student status, a usual education location and
+attendance on the simulated day are three different outcomes. A student has an
+education anchor even if their selected diary contains no education visit.
+BFS enrolment provides relative tertiary institution/campus shares. Those
+shares are normalised to the modelled cohort; they do not independently fix
+the national number of students or the number attending each day.
+
+\tableofcontents
+\newpage
+
+\section{Data sources and their roles}
+
+\begin{longtable}{L{.22\textwidth}L{.27\textwidth}L{.43\textwidth}}
+\toprule Source & Coverage used & Role and interpretation \\
+\midrule\endhead
+STATPOP & 2023 person and household extracts & Population identities, ages,
+households and registered home coordinates. Selected geocoded people missing
+from the private-household table are retained in technical one-person households. \\
+Structural survey (SS) & Pooled 2021--2023 records with their survey weights;
+2023 is the default stock-audit year & Employment/student models, study
+classification, school departure and destination flows, and secondary commute
+distance distributions. The education models use age-15+ evidence. \\
+Microcensus (MZ) & Existing MZ 2015 pipeline inputs; interviews from age 6 &
+Activity-chain donors, diary attendance, usual commute predictors and child
+distance references. MZ 2021 comparisons made during investigation are not an
+additional active training input in this implementation. \\
+BFS enrolment & Academic year 2023/24 by default & Pooled UH and FH/PH institution
+totals, including disjoint continuing/other and legacy-degree categories;
+an external national higher-vocational reference completes the broad types. \\
+STATENT & Establishment and enterprise evidence in the supplied extract &
+School coordinates, NOGA compatibility, institution/campus grouping and
+employment/FTE weights. Employment is a location proxy, not measured student capacity. \\
+GWR residence candidates & External reviewed reference file & Descriptive
+accommodation proximity for recovered residents. Proximity does not establish
+student status or university affiliation. \\
+\bottomrule
+\end{longtable}
+
+SS weights are used for fitting distributions and models. A pooled sum of three
+annual SS weights is not a one-year population estimate: stock comparisons
+must select a year or report an annual average. MZ person weights are used for
+person-level reference distributions. Synthetic sample counts are divided by
+\code{input_downsampling} when reporting full-population estimates; the result
+is an expanded estimate, not an exact census count.
+
+The supplied 2023 education codebook is also assumed to apply to 2021--2022;
+the processed survey retains a flag for that assumption. SS usual commutes,
+MZ diary-day visits and BFS institution enrolment have different statistical
+scopes. Agreement between their totals does not prove that their frames or
+weighting procedures are identical.
+
+\section{Workflow and model order}
+
+The education-relevant dependency order is:
+\begin{enumerate}
+\item Construct the STATPOP population and households, including the agreed
+recovery and home-only rules.
+\item Prepare SS labels and a separate student-training geography. Run the
+existing employment/job and income models before predicting student participation.
+\item Predict student status, then impute a joint study-group/study-country
+outcome for existing students aged 15+.
+\item Complete the intervening population models, optionally scale households
+to projection controls, and sample the population.
+\item Assign work and usual education locations before MZ donor matching.
+Education assignment is independent of the future activity-chain donor.
+\item Match MZ diaries using demographic/status compatibility and commute
+information. Subsequent models, including public-transport subscription
+ownership, consume the matched/enriched population.
+\item Build daily trips and activities. Education visits use the assigned
+education anchor. Diagnose student stock, campus anchors, daily visitors and distances.
+\end{enumerate}
+
+There is one finite education anchor per sampled person classified as a
+student. This is enforced at the education-location stage boundary. The
+foreign/unknown cases described below may have proxy anchors; a finite anchor
+alone does not mean that its location is an observed domestic study destination.
+
+\section{Student participation and apprenticeship}
+\subsection{Participation label and predictors}
+
+The binary student model uses the SS \code{CURRACTIVITY_STUDENT} label,
+retained as \code{is_student}. \code{ONGOINGEDUCATION}, retained as
+\code{current_education}, describes the programme and is used by the subsequent
+classification model. The code preserves discrepancies between participation
+and programme reports for auditing rather than declaring everyone with an
+education programme to be a student.
+
+The active classifier is CatBoost, fitted with survey weights. Its predictors
+are age, age squared, sex, employed status, apprentice status, municipality
+type, district and canton. Apprentice status means SS job-position code 50.
+Municipality ID is used in data preparation but is \emph{not} an active
+classifier predictor. Status is sampled from predicted probabilities, which
+are also retained for diagnostics. There is no municipal student quota or
+national BFS stock correction in this step.
+
+For SS student observations, training geography uses the domestic school
+\emph{departure} location when available. Otherwise it uses registered
+residence. Explicit foreign departures remain an outside-Switzerland category.
+Nonstudents retain residence geography. All relevant administrative features
+are changed together on a separate training copy; other SS consumers retain
+their original residence fields. Prediction uses the synthetic person's
+current home geography. This departure/residence distinction remains a
+limitation where students live elsewhere during term time.
+
+The current student stage sets \code{is_student = 1} below age 15 after
+prediction. This includes children below MZ interview age; it is a pipeline
+convention, not evidence that every infant attends school. The flag, an anchor
+and a diary education visit must therefore be counted separately.
+
+\subsection{Partial repair of vocational records}
+
+The former blanket rule made every SS vocational-secondary record an employed
+apprentice. The current rule only considers age-15+ students in programme 6
+who report nonemployment/inactivity and the corresponding job codes 60 or 70.
+Explicit apprentices and other reported jobs are preserved.
+
+Within each survey year, eligible records are shuffled reproducibly and the
+prefix closest to the requested weighted repair mass is selected. Selected
+records receive employed status and job-position code 50. Student flags and
+survey weights do not change. The default repaired fraction is 0.65 of the
+\emph{eligible weighted pool}, not 65\% of all vocational students.
+
+This remains a scenario assumption motivated by the earlier stock audit, not
+an observed apprenticeship label or an exact BFS calibration. Employment and
+student stages export aggregate apprenticeship diagnostics separately for
+survey years, private households and recovered residents. Apprenticeship also
+enters programme imputation, reducing confusion between apprentices and other
+employed tertiary students without imposing a deterministic programme rule.
+
+\section{Study classification and age handling}
+
+For students aged 15+, the programme model draws a joint programme/country
+outcome from weighted SS profiles. Country status is domestic, abroad or
+unknown. An explicit foreign school country takes precedence over a domestic
+municipality field. Missing programme and country evidence remains visible.
+
+The conditioning hierarchy is age band, employment, apprenticeship, sex and
+canton, in that order. Each supported finer profile is blended with its
+parent using
+\[
+ n_{\mathrm{eff}}=\frac{(\sum_j w_j)^2}{\sum_j w_j^2},\qquad
+ P_g=\frac{n_{\mathrm{eff},g}}{n_{\mathrm{eff},g}+s}P_g^{\rm empirical}
+       +\frac{s}{n_{\mathrm{eff},g}+s}P_{\rm parent},
+\]
+where \(s=20\) by default. The broadest age profile is empirical. Unseen
+combinations back off to supported profiles; an unsupported age band uses the
+nearest supported age band. Parent profiles include child observations, so this
+is smoothing, not an independent Bayesian prior.
+
+\begin{longtable}{L{.19\textwidth}L{.32\textwidth}L{.41\textwidth}}
+\toprule Population group & Classification & Location handling \\
+\midrule\endhead
+Under 15 & Explicit below-SS-coverage marker & Existing age/school pools and
+independent weighted MZ distance draws; no SS programme prediction. \\
+Age 15+, SS codes 2--8 & Retain compulsory, bridging and secondary programme
+detail & Separate pooled secondary OD model, SS age/programme distance targets
+and compatible school selection. \\
+Age 15+, SS codes 9--13 & One pooled tertiary outcome before fitting & Shared
+UH, FH/PH and higher-vocational teaching pool; pooled tertiary OD and campus balancing. \\
+Tertiary under 24 & Same pooled tertiary classification & Additional nationally
+fitted distance preference, by default, before joint balancing. \\
+Tertiary age 24+ & Same pooled tertiary classification & Original pooled seed
+probabilities; shared campus balancing can still alter final destinations. \\
+Foreign, unknown or unresolved study & Keep explicit status & Labelled
+compatible or age-based proxy locations where regular domestic assignment does
+not apply. These do not enter observed domestic OD evidence. \\
+Nonstudents & No regular student anchor & Donor education visits are handled
+as secondary \code{other} activities, with original-purpose provenance. \\
+\bottomrule
+\end{longtable}
+
+The tertiary group combines higher professional examinations, higher vocational
+colleges, bachelor, master and doctorate/habilitation. The synthetic population
+does not receive separate tertiary degree labels: \code{current_education}
+is missing for the pooled tertiary outcome and \code{study_level} is
+\code{tertiary}. Detailed survey and BFS degree categories remain useful audit
+references, not modelled degree stocks. FH/PH campuses are included in the
+regular tertiary choice set.
+
+Different stages use different age bands. Programme prediction uses
+15--17, 18--19, 20--24, 25--29, 30--39, 40--49, 50--64 and 65+.
+Secondary distance fitting uses 15--17, 18--23, 24--29, 30--39, 40--49,
+50--59 and 60+. The tertiary tilt has only the under-24/24+ split.
+Distance-analysis bands are not automatically the matching bands.
+
+\section{Education origins and smoothed OD flows}
+
+There are two active broad flow models: secondary (SS codes 2--8) and tertiary
+(codes 9--13). Both use positive-weight student observations aged 15+ from
+the pooled SS years. Origins prefer school-commute departure, with residence
+fallback only when departure is unresolved. Explicit foreign origins and
+foreign study destinations are excluded from domestic flows. Municipality
+and quarter information is retained at the available resolution.
+
+For an origin with empirical destination profile \(P_i\), the smoothed seed is
+\[
+ P_i^{\rm smooth}=\alpha_i P_i+(1-\alpha_i)R_i,
+ \qquad \alpha_i=\frac{n_{\rm eff,i}}{n_{\rm eff,i}+s_{\rm OD}}.
+\]
+The default \(s_{\rm OD}\) is 100. A geographic prior \(R_i\) uses up to
+50 observed neighbouring municipalities, a Gaussian bandwidth of 20 km and
+capped effective-sample contributions so that one large city does not dominate.
+For quarters, parent-municipality evidence excludes the quarter's own records
+before regional borrowing. A zone with no observed respondents can therefore
+still have a modelled destination distribution if the synthetic population
+contains students there. Borrowed evidence is recorded as such.
+
+A weak distance penalty applies to uncertain origin profiles:
+\[
+ P_{ij}^{\rm base}\ \propto\ P_{ij}^{\rm smooth}
+ \exp\{-\lambda(1-\alpha_i)d_{ij}\},
+ \qquad \lambda=0.005\ {\rm km}^{-1}.
+\]
+Distances here are zone-centroid straight-line distances. The implementation
+centres exponents for numerical stability. Geographic borrowing can introduce
+routes absent from an origin's own sample; subsequent distance weighting and
+balancing preserve zeros in the resulting smoothed seed. Preserving support
+does not mean preserving every zero in the raw survey count table.
+
+\section{Child and secondary-school assignment}
+\subsection{Children and baseline proxies}
+
+The legacy location pools use age intervals \(a\leq6\), \(6<a\leq12\),
+\(12<a\leq16\), and \(a>16\), associated with kindergarten, primary,
+secondary and tertiary establishments. The initial nearest-site candidate
+counts are 1, 2, 7 and 20 respectively. Classified age-15+ domestic students
+are subsequently handled by the secondary/tertiary methods below.
+
+Independent weighted MZ education-distance draws use these same age intervals,
+with the configured diary-day selection. They do not require the person's
+future donor. The youngest pool may use age-six evidence if present; MZ has
+no observations below six. An empty reference pool receives a zero-distance
+reference and an explicit nearest-school coverage-fallback label. This is
+particularly relevant to the kindergarten pool, whose candidate count is one.
+
+MZ diary distances use the last observed home before the selected education
+activity, otherwise the first home afterwards, and finally the household home.
+Secondary-home diary activities are eligible. The main education activity is
+selected by duration, with origin-only education handled when necessary.
+
+\subsection{Secondary programmes and distance targets}
+
+The stage \code{secondary_distances} fits weighted empirical SS distance CDFs
+for each age/programme cell. It uses reported school-departure geography and
+nonnegative \code{DISTTOSCHOOL_AIR}, interpreted as kilometres by default.
+Residence-fallback OD observations do not supply these reported-departure
+distance references. Codes 2 and 3 share one programme pool. Below effective
+sample size 50, fitting backs off to all ages of the same programme. Weak
+programme-wide support is labelled; absent evidence gives a missing target
+and nearest-compatible-school fallback.
+
+Within each recipient age/programme group, midpoint quantiles of the fitted
+CDF supply target distances. Independent MZ references determine rank, with
+seeded handling of ties/missing references. Thus SS determines the distance
+distribution; the MZ draw is not the literal target distance.
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule SS code & Programme & Compatible establishment NOGA \\
+\midrule
+2--3 & Compulsory & 853101, 852002, 852003 \\
+4 & Bridging & 853101, 853102, 853103, 853200 \\
+5 & Specialised secondary & 853102, 853103 \\
+6 & Vocational secondary & 853200 \\
+7 & General secondary & 853102 \\
+8 & Vocational/specialised maturity & 853200, 853102, 853103 \\
+\bottomrule
+\end{tabular}\end{center}
+
+NOGA compatibility is an explicit approximation, not a verified programme
+catalogue. In particular, code 5 retains both academic school types because
+the narrower establishment code alone has insufficient coverage.
+
+The final secondary destination zone is drawn from the compatible pooled OD
+row after multiplying by
+\[
+ \exp\left[-\frac12\left(\frac{e_{ij}}{\sigma_i}\right)^2\right],
+ \quad \sigma_i=\max(1000\ {\rm m},0.10t_i),
+\]
+where \(t_i\) is the SS target distance and \(e_{ij}\) is the smallest absolute
+target mismatch among compatible schools in zone \(j\), measured from the
+actual synthetic home. The zone receives no artificial bonus for duplicate
+school records. Missing targets leave compatible OD probabilities unconditioned.
+
+Inside the sampled zone, up to 20 schools with the smallest target-distance
+mismatch are considered. A Gaussian preference with tolerance
+\(\max(200\ {\rm m},0.10t_i)\) is combined with clipped employee weights.
+Unsupported OD choices retain the preceding compatible distance-based
+fallback. Scarce schools can prevent exact reproduction of targets. There
+are no secondary school-capacity or destination-total constraints.
+
+\section{Tertiary institutions, campuses and balancing}
+\subsection{Establishment registry and BFS reference}
+
+STATENT establishment and enterprise NOGA identify UH (854201), FH/PH
+(854202) and higher-vocational (854203) institutions. Establishments are
+grouped within an enterprise using DBSCAN with default 500 m neighbourhood
+distance and one-point minimum clusters. This is a connectivity rule, not a
+maximum campus diameter; chained sites can span more than 500 m.
+
+Regular pooled assignment uses eligible teaching establishments, excluding
+type conflicts and applying reviewed site rules. Research-only sites remain
+outside this undifferentiated teaching pool. Detailed doctoral eligibility
+helpers remain available for analysis but are not a separate active doctoral
+assignment model.
+
+External institution links associate BFS totals with STATENT enterprises.
+Both proposed and verified link statuses can currently supply targets; their
+evidence quality should be inspected. Within a linked institution, eligible
+teaching-site FTE splits the total between campuses:
+\[
+ E_c=E_u\frac{F_c}{\sum_{k\in u}F_k}.
+\]
+Here \(E_u\) is institution enrolment and \(F_c\) is eligible campus FTE.
+\(E_c\) is an estimated campus allocation, not an independently published
+campus enrolment count.
+
+The pooled annual reference includes disjoint university programmes, including
+continuing/other and legacy diplomas, plus the supplied higher-vocational
+reference. The documented 2023/24 input has 169,249 UH, 107,196 FH/PH and
+60,854 higher-vocational enrolments (337,299 combined). These are reference
+file values, not a claim of complete coverage of every tertiary training
+activity or a Swiss-resident census. Changing the input/year requires rechecking them.
+
+\subsection{Targets and assignment}
+
+For \(N\) modelled domestic tertiary students, the initial campus target is
+\[
+ T_c=N\frac{E_c}{\sum_u E_u}.
+\]
+Named campuses and residual institution-type groups form disjoint margins.
+Unlinked enrolment stays in the residual UH/FH/PH/higher-vocational groups;
+it is not redistributed exclusively to named institutions.
+
+Balancing operates on the cohort with usable compatible OD support, using
+that supported cohort's size for its requested margins. Unsupported people
+retain labelled proxy/fallback anchors outside those fitted margins. Iterative
+proportional fitting adjusts origin-to-campus/type flows. Controlled rounding
+preserves each supported origin-row total and the fitted campus/type margins
+within the integer rounding constraints. Infeasible targets remain visible
+as residuals; the algorithm does not invent routes to satisfy them.
+
+With the default young-distance feature, rows are origin-by-age-group, and
+the young seed is additionally multiplied by
+\[
+ \exp(-\beta d_{ij}),\qquad a_i<24.
+\]
+One national \(\beta\) is fitted by conditional destination likelihood from
+reported domestic school departures, with a numerical bound
+\(0\leq\beta\leq0.05\ {\rm km}^{-1}\). Reported numeric SS distance is not
+required: the fit uses observed OD-zone centroids. The age threshold and bound
+are code constants. Older students have no added tilt, although balancing
+their shared campus margins can change final allocations. The October audit
+fit was approximately 0.00887 per kilometre; this is a fitted result, not a
+configuration default.
+
+After selecting a zone and calibration group, named groups identify their
+campus; residual groups can contain several campuses, selected by eligible
+FTE before individual buildings. This avoids a large cluster of nearby
+buildings excluding another campus. Within a chosen campus/zone, the existing
+employee and reference-distance preference selects among up to 20 nearest
+buildings. FTE controls campus attractiveness; headcount contributes to the
+within-campus preference. Neither is a hard building capacity.
+
+\section{Matching and daily attendance}
+
+Work and education anchors exist before matching. For donors and recipients,
+the combined matching predictor is the longer valid work/education distance:
+\[
+ d_{\rm match}=\max(d_{\rm work},d_{\rm education}).
+\]
+If only one is known, that one is used; if neither is known, the sentinel is
+\(-1\), while zero is a valid commute. On the MZ side, school distance uses
+the reported usual school address first, then an observed diary education
+location. Remaining missing student distances are drawn with person weights
+from observed domestic peers: same age band and employment first, then age
+band, then all students. Imputed distances never become donor references for
+further imputation and never manufacture education visits.
+
+Current ordinary matching uses broad donor-pool splits under 15, 15--23 and
+24+. Status and age-class variables further constrain matching; the exact
+matching classes are separate from the distance-report bands. For ages 15--23,
+employment and combined employment/student status are mandatory, while
+commute classes and canton are among the relaxable criteria. The algorithm
+can relax detailed matching requirements and reduce the requested donor count;
+it does not guarantee a same-canton donor or an exact distance match.
+
+Daily attendance follows the selected diary. A student can have no education
+visit because the observed day includes work, other activities or staying
+home. A workday selection includes weekdays during school holidays. There is
+no additional fixed attendance-rate draw, national attendance multiplier or
+daily BFS campus quota in the active assignment.
+
+For nonstudent donors, reported education-purpose visits are recoded to
+\code{other} in the secondary-trip processing, retaining original-purpose
+provenance. Synthetic trip processing also applies the recoding using the
+recipient's final nonstudent status; raw MZ diaries remain available unchanged
+for matching and survey audits. This allows secondary activity assignment to handle possible
+courses and continuing education without assigning every nonstudent a regular
+school. It does not establish the actual nature of those courses.
+
+\section{Recovered residents, scaling and residence limitations}
+
+Geocoded people missing from the household table can be retained in technical
+single-person households. Recovery requires the existing coordinate-quality
+checks; recovered children under 16 are excluded. Younger recovered people
+use the same ordinary employment, student and programme models as comparable
+private-household residents. Dorm proximity is descriptive. There are no
+forced dorm-student labels, donor swaps, reserved campus places or subtraction
+of a fixed dorm group from municipal student quotas.
+
+With residence classification enabled, recovered people aged 39+ are assigned
+the agreed home-only scenario and bypass the corresponding behavioural
+models/diagnostics. This age cutoff is a modelling assumption, not an observed
+absence of mobility. The older home-only rule is independent of dorm distance.
+
+Optional projection scaling uses year-end population controls from the
+2025 reference vintage and compatible private-household controls. Technical
+recovered households are excluded from the private-household margin but their
+people remain in population controls and household replication. Scaling changes
+the cohort composition and hence can change student stocks without changing
+the student model itself. For direct 2023 comparisons, use scaling disabled.
+
+Raw STATPOP secondary-residence fields and linked secondary-coordinate records
+were identified during the latest audit, but \textbf{no term-time relocation
+has been implemented}. The retained home remains the current registered-home
+representation. School-departure geography in SS training/ODs therefore does
+not automatically move synthetic students to term-time homes. Multiple raw
+residence records must never be counted as additional people without resolving
+identity and residence scope. This is a documented future investigation, not
+an active configuration option.
+
+\section{Configuration reference}
+\label{sec:config}
+
+\textbf{Conventions.} Defaults are stage defaults when the relevant stage is
+configured. Required general inputs such as \code{data_path},
+\code{analysis_path}, \code{random_seed} and \code{input_downsampling} must
+come from the surrounding configuration. Numeric parameters must remain in
+their documented valid ranges. Booleans should be YAML \code{true}/\code{false}.
+Changing defaults is a sensitivity experiment, not automatically an improvement.
+
+\subsection{Participation, programme and distance settings}
+\small
+\begin{longtable}{L{.34\textwidth}L{.13\textwidth}L{.45\textwidth}}
+\toprule Parameter & Default & Alternatives and effect \\
+\midrule\endhead
+\code{vocational_apprentice_repair_fraction} & 0.65 & Range [0,1]. Zero retains
+raw labels; one repairs all eligible ambiguous records. Even one does not
+restore the old blanket overwrite of every vocational record. Does not change student flags. \\
+\code{education_level_prior_strength} & 20.0 & Nonnegative effective-observation
+strength. Larger values shrink finer programme/country profiles more strongly;
+zero removes blending for supported cells. Unsupported profiles still back off. \\
+\code{secondary_education_distance_minimum_effective_n} & 50 & Positive threshold
+for age/programme distance cells. Larger values pool more cells across ages;
+smaller values retain noisier local age/programme distributions. \\
+\code{education_distance_ss_unit} & \code{km} & \code{m} is the alternative.
+Controls SS reported-distance conversion in secondary targets and distance
+analysis; it does not change centroid-distance units. Set from input metadata,
+not to tune results. \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsection{OD smoothing and regularisation}
+These settings are independent for secondary and tertiary flows. Values shown
+are identical defaults, but each key controls only its corresponding matrix.
+
+\small
+\begin{longtable}{L{.34\textwidth}L{.13\textwidth}L{.45\textwidth}}
+\toprule Parameter & Default & Alternatives and effect \\
+\midrule\endhead
+\code{secondary_od_prior_strength} & 100.0 & Nonnegative shrinkage strength.
+Higher values favour neighbouring/parent evidence. Zero uses local empirical
+profiles where observed, but still needs borrowed evidence for empty origins. \\
+\code{tertiary_od_prior_strength} & 100.0 & Same interpretation for tertiary flows. \\
+\code{secondary_od_neighbors} & 50 & Positive integer maximum number of nearby
+observed municipalities in geographic priors. More broadens the donor set;
+fewer makes it more local and potentially less stable. \\
+\code{tertiary_od_neighbors} & 50 & Same interpretation for tertiary flows. \\
+\code{secondary_od_bandwidth} & 20000.0 m & Positive Gaussian distance scale
+for neighbouring origins. Larger values spread influence more widely;
+smaller values concentrate it locally. Not a hard search radius. \\
+\code{tertiary_od_bandwidth} & 20000.0 m & Same interpretation for tertiary flows. \\
+\code{secondary_od_distance_decay} & 0.005/km & Nonnegative weak distance penalty,
+scaled by origin uncertainty. Zero disables it; larger values favour nearby
+supported destinations more strongly. \\
+\code{tertiary_od_distance_decay} & 0.005/km & Same base penalty for tertiary
+flows, separate from the fitted under-24 preference. \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsection{Campus assignment and enrolment inputs}
+\small
+\begin{longtable}{L{.34\textwidth}L{.13\textwidth}L{.45\textwidth}}
+\toprule Parameter & Default & Alternatives and effect \\
+\midrule\endhead
+\code{education_tertiary_balance} & \code{true} & False uses compatible pooled
+tertiary OD without campus/type margin balancing and also disables the young
+distance preference. It does not remove tertiary anchors. \\
+\code{education_tertiary_age_distance} & \code{true} & Active only with balancing.
+False retains pooled OD seeds without the added under-24 tilt, while keeping
+campus balancing. It does not disable the base OD distance penalty. \\
+\code{education_campus_cluster_distance} & 500.0 m & Positive within-enterprise
+DBSCAN neighbourhood scale. Smaller values split campuses; larger values merge
+nearby site clusters. Changing it changes campus IDs/groups and requires reviewing maps and targets. \\
+\code{education_enrolment_year} & \code{2023/24} & Choose another academic-year
+string only if matching university and higher-vocational input rows are available.
+Changing the year does not download data or rescale the population year. \\
+\code{education_enrolment_path} & \code{null} & Null resolves to
+\code{<data_path>/education_enrolment}. An explicit directory selects another
+set of saved BFS JSON snapshots. The CSV overrides below have independent defaults. \\
+\code{education_institution_links} & Path A & Explicit CSV path changes
+BFS-to-STATENT institution mapping. Missing/unreviewed links affect named margins
+and residual groups; do not duplicate one institution's total across enterprises. \\
+\code{education_site_eligibility} & Path B & Explicit CSV path selects reviewed
+site/programme eligibility decisions. Changes can affect teaching pools and
+campus FTE weights. Rules need supported IDs and evidence. \\
+\code{education_higher_vocational_reference} & Path C & Explicit CSV path selects
+the national higher-vocational reference. Changes alter its share in pooled
+tertiary targets. It is not a measured campus-capacity file. \\
+\code{education_reference_sites} & Path D & Reference-site CSV for institution
+matching and campus audits. It is not an automatic home-relocation or student
+affiliation rule. \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+Paths A--D are under \code{<data_path>/education_enrolment/}:
+\begin{description}
+\item[A] \code{education_institution_links.csv}
+\item[B] \code{education_site_eligibility.csv}
+\item[C] \code{education_higher_vocational_enrolment.csv}
+\item[D] \code{education_reference_sites.csv}
+\end{description}
+These files remain external data inputs, not committed reference CSVs.
+Use explicit valid filenames to override these four path defaults; unlike
+\code{education_enrolment_path}, null is not their documented fallback value.
+
+\subsection{Related population, matching and analysis controls}
+\small
+\begin{longtable}{L{.34\textwidth}L{.13\textwidth}L{.45\textwidth}}
+\toprule Parameter & Default & Alternatives and effect \\
+\midrule\endhead
+\code{retain_geocoded_missing_households} & \code{true} & False excludes missing-
+household records instead of retaining eligible geocoded residents as technical
+singletons. Changes population coverage and potentially education stocks. \\
+\code{non_private_residences_enabled} & \code{true} & False disables GWR proximity
+classification and its older-resident home-only flags. Recovery remains governed
+by the preceding setting; retained residents then use ordinary model handling. \\
+\code{non_private_residence_radius} & 250.0 m & Nonnegative descriptive proximity
+threshold. Larger values label more recovered younger people as dorm candidates.
+This flag does not force them to become students or select their campus. \\
+\code{non_private_home_only_minimum_age} & 39 & Must exceed 18. Recovered people
+at/above it are home-only; younger recovered people use ordinary models. Also
+sets the exclusive upper age for the dorm-candidate flag. \\
+\code{gwr_residence_candidates} & Path E & Defaults to
+\code{<data_path>/gwr/residence_candidates.csv}; override with a compatible
+reviewed residence-candidate file. \\
+\code{only_permanent_residents} & \code{true} & True admits residence type 1;
+false admits types 1 and 2 at the first filter. Both branches subsequently
+require population type 1. False therefore does not by itself retain all
+secondary-residence records or implement term-time homes. \\
+\code{specific_day_scenario} & \code{workday} & \code{weekend} or capitalised
+weekday names Monday--Sunday select other diary pools. Affects matching and
+MZ education references/analysis, not BFS annual enrolment. \\
+\code{matching_minimum_observations} & 10 & Requested donor support before
+progressive matching relaxation/reduction. Larger values can cause more relaxation;
+not a guaranteed minimum in the final most-specific cell. \\
+\code{matching_enable_diagnostics} & \code{false} & True enables additional
+matching feature-distribution logs. Does not impose additional matching targets. \\
+\code{education_stock_survey_year} & 2023 & Selects the year for the stock audit.
+It does not switch production training from pooled SS to a single year. \\
+\code{enable_scaling} & \code{false} & True fits and replicates households using
+projection controls. False preserves the unscaled source population before sampling. \\
+\code{scaling_year} & 2050 & Existing code default, relevant only if scaling is
+enabled. Explicitly set 2025 for 31 December 2025 targets from the 2025 reference
+vintage. The target year is not implicitly 2025. \\
+\code{input_downsampling} & Required & Sample fraction used by population
+sampling and expansion of analysis counts. Set consistently; do not compare
+raw sample counts directly with full BFS stocks. \\
+\code{random_seed} & Required & Used by programme draws, OD/location sampling,
+apprentice repair and other stages. Does not override every legacy model seed;
+see Section~\ref{sec:constants}. \\
+\bottomrule
+\end{longtable}
+\normalsize
+
+\subsection{Important choices that are not YAML switches}
+\label{sec:constants}
+
+The current code fixes departure-first student-training geography, pooled
+tertiary classification, and the pre-matching education-anchor order. No active
+switch restores forced dorm students, municipal dorm subtraction, dorm swaps
+or separate bachelor/master/doctoral assignment.
+
+Other code constants include the under-24 threshold and coefficient bound,
+secondary zone/school tolerance floors (1000/200 m), the 10\% relative tolerance,
+and the school candidate counts. The student CatBoost settings are 3200
+iterations, learning rate 0.04, depth 10, L2 regularisation 6, Bernoulli
+bootstrap and subsample 0.8, with training seed 42. The student draw uses the
+legacy base seed 789 plus chunk offset, with chunks of 50,000. These are not
+controlled by the general \code{random_seed} setting. Changing the general
+seed should not be described as refitting every model with a new seed.
+
+\subsection{Example education configuration}
+
+Merge the following into the existing YAML \code{config:} mapping. This is
+an education-focused fragment, not a complete runnable pipeline file.
+The explicit 2025 target below overrides the legacy 2050 default but has no
+effect while scaling is disabled.
+
+\begin{lstlisting}
+config:
+  vocational_apprentice_repair_fraction: 0.65
+  education_level_prior_strength: 20.0
+
+  secondary_od_prior_strength: 100.0
+  secondary_od_neighbors: 50
+  secondary_od_bandwidth: 20000.0
+  secondary_od_distance_decay: 0.005
+  secondary_education_distance_minimum_effective_n: 50
+  education_distance_ss_unit: km
+
+  tertiary_od_prior_strength: 100.0
+  tertiary_od_neighbors: 50
+  tertiary_od_bandwidth: 20000.0
+  tertiary_od_distance_decay: 0.005
+  education_tertiary_balance: true
+  education_tertiary_age_distance: true
+
+  education_campus_cluster_distance: 500.0
+  education_enrolment_year: "2023/24"
+  education_enrolment_path: null
+  # Reviewed CSV paths default independently under data_path.
+
+  retain_geocoded_missing_households: true
+  non_private_residences_enabled: true
+  non_private_residence_radius: 250.0
+  non_private_home_only_minimum_age: 39
+
+  specific_day_scenario: workday
+  education_stock_survey_year: 2023
+  enable_scaling: false
+  scaling_year: 2025
+\end{lstlisting}
+
+\section{Validation and interpretation}
+
+\subsection{Checks that answer different questions}
+\begin{enumerate}
+\item \textbf{Population stock:} count all students regardless of diary visits;
+compare age-15+ totals and employment/student overlap with SS 2023. Separate
+private, recovered and home-only groups; retain abroad/unknown study status.
+\item \textbf{Programme prediction:} examine effective sample sizes, backoff
+methods, apprenticeship conditioning and held-out outcomes. Detailed degree
+counts cannot be validated as synthetic outcomes when tertiary is pooled.
+\item \textbf{Annual anchors:} verify one finite location per student, compatible
+schools, origin support, campus/type margins and unsupported-proxy shares.
+\item \textbf{Daily attendance:} count distinct people with an education activity,
+not repeated visits. Compare modelled diary attendance with weighted MZ,
+standardising for age/status composition before attributing a difference to placement.
+\item \textbf{Distance:} compare means, medians, tails and empirical CDFs.
+MZ uses diary-home distance; SS uses reported departure-based distance; the
+population uses assigned home and actual education visitors. A separate common
+municipality-centroid comparison removes differences in coordinate precision.
+\end{enumerate}
+
+The young-tertiary distance audit rebuilds both base OD and coefficient on two
+SS years and tests the omitted year, rotating 2021--2023. It compares baseline,
+half and full fitted preference using weighted log loss, Brier score and
+zero-support share. The documented trial favoured the full young preference
+in all three held-out years, with coefficients about 0.00885--0.00940/km.
+This supports a modest national age effect, not precise local prediction or
+resolution of term-time residence.
+
+Regression checks cover origin/age counts, structural support, integer campus
+margins, study/status preservation, geographic ambiguity, apprenticeship
+repair and the real Synpp configuration/execute interface. The commit review
+ran 49 targeted tests plus 17 subtests across the recent changes, including
+related freight and simulation fixes. Passing implementation tests is not a
+statistical guarantee of every campus's attendance.
+
+\subsection{Analysis stages and outputs}
+Outputs are generally placed under \code{<analysis_path>/<analysis_name>}.
+The production run must include the relevant downstream activities to report
+actual attendance; a frozen-diary replay only isolates placement effects.
+
+\begin{longtable}{L{.44\textwidth}L{.49\textwidth}}
+\toprule Stage & Main use \\
+\midrule\endhead
+\code{analysis.tertiary_education_assignment} & Annual anchors, campus counts,
+origin flows, daily visitors and balancing diagnostics. Inspect
+\code{calibrated_group_comparison.csv} and
+\code{student_anchor_and_attendance.csv}. \\
+\code{analysis.education_student_stock} & Stock by residence cohort, student/
+employment overlap, SS-year comparisons and BFS reference coverage. Audit only;
+does not impose stock corrections. \\
+\code{analysis.education_distances} & Weighted native and common-centroid
+distance summaries/CDFs by age and student scope, with coverage diagnostics. \\
+\code{analysis.secondary_education_assignment} & Secondary compatibility,
+targets, realised distances and fallback methods. Some donor-based columns
+are legacy counterfactual diagnostics, not current assignment objectives. \\
+\code{analysis.tertiary_education_age_distance} & Held-out-year validation of the
+national young-distance preference. \\
+\code{analysis.education_classification} & Smoothed programme/country prediction
+and support; does not retrain the binary student classifier. \\
+\code{analysis.education_institutions} and
+\code{analysis.education_campus_weights} & Registry clustering, institution
+coverage, FTE allocation and reviewed site eligibility. \\
+\bottomrule
+\end{longtable}
+
+An ``expected daily'' number displayed on a comparison map is an analytical
+benchmark obtained by applying an attendance assumption/rate to enrolment.
+It is not the active campus-balancing target. A ``cohort-normalised target''
+instead describes the model's annual student-anchor margin. Neither should be
+labelled a directly published campus attendance count.
+
+\subsection{Remaining limitations and current stopping point}
+
+The main uncertainties are differing source years and frames, finite local
+survey support, the apprenticeship repair assumption, FTE-based campus shares,
+secondary NOGA compatibility, missing-distance imputation and registered versus
+term-time homes. Pooling tertiary prevents sparse degree-specific OD matrices,
+but removes degree-specific placement, including a separate research-site
+model for doctoral students. Continuing education also has incomplete alignment
+between participation labels, BFS categories and MZ purposes.
+
+The agreed baseline keeps the current implementation. Secondary-residence
+relocation and additional local tuning are deferred. Further changes should
+be justified by a measured residual with adequate support, rather than by
+forcing every campus or small canton/age cell to match one reference exactly.
+
+\appendix
+\section{Implementation guide}
+Paths below are relative to the repository root. They identify the active
+implementation, rather than requiring external documentation to compile the report.
+\begin{description}
+\raggedright
+\item[Survey preparation] \code{data/structural_survey/raw.py},
+\code{structural_survey.py}, \code{student_training.py},
+\code{education_origins.py} and \code{apprenticeship.py} in the same directory.
+\item[Population models] \code{synthesis/population/models/students.py},
+\code{education.py}, \code{employment.py} and \code{non_private.py}.
+\item[OD evidence] \code{data/od/education_matrix.py},
+\code{tertiary_education_matrix.py}, \code{tertiary_education_smoothing.py}
+and \code{tertiary_education_age.py}.
+\item[Institutions and references] \code{data/statent/education_institutions.py},
+\code{education_enrolment.py} and \code{education_campus_weights.py}.
+\item[Location assignment] \code{synthesis/population/spatial/primary/education/}
+contains \code{locations.py}, \code{secondary_distances.py},
+\code{secondary.py}, \code{targets.py}, \code{balancing.py} and \code{tertiary.py}.
+\item[Matching and diary purposes] \code{synthesis/population/matching/commute.py},
+\code{matched_v1.py}, \code{data/microcensus/commute.py} and
+\code{data/microcensus/secondary_trips.py}.
+\item[Recovery and projections] \code{data/statpop/statpop.py},
+\code{data/statpop/households.py}, \code{data/statpop/projections/} and
+\code{synthesis/population/scaled.py}.
+\item[Companion documentation] The \code{analysis/education_*.md},
+\code{analysis/tertiary_education_*.md} and secondary-assignment notes provide
+stage-level details. Some include historical trials; active behaviour is
+resolved against the executable stage entry points in this report.
+\end{description}
+
+\section{Online sources for external reference files A--E}
+
+The five CSV filenames in Section~\ref{sec:config} are project-prepared inputs,
+not official files available online under those names. Official sources supply
+enrolment tables, campus addresses and building records; our crosswalks, review
+decisions, aggregation and filtering turn them into the required CSV schemas.
+Preserve the reviewed snapshots to reproduce the current run. The normal pipeline
+reads local inputs and does not rebuild them from live websites.
+
+\begin{description}
+\raggedright
+\item[A: Institution links.] \code{education_institution_links.csv} is our
+reviewed crosswalk from named BFS institutions to anonymous STATENT enterprise
+identifiers. There is no direct public download for this crosswalk. Evidence
+includes \href{https://www.epfl.ch/campus/visitors/coming-to-epfl/}{EPFL campus addresses},
+\href{https://www.zhaw.ch/en/about-us/visitor-information/location-plans}{ZHAW location plans},
+\href{https://ethz.ch/en/campus/erreichen/hoenggerberg.html}{ETH Hoenggerberg}
+and \href{https://students.uzh.ch/de/dates/sites/irchel.html}{UZH Irchel}.
+Public addresses support the spatial interpretation but do not independently
+verify an anonymised enterprise identity. Use the existing reviewed mapping
+with the corresponding STATENT extract.
+
+\item[B: Site eligibility.] \code{education_site_eligibility.csv} records our
+modelling decisions, with per-row evidence and notes. It is not an official
+campus-eligibility dataset. Examples of source evidence are
+\href{https://www.epfl.ch/education/bachelor/enhanced-learning-programs/summer-in-the-lab-internship-program/}{EPFL's laboratory internship programme}
+and \href{https://csf.ethz.ch/monte-verita.html}{ETH's Monte Verita conference venue}.
+These sources describe activities/use; the decision about regular student
+assignment remains an explicit project assumption.
+
+\item[C: Higher-vocational enrolment.]
+\code{education_higher_vocational_enrolment.csv} is a compact transformation of
+\href{https://www.pxweb.bfs.admin.ch/pxweb/de/px-x-1502030000_112/-/px-x-1502030000_112.px/}{BFS table px-x-1502030000\_112}.
+Select academic year 2023/24 and aggregate across fields, sexes and nationality
+categories without counting total rows alongside their components. Retain the
+education-type distinction. Our snapshot contains 35,982 higher-vocational
+college students, 21,960 in the examination/preparation category and 2,912 in
+non-BBG-regulated higher vocational education. The file preserves the source
+URL and incomplete preparation-course coverage note. A raw BFS export needs
+conversion to the pipeline's column names and three study-level labels.
+
+\item[D: Campus reference points.] \code{education_reference_sites.csv} was
+assembled from official campus maps/addresses, including the institution
+pages above. The \href{https://plan.epfl.ch/}{EPFL map} and
+\href{https://students.uzh.ch/de/dates/sites/irchel.html}{UZH Irchel map/address}
+are examples. Address coordinates were obtained using swisstopo's location
+search service; see the \href{https://docs.geo.admin.ch/}{geo.admin.ch API documentation}.
+The CSV retains source URLs, coordinate sources, notes and review dates. These
+are campus anchors, not campus polygons or an official combined national file.
+
+\item[E: Residence candidates.] \code{gwr/residence_candidates.csv} is our
+filtered and enriched building snapshot. Download raw GWR data from
+\href{https://public.madd.bfs.admin.ch/ch.zip}{the nationwide GWR ZIP}; see
+\href{https://www.gwr.admin.ch/de/data/supply/public_content.html}{official access and field documentation}.
+Operator evidence comes from \href{https://www.fmel.ch/nos-maisons}{FMEL's residence list}.
+Our 13 October 2026 snapshot retains communal-residence class 1130, additional
+explicit student-housing names and reviewed FMEL address matches, deduplicated
+by EGID. It contains 4,774 buildings. Raw GWR alone is neither this prepared
+CSV nor a complete student-dormitory inventory; communal accommodation includes
+other uses. Live exports change over time, so re-downloading will not necessarily
+reproduce the saved snapshot.
+\end{description}
+
+\section{Reproducible maintenance of files A--D}
+
+The standalone command \code{python -m analysis.education_reference_update}
+provides two operations: \code{prepare} creates a new candidate reference
+directory; \code{review} checks it against an exported STATENT registry. Neither
+operation changes the active configuration or runs the population pipeline.
+Detailed commands, file provenance, conversion rules and review procedures are
+documented in \code{doc/analysis/education_reference_update.md}.
+
+Preparation copies A, B and D unchanged, downloads the official UH, FH/PH and
+higher-vocational cubes for explicitly requested years, and derives C. It
+archives queries, metadata, responses, retrieval timestamps and hashes. An
+offline mode reproduces the conversion from those saved responses. The C
+converter selects only totals on the field/sex/nationality axes, maps education
+types 311, 312+313 and 315 to the three reference groups, and reconciles their
+sum against the published total. Missing cells, changed definitions or positive
+unmapped historic categories require review rather than silent substitution.
+
+Review checks missing or duplicate identifiers, type/eligibility consistency,
+source evidence, C conservation, and proximity of D anchors to linked sites.
+With a prior registry export, it also reports establishment, enterprise, NOGA
+and coordinate changes. Its default 500\,m proximity threshold is only an audit
+threshold, not a campus boundary or assignment parameter. Proposed identities
+remain proposed; no automatic spatial remapping or promotion takes place.
+The HTML report, issue tables and registry baseline remain in the external
+data directory alongside the reference bundle.
+
+A validation download on 21 October 2026 reproduced all three existing 2023/24
+higher-vocational counts exactly (60,854 in total). Download and offline replay
+produced identical A--D CSVs. The current cached STATENT registry produced no
+structural errors, but retained five proposed-identity notices and flagged the
+ZHAW Zurich Lagerstrasse anchor for spatial review. The first audit also records
+the lack of a historical registry baseline. These checks do not certify the
+anonymous institution identities. The existing production references and
+assignment remain unchanged.
+
+\end{document}

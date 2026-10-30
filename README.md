@@ -6,6 +6,9 @@ The pipeline uses [Synpp](https://github.com/eqasim-org/synpp) to organize its s
 
 See the [documentation index](doc/INDEX.md) for module guides and changelogs.
 
+For education reference provenance, annual BFS updates and STATENT consistency
+checks, see [Maintaining education reference files](doc/analysis/education_reference_update.md).
+
 ## Main reference
 
 The main research reference for the synthetic population of Switzerland is:
@@ -227,15 +230,17 @@ classifications for all municipalities on 01.01.2024
 
 **Projections are used currently only for the population and not freight; need an update to the code**
 - Households:
-    - Content: `projections/households` should contain data for number of households per canton from 2020-2050 (unfortunately it is no lonegr avaialble to download household size distribution per canton). All projections are according to the BfS reference scenario.
-    - Download the `xlsx` file and place it in the `projections/households` folder
-    - State: 2024
+    - Content: `projections/households/households_2025.csv` contains private-household counts from the BFS reference scenario **AM-00-2025**, for 2025–2055. Use the code-based SDMX CSV export from [DF_SCEN_MENAGES](https://stats.swiss/vis?lc=en&df%5bds%5d=disseminate&df%5bid%5d=DF_SCEN_MENAGES&df%5bag%5d=CH1.SCEN&df%5bvs%5d=1.0.0).
+    - Select `SCENARIO=AM-00-2025`, all cantons, `SIZE_HOUSEHOLD=_T`, `NUMBER_HOUSEHOLD_PERSON=MEN`, `FREQ=A`, `TIME_HORIZ=P`, and the desired years. The reader also accepts exports containing the national total and other measures, but selects only private-household counts for the 26 cantons. The old AM-00-2020 workbook is no longer used.
+    - Recovered residents' synthetic singleton households are excluded from this private-household margin. They remain in the total-person controls and in household replication after fitting.
+    - State: 2025
     - Contract:
-        - Projections: [Open Data](https://www.bfs.admin.ch/bfs/de/home/statistiken/katalog.assetdetail.16344851.html)
+        - Projections: [Open Data](https://www.bfs.admin.ch/asset/en/DF_SCEN_MENAGES)
 - Population:
-    - Content: `projections/population` contains data of population per canton, nationality, gender and age from 2024-2055. All projections are according to the BfS reference scenario.
-    - On the webpage below select for Kanton: all except Schweiz; Staatsangehörigkeit (Kategorie): Schweiz and Ausland; Geschlecht: Mann and Frau; Alter: all except Total; Jahr: all; Beobachtungseinheit: Bevölkerungsstand am 1. Januar. Click on Weiter. On the left side in the dropdwon menu select `Ergebnis speichern asl... Excel`, and place the downloaded file in the `projections/population` folder
-    - State: 2024
+    - Content: `projections/population/population_year_end_2025.csv` contains population by canton, nationality, sex and single age for 2024–2055 from reference scenario **AR-00-2025**. The suffix identifies the projection vintage; `scaling_year` selects the target year.
+    - Select Kanton: all except Schweiz; Staatsangehörigkeit (Kategorie): Schweiz and Ausland; Geschlecht: Mann and Frau; Alter: ages 0 through 100+ without Total; Jahr: all; Beobachtungseinheit: **Bevölkerungsstand am 31. Dezember**. Save as a semicolon-delimited CSV with German labels (Latin-1 encoding) at the path above.
+    - `scaling_year: 2025` now means **31 December 2025**. January stocks use age attained during the coming year and cannot be substituted directly. The reader rejects a January-only extract; it preserves actual STATPOP ages and constructs year-end control groups instead.
+    - State: 2025
     - Contract:
         - Projections: [Open Data](https://www.pxweb.bfs.admin.ch/pxweb/de/px-x-0104020000_101/px-x-0104020000_101/px-x-0104020000_101.px)
 - Freight:
@@ -274,9 +279,9 @@ Finally your data folder should look something like this:
 |   +--- haushaltspersonen.csv
 +--- projections
 |   +--- households
-|   |   +--- su-d-01.03.03.01.xlsx
+|   |   +--- households_2025.csv
 |   +--- population
-|   |   +--- px-x-0104020000_101_20250808-151932.csv
+|   |   +--- population_year_end_2025.csv
 +--- spatial
 |   +--- municipality
 |   |   +--- 2023
