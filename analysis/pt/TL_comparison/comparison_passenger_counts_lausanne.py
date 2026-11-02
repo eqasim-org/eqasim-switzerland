@@ -67,6 +67,37 @@ def configure(context):
 
     context.config("specific_day_scenario", default = "workday")
 
+def execute(context):
+    data_path = context.config("data_path")
+
+    matsim_output_folder = os.path.join(
+        context.config("output_path"),
+        context.config("output_id"),
+        context.config("simulation_directory")
+    )
+
+    output_dir = run(
+        gtfs_path                = "%s/output" % context.path("data.gtfs.cleaned"),
+        perimeter_shapefile      = os.path.join(data_path, context.config("analysis.pt.tl_perimeter")),
+        tl_processed_counts_path = os.path.join(data_path, context.config("analysis.pt.tl_processed_counts_path")),
+        matsim_output_folder    = matsim_output_folder,
+        input_downsampling      = context.config("input_downsampling"),
+        min_stop_avg_events     = context.config("analysis.pt.min_stop_avg_events"),
+        min_stop_active_hours   = context.config("analysis.pt.min_stop_active_hours"),
+        map_hour_start          = context.config("analysis.pt.map_hour_start"),
+        map_hour_end            = context.config("analysis.pt.map_hour_end"),
+        night_hours             = context.config("analysis.pt.night_hours"),
+        sbb_path                = (os.path.join(data_path, context.config("analysis.pt.sbb_path"))
+                                   if context.config("analysis.pt.include_sbb") else None),
+        sbb_year                = context.config("analysis.pt.tl_sbb_year"),
+        counts_source           = context.config("analysis.pt.counts_source"),
+        day_scenario            = context.config("specific_day_scenario"),
+    )
+
+    return dict(done = True, path = output_dir)
+
+
+
 
 def resolve_tl_stats_path(processed_dir):
     """Latest tl2024_agg_workday_<date>.csv (written by tl_2024.py), without its companion files."""
@@ -310,34 +341,6 @@ def run(gtfs_path, perimeter_shapefile, tl_processed_counts_path, matsim_output_
     return output_dir
 
 
-def execute(context):
-    data_path = context.config("data_path")
-
-    matsim_output_folder = os.path.join(
-        context.config("output_path"),
-        context.config("output_id"),
-        context.config("simulation_directory")
-    )
-
-    output_dir = run(
-        gtfs_path                = "%s/output" % context.path("data.gtfs.cleaned"),
-        perimeter_shapefile      = os.path.join(data_path, context.config("analysis.pt.tl_perimeter")),
-        tl_processed_counts_path = os.path.join(data_path, context.config("analysis.pt.tl_processed_counts_path")),
-        matsim_output_folder    = matsim_output_folder,
-        input_downsampling      = context.config("input_downsampling"),
-        min_stop_avg_events     = context.config("analysis.pt.min_stop_avg_events"),
-        min_stop_active_hours   = context.config("analysis.pt.min_stop_active_hours"),
-        map_hour_start          = context.config("analysis.pt.map_hour_start"),
-        map_hour_end            = context.config("analysis.pt.map_hour_end"),
-        night_hours             = context.config("analysis.pt.night_hours"),
-        sbb_path                = (os.path.join(data_path, context.config("analysis.pt.sbb_path"))
-                                   if context.config("analysis.pt.include_sbb") else None),
-        sbb_year                = context.config("analysis.pt.tl_sbb_year"),
-        counts_source           = context.config("analysis.pt.counts_source"),
-        day_scenario            = context.config("specific_day_scenario"),
-    )
-
-    return dict(done = True, path = output_dir)
 
 
 def main(argv = None):

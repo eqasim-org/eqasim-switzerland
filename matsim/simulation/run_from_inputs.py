@@ -1,7 +1,10 @@
 import os.path
 import shutil
 import matsim.runtime.eqasim as eqasim
-from matsim.config.tools import java_boolean, parse_boolean, copy_config, adapt_existing_scenario
+from matsim.config.tools import (
+    java_boolean, parse_boolean, copy_config, adapt_existing_scenario,
+    resolve_output_file, scenario_input_parameters, change_params,
+)
 import logging
 logger = logging.getLogger("synpp")
 
@@ -60,8 +63,8 @@ def execute(context):
     prefix = context.config("output_prefix")
     for file in ["facilities.xml.gz", "households.xml.gz", "network.xml.gz", "population.xml.gz",
                  "transit_schedule.xml.gz", "transit_vehicles.xml.gz", "vehicles.xml.gz"]:
-        origin      = os.path.join(input_path, prefix + file)
-        destination = os.path.join(output_path, prefix + file)
+        origin = resolve_output_file(os.path.join(input_path, prefix + file))
+        destination = os.path.join(output_path, os.path.basename(origin))
         shutil.copy2(origin, destination)
 
     config_path = os.path.join(output_path, config)
@@ -69,6 +72,7 @@ def execute(context):
 
     adapt_existing_scenario(config_path, context.config("input_downsampling"),
                             context.config("output_prefix"), context.config("use_freight"))
+    change_params(config_path, scenario_input_parameters(output_path, prefix))
 
     if (not context.config("use_vdf")):
         # Run simulation
@@ -93,6 +97,6 @@ def execute(context):
             "--config:controler.writePlansInterval", str(1),
             "--config:eqasim.useScheduleBasedTransport", scheduleBasedPTconfig,
         ])
-    assert os.path.exists("%s/simulation_output/output_events.xml.gz" % output_path)
+    resolve_output_file(os.path.join(output_path, "simulation_output", "output_events.xml"))
     
     return context.path()

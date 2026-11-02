@@ -21,9 +21,19 @@ def configure(context):
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
     context.stage("data.microcensus.activity_chains")
+    context.stage("data.microcensus.commute")
     context.stage("synthesis.population.sampled")
     context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
     context.stage("data.constants")
+    if context.config("census", "statpop") == "statpop":
+        context.stage("synthesis.population.spatial.primary.education.locations", alias="education_locations")
+
+
+def validate(context):
+    # Synpp hashes stage source but not imported commute-predictor helpers.
+    import hashlib
+    from pathlib import Path
+    return hashlib.sha256(Path(__file__).with_name("commute.py").read_bytes()).hexdigest()
 
 
 def compare_feature_distribution(df_population_sub, df_source_sub, feature, weight_col="person_weight"):
@@ -355,7 +365,9 @@ def get_mz_persons(context):
     logger.info(f"Removing {len(persons_to_remove)} persons who are not employed but have 'work' as a purpose in their activity chain.")
 
     df_persons = df_persons[~df_persons["person_id"].isin(persons_to_remove)]
-    return df_persons
+    from synthesis.population.matching.commute import donor_commutes
+    return donor_commutes(df_persons, context.stage("data.microcensus.commute")["education"],
+                           seed=context.config("random_seed") + 1349)
 
 
 def execute(context):
@@ -382,17 +394,16 @@ def execute(context):
     df_source["canton_id"] = df_source["canton_id"].astype(int)
 
     df_population        = context.stage("synthesis.population.sampled").copy()
+    from synthesis.population.models.non_private import home_only_mask
+    held_out_home = df_population.loc[home_only_mask(df_population)].copy()
+    df_population = df_population.loc[~home_only_mask(df_population)].copy()
     df_population["sex"] = df_population["sex"].astype(int)
     
     # add commute distance and work location type
-    df_work       = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]]
-    df_population = pd.merge(
-        df_population,
-        df_work,
-        on="person_id",
-        how="left",
-        validate="one_to_one",
-    )
+    from synthesis.population.matching.commute import population_commutes, write_diagnostics
+    education = context.stage("education_locations") if const.census == "statpop" else None
+    df_population = population_commutes(df_population, context.stage("work_locations"), education)
+    write_diagnostics(df_source, df_population, context.path())
     
     assert df_population.loc[df_population.employed == const.EMPLOYED, "work_location_type"].notna().all(), "Some employed agents are missing commute distance"
 
@@ -504,6 +515,8 @@ def execute(context):
             "gt24":  (24, 150),
         }
 
+        # Accommodation evidence does not select a different donor pool.
+        # Recovered residents use the same age bands and matching variables.
         for band_name, (age_min, age_max) in age_bands.items():
             # Selector for this band, respecting MZ_AGE_THRESHOLD and excluding collective housing
             sel = (~df_population_work["collective_housing_resident"]) & (df_population_work["age"] >= const.MZ_AGE_THRESHOLD)
@@ -511,7 +524,6 @@ def execute(context):
                 sel &= (df_population_work["age"] >= age_min)
             if age_max is not None:
                 sel &= (df_population_work["age"] <= age_max)
-
             if not sel.any():
                 continue
 
@@ -521,7 +533,6 @@ def execute(context):
                 src_band = src_band[src_band["age"] >= age_min]
             if age_max is not None:
                 src_band = src_band[src_band["age"] <= age_max]
-
             # Safety fallback: if band-filtered source is empty, fall back to full source
             if len(src_band) == 0:
                 logger.warning(f"Source is empty for band '{band_name}' after age filter; falling back to full df_source.")
@@ -714,4 +725,10 @@ def execute(context):
     logger.info("  Persons: %d (%.2f%%)", len(removed_person_ids), pct_removed)
 
     # Return
+    if not held_out_home.empty:
+        # These people have no donor: trips attach only real MZ IDs, and the
+        # existing missing-trip activity path creates their sole home activity.
+        home_mapping = held_out_home[["person_id", "household_id"]].copy()
+        home_mapping["mz_person_id"] = -1
+        df_matching = pd.concat([df_matching, home_mapping], ignore_index=True)
     return df_matching, removed_person_ids

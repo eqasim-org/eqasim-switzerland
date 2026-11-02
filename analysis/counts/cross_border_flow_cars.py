@@ -1,4 +1,3 @@
-import glob
 import logging
 import os
 
@@ -11,6 +10,7 @@ import shapely
 from shapely.ops import unary_union
 
 from . import flow_map_page
+from analysis.output_files import find_simulation_output
 from .flow_metrics import share_column
 from .cross_border_flow_events import GROUPS as EVENT_GROUPS
 from .paths import (
@@ -76,19 +76,7 @@ def execute(context):
 
 
 def _find_output_file(simulation_path, filename):
-
-    direct_path = os.path.join(simulation_path, filename)
-    if os.path.exists(direct_path):
-        return direct_path
-
-    _, _, suffix = filename.partition(".")
-    candidates = glob.glob(os.path.join(simulation_path, "ITERS", "*", f"*.{suffix}"))
-    if not candidates:
-        raise FileNotFoundError(f"Could not find {filename} in {simulation_path} (or its ITERS folder)")
-
-    candidate = max(candidates, key=os.path.getmtime)
-    logger.warning("%s not found at %s, using latest iteration snapshot %s instead", filename, direct_path, candidate)
-    return candidate
+    return find_simulation_output(simulation_path, filename)
 
 
 def load_cross_border_person_ids(persons_path):

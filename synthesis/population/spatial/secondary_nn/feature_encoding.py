@@ -1,4 +1,4 @@
-from .tools import MOBILITY_FEATURES, OSM_FEATURES
+from .tools import MOBILITY_FEATURES, OSM_FEATURES, OVGK_MEAN_FEATURES
 from .chain_state import CHAIN_STATE_FEATURES
 import numpy as np
 from sklearn.preprocessing import QuantileTransformer
@@ -7,7 +7,7 @@ from .hierarchical_utils import ORIGIN_PURPOSE_REMAP, SECONDARY_ACTIVITIES
 ACTIVITY_CHAIN_N                = len(SECONDARY_ACTIVITIES)  # = 6; first 6 dims of encode_purpose output (SECONDARY_ACTIVITIES only)
 PERSON_STATIC_NUMERIC_FEATURES  = ["age", "income_class", "daily_longest_distance_from_home", "daily_crowfly_total", "daily_longest_distance_from_work"] + [f"activity_chain_{a}" for a in SECONDARY_ACTIVITIES]
 PERSON_STATIC_BINARY_FEATURES   = ["sex", "employed", "car_availability"] + MOBILITY_FEATURES
-PERSON_STATIC_FEATURES          = PERSON_STATIC_NUMERIC_FEATURES + PERSON_STATIC_BINARY_FEATURES   # Numeric scaled, binary pass-through
+PERSON_STATIC_FEATURES          = PERSON_STATIC_NUMERIC_FEATURES + PERSON_STATIC_BINARY_FEATURES   # Numeric quantities scaled; mobility indicators and ordered ÖVGK pass through
 PERSON_DYNAMIC_FEATURES         = ["crowfly_consumed_before_trip", "trip_position_class", "departure_time_normalized", "activity_duration_h", "target_distance"]  # 5 scaled dims + purpose one-hot + origin_purpose one-hot appended at build time
 # Legacy aliases so any code still referencing the old names keeps compiling.
 PERSON_TRIP_NUMERIC_FEATURES = PERSON_STATIC_NUMERIC_FEATURES + PERSON_DYNAMIC_FEATURES
@@ -24,7 +24,7 @@ CANDIDATE_STATIC_PASSTHROUGH_FEATURES = [
     "urban_core", "urban",
     "ovgk_share_a", "ovgk_share_b", "ovgk_share_c", "ovgk_share_d", "ovgk_share_none",
     "outside_fraction",
-]
+] + OVGK_MEAN_FEATURES
 STATIC_CANDIDATE_FEATURES = CANDIDATE_STATIC_SCALED_FEATURES + CANDIDATE_STATIC_PASSTHROUGH_FEATURES
 N_CANDIDATE_STATIC_SCALED = len(CANDIDATE_STATIC_SCALED_FEATURES)   # Scaled environmental quantities precede fractions
 DYNAMIC_CANDIDATE_FEATURES = ["dist_home", "dist_work", "dist_last", "detour_factor"]
@@ -100,7 +100,7 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
         state = np.asarray(chain_state_matrix, dtype=np.float64)
         if state.shape != (len(age), len(CHAIN_STATE_FEATURES)) or not np.isfinite(state).all():
             raise ValueError("Invalid remaining-chain feature matrix")
-        dynamic_numeric = np.column_stack([dynamic_numeric, state])
+        dynamic_numeric = np.column_stack([dynamic_numeric, state[:, :-1]])
     if person_dynamic_scaler is not None:
         if getattr(person_dynamic_scaler, "chain_state_features", False) != (chain_state_matrix is not None):
             raise ValueError("Remaining-chain option differs from the fitted person scaler")
@@ -116,6 +116,8 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
         dynamic_scaled = person_dynamic_scaler.fit_transform(dynamic_numeric).astype(np.float32)
     else:
         dynamic_scaled = person_dynamic_scaler.transform(dynamic_numeric).astype(np.float32)
+    if chain_state_matrix is not None:
+        dynamic_scaled = np.column_stack([dynamic_scaled, state[:, -1]])
     person_dynamic_scaler.use_target_distance = use_target_distance
     person_dynamic_scaler.chain_state_features = chain_state_matrix is not None
 
@@ -160,8 +162,10 @@ def transform_person_dynamic_vector(consumed_before, trip_position, departure_ti
         state = np.asarray(chain_state_vector, dtype=np.float64).reshape(1, -1)
         if state.shape[1] != len(CHAIN_STATE_FEATURES) or not np.isfinite(state).all():
             raise ValueError("Invalid remaining-chain prediction features")
-        numeric = np.column_stack([numeric, state])
+        numeric = np.column_stack([numeric, state[:, :-1]])
     numeric_scaled = dynamic_scaler.transform(numeric).astype(np.float32)
+    if getattr(dynamic_scaler, "chain_state_features", False):
+        numeric_scaled = np.column_stack([numeric_scaled, state[:, -1]])
     return np.concatenate([numeric_scaled, [purpose_hot], [origin_purpose_hot]], axis=1).astype(np.float32)  # [1, 5+2P]
 
 def transform_person_trip_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, static_scaler, dynamic_scaler, chain_state_vector=None, mobility_vector=None):

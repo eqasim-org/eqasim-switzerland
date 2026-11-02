@@ -104,8 +104,13 @@ class networkCleaner():
         return stats
         
     def remove_unimportant_links_outside_border(self, df):
-        """Keep minor roads that intersect the region, including its 2 km buffer."""
-        border = CapacityCorrector.get_region_border(self.context, buffer=2000.0)
+        """Keep minor roads within the configured buffer (5 km by default)."""
+        # Retain more of the foreign approaches to border crossings. Cutting them
+        # too close can create dead ends that connectivity cleaning then removes.
+        buffer = float(self.context.config("minor_road_border_buffer"))
+        if not np.isfinite(buffer) or buffer < 0:
+            raise ValueError("minor_road_border_buffer must be finite and nonnegative")
+        border = CapacityCorrector.get_region_border(self.context, buffer=buffer)
         minor = df.attributes.map(
             lambda attrs: attrs.get("osm:way:highway") if isinstance(attrs, dict) else None
         ).isin(["residential", "unclassified", "living_street", "service", "track",

@@ -202,10 +202,19 @@ The preparation stages are:
 | Stage | Result |
 | --- | --- |
 | `sumo.scenario.unrouted_demand` | Sorted selected demand in `demand.arrow`, plus vehicle-type definitions; no XML trip export yet |
-| `mode_choice.routing.sumo_network` | Directed MATSim road shapes, modes, lengths and speeds in `road_links.arrow` |
-| `mode_choice.routing.sumo` | Reused/completed itineraries in `road_routes.arrow`, plus `routing_report.json` |
+| `sumo.routing.network` | Directed MATSim road shapes, modes, lengths and speeds in `road_links.arrow` |
+| `sumo.routing.paths` | Reused/completed itineraries in `road_routes.arrow`, plus `routing_report.json` |
 | `sumo.scenario.border` | Swiss polygon in LV95 WKB |
-| `sumo.scenario.demand` | Domestic vehicle trips, `demand.arrow`, XML and `border_clipping.json` |
+| `sumo.scenario.selected` | Original domestic and crossing partitions; outside-to-outside trips removed |
+| `sumo.scenario.clipped` | Clipped originals, fixed border anchors and `border_clipping.json` |
+| `sumo.scenario.scaled` | Retained demand expanded to 100%, before SUMO assignment |
+| `sumo.scenario.demand` | Sorted expanded vehicle trips in Arrow and SUMO XML |
+
+`sumo.scenario.selected` uses vectorized endpoint containment on the original
+sample: domestic trips pass through, outside-to-outside trips are dropped
+(including transit), and only inbound/outbound trips need road-path clipping.
+`sumo.scenario.clipped` clips these originals before `sumo.scenario.scaled`
+expands the retained demand. Boundary anchors stay fixed during expansion.
 
 Mode-choice paths are matched by person ID, trip index, car/truck mode and
 endpoints/departure (2 m and 1 s tolerances). Missing or changed requests are
@@ -216,14 +225,13 @@ not run mode choice again or modify source modes. Its router process is stopped
 before SUMO preparation continues. The shared network reader cache is used and
 corresponding directed detailed curves are retained.
 
-The national cutter intersects **actual link paths** with Switzerland. It checks
-the whole path even if both endpoints are domestic, and retains through-trips
-whose endpoints are both foreign. Wholly foreign paths disappear. Every
-domestic visit is kept; leaving and re-entering creates IDs ending in
-`__swiss_1`, etc. Source/person/trip identifiers remain attached. Missing,
-forbidden, disconnected or incompatible itineraries cause explicit errors;
-there is no straight-line or fixed-speed fallback. Native bulk XML export and
-the existing scenario writers are shared, and final departures are sorted again.
+For inbound/outbound originals, the national cutter uses actual link paths and
+the precomputed border-link intersection fractions. Domestic visits are retained;
+leaving and re-entering creates IDs ending in `__swiss_1`, etc. Trips classified
+as domestic skip this path inspection, while outside-to-outside trips are removed
+before routing. Source/person/trip identifiers remain attached. Invalid crossing
+itineraries cause explicit errors rather than a straight-line fallback. Final
+expanded demand shares the native bulk XML writer and departure sorting.
 Person-plan XML from `population.plans` remains a separate, untrimmed export.
 
 Entry/exit locations follow the detailed road geometry. The itinerary export

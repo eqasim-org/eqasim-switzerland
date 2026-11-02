@@ -1,0 +1,287 @@
+--- a/src/marouter/ROMAAssignments.cpp
++++ b/src/marouter/ROMAAssignments.cpp
+@@ -53,12 +53,34 @@
+       myMaxAlternatives(maxAlternatives), myUseDefaultCapacities(defaultCapacities),
+       myNet(net), myMatrix(matrix), myRouter(router), myNetloadOutput(netloadOutput) {
+     myDefaultVehicle = new ROVehicle(SUMOVehicleParameter(), nullptr, net.getVehicleTypeSecure(DEFAULT_VTYPE_ID), &net);
++    // Keep class-specific queries on the same network and shared flow timelines.
++    for (const ODCell* cell : matrix.getCells()) {
++        if (myVehicles.count(cell->vehicleType) == 0) {
++            SUMOVehicleParameter parameters;
++            parameters.id = "assignment_" + cell->vehicleType;
++            const std::string type = cell->vehicleType.empty() ? DEFAULT_VTYPE_ID : cell->vehicleType;
++            const SUMOVTypeParameter* vehicleType = net.getVehicleTypeSecure(type);
++            if (vehicleType == nullptr) {
++                throw ProcessError("Unknown assignment vehicle type " + type);
++            }
++            myVehicles[cell->vehicleType] = new ROVehicle(parameters, nullptr, vehicleType, &net);
++        }
++    }
+ }
+ 
+ 
+ ROMAAssignments::~ROMAAssignments() {
+     delete myDefaultVehicle;
+-}
++    for (const auto& entry : myVehicles) {
++        delete entry.second;
++    }
++}
++
++ROVehicle*
++ROMAAssignments::getVehicle(const ODCell* cell) const {
++    return myVehicles.at(cell->vehicleType);
++}
++
+ 
+ // based on the definitions in PTV-Validate and in the VISUM-Cologne network
+ double
+@@ -193,13 +215,24 @@
+     if (to == nullptr) {
+         throw ProcessError(TLF("Unknown destination '%'.", cell->destination));
+     }
++    ROVehicle* const vehicle = getVehicle(cell);
+     ConstROEdgeVector edges;
+     if (router == nullptr) {
+         router = &myRouter;
+     }
+     if (myMaxAlternatives > 0 && (int)cell->pathsVector.size() < myMaxAlternatives) {
+-        router->compute(from, to, myDefaultVehicle, time, edges);
+-        if (setBulkMode) {
++        if (cell->requiresLoop) {
++            // Loop search changes its source to each successor; do not reuse a
++            // bulk tree belonging to the original edge or another successor.
++            router->setBulkMode(false);
++            router->computeLooped(from, to, vehicle, time, edges);
++        } else {
++            router->compute(from, to, vehicle, time, edges);
++        }
++        if (edges.empty()) {
++            throw ProcessError("No class-permitted assignment route for type " + cell->vehicleType + " from " + cell->origin + " to " + cell->destination);
++        }
++        if (setBulkMode && !cell->requiresLoop) {
+             router->setBulkMode(true);
+         }
+         if (addRoute(edges, cell->pathsVector, cell->origin + cell->destination + toString(cell->pathsVector.size()), probability)) {
+@@ -209,7 +242,7 @@
+         double minCost = std::numeric_limits<double>::max();
+         std::shared_ptr<RORoute> minRoute = nullptr;
+         for (const std::shared_ptr<RORoute>& p : cell->pathsVector) {
+-            const double cost = router->recomputeCosts(edges, myDefaultVehicle, time);
++            const double cost = router->recomputeCosts(p->getEdgeVector(), vehicle, time);
+             if (cost < minCost) {
+                 minCost = cost;
+                 minRoute = p;
+@@ -322,13 +355,13 @@
+                 const SUMOTime begin = myAdditiveTraffic ? myBegin : c->begin;
+ #ifdef HAVE_FOX
+                 if (myNet.getThreadPool().size() > 0) {
+-                    if (lastOrigin != c->origin) {
++                    if (lastOrigin != c->origin + "\t" + c->vehicleType) {
+                         workerIndex++;
+                         if (workerIndex == myNet.getThreadPool().size()) {
+                             workerIndex = 0;
+                         }
+                         myNet.getThreadPool().add(new RONet::BulkmodeTask(false), workerIndex);
+-                        lastOrigin = c->origin;
++                        lastOrigin = c->origin + "\t" + c->vehicleType;
+                         myNet.getThreadPool().add(new RoutingTask(*this, c, begin, linkFlow), workerIndex);
+                     } else {
+                         myNet.getThreadPool().add(new RoutingTask(*this, c, begin, linkFlow), workerIndex);
+@@ -338,9 +371,9 @@
+ #else
+                 UNUSED_PARAMETER(workerIndex);
+ #endif
+-                if (lastOrigin != c->origin) {
++                if (lastOrigin != c->origin + "\t" + c->vehicleType) {
+                     myRouter.setBulkMode(false);
+-                    lastOrigin = c->origin;
++                    lastOrigin = c->origin + "\t" + c->vehicleType;
+                 }
+                 computePath(c, begin, linkFlow, &myRouter, true);
+             }
+@@ -397,11 +430,11 @@
+                 const SUMOTime end = myAdditiveTraffic ? myEnd : c->end;
+                 // update path cost
+                 for (const std::shared_ptr<RORoute>& r : c->pathsVector) {
+-                    r->setCosts(myRouter.recomputeCosts(r->getEdgeVector(), myDefaultVehicle, 0));
++                    r->setCosts(myRouter.recomputeCosts(r->getEdgeVector(), getVehicle(c), 0));
+                     //                    std::cout << std::setprecision(20) << r->getID() << ":" << r->getCosts() << std::endl;
+                 }
+                 // calculate route utilities and probabilities
+-                RouteCostCalculator<RORoute, ROEdge, ROVehicle>::getCalculator().calculateProbabilities(c->pathsVector, myDefaultVehicle, 0);
++                RouteCostCalculator<RORoute, ROEdge, ROVehicle>::getCalculator().calculateProbabilities(c->pathsVector, getVehicle(c), 0);
+                 // calculate route flows
+                 for (const std::shared_ptr<RORoute>& r : c->pathsVector) {
+                     const double pathFlow = r->getProbability() * c->vehicleNumber;
+@@ -477,10 +510,10 @@
+     for (const ODCell* const c : myMatrix.getCells()) {
+         // update path cost
+         for (const std::shared_ptr<RORoute>& r : c->pathsVector) {
+-            r->setCosts(myRouter.recomputeCosts(r->getEdgeVector(), myDefaultVehicle, 0));
++            r->setCosts(myRouter.recomputeCosts(r->getEdgeVector(), getVehicle(c), 0));
+         }
+         // calculate route utilities and probabilities
+-        RouteCostCalculator<RORoute, ROEdge, ROVehicle>::getCalculator().calculateProbabilities(c->pathsVector, myDefaultVehicle, 0);
++        RouteCostCalculator<RORoute, ROEdge, ROVehicle>::getCalculator().calculateProbabilities(c->pathsVector, getVehicle(c), 0);
+         // calculate route flows
+         for (const std::shared_ptr<RORoute>& r : c->pathsVector) {
+             r->setProbability(r->getProbability() * c->vehicleNumber);
+--- a/src/marouter/ROMAAssignments.h
++++ b/src/marouter/ROMAAssignments.h
+@@ -34,6 +34,7 @@
+ class ROEdge;
+ class ROMAEdge;
+ class ROVehicle;
++struct ODCell;
+ 
+ 
+ 
+@@ -55,6 +56,8 @@
+ 
+     /// Destructor
+     ~ROMAAssignments();
++
++    ROVehicle* getVehicle(const ODCell* cell) const;
+ 
+     ROVehicle* getDefaultVehicle() const {
+         return myDefaultVehicle;
+@@ -141,6 +144,7 @@
+     SUMOAbstractRouter<ROEdge, ROVehicle>& myRouter;
+     static std::map<const ROEdge* const, double> myPenalties;
+     ROVehicle* myDefaultVehicle;
++    std::map<std::string, ROVehicle*> myVehicles;
+     OutputDevice* const myNetloadOutput;
+ 
+ #ifdef HAVE_FOX
+--- a/src/marouter/marouter_main.cpp
++++ b/src/marouter/marouter_main.cpp
+@@ -296,7 +296,7 @@
+                     matrix.writeDefaultAttrs(od, oc.getBool("ignore-vehicle-type"), c);
+                     od.openTag(SUMO_TAG_ROUTE_DISTRIBUTION);
+                     for (const std::shared_ptr<RORoute>& r : c->pathsVector) {
+-                        r->setCosts(router->recomputeCosts(r->getEdgeVector(), &defaultVehicle, begin));
++                        r->setCosts(router->recomputeCosts(r->getEdgeVector(), a.getVehicle(c), begin));
+                         r->writeXMLDefinition(od, nullptr, true, true, false, false);
+                     }
+                     od.closeTag();
+@@ -315,7 +315,7 @@
+                             veh.write(od, OptionsCont::getOptions(), SUMO_TAG_VEHICLE, ignoreType || veh.vtypeid == DEFAULT_VTYPE_ID ? "" : veh.vtypeid);
+                             od.openTag(SUMO_TAG_ROUTE_DISTRIBUTION);
+                             for (const std::shared_ptr<RORoute>& r : c->pathsVector) {
+-                                r->setCosts(router->recomputeCosts(r->getEdgeVector(), &defaultVehicle, begin));
++                                r->setCosts(router->recomputeCosts(r->getEdgeVector(), a.getVehicle(c), begin));
+                                 r->writeXMLDefinition(od, nullptr, true, true, false, false);
+                             }
+                             od.closeTag();
+--- a/src/marouter/ROMARouteHandler.cpp
++++ b/src/marouter/ROMARouteHandler.cpp
+@@ -27,6 +27,8 @@
+ #include <utils/vehicle/SUMOVehicleParameter.h>
+ #include <utils/vehicle/SUMOVehicleParserHelper.h>
+ #include <od/ODMatrix.h>
++#include <router/ROEdge.h>
++#include <router/RONet.h>
+ #include "ROMARouteHandler.h"
+ 
+ 
+@@ -50,7 +52,16 @@
+ 
+ void
+ ROMARouteHandler::myStartElement(int element, const SUMOSAXAttributes& attrs) {
+-    if (element == SUMO_TAG_TRIP || element == SUMO_TAG_VEHICLE || element == SUMO_TAG_FLOW) {
++    if (element == SUMO_TAG_VTYPE) {
++        const SUMOVTypeParameter* base = nullptr;
++        if (attrs.hasAttribute(SUMO_ATTR_REFID)) {
++            base = RONet::getInstance()->getVehicleTypeSecure(attrs.getString(SUMO_ATTR_REFID));
++            if (base == nullptr) {
++                throw ProcessError("Unknown referenced assignment vehicle type");
++            }
++        }
++        RONet::getInstance()->addVehicleType(SUMOVehicleParserHelper::beginVTypeParsing(attrs, true, "", base));
++    } else if (element == SUMO_TAG_TRIP || element == SUMO_TAG_VEHICLE || element == SUMO_TAG_FLOW) {
+         myVehicleParameter = (element == SUMO_TAG_FLOW
+                               ? SUMOVehicleParserHelper::parseFlowAttributes(SUMO_TAG_FLOW, attrs, true, true, 0, TIME2STEPS(3600))
+                               : SUMOVehicleParserHelper::parseVehicleAttributes(element, attrs, true));
+@@ -112,9 +123,21 @@
+                 SUMOVehicleParameter veh = *myVehicleParameter;
+                 veh.id = i == 0 ? myVehicleParameter->id : myVehicleParameter->id + "." + toString(i);
+                 veh.depart = depart;
+-                myMatrix.add(veh,
+-                             !myVehicleParameter->wasSet(VEHPARS_FROM_TAZ_SET) || myIgnoreTaz,
+-                             !myVehicleParameter->wasSet(VEHPARS_TO_TAZ_SET) || myIgnoreTaz);
++                const bool originIsEdge = !myVehicleParameter->wasSet(VEHPARS_FROM_TAZ_SET) || myIgnoreTaz;
++                const bool destinationIsEdge = !myVehicleParameter->wasSet(VEHPARS_TO_TAZ_SET) || myIgnoreTaz;
++                bool requiresLoop = false;
++                if (originIsEdge && destinationIsEdge && veh.fromTaz == veh.toTaz) {
++                    const ROEdge* edge = RONet::getInstance()->getEdge(veh.fromTaz);
++                    if (edge != nullptr) {
++                        const double length = edge->getLength();
++                        double start = veh.departPosProcedure == DepartPosDefinition::GIVEN ? veh.departPos : 0.;
++                        double stop = veh.arrivalPosProcedure == ArrivalPosDefinition::GIVEN ? veh.arrivalPos : length;
++                        if (start < 0.) { start += length; }
++                        if (stop < 0.) { stop += length; }
++                        requiresLoop = start > stop;
++                    }
++                }
++                myMatrix.add(veh, originIsEdge, destinationIsEdge, requiresLoop);
+                 depart += departOffset;
+             }
+         }
+--- a/src/od/ODCell.h
++++ b/src/od/ODCell.h
+@@ -77,4 +77,7 @@
+ 
+     /// @brief the destination "district" is an edge id
+     bool destinationIsEdge = false;
++
++    // Position-sensitive trips on one directed edge may need a return loop.
++    bool requiresLoop = false;
+ };
+--- a/src/od/ODMatrix.h
++++ b/src/od/ODMatrix.h
+@@ -117,7 +117,7 @@
+      * @param[in] vehicleType The vehicle type to use for the cell's flows
+      * @return whether the vehicle could be added
+      */
+-    bool add(const SUMOVehicleParameter& veh, bool originIsEdge = false, bool destinationIsEdgeconst = false);
++    bool add(const SUMOVehicleParameter& veh, bool originIsEdge = false, bool destinationIsEdgeconst = false, bool requiresLoop = false);
+ 
+     /** @brief Helper function for flow and trip output writing the depart
+      *   and arrival attributes
+--- a/src/od/ODMatrix.cpp
++++ b/src/od/ODMatrix.cpp
+@@ -124,7 +124,7 @@
+ 
+ 
+ bool
+-ODMatrix::add(const SUMOVehicleParameter& veh, bool originIsEdge, bool destinationIsEdge) {
++ODMatrix::add(const SUMOVehicleParameter& veh, bool originIsEdge, bool destinationIsEdge, bool requiresLoop) {
+     const std::string fromTaz = veh.fromTaz;
+     const std::string toTaz = veh.toTaz;
+     if (myMissingDistricts.count(fromTaz) > 0 || myMissingDistricts.count(toTaz) > 0) {
+@@ -136,7 +136,7 @@
+     std::vector<ODCell*>& odList = myShortCut[std::make_pair(fromTaz, toTaz)];
+     ODCell* cell = nullptr;
+     for (std::vector<ODCell*>::const_reverse_iterator c = odList.rbegin(); c != odList.rend(); ++c) {
+-        if ((*c)->begin <= veh.depart && (*c)->end > veh.depart && (*c)->vehicleType == veh.vtypeid) {
++        if ((*c)->begin <= veh.depart && (*c)->end > veh.depart && (*c)->vehicleType == veh.vtypeid && (*c)->requiresLoop == requiresLoop) {
+             cell = *c;
+             break;
+         }
+@@ -148,6 +148,7 @@
+         if (add(1., std::make_pair(intervalIdx * interval, (intervalIdx + 1) * interval),
+                 fromTaz, toTaz, veh.vtypeid, originIsEdge, destinationIsEdge, true)) {
+             cell = myContainer.back();
++            cell->requiresLoop = requiresLoop;
+             odList.push_back(cell);
+         } else {
+             return false;
+@@ -631,6 +632,7 @@
+         ncell->origin = cell->origin;
+         ncell->destination = cell->destination;
+         ncell->vehicleType = cell->vehicleType;
++        ncell->requiresLoop = cell->requiresLoop;
+         ncell->vehicleNumber = cell->vehicleNumber * ps.getProbs()[i] / ps.getOverallProb();
+         newCells.push_back(ncell);
+     }

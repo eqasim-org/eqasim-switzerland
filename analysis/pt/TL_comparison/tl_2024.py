@@ -27,6 +27,31 @@ _STATS = ["min", "max", "mean", "std", "q10", "q20", "q50", "q80", "q90"]
 _QUANTILES = {"q10": 0.1, "q20": 0.2, "q50": 0.5, "q80": 0.8, "q90": 0.9}
 
 
+def configure(context):
+    # TL stops are matched to the stops of the GTFS of the simulation
+    context.stage("data.gtfs.cleaned")
+    context.config("data_path")
+
+    context.config("analysis.pt.tl_raw_counts_path",       default = "Lausanne_passenger_counts/tl data 2024/raw")
+    context.config("analysis.pt.tl_processed_counts_path", default = "Lausanne_passenger_counts/tl data 2024/processed")
+    context.config("analysis.pt.tl_workers",               default = 8)
+
+def execute(context):
+    data_path = context.config("data_path")
+    out_dir   = os.path.join(data_path, context.config("analysis.pt.tl_processed_counts_path"))
+
+    result, directions, crosswalk = aggregate_workday_stats(
+        os.path.join(data_path, context.config("analysis.pt.tl_raw_counts_path")),
+        "%s/output" % context.path("data.gtfs.cleaned"),
+        context.config("analysis.pt.tl_workers"),
+    )
+
+    base = write_outputs(result, directions, crosswalk, out_dir)
+    print(f"Wrote {base}.csv and its companion files")
+
+    return dict(done = True, path = out_dir)
+
+
 def _normalize_name(name):
     name = unicodedata.normalize("NFKD", str(name))
     name = "".join(c for c in name if not unicodedata.combining(c))
@@ -254,27 +279,5 @@ def write_outputs(result, directions, crosswalk, out_dir):
     return base
 
 
-def configure(context):
-    # TL stops are matched to the stops of the GTFS of the simulation
-    context.stage("data.gtfs.cleaned")
-    context.config("data_path")
-
-    context.config("analysis.pt.tl_raw_counts_path",       default = "Lausanne_passenger_counts/tl data 2024/raw")
-    context.config("analysis.pt.tl_processed_counts_path", default = "Lausanne_passenger_counts/tl data 2024/processed")
-    context.config("analysis.pt.tl_workers",               default = 8)
 
 
-def execute(context):
-    data_path = context.config("data_path")
-    out_dir   = os.path.join(data_path, context.config("analysis.pt.tl_processed_counts_path"))
-
-    result, directions, crosswalk = aggregate_workday_stats(
-        os.path.join(data_path, context.config("analysis.pt.tl_raw_counts_path")),
-        "%s/output" % context.path("data.gtfs.cleaned"),
-        context.config("analysis.pt.tl_workers"),
-    )
-
-    base = write_outputs(result, directions, crosswalk, out_dir)
-    print(f"Wrote {base}.csv and its companion files")
-
-    return dict(done = True, path = out_dir)

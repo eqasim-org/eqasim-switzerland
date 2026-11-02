@@ -7,7 +7,7 @@ import pytest
 from matsim.config import config, tools
 from matsim.simulation import prepare, run, run_from_inputs
 from matsim.config import pt as pt_config
-from mode_choice.routing import config as mode_routing
+from mode_choice.routing.java import config as mode_routing
 
 
 class Context:

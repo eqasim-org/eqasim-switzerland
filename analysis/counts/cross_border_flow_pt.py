@@ -83,17 +83,19 @@ def execute(context):
 # Transit schedule parsing
 # ---------------------------------------------------------------------------
 
-def load_transit_schedule(schedule_path):
+def load_transit_schedule(schedule_path, line_labels=None):
     stop_coords = {}
     stop_names = {}
     vehicle_lines = {}
     current_line_label = None
 
-    with xopen.xopen(schedule_path, "r") as f:
+    with xopen.xopen(schedule_path, "rb") as f:
         for event, elem in ET.iterparse(f, events=["start", "end"]):
             if event == "start":
                 if elem.tag == "transitLine":
                     current_line_label = elem.attrib.get("name") or elem.attrib["id"]
+                    if line_labels is not None:
+                        line_labels[elem.attrib["id"]] = current_line_label
                 continue
 
             if elem.tag == "stopFacility":

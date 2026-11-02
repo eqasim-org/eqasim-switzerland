@@ -112,7 +112,10 @@ def execute(context):
 
                 # select random enterprise within NUTS zone
                 choices = rng.choice(indices, size=number_trips)
-                enterprises = df_statent.values[choices, 0:2]
+                # STATENT mixes numeric and text fields, so whole-table .values
+                # yields object arrays. Read named coordinates as floats, using
+                # the sampled index labels rather than assuming row positions.
+                enterprises = df_statent.loc[choices, ["x", "y"]].to_numpy(dtype=float)
 
                 # assign coordinates
                 df_trips.loc[df_trips["origin_id"] == origin_id, "origin_x"] = enterprises[:, 0].astype(float)
@@ -144,7 +147,8 @@ def execute(context):
 
                 # select random enterprise within NUTS zone
                 choices = rng.choice(indices, size=number_trips)
-                enterprises = df_statent.values[choices, 0:2]
+                # Keep coordinates numeric for pandas 3's strict assignment.
+                enterprises = df_statent.loc[choices, ["x", "y"]].to_numpy(dtype=float)
 
                 # assign coordinates
                 df_trips.loc[df_trips["destination_id"] == destination_id, "destination_x"] = enterprises[:, 0]

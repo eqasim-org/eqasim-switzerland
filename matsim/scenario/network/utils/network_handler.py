@@ -1,8 +1,10 @@
 import json
 import os
 import shutil
+import geopandas as gpd
 import numpy as np
 import pandas as pd
+from shapely import intersects, linestrings, prepare
 from scipy.spatial import cKDTree
 from matsim.readers import read_network
 from matsim.scenario.network.utils.network_attribute_assigner import NetworkAttributeAssigner
@@ -31,10 +33,10 @@ class NetworkHandler:
         self._assign_network_attributes()
         self._assign_elevations_if_requested()
         self._add_traffic_lights_if_requested()
-        self._add_tolls_if_requested()
         if os.path.exists(self.detailed_network_path):
             logger.info("Loading detailed geometries before network cleaning...")
             attach_link_geometries(self.net, self.detailed_network_path)
+        self._add_tolls_if_requested()
         self._simplify_network_if_requested()
         self._correct_link_capacity_if_requested()
         self._adjust_capacity_outside_border_if_requested()
@@ -80,6 +82,31 @@ class NetworkHandler:
         has_tolls_func = lambda x: x.get("osm:way:id", None) in tolls_links if isinstance(x, dict) else False
         has_tolls = links["attributes"].apply(has_tolls_func)
 
+        if self.context.config("only_french_tolls"):
+            # French extracts overlap Switzerland. Check full directed shapes,
+            # including crossings, and remove any inherited Swiss toll as well.
+            existing_tolls = links.attributes.map(lambda a: isinstance(a, dict) and "toll" in a)
+            candidates = links.loc[has_tolls | existing_tolls]
+            if not candidates.empty:
+                crs = self.net.network_attrs.get("coordinateReferenceSystem", "EPSG:2056")
+                if GEOMETRY_COLUMN in candidates:
+                    shapes = candidates[GEOMETRY_COLUMN]
+                else:
+                    nodes = self.net.nodes.set_index("node_id")[["x", "y"]]
+                    shapes = linestrings(np.stack([
+                        nodes.loc[candidates.from_node].to_numpy(),
+                        nodes.loc[candidates.to_node].to_numpy(),
+                    ], axis=1))
+                geometries = gpd.GeoSeries(shapes, index=candidates.index, crs=crs).to_crs(2056)
+                border = self.context.stage("data.spatial.swiss_border").to_crs(2056).union_all().buffer(10)
+                prepare(border)
+                excluded = candidates.index[intersects(border, geometries.array)]
+                has_tolls.loc[excluded] = False
+                links.loc[excluded, "attributes"] = links.loc[excluded, "attributes"].map(
+                    lambda attributes: {key: value for key, value in attributes.items() if key != "toll"}
+                )
+                logger.info("Excluded %d Swiss or border-crossing links from tolls (10 m border buffer).", len(excluded))
+
         price_per_km = max(self.context.config("average_tolls_prices_per_km"), 0.0)
         def add_toll_func(row):
             l = max(row['length'], 1.0) / 1000.0 #convert m to km
@@ -87,7 +114,8 @@ class NetworkHandler:
             x["toll"] = price_per_km * l
             return x
 
-        links.loc[has_tolls, "attributes"] = links.loc[has_tolls, ['length','attributes']].apply(add_toll_func, axis=1)
+        if has_tolls.any():
+            links.loc[has_tolls, "attributes"] = links.loc[has_tolls, ['length','attributes']].apply(add_toll_func, axis=1)
         self.net.links = links
 
 

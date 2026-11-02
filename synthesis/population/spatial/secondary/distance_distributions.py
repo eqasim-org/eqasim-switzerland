@@ -7,7 +7,7 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
     context.stage("data.microcensus.persons")
-    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.secondary_trips")
 
 
 def calculate_bounds(values, bin_size):
@@ -39,7 +39,8 @@ def calculate_bounds(values, bin_size):
 def execute(context):
     df_persons = context.stage("data.microcensus.persons")[["person_id", "person_weight", "weekend"]].rename(
         columns={"person_weight": "weight"})
-    df_trips = context.stage("data.microcensus.trips")[0][["person_id", "trip_id", "mode", "crowfly_distance",
+    # Match synthetic purposes: nonstudent education visits are secondary other.
+    df_trips = context.stage("data.microcensus.secondary_trips")[["person_id", "trip_id", "mode", "crowfly_distance",
                                                              "departure_time", "arrival_time", "purpose", "origin_purpose"]]
     # Filter out weekend trips
     weekend_persons = df_persons[df_persons["weekend"]]["person_id"].unique()

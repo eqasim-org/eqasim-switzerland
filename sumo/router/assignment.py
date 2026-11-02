@@ -12,6 +12,7 @@ from sumo.runtime import sumo
 
 def configure(context):
     context.stage("sumo.runtime.sumo")
+    context.stage("sumo.native.marouter")
     context.stage("sumo.config.loaded")
 
 
@@ -28,7 +29,8 @@ def execute(context):
 
     # Assign road demand before computing any of the final query routes.
 
-    sumo.run(context, ["--configuration-file", assignment], binary="marouter")
+    sumo.run(context, ["--configuration-file", assignment], binary="marouter",
+             executable=context.stage("sumo.native.marouter"))
     sumo.run(context, ["--configuration-file", routing], binary="duarouter")
 
     # Export source identifiers, reference times, loaded travel times and distances.

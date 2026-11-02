@@ -1,4 +1,4 @@
-from .tools import aggregate_osm_features, destination_offer_masks
+from .tools import aggregate_osm_features, destination_offer_masks, encode_ovgk, OVGK_PURPOSES, OVGK_MEAN_FEATURES
 from functools import lru_cache
 
 import pandas as pd
@@ -208,6 +208,7 @@ def _aggregate_destination_features_by_level(destinations_with_levels, level_col
 
     cols = [level_col, "destination_id", "number_employees", "ovgk", "offers_education", "offers_shop", "offers_leisure",
             "offers_sport", "offers_gastronomy", "offers_accommodation", "offers_cultural", "municipality_type"]
+    cols = list(dict.fromkeys(cols + [f"offers_{purpose}" for purpose in OVGK_PURPOSES]))
     df = destinations_with_levels[cols].copy()
 
     # municipality_type indicators
@@ -241,6 +242,14 @@ def _aggregate_destination_features_by_level(destinations_with_levels, level_col
                         ovgk_share_d=("ovgk_share_d", "mean"),
                         ovgk_share_none=("ovgk_share_none", "mean"),
                         )
+
+    # Average actual facility quality separately for each eligible activity purpose.
+
+    df["ovgk_code"] = encode_ovgk(df.ovgk)
+    for purpose, column in zip(OVGK_PURPOSES, OVGK_MEAN_FEATURES):
+        mask = df[f"offers_{purpose}"].astype(bool)
+        means = df.loc[mask].groupby(level_col).ovgk_code.mean()
+        out[column] = means.reindex(out.index).fillna(4.)
 
     out.index = out.index.astype(str)
     out.index.name = "h3_index"

@@ -8,12 +8,12 @@ CHAIN_STATE_FEATURES = [
     'consumed_budget_fraction',
 ] + ['remaining_' + purpose for purpose in SECONDARY_ACTIVITIES] + [
     'next_anchor_distance_m', 'trips_to_next_anchor', 'has_next_anchor',
-    'next_anchor_home', 'next_anchor_work', 'next_anchor_education',
+    'next_anchor_home', 'next_anchor_work', 'next_anchor_education', 'origin_ovgk',
 ]
 
 
 def chain_state_vector(daily_total, consumed_before, remaining_purposes, origin_x, origin_y,
-                       primary_locations=None, next_anchor=None):
+                       primary_locations=None, next_anchor=None, origin_ovgk=4.):
     """Use plan purposes and known primary coordinates; never future secondary coordinates."""
     purposes = list(remaining_purposes)
     budget = max(0., float(daily_total) - float(consumed_before))
@@ -36,7 +36,7 @@ def chain_state_vector(daily_total, consumed_before, remaining_purposes, origin_
         anchor[:3] = [np.hypot(x - origin_x, y - origin_y), steps, 1]
         anchor[3 + PRIMARY_ACTIVITIES.index(purpose)] = 1
     result = np.concatenate([[budget, len(purposes), budget / max(len(purposes), 1),
-                              max(0., float(consumed_before)) / max(float(daily_total), 1.)], counts, anchor])
+                              max(0., float(consumed_before)) / max(float(daily_total), 1.)], counts, anchor, [origin_ovgk]])
     if not np.isfinite(result).all():
         raise ValueError('Remaining-chain features must be finite')
     return result.astype(np.float32)
@@ -56,5 +56,5 @@ def survey_chain_states(trips):
             next_anchor = None if anchor is None or not np.isfinite([row.origin_x, row.origin_y]).all() else (*anchor[:3], anchor[3] - i + 1)
             result[indices[i]] = chain_state_vector(
                 row.daily_crowfly_total, row.crowfly_consumed_before_trip, purposes[i:],
-                row.origin_x, row.origin_y, next_anchor=next_anchor)
+                row.origin_x, row.origin_y, next_anchor=next_anchor, origin_ovgk=row.origin_ovgk if "origin_ovgk" in group else 4.)
     return list(result)

@@ -8,7 +8,7 @@ from dmc.parameters import Parameters
 from mode_choice.selection.mode_choice import ModeChoice
 from mode_choice.selection.sampler import TourSampler
 from mode_choice.selection.cache import TopologyCache
-from mode_choice.routing.RoutingServer import RoutingServer
+from mode_choice.routing.java.client import RoutingServer
 
 logger = logging.getLogger(__name__)
 

@@ -21,6 +21,7 @@ import visualize # pyright: ignore[reportMissingImports]
 import passenger_profiles # pyright: ignore[reportMissingImports]
 import line_asymmetry # pyright: ignore[reportMissingImports]
 import gtfs_utils # pyright: ignore[reportMissingImports]
+from analysis.output_files import find_simulation_output
 from comparison_passenger_counts_lausanne import TL_TO_MATSIM_LINE, SUBMODE_NAMES, SUBMODE_OF_LINE
 
 # the MATSim line -> the TL line
@@ -75,6 +76,10 @@ def execute(context):
     )
 
     return dict(done = True, path = output_dir)
+
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +192,7 @@ def line_order(routes, line_id):
 
 
 def prepare_counts(simulation_path, scale, night_hours):
-    counts = pd.read_csv(os.path.join(simulation_path, "pt_passenger_counts.csv.gz"), sep = ";",
+    counts = pd.read_csv(find_simulation_output(simulation_path, "pt_passenger_counts.csv.gz"), sep = ";",
                          usecols = ["stop_id", "line_id", "line_name", "route_direction", "time_bin", "boardings", "alightings"])
     counts["hour"] = counts["time_bin"].str.extract(r"^(\d{1,2})").astype(int)
 

@@ -14,6 +14,7 @@ from shapely.ops import unary_union
 
 import matsim.scenario.network.utils.pt_route_check as pt_route_check
 from analysis.pt.transit_schedule import page
+from analysis.output_files import find_simulation_output
 
 NETWORK_CRS = "epsg:2056"
 
@@ -73,7 +74,7 @@ def configure(context):
     context.config("pt_route_agencies", ["881", "151"])  # same default as matsim.scenario.network.corrected
     # Reference of a route: the GTFS shape of its trip, else the official line route (line_routes_path)
     context.config("pt_route_gtfs_shapes", True)
-    if context.config("pt_route_gtfs_shapes") or (
+    if context.config("pt_route_gtfs_shapes") or isinstance(context.config("pt_line_routes_path"), dict) or (
             context.config("analysis.pt.transit_schedule_route_check") and context.config("pt_route_agencies")):
         context.stage("data.gtfs.cleaned")
 
@@ -123,10 +124,12 @@ def execute(context):
 
     agencies = [str(a) for a in context.config("pt_route_agencies")]
     gtfs_routes_path = gtfs_trips_path = gtfs_shapes_path = None
-    if context.config("pt_route_gtfs_shapes"):
+    # Operator-specific references still need the route-to-agency table without shapes.
+    if context.config("pt_route_gtfs_shapes") or isinstance(context.config("pt_line_routes_path"), dict) or (
+            context.config("analysis.pt.transit_schedule_route_check") and agencies):
         gtfs_path = "%s/output" % context.path("data.gtfs.cleaned")
-        if os.path.exists("%s/shapes.txt" % gtfs_path):
-            gtfs_routes_path = "%s/routes.txt" % gtfs_path
+        gtfs_routes_path = "%s/routes.txt" % gtfs_path
+        if context.config("pt_route_gtfs_shapes") and os.path.exists("%s/shapes.txt" % gtfs_path):
             gtfs_trips_path, gtfs_shapes_path = "%s/trips.txt" % gtfs_path, "%s/shapes.txt" % gtfs_path
 
     route_check_rows = None
@@ -139,7 +142,7 @@ def execute(context):
             modes = tuple(context.config("pt_route_modes")),
             buffer_m = context.config("pt_route_buffer"), min_share = context.config("pt_route_min_share"),
             agencies = agencies,
-            gtfs_routes_path = "%s/output/routes.txt" % context.path("data.gtfs.cleaned") if agencies or gtfs_shapes_path else None,
+            gtfs_routes_path = gtfs_routes_path,
             gtfs_trips_path = gtfs_trips_path, gtfs_shapes_path = gtfs_shapes_path,
         )
 
@@ -156,18 +159,7 @@ def execute(context):
 
 
 def _find_output_file(simulation_path, filename):
-    direct_path = os.path.join(simulation_path, filename)
-    if os.path.exists(direct_path):
-        return direct_path
-
-    stem, _, suffix = filename.partition(".")
-    candidates = glob.glob(os.path.join(simulation_path, "ITERS", "*", f"*.{suffix}"))
-    if not candidates:
-        raise FileNotFoundError(f"Could not find {filename} in {simulation_path} (or its ITERS folder)")
-
-    candidate = max(candidates, key=os.path.getmtime)
-    print(f"{filename} not found at {direct_path}, using latest iteration snapshot {candidate} instead")
-    return candidate
+    return find_simulation_output(simulation_path, filename)
 
 
 # ---------------------------------------------------------------------------

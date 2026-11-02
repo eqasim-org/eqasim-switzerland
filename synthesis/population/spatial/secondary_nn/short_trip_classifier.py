@@ -22,19 +22,22 @@ from .feature_encoding import fit_person_trip_matrix, transform_person_static_ve
 from .hierarchical_utils import SECONDARY_ACTIVITIES, ORIGIN_PURPOSE_REMAP, DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION
 from .tools import MOBILITY_FEATURES, OriginContext, training_mobility, selector_origin_context
 from .distribution_scores import ensemble_score_components, mixture_score
-from .cross_validation import train_cross_validated
+from .cross_validation import train_cross_validated, train_rotating_holdout, rotating_holdout_split
 
 logger = logging.getLogger('synpp: expert_selector')
 MODEL_NAME = 'expert_selector.pkl'
 
 
 def configure(context):
+    context.config("secondary_nn_model_validation_rotation_epochs", 3)
+    context.config("secondary_nn_model_validation_holdout_fraction", 0.1)
     context.config('secondary_nn_use_target_distance', True)
     context.config('secondary_nn_model_validation_folds', 5)
-    context.config('secondary_nn_model_min_epochs', 20)
-    context.config('secondary_nn_model_validation_strategy', 'cross_validation')
+    context.config('secondary_nn_model_min_epochs', 30)
+    context.config('secondary_nn_model_validation_strategy', 'rotating_holdout')
     if context.config('secondary_nn_use_target_distance'):
         return
+    context.stage("synthesis.population.spatial.secondary_nn.mobility")
     for stage in ['data.microcensus.trips', 'data.microcensus.persons', 'data.constants',
                   'data.spatial.ovgk', 'synthesis.population.destinations',
                   'synthesis.population.spatial.secondary.detour_factors.factors']:
@@ -93,7 +96,9 @@ def execute(context):
         energy_weight=float(context.config('secondary_nn_selector_energy_weight')),
         min_epochs=int(context.config('secondary_nn_model_min_epochs')),
         folds=int(context.config('secondary_nn_model_validation_folds')),
-        validation_strategy=context.config('secondary_nn_model_validation_strategy'), path=context.path())
+        validation_strategy=context.config('secondary_nn_model_validation_strategy'), path=context.path(),
+        rotation_epochs=int(context.config('secondary_nn_model_validation_rotation_epochs')),
+        holdout_fraction=float(context.config('secondary_nn_model_validation_holdout_fraction')))
 
     # Persist validation coverage, distribution diagnostics and the fitted mixture.
 
@@ -253,10 +258,11 @@ def mixture_objective(logits, statistics, crps_weight=.1, energy_weight=.1):
 
 def train_selector(frame, comparisons, origin_context, *, seed, max_iter=300, learning_rate=.01,
                    weight_decay=.001, patience=20, crps_weight=.1, energy_weight=.1,
-                   min_epochs=20, folds=5, validation_strategy="cross_validation", path=None):
+                   min_epochs=30, folds=5, validation_strategy="rotating_holdout", path=None,
+                   rotation_epochs=3, holdout_fraction=.1):
     if max_iter < 1 or learning_rate <= 0 or min(weight_decay, crps_weight, energy_weight) < 0 or patience < 1:
         raise ValueError('Invalid probabilistic selector controls')
-    if not 0 <= min_epochs <= max_iter or folds < 2 or validation_strategy not in ('fixed', 'cross_validation'):
+    if not 0 <= min_epochs <= max_iter or folds < 2 or validation_strategy not in ('fixed', 'cross_validation', 'rotating_holdout'):
         raise ValueError('Invalid selector minimum epochs, validation strategy or folds')
     if len(frame) != len(comparisons):
         raise ValueError('Every eligible trip requires exactly one expert comparison')
@@ -294,9 +300,9 @@ def train_selector(frame, comparisons, origin_context, *, seed, max_iter=300, le
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)
         network = _network(x.shape[1])
-        if validation_strategy == 'cross_validation':
+        if validation_strategy in ('cross_validation', 'rotating_holdout'):
 
-            # Keep outer people untouched while independent development folds select duration.
+            # Keep outer people excluded while the configured schedule selects a checkpoint.
 
             rows = np.flatnonzero(development)
             groups = frame.iloc[rows].person_id.to_numpy()
@@ -311,8 +317,10 @@ def train_selector(frame, comparisons, origin_context, *, seed, max_iter=300, le
             def score_samples(indices, logits):
                 return mixture_objective(logits,
                     {key: value[indices] for key, value in development_stats.items()}, crps_weight, energy_weight)
-            training_history = train_cross_validated(
-                network, (None, None, None, None, None, weight[rows]), fold_rows, groups, score_samples,
+            trainer = train_rotating_holdout if validation_strategy == 'rotating_holdout' else train_cross_validated
+            schedule = dict(rotation_epochs=rotation_epochs, holdout_fraction=holdout_fraction) if validation_strategy == 'rotating_holdout' else {}
+            training_history = trainer(
+                network, (None, None, None, None, None, weight[rows]), fold_rows, groups, score_samples, **schedule,
                 epochs=max_iter, batch_size=512, lr=learning_rate, weight_decay=weight_decay,
                 lr_step_size=max_iter + 1, lr_gamma=1., grad_clip=5., patience=patience,
                 min_delta=1e-5, min_epochs=min_epochs, seed=seed, logger=logger, path=path,
@@ -373,7 +381,7 @@ def train_selector(frame, comparisons, origin_context, *, seed, max_iter=300, le
     observed = np.hypot(validation.destination_x - validation.origin_x, validation.destination_y - validation.origin_y)
     metrics = dict(validation_rows=len(validation), validation_persons=int(validation.person_id.nunique()),
                    development_rows=int(development.sum()), development_persons=int(frame.loc[development, 'person_id'].nunique()),
-                   refit_epochs=int(best_epoch), outer_mixture_objective=outer_loss,
+                   refit_epochs=int(training_history['refit_epochs']), outer_mixture_objective=outer_loss,
                    validation_mode=training_history['validation_mode'],
                    validation_folds=training_history['validation_folds'],
                    early_stopping_min_epochs=min_epochs,
@@ -388,7 +396,12 @@ def train_selector(frame, comparisons, origin_context, *, seed, max_iter=300, le
                    development_predictions_are_cross_fitted=True, probabilistic_routing=True)
     audit = frame[['person_id', 'trip_id', 'partition', 'fold', 'prediction_fold']].copy()
     audit['selector_validation_fold'] = -1
-    if validation_strategy == 'cross_validation':
+    if validation_strategy == 'rotating_holdout':
+        held, rotating = rotating_holdout_split(frame.iloc[rows].person_id.to_numpy(), folds, seed, holdout_fraction)
+        audit['selector_reserved_holdout'] = False
+        audit.loc[audit.index[rows[held]], 'selector_reserved_holdout'] = True
+        fold_rows = [torch.as_tensor(indices) for indices in rotating]
+    if validation_strategy in ('cross_validation', 'rotating_holdout'):
         for number, indices in enumerate(fold_rows):
             audit.loc[audit.index[rows[indices.numpy()]], 'selector_validation_fold'] = number
     audit['short_probability'] = probability

@@ -25,6 +25,7 @@ def execute(context):
         "POPULATIONTYPE": int,
         "TYPEOFRESIDENCE": int,
         "REPORTINGMUNICIPALITYID": int,
+        "INDIC_EGID": int,
     }
 
     renames = {
@@ -37,7 +38,8 @@ def execute(context):
         "GEOCOORDE": "home_x",
         "POPULATIONTYPE": "population_type",
         "TYPEOFRESIDENCE": "type_of_residence",
-        "REPORTINGMUNICIPALITYID": "municipality_id"  
+        "REPORTINGMUNICIPALITYID": "municipality_id",
+        "INDIC_EGID": "statpop_geocoding_indicator",
     }
 
     with open(part_1, mode="rb") as f1, open(part_2, mode="rb") as f2:
@@ -47,10 +49,9 @@ def execute(context):
     # Combine them into one DataFrame
     df = pd.concat([df1, df2], ignore_index=True)
 
-    # For some people (67 092 to be exact), the reported home location corresponds to the administrative center of the municipality.
-    # These people should be living in collective housings (senior homes, prisons, boarding schools, worker or student homes,...) or
-    # in the asylum requiring process, so they don't have any clear coordinate assigned to them.
-    # We decided to tag those people and exclude them from the statistical matching so that they are forced to stay home.
+    # Legacy flag used by matching to restrict donors to home-only activity chains.
+    # It detects administrative-centre/unknown coordinates, NOT verified residence
+    # in an institution: geocoded dorm/care-home residents can have this flag False.
 
     municipality_centers = pd.read_excel(f"{data_path}/spatial/municipality_centers/be-b-00.03-gg22.xlsx", sheet_name = "g1g22")
     municipality_centers = list(zip(municipality_centers["E_CNTR"], municipality_centers["N_CNTR"]))

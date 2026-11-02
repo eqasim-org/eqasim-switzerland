@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from analysis.counts.paths import configure_simulation_path, get_simulation_path
+from matsim.config.tools import find_simulation_output
 
 
 logger = logging.getLogger("synpp")
@@ -30,7 +31,7 @@ def execute(context):
     # Load only the trip columns needed for these distributions.
 
     simulation = Path(get_simulation_path(context))
-    path = simulation / "output_trips.csv.gz"
+    path = find_simulation_output(simulation, "output_trips.csv.gz")
     trips = read_trips(path)
     time_bin = context.config("analysis.mode_shares.travel_time_bin_min")
     distance_bin = context.config("analysis.mode_shares.distance_bin_km")

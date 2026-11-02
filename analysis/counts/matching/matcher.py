@@ -6,7 +6,6 @@ from enum import Enum
 import geopandas as gpd
 import pandas as pd
 import numpy as np
-from shapely.geometry import Point
 
 from .road_matching import (
     ROAD_TYPE_PRIORITY,
@@ -33,8 +32,8 @@ class TrafficDataMatcher:
     Directional observations require manual ``osm_id`` and ``angle`` columns
     and produce exactly one directed link. Try current OSM IDs, historical OSM
     IDs, then nearby geometry, accepting only compatible directions at every
-    step. Spatial fallback uses the manual endpoints' midpoint/angle when
-    available, otherwise the station location/angle. Its default radius is
+    step. Spatial fallback uses the actual station location and supplied angle,
+    never a supplied MATSim link ID or old link midpoint. Its default radius is
     50 metres and the default angle tolerance is 45 degrees.
     Bidirectional observations represent
     an aggregate across both directions and produce exactly two opposite links.
@@ -115,12 +114,6 @@ class TrafficDataMatcher:
         for _, station in count_data.iterrows():
             reference = station.geometry
             angle = station.angle
-            endpoints = pd.to_numeric(station.reindex(MATCH_ENDPOINT_COLUMNS), errors="coerce").to_numpy(dtype=float)
-            if np.isfinite(endpoints).all():
-                x0, y0, x1, y1 = endpoints
-                if x0 != x1 or y0 != y1:
-                    reference = Point((x0 + x1) / 2, (y0 + y1) / 2)
-                    angle = np.degrees(np.arctan2(y1 - y0, x1 - x0))
             if reference is None or reference.is_empty or not np.isfinite(angle):
                 logger.warning("No valid direction/location for count %s; leaving unmatched", station.id)
                 continue

@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import logging
 from data.utils import coerce_boolean_series
+from data.microcensus.secondary_trips import recode_nonstudent_education
 from data.cross_border.travel_times import estimate_travel_time
 
 logger = logging.getLogger("synpp")
@@ -9,6 +10,12 @@ logger = logging.getLogger("synpp")
 This stage attaches all trip relevant information to the synthetic population.
 """
 
+
+BORDER_MATCH_COLUMNS = [
+    "cross_border_person_id", "destination_country_raw",
+    "interview_geometry_point", "border_crossing_trip_mode", "interview_point_id",
+    "border_crossing_point", "border_crossing_direction", "border_interview_place",
+]
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -21,14 +28,22 @@ def configure(context):
     context.config("specific_day_scenario", default = "workday")
 
 
-BORDER_MATCH_COLUMNS = [
-    "cross_border_person_id", "destination_country_raw",
-    "interview_geometry_point", "border_crossing_trip_mode", "interview_point_id",
-    "border_crossing_point",
-]
+ORIGINAL_PURPOSE_COLUMNS = ["original_preceding_purpose", "original_following_purpose"]
+
+
+def validate(context):
+    # Synpp hashes this stage, but imported helpers also change its output.
+    import hashlib
+    from pathlib import Path
+    import data.microcensus.secondary_trips
+    return hashlib.sha256(Path(data.microcensus.secondary_trips.__file__).read_bytes()).hexdigest()
 
 
 def execute(context):
+
+    # Load recipients and donor trips, preserving the assigned crossing event.
+
+
     c      = context.stage("data.constants")
 
     if c.census == "statpop":
@@ -68,6 +83,17 @@ def execute(context):
     # trips. May be improved later. TODO
     df_trips = df_trips[~f]
 
+    if c.census == "statpop":
+        # Use the recipient's final student status, after the stock correction.
+        # Raw donor diaries remain unchanged for matching and survey audits.
+        persons = context.stage("synthesis.population.enriched")
+        nonstudents = persons.loc[pd.to_numeric(persons["is_student"], errors="raise").eq(0), "person_id"]
+        df_trips = recode_nonstudent_education(
+            df_trips, nonstudents, ("preceding_purpose", "following_purpose"))
+    else:
+        for column in ["preceding_purpose", "following_purpose"]:
+            df_trips["original_" + column] = df_trips[column]
+
     df_trips.loc[:, "travel_time"] = df_trips.loc[:, "arrival_time"] - df_trips.loc[:, "departure_time"]
 
     df_trips = df_trips[["person_id", "mz_person_id", "trip_id",
@@ -75,7 +101,7 @@ def execute(context):
                          "travel_time", "mode",
                          "preceding_purpose", "following_purpose",
                          "is_truck_driver", "is_outside_of_switzerland",
-                         "is_crossing_the_border"]].sort_values(by=["person_id", "trip_id"])
+                         "is_crossing_the_border"] + ORIGINAL_PURPOSE_COLUMNS].sort_values(by=["person_id", "trip_id"])
 
     # Diversify departure times
     counts = df_trips[["person_id", "trip_id"]].groupby("person_id").size().reset_index(name="count")["count"].values
@@ -103,7 +129,8 @@ def execute(context):
     # Define trip index
     df_trips = df_trips.sort_values(by=["person_id", "trip_id"])
     df_count = df_trips.groupby("person_id").size().reset_index(name="count")
-    df_trips["trip_index"] = np.hstack([np.arange(count) for count in df_count["count"].values])
+    df_trips["trip_index"] = (np.hstack([np.arange(count) for count in df_count["count"].values])
+                              if len(df_count) else np.array([], dtype=int))
 
     # Define remote_walk as main mode to go to work for agents working from home
     remote_agents = context.stage("synthesis.population.spatial.primary.work.work_remotly")
@@ -165,13 +192,20 @@ def execute(context):
         "mode",
         "destination_country_raw", "interview_geometry_point", "interview_point_id",
         "border_crossing_point",
-    ]
+    ] + ORIGINAL_PURPOSE_COLUMNS
+
+    _write_border_trip_audit(context, df_persons, is_cb_person)
 
     if len(df_cb_persons) == 0:
         return df_trips_noncb[final_columns]
 
-    # Direction: 50% leaving Switzerland (home -> border), 50% entering (border -> home)
-    is_leaving = rng.random_sample(size=len(df_cb_persons)) < 0.5
+    # Consume the event's assigned direction. Redrawing 50/50 here would
+    # discard the entry/exit controls established before population sampling.
+
+    direction = df_cb_persons["border_crossing_direction"]
+    if not direction.isin(["entry", "exit"]).all():
+        raise ValueError("Swiss crossing direction is missing/invalid; rerun synthesis.population.models.cross_border")
+    is_leaving = direction.eq("exit").to_numpy()
 
     sampled_times = sample_border_trip_times(context, df_cb_persons, is_leaving, rng)
 
@@ -191,6 +225,9 @@ def execute(context):
         "border_crossing_point": df_cb_persons["border_crossing_point"].values,
     })
     df_trips_cb["trip_duration"] = df_trips_cb["arrival_time"] - df_trips_cb["departure_time"]
+    # These are newly constructed border trips, not recoded diary education.
+    for column in ["preceding_purpose", "following_purpose"]:
+        df_trips_cb["original_" + column] = df_trips_cb[column]
 
     df_trips = pd.concat([df_trips_noncb, df_trips_cb], ignore_index=True, sort=False)
 
@@ -270,3 +307,20 @@ def sample_border_trip_times(context, df_cb_persons, is_leaving, rng):
                 np.nanmedian(travel_time) / 60, int(is_leaving.sum()), int((~is_leaving).sum()), len(pool))
 
     return pd.DataFrame({"departure_time": np.round(departure_time), "arrival_time": np.round(arrival_time)})
+
+
+def _write_border_trip_audit(context, persons, generated):
+    """Separate sampled selections from downstream truck/outside exclusions."""
+    selected = coerce_boolean_series(persons["is_crossing_the_border"], name="is_crossing_the_border")
+    selected &= persons["cross_border_person_id"].notna()
+    audit = persons.loc[selected, ["border_interview_place", "border_crossing_trip_mode",
+                                   "border_crossing_direction"]].copy()
+    audit["selected_sample_events"] = 1
+    truck = coerce_boolean_series(persons["is_truck_driver"], name="is_truck_driver")
+    outside = coerce_boolean_series(persons["is_outside_of_switzerland"], name="is_outside_of_switzerland")
+    # Mutually exclusive exclusions keep the accounting additive.
+    audit["excluded_truck_driver"] = truck.loc[selected].astype(int)
+    audit["excluded_outside"] = (outside & ~truck).loc[selected].astype(int)
+    audit["generated_events"] = generated.loc[selected].astype(int)
+    keys = ["border_interview_place", "border_crossing_trip_mode", "border_crossing_direction"]
+    audit.groupby(keys, dropna=False).sum().to_csv(f"{context.path()}/swiss_crossing_trip_counts.csv")

@@ -22,6 +22,9 @@ def configure(context):
     context.stage("synthesis.population.sampled")
     context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
     context.stage("data.constants")
+    context.stage("data.microcensus.commute")
+    if context.config("census", "statpop") == "statpop":
+        context.stage("synthesis.population.spatial.primary.education.locations", alias="education_locations")
 
 
 def execute(context):

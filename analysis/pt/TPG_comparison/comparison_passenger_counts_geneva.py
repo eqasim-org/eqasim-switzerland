@@ -28,7 +28,7 @@ def configure(context):
     # Rebuild the processed TPG counts from the raw ones first (analysis.pt.TPG_comparison.tpg_raw_stats_2025, ~5 GB)
     context.config("analysis.pt.tpg_rebuild_counts", default = False)
     if context.config("analysis.pt.tpg_rebuild_counts"):
-        context.stage("analysis.pt.TPG_comparison.tpg_raw_stats_2025")
+        context.stage("analysis.pt.TPG_comparison.tpg_raw_stats_%s" % context.config("analysis.pt.tpg_year"))
 
     context.config("analysis.pt.min_stop_avg_events",   default = 10.0)
     context.config("analysis.pt.min_stop_active_hours", default = 6)
@@ -57,6 +57,52 @@ def configure(context):
 
     elif context.config("analysis.pt.include_lemanis") and context.config("analysis.pt.lemanis_year") == 2022:
         context.config("analysis.pt.lemanis_path_2022", default = "Geneva_passenger_counts/Lemanis/2022")
+
+def execute(context):
+    data_path = context.config("data_path")
+
+    matsim_output_folder = os.path.join(
+        context.config("output_path"),
+        context.config("output_id"),
+        context.config("simulation_directory")
+    )
+
+    lemanis_year = context.config("analysis.pt.lemanis_year")
+    lemanis_path = None
+    if context.config("analysis.pt.include_lemanis"):
+        lemanis_path = os.path.join(data_path, context.config(f"analysis.pt.lemanis_path_{lemanis_year}"))
+
+    output_dir = run(
+        gtfs_path                 = "%s/output" % context.path("data.gtfs.cleaned"),
+        perimeter_shapefile       = os.path.join(data_path, context.config("analysis.pt.tpg_perimeter")),
+        tpg_data_path             = os.path.join(data_path, context.config("analysis.pt.tpg_data")),
+        matsim_output_folder      = matsim_output_folder,
+        input_downsampling        = context.config("input_downsampling"),
+        year                      = context.config("analysis.pt.tpg_year"),
+        tpg_processed_counts_path = os.path.join(data_path, context.config("analysis.pt.tpg_processed_counts_path")),
+        min_stop_avg_events       = context.config("analysis.pt.min_stop_avg_events"),
+        min_stop_active_hours     = context.config("analysis.pt.min_stop_active_hours"),
+        map_hour_start            = context.config("analysis.pt.map_hour_start"),
+        map_hour_end              = context.config("analysis.pt.map_hour_end"),
+        night_hours               = context.config("analysis.pt.night_hours"),
+        include_lemanis           = context.config("analysis.pt.include_lemanis"),
+        lemanis_year              = lemanis_year,
+        lemanis_path              = lemanis_path,
+        day_scenario              = context.config("specific_day_scenario"),
+        sbb_path                  = (os.path.join(data_path, context.config("analysis.pt.sbb_path"))
+                                     if context.config("analysis.pt.include_sbb") else None),
+        sbb_year                  = context.config("analysis.pt.sbb_year"),
+        stop_line_comparison      = context.config("analysis.pt.stop_line_comparison"),
+        stop                      = context.config("analysis.pt.stop"),
+        line                      = context.config("analysis.pt.line"),
+        stop_all_lines            = context.config("analysis.pt.stop_all_lines"),
+        skip_global_comparison    = context.config("analysis.pt.skip_global_comparison"),
+        counts_source             = context.config("analysis.pt.counts_source"),
+    )
+
+    return dict(done = True, path = output_dir)
+
+
 
 
 def run(gtfs_path, perimeter_shapefile, tpg_data_path, matsim_output_folder, input_downsampling,
@@ -132,49 +178,6 @@ def run(gtfs_path, perimeter_shapefile, tpg_data_path, matsim_output_folder, inp
     return output_dir
 
 
-def execute(context):
-    data_path = context.config("data_path")
-
-    matsim_output_folder = os.path.join(
-        context.config("output_path"),
-        context.config("output_id"),
-        context.config("simulation_directory")
-    )
-
-    lemanis_year = context.config("analysis.pt.lemanis_year")
-    lemanis_path = None
-    if context.config("analysis.pt.include_lemanis"):
-        lemanis_path = os.path.join(data_path, context.config(f"analysis.pt.lemanis_path_{lemanis_year}"))
-
-    output_dir = run(
-        gtfs_path                 = "%s/output" % context.path("data.gtfs.cleaned"),
-        perimeter_shapefile       = os.path.join(data_path, context.config("analysis.pt.tpg_perimeter")),
-        tpg_data_path             = os.path.join(data_path, context.config("analysis.pt.tpg_data")),
-        matsim_output_folder      = matsim_output_folder,
-        input_downsampling        = context.config("input_downsampling"),
-        year                      = context.config("analysis.pt.tpg_year"),
-        tpg_processed_counts_path = os.path.join(data_path, context.config("analysis.pt.tpg_processed_counts_path")),
-        min_stop_avg_events       = context.config("analysis.pt.min_stop_avg_events"),
-        min_stop_active_hours     = context.config("analysis.pt.min_stop_active_hours"),
-        map_hour_start            = context.config("analysis.pt.map_hour_start"),
-        map_hour_end              = context.config("analysis.pt.map_hour_end"),
-        night_hours               = context.config("analysis.pt.night_hours"),
-        include_lemanis           = context.config("analysis.pt.include_lemanis"),
-        lemanis_year              = lemanis_year,
-        lemanis_path              = lemanis_path,
-        day_scenario              = context.config("specific_day_scenario"),
-        sbb_path                  = (os.path.join(data_path, context.config("analysis.pt.sbb_path"))
-                                     if context.config("analysis.pt.include_sbb") else None),
-        sbb_year                  = context.config("analysis.pt.sbb_year"),
-        stop_line_comparison      = context.config("analysis.pt.stop_line_comparison"),
-        stop                      = context.config("analysis.pt.stop"),
-        line                      = context.config("analysis.pt.line"),
-        stop_all_lines            = context.config("analysis.pt.stop_all_lines"),
-        skip_global_comparison    = context.config("analysis.pt.skip_global_comparison"),
-        counts_source             = context.config("analysis.pt.counts_source"),
-    )
-
-    return dict(done = True, path = output_dir)
 
 
 def main(argv = None):

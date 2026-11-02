@@ -7,8 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import os, json
-from .distribution_scores import discrete_crps, projected_energy_score, relative_mean_distance_loss
-from .cross_validation import train_cross_validated
+from .distribution_scores import discrete_crps, projected_energy_score, relative_mean_distance_loss, PreparedCRPS
+from .cross_validation import train_cross_validated, train_rotating_holdout
 import matplotlib.pyplot as plt
 logger = logging.getLogger("synpp: choice_model")
 
@@ -118,7 +118,8 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
                        candidate_xy=None, observed_xy=None, energy_projections=8,
                        refit_full=False, auxiliary_relative_distance_loss_weight=0.0,
                        early_stopping_min_epochs=0, cross_validate=False, validation_seed=None,
-                       relative_distance_underestimation_factor=1.0):
+                       relative_distance_underestimation_factor=1.0, rotating_holdout=False,
+                       validation_rotation_epochs=3, validation_holdout_fraction=0.1):
     """Train the choice model with rotating or fixed-fold validation.
 
     ``validation_groups`` keeps related samples (for example, trips belonging to
@@ -229,9 +230,35 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
         if not torch.isfinite(spatial_candidates).all() or not torch.isfinite(spatial_targets).all():
             raise ValueError("Spatial distribution coordinates must be finite")
 
+    # Cache fixed scalar radii and projected geometry across all CV epochs and refitting.
+
+    prepared_scores = []
+    if distance_loss_kind == "crps_energy" and float(distance_loss_weight) > 0:
+        logger.info("Precomputing exact distribution-score geometry for all training folds")
+        for candidates, targets in [(distance_candidates_tensor, distance_targets_tensor),
+                                    (distance_candidates_home_tensor, distance_targets_home_tensor)]:
+            if candidates is not None:
+                prepared_scores.append((PreparedCRPS(candidates, targets), 1.))
+        if spatial_candidates is not None:
+            for angle in np.arange(energy_projections) * np.pi / energy_projections:
+                direction = spatial_candidates.new_tensor([np.cos(angle), np.sin(angle)])
+                # Center per trip to preserve the original projected-score numerics.
+                positions = ((spatial_candidates - spatial_targets[:, None, :]) @ direction)
+                prepared_scores.append((PreparedCRPS(positions, torch.zeros_like(spatial_targets[:, 0])),
+                                        np.pi / (2 * energy_projections)))
+        cache_bytes = sum(score.order.numel() * score.order.element_size()
+                          + score.values.numel() * score.values.element_size()
+                          + score.absolute.numel() * score.absolute.element_size()
+                          for score, _ in prepared_scores)
+        logger.info("Prepared distribution geometry: %.2f GiB", cache_bytes / 1024**3)
+
     def regularization(indices, probabilities):
         values = probabilities.new_zeros(len(indices))
         if float(distance_loss_weight) == 0:
+            return values
+        if prepared_scores:
+            for prepared, factor in prepared_scores:
+                values = values + factor * prepared.score(probabilities, indices) / distribution_scale_m
             return values
         for candidates, targets, factor in [
                 (distance_candidates_tensor, distance_targets_tensor, underestimation_factor),
@@ -272,13 +299,13 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
     min_epochs = int(early_stopping_min_epochs)
     if min_epochs < 0 or min_epochs > int(epochs):
         raise ValueError("Minimum training epochs must lie between zero and the maximum epochs")
-    if cross_validate and (validation_groups is None or rotate_validation):
+    if (cross_validate or rotating_holdout) and (validation_groups is None or rotate_validation):
         raise ValueError("Independent CV requires person groups and rotate_validation=False")
 
     # Build folds once. With groups, split unique groups first so related
     # observations cannot leak between training and validation.
     cv_seed = int(torch.initial_seed() if validation_seed is None else validation_seed)
-    permutation = np.random.default_rng(cv_seed).permutation if cross_validate else np.random.permutation
+    permutation = np.random.default_rng(cv_seed).permutation if cross_validate or rotating_holdout else np.random.permutation
     if validation_groups is None:
         perm = permutation(n_samples)
         fold_arrays = np.array_split(perm, n_val_folds)
@@ -302,7 +329,7 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
 
     # Use the same masked and survey-weighted objective in each independent fold.
 
-    if cross_validate:
+    if cross_validate or rotating_holdout:
         (logger_instance or logger).info(
             "CV scoring: kind=%s, main_weight=%.4f, auxiliary_relative_weight=%.4f, origin_underestimation_factor=%.2f",
             distance_loss_kind, distance_loss_weight, auxiliary_weight, underestimation_factor)
@@ -314,10 +341,13 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
                 score = score + auxiliary_weight * auxiliary_scores(indices, probabilities)
             return score
 
-        train_cross_validated(
+        trainer = train_rotating_holdout if rotating_holdout else train_cross_validated
+        schedule = dict(rotation_epochs=validation_rotation_epochs,
+                        holdout_fraction=validation_holdout_fraction) if rotating_holdout else {}
+        trainer(
             model, (person_static_tensor, person_dynamic_tensor, candidate_static_tensor,
                     candidate_dynamic_tensor, mask_tensor, weights_tensor),
-            fold_indices, validation_groups, score_samples, epochs=int(epochs),
+            fold_indices, validation_groups, score_samples, **schedule, epochs=int(epochs),
             batch_size=int(batch_size), lr=lr, weight_decay=weight_decay,
             lr_step_size=lr_step_size, lr_gamma=lr_gamma, grad_clip=grad_clip,
             patience=early_stopping_patience, min_delta=early_stopping_min_delta,
@@ -599,7 +629,8 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
             local_logger.info("\tLoss plot saved to %s", os.path.join(path, "lossevolution.png"))
 
 
-def predict_choice_proba(model, person_static, person_dynamic, candidate_static, candidate_dynamic, valid_mask_tensor=None):
+def predict_choice_proba(model, person_static, person_dynamic, candidate_static, candidate_dynamic,
+                         valid_mask_tensor=None, candidate_weights=None):
     with torch.inference_mode():
         dev = model._device
         ps = torch.as_tensor(person_static,   dtype=torch.float32, device=dev)
@@ -607,6 +638,16 @@ def predict_choice_proba(model, person_static, person_dynamic, candidate_static,
         cs = torch.as_tensor(candidate_static,  dtype=torch.float32, device=dev)
         cd = torch.as_tensor(candidate_dynamic, dtype=torch.float32, device=dev)
         utilities = model(ps, pd, cs, cd)
+        if candidate_weights is not None:
+            weights = torch.as_tensor(candidate_weights, dtype=utilities.dtype, device=dev)
+            if weights.ndim == 1:
+                weights = weights.unsqueeze(0)
+            if weights.shape[-1] != utilities.shape[-1] or weights.ndim != 2 or weights.shape[0] not in (1, utilities.shape[0]):
+                raise ValueError("Soft destination weights must align with candidate utilities")
+            if not torch.isfinite(weights).all() or not (weights > 0).all():
+                raise ValueError("Soft destination weights must be finite and strictly positive")
+            # Multiplying choice masses is addition in log-utility space, regardless of utility sign.
+            utilities = utilities + weights.log()
         if valid_mask_tensor is not None:
             valid_mask_tensor = torch.as_tensor(valid_mask_tensor, dtype=torch.bool, device=dev)
             if valid_mask_tensor.ndim == 1:

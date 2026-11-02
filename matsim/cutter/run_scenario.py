@@ -3,6 +3,7 @@ import logging
 import shutil
 from pathlib import Path
 import matsim.runtime.eqasim as eqasim
+from matsim.config.tools import resolve_output_file
 
 logger = logging.getLogger("synpp:    Regional Model\t")
 
@@ -71,6 +72,6 @@ def execute(context):
             ], cwd = regional_scenario)
 
     assert os.path.exists(simulation_path), "Simulation output path does not exist: %s" % simulation_path
-    assert os.path.exists("%s/output_events.xml.gz" % simulation_path), "Output events file does not exist: %s" % ("%s/output_events.xml.gz" % simulation_path)
+    resolve_output_file(os.path.join(simulation_path, "output_events.xml"))
 
     return regional_scenario, simulation_path

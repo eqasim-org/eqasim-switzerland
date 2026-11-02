@@ -15,4 +15,4 @@ def execute(context):
 
 
 def validate(context):
-    return validate_regional(context)
+    return validate_regional(context, microscopic)

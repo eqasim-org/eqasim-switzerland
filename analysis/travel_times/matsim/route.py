@@ -2,7 +2,7 @@ from matsim.runtime.eqasim import run as run_eqasim
 import os
 import pandas as pd
 import logging 
-import glob
+from matsim.config.tools import find_simulation_output
 
 logger = logging.getLogger("synpp")
 
@@ -48,18 +48,8 @@ def execute(context):
     path_to_dir = os.path.join(context.config("output_path"), 
                                context.config("output_id"))
     
-    path_to_events = os.path.join(path_to_dir, context.config("simulation_directory"), "output_events.xml.gz")
-    if not os.path.exists(path_to_events):
-        # try to find the events file in case the directory structure is different
-        logger.warning(f"Events file not found at {path_to_events}. Searching for events file in ITERS ...")
-        p = os.path.join(path_to_dir, context.config("simulation_directory"), "ITERS", "*", "*.events.xml.gz")
-        events_files = glob.glob(p, recursive=True)
-        if len(events_files) == 0:
-            raise FileNotFoundError(f"No events file found in {path_to_dir}")
-        elif len(events_files) > 1:
-            logger.warning(f"Multiple events files found in {path_to_dir}. Using the latest created one")
-        path_to_events = max(events_files, key=os.path.getctime)
-        logger.info(f"Events file found at {path_to_events}")
+    path_to_events = find_simulation_output(
+        os.path.join(path_to_dir, context.config("simulation_directory")), "output_events.xml.gz")
 
     path_to_config = os.path.join(path_to_dir,
                                   "%sconfig.xml" % context.config("output_prefix"))

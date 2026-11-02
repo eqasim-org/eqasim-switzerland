@@ -9,6 +9,8 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from shapely.geometry import LineString
+from shapely.ops import nearest_points
 
 from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
@@ -134,19 +136,6 @@ def execute(context, *, counts_stage="analysis.counts.cantons.transcality",
         return None
 
     plotter = Plotter()
-    plotter.plot_network_with_counts(
-        counts,
-        matched,
-        network,
-        output=os.path.join(output_directory, f"{city}_network.png"),
-        lw=0.7,
-        markersize=4,
-        figsize=(40, 40),
-        road_types="all",
-        cut=True,
-        highlight_stations=[],
-        return_matched_links=False,
-    )
 
     result_path = save_count_results(city, matched, flows, context.path())
     plotter.plot_flow(
@@ -231,6 +220,7 @@ def save_map(context, counts, flows, network, comparison, sample_size, output_di
                 tooltip_fields.insert(-1, field)
         profiles.append(Plotter.flow_profile_svg(row.profile_json, simulated_profile))
     points["daily_profile"] = profiles
+    points = add_match_geometry(points, network)
     points = gpd.GeoDataFrame(points, geometry="geometry", crs=counts.counts.crs).to_crs(
         epsg=4326
     )
@@ -259,6 +249,27 @@ def save_map(context, counts, flows, network, comparison, sample_size, output_di
         show_construction=not context.config("analysis.counts.exclude_construction_sites"),
         path_to_save=os.path.join(output_directory, f"counts_on_network_{city}.html"),
     )
+
+
+def add_match_geometry(points, network):
+    """Keep directed link curves and metric-nearest connectors for map selection."""
+    metric_points = points.to_crs(2056)
+    ids = {str(link) for links in points.matched_link_ids for link in links}
+    roads = network.get_link_geometries(list(ids)).to_crs(2056).set_index("link_id")
+    roads.index = roads.index.astype(str)
+    paths, connectors = [], []
+    for _, row in metric_points.iterrows():
+        shapes = [roads.loc[str(link), "geometry"] for link in dict.fromkeys(row.matched_link_ids)
+                  if str(link) in roads.index]
+        lines = [LineString([row.geometry, nearest_points(row.geometry, shape)[1]]) for shape in shapes]
+        paths.append([path for shape in gpd.GeoSeries(shapes, crs=2056).to_crs(4326)
+                      for path in Plotter.extract_paths(shape)])
+        connectors.append([path for shape in gpd.GeoSeries(lines, crs=2056).to_crs(4326)
+                           for path in Plotter.extract_paths(shape)])
+    result = points.copy()
+    result["_matched_paths"] = paths
+    result["_connector_paths"] = connectors
+    return result
 
 
 def closest_counts_within_bounds(flows):

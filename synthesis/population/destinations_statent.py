@@ -5,12 +5,13 @@ from data.spatial.ovgk import impute as impute_ovgk
 
 def configure(context):
     context.stage("data.statent.statent")
+    context.stage("data.statent.education_institutions")
     context.stage("data.spatial.ovgk")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
 
-def execute(context):
-    df = pd.DataFrame(context.stage("data.statent.statent")[["enterprise_id", "x", "y", "noga","number_employees"]],
+def prepare_destinations(df_statent, registry):
+    df = pd.DataFrame(df_statent[["enterprise_id", "x", "y", "noga","number_employees"]],
                                     copy=True)
     df.columns = ["destination_id", "destination_x", "destination_y", "noga", "number_employees"]
 
@@ -21,6 +22,10 @@ def execute(context):
 
     # 85 = education
     df.loc[:, "offers_education"] = df["noga"].str.startswith("85")
+    # Doctoral primary destinations can be affiliated research establishments.
+    compatibility = registry["compatibility"]
+    doctoral_ids = compatibility.loc[compatibility["study_level"].eq("doctorate_habilitation"), "enterprise_id"]
+    df.loc[df["destination_id"].isin(doctoral_ids), "offers_education"] = True
     df.loc[:, "offers_education_secondary"] = df["noga"].str.startswith("85")
 
     # 90 = arts, entertainment, leisure; 56 = gastronomy
@@ -36,6 +41,12 @@ def execute(context):
     df.loc[:, "offers_shop"] = df["noga"].str.startswith("47")
 
     del df["noga"]
+    return df
+
+
+def execute(context):
+    df = prepare_destinations(context.stage("data.statent.statent"),
+                              context.stage("data.statent.education_institutions"))
 
     df = spatial_utils.to_gpd(context, df, x="destination_x", y="destination_y", coord_type="facility")
 

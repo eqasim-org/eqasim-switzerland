@@ -30,11 +30,6 @@ def configure(context):
     context.config("pt_route_add_links", True)
 
 
-def line_routes_paths(context):
-    """pt_line_routes_path with absolute paths: {agency_id: path}, one path, or None"""
-    return pt_route_check.resolve_line_routes(context.config("pt_line_routes_path"), context.config("data_path"))
-
-
 def execute(context):
     """Re-routes the PT routes mapped by pt2matsim that deviate from their reference route: the GTFS shape of
     their trip, or the official line route if the trip has no shape.
@@ -46,6 +41,9 @@ def execute(context):
     connection), bus-only links are added along the official route in that copy too. Vehicles are
     those of the mapped stage.
     """
+
+    # Read upstream assets without modifying their cached files.
+
     paths = context.stage("matsim.scenario.network.mapped")
     corrected_schedule_path = "%s/corrected_schedule.xml.gz" % context.path()
     patched_network_path = "%s/corrected_network.xml.gz" % context.path()
@@ -56,6 +54,8 @@ def execute(context):
     use_shapes = context.config("pt_route_gtfs_shapes") and os.path.exists("%s/shapes.txt" % gtfs_path)
 
     geometry_path = "%s/detailed_network.csv" % context.path()
+
+    # Correct a local schedule/network copy against the matching operator and trip shape.
 
     _, n_patched = pt_route_check.run(
         schedule_path           = paths["schedule"], network_path = paths["network"],
@@ -77,6 +77,8 @@ def execute(context):
 
     assert os.path.exists(corrected_schedule_path)
 
+    # Keep the returned network and its detailed geometry from the same correction.
+
     return dict(
         network      = patched_network_path if n_patched > 0 else paths["network"],
         schedule     = corrected_schedule_path,
@@ -85,3 +87,8 @@ def execute(context):
         geometry     = geometry_path if n_patched > 0 and context.config("export_detailed_network") else paths["geometry"],
         report       = "%s/route_correction.csv" % context.path(),
     )
+
+
+def line_routes_paths(context):
+    """pt_line_routes_path with absolute paths: {agency_id: path}, one path, or None"""
+    return pt_route_check.resolve_line_routes(context.config("pt_line_routes_path"), context.config("data_path"))

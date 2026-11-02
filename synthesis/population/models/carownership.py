@@ -38,6 +38,12 @@ def configure(context):
     context.stage("synthesis.population.models.drlicense")
 
 def execute(context):
+    from synthesis.population.models.non_private import execute_without_home_only
+    return execute_without_home_only(context, "synthesis.population.models.drlicense", _execute_model,
+                                     {"number_of_cars_class": 0})
+
+
+def _execute_model(context):
     # -------------------------------------------------------------------
     # CONFIG
     # -------------------------------------------------------------------

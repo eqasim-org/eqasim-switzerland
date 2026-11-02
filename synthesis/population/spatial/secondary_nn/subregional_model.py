@@ -22,10 +22,13 @@ MODEL_NAME = "subregional_model.pt"
 
 
 def configure(context):
+    context.config("secondary_nn_model_validation_rotation_epochs", 3)
+    context.config("secondary_nn_model_validation_holdout_fraction", 0.1)
+    context.stage("synthesis.population.spatial.secondary_nn.mobility")
     context.config("secondary_nn_use_target_distance", True)
     context.config("secondary_nn_model_validation_folds", 5)
-    context.config("secondary_nn_model_min_epochs", 20)
-    context.config("secondary_nn_model_validation_strategy", "cross_validation")
+    context.config("secondary_nn_model_min_epochs", 30)
+    context.config("secondary_nn_model_validation_strategy", "rotating_holdout")
     context.stage("data.spatial.ovgk")
     context.config("secondary_nn_distance_loss_kind", "crps_energy")
     context.config("secondary_nn_distribution_loss_weight", 0.1)
@@ -38,7 +41,7 @@ def configure(context):
     context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")
     context.stage("synthesis.population.spatial.secondary_nn.regional_model")
-    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.secondary_trips")
     context.stage("data.microcensus.persons")
     context.stage("data.constants")
     context.stage("data.spatial.swiss_border")
@@ -76,7 +79,8 @@ def execute(context):
     constants = context.stage("data.constants")
     mz_persons["car_availability"] = (mz_persons["car_availability"] != constants.CAR_AVAILABILITY_NEVER)
 
-    mz_trips = context.stage("data.microcensus.trips")[0]
+    # Preserve nonstudent education recoding in the filtered NN training pool.
+    mz_trips = context.stage("data.microcensus.secondary_trips")
     mz_trips = mz_trips.loc[mz_trips.person_id.isin(mz_persons.person_id)].copy()
     mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "purpose", "origin_purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[

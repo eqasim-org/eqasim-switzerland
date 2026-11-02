@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>French population — homes and trips</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+body { margin:0; font:14px system-ui,sans-serif; color:#203044; } #map { height:100vh; }
+[hidden] { display:none !important; }
+#panel { position:absolute; right:12px; top:12px; z-index:1000; width:340px; max-width:calc(100vw - 48px); max-height:calc(100vh - 48px); overflow:auto; background:#fffffff2; padding:16px; border-radius:12px; box-shadow:0 3px 20px #0003; }
+h2 { margin:0 0 12px; } label { display:block; margin:7px 0; } button,select { padding:7px; margin:3px 0; } fieldset { border:1px solid #ddd; border-radius:6px; margin:10px 0; } .choices { display:grid; grid-template-columns:1fr 1fr; } .choices label { font-size:12px; }
+#status { background:#edf3f8; padding:10px; border-radius:6px; white-space:pre-line; } .hint { font-size:12px; color:#536479; } #loading { position:absolute; left:15px; bottom:20px; z-index:1100; background:white; padding:12px; } canvas.trips { pointer-events:none; }
+</style></head><body><div id="map"></div>
+<aside id="panel"><h2>French activities</h2>
+<p class="hint">Save named polygons, then reuse any of them for homes, origins or destinations. No polygon means no geographic restriction.</p>
+<label>Polygon name <input id="polygon-name" placeholder="e.g. Geneva centre"></label>
+<button id="draw">Draw polygon</button> <button id="finish" disabled>Finish</button> <button id="cancel" disabled>Cancel</button>
+<label>Saved polygons <select id="saved-polygons"><option value="">Choose polygon</option></select></label>
+<button id="rename">Rename</button> <button id="redraw">Redraw</button> <button id="delete">Delete</button>
+<p id="drawing" class="hint">Click Draw, click vertices on the map, then Finish. Select saved areas below; reuse the same area in several roles.</p>
+<label>Residents’ homes <select id="region-home"><option value="">Anywhere</option></select></label>
+<label>Trip origins (A) <select id="region-origin"><option value="">Anywhere</option></select></label>
+<label>Trip destinations (B) <select id="region-destination"><option value="">Anywhere</option></select></label>
+<button id="reset">Clear geographic filters (keep polygons)</button>
+<fieldset><legend>Person attribute</legend>
+<select id="attribute"><option value="">No attribute filter</option></select>
+<p id="attribute-type" class="hint">Raw source values are retained; types below describe the available filter.</p>
+<div id="attribute-categories" class="choices" hidden></div>
+<div id="attribute-range" hidden><label>Minimum <input id="attribute-min" type="number" step="any"></label><label>Maximum <input id="attribute-max" type="number" step="any"></label></div>
+<label id="attribute-text-row" hidden>Contains (case sensitive) <input id="attribute-text"></label>
+<label id="attribute-missing-row" hidden><input id="attribute-missing" type="checkbox"> Include empty values</label>
+<button id="attribute-apply">Apply attribute filter</button><p id="attribute-error" class="hint"></p>
+</fieldset>
+<label><input type="checkbox" id="homes" checked> Show selected residents’ homes</label>
+<label><input type="checkbox" id="trips"> Show their trips</label>
+<fieldset><legend>Trip line appearance</legend>
+<label>Color <input id="line-color" type="color" value="#495f83"></label>
+<label>Width <input id="line-width" type="range" min="0.2" max="6" step="0.1" value="0.7"> <output id="line-width-label">0.7 px</output></label>
+<label>Opacity <input id="line-opacity" type="range" min="0" max="1" step="0.05" value="0.15"> <output id="line-opacity-label">15%</output></label>
+</fieldset>
+<label><input type="checkbox" id="bidirectional"> Between A and B in either direction</label>
+<p class="hint">Otherwise only A → B. Either-direction requires both A and B.</p>
+<fieldset><legend>Modes</legend><button id="modes-all">All</button> <button id="modes-none">None</button><div class="choices" id="modes"></div></fieldset>
+<fieldset><legend>Origin activity purposes</legend><button id="origin-purposes-all">All</button> <button id="origin-purposes-none">None</button><div class="choices" id="origin-purposes"></div></fieldset>
+<fieldset><legend>Destination activity purposes</legend><button id="purposes-all">All</button> <button id="purposes-none">None</button><div class="choices" id="purposes"></div></fieldset>
+<label>Maximum drawn homes / trips <select id="limit"><option>10000</option><option selected>30000</option><option>100000</option><option value="0">All (may be slow)</option></select></label>
+<button id="fit">Fit selected homes</button><div id="status"></div>
+<p class="hint">Blue: homes · orange: origins · green: destinations. Thin translucent lines are straight OD connections, not routed paths. Drawing limits never change selection totals. Hover near a home to see its person ID and coordinates.</p>
+<p id="source" class="hint"></p></aside><div id="loading">Loading population…</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// Boundary-inclusive point-in-polygon, also used by the local regression tests.
+function inside(point, polygon) {
+  if (!polygon) return true;
+  let result = false;
+  for (let i=0,j=polygon.length-1;i<polygon.length;j=i++) {
+    const a=polygon[j], b=polygon[i], dx=b[0]-a[0], dy=b[1]-a[1];
+    const cross=(point[0]-a[0])*dy-(point[1]-a[1])*dx;
+    if (Math.abs(cross)<1e-10 && point[0]>=Math.min(a[0],b[0])-1e-10 && point[0]<=Math.max(a[0],b[0])+1e-10 && point[1]>=Math.min(a[1],b[1])-1e-10 && point[1]<=Math.max(a[1],b[1])+1e-10) return true;
+    if ((a[1]>point[1])!==(b[1]>point[1]) && point[0]<(b[0]-a[0])*(point[1]-a[1])/(b[1]-a[1])+a[0]) result=!result;
+  }
+  return result;
+}
+function tripMatches(t, regions, either) {
+  const a=[t[1],t[2]], b=[t[3],t[4]];
+  return (inside(a,regions.origin)&&inside(b,regions.destination)) ||
+    (either && regions.origin && regions.destination && inside(a,regions.destination)&&inside(b,regions.origin));
+}
+function attributeMatches(value, filter) {
+  if (!filter) return true;
+  if (value === '' || value == null) return filter.missing;
+  if (filter.type === 'categorical') return filter.values.includes(value);
+  if (filter.type === 'text') return value.includes(filter.text);
+  const n=Number(value);
+  return Number.isFinite(n) && n>=filter.minimum && n<=filter.maximum;
+}
+function assignedRegions(polygons, assignments) {
+  return Object.fromEntries(['home','origin','destination'].map(role=>[role,polygons[assignments[role]]?.vertices || null]));
+}
+(async function () {
+const $=id=>document.getElementById(id);
+try {
+  if (typeof L==='undefined') throw new Error('Map library could not load. Internet access is required.');
+  const bytes=Uint8Array.from(atob('__DATA__'),c=>c.charCodeAt(0));
+  const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+  const data=JSON.parse(await new Response(stream).text());
+  const map=L.map('map').setView([46.2,6.15],10);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',{
+    attribution:'Tiles &copy; Esri &mdash; Sources: Esri, HERE, Garmin, Intermap, increment P Corp., GEBCO, USGS, FAO, NPS, NRCAN, GeoBase, IGN, Kadaster NL, Ordnance Survey, METI, Esri Japan, and the GIS User Community',
+    maxZoom:19
+  }).addTo(map);
+  L.DomEvent.disableClickPropagation($('panel')); L.DomEvent.disableScrollPropagation($('panel'));
+  let regions={home:null,origin:null,destination:null};
+  const polygons={}, shapes={}, colors={home:'#277bb5',origin:'#e17a25',destination:'#269758'};
+  let vertices=null, replacing=null, polygonCounter=0, preview=null, homeIndices=[], tripIndices=[], homeTotal=0, tripTotal=0, attributeFilter=null;
+  const canvas=L.DomUtil.create('canvas','trips',map.getPanes().overlayPane), ctx=canvas.getContext('2d');
+  const modeChecks=[],purposeChecks=[],originPurposeChecks=[];
+  function choices(id, values, storage) {
+    values.forEach((value,index)=>{const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=true;check.value=index;check.onchange=select;label.append(check,document.createTextNode(' '+value));$(id).append(label);storage.push(check);});
+    ['all','none'].forEach(action=>$(id+'-'+action).onclick=()=>{storage.forEach(c=>c.checked=action==='all');select();});
+  }
+  function capped(indices) { const max=Number($('limit').value);if(!max||indices.length<=max)return indices;return Array.from({length:max},(_,i)=>indices[Math.floor(i*indices.length/max)]); }
+  function select() {
+    const selected=new Uint8Array(data.persons.length), homes=[],trips=[];
+    data.persons.forEach((p,i)=>{if(inside([p[1],p[2]],regions.home)&&attributeMatches(attributeFilter?data.personAttributes[i][attributeFilter.index]:null,attributeFilter)){selected[i]=1;homes.push(i);}});
+    data.trips.forEach((t,i)=>{if(selected[t[0]]&&modeChecks[t[5]].checked&&purposeChecks[t[6]].checked&&originPurposeChecks[t[7]].checked&&tripMatches(t,regions,$('bidirectional').checked))trips.push(i);});
+    homeTotal=homes.length;tripTotal=trips.length;homeIndices=capped(homes);tripIndices=capped(trips);
+    $('status').textContent=`Selected residents: ${homeTotal.toLocaleString()} / ${data.persons.length.toLocaleString()}\nMatching trips: ${tripTotal.toLocaleString()} / ${data.trips.length.toLocaleString()}\nDrawn homes: ${$('homes').checked?homeIndices.length.toLocaleString():0}; trips: ${$('trips').checked?tripIndices.length.toLocaleString():0}`;
+    paint();
+  }
+  function paint() {
+    const size=map.getSize(),dpr=window.devicePixelRatio||1;
+    L.DomUtil.setPosition(canvas,map.containerPointToLayerPoint([0,0]));canvas.width=size.x*dpr;canvas.height=size.y*dpr;canvas.style.width=size.x+'px';canvas.style.height=size.y+'px';ctx.setTransform(dpr,0,0,dpr,0,0);
+    const xy=(x,y)=>map.latLngToContainerPoint([y,x]);
+    if($('trips').checked){ctx.strokeStyle=$('line-color').value;ctx.globalAlpha=Number($('line-opacity').value);ctx.lineWidth=Number($('line-width').value);ctx.beginPath();tripIndices.forEach(i=>{const t=data.trips[i],a=xy(t[1],t[2]),b=xy(t[3],t[4]);ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);});ctx.stroke();ctx.globalAlpha=1;
+      for(const [offset,color] of [[1,'rgba(225,122,37,.55)'],[3,'rgba(38,151,88,.55)']]){ctx.fillStyle=color;ctx.beginPath();tripIndices.forEach(i=>{const t=data.trips[i],p=xy(t[offset],t[offset+1]);ctx.moveTo(p.x+1.5,p.y);ctx.arc(p.x,p.y,1.5,0,Math.PI*2);});ctx.fill();}}
+    if($('homes').checked){ctx.fillStyle='rgba(39,123,181,.5)';ctx.beginPath();homeIndices.forEach(i=>{const h=data.persons[i],p=xy(h[1],h[2]);ctx.moveTo(p.x+2,p.y);ctx.arc(p.x,p.y,2,0,Math.PI*2);});ctx.fill();}
+  }
+  function syncRegions(){
+    const assignments=Object.fromEntries(['home','origin','destination'].map(role=>[role,$('region-'+role).value]));
+    regions=assignedRegions(polygons,assignments);
+    Object.keys(shapes).forEach(id=>{map.removeLayer(shapes[id]);delete shapes[id];});
+    Object.entries(polygons).forEach(([id,p])=>{
+      const roles=Object.keys(assignments).filter(role=>assignments[role]===id);
+      const label=document.createElement('span');label.textContent=p.name+(roles.length?' ('+roles.join(', ')+')':'');
+      shapes[id]=L.polygon(p.vertices.map(v=>[v[1],v[0]]),{color:colors[roles[0]]||'#7e699a',fillOpacity:roles.length?.08:.025}).bindTooltip(label).addTo(map);
+    });
+    select();
+  }
+  function refreshPolygons(){
+    ['saved-polygons','region-home','region-origin','region-destination'].forEach(id=>{
+      const current=$(id).value;$(id).replaceChildren(new Option(id==='saved-polygons'?'Choose polygon':'Anywhere',''));
+      Object.entries(polygons).forEach(([key,p])=>$(id).add(new Option(p.name,key)));
+      $(id).value=polygons[current]?current:'';
+    });
+    syncRegions();
+  }
+  function stopDrawing(){vertices=null;replacing=null;if(preview)map.removeLayer(preview);preview=null;$('finish').disabled=true;$('cancel').disabled=true;map.getContainer().style.cursor='';}
+  function startDrawing(id=null){stopDrawing();vertices=[];replacing=id;$('cancel').disabled=false;map.getContainer().style.cursor='crosshair';}
+  $('draw').onclick=()=>startDrawing();
+  $('redraw').onclick=()=>{const id=$('saved-polygons').value;if(id){$('polygon-name').value=polygons[id].name;startDrawing(id);}};
+  $('cancel').onclick=stopDrawing;
+  map.on('click',e=>{if(vertices===null)return;vertices.push([e.latlng.lng,e.latlng.lat]);if(preview)map.removeLayer(preview);preview=L.polyline(vertices.map(p=>[p[1],p[0]]),{color:'#7e699a',dashArray:'5 5'}).addTo(map);$('finish').disabled=vertices.length<3;});
+  $('finish').onclick=()=>{if(!vertices||vertices.length<3)return;const id=replacing||String(++polygonCounter);polygons[id]={name:$('polygon-name').value.trim()||'Area '+id,vertices:vertices.slice()};stopDrawing();refreshPolygons();$('saved-polygons').value=id;$('polygon-name').value='';};
+  $('saved-polygons').onchange=()=>{$('polygon-name').value=polygons[$('saved-polygons').value]?.name||'';};
+  $('rename').onclick=()=>{const id=$('saved-polygons').value,name=$('polygon-name').value.trim();if(id&&name){polygons[id].name=name;refreshPolygons();}};
+  $('delete').onclick=()=>{const id=$('saved-polygons').value;if(id){stopDrawing();delete polygons[id];refreshPolygons();}};
+  ['home','origin','destination'].forEach(role=>$('region-'+role).onchange=syncRegions);
+  $('reset').onclick=()=>{stopDrawing();['home','origin','destination'].forEach(role=>$('region-'+role).value='');syncRegions();};
+  ['line-color','line-width','line-opacity'].forEach(id=>$(id).oninput=()=>{
+    $('line-width-label').textContent=$('line-width').value+' px';$('line-opacity-label').textContent=Math.round(Number($('line-opacity').value)*100)+'%';paint();
+  });
+  (data.attributes||[]).forEach((a,i)=>$('attribute').add(new Option(a.name,String(i))));
+  $('attribute').onchange=()=>{
+    attributeFilter=null;$('attribute-error').textContent='';
+    const a=(data.attributes||[])[$('attribute').value];
+    ['attribute-categories','attribute-range','attribute-text-row','attribute-missing-row'].forEach(id=>$(id).hidden=true);
+    $('attribute-categories').replaceChildren();$('attribute-text').value='';$('attribute-min').value='';$('attribute-max').value='';$('attribute-missing').checked=false;
+    $('attribute-type').textContent=a?`${a.name}: ${a.type} (detected from raw CSV values). Empty: ${a.missing}.`:'No attribute filter.';
+    if(a){$('attribute-missing-row').hidden=false;
+      if(a.type==='categorical'){$('attribute-categories').hidden=false;a.categories.forEach(value=>{const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.checked=true;input.value=value;label.append(input,document.createTextNode(' '+value));$('attribute-categories').append(label);});}
+      else if(a.type==='text')$('attribute-text-row').hidden=false;
+      else {$('attribute-range').hidden=false;$('attribute-min').placeholder=a.minimum;$('attribute-max').placeholder=a.maximum;$('attribute-type').textContent+=` Range: ${a.minimum} to ${a.maximum}.`;}
+    }
+    select();
+  };
+  $('attribute-apply').onclick=()=>{
+    const index=$('attribute').value,a=(data.attributes||[])[index];
+    if(!a){attributeFilter=null;select();return;}
+    const filter={index:Number(index),type:a.type,missing:$('attribute-missing').checked};
+    if(a.type==='categorical')filter.values=Array.from($('attribute-categories').querySelectorAll('input:checked'),i=>i.value);
+    else if(a.type==='text')filter.text=$('attribute-text').value;
+    else {filter.minimum=$('attribute-min').value===''?-Infinity:Number($('attribute-min').value);filter.maximum=$('attribute-max').value===''?Infinity:Number($('attribute-max').value);
+      if(Number.isNaN(filter.minimum)||Number.isNaN(filter.maximum)||filter.minimum>filter.maximum){$('attribute-error').textContent='Minimum must not exceed maximum.';return;}}
+    $('attribute-error').textContent='';attributeFilter=filter;select();
+  };
+  ['homes','trips','bidirectional','limit'].forEach(id=>$(id).onchange=select);
+  $('fit').onclick=()=>{if(homeIndices.length)map.fitBounds(homeIndices.map(i=>[data.persons[i][2],data.persons[i][1]]),{padding:[30,30],maxZoom:16});};
+  map.on('moveend resize zoomend',paint);
+  let hoverTimer;const tip=L.tooltip({direction:'top'});
+  map.on('mousemove',e=>{clearTimeout(hoverTimer);hoverTimer=setTimeout(()=>{if(vertices!==null||!$('homes').checked)return;let best=null,distance=49;homeIndices.forEach(i=>{const h=data.persons[i],p=map.latLngToContainerPoint([h[2],h[1]]),d=(p.x-e.containerPoint.x)**2+(p.y-e.containerPoint.y)**2;if(d<distance){distance=d;best=h;}});if(best){const label=document.createElement('span');label.textContent=`Person ${best[0]} · lon ${best[1]}, lat ${best[2]}`;tip.setLatLng([best[2],best[1]]).setContent(label).addTo(map);}else map.removeLayer(tip);},100);});
+  choices('modes',data.modes,modeChecks);choices('purposes',data.purposes,purposeChecks);choices('origin-purposes',data.originPurposes,originPurposeChecks);
+  $('source').textContent=`Source French population: ${data.sourcePersons.toLocaleString()} persons. ${data.sampled?'Deterministic person sample loaded.':'All valid residents loaded.'} Excluded: ${data.missingHomes} missing homes, ${data.missingTrips} trips with missing endpoints. Home coordinates shown in WGS84. Data is embedded locally, not uploaded.`;
+  select();$('fit').click();$('loading').hidden=true;
+} catch(error) { $('loading').textContent='Could not load explorer: '+error.message; console.error(error); }
+})();
+</script></body></html>

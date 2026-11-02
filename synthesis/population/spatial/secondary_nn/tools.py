@@ -24,10 +24,12 @@ OSM_KINDS = dict(zip(
      "cable_station", "worship", "shoreline", "riverside_path", "shore_path"],
     OSM_FEATURES,
 ))
+OVGK_CODES = {"A": 0, "B": 1, "C": 2, "D": 3, "None": 4}
+OVGK_PURPOSES = ["home", "work", "education", "shop", "leisure", "other"]
+OVGK_MEAN_FEATURES = [f"ovgk_mean_{purpose}" for purpose in OVGK_PURPOSES]
 MOBILITY_FEATURES = [
-    "driving_license", "bike_available", "pt_ga", "pt_halbtax", "pt_regional",
-    "home_ovgk_a", "home_ovgk_b", "home_ovgk_c",
-    "home_ovgk_d", "home_ovgk_none",
+    "pt_none", "pt_ga", "pt_regional", "pt_halbtax", "pt_halbtax_regional",
+    "driving_license", "bike_available", "home_ovgk",
 ]
 PASSENGER_AERIALWAYS = {
     "cable_car", "gondola", "chair_lift", "mixed_lift", "drag_lift", "t-bar",
@@ -37,17 +39,20 @@ NN_ALGORITHMS = {"nn", "neural_network", "v2", "v.2", "locations_v2"}
 
 
 def model_validation_options(context, *, folds=None, strategy=None, min_epochs=None, val_every=1):
-    """Read declared controls; independent folds select duration before a full refit."""
+    """Share the configured person-grouped validation schedule across experts."""
     strategy = context.config("secondary_nn_model_validation_strategy") if strategy is None else strategy
-    if strategy not in ("fixed", "cross_validation"):
-        raise ValueError("Model validation strategy must be fixed or cross_validation")
+    if strategy not in ("fixed", "cross_validation", "rotating_holdout"):
+        raise ValueError("Model validation strategy must be fixed, cross_validation or rotating_holdout")
     cross_validate = strategy == "cross_validation"
     return dict(
         n_val_folds=int(context.config("secondary_nn_model_validation_folds") if folds is None else folds),
         early_stopping_min_epochs=int(context.config("secondary_nn_model_min_epochs") if min_epochs is None else min_epochs),
-        cross_validate=cross_validate, validation_seed=int(context.config("random_seed")),
+        cross_validate=cross_validate, rotating_holdout=strategy == "rotating_holdout",
+        validation_rotation_epochs=int(context.config("secondary_nn_model_validation_rotation_epochs")),
+        validation_holdout_fraction=float(context.config("secondary_nn_model_validation_holdout_fraction")),
+        validation_seed=int(context.config("random_seed")),
         val_every=1 if cross_validate else int(val_every),
-        refit_full=cross_validate or not bool(context.config("secondary_nn_use_target_distance")))
+        refit_full=strategy != "rotating_holdout" and (cross_validate or not bool(context.config("secondary_nn_use_target_distance"))))
 
 
 def origin_candidate_indices(tree, origin_x, origin_y, support_mask, *, radius_m,
@@ -128,7 +133,8 @@ class DistanceDestinationSampler:
         if self.xy.shape != (len(self.facilities), 2) or not np.isfinite(self.xy).all():
             raise ValueError("Short-range facility coordinates must be finite and aligned with their pools")
 
-    def distribution(self, cells, origin_x, origin_y, target_distance, *, sigma_fraction=.1, sigma_min_m=25.):
+    def distribution(self, cells, origin_x, origin_y, target_distance, *, sigma_fraction=.1, sigma_min_m=25.,
+                     facility_weights=None):
         if (not np.isfinite([origin_x, origin_y, target_distance, sigma_fraction, sigma_min_m]).all()
                 or target_distance < 0 or sigma_fraction <= 0 or sigma_min_m <= 0):
             raise ValueError("Distance sampling needs finite coordinates, a nonnegative target and positive widths")
@@ -152,6 +158,15 @@ class DistanceDestinationSampler:
 
         relative_error = (error - error.min()) / sigma
         log_weight = -.5 * relative_error * ((error + error.min()) / sigma)
+        if facility_weights is not None:
+            facility_weights = np.asarray(facility_weights)
+            if facility_weights.shape != (len(self.facilities),):
+                raise ValueError("Facility weights must align with the distance sampler catalogue")
+            local_weights = facility_weights[indices]
+            if not np.isfinite(local_weights).all() or not (local_weights > 0).all():
+                raise ValueError("Facility weights must be finite and positive")
+            log_weight += np.log(local_weights)
+        log_weight -= log_weight.max()
         weights = np.exp(log_weight)
         return indices, weights / weights.sum()
 
@@ -473,7 +488,7 @@ def add_osm_destinations(destinations, features, municipalities, ovgk, radius_m=
 def accessibility_at_points(x, y, ovgk):
     points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x, y), crs=2056)
     matched = gpd.sjoin(points, ovgk[["ovgk", "geometry"]].to_crs(2056), how="left", predicate="intersects")
-    rank = matched.ovgk.astype("string").map({"A": 0, "B": 1, "C": 2, "D": 3}).fillna(4)
+    rank = matched.ovgk.astype("string").map(OVGK_CODES).fillna(4)
     best = rank.groupby(level=0).min().reindex(points.index, fill_value=4).astype(int)
     return np.array(["A", "B", "C", "D", "None"])[best]
 
@@ -506,7 +521,7 @@ def aggregate_osm_features(cells, features):
 def attach_candidate_features(attributes, cells):
     indexed = cells.set_index("h3_index")
     for attrs in attributes.values():
-        for column in OSM_FEATURES:
+        for column in OSM_FEATURES + OVGK_MEAN_FEATURES:
             attrs[column] = indexed.loc[attrs["children"], column].to_numpy(dtype=float)
 
 
@@ -525,7 +540,9 @@ def enrich_candidate_tensor(tensor, candidate_x, candidate_y, valid_mask, cells)
     # Scaled environmental quantities precede existing fraction features.
     from .feature_encoding import N_CANDIDATE_DYNAMIC, CANDIDATE_STATIC_SCALED_FEATURES
     insertion = N_CANDIDATE_DYNAMIC + len(CANDIDATE_STATIC_SCALED_FEATURES) - len(OSM_FEATURES)
-    return np.concatenate([tensor[:, :, :insertion], extra, tensor[:, :, insertion:]], axis=2)
+    means = np.zeros((*shape, len(OVGK_MEAN_FEATURES)))
+    means[valid_mask] = cells[OVGK_MEAN_FEATURES].to_numpy(dtype=float)[indices]
+    return np.concatenate([tensor[:, :, :insertion], extra, tensor[:, :, insertion:], means], axis=2)
 
 
 def mobility_features(persons, constants=None, survey=False, ovgk=None):
@@ -553,19 +570,20 @@ def mobility_features(persons, constants=None, survey=False, ovgk=None):
         ga = category.eq(1)
         regional = category.isin([2, 4])
         halbtax = category.isin([3, 4])
-    out["pt_ga"], out["pt_halbtax"], out["pt_regional"] = ga, halbtax, regional
+    # Encode the same five mutually exclusive subscription categories in both populations.
+
+    category = np.select([ga, regional & halbtax, regional, halbtax], [1, 4, 2, 3], default=0)
+    for index, name in enumerate(MOBILITY_FEATURES[:5]):
+        out[name] = category == index
     classes = accessibility_at_points(persons.home_x, persons.home_y, ovgk) if ovgk is not None else persons.get("ovgk", pd.Series("None", index=persons.index)).fillna("None").to_numpy()
-    for category in ["A", "B", "C", "D", "None"]:
-        out["home_ovgk_" + category.lower()] = classes == category
+    out["home_ovgk"] = encode_ovgk(classes)
     return out[MOBILITY_FEATURES].astype(np.float32)
 
 
 def training_mobility(context, frame):
-    persons = context.stage("data.microcensus.persons")
-    features = mobility_features(persons, context.stage("data.constants"), survey=True,
-                                 ovgk=context.stage("data.spatial.ovgk"))
-    features["person_id"] = persons.person_id.to_numpy()
+    features = context.stage("synthesis.population.spatial.secondary_nn.mobility")
     return frame[["person_id"]].merge(features, on="person_id", how="left", validate="many_to_one")[MOBILITY_FEATURES].to_numpy()
+
 
 
 class OriginContext:
@@ -607,7 +625,7 @@ class OriginContext:
                 values = block.sum(axis=0) if len(indices) else np.zeros(len(self.columns))
                 # Fractions are means over cells, quantities are sums.
                 for i, column in enumerate(self.columns):
-                    if column.startswith("ovgk_share_") or column in ("urban", "urban_core", "outside_fraction"):
+                    if column.startswith(("ovgk_share_", "ovgk_mean_")) or column in ("urban", "urban_core", "outside_fraction"):
                         values[i] /= max(len(indices), 1)
                 summaries.extend(values)
                 summaries.extend([len(indices), self.purpose_values[purpose][indices].sum()])
@@ -675,3 +693,51 @@ def selector_origin_context(context):
         counts[purpose] = leaves.value_counts()
     return OriginContext(levels['level_2'], radii=context.config('secondary_nn_selector_context_radii_m'),
                          purpose_counts=counts)
+
+
+def pt_destination_support(h3_data, destinations, tree, purposes):
+    """Propagate actual purpose-eligible A-D facility support through the coordinate tree."""
+    offers = [name for name in destinations if name.startswith('offers_')]
+    mapped = h3_data['destinations'][['destination_id', 'level_2']].merge(
+        destinations[['destination_id', 'ovgk', *offers]], on='destination_id', how='left', validate='one_to_one')
+    good_pt = mapped.ovgk.isin(['A', 'B', 'C', 'D']).to_numpy()
+    leaves = {base: dict.fromkeys(mapped.loc[mask & good_pt, 'level_2'].dropna(), True)
+              for base, mask in destination_offer_masks(mapped).items()}
+    middle, roots = {}, {}
+    for purpose in purposes:
+        base = base_activity_purpose(purpose)
+        middle[base] = {branch: any(leaves[base].get(leaf, False) for leaf in cells)
+                        for branches in tree.values() for branch, cells in branches.items()}
+        roots[base] = {root: any(middle[base][branch] for branch in branches)
+                       for root, branches in tree.items()}
+    return roots, middle, leaves
+
+
+def soft_pt_weights(cell_ids, support, purposes, weight):
+    """A positive array per purpose; cells with no A-D facility retain reduced mass."""
+    masks = destination_support_masks(cell_ids, support, purposes)
+    return {purpose: np.where(mask, 1., weight).astype(np.float32) for purpose, mask in masks.items()}
+
+
+def encode_ovgk(values):
+    """Encode absence/unknown coverage as 4, preserving the A-to-D ordering."""
+    return pd.Series(np.asarray(values)).astype("string").map(OVGK_CODES).fillna(4).to_numpy(dtype=np.float32)
+
+
+class AccessibilityLookup:
+    """Reuse one spatial index and exact-coordinate results for activity origins."""
+
+    def __init__(self, ovgk):
+        from shapely.strtree import STRtree
+        self.layer = ovgk.to_crs(2056)
+        self.tree = STRtree(self.layer.geometry.to_numpy())
+        self.codes = encode_ovgk(self.layer.ovgk)
+        self.cache = {}
+
+    def at(self, x, y):
+        from shapely.geometry import Point
+        key = (float(x), float(y))
+        if key not in self.cache:
+            indices = self.tree.query(Point(*key), predicate="intersects")
+            self.cache[key] = float(self.codes[indices].min()) if len(indices) else 4.
+        return self.cache[key]

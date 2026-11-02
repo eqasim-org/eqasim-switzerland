@@ -55,14 +55,15 @@ client are implementation helpers, not additional data stages.
 
 | Stage (prefix `mode_choice.`) | Output |
 | --- | --- |
-| `routing.server` | Serializable launch settings; starts Java asynchronously |
+| `routing.java.server` | Serializable launch settings; starts Java asynchronously |
 | `data.trips` | Corrected source trips as Polars, with generated `trip_id` |
 | `tours.build` | `trip_id`, `tour_index`, `mode_choice_eligible` |
 | `data.prepare` | Eligible trips with person, location and spatial features |
-| `routing.requests` | Path to the shared Java request CSV |
-| `routing.freight` | Freight/LCV requests with population person IDs |
-| `routing.preparation` | Prepared network, facility endpoints and freight endpoints; conditional on route reuse |
-| `routing.road_requests` | One mixed car/freight/LCV CSV for joint assignment |
+| `routing.java.requests` | Path to the shared Java request CSV |
+| `routing.java.freight` | Freight/LCV requests with population person IDs |
+| `routing.java.preparation` | Prepared network, facility endpoints and freight endpoints; conditional on route reuse |
+| `routing.java.weights` | Trip weights and `canton_weights.parquet` diagnostics; MARouter only |
+| `routing.java.road_requests` | One mixed car/freight/LCV CSV for joint assignment |
 | `routing_variables.car` | `trip_id`, car time and distance |
 | `routing_variables.car_passenger` | Car variables renamed for passengers; no routing call |
 | `routing_variables.pt` | `trip_id`, PT time/distance components and totals |
@@ -78,10 +79,10 @@ client are implementation helpers, not additional data stages.
 
 ```mermaid
 flowchart TD
-    server[routing.server] --> trips[data.trips]
+    server[routing.java.server] --> trips[data.trips]
     trips --> identify[tours.build]
     identify --> features[data.prepare]
-    features --> requests[routing.requests]
+    features --> requests[routing.java.requests]
     requests --> routes[routing_variables: car / pt / walk / bike]
     routes --> passenger[routing_variables.car_passenger]
     routes --> parking[costs.parking]
@@ -193,8 +194,8 @@ Walk/bike do not inherit the car backend.
 ### Macroscopic road assignment and route reuse
 
 The default `use_marouter_in_mode_choice: true` enables the incremental BPR road
-assignment in eqasim commit `74b85c14c7ae9ac7d4d4f3daf253591af76fe444`.
-`routing.road_requests` combines the eligible population's car alternatives and
+assignment in eqasim commit `ffcd5ade6a596c0f8a586cdd9de09e06fc2e3253`.
+`routing.java.road_requests` combines the eligible population's car alternatives and
 all enabled `synthesis.freight.trips` / `synthesis.lcv.trips` in **one** request.
 Every Java request starts with zero flows; splitting trucks into another request
 would lose their congestion contribution. Freight IDs match the population writer
@@ -204,9 +205,30 @@ retain only the passenger population's car rows.
 The server receives the configured `random_seed` and `input_downsampling`, so
 assignment is reproducible and capacity is scaled to the population sample once.
 It uses the existing MATSim `eqasim:vdf` settings. Recorded events are used only
-when MARouter is disabled. This assignment uses all eligible car alternatives as
-demand before mode selection; calibration reuses these routes and does not rerun
-assignment with each set of choices.
+when MARouter is disabled. `routing.java.weights` is a separate Synpp stage,
+registered only for MARouter. For each residence canton it computes:
+
+```text
+target_car_trips = eligible_trips * target_car_driver_share
+driver_weight = target_car_trips / car_available_trips
+```
+
+All eligible trips count in the numerator, including minors, people without a
+licence and households without cars. Only available drivers receive this weight.
+Non-drivers are sent as `car_passenger` probes with weight zero: they do not add
+traffic flow, but their passenger alternatives still need travel times. Car
+availability also requires at least one household car. Existing mode-share
+calibration still counts non-drivers and uses the full eligible population.
+
+Freight and LCV requests receive weight 1 because they already represent vehicle
+trips. Java multiplies weight by the vehicle PCU (cars 1, trucks normally 2).
+Weights never include `input_downsampling`; sample size scales capacity separately.
+`routing.java.weights/canton_weights.parquet` records the counts, shares and
+weights. Missing targets or positive demand without any available drivers raise
+an explicit error. Weights greater than one are allowed as vehicle-equivalent
+assignment multipliers, with a warning that the target exceeds available trips.
+Calibration reuses these weighted routes; it does not reassign roads for each ASC
+iteration. This is a target-based congestion approximation before final choices.
 
 Set `route_population_once: true` (default false) to reuse the Java itineraries:
 
@@ -217,22 +239,22 @@ route_population_once: true
 mode_choice_car_routing_backend: java
 ```
 
-`routing.preparation` runs Java's normal facility placement and freight relocation
+`routing.java.preparation` runs Java's normal facility placement and freight relocation
 before starting the server, without routing trips. It writes private prepared
-network and endpoint files. `routing.requests` joins those facility endpoints and
+network and endpoint files. `routing.java.requests` joins those facility endpoints and
 uses the population writer's whole-second departure times. Requests carry
 `person_id` and the original zero-based `trip_index`, including gaps left by trips
 excluded from mode choice. The server then starts with `--export-routes true`.
 
-In `matsim.simulation.prepare`, `routing.exports.population_routes(context)` streams
+In `matsim.simulation.prepare`, `routing.java.exports.population_routes(context)` streams
 the selected modes and truck routes into `mode_choice_routes.csv` and returns its
 path for `RunPopulationRouting --routes-path`. Upstream CSVs remain untouched.
 The combined file omits mode choice's globally unique `trip_id`: Java matches on
 `person_id` plus `trip_index`. Selected car passengers reuse the car itinerary with
 the appropriate passenger mode. Walk/bike routed in Python, excluded population
 trips, and incompatible or missing itineraries use Java's normal routing fallback.
-Java reports reuse and fallback counts. Route reuse also derives PT components
-from the saved itinerary and fare data, avoiding a second detailed PT routing pass.
+Java reports reuse and fallback counts. PT components come directly from the
+server in all cases, independently of route reuse.
 Endpoint links that forbid a requested network mode are omitted from that mode's
 request, so Java does not abort a whole batch. Missing population-mode results
 receive the normal unavailable-route times; missing truck exports fall back to
@@ -258,7 +280,7 @@ feasible mode sequence, selection reports an error identifying the person and
 tour. Duplicate or unknown routing identifiers remain errors.
 
 The server starts with `--compute-cost true` and the configured `car_cost_model`.
-`routing.config` creates a private copy of the PT routing config pointing to the
+`routing.java.config` creates a private copy of the PT routing config pointing to the
 cost parameters from `dmc.parameter_files`, preserving relative transit/pricing input paths.
 Java car and PT routing request prices together with routes, save only `trip_id` and
 `car_cost_CHF` or `pt_cost_CHF` in their stage's `cost.parquet`, and return routing
@@ -284,20 +306,15 @@ costs. This saved itinerary remains in `pt_routes.csv` and can be passed to
 The usual cost stages still read `cost.parquet`. No `savePtCostData` request or
 `--save-pt-cost-data` launch option is needed with the updated API.
 
-When `route_population_once` is false, the multimodal server supplies PT total time and
-distance and fares but not the separately weighted time/distance components
-required by DMC as separate columns. `routing_variables.pt` also calls the detailed
-PT router in this case. With route reuse enabled, it obtains in-vehicle time,
-distance, access/egress walking, transfers and transfer walking/waiting from the
-same exported itinerary instead. Both paths exclude initial waiting from transfer
-time. Totals are never substituted for in-vehicle times, and string trip IDs
-are preserved throughout routing and pricing.
-
-The supplemental router receives `detailed_pt_requests.csv` with only identifier,
-origin/destination coordinates and departure time. Home and subscription fields
-remain in the multimodal server's request CSV for pricing. Its component results
-are saved as `detailed_pt_routes.csv`, separately from the server's `pt_routes.csv`.
-The supplemental Java process reads the current `java_memory` configuration.
+Java PT routing now makes one server request. The response contains total time
+and distance, separate in-vehicle time/distance, access/egress walking, transfer
+walking/waiting, initial waiting, transfers and optional fare/itinerary data.
+`routing.java.pt` reads the numerical components directly, using minutes and km.
+Initial waiting remains separate from transfer waiting, as required by DMC.
+`route_population_once` controls itinerary reuse, not component availability.
+There is no supplemental `RunBatchPublicTransportRouter` call in Java mode-choice
+routing. Java or Python pricing remains selectable independently. Missing or
+invalid components invalidate the alternative using the normal high-time sentinel.
 
 The baseline integration was checked against commit `64b8ce08`; the canonical
 subscription and automatic itinerary interfaces follow the updated sources in
@@ -321,7 +338,7 @@ population back to Pandas at their own boundary.
 
 ## Server lifecycle and logs
 
-`routing.server` launches Java without waiting for initialization. Loading can
+`routing.java.server` launches Java without waiting for initialization. Loading can
 overlap subsequent Python stages once the mapped network and routing config exist;
 Synpp determines the dependency order. `data.trips`, feature preparation and Java
 routing ensure a live process exists even when launch settings came from Synpp's
@@ -439,11 +456,11 @@ bottleneck is separate from routing or mode-choice computation.
 
 Set `prepare_sumo: true` with the Java car backend to save road itineraries during
 normal mode-choice routing. This does not require `route_population_once` and
-does not alter mode choices. SUMO's `sumo.scenario.unrouted_demand` supplies only
-selected demand to `mode_choice.routing.sumo`, which reuses matching paths and
+does not alter mode choices. SUMO's `sumo.scenario.selected` supplies only
+original trips with exactly one endpoint in Switzerland to `sumo.routing.paths`, which reuses matching paths and
 routes missing/changed trips, including selected external/cross-border and
 commercial trips. These additional routing-only trips never enter the choice
-model. `mode_choice.routing.sumo_network` caches corresponding directed detailed
+model. `sumo.routing.network` caches corresponding directed detailed
 road geometries from the exact routing network. Both stages return Arrow paths.
 See [SUMO route reuse and border clipping](../sumo/population/README.md#road-route-reuse-and-swiss-border-demand-clipping)
 for matching keys, timing assumptions and runtime requirements.
@@ -464,3 +481,31 @@ This applies to PT, car/truck routing and SUMO's missing-route completion. It is
 independent of the server startup timeout and of the Slurm job time allocation.
 Restart the pipeline job to load a changed timeout; a running request keeps the
 value with which it started.
+
+## Routing implementations and PT pricing
+
+Backend-specific code lives under `mode_choice.routing.java`, `.python`, and `.flash`.
+The `routing_variables` stages select implementations and return the existing trip-keyed outputs.
+Common option validation and failed-route handling remain in `routing.options` and `routing.results`.
+
+| PT routing | Default PT pricing | Optional override |
+| --- | --- | --- |
+| `mode_choice_pt_routing_backend: java` | Java server, together with routing | `mode_choice_pt_price_backend: python` |
+| `mode_choice_pt_routing_backend: flash` | Python `dmc.cost.pt.estimate_simple_cost` | `mode_choice_pt_price_backend: java` |
+
+The pricing option can be omitted to use the matching default. All four combinations are supported.
+Python pricing uses the selected router's in-vehicle distance and the existing DMC subscription,
+age and regional-pass inputs. Java routing disables per-request cost computation when Python
+pricing is selected. With exported Java itineraries, PT components can still be extracted without
+fare data, using boarding times embedded in the transit-route descriptions.
+
+For FLASH with Java pricing, the shared server's `/cost` endpoint prices raw PT requests.
+Java must route these internally; the resulting Java itinerary and fare can differ from FLASH.
+This is a hybrid, with no promise of pure-FLASH speed or itinerary-equivalent Swiss prices.
+Missing/nonfinite prices invalidate the PT alternative through the normal failed-route policy.
+`costs.pt` continues reading the single `cost.parquet` owned by `routing_variables.pt`.
+
+See [FLASH setup, limitations and benchmarks](routing/flash/README.md).
+
+Renamed Synpp stages use new cache directories; routing/downstream stages can be rebuilt.
+The fitted DMC parameter stages were not renamed by this reorganization.

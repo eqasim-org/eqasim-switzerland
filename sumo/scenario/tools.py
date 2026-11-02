@@ -73,26 +73,38 @@ def filter_loading_trips(source, destination):
 
 
 def read_routes(path):
-    """Read explicit routes and finite exit times, preserving IDs and metadata."""
+    """Compatibility reader; streaming consumers should use iter_routes."""
     types, vehicles = {}, []
+    for tag, value in iter_routes(path):
+        if tag == "vType":
+            types[value.get("id")] = value
+        else:
+            vehicles.append(value)
+    return types, vehicles
+
+
+def iter_routes(path, selected_edges=None):
+    """Stream vehicles, rejecting nonregional paths before allocating timing objects."""
     for element in elements(path, ("vType", "vehicle")):
         if element.tag == "vType":
-            types[element.get("id")] = copy.deepcopy(element)
+            yield element.tag, copy.deepcopy(element)
             continue
         route = element.find("route")
         if route is None:
             raise ValueError(f"Vehicle {element.get('id')} needs a single explicit route")
         edges = route.get("edges", "").split()
+        if selected_edges is not None and not any(edge in selected_edges for edge in edges):
+            yield "outside", None
+            continue
         exits = [float(value) for value in route.get("exitTimes", "").split()]
         depart = float(element.get("depart"))
         if len(edges) != len(exits) or not edges or not all(math.isfinite(value) for value in [depart, *exits]):
             raise ValueError(f"Missing or invalid edge exitTimes for {element.get('id')}")
         if depart < 0 or any(end < start for start, end in zip([depart, *exits[:-1]], exits)):
             raise ValueError(f"Unfinished/nonmonotone edge exitTimes for {element.get('id')}")
-        vehicles.append({"attributes": dict(element.attrib), "edges": edges, "exit_times": exits,
+        yield "vehicle", {"attributes": dict(element.attrib), "edges": edges, "exit_times": exits,
                          "route_attributes": {key: value for key, value in route.attrib.items() if key not in {"edges", "exitTimes"}},
-                         "parameters": {param.get("key"): param.get("value") for param in element.findall("param")}})
-    return types, vehicles
+                         "parameters": {param.get("key"): param.get("value") for param in element.findall("param")}}
 
 
 def write_routes(path, types, vehicles):

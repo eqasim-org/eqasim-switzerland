@@ -3,6 +3,7 @@ import pandas as pd
 
 from data.statpop.multilevelipf import multilevelipf
 from data.statpop.multilevelipf.multilevelipf import FittingProblem, IPUSolver
+from data.utils import coerce_boolean_series
 import logging
 
 logger = logging.getLogger("synpp")
@@ -30,6 +31,21 @@ def _normalize_ipu_keys(df, dataset_name):
             ) from error
     return result
 
+
+def _build_problem(df, household_controls, population_controls):
+    """Fit private households and all retained residents to their own margins."""
+    df = multilevelipf.add_expansion_factor_column(df.copy())
+    # Older private-only inputs have no recovery flag. A technical singleton
+    # represents a recovered resident, not a private household in BFS statistics.
+    recovered = df.get("is_synthetic_household", pd.Series(False, index=df.index))
+    df["is_synthetic_household"] = coerce_boolean_series(recovered, name="is_synthetic_household")
+    if df.groupby("household_id")["is_synthetic_household"].nunique().gt(1).any():
+        raise ValueError("A household cannot mix private and recovered classifications")
+    group_controls = [household_controls.assign(is_synthetic_household=False)]
+    group_filters = multilevelipf.compute_group_filters(df, group_controls)
+    individual_filters = multilevelipf.compute_individual_filters(df, "household_id", [population_controls])
+    return FittingProblem(df, group_filters, "household_id", individual_filters, "person_id")
+
 def configure(context):
     context.stage("synthesis.population.models.caravailability")
     context.stage("data.statpop.projections.households")
@@ -50,7 +66,7 @@ def execute(context):
 
         scaling_year = context.config("scaling_year")
 
-        logger.info("Scaling STATPOP to year %d using IPU.", scaling_year)
+        logger.info("Scaling STATPOP to 31 December %d using IPU (2025 reference scenarios).", scaling_year)
 
         processes = context.config("threads")
         df_household_controls, hh_year = context.stage("data.statpop.projections.households")
@@ -96,22 +112,9 @@ def execute(context):
         for canton_id in context.progress(canton_ids, label="Constructing separate IPU fitting problems by canton..."):
             # select sub df
             df = df_statpop[df_statpop["canton_id"] == canton_id].copy()
-            df = multilevelipf.add_expansion_factor_column(df)
-
-            # get group controls, perform checks and convert to filters
-            group_controls = [df_household_controls[df_household_controls["canton_id"] == canton_id]]
-            group_id = "household_id"
-            assert multilevelipf.check_control_has_weight_column(group_controls)
-            group_controls = multilevelipf.compute_group_filters(df, group_controls)
-
-            # get individual controls, perform checks and convert to filters
-            individual_controls = [df_population_controls[df_population_controls["canton_id"] == canton_id]]
-            individual_id = "person_id"
-            assert multilevelipf.check_control_has_weight_column(individual_controls)
-            individual_controls = multilevelipf.compute_individual_filters(df, group_id, individual_controls)
-
-            # create fitting problem
-            problem = FittingProblem(df, group_controls, group_id, individual_controls, individual_id)
+            problem = _build_problem(df,
+                df_household_controls[df_household_controls["canton_id"] == canton_id],
+                df_population_controls[df_population_controls["canton_id"] == canton_id])
             problems.append(problem)
 
         logger.info("Constructed %d IPU fitting problems.", len(problems))
@@ -134,6 +137,8 @@ def execute(context):
                 f"IPU did not converge for {failed} of {len(convergence)} canton problems"
             )
 
+        # Worker completion order must not change IDs or the downstream sample.
+        df_households = df_households.sort_values("statpop_household_id", kind="stable").reset_index(drop=True)
         # Generate new unique ids
         logger.info("Generating new household ids.")
         df_households["household_id_new"] = np.arange(df_households.shape[0]) + 1
@@ -154,6 +159,12 @@ def execute(context):
         logger.info("Number of persons in population controls : %d", df_population_controls["weight"].sum())
         logger.info("Number of households after scaling : %d", len(df_statpop["household_id"].unique()))
         logger.info("Number of persons after scaling : %d", len(df_statpop["person_id"].unique()))
+        recovered = coerce_boolean_series(df_statpop.get(
+            "is_synthetic_household", pd.Series(False, index=df_statpop.index)), name="is_synthetic_household")
+        logger.info("Private households after scaling : %d (target %d)",
+                    df_statpop.loc[~recovered, "household_id"].nunique(), df_household_controls["weight"].sum())
+        logger.info("Recovered residents after scaling : %d; technical households excluded from the private margin.",
+                    recovered.sum())
 
     return df_statpop
 
@@ -173,43 +184,18 @@ def process(context, problem):
     )
     df_result, convergence = ipu_solver.fit(problem)
 
-    df_households = []
-
-    # Integerize by group using Bernoulli rounding of the remainder
-    for i, group_control in enumerate(problem.group_controls):
-        group_filter = group_control[1]
-
-        # Household-level rows for this group
-        df_hh_group = (
-            df_result[group_filter][["household_id", "statpop_household_id", "expansion_factor"]]
-            .drop_duplicates("household_id")
-        )
-
-        if df_hh_group.empty:
-            continue
-
-        # 1) Split weight into integer part and remainder
-        weights   = df_hh_group["expansion_factor"].to_numpy()
-        counts    = np.floor(weights).astype(int)          # integer part
-        remainders= weights - counts                       # in [0, 1)
-
-        # 2) Replicate integer part
-        idx_rep   = np.repeat(df_hh_group.index.to_numpy(), counts)
-        df_rep    = df_hh_group.loc[idx_rep]
-
-        # 3) Bernoulli add-one for the decimal part (independent per household)
-        #    Each household gets one extra copy with probability equal to its remainder.
-        u         = rng.rand(len(df_hh_group))
-        add_one   = (u < remainders).astype(int)
-        idx_add   = np.repeat(df_hh_group.index.to_numpy(), add_one)
-        df_add    = df_hh_group.loc[idx_add]
-
-        # Combine for this group
-        df_out = pd.concat([df_rep, df_add], ignore_index=True)
-        df_households.append(df_out)
-
-    # Stack groups, drop fractional weight, and assign new sequential household ids
-    df_households = pd.concat(df_households, ignore_index=True).drop(columns=["expansion_factor"])
+    # Integerize every fitted household once, including recovered singletons
+    # which have person controls but deliberately no private-household margin.
+    # Iterating group-control filters here would silently discard those residents.
+    df_hh = df_result[["household_id", "statpop_household_id", "expansion_factor"]].drop_duplicates("household_id")
+    weights = df_hh["expansion_factor"].to_numpy(dtype=float)
+    if not np.isfinite(weights).all() or (weights < 0).any():
+        raise ValueError("IPU household expansion factors must be finite and non-negative")
+    counts = np.floor(weights).astype(int)
+    remainders = weights - counts
+    df_rep = df_hh.iloc[np.repeat(np.arange(len(df_hh)), counts)]
+    df_add = df_hh.loc[rng.rand(len(df_hh)) < remainders]
+    df_households = pd.concat([df_rep, df_add], ignore_index=True).drop(columns="expansion_factor")
     # Keep original id for later joins if useful
     df_households = df_households.rename(columns={"household_id": "orig_household_id"})
     df_households["household_id"] = np.arange(1, df_households.shape[0] + 1)

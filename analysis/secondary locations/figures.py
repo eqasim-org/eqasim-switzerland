@@ -225,18 +225,22 @@ def maps(datasets, observed, predictions, regions, purposes, basemap, directory)
     outputs = []
     for city, region in regions.items():
         for purpose in purposes:
-            frames = [observed, predictions.loc[predictions.dataset == 'nn_distance'], predictions.loc[predictions.dataset == 'nn_no_distance'],
-                      datasets.get('rda', pd.DataFrame()), datasets.get('nn_distance', pd.DataFrame()), datasets.get('nn_no_distance', pd.DataFrame())]
+            frames = [observed, predictions.loc[predictions.dataset == 'rda'], predictions.loc[predictions.dataset == 'nn_distance'], predictions.loc[predictions.dataset == 'nn_no_distance'],
+                      datasets.get('survey', pd.DataFrame()), datasets.get('rda', pd.DataFrame()), datasets.get('nn_distance', pd.DataFrame()), datasets.get('nn_no_distance', pd.DataFrame())]
             if any(f.empty for f in frames): continue
             frames = [f.loc[f.purpose == purpose] for f in frames]
             grids = [density_grid(f, region['bounds']) for f in frames]
             vmax = max(float(g[0].max()) for g in grids)
             if vmax <= 0: continue
             norm = PowerNorm(gamma=.5, vmin=0, vmax=vmax)
-            fig, axes = plt.subplots(2, 3, figsize=(7.3, 6.2))
-            titles = ['Observed microcensus', 'NN · distance input', 'NN · learned selector', 'RDA', 'NN · distance input', 'NN · learned selector']
+            fig, axes = plt.subplots(2, 4, figsize=(10.2, 6.2))
+            titles = ['Observed · replay sample', 'RDA · single-leg replay', 'NN · distance input', 'NN · learned selector',
+                      'Observed · full survey', 'RDA · population', 'NN · distance input', 'NN · learned selector']
             for i,(ax,title,grid) in enumerate(zip(axes.flat,titles,grids)):
                 geographic_background(ax, region, basemap)
+                from city_centres import center_xy
+                from matplotlib.patches import Circle
+                ax.add_patch(Circle(center_xy(region),2000,fill=False,color='#245',lw=.8,ls='--',zorder=5))
                 z,xb,yb,n,visible = grid
                 image = ax.pcolormesh(xb,yb,np.ma.masked_where(z.T<=0,z.T), norm=norm, cmap='YlOrRd', alpha=.83, shading='flat', rasterized=True,zorder=3)
                 ax.set_title(f'{string.ascii_lowercase[i]}   {title}', loc='left', fontsize=8)
@@ -244,7 +248,7 @@ def maps(datasets, observed, predictions, regions, purposes, basemap, directory)
                         va='top', fontsize=6, zorder=6,bbox=dict(facecolor='white',alpha=.85,edgecolor='none',pad=2))
             fig.suptitle(f"{region['label']} · {PURPOSE_LABELS[purpose]}",fontsize=11, x=.08, ha='left')
             fig.text(.01,.73,'Same survey trips\nObserved origins',rotation=90,va='center',fontsize=8)
-            fig.text(.01,.36,'Synthetic population\nCity-origin trips',rotation=90,va='center',fontsize=8)
+            fig.text(.01,.36,'Population comparison\nSurvey + synthetic',rotation=90,va='center',fontsize=8)
             fig.subplots_adjust(left=.07,right=.99,bottom=.20,top=.91,hspace=.12,wspace=.05)
             cax=fig.add_axes([.27,.115,.48,.016])
             colorbar=fig.colorbar(image,cax=cax,orientation='horizontal')
@@ -256,7 +260,7 @@ def maps(datasets, observed, predictions, regions, purposes, basemap, directory)
             for panel_index, (title, grid) in enumerate(zip(titles, grids)):
                 z, xb, yb, _, _ = grid
                 xc, yc = np.meshgrid((xb[:-1]+xb[1:])/2, (yb[:-1]+yb[1:])/2, indexing='ij')
-                grid_tables.append(pd.DataFrame(dict(panel_id=string.ascii_lowercase[panel_index], cohort='survey_replay' if panel_index < 3 else 'synthetic_population', panel=title, x=xc.ravel(), y=yc.ravel(), destinations_per_1000=z.ravel())))
+                grid_tables.append(pd.DataFrame(dict(panel_id=string.ascii_lowercase[panel_index], cohort='survey_replay' if panel_index < 4 else 'survey_reference' if panel_index == 4 else 'synthetic_population', panel=title, x=xc.ravel(), y=yc.ravel(), destinations_per_1000=z.ravel())))
             table_directory=Path(directory).parent/'tables'
             table_directory.mkdir(exist_ok=True)
             pd.concat(grid_tables,ignore_index=True).to_csv(table_directory/(name+'_grid.csv'),index=False)
@@ -284,3 +288,23 @@ def selector_figure(trips, directory):
     for i,ax in enumerate(axes):panel(ax,string.ascii_lowercase[i])
     fig.tight_layout()
     save(fig,directory,'08_model_selection_diagnostic')
+
+
+def centre_visit_figure(table, regions, purposes, directory, cohort, name):
+    columns = ['all',*purposes]
+    fig,axes = plt.subplots(len(regions),len(columns),figsize=(10.2,5.7),squeeze=False,sharex=True,sharey=True)
+    for i,(city,region) in enumerate(regions.items()):
+        for j,purpose in enumerate(columns):
+            ax=axes[i,j]
+            subset=table.loc[(table.city==city)&(table.purpose==purpose)&(table.cohort==cohort)]
+            for method,f in subset.groupby('dataset',sort=False):
+                ax.plot(f.radius_km,100*f.share_people_visiting,color=COLORS[method],label=LABELS[method],lw=1.6)
+            ax.axvline(2,color='#888',ls=':',lw=.8)
+            ax.set(title=region['label']+' · '+('All secondary purposes' if purpose=='all' else PURPOSE_LABELS[purpose]),xlim=(0,5),ylim=(0,100))
+            if i==len(regions)-1:ax.set_xlabel('City-centre catchment radius (km)')
+            if j==0:ax.set_ylabel('People with ≥1 secondary visit (%)')
+            panel(ax,string.ascii_lowercase[i*len(columns)+j])
+    axes[0,-1].legend(fontsize=6.5)
+    fig.suptitle('City-centre visitation · '+('synthetic populations and full survey' if cohort=='population' else 'same survey people and trips'),fontsize=11)
+    fig.tight_layout(rect=(0,0,1,.96))
+    save(fig,directory,name)

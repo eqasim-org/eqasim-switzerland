@@ -1,7 +1,7 @@
 """Run the selected Java cutter; scenario assembly lives in scenario.py."""
 import os.path
 import matsim.runtime.eqasim as eqasim
-from matsim.config.tools import change_params
+from matsim.config.tools import change_params, resolve_output_file
 from .file_paths import simulation_root
 
 
@@ -32,7 +32,8 @@ def execute(context):
     
     # Read the supplied simulation or the pipeline simulation stage.
     p = simulation_root(context)
-    config_path = os.path.join(p, "simulation_output", "output_config.xml")
+    simulation_path = os.path.join(p, "simulation_output")
+    config_path = os.path.join(simulation_path, "output_config.xml")
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"Simulation output config does not exist: {config_path}")
 
@@ -42,17 +43,21 @@ def execute(context):
     # change the path of all input files to point to the output files
     # population, households, facitilies, network, transit_schedule, transit_vehicles, vehicles
     cutter_config_path = "%s/config_cutter.xml" % context.path()
+    simulation_inputs = {
+        parameter: resolve_output_file(os.path.join(simulation_path, filename))
+        for parameter, filename in {
+            "plans.inputPlansFile": "output_plans.xml",
+            "households.inputFile": "output_households.xml",
+            "facilities.inputFacilitiesFile": "output_facilities.xml",
+            "network.inputNetworkFile": "output_network.xml",
+            "transit.transitScheduleFile": "output_transitSchedule.xml",
+            "transit.vehiclesFile": "output_transitVehicles.xml",
+            "vehicles.vehiclesFile": "output_vehicles.xml",
+        }.items()
+    }
     change_params(config_path = config_path,
                   output_path = cutter_config_path,
-                  params = [
-                            # First: use the simulation results to cut the scenario
-                            ("plans.inputPlansFile", '%s/%s/output_plans.xml.gz' % (p, "simulation_output")),
-                            ("households.inputFile", '%s/%s/output_households.xml.gz' % (p, "simulation_output")),
-                            ("facilities.inputFacilitiesFile",'%s/%s/output_facilities.xml.gz' % (p, "simulation_output")),
-                            ("network.inputNetworkFile",'%s/%s/output_network.xml.gz' % (p, "simulation_output")),
-                            ("transit.transitScheduleFile", '%s/%s/output_transitSchedule.xml.gz' % (p, "simulation_output")),
-                            ("transit.vehiclesFile", '%s/%s/output_transitVehicles.xml.gz' % (p, "simulation_output")),
-                            ("vehicles.vehiclesFile", '%s/%s/output_vehicles.xml.gz' % (p, "simulation_output")),
+                  params = [*simulation_inputs.items(),
                             # Second: turn off calibration config
                             ("eqasim:calibration.activate", "false"),
                             ("eqasim:calibration.runCalibration","false"),
@@ -77,7 +82,7 @@ def execute(context):
     if version == "v1":
         main_class = "org.eqasim.core.scenario.cutter.RunScenarioCutter"
         arguments.extend([
-            "--events-path", os.path.join(p, "simulation_output", "output_events.xml.gz"),
+            "--events-path", resolve_output_file(os.path.join(simulation_path, "output_events.xml")),
             "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator",
         ])
     else:

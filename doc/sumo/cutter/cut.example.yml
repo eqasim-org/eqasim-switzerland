@@ -4,6 +4,10 @@ run:
   - sumo.cutter.scenario
 config:
   random_seed: 518745
+  threads: 24
+  input_downsampling: 1.0  # These input files already represent full demand.
+  enable_mode_choice: true
+  clip_trips_to_border_in_sumo: false  # Inputs are already restricted to the network.
   sumo_network_file: data/switzerland.net.xml.gz
   sumo_assignment_trip_files:
     - data/cars.trips.xml.gz
@@ -12,9 +16,9 @@ config:
   sumo_region_geometry: data/zurich_region.gpkg
   sumo_cutter_components: largest
   sumo_loading_method: incremental  # Default: native macro assignment, no full-network simulation.
-  sumo_assignment_iterations: 50
+  sumo_assignment_iterations: 20
   sumo_assignment_interval: 3600
   sumo_assignment_scale: 1.0
   sumo_begin: 0
-  sumo_end: 108000
-  sumo_rerouting_probability: 0  # Preserve the loaded paths in the regional run.
+  sumo_end: null # Cover all departures and let simulations finish.
+  sumo_rerouting_probability: 1  # GPS routing responds to regional congestion.

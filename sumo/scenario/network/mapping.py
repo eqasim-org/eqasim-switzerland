@@ -40,6 +40,8 @@ def build_index(network, directory, classes):
     for connection in data["connections"]:
         first, last = lookup[connection["from"]], lookup[connection["to"]]
         permission = lanes[first][int(connection["fromLane"])] & lanes[last][int(connection["toLane"])]
+        if "allow" in connection or "disallow" in connection:
+            permission &= sum(1 << index for index, name in enumerate(classes) if lane_allows(connection, name))
         if permission:
             pairs.append((first, last))
             permissions.append(permission)
@@ -183,16 +185,24 @@ class EndpointIndex:
         for index in candidates:
             line = self.shapes[index]
             fraction = line.project(point, normalized=True)
+            if not np.isfinite(fraction):
+                continue
             snap = line.interpolate(fraction, normalized=True)
             if self.region is not None and not self.region.covers(snap):
-                parts = shapely.get_parts(line.intersection(self.region))
-                parts = parts[shapely.get_type_id(parts) == 1]
+                inside = line.intersection(self.region)
+                if inside.is_empty:
+                    continue
+                parts = shapely.get_parts(inside)
+                parts = parts[(shapely.get_type_id(parts) == 1) & ~shapely.is_empty(parts)
+                              & (shapely.length(parts) > 1e-12)]
                 if not len(parts):
                     continue
                 part = min(parts, key=lambda piece: piece.distance(point))
                 snap = part.interpolate(part.project(point))
                 fraction = line.project(snap, normalized=True)
             distance = point.distance(snap)
+            if not np.isfinite([fraction, distance, self.lengths[index]]).all():
+                continue
             alignment = 1.
             if direction is not None:
                 before = np.asarray(line.interpolate(max(0., fraction-.01), normalized=True).coords[0])[:2]
@@ -200,7 +210,7 @@ class EndpointIndex:
                 heading = after-before
                 norm = np.linalg.norm(heading)
                 alignment = np.dot(direction, heading) / norm if norm > 1e-12 else 0.
-                if alignment <= 0:
+                if not np.isfinite(alignment) or alignment <= 0:
                     continue
             score = (distance + 20 * (1-alignment), self.ids[index])
             if (self.radius is None or distance <= self.radius) and (best is None or score < best[0]):
@@ -234,6 +244,8 @@ def map_trips(source, target, manifest, radius, border=None):
                             raise ValueError(f"Cannot map SUMO trip {element.get('id')}: {error}") from error
                         if matched is None:
                             continue
+                        if not np.isfinite([matched["position"], matched["distance_m"]]).all():
+                            raise ValueError(f"Nonfinite {side} position for SUMO trip {element.get('id')}")
                         if previous is not None:
                             report["repaired_endpoints"] += 1
                             if len(report["examples"]) < 20:

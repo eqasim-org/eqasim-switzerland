@@ -19,6 +19,21 @@ uv run python "analysis/secondary locations/run.py" --phase status
 uv run python "analysis/secondary locations/run.py"
 ```
 
+To provide the source configurations explicitly, use `--configs`. Include the
+RDA configuration to retain its comparison panels:
+
+```bash
+uv run python "analysis/secondary locations/run.py" --configs \
+  config_dib_10_rda.yml \
+  config_dib_10_nn_distance.yml \
+  config_dib_10_nn_no_distance.yml
+```
+
+The same arguments work with `generate_report --slurm` to submit only the
+report generation to Slurm. Supplying just the two NN configurations produces
+a comparison without RDA. The command reads completed assignment caches and
+does not rerun the population pipeline or train models.
+
 The default command prepares data, performs survey replay using saved models,
 and creates `results/report.html`, `results/findings.md`, figure captions,
 machine-readable tables, and PDF/SVG/600-dpi PNG figures. Results stay in this
@@ -374,3 +389,44 @@ counterfactual using distance-only facility sampling on identical observed origi
 purposes and draw seeds. Hierarchy predictions above 1.5 km remain identical in
 that diagnostic. The counterfactual is not a sequential synthetic rollout or an
 independent held-out evaluation.
+
+The report dependency command also accepts several successful prerequisite jobs:
+
+```bash
+"analysis/secondary locations/generate_report" --slurm --after-job DISTANCE_JOB:NO_DISTANCE_JOB
+```
+
+Replace both placeholders with numeric job IDs. Slurm starts the analysis only
+when both runs succeed. The completed NN assignment records
+`secondary_nn_no_car_no_pt_weight`; report replay uses that value, while older
+assignments default to their historical policy. The report notes that the soft
+accessibility rule is an imposed prediction rule, rather than an independently
+learned OVGK effect.
+
+## RDA survey replay and city-centre visitation
+
+The report now includes RDA alongside both NNs in the survey-map row. It reuses
+`locations_rda.process` with its calibrated mode/travel-time distance sampler,
+employee-weighted destination discretization, car-plus-licence PT mask, and
+configured detour objective. Each survey trip is a single-leg tail anchored at
+its observed origin. The reached activity keeps its observed purpose and duration;
+its observed destination is never supplied to the solver. This is a conditional
+single-leg diagnostic, distinct from full-chain population assignment with future
+primary anchors. RDA convergence is recorded in `replay_predictions.parquet`.
+The map's second row includes the full survey reference and all three synthetic
+populations. All eight panels share grid, extent and normalization.
+
+Two additional figures compare city-centre visitation for Geneva and Zürich:
+one for full synthetic populations versus the survey, and one for the common
+survey replay cohort. For all secondary purposes, shopping, and leisure, each
+curve is the weighted share of people with at least one eligible visit inside a
+catchment of 0–5 km around the configured city centre. People count once per
+purpose and draw; repeated visits do not increase their contribution. For replay,
+these person-level indicators are averaged over draws. Eligibility uses the same
+city-origin window in every method; destinations outside the map stay in the
+denominator. Centres use the original configured coordinates, without grid snapping.
+Dashed circles on maps and dotted figure lines mark a 2 km reference radius.
+`tables/city_centre_visitation.csv` exports the full radius sensitivity, and
+`findings.md` states the measured 2 km contrasts, including negative contrasts.
+These descriptive single-run figures carry no between-seed uncertainty intervals.
+The ordinary `generate_report` command produces all of these additions.

@@ -24,9 +24,10 @@ def execute(context):
     if not isinstance(osm_files,list):
         osm_files = [osm_files]
     
-    # keep only french network for now
+    # Select French extracts, which may overlap Switzerland. NetworkHandler
+    # additionally excludes Swiss/border-crossing links when assigning tolls.
     if context.config("only_french_tolls"):
-        logger.info("\t Filtering OSM files to include only French network regions...")
+        logger.info("\t Selecting French OSM extracts; Swiss links are excluded during network toll assignment...")
         files_to_keep = []
         for file in osm_files:
             french_network = ["alsace", "franche-comte", "rhone-alpes"]

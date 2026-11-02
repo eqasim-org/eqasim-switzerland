@@ -81,7 +81,7 @@ def test_context_uses_clipped_intersections_and_does_not_duplicate_boundary_poin
 
 
 def test_environmental_tensor_order_matches_saved_candidate_schema():
-    cells = gpd.GeoDataFrame({c: [i + 1, i + 2] for i, c in enumerate(tools.OSM_FEATURES)}, geometry=[box(0, 0, 1, 1), box(2, 0, 3, 1)], crs=2056)
+    cells = gpd.GeoDataFrame({c: [i + 1, i + 2] for i, c in enumerate(tools.OSM_FEATURES + tools.OVGK_MEAN_FEATURES)}, geometry=[box(0, 0, 1, 1), box(2, 0, 3, 1)], crs=2056)
     cells["centroid"] = cells.geometry.representative_point()
     tensor = np.arange(21, dtype=float)[None, None, :].repeat(2, axis=1)
     mask = np.array([[True, False]])
@@ -100,10 +100,10 @@ def test_mobility_recodes_bike_and_subscription_data_consistently():
     constants = SimpleNamespace(BIKE_AVAILABILITY_ALWAYS=0, BIKE_AVAILABILITY_SOMETIMES=1, BIKE_AVAILABILITY_NEVER=2)
     result = tools.mobility_features(persons, constants, survey=True)
     assert result.bike_available.tolist() == [1, 0]
-    assert result.pt_halbtax.tolist() == [1, 0]
-    assert result.pt_regional.tolist() == [1, 0]
+    assert result.pt_halbtax_regional.tolist() == [1, 0]
+    assert result.pt_regional.tolist() == [0, 0]
     assert result.pt_ga.tolist() == [0, 1]
-    assert result.home_ovgk_none.tolist() == [0, 1]
+    assert result.home_ovgk.tolist() == [1, 4]
 
 
 def test_energy_score_penalizes_wrong_direction_and_does_not_cancel_predictions():
@@ -241,8 +241,9 @@ def test_synthetic_subscription_categories_match_survey_priorities():
     population = pd.DataFrame(dict(pt_subscription=[0, 1, 2, 3, 4], bike_availability=1))
     out = tools.mobility_features(population)
     assert out.pt_ga.tolist() == [0, 1, 0, 0, 0]
-    assert out.pt_regional.tolist() == [0, 0, 1, 0, 1]
-    assert out.pt_halbtax.tolist() == [0, 0, 0, 1, 1]
+    assert out.pt_regional.tolist() == [0, 0, 1, 0, 0]
+    assert out.pt_halbtax.tolist() == [0, 0, 0, 1, 0]
+    assert out.pt_halbtax_regional.tolist() == [0, 0, 0, 0, 1]
 
 
 class Progress:
@@ -336,6 +337,8 @@ def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch
     context.stages.update({
         "data.constants": constants, "data.microcensus.persons": persons,
         "data.microcensus.trips": (pd.DataFrame(records), None, None, None),
+        # These leisure trips are unchanged by nonstudent education recoding.
+        "data.microcensus.secondary_trips": pd.DataFrame(records),
         "synthesis.population.destinations": destinations,
         "data.statent.statent": pd.DataFrame(dict(enterprise_id=np.arange(len(xy)), noga="93")),
         "data.spatial.swiss_border": gpd.GeoDataFrame(geometry=[box(2600000, 1200000, 2750000, 1300000)], crs=2056),
@@ -347,6 +350,8 @@ def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch
     split_stage = "synthesis.population.spatial.secondary_nn.training_split"
     training_split.configure(context)
     context.stages[split_stage] = training_split.execute(context)
+    from synthesis.population.spatial.secondary_nn import mobility
+    context.stages["synthesis.population.spatial.secondary_nn.mobility"] = mobility.execute(context)
     context.stages["synthesis.population.spatial.secondary_nn.h3"] = hierarchy.execute(context)
     seen = []
     for name in ["regional_model", "subregional_model", "local_model", "short_range_model"]:

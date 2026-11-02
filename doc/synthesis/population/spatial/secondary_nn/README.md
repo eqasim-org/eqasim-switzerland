@@ -154,8 +154,8 @@ Distance scores reward the correct radius; spatial scores additionally penalize
 wrong directions. Target distance remains an input when enabled, and the 1.5 km
 expert-routing threshold and final facility distance reweighting are preserved.
 No cross-fitting or mixture gate is scheduled for distance-conditioned models.
-All destination experts use independent validation folds for choosing their
-training duration; these are distinct from the distance-free gate's expert
+All destination experts use continuous training with rotating warm-up folds and
+a reserved person holdout. This is distinct from the distance-free gate's expert
 cross-fitting stages.
 
 Set `secondary_nn_distance_loss_kind: relative` to compare against the previous
@@ -212,36 +212,42 @@ asymmetry between equal absolute over- and under-prediction errors.
 
 ## Shared validation and minimum exploration
 
-All four destination experts, with and without target distance, and the learned
-selector default to `secondary_nn_model_validation_strategy: cross_validation`,
-`secondary_nn_model_validation_folds: 5` and
-`secondary_nn_model_min_epochs: 20`. Every fold has its own model and optimizer;
-its validation people are never in that model's training set. All fold models
-train and validate at every epoch. The stopping score pools held-out losses
-with survey weights.
+All four experts and the learned selector default to
+`secondary_nn_model_validation_strategy: rotating_holdout`. Each expert version
+trains one network with one optimizer, without a restart or final refit:
 
-The minimum is an exploration period before patience can stop training. Best
-epoch selection still includes earlier epochs: the procedure allows later
-recovery without forcing an overfitted checkpoint. Once duration is selected,
-the production model restarts from its initial weights and trains on all input
-rows for that duration. Expert cross-fitting exclusions and the selector's outer
-validation people never enter this refit. Internal five-fold validation is
-separate from `secondary_nn_crossfit_folds`, which remains three by default for
-constructing the gate's out-of-fold expert predictions.
+1. Reserve 10% of people before the first gradient update. All trips of a person
+   stay together. Reserved people never contribute training gradients.
+2. Divide the remaining 90% into five fixed person folds. During the first
+   `secondary_nn_model_min_epochs: 30` epochs, use four for training and one for
+   diagnostic validation. Randomly select a different validation fold every
+   `secondary_nn_model_validation_rotation_epochs: 3` epochs. These are ten
+   three-epoch blocks; a previous validation fold can subsequently train.
+3. From epoch 31, train on the entire development 90% and validate only on the
+   reserved 10%. Patience and best-checkpoint selection begin in this phase.
+   Restore its best checkpoint without refitting on the reserved people.
 
-The stages save fold membership in `cross_validation_folds.json`, per-fold loss
-curves in `loss_history.json`, and PNG/PDF/SVG learning curves. Checkpoints and
-regional person scalers live in their producing stage directories, so separate
-folds/configurations cannot overwrite a shared checkpoint. Feature transforms
-remain fixed during CV; the curves select network duration and do not establish
-independent full-pipeline accuracy. The outer gate validation remains untouched.
+The holdout fraction is `secondary_nn_model_validation_holdout_fraction: 0.1`.
+Warm-up validation is a diagnostic signal rather than independent validation.
+Its values are not compared with the reserved holdout to choose a checkpoint.
+Network, optimizer and scheduler state persist across rotations and the phase
+transition. Maximum epochs must exceed the warm-up period.
 
-Set the shared strategy to `fixed` to retain a permanent holdout. Optional
-`local_model_validation_folds`, `short_range_model_validation_folds`,
-`short_range_model_validation_strategy` and `short_range_model_min_epochs`
-override the shared controls; null means inherit. The maximum epochs for each
-stage must be at least its minimum exploration period. Rotating validation people
-through one continuously trained model is not used for early stopping.
+The schedule applies separately within each allowed expert training pool; it
+never admits the selector's outer validation people or an excluded cross-fitting
+fold. `secondary_nn_crossfit_folds` remains three for unbiased selector inputs.
+There are four production expert fits with distance and sixteen expert fits
+without distance, plus one selector fit, rather than 24 and 96 network fits.
+
+`cross_validation_folds.json` records reserved and rotation people;
+`loss_history.json` records the phase, validation fold per epoch, best final-phase
+checkpoint, and zero refit epochs. PNG/PDF/SVG curves mark the phase boundary.
+The seed fixes membership and rotations. Feature transforms remain fixed during
+training. The selector's outer evaluation remains separate from early stopping.
+
+Historical `cross_validation` (independent folds plus refit) and `fixed` strategies
+remain available explicitly. Local/short-range overrides still inherit the
+shared controls when null.
 
 ## Short-range origin choice sets
 
@@ -285,13 +291,13 @@ a probabilistic mixture gate rather than a cost-difference regressor.
    stages, using `secondary_nn_crossfit_fold`. For each fold, experts and their
    scalers exclude that whole fold and all outer people. Predictions for the
    excluded fold form the gate's out-of-fold development data.
-3. The normal four expert stages use all development people, including refitting
-   after epoch selection. Their predictions on outer validation people provide
+3. The normal four expert stages use development people with their own reserved
+   early-stopping holdout. Their predictions on outer validation people provide
    the untouched final evaluation. There is no permanent 30% gate reservation.
 4. The gate fits a small regularized neural network. Its normalization is fitted
    only on gate-fitting people, and stopping uses development stopping people.
-   It is then reinitialized and refitted on all out-of-fold development rows for
-   the selected epoch count. Outer outcomes are used only for final diagnostics.
+   It follows the same rotating warm-up and reserved-holdout schedule without
+   reinitialization or refitting. Outer outcomes are used only for final diagnostics.
 
 For each eligible nonstationary trip, both experts provide exact probability mass
 for the same observed coordinate leaf and ten reproducible final-facility draws.
@@ -344,8 +350,10 @@ Optional controls and defaults:
 | `secondary_nn_short_distance_loss_kind` | `relative` (distance-enabled short expert only) |
 | `secondary_nn_short_relative_underestimation_factor` | 2.0 (origin radius only) |
 | `secondary_nn_short_sampling` | `neural` |
-| `secondary_nn_model_validation_strategy` | `cross_validation` (all destination experts and selector) |
-| `secondary_nn_model_min_epochs` | 20 |
+| `secondary_nn_model_validation_strategy` | `rotating_holdout` (all destination experts and selector) |
+| `secondary_nn_model_min_epochs` | 30 |
+| `secondary_nn_model_validation_rotation_epochs` | 3 |
+| `secondary_nn_model_validation_holdout_fraction` | 0.1 |
 | `secondary_nn_model_validation_folds` | 5 |
 | `short_range_model_validation_strategy` | null (inherit shared strategy) |
 | `short_range_model_min_epochs` | null (inherit shared minimum) |
@@ -366,8 +374,7 @@ Optional controls and defaults:
 values are internal fold stages. Leave it at its default in run configurations.
 The old `selector_person_fraction`, `selector_spatial_loss_weight`,
 `selector_loss_scale_m`, `selector_min_samples_leaf` and `selector_l2` controls
-are obsolete. Three folds require four expert sets in total, plus the selected-
-epoch refits; fold checkpoints and comparisons are cached for reuse. Fold-only
+are obsolete. Three folds require four expert sets in total with no final refits; fold checkpoints and comparisons are cached for reuse. Fold-only
 models skip country-wide diagnostic maps but retain fitting histories.
 
 The local training cutoff remains 1500 m. When target distance is disabled,
@@ -466,9 +473,74 @@ auxiliary hybrid term are absent in this setting. The main relative coefficient
 is `secondary_nn_distance_loss_weight` (default 0.07).
 
 The same objective and masks apply during fold fitting, validation, early stopping
-and full-data refitting. Loss history records the multiplier and other loss
-settings. Five independent person folds and minimum 20-epoch exploration remain
-in effect. The hierarchy and distance-free short expert use their existing losses
+and checkpoint selection. Loss history records the multiplier and other loss
+settings. The shared rotating warm-up and reserved-holdout schedule applies. The hierarchy and distance-free short expert use their existing losses
 with multiplier 1; the learned selector is unchanged. A multiplier of 1 recovers
 the symmetric legacy relative loss. Historical focused loss-trial runners pin 1
 explicitly so their old labels do not silently acquire asymmetric scoring.
+
+## Prediction-time soft accessibility weights
+
+`secondary_nn_no_car_no_pt_weight` defaults to 0.05 in location assignment.
+For a person without both car availability and a driving licence, each H3
+alternative receives weight 1 if it contains a purpose-eligible facility with
+OVGK A, B, C or D, and 0.05 otherwise. Support is derived from actual facility
+offers and propagated from coordinate leaves to their middle and root nodes.
+A workplace with good PT does not establish leisure accessibility in that cell.
+The arrays align with each wrapper's candidate order, including masked padding.
+
+Prediction uses `softmax(neural_utility + log(accessibility_weight))`, equivalently
+multiplying the original choice probabilities by the positive weights and
+renormalizing. Multiplying raw utilities by 0.05 would be incorrect for negative
+utilities. The rule applies at all hierarchy levels and within the short-range
+origin neighbourhood, preserving learned attractiveness and purpose masks.
+All-no-PT choice sets retain their original relative probabilities; no destination
+is removed by this policy. Conditional normalization at each level means the
+factor specifies local choice odds, not a guaranteed global facility-odds ratio.
+
+Usable car access requires the driving-licence mobility feature as well as car
+availability. Missing licence information is treated conservatively. Car users
+with a licence retain their original probabilities. Final facility sampling uses
+the same 0.05 no-OVGK factor when usable car access is absent, including mixed
+PT/no-PT cells. Optional direct-distance short sampling applies the same positive facility
+weights across its origin neighbourhood. The detour feature and learned selector remain in place.
+
+This policy is prediction-only. Validation and expert/gate fitting retain their
+original objectives and distributions. A value of 1 disables the new cell policy
+and retains the historical within-cell 0.01 no-OVGK facility weighting. Values
+must lie in (0, 1]. Report replay reads the policy from the completed assignment;
+historical assignments lacking the option replay with value 1. Report provenance
+and interpretation notes distinguish the imposed soft rule from learned effects.
+
+## Ordered public-transport accessibility and shared preprocessing
+
+All scalar ÖVGK inputs use A=0, B=1, C=2, D=3 and no coverage=4.
+Each H3 node contains `ovgk_mean_home`, `ovgk_mean_work`,
+`ovgk_mean_education`, `ovgk_mean_shop`, `ovgk_mean_leisure` and
+`ovgk_mean_other`: arithmetic means over actual purpose-eligible facilities,
+without employee weighting. An absent purpose receives 4; the existing offer
+counts distinguish absence from poor accessibility. These inputs supplement
+class shares at all three hierarchical levels and in the origin-centred short
+expert. Original destination class labels remain available to accessibility
+masks and other pipeline consumers.
+
+Person inputs include scalar `home_ovgk`. Immediately after car availability,
+PT subscriptions use five mutually exclusive indicators: none, GA, regional,
+Halbtax, and Halbtax plus regional. Licence and bicycle availability follow.
+The shared `mobility` stage computes survey mobility and home spatial lookups
+once and is reused by production experts, cross-fitting folds and selector.
+
+Trip state includes scalar `origin_ovgk`, evaluated at the actual origin rather
+than an H3 centroid. Survey origins are joined once in `mz_chains`; prediction
+uses a shared polygon index and an exact-coordinate cache, including dynamically
+assigned preceding secondary activities. Overlapping polygons use the best
+available class consistently with home accessibility.
+
+For CRPS and projected spatial energy training losses, fixed sorted positions
+and absolute observation errors are prepared once per expert. The same tensors
+are reused throughout warm-up and reserved-holdout training.
+Sorting no longer runs in every minibatch and epoch. This trades additional
+RAM for computation; the training log records the allocated geometry size.
+The geometry cache preserves the loss and its gradients. Speedups of the score calculation do not imply the
+same speedup for the complete neural training pipeline. New feature dimensions
+require retraining all experts and the distance-free selector.

@@ -29,13 +29,26 @@ def prepare_inputs(source, cohort):
     Holding IDs fixed alone would therefore not isolate model differences.
     """
     from synthesis.population.spatial.secondary_nn import mz_chains
+    from synthesis.population.spatial.secondary_nn.chain_state import CHAIN_STATE_FEATURES
     from synthesis.population.spatial.secondary_nn.tools import MOBILITY_FEATURES, mobility_features
-    name = 'synthesis.population.spatial.secondary_nn.mz_chains'
-    chains = source.stage(name) if source.candidates(name) else mz_chains.execute(source)
-    if 'chain_state' not in chains:
-        # Reconstruct missing diagnostic features locally; never rewrite an old run cache.
-        chains = mz_chains.execute(source)
+    # Retain complete diaries of selected people, including their primary activities.
+    from types import SimpleNamespace
     survey_persons = source.stage('data.microcensus.persons')
+    survey_persons = survey_persons.loc[survey_persons.person_id.isin(cohort.person_id)].copy()
+    def selected_stage(name):
+        if name == 'data.microcensus.persons':
+            return survey_persons
+        value = source.stage(name)
+        if name == 'data.microcensus.trips':
+            return (value[0].loc[value[0].person_id.isin(cohort.person_id)].copy(),*value[1:])
+        return value
+    local_context = SimpleNamespace(stage=selected_stage)
+    name = 'synthesis.population.spatial.secondary_nn.mz_chains'
+    chains = source.stage(name) if source.candidates(name) else mz_chains.execute(local_context)
+    if ('chain_state' not in chains or
+            any(np.asarray(state).shape != (len(CHAIN_STATE_FEATURES),) for state in chains.chain_state)):
+        # Reconstruct legacy diagnostics locally without changing an upstream cache.
+        chains = mz_chains.execute(local_context)
     mobility = mobility_features(survey_persons, source.stage('data.constants'), survey=True,
                                  ovgk=source.stage('data.spatial.ovgk'))
     persons = survey_persons[[
@@ -70,7 +83,8 @@ def replay(cache, cohort, inputs, draws, seed, threads, shared_detour=None):
     context = Context()
     torch.set_num_threads(threads)
     LOG.info('Loading saved %s models for %d survey persons', cache.kind, cohort.person_id.nunique())
-    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=False)
+    wrapper = HierarchicalLocationChoiceModel.build(context, optimize=False,
+        accessibility_weight=float(cache.config('secondary_nn_no_car_no_pt_weight', 1.)))
     wrapper.assert_ready_for_prediction()
     # Inputs are prepared once from the reference survey realization. Each trip
     # starts at its observed origin; this is not a sequential rollout.

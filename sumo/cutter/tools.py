@@ -109,7 +109,7 @@ def build_network(context, source, region, keep_outside, components="largest", m
     node_root = etree.parse(str(prefix) + ".nod.xml").getroot()
     edge_root = etree.parse(str(prefix) + ".edg.xml").getroot()
     connection_root = etree.parse(str(prefix) + ".con.xml").getroot()
-    source_data = read_network(source)
+    source_data = read_network(source, context=context)
     nodes = {element.get("id"): copy.deepcopy(element) for element in node_root.findall("node")}
     edge_ids = {element.get("id") for element in edge_root.findall("edge")}
     fragments, edges, mapping = {}, {}, {}
@@ -212,7 +212,7 @@ def build_network(context, source, region, keep_outside, components="largest", m
             arguments += ["--tllogic-files", cache / "clipped.tll.xml"]
     sumo.run(context, arguments, binary="netconvert")
     desired = {(element.get("from"), element.get("to"), element.get("fromLane"), element.get("toLane")) for element in connections}
-    actual = read_network(network)
+    actual = read_network(network, context=context)
     extra = [connection for connection in actual["connections"] if
              (connection["from"], connection["to"], connection["fromLane"], connection["toLane"]) not in desired]
     if extra:
@@ -222,7 +222,7 @@ def build_network(context, source, region, keep_outside, components="largest", m
         sumo.run(context, ["-s", network, "--connection-files", cache / "delete_connections.xml", "-o", cleaned,
                            "--offset.disable-normalization", "true"], binary="netconvert")
         cleaned.replace(network)
-    final = read_network(network)
+    final = read_network(network, context=context)
     if set(final["edges"]) != set(edges):
         raise ValueError("Native rebuilding unexpectedly changed the retained edge IDs")
     if any((connection["from"], connection["to"], connection["fromLane"], connection["toLane"]) not in desired
@@ -254,7 +254,8 @@ def connected_edges(edges, connections, selected, policy):
         lanes2 = {int(lane.get("index")): lane.attrib for lane in second.findall("lane")}
         lane1 = lanes1.get(int(element.get("fromLane", "0")), first.attrib)
         lane2 = lanes2.get(int(element.get("toLane", "0")), second.attrib)
-        if any(lane_allows(lane1, vehicle_class) and lane_allows(lane2, vehicle_class) for vehicle_class in classes):
+        if any(lane_allows(lane1, vehicle_class) and lane_allows(lane2, vehicle_class)
+               and lane_allows(element.attrib, vehicle_class) for vehicle_class in classes):
             pairs.append((index[element.get("from")], index[element.get("to")]))
     components = ig.Graph(n=len(ids), edges=pairs, directed=True).connected_components(mode="weak")
     if policy == "error" and len(components) > 1:
@@ -295,42 +296,45 @@ def remap_trip_endpoints(source, mapping_file, destination):
                 writer.write(element)
 
 
-def cut_vehicle(vehicle, mapping, source_network, cut_network, transitions=None):
+def cut_vehicle(vehicle, mapping, source_network, cut_network, transitions=None, kernel=None):
     """Keep every contiguous visit, retaining entry clocks and boundary positions."""
     attributes = vehicle["attributes"]
     original_depart = float(attributes["depart"])
     pairs = transitions if transitions is not None else {(connection["from"], connection["to"]) for connection in cut_network["connections"]}
-    visits, active = [], []
-    previous_index, previous_end = -2, None
-    for index, (edge_id, exit_time) in enumerate(zip(vehicle["edges"], vehicle["exit_times"])):
-        length = source_network["edges"][edge_id]["length"]
-        lower = _position(attributes.get("departPos", "0"), length) / length if index == 0 else 0
-        upper = _position(attributes.get("arrivalPos", "max"), length) / length if index == len(vehicle["edges"]) - 1 else 1
-        entered = original_depart if index == 0 else vehicle["exit_times"][index - 1]
-        if upper < lower:
-            raise ValueError(f"Invalid endpoint positions for vehicle {attributes['id']}")
-        for piece in mapping.get(edge_id, []):
-            start, end = max(lower, piece["start"]), min(upper, piece["end"])
-            if end - start < 1e-10:
-                continue
-            denominator = max(upper - lower, 1e-12)
-            begin_time = entered + (exit_time - entered) * (start - lower) / denominator
-            end_time = entered + (exit_time - entered) * (end - lower) / denominator
-            chain = active and index == previous_index + 1 and previous_end >= 1 - 1e-9 and start <= 1e-9 and (active[-1]["id"], piece["id"]) in pairs
-            if active and not chain:
-                visits.append(active)
-                active = []
-            span = piece["end"] - piece["start"]
-            active.append({"id": piece["id"], "begin": begin_time, "end": end_time,
-                "new_entry": index > 0 or start > lower + 1e-9,
-                "new_exit": index < len(vehicle["edges"]) - 1 or end < upper - 1e-9,
-                "depart_pos": (start - piece["start"]) / span * piece["length"],
-                "arrival_pos": (end - piece["start"]) / span * piece["length"],
-                "distance": (end - start) / span * piece["length"],
-                "interpolated": start > lower + 1e-9 or end < upper - 1e-9})
-            previous_index, previous_end = index, end
-    if active:
-        visits.append(active)
+    if kernel is not None:
+        visits = kernel.visits(vehicle)
+    else:
+        visits, active = [], []
+        previous_index, previous_end = -2, None
+        for index, (edge_id, exit_time) in enumerate(zip(vehicle["edges"], vehicle["exit_times"])):
+            length = source_network["edges"][edge_id]["length"]
+            lower = _position(attributes.get("departPos", "0"), length) / length if index == 0 else 0
+            upper = _position(attributes.get("arrivalPos", "max"), length) / length if index == len(vehicle["edges"]) - 1 else 1
+            entered = original_depart if index == 0 else vehicle["exit_times"][index - 1]
+            if upper < lower:
+                raise ValueError(f"Invalid endpoint positions for vehicle {attributes['id']}")
+            for piece in mapping.get(edge_id, []):
+                start, end = max(lower, piece["start"]), min(upper, piece["end"])
+                if end - start < 1e-10:
+                    continue
+                denominator = max(upper - lower, 1e-12)
+                begin_time = entered + (exit_time - entered) * (start - lower) / denominator
+                end_time = entered + (exit_time - entered) * (end - lower) / denominator
+                chain = active and index == previous_index + 1 and previous_end >= 1 - 1e-9 and start <= 1e-9 and (active[-1]["id"], piece["id"]) in pairs
+                if active and not chain:
+                    visits.append(active)
+                    active = []
+                span = piece["end"] - piece["start"]
+                active.append({"id": piece["id"], "begin": begin_time, "end": end_time,
+                    "new_entry": index > 0 or start > lower + 1e-9,
+                    "new_exit": index < len(vehicle["edges"]) - 1 or end < upper - 1e-9,
+                    "depart_pos": (start - piece["start"]) / span * piece["length"],
+                    "arrival_pos": (end - piece["start"]) / span * piece["length"],
+                    "distance": (end - start) / span * piece["length"],
+                    "interpolated": start > lower + 1e-9 or end < upper - 1e-9})
+                previous_index, previous_end = index, end
+        if active:
+            visits.append(active)
     results = []
     for index, visit in enumerate(visits):
         attrs = dict(attributes)

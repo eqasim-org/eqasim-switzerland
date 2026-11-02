@@ -29,6 +29,10 @@ def write(context, network=None, routes=None):
     sections = simulation.sections(context, network=network, routes=routes)
     sections["time"]["step-length"] = 1
 
+    # Avoid SUMO 1.28's internal-junction lane-queue crash; retain lane permissions.
+
+    sections["processing"]["no-internal-links"] = True
+
     # Model urban spillback, lane permissions and signal-controlled junctions.
 
     sections["mesoscopic"] = {

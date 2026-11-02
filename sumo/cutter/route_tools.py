@@ -38,8 +38,10 @@ class RoutedBorderClipper:
         self.free_times = (frame["length"] / frame["freespeed"]).to_numpy()
         self.from_nodes, self.to_nodes = frame["from_node"].to_numpy(), frame["to_node"].to_numpy()
         self.permissions = np.asarray([("car" in modes, "truck" in modes) for modes in frame["modes"]])
-        self.inside = shapely.covers(self.region, self.shapes)
-        self.touches = shapely.intersects(self.region, self.shapes)
+        indexed = {"swiss_inside", "swiss_touches", "swiss_intervals"}.issubset(frame.columns)
+        self.inside = frame["swiss_inside"].to_numpy() if indexed else shapely.covers(self.region, self.shapes)
+        self.touches = frame["swiss_touches"].to_numpy() if indexed else shapely.intersects(self.region, self.shapes)
+        self.border_intervals = frame["swiss_intervals"].to_list() if indexed else None
         self.paths = read_table(routes) if paths is None else paths
         if self.paths["id"].n_unique() != self.paths.height:
             raise ValueError("Duplicate completed road routes")
@@ -82,6 +84,12 @@ class RoutedBorderClipper:
 
     @lru_cache(maxsize=None)
     def link_intervals(self, index):
+        if self.border_intervals is not None:
+            if self.inside[index]:
+                return ((0., 1.),)
+            if not self.touches[index]:
+                return ()
+            return tuple(map(tuple, json.loads(self.border_intervals[index])))
         return tuple(self.geometry.intervals(self.shapes[index]))
 
     def __call__(self, frame, defer_matching=False):
@@ -182,6 +190,7 @@ class RoutedBorderClipper:
             record = trip_record(row)
             record["parameters"]["_sumo_loads_network"] = "true" if row["loads_network"] else "false"
             element = trip_element(record)
+            etree.SubElement(element, "param", key="_sumo_population", value="true")
         else:
             element = etree.fromstring(row["xml"])
         if any(key in element.attrib for key in ("via", "viaXY", "viaLonLat")):
@@ -289,7 +298,8 @@ class SumoEndpointMatcher:
             if inside.is_empty:
                 return None
             parts = shapely.get_parts(inside)
-            parts = parts[shapely.get_type_id(parts) == 1]
+            parts = parts[(shapely.get_type_id(parts) == 1) & ~shapely.is_empty(parts)
+                          & (shapely.length(parts) > 1e-12)]
             if not len(parts):
                 return None
             closest = min(parts, key=lambda part: part.distance(point))
@@ -298,7 +308,7 @@ class SumoEndpointMatcher:
             snap, heading = endpoint(line, fraction)
         alignment = float(np.dot(wanted, heading))
         distance = float(np.linalg.norm(snap - np.asarray(point.coords[0])))
-        if alignment <= 0 or (self.distance is not None and distance > self.distance):
+        if not np.isfinite([alignment, distance, fraction]).all() or alignment <= 0 or (self.distance is not None and distance > self.distance):
             return None
         score = (distance + 20 * (1 - alignment), edge_id)
         lon, lat = self.reverse.transform(*(snap - self.offset))

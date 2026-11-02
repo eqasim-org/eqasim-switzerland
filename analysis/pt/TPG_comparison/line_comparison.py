@@ -32,11 +32,34 @@ def configure(context):
     # Rebuild the processed TPG counts from the raw ones first (analysis.pt.TPG_comparison.tpg_raw_stats_2025, ~5 GB)
     context.config("analysis.pt.tpg_rebuild_counts", default = False)
     if context.config("analysis.pt.tpg_rebuild_counts"):
-        context.stage("analysis.pt.TPG_comparison.tpg_raw_stats_2025")
+        context.stage("analysis.pt.TPG_comparison.tpg_raw_stats_%s" % context.config("analysis.pt.tpg_year"))
     context.config("analysis.pt.night_hours",               default = 5)
 
     context.config("analysis.pt.line_comparison_output_id", default = None)  # the run of output_id by default
     context.config("analysis.pt.tpg_line_comparison_lines", default = [])    # MATSim line names; empty: all the lines of the TPG data
+
+def execute(context):
+    data_path = context.config("data_path")
+    year = context.config("analysis.pt.tpg_year")
+    output_id = context.config("analysis.pt.line_comparison_output_id") or context.config("output_id")
+    simulation_path = os.path.join(context.config("output_path"), output_id, context.config("simulation_directory"))
+
+    lines = context.config("analysis.pt.tpg_line_comparison_lines")
+    if isinstance(lines, str):
+        lines = [line.strip() for line in lines.split(",") if line.strip()]
+
+    output_dir = shared.run(
+        simulation_path, read_tpg_table(os.path.join(data_path, context.config("analysis.pt.tpg_processed_counts_path")), year),
+        "%s/output" % context.path("data.gtfs.cleaned"),
+        input_downsampling = context.config("input_downsampling"), lines = lines,
+        night_hours = context.config("analysis.pt.night_hours"),
+        output_dir = os.path.join(simulation_path, f"pt_comparison_tpg_{year}"),
+        reference_name = "TPG", prefix = "tpg", elevation_path = os.path.join(data_path, shared.ELEVATION_PATH),
+    )
+
+    return dict(done = True, path = output_dir)
+
+
 
 
 def read_tpg_table(processed_dir, year):
@@ -62,26 +85,6 @@ def read_tpg_table(processed_dir, year):
     return tpg
 
 
-def execute(context):
-    data_path = context.config("data_path")
-    year = context.config("analysis.pt.tpg_year")
-    output_id = context.config("analysis.pt.line_comparison_output_id") or context.config("output_id")
-    simulation_path = os.path.join(context.config("output_path"), output_id, context.config("simulation_directory"))
-
-    lines = context.config("analysis.pt.tpg_line_comparison_lines")
-    if isinstance(lines, str):
-        lines = [line.strip() for line in lines.split(",") if line.strip()]
-
-    output_dir = shared.run(
-        simulation_path, read_tpg_table(os.path.join(data_path, context.config("analysis.pt.tpg_processed_counts_path")), year),
-        "%s/output" % context.path("data.gtfs.cleaned"),
-        input_downsampling = context.config("input_downsampling"), lines = lines,
-        night_hours = context.config("analysis.pt.night_hours"),
-        output_dir = os.path.join(simulation_path, f"pt_comparison_tpg_{year}"),
-        reference_name = "TPG", prefix = "tpg", elevation_path = os.path.join(data_path, shared.ELEVATION_PATH),
-    )
-
-    return dict(done = True, path = output_dir)
 
 
 def main(argv = None):

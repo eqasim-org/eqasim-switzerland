@@ -49,14 +49,15 @@ def execute(context):
     return settings
 
 
-def run(context, arguments=None, binary="sumo", cwd=None, catch_output=False):
+def run(context, arguments=None, binary="sumo", cwd=None, catch_output=False, executable=None):
     """Run an installed SUMO tool, raising on failure.
 
     Consumers must declare ``context.stage("sumo.runtime.sumo")`` in configure.
+    ``executable`` can select a separately cached native build.
     Return the exit code, or decoded stdout when catch_output is True.
     """
     settings = context.stage("sumo.runtime.sumo")
-    command = [str(_binary_path(settings, binary))]
+    command = [str(_binary_path(settings, binary) if executable is None else Path(executable).resolve())]
     command.extend(str(argument) for argument in (arguments or ()))
     logger.info("Executing SUMO tool: %s", command)
     result = subprocess.run(

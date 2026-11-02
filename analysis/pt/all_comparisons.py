@@ -24,6 +24,28 @@ STAGES = [
 ]
 
 
+def configure(context):
+    context.config("data_path")
+    context.config("analysis.pt.tpg_processed_counts_path", default = "Geneva_passenger_counts/TPG/processed")
+    context.config("analysis.pt.tpg_year", default = 2025)
+    context.config("analysis.pt.tpg_rebuild_counts", default = False)
+
+    if not _tpg_counts_have_directions(context):
+        logger.warning("No TPG counts per direction: the TPG line map is left out (run analysis.pt.TPG_comparison.tpg_raw_stats_2025 once)")
+    for stage in _stages(context):
+        context.stage(stage)
+
+def execute(context):
+
+    # Collect the reports produced by the configured comparison stages.
+
+    paths = {stage: context.stage(stage)["path"] for stage in _stages(context)}
+    for stage, path in paths.items():
+        logger.info("%s -> %s", stage, path)
+
+    return paths
+
+
 def _tpg_counts_have_directions(context):
     if context.config("analysis.pt.tpg_rebuild_counts"):  # written by tpg_raw_stats_2025 before the comparisons
         return True
@@ -38,21 +60,5 @@ def _stages(context):
     return [stage for stage in STAGES if stage != "analysis.pt.TPG_comparison.line_comparison"]
 
 
-def configure(context):
-    context.config("data_path")
-    context.config("analysis.pt.tpg_processed_counts_path", default = "Geneva_passenger_counts/TPG/processed")
-    context.config("analysis.pt.tpg_year", default = 2025)
-    context.config("analysis.pt.tpg_rebuild_counts", default = False)
-
-    if not _tpg_counts_have_directions(context):
-        logger.warning("No TPG counts per direction: the TPG line map is left out (run analysis.pt.TPG_comparison.tpg_raw_stats_2025 once)")
-    for stage in _stages(context):
-        context.stage(stage)
 
 
-def execute(context):
-    paths = {stage: context.stage(stage)["path"] for stage in _stages(context)}
-    for stage, path in paths.items():
-        logger.info("%s -> %s", stage, path)
-
-    return paths

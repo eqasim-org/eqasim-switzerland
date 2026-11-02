@@ -147,7 +147,16 @@ def execute(context):
     se = context.stage("data.structural_survey.raw")
     sr = context.config("input_downsampling")
 
-    df_persons = find_truck_drivers(
-        se, df_persons, sr, random_seed=context.config("random_seed"))
+    from synthesis.population.models.non_private import home_only_mask
+    held = home_only_mask(df_persons)
+    home_only = df_persons.loc[held].copy()
+    # No truck-driver classification or MZ-derived mobility attributes for the
+    # unmodelled home-only scenario. Defaults only support output serialization.
+    df_persons = find_truck_drivers(se, df_persons.loc[~held].copy(), sr,
+        random_seed=context.config("random_seed"))
+    if not home_only.empty:
+        for column in ["is_truck_driver", "is_outside_of_switzerland", "is_car_passenger", "bike_availability"]:
+            home_only[column] = False if column.startswith("is_") else 0
+        df_persons = pd.concat([df_persons, home_only], ignore_index=True)
 
     return df_persons

@@ -7,10 +7,12 @@ def configure(context):
     context.stage("matsim.simulation.prepare")
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
+
     context.config("java_memory", "50G", volatile=True)
     context.config("threads", volatile=True)
     context.config("use_vdf", False)
     context.config("use_dsim", False)
+    context.config("preventwaitingtoentertraffic", False)
 
 
 def execute(context):
@@ -33,6 +35,9 @@ def execute(context):
             "--use-dsim", "true",
             "--config:dsim.threads", str(context.config("threads"))
         ])
+
+    # Keep the explicit replanning limit even when preparation came from cache.
+    arguments.extend(["--config:global.numberOfThreads", str(context.config("threads"))])
 
     # Run the simulation with the prepared config. The main class is chosen based on the engine.
     main_class= "org.eqasim.switzerland.ch_cmdp.RunVDFSimulation" if vdf else "org.eqasim.switzerland.ch_cmdp.RunSimulation"

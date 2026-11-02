@@ -8,8 +8,8 @@ MINIMUM_AGE = 18
 # MAIN_ACTIVITY_LATEST_END: shorter stops made agents cross the border to turn back at
 # once, and night shifts brought them home after the end of the simulation. [s]
 MINIMUM_MAIN_ACTIVITY_DURATION = 30 * 60
-MAIN_ACTIVITY_EARLIEST_START = 4 * 3600
-MAIN_ACTIVITY_LATEST_END = 21 * 3600
+MAIN_ACTIVITY_EARLIEST_START   = 4 * 3600
+MAIN_ACTIVITY_LATEST_END       = 21 * 3600
 
 def configure(context):
     context.config("data_path")

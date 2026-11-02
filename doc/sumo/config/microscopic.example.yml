@@ -9,8 +9,9 @@ config:
     - data/zurich.rou.xml.gz
   sumo_additional_files: []
   sumo_begin: 0
-  sumo_end: 108000
+  sumo_end: null # Cover all departures and let simulations finish.
   sumo_micro_step_length: 0.5
   sumo_micro_action_step_length: 1.0
-  sumo_rerouting_probability: 0.0  # Default: preserve supplied paths; enable rerouting explicitly.
-  sumo_rerouting_period: 300
+  sumo_rerouting_probability: 1.0  # GPS routing enabled by default.
+  sumo_rerouting_period: 60
+  sumo_time_to_teleport: 600

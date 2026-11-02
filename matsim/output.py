@@ -1,7 +1,7 @@
 import os
 import shutil
 import glob
-from matsim.config.tools import change_params, get_regions_path
+from matsim.config.tools import change_params, get_regions_path, resolve_output_file, scenario_input_parameters
 
 def configure(context):
     context.stage("matsim.simulation.run")    
@@ -66,9 +66,10 @@ def execute(context):
     file_names.extend(glob.glob("network_calibration_files/*", root_dir=source_path))
 
     for file in file_names:
-        destination = os.path.join(target_path, file)
+        source = resolve_output_file(os.path.join(source_path, file))
+        destination = os.path.join(target_path, os.path.relpath(source, source_path))
         os.makedirs(os.path.dirname(destination), exist_ok=True)
-        shutil.copyfile(os.path.join(source_path, file), destination)
+        shutil.copyfile(source, destination)
 
     # copy the jar file
     if context.config("write_jar"):
@@ -99,7 +100,8 @@ def execute(context):
     # modify the config to remove absolute paths (to have a self contained directory of the scenario)
     change_params(config_path = config_file, 
                   output_path = config_file,
-                  params = [("eqasim:alphaCalibration.filePath","%scantonal_mode_shares.csv" % context.config("output_prefix")),
+                  params = [*scenario_input_parameters(target_path, context.config("output_prefix")).items(),
+                            ("eqasim:alphaCalibration.filePath","%scantonal_mode_shares.csv" % context.config("output_prefix")),
                             ("eqasim.modeParametersPath",dmc_params),
                             ("eqasim.costParametersPath","cost_parameters.yml"),
                             ("eqasim:networkCalibration.countsFile", "network_calibration_files/target_counts.csv"
@@ -140,7 +142,7 @@ def execute(context):
         # make sure all calibrations are deactivated
         change_params(config_path = config_file, 
                       output_path = config_file,
-                      params = [
+                      params = [*scenario_input_parameters(target_regional_model_path, context.config("extent_prefix")).items(),
                             ("eqasim:calibration.activate", "false"),
                             ("eqasim:calibration.runCalibration","false"),
                             ("eqasim:alphaCalibration.activate","false"),

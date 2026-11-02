@@ -37,6 +37,32 @@ _SCHOOL_HOLIDAYS_2025 = [
 _COUNT_COLUMNS = [("NbMontees", "boardings"), ("NbDescentes", "alightings")]
 
 
+def configure(context):
+    context.config("data_path")
+
+    context.config("analysis.pt.tpg_data",                  default = "Geneva_passenger_counts/TPG")
+    context.config("analysis.pt.tpg_raw_counts_path",       default = "Geneva_passenger_counts/TPG/raw/2025/raw_transit_data_2025.csv")
+    context.config("analysis.pt.tpg_processed_counts_path", default = "Geneva_passenger_counts/TPG/processed")
+
+def execute(context):
+    data_path = context.config("data_path")
+    out_dir   = os.path.join(data_path, context.config("analysis.pt.tpg_processed_counts_path"))
+
+    result, by_direction = aggregate_workday_stats(
+        os.path.join(data_path, context.config("analysis.pt.tpg_raw_counts_path")),
+        os.path.join(data_path, context.config("analysis.pt.tpg_data")),
+    )
+
+    # the comparison reads the latest tpg2025_agg_workday_<date>.csv of the folder, the line comparison the latest
+    # tpg2025_agg_workday_<date>_by_direction.csv
+    path = os.path.join(out_dir, f"tpg2025_agg_workday_{datetime.date.today():%Y%m%d}.csv")
+    result.to_csv(path, index = False)
+    by_direction.to_csv(path.replace(".csv", "_by_direction.csv"), index = False)
+    print(f"Wrote {path} ({result.shape[0]} rows) and its _by_direction version ({by_direction.shape[0]} rows)")
+
+    return dict(done = True, path = path)
+
+
 def aggregate_workday_stats(raw_counts_path, tpg_data_path,
                              bank_holidays = _BANK_HOLIDAYS_2025, school_holidays = ()):
     """Returns (stats per stop, line and hour, the same per stop, line, direction and hour). The raw counts have no
@@ -136,31 +162,8 @@ def _aggregate(raw, line_column):
     return out
 
 
-def configure(context):
-    context.config("data_path")
-
-    context.config("analysis.pt.tpg_data",                  default = "Geneva_passenger_counts/TPG")
-    context.config("analysis.pt.tpg_raw_counts_path",       default = "Geneva_passenger_counts/TPG/raw/2025/raw_transit_data_2025.csv")
-    context.config("analysis.pt.tpg_processed_counts_path", default = "Geneva_passenger_counts/TPG/processed")
 
 
-def execute(context):
-    data_path = context.config("data_path")
-    out_dir   = os.path.join(data_path, context.config("analysis.pt.tpg_processed_counts_path"))
-
-    result, by_direction = aggregate_workday_stats(
-        os.path.join(data_path, context.config("analysis.pt.tpg_raw_counts_path")),
-        os.path.join(data_path, context.config("analysis.pt.tpg_data")),
-    )
-
-    # the comparison reads the latest tpg2025_agg_workday_<date>.csv of the folder, the line comparison the latest
-    # tpg2025_agg_workday_<date>_by_direction.csv
-    path = os.path.join(out_dir, f"tpg2025_agg_workday_{datetime.date.today():%Y%m%d}.csv")
-    result.to_csv(path, index = False)
-    by_direction.to_csv(path.replace(".csv", "_by_direction.csv"), index = False)
-    print(f"Wrote {path} ({result.shape[0]} rows) and its _by_direction version ({by_direction.shape[0]} rows)")
-
-    return dict(done = True, path = path)
 
 
 def main():

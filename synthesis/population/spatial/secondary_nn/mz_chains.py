@@ -2,10 +2,12 @@ import numpy as np
 import pandas as pd
 from .hierarchical_utils import encode_purpose
 from .chain_state import survey_chain_states
+from .tools import accessibility_at_points, encode_ovgk
 
 def configure(context):
+    context.stage("data.spatial.ovgk")
     context.stage("data.microcensus.persons")
-    context.stage("data.microcensus.trips")
+    context.stage("data.microcensus.secondary_trips")
 
 
 def execute(context):
@@ -13,7 +15,8 @@ def execute(context):
     # Load observed diaries and primary-location attributes.
 
     persons = context.stage("data.microcensus.persons")[["person_id", "home_x", "home_y", "work_x", "work_y"]]
-    trips = context.stage("data.microcensus.trips")[0].copy()
+    # Encode the same purpose grouping used by synthetic secondary visits.
+    trips = context.stage("data.microcensus.secondary_trips").copy()
 
     trips = trips.merge(persons, on="person_id", how="left")
 
@@ -85,6 +88,8 @@ def execute(context):
     
     # Build remaining plan state using only known primary anchors.
 
+    trips_sorted["origin_ovgk"] = encode_ovgk(accessibility_at_points(
+        trips_sorted.origin_x, trips_sorted.origin_y, context.stage("data.spatial.ovgk")))
     trips_sorted["chain_state"] = survey_chain_states(trips_sorted)
 
     # target distances
