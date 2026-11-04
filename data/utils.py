@@ -158,3 +158,16 @@ def read_csv(context, fp, fields, renames=None, sep=";", total=None, encoding="l
     ]
 
     return pd.DataFrame.from_records(data, columns=columns)
+
+
+def binary_code_series(values, *, name=None):
+    """Return numeric 0/1 codes, accepting legacy numeric strings and rejecting missing/invalid values."""
+    series = values if isinstance(values, pd.Series) else pd.Series(values)
+    field = name or series.name or "binary code"
+    try:
+        numeric = pd.to_numeric(series, errors="raise")
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{field} must contain only 0 or 1") from error
+    if not numeric.isin([0, 1]).all():
+        raise ValueError(f"{field} must contain only nonmissing 0 or 1")
+    return numeric.astype("int8")

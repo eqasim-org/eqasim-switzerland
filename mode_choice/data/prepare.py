@@ -5,6 +5,7 @@ unique destinations, using the same density and PT-quality helpers as estimation
 """
 import geopandas as gpd
 import polars as pl
+from data.utils import binary_code_series
 from dmc.constants import constants
 from mode_choice import defaults as D
 from dmc.parameters import Parameters
@@ -94,7 +95,9 @@ def prepare_persons(persons, c, p, cantons):
     columns = ["person_id", "age", "sex", "income_class", "household_size", "N_children_under_12",
                "N_children_under_18", "number_of_cars_class", "driving_license", "car_availability",
                "bike_availability", "ovgk", "canton_id", "home_x", "home_y", "pt_subscription"]
-    df = pl.from_pandas(persons[columns]).with_columns(
+    selected = persons[columns].copy()
+    selected["car_availability"] = binary_code_series(selected["car_availability"])
+    df = pl.from_pandas(selected).with_columns(
         pl.col("number_of_cars_class").cast(pl.Float64),
         pl.col("driving_license").cast(pl.Int64).eq(1),
         pl.col("car_availability").cast(pl.Int64),

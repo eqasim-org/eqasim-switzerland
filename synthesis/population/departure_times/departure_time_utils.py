@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+from data.utils import binary_code_series
 from .routing_cache import route_trips
 from dmc.parameters import Parameters
 import logging
@@ -51,7 +52,7 @@ def get_variation_window_min(context, df_trips):
     df = df_trips[["person_id","euclidean_distance"]].merge(car_avail, on="person_id", how="left")
 
     euclidean_distances_km = (df["euclidean_distance"] / 1000).values
-    car_availability = df["car_availability"].fillna(False).astype(bool).values
+    car_availability = binary_code_series(df["car_availability"].fillna(0)).eq(1).to_numpy()
     car_availability_additional_range = 5  # if car is available, we add 5 minutes to the variation window
 
     # Get the variation window for each trip based on the distance
@@ -172,7 +173,8 @@ def find_best_departure_times(context, df, original_departures):
     best_departure_times = df.loc[df.groupby(['person_id', 'trip_index'])['utility'].idxmax()][["person_id", "trip_index", "departure_time", "initial_waiting_time_min"]].copy()
 
     # For people without car availability, we advance the departure by the initial waiting time - noise
-    car_availability = context.stage("synthesis.population.enriched")[["person_id", "car_availability"]]
+    car_availability = context.stage("synthesis.population.enriched")[["person_id", "car_availability"]].copy()
+    car_availability["car_availability"] = binary_code_series(car_availability["car_availability"])
 
     best_departure_times["person_id"] = best_departure_times["person_id"].astype(car_availability["person_id"].dtype)
     best_departure_times = best_departure_times.merge(car_availability, on="person_id", how="left")
