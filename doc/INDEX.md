@@ -38,6 +38,9 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Bus route corrections using GTFS shapes](matsim/scenario/network/pt_route_corrections.md)
 - [Road-user map and activity-purpose shares](analysis/counts/road_users/README.md)
 - [Cross-border survey entries and through-trip exits](data/cross_border/README.md)
+- [Early cross-border assignment analysis](analysis/cross_border_assignment.md)
+- [Count-guided crossing assignment](data/cross_border/README.md#count-guided-physical-crossing-shares)
+- [Group O count-share allocation experiment](analysis/cross_border_count_share_trial.md)
 - [French population and trip explorer](analysis/french_activities.md)
 - [Secondary-location behavior comparison](<analysis/secondary locations/README.md>)
 

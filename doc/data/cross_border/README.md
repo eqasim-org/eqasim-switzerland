@@ -18,11 +18,22 @@ in use. The Swiss reference pool retains its existing within-group eligibility.
 PT continues to use its original importance/gateway rules.
 
 The capacity comes from the final `matsim.scenario.network.pt` road network,
-before artificial border terminals are added. MATSim's link capacity is already
+before artificial border terminals are added. The `crossBorderSelectionCapacity`
+link attribute preserves capacity before the sampling-dependent short-link
+uplift in `matsim.scenario.network.convert_osm`. Road-class bounds, manual limits
+and the configured reduction outside the modelled region still apply. Simulation
+capacity remains unchanged. This prevents shorter links or smaller population
+samples from receiving larger crossing-selection weights. MATSim's capacity is already
 for all lanes: **do not multiply it by `permlanes` again**. Since the road survey
 observes inbound traffic, the selection weight uses the inbound capacity, not
 the sum of entry and exit capacities. This is an attractiveness assumption,
 not a measured traffic share or a hard traffic quota.
+
+Rebuild from `matsim.scenario.network.convert_osm` when adopting this change;
+existing cached networks do not contain the preserved attribute. The updated
+stage source invalidates its cache under Synpp's normal code-change checks.
+Older/unmodified networks fall back to link capacity with a warning. No new
+configuration option is required.
 
 Before applying these weights, the directional matcher identifies the road under
 the reference point from detailed geometry. It looks for an anchor within 100 m,
@@ -45,6 +56,15 @@ divided over its eligible aliases, so extra reference points cannot gain extra
 traffic. Different interview groups are never combined. If a group's capacity
 is missing or invalid, that entire group uses importance-only weights and emits
 a warning; all-zero importance uses equal physical-road weights.
+
+Foreign road crossing eligibility uses `ROAD_DETOUR_FACTOR = 1.2` in
+`data.cross_border.generate_od`: the straight-line origin–crossing–destination
+distance may be up to 20% above the shortest alternative. This applies across
+interview groups, both when assigning survey records and when projecting distant
+endpoints after expansion. Capacity × importance weights are unchanged. PT keeps
+its 1.2 factor, and the Swiss reference-pool selection rule is unchanged.
+For groups with complete count references, the joint assignment below supersedes
+this initial road draw using a Swiss travel-time limit instead of a distance ratio.
 
 The stage writes:
 
@@ -99,6 +119,62 @@ above nine; above two for motorcycles) are sampled from valid 2021 peers of the
 same vehicle type and, when supported, purpose, using the configured seed and
 original 2021 vehicle weights. This only repairs passenger expansion. It never
 changes a vehicle weight or removes its driver.
+
+### Optional manual car targets
+
+`cross_border_car_crossing_targets` defaults to `null` (no overrides); an empty
+mapping `{}` also disables it. To replace a
+survey control with a more recent car count, add a mapping under `config`:
+
+```yaml
+cross_border_car_crossing_targets:
+    "Vallorbe (544)": 18600
+```
+
+Keys are exact **2021 road-border `BEFRAGUNGSORT` names**, not GeoPackage FIDs,
+BCP point IDs or exit codes. Values are positive finite **full-population car
+crossings per modelled day, both directions combined**, before downsampling.
+The count must represent the configured `specific_day_scenario`: a weekday
+count is not automatically converted to a weekend count. A grouped interview
+place controls the whole group, not one of its individual roads. Unknown names,
+non-road names and missing/zero 2015 controls are rejected.
+
+`data.cross_border.car_targets` reads the unmodified raw 2015 vehicle weights
+and the 2021 interview-place names. It computes a common multiplier:
+
+```
+requested daily crossings / (2 × combined Swiss and foreign 2015 daily entries)
+```
+
+Each OD stage replaces its own car target with its 2015 residence-group share
+of the requested total. This preserves the Swiss/foreign reference proportions
+and the 2021 conditional journey mix within each residence group. Both stages
+use the same multiplier; neither receives the full requested total separately.
+Manual controls apply even when local sample sizes are below the usual support
+threshold (with a warning), but fail if a positive residence-group target has no
+2021 support. Other interview places retain their previous calibration, including
+their residual-pool factors. Original survey files and weights in the reference
+ledger are not overwritten.
+
+Only the existing `car` category is controlled; it includes motorcycles. Driver
+weights determine vehicle demand. Their passenger population follows the existing
+occupancy expansion, so this does not freeze car-passenger numbers. Rail, coach
+and separately generated freight/LCV demand are not rescaled.
+
+This is a **survey-demand control, not an exact final road-link quota**. Sampling,
+unsupported journey categories, geographic exclusions, transit exits, route
+choices and ordinary Swiss/French travellers can change the final traffic count.
+An exclusion polygon is still honoured; an override does not compensate for a
+separately modelled external population. No automatic subtraction of that traffic
+from the manual target is performed. Validate the resulting prepared routes or
+simulation events after rebuilding through `matsim.simulation.prepare`.
+
+The target stage writes `car_crossing_targets.csv` with the original combined
+benchmark, requested count and multiplier. Each OD stage's existing
+`vehicle_calibration.csv` retains `entries_2015` and adds `target_entries`,
+`manual_override_factor` and `requested_both_directions`; overridden rows have
+`calibration_source=manual_interview_group_vehicle`. Remove the mapping to restore
+the ordinary survey controls.
 
 ## Sampling the foreign population
 
@@ -222,13 +298,36 @@ The original OD IDs and directional facility IDs are reused, so event expansion
 does not duplicate the facility inventory. New matched attributes are
 `border_crossing_direction` and `border_interview_place`.
 
-Overlap prevention remains based on residence: the foreign survey reader
-excludes Swiss residents; the Swiss model removes residents and reference
-origins inside `cross_border_exclude_shapefiles`, which are covered by the
-external population. The polygon exclusion in both the foreign generator and
-the Swiss model is applied only when `include_external_population: true`.
-With `false`, retain the configured polygon if reusing a network cache: it
-does not remove survey demand, Swiss training observations or event targets.
+Overlap prevention differs by population:
+
+- The foreign generator retains its existing residence-based exclusion in
+  `cross_border_exclude_shapefiles` when external population is enabled.
+- The Swiss model removes **survey journeys only when both their Swiss endpoint
+  and foreign endpoint lie inside that region**. It no longer excludes residents
+  or MZ training respondents just because their home lies inside MMT. Swiss
+  residents inside MMT remain eligible for journeys to destinations outside it.
+- The Swiss survey stage now retains `foreign_x` / `foreign_y` in EPSG:2056,
+  separately from `origin_x` / `origin_y` and the modelled border activity.
+  The country/crossing proxies used for routing do not establish overlap:
+  uncertain/nonfinite endpoints are retained and flagged. Reported coordinates
+  and municipality/NUTS-derived coordinates follow the existing location-source
+  convention.
+
+The polygon exclusion is active only when `include_external_population: true`.
+With `false`, it does not remove survey demand or event targets. The Swiss
+person-level MZ model supplies crossing propensity; with spatial calibration
+(the default), the retained survey journeys determine the residual event quotas.
+This implements the scenario assumption that ordinary assignment handles Swiss
+journeys whose two endpoints are inside MMT; it does not independently measure
+how many such journeys ordinary assignment actually produces.
+
+`journey_overlap.csv` in the Swiss cross-border model cache counts references by
+interview place, mode and exclusion/retention reason. `crossing_event_scope.csv`
+continues to show directional targets before and after the filter. No new
+configuration parameter or input file is needed. The Swiss survey stage must be
+rebuilt to add the foreign-coordinate fields; normal dependency invalidation
+propagates the change through the model and count-guided allocation.
+
 Changing the polygon itself can still invalidate network/geography stages
 because they also declare this setting. MZ border-crossing donors are excluded from ordinary
 matching. Incidental crossings of domestic routes are not another explicitly
@@ -840,3 +939,115 @@ both survey readers already map business trips and commuting to work.
 This replaces the former mode-loop age threshold, which inadvertently required
 age strictly greater than 18 for every mode. It does not alter the ordinary
 Swiss population's donor matching.
+
+
+## Count-guided physical crossing shares
+
+`data.cross_border.count_assignment` combines full foreign/transit demand with
+**actual assigned Swiss residents** immediately after the Swiss cross-border
+model. It returns compact point overrides, which are consumed by foreign
+sampling/network projection, Swiss downstream models, facility creation and the
+early analysis. It does not change the original survey weights, interview-group
+totals, category totals, trip purposes, person IDs or domestic destinations.
+Swiss donor IDs receive a point-qualified facility alias when reassigned, retaining
+the original donor ID in the override audit. This prevents one shared donor's
+entry/exit facilities from being located at different crossings.
+
+Configuration (under `config`):
+
+- `cross_border_count_assignment`: **true** by default; set **false** for the
+  former capacity × importance allocation and general 1.2 road eligibility.
+  Joint allocation is active only with `include_cross_border: true` and currently
+  requires `census: statpop` (disable it for other census producers).
+- `cross_border_assignment_counts_file`: **null** by default; use
+  `<cross_border_reference_path>/traffic_count_references.json`, with the usual
+  `<data_path>/crossborder` reference-directory fallback. A supplied relative
+  path resolves under `data_path`. This file is shared with the early analysis.
+  A missing default file leaves assignment unchanged; an explicitly configured
+  missing file raises an error.
+
+- `cross_border_count_max_extra_minutes`: **30** by default; maximum permitted
+  extra Swiss free-flow travel time relative to the fastest eligible crossing.
+  The initial allowance remains 20 minutes. Values must be finite and at least
+  20; setting 20 disables expansion and raises a conflict if exact shares cannot
+  be met. This is a common ceiling, not a Group O-specific adjustment.
+
+A JSON record needs `fid`, LV95 reference-point `x`/`y`, and positive `low`;
+`high` is optional and defaults to `low`. Keep `name`, `period`, `day_type`,
+`vehicle_scope`, `source_url` and methodological notes for provenance. Coordinates
+must match the active crossing within 50 m. Only groups with references for
+**every canonical physical entry candidate** are calibrated. Missing groups,
+incomplete groups, single-choice groups and noncanonical reference FIDs are
+reported and keep their existing assignments. Counts for aliases must not be
+added twice. Update the reference file when moving points or changing which
+alias is canonical; invalid coordinates/ranges fail validation.
+
+The midpoint of each count range supplies its share within the group. Shares
+are normalized to the existing number of modelled car crossings, **not used as
+absolute traffic totals**. Observed counts may include freight/ordinary traffic
+or different observation periods. They therefore guide the distribution of the
+survey-derived car cohort rather than justify changing its population size.
+Visitors contribute two crossings, Swiss residents one directional event, and
+transit one entry plus any uniquely located reported exit. Known transit exits
+reserve capacity first and never move. Transit with unlocated/ambiguous exits
+keeps its entry. Passengers do not contribute vehicles; they use the fitted
+attractiveness and the same geographic constraints. The source has no persistent
+vehicle pairing, so this does not create joint driver/passenger vehicles.
+
+Directed shortest paths use Swiss roads only and free-flow times. Each choice
+starts within **20 extra Swiss minutes** of the fastest eligible group crossing;
+returning visitors must satisfy this in each direction. A transit's reported
+exit is excluded from entry alternatives before defining the fastest route.
+Cost also includes foreign straight-line access at 60 km/h, with a **5-minute**
+entropy scale. These are documented modelling assumptions, not extra tuned
+per-site settings. The 1.2 straight-line factor and importance/capacity weights
+are not applied again inside this calibrated choice set.
+
+Count margins remain **exact expected targets**. If they are infeasible at 20
+minutes, the allocator finds the smallest feasible whole-minute allowance, up to
+`cross_border_count_max_extra_minutes`. A fractional configured ceiling is tried
+as a final step without rounding it upward. Feasibility checks reuse the computed
+road costs; no additional shortest-path queries are required. Prohibited transit
+entry/exit combinations remain prohibited at every allowance.
+
+There is **no production soft-count fallback**. If no feasible allocation exists
+within the ceiling, fixed crossings already exceed a target, or the exact solve
+misses a margin by more than 0.1 crossings, the stage stops with an explicit
+`count_assignment_conflict` in `groups.csv`. It does not silently restore the
+old allocation. Review the counts, fixed demand and geographic constraints before
+changing the ceiling. The offline experiment still supports soft fits for
+comparison, but production never selects them.
+
+Unsupported endpoints (more than 5 km from the connected Swiss road component)
+stay fixed and reserve their existing counts. A crossing lacking a connected
+Swiss anchor within 1 km stops its calibrated group with a diagnostic. The graph
+uses the largest strongly connected Swiss component; isolated regions need
+further routing treatment and are not silently joined across the border.
+Passenger-only ODs do not force a larger driver allowance; passengers without
+support within the selected allowance retain their current crossing.
+
+`groups.csv` reports the selected allowance, number of feasibility checks and
+expected share of movable crossings beyond 20 extra minutes. Status is
+`exact_shares` at 20 minutes or `exact_shares_expanded_geography` above it.
+`crossing_counts.csv` adds expected/assigned crossings beyond 20 minutes per
+site, and `person_assignments.csv` retains each selected extra time. The early
+map/report explicitly displays the allowance and expanded-range share too.
+
+Whole people/tours are drawn with `random_seed`; integer counts fluctuate around
+expected margins. Later population scaling, sampling, exclusions and MATSim route
+repair can change actual site totals. The existing preparation repair still
+checks invalid routes and may override a crossing; it is not disabled to force
+a count fit. Final routed counts remain a separate validation step.
+
+Stage-cache diagnostics:
+
+- `groups.csv`: exact/expanded/unchanged/conflict status, geographic allowance, fixed demand and margin residuals;
+- `crossing_counts.csv`: reference, normalized target, expected and assigned
+  counts, original allocation, fixed entries and known exits;
+- `road_anchors.csv`: small snaps to the connected Swiss road component;
+- `person_assignments.csv`: local ID/provenance audit of supported assignments.
+
+Run `analysis.cross_border.assignment` to inspect the resulting full-demand map
+and tables without licence/car models or MATSim preparation. Its dependency graph
+adds only this joint stage to the previous early-analysis graph. The road graph
+is loaded once; routing scales with crossing choices, not with expanded people.
