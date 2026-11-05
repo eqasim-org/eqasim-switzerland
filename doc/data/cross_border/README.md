@@ -924,10 +924,10 @@ change donor eligibility or PT routing utility coefficients.
 `data.cross_border.match_activity_chain` draws MZ donors aged **18 or older** for
 all purposes and modes. Eligible home-X-home chains must have at least **30
 minutes** between arrival from the first trip and departure on the second trip.
-There is **no clock-time window**: activities starting before 04:00 or ending
-after 21:00 remain eligible. Missing or negative main-activity durations fail the
-duration check. These are donor eligibility rules; downstream travel-time
-adjustments remain unchanged.
+That main activity must start **at or after 04:00** and end **at or before
+21:00**. Missing or negative main-activity durations fail the duration check.
+These are donor eligibility rules; downstream travel-time adjustments remain
+unchanged.
 
 Selection still matches survey purpose, transport mode on both trips and the
 configured scenario day. Shopping accepts home-shop-home and home-other-home.
