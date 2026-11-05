@@ -25,6 +25,10 @@ TRAIN_CATEGORIES = {"1": "long_distance", "2": "regional"}
 # (real end -> gateway -> other end) is at most this factor times the smallest one
 GATEWAY_DETOUR_FACTOR = 1.2
 
+# Road alternatives may add up to 20% to the shortest straight-line journey
+# via a crossing. Use the same threshold before and after agent expansion.
+ROAD_DETOUR_FACTOR = 1.2
+
 
 def configure(context):
     context.config("data_path")
@@ -37,6 +41,7 @@ def configure(context):
     context.stage("data.cross_border.road_exit_points")
     context.stage("data.cross_border.interview_places")
     context.stage("data.cross_border.road_candidates")
+    context.stage("data.cross_border.car_targets")
     context.stage("data.cross_border.pt_gateways")
 
     context.config("border_offset", default = 50000)
@@ -57,7 +62,8 @@ def execute(context):
     # Use vehicle controls before location or model-region exclusions. Occupancy
     # affects passengers only; it cannot change the number of generated drivers.
 
-    borders, calibration = calibrate_demand(borders2015, borders2021)
+    borders, calibration = calibrate_demand(
+        borders2015, borders2021, context.stage("data.cross_border.car_targets"))
     borders = repair_car_occupancy(borders, rng)
     write_survey_audit(context, borders2015, borders, calibration)
     borders = borders.loc[borders["location_usable"]].copy()
@@ -304,7 +310,7 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     # place instead of using their own (real, but far away) coordinate - same
     # distance and capacity × importance selection as read_2021_data.sample_point, minimizing
     # the origin->crossing->destination detour and drawing (capacity × importance)
-    # among the candidates within 20% of that minimum. This is independently
+    # among road candidates within 20% of that minimum (also 20% for PT). This is independently
     # re-drawn here rather than reusing sample_point's own pick: this function
     # runs after expand_and_sample/sample_rows_by_weight, so the several expanded
     # copies of one respondent (occupants, weight duplicates) can each land on a
@@ -353,7 +359,8 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
         else:
             total_dist = candidates["geometry"].apply(lambda g: row["geometry"].distance(g))
 
-        eligible = candidates[total_dist <= total_dist.min() * 1.2]
+        factor = ROAD_DETOUR_FACTOR if row["label"] == "road" else GATEWAY_DETOUR_FACTOR
+        eligible = candidates[total_dist <= total_dist.min() * factor]
 
         weights = crossing_sampling_weights(eligible)
         if not np.isfinite(weights).all() or weights.sum() <= 0:
@@ -849,10 +856,11 @@ def read_2021_data(context):
         candidates = grouped_points.get((row["interview_place"], label))
         if candidates is not None and "importance" in candidates.columns:
             # Minimize the detour through the crossing (origin -> point -> destination),
-            # then draw capacity × importance-weighted among the candidates within 20% of that
-            # minimum (the minimizing candidate is always included).
+            # Draw capacity × importance-weighted among road candidates within
+            # 20% of that minimum, as for PT. Always include the minimum.
             total_dist = candidates["geometry"].apply(lambda g: origin.distance(g) + destination.distance(g))
-            eligible   = candidates[total_dist <= total_dist.min() * 1.2]
+            factor = ROAD_DETOUR_FACTOR if label == "road" else GATEWAY_DETOUR_FACTOR
+            eligible   = candidates[total_dist <= total_dist.min() * factor]
 
             weights = crossing_sampling_weights(eligible)
             if not np.isfinite(weights).all() or weights.sum() <= 0:

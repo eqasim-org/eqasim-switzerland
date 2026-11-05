@@ -60,7 +60,8 @@ def configure(context):
 
 
 def execute(context):
-    # move the osm network to this stage
+    # Process a local network, preserving crossBorderSelectionCapacity before
+    # the sampling-dependent short-link uplift for downstream crossing weights.
     network_path, detailed_network_file = context.stage("matsim.scenario.network.convert_osm_pt2matsim")
 
     # Work on a local copy: NetworkHandler merges/filters its geometries along
