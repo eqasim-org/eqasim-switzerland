@@ -4,6 +4,8 @@ from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassif
 from catboost import CatBoostClassifier
 import logging
 
+from data.utils import binary_code_series
+
 logger = logging.getLogger("synpp")
 
 CANONICAL_CODE_DTYPES = {
@@ -67,8 +69,10 @@ def configure(context):
 
 def execute(context):
     from synthesis.population.models.non_private import execute_without_home_only
-    return execute_without_home_only(context, "synthesis.population.models.carownership", _execute_model,
+    result = execute_without_home_only(context, "synthesis.population.models.carownership", _execute_model,
                                      {"car_availability": 0})
+    result["car_availability"] = binary_code_series(result["car_availability"])
+    return result
 
 
 def _execute_model(context):
@@ -604,4 +608,5 @@ def _execute_model(context):
                 f"caravailability output column {column!r} cannot be converted to {dtype}"
             ) from error
 
+    pop_df["car_availability"] = binary_code_series(pop_df["car_availability"])
     return pop_df

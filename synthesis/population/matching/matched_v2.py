@@ -4,6 +4,8 @@ import logging
 from pathlib import Path
 
 
+from synthesis.population.models.non_private import home_only_mask
+
 from .V2 import configuration
 from .V2.configuration import MatchingOptions
 from .V2.diagnostics import MatchingDiagnostics
@@ -35,6 +37,10 @@ def execute(context):
     source, population, trips = prepare_inputs(context, const)
     eligible = (population["age"] >= const.MZ_AGE_THRESHOLD if const.census == "statpop"
                 else population["age_class"] > 0)
+    # Preserve home-only residents with no donor, exactly as in V1.
+    held_home = home_only_mask(population)
+    eligible &= ~held_home
+    logger.info("V2 held out %d home-only residents without donor trips", held_home.sum())
     id_columns = ["person_id"] + (["household_id"] if const.census == "statpop" else [])
     result = population[id_columns].copy()
     result["mz_person_id"] = -1

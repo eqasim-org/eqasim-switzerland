@@ -24,9 +24,17 @@ def configure(context):
     # build a "typical day" feed. Empty: keep all the services (pt2matsim then selects the day with gtfs_date).
     context.config("gtfs_filter_date", default = "")
 
+    # The day selected by pt2matsim (YYYYMMDD), or a rule such as dayWithMostServices.
+    context.config("gtfs_date", "dayWithMostServices")
+
+    # The feeds without any trip on the scenario day (gtfs_filter_date, else gtfs_date if it is a date) have their
+    # calendar moved by whole weeks so that one of their regular days with the same weekday falls on it (see
+    # gtfs.align_feed_to_date). Lets feeds published for another period be used without changing the files.
+    context.config("gtfs_align_dates", default = True)
+
     # Optional: the TPG own feed (one typical working day), which replaces the TPG lines (agency 881) of the Swiss feed.
     # A file name in gtfs_folder, or an absolute path; it is not read as one more feed. Empty: the Swiss feed is kept.
-    context.config("gtfs_tpg_file", default = "")
+    context.config("gtfs_tpg_file", default = "gtfs_tpg_theorique_jour_ouvre.zip")
     # TPG lines of the Swiss feed that the TPG feed does not have and that are removed rather than kept (the airport
     # lines, at the request of TPG). Only used with gtfs_tpg_file.
     context.config("gtfs_tpg_removed_lines", default = ["A1", "A2", "A3", "A4", "A5", "A6"])
@@ -45,6 +53,7 @@ def execute(context):
 
     input_files, tpg_file = selected_inputs(context)
     filter_date = context.config("gtfs_filter_date")
+    align_date = scenario_date(context) if context.config("gtfs_align_dates") else None
 
     # Load feeds
     feeds = []
@@ -56,6 +65,9 @@ def execute(context):
 
         # This was fixed in pt2matsim, so we can remove one a new release (> 20.7) is available.
         feed = gtfs.despace_stop_ids(feed) # Necessary as MATSim does not like stops/links with spaces
+
+        if align_date is not None:
+            feed, _ = gtfs.align_feed_to_date(feed, align_date)
 
         if filter_date:
             feed = gtfs.filter_feed_to_date(feed, filter_date)
@@ -135,6 +147,20 @@ def execute(context):
     gtfs.write_feed(merged_feed, "%s/output" % context.path())
 
     return "gtfs"
+
+def scenario_date(context):
+    """The day the feeds must run on: gtfs_filter_date, else gtfs_date if it is a date. None for a pt2matsim rule
+    (dayWithMostServices, ...), which picks a day only after the merge."""
+    for value in (context.config("gtfs_filter_date"), context.config("gtfs_date")):
+        value = str(value or "").strip()
+        if value:
+            try:
+                return pd.Timestamp(value)
+            except ValueError:
+                logger.info(f"gtfs_date {value} is not a date: the calendars of the feeds are not aligned")
+                return None
+    return None
+
 
 # Transfer times set by hand, from all the stops (platforms) of a station to all the ones of another, by their base code
 # (the stop id before ":"): (from code, to code, min_transfer_time in s, why). They replace the rules of the feeds, and

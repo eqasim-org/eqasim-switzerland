@@ -4,7 +4,7 @@ from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassif
 from catboost import CatBoostClassifier
 import logging
 
-from data.utils import coerce_boolean_series
+from data.utils import binary_code_series, coerce_boolean_series
 
 logger = logging.getLogger("synpp")
 
@@ -149,8 +149,10 @@ def configure(context):
 
 def execute(context):
     from synthesis.population.models.non_private import execute_without_home_only
-    return execute_without_home_only(context, "synthesis.population.enriched", _execute_model,
+    result = execute_without_home_only(context, "synthesis.population.enriched", _execute_model,
                                      {"pt_subscription": 0})
+    result["car_availability"] = binary_code_series(result["car_availability"])
+    return result
 
 
 def _execute_model(context):
@@ -955,4 +957,5 @@ def _execute_model(context):
     ]:
         pop_df[column] = pd.to_numeric(pop_df[column], errors="raise").astype("int64")
 
+    pop_df["car_availability"] = binary_code_series(pop_df["car_availability"])
     return pop_df

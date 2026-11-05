@@ -28,6 +28,12 @@ def configure(context):
         context.stage("data.gtfs.cleaned")
     context.config("pt_route_stop_radius", 80.0)
     context.config("pt_route_add_links", True)
+    # Platforms of the operators by GTFS agency_id (TL by default; paths absolute or relative to data_path): a stop of a
+    # route compared with an official line route that lies off it is moved to a platform of the same station on it
+    context.config("pt_route_platforms", pt_route_check.DEFAULT_PLATFORMS)
+    # Lines by GTFS agency_id whose official line routes skip some of their stops: the routes are corrected along them
+    # through these stops (TL line 32: the TL route is a later one, without Renens VD, Avenir)
+    context.config("pt_route_through_stops_lines", {"151": ["32"]})
 
 
 def execute(context):
@@ -38,8 +44,10 @@ def execute(context):
     which the network does not allow buses (the OSM data lacks the bus mode there), the bus mode
     is added to that link in a patched copy of the network. Where the network has no sensible
     connection between two stops although the official route runs between them (e.g. a missing
-    connection), bus-only links are added along the official route in that copy too. Vehicles are
-    those of the mapped stage.
+    connection), bus-only links are added along the official route in that copy too. A stop of a route
+    compared with an official line route that lies off it is moved to a platform of the operator of the
+    same station on it (pt_route_platforms), and a route whose official line route takes another path
+    keeps its mapping. Vehicles are those of the mapped stage.
     """
 
     # Read upstream assets without modifying their cached files.
@@ -54,6 +62,7 @@ def execute(context):
     use_shapes = context.config("pt_route_gtfs_shapes") and os.path.exists("%s/shapes.txt" % gtfs_path)
 
     geometry_path = "%s/detailed_network.csv" % context.path()
+    platforms = pt_route_check.read_platforms(context.config("pt_route_platforms"), context.config("data_path"))
 
     # Correct a local schedule/network copy against the matching operator and trip shape.
 
@@ -73,6 +82,8 @@ def execute(context):
         gtfs_shapes_path        = "%s/shapes.txt" % gtfs_path if use_shapes else None,
         input_geometry_path     = paths["geometry"] if context.config("export_detailed_network") else None,
         output_geometry_path    = geometry_path if context.config("export_detailed_network") else None,
+        platforms               = platforms,
+        through_stops_lines     = context.config("pt_route_through_stops_lines"),
     )
 
     assert os.path.exists(corrected_schedule_path)
@@ -92,5 +103,3 @@ def execute(context):
 def line_routes_paths(context):
     """pt_line_routes_path with absolute paths: {agency_id: path}, one path, or None"""
     return pt_route_check.resolve_line_routes(context.config("pt_line_routes_path"), context.config("data_path"))
-
-

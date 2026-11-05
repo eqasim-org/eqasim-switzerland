@@ -7,6 +7,8 @@ import pandas as pd
 from scipy.special import logsumexp
 from sklearn.neighbors import NearestNeighbors
 
+from data.utils import coerce_boolean_series
+
 from .features import prepare_features
 
 logger = logging.getLogger("synpp")
@@ -67,10 +69,11 @@ def transport_probabilities(indices, costs, weights, temperature, balance_streng
 
 def select_donors(source, target, source_space, target_space, *, rng, top_k, temperature,
                    balance_strength, query_batch_size, n_draws=1):
-    """Only employment and student status define hard inference masks.
+    """Employment/student masks apply to ordinary recipients.
 
-    No exact or hierarchical age, income, sex, children, geography, car-access,
-    collective-housing or work-type cells constrain the learned neighbourhood.
+    Municipality-centre collective residents additionally require a home-only
+    survey diary, following V1. Ordinary recipients may use all diary types.
+    No age, income, sex, children, geography, car-access or work-type cells apply.
     Optional marginal balancing is off by default; n_draws supports evaluation.
     """
     assigned = np.full((len(target), n_draws), -1, dtype=np.int64)
@@ -80,8 +83,17 @@ def select_donors(source, target, source_space, target_space, *, rng, top_k, tem
     keys = ["employed", "is_student"]
     source_groups = source.groupby(keys, sort=True).indices
     diagnostics = []
-    for key, target_rows in target.groupby(keys, sort=True).indices.items():
-        source_rows = source_groups.get(key, np.array([], dtype=int))
+    collective = coerce_boolean_series(target.get("collective_housing_resident",
+        pd.Series(False, index=target.index)), name="collective_housing_resident")
+    if collective.any() and "home_only" not in source:
+        raise ValueError("Collective residents require donor home_only diary labels")
+    donor_home = (coerce_boolean_series(source["home_only"], name="home_only").to_numpy()
+                  if collective.any() else None)
+    groups = target[keys].assign(requires_home_diary=collective)
+    for key, target_rows in groups.groupby(keys + ["requires_home_diary"], sort=True).indices.items():
+        source_rows = source_groups.get(key[:2], np.array([], dtype=int))
+        if key[2]:
+            source_rows = source_rows[donor_home[source_rows]]
         if not len(source_rows):
             continue
         neighbors = min(top_k, len(source_rows))
@@ -109,6 +121,7 @@ def select_donors(source, target, source_space, target_space, *, rng, top_k, tem
         expected = np.bincount(idx.ravel(), weights=probabilities.ravel(), minlength=len(weights))
         prior = weights / weights.sum()
         diagnostics.append({"employed": int(key[0]), "is_student": int(key[1]),
+                            "requires_home_diary": bool(key[2]),
                             "recipients": len(target_rows), "donors": len(source_rows),
                             "reachable_donors": int(np.count_nonzero(expected)),
                             "expected_donor_tvd": float(np.abs(expected / len(target_rows) - prior).sum() / 2)})
@@ -118,7 +131,7 @@ def select_donors(source, target, source_space, target_space, *, rng, top_k, tem
 
 
 class DonorSelector:
-    """Survey-weighted nearest donors constrained only by employment/student status."""
+    """Survey-weighted neighbours with status masks and collective home diaries."""
 
     def __init__(self, *, top_k, temperature, balance_strength, query_batch_size):
         self.options = dict(top_k=top_k, temperature=temperature,

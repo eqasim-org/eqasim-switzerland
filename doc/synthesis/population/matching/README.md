@@ -85,7 +85,7 @@ lightweight report stages without loading or retraining those models.
 
 ## V2 inputs and masks
 
-Only these two flags define the inference donor pools:
+For ordinary residents, these two flags define the inference donor pools:
 
 - `employed`: employed people match employed people, and non-workers match
   non-workers. The census and survey employment codes are harmonized first.
@@ -94,8 +94,8 @@ Only these two flags define the inference donor pools:
   population flag; when no flag exists, the pipeline's `employment_status`
   contract identifies STUDENT=2 and EMPLOYED_STUDENT=3.
 
-No age, income, sex, child-presence, geography, car-access, collective-housing or
-work-type matching cells are applied. In particular, there are no age barriers
+No age, income, sex, child-presence, geography, car-access or work-type matching
+cells are applied. Collective residents have the home-only exception described below. In particular, there are no age barriers
 at 15 or 24, and no preferred exact-age or income cell before nearest-neighbour
 retrieval. The model can learn an age-dependent relationship without a bin edge.
 Survey-age eligibility still applies; this is not a donor-age constraint.
@@ -218,3 +218,28 @@ The two analysis stages now live at:
 They share `analysis.matching.validation`, which evaluates unseen people,
 probabilistic diary predictions, population covariate overlap and representation
 quality. See the [analysis protocol](../../../analysis/matching/README.md).
+
+### Home-only residents
+
+V2 uses the same explicit `non_private_home_only_households` mask as V1. These
+residents remain in the population with `mz_person_id = -1`, receive no donor
+trips, and obtain one home activity from the activity stage. Household feature
+counts still use the complete roster.
+
+Survey diaries whose activity chain is `home` remain in V2 training and the
+ordinary donor pool, as in V1. A zero-trip survey day is distinct from the
+explicit synthetic home-only scenario. Ordinary residents can receive either
+a travelling or non-travelling diary. Recipients with
+`collective_housing_resident` (municipality-centre residences) use only home-only
+survey donors, following V1's separate collective-resident branch; V2 also
+retains its employment/student constraints. If no such donor satisfies both
+status constraints, the usual unmatched-recipient handling applies.
+
+V2 calls V1's `get_mz_persons(context)` directly for survey cleaning and donor
+commute imputation, before applying the scenario-day/border filters. Both stages
+use `models.non_private.home_only_mask` and `matching.commute.population_commutes`.
+The explicit home-only group bypasses commute preparation as well as prediction.
+V2 restores the complete roster before household-count reconstruction and keeps
+recipient row order. Stage cache validation includes these shared helper sources.
+V1 itself is unchanged; exact-age/income features, training and latent-space
+retrieval remain specific to V2, including its employment/student safeguards.

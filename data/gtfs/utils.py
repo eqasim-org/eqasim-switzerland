@@ -92,6 +92,10 @@ def read_feed(path):
             logger.info("Missing parent_station in stops, setting to NaN")
             df_stops["parent_station"] = np.nan
 
+        if not "location_type" in df_stops:
+            logger.info("Missing location_type in stops, setting to 0 (stop or platform)")
+            df_stops["location_type"] = 0
+
         df_stops["location_type"]  = df_stops["location_type"].fillna(0).astype(int)
         df_stops["parent_station"] = df_stops["parent_station"].fillna("").astype(str)
 
@@ -1725,8 +1729,66 @@ def filter_feed_to_date(feed, date):
     return feed
 
 
+def align_feed_to_date(feed, date, min_share = 0.9):
+    """
+    Moves the calendar of a feed that has no trip on the given date so that one of its regular days falls on it. Used
+    for the feeds published for another period than the one of the scenario (e.g. a French network that only gives
+    its next timetable).
 
+    The reference day has the same weekday as the date and at least min_share of the trips of the busiest day with
+    that weekday (school holidays and public holidays have fewer), and is the closest such day to the date. All the
+    dates of the feed (calendar ranges, calendar_dates exceptions, feed_info period) are moved by the same whole number
+    of weeks, so the weekdays and the exceptions stay consistent and the feed runs on the date as on the reference day.
 
+    Returns the feed and the reference day, or None if the feed was not moved (it already runs on the date, or it has
+    no day with the same weekday).
+    """
+    date = pd.Timestamp(date)
+    trip_services = feed["trips"]["service_id"].astype(str)
+
+    if trip_services.isin(get_active_service_ids(feed, date)).any():
+        return feed, None
+
+    # Trips per active day, for the days with the same weekday as the date
+
+    active = expand_service_dates(feed)
+    active["service_id"] = active["service_id"].astype(str)
+    trips_per_service = trip_services.value_counts()
+    trips_per_day = active["service_id"].map(trips_per_service).fillna(0).groupby(active["date"]).sum()
+    candidates = trips_per_day[(trips_per_day.index.weekday == date.weekday()) & (trips_per_day > 0)]
+
+    if candidates.empty:
+        logger.warning(f"No day of the feed is a {date.day_name()}: its calendar is not moved to {date.date()}")
+        return feed, None
+
+    regular = candidates[candidates >= min_share * candidates.max()]
+    reference = min(regular.index, key = lambda day: (abs((day - date).days), day))
+    offset = date - reference
+
+    # Move every date of the feed by the same offset
+
+    feed = copy_feed(feed)
+
+    def shift(column):
+        shifted = (pd.to_datetime(column.astype(str), format = "%Y%m%d") + offset).dt.strftime("%Y%m%d")
+        return shifted.astype(column.dtype)
+
+    if "calendar" in feed:
+        for column in ("start_date", "end_date"):
+            feed["calendar"][column] = shift(feed["calendar"][column])
+
+    if "calendar_dates" in feed:
+        feed["calendar_dates"]["date"] = shift(feed["calendar_dates"]["date"])
+
+    if "feed_info" in feed:
+        for column in ("feed_start_date", "feed_end_date"):
+            if column in feed["feed_info"] and feed["feed_info"][column].notna().all():
+                feed["feed_info"][column] = shift(feed["feed_info"][column])
+
+    logger.info(f"Calendar moved by {offset.days} days: the services of {reference.date()} "
+                f"({int(candidates[reference])} trips) now run on {date.date()}")
+
+    return feed, reference
 
 
 # --- Replacing the lines of an agency of the Swiss feed by the operator's own feed ----------------------------------

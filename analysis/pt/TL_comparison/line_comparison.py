@@ -56,6 +56,7 @@ def configure(context):
     context.config("analysis.pt.line_comparison_output_id", default = None)  # the run of output_id by default
     context.config("analysis.pt.tl_line_comparison_lines",  default = [])    # MATSim line names; empty: all the lines of the TL data
 
+
 def execute(context):
     data_path = context.config("data_path")
     output_id = context.config("analysis.pt.line_comparison_output_id") or context.config("output_id")

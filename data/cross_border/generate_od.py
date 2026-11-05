@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import Point
 import geopandas as gpd
-import random
 from pathlib import Path
 import logging
 import re
@@ -250,16 +249,6 @@ def sample_rows_by_weight(df2, rng, weight_col="weight"):
     # Combine both
     sampled_df = pd.concat([repeated, fractional], ignore_index=True)
     return sampled_df
-
-
-def sample_points_in_polygon(polygon, n):
-    points = []
-    minx, miny, maxx, maxy = polygon.bounds
-    while len(points) < n:
-        p = Point(random.uniform(minx, maxx), random.uniform(miny, maxy))
-        if polygon.contains(p):
-            points.append(p)
-    return points
 
 
 def project_point_series_close_to_border(df, x, y, distance_threshold, default_purpose, projected_purpose, column_name, context, rng, mode_column = "trip_mode", interview_place_column = "interview_place", other_x = None, other_y = None, other_crs = "EPSG:4326", restrict_column = None, update_interview_point = True):
@@ -650,6 +639,90 @@ def process_through_trips(through_trips, N, context, rng):
     return df
 
 
+def match_interview_points(borders, context):
+    """
+    Gives every survey record (start_x/start_y and end_x/end_y in WGS84) the border
+    crossing point it was surveyed at: one of the points of its interview_place
+    serving its mode, close to the shortest origin -> point -> destination path.
+    Shared with data.cross_border.swiss_residents_od.
+    """
+
+    points = context.stage("data.cross_border.road_candidates").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "selection_weight", "canonical_point_id", "label"]].to_crs("EPSG:2056")
+    points["interview_point_id"] = points["border_crossing_point_id"]
+
+    # Survey endpoints are longitude/latitude; crossing distances must use Swiss
+    # metres at both ends. Keep the original columns in WGS84 for later stages.
+    matching = borders[["interview_place", "trip_mode"]].copy()
+    matching["origin_geometry"] = gpd.GeoSeries(
+        gpd.points_from_xy(borders["start_x"], borders["start_y"]), crs = "EPSG:4326"
+    ).to_crs("EPSG:2056").values
+    matching["destination_geometry"] = gpd.GeoSeries(
+        gpd.points_from_xy(borders["end_x"], borders["end_y"]), crs = "EPSG:4326"
+    ).to_crs("EPSG:2056").values
+
+    # "label" indicates which mode a point was surveyed for ("road" serves car trips,
+    # "pt" serves public transport trips), so candidates are grouped by place AND mode.
+    mode_to_label = MODE_TO_LABEL
+
+    grouped_points = {k: v for k, v in points.groupby(["interview_place", "label"])}
+
+    point_rng = np.random.RandomState(context.config("random_seed"))
+
+    def sample_point(row):
+        origin      = row["origin_geometry"]
+        destination = row["destination_geometry"]
+
+        label = mode_to_label.get(row["trip_mode"])
+        candidates = grouped_points.get((row["interview_place"], label))
+        if candidates is not None and "importance" in candidates.columns:
+            # Minimize the detour through the crossing (origin -> point -> destination),
+            # then draw capacity × importance-weighted among candidates within
+            # the mode's detour threshold. The minimum is always included.
+            total_dist = candidates["geometry"].apply(lambda g: origin.distance(g) + destination.distance(g))
+            factor = ROAD_DETOUR_FACTOR if label == "road" else GATEWAY_DETOUR_FACTOR
+            eligible = candidates[total_dist <= total_dist.min() * factor]
+
+            weights = crossing_sampling_weights(eligible)
+            if not np.isfinite(weights).all() or weights.sum() <= 0:
+                weights = None
+
+            sampled = eligible.sample(n = 1,
+                                      weights = weights,
+                                      random_state = point_rng)
+            return sampled.iloc[0][["geometry", "importance", "interview_point_id", "label"]]
+
+        # Fall back to the closest point that still matches the trip's mode, if any exist
+        same_label = points[points["label"] == label] if label is not None else points
+        if len(same_label) == 0:
+            same_label = points
+
+        total_dist = same_label["geometry"].apply(lambda g: origin.distance(g) + destination.distance(g))
+        closest    = same_label.loc[total_dist.idxmin()]
+        return closest[["geometry", "importance", "interview_point_id", "label"]]
+
+    result = matching.apply(sample_point, axis=1)
+    borders[["interview_geometry_point", "importance", "interview_point_id", "interview_point_label"]] = result
+
+    # The point has to serve the mode the agent travels with, since it becomes
+    # that agent's border activity in data.cross_border.activities: car (and
+    # its passengers) cross at a road point, public transport at a pt one. That
+    # holds by construction above, including in the fallback, so this only
+    # catches a mode that mode_to_label does not know about.
+    expected_label = borders["trip_mode"].map(mode_to_label)
+    mismatched     = expected_label.notna() & (borders["interview_point_label"] != expected_label)
+
+    assert not mismatched.any(), (
+        "%d records got a border crossing point that does not serve their mode, e.g. %s"
+        % (int(mismatched.sum()),
+           borders.loc[mismatched, ["trip_mode", "interview_point_label"]].head().to_dict("records"))
+    )
+
+    logger.info("Border crossing points by mode: %s",
+                borders.groupby(["trip_mode", "interview_point_label"]).size().to_dict())
+
+    return borders
+
+
 def read_2021_data(context):
     # Load data
     # We are using the 2021 release because the 2015 one doesn't provide reliable destination coordinates.
@@ -707,7 +780,6 @@ def read_2021_data(context):
     df2021["vehicle_type"] = df2021["vehicle_type"].astype(str)
     df2021.loc[df2021["vehicle_type"]=="1", "vehicle_type"] = "car"
     df2021.loc[df2021["vehicle_type"]=="2", "vehicle_type"] = "car" #"motorcycle"
-    df2021.loc[df2021["vehicle_type"]=="3", "vehicle_type"] = "pt"  #"long distance bus"
     
     # 4. Identify trip purpose
     df2021["trip_purpose"] = df2021["trip_purpose"].astype(str)
@@ -824,81 +896,9 @@ def read_2021_data(context):
             all_borders[column] = None
         return all_borders
 
-    # 14. Match to an interview point    
-    #borders.loc[borders["interview_place"] == "Vallorbe (544)", "interview_place"] = "Gruppe O: VD/NE -> F. Dép. Jura. Doubs"
+    # 14. Match to an interview point
 
-    points = context.stage("data.cross_border.road_candidates").copy()[["interview_place", "border_crossing_point_id", "geometry", "importance", "selection_weight", "canonical_point_id", "label"]].to_crs("EPSG:2056")
-    points["interview_point_id"] = points["border_crossing_point_id"]
-
-    # Survey endpoints are longitude/latitude; crossing distances must use Swiss
-    # metres at both ends. Keep the original columns in WGS84 for later stages.
-    matching = borders[["interview_place", "trip_mode"]].copy()
-    matching["origin_geometry"] = gpd.GeoSeries(
-        gpd.points_from_xy(borders["start_x"], borders["start_y"]), crs = "EPSG:4326"
-    ).to_crs("EPSG:2056").values
-    matching["destination_geometry"] = gpd.GeoSeries(
-        gpd.points_from_xy(borders["end_x"], borders["end_y"]), crs = "EPSG:4326"
-    ).to_crs("EPSG:2056").values
-
-    # "label" indicates which mode a point was surveyed for ("road" serves car trips,
-    # "pt" serves public transport trips), so candidates are grouped by place AND mode.
-    mode_to_label = MODE_TO_LABEL
-
-    grouped_points = {k: v for k, v in points.groupby(["interview_place", "label"])}
-
-    point_rng = np.random.RandomState(context.config("random_seed"))
-
-    def sample_point(row):
-        origin      = row["origin_geometry"]
-        destination = row["destination_geometry"]
-
-        label = mode_to_label.get(row["trip_mode"])
-        candidates = grouped_points.get((row["interview_place"], label))
-        if candidates is not None and "importance" in candidates.columns:
-            # Minimize the detour through the crossing (origin -> point -> destination),
-            # Draw capacity × importance-weighted among road candidates within
-            # 20% of that minimum, as for PT. Always include the minimum.
-            total_dist = candidates["geometry"].apply(lambda g: origin.distance(g) + destination.distance(g))
-            factor = ROAD_DETOUR_FACTOR if label == "road" else GATEWAY_DETOUR_FACTOR
-            eligible   = candidates[total_dist <= total_dist.min() * factor]
-
-            weights = crossing_sampling_weights(eligible)
-            if not np.isfinite(weights).all() or weights.sum() <= 0:
-                weights = None
-
-            sampled = eligible.sample(n = 1,
-                                      weights = weights,
-                                      random_state = point_rng)
-            return sampled.iloc[0][["geometry", "importance", "interview_point_id", "label"]]
-
-        # Fall back to the closest point that still matches the trip's mode, if any exist
-        same_label = points[points["label"] == label] if label is not None else points
-        if len(same_label) == 0:
-            same_label = points
-
-        total_dist = same_label["geometry"].apply(lambda g: origin.distance(g) + destination.distance(g))
-        closest    = same_label.loc[total_dist.idxmin()]
-        return closest[["geometry", "importance", "interview_point_id", "label"]]
-
-    result = matching.apply(sample_point, axis=1)
-    borders[["interview_geometry_point", "importance", "interview_point_id", "interview_point_label"]] = result
-
-    # The point has to serve the mode the agent travels with, since it becomes
-    # that agent's border activity in data.cross_border.activities: car (and
-    # its passengers) cross at a road point, public transport at a pt one. That
-    # holds by construction above, including in the fallback, so this only
-    # catches a mode that mode_to_label does not know about.
-    expected_label = borders["trip_mode"].map(mode_to_label)
-    mismatched     = expected_label.notna() & (borders["interview_point_label"] != expected_label)
-
-    assert not mismatched.any(), (
-        "%d records got a border crossing point that does not serve their mode, e.g. %s"
-        % (int(mismatched.sum()),
-           borders.loc[mismatched, ["trip_mode", "interview_point_label"]].head().to_dict("records"))
-    )
-
-    logger.info("Border crossing points by mode: %s",
-                borders.groupby(["trip_mode", "interview_point_label"]).size().to_dict())
+    borders = match_interview_points(borders, context)
 
     # Unresolved endpoints still enter the calibration denominator and diagnostics.
     for column in ["interview_geometry_point", "importance", "interview_point_id", "interview_point_label"]:
@@ -939,10 +939,12 @@ def read_2015_data(context):
     df2015.loc[df2015["road_type"]=="1", "road_type"] = "road"
     df2015.loc[df2015["road_type"]=="2", "road_type"] = "rail"
 
+    # Coaches (4) are dropped: the 2021 survey has none, so counting them as pt
+    # inflated the 2015/2021 pt scaling factors of the trips entering CH.
     df2015["vehicle_type"] = df2015["vehicle_type"].astype(str)
+    df2015 = df2015[df2015["vehicle_type"]!="4"].copy()
     df2015.loc[df2015["vehicle_type"]=="1", "vehicle_type"] = "car"
     df2015.loc[df2015["vehicle_type"]=="3", "vehicle_type"] = "car"
-    df2015.loc[df2015["vehicle_type"]=="4", "vehicle_type"] = "pt"
 
     df2015["trip_purpose"] = df2015["trip_purpose"].astype(str)
     df2015.loc[df2015["trip_purpose"]=="1", "trip_purpose"] = "work"

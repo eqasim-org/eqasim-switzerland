@@ -6,8 +6,10 @@ from pathlib import Path
 
 def implementation_token():
     digest = hashlib.sha256()
-    # Include the shared work/education predictor used by the input adapter.
-    paths = [*Path(__file__).parent.glob("*.py"), Path(__file__).parent.parent / "commute.py"]
+    # Imported V1 preparation and the shared residence mask affect inputs too.
+    matching = Path(__file__).parent.parent
+    paths = [*Path(__file__).parent.glob("*.py"), matching / "commute.py",
+             matching / "matched_v1.py", matching.parent / "models" / "non_private.py"]
     for path in sorted(paths):
         digest.update(path.name.encode())
         digest.update(path.read_bytes())
