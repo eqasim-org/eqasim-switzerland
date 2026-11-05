@@ -4,10 +4,13 @@ from data.spatial.ovgk import impute as impute_ovgk
 from data.cross_border.destinations import make_entry_border_facility_id, make_exit_border_facility_id
 from synthesis.population.spatial.secondary_nn.tools import NN_ALGORITHMS, add_osm_destinations
 
+from data.cross_border.count_assignment_inputs import configure_reference, assigned_reference
+
+
 def configure(context):
     context.stage("synthesis.population.destinations_statent")
     context.stage("synthesis.population.spatial.primary.work.remote_locations", alias="remote_work_locations")
-    context.stage("data.cross_border.swiss_residents_od")
+    configure_reference(context)
     context.stage("data.spatial.ovgk")
     context.stage("data.spatial.municipality_types")
     context.stage("data.spatial.municipalities")
@@ -48,7 +51,7 @@ def build_border_destinations(context):
 
         border_frames.append(pd.concat([entry, exit], ignore_index=True, sort=False))
 
-    df_cb = context.stage("data.cross_border.swiss_residents_od")[["cross_border_person_id", "border_crossing_point"]].copy()
+    df_cb = assigned_reference(context)[["cross_border_person_id", "border_crossing_point"]].copy()
 
     # Swiss residents are sampled later as either home -> border or border -> home,
     # so both directional facilities must exist before MATSim writes facilities.

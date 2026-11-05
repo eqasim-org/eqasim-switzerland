@@ -3,6 +3,8 @@ from pathlib import Path
 
 import numpy as np
 
+from data.cross_border.count_assignment_inputs import configure_foreign, assigned_foreign
+
 logger = logging.getLogger("synpp")
 SAMPLING_COLUMNS = ["interview_place", "label", "trip_mode"]
 
@@ -12,14 +14,14 @@ def configure(context):
     context.config("input_downsampling")
     context.config("random_seed")
 
-    context.stage("data.cross_border.generate_od")
+    configure_foreign(context)
 
 
 def execute(context):
 
     # Load the expanded population; survey weights have already been applied.
 
-    df = context.stage("data.cross_border.generate_od")
+    df = assigned_foreign(context)
     probability = context.config("input_downsampling")
 
     # Preserve local driver/person demand through downsampling. Keep every row
