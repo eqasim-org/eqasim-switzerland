@@ -4,6 +4,8 @@ from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassif
 from catboost import CatBoostClassifier
 import logging
 
+from data.cross_border.count_assignment_inputs import configure_swiss, assigned_swiss
+
 logger = logging.getLogger("synpp")
 # ---------------------------------------------------------
 # helper: stochastic draw from class probabilities 
@@ -28,7 +30,7 @@ def configure(context):
     context.config("random_seed")
     context.stage("data.constants")
     context.stage("data.microcensus.21.persons")
-    context.stage("synthesis.population.models.cross_border")
+    configure_swiss(context)
 
 def execute(context):
     from synthesis.population.models.non_private import execute_without_home_only
@@ -50,7 +52,7 @@ def _execute_model(context):
     # 0. LOAD DATA
     # -------------------------------------------------------------------
     survey_df = context.stage("data.microcensus.21.persons")
-    pop_df    = context.stage("synthesis.population.models.cross_border")
+    pop_df    = assigned_swiss(context)
 
     for df in (survey_df, pop_df):
         df["N_children_under_18"] = pd.to_numeric(df["N_children_under_18"], errors="coerce")

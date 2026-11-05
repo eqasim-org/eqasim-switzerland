@@ -33,6 +33,7 @@ def configure(context):
     context.stage("data.spatial.cantons")
     context.stage("data.cross_border.interview_places")
     context.stage("data.cross_border.road_candidates")
+    context.stage("data.cross_border.car_targets")
     context.stage("data.cross_border.pt_gateways")
     context.stage("data.spatial.swiss_border")
     context.stage("data.spatial.nuts")
@@ -53,7 +54,8 @@ def execute(context):
     # Use vehicle controls before location or model-region exclusions. Occupancy
     # affects passengers only; it cannot change the number of generated drivers.
 
-    borders, calibration = calibrate_demand(borders2015, borders2021)
+    borders, calibration = calibrate_demand(
+        borders2015, borders2021, context.stage("data.cross_border.car_targets"))
     borders = repair_car_occupancy(borders, rng)
     write_survey_audit(context, borders2015, borders, calibration, swiss_residents = True)
     borders = borders.loc[borders["location_usable"]].copy()
@@ -127,6 +129,13 @@ def process_from_to_trips(df_trips, context, rng):
     df["origin_x"] = origins.x.values
     df["origin_y"] = origins.y.values
 
+    # Retain the foreign survey endpoint separately from the modelled border
+    # activity. Overlap filtering needs both ends of the journey, including for
+    # PT records later moved onto a gateway or their actual destination.
+    foreign = gpd.GeoSeries(gpd.points_from_xy(df["end_x"], df["end_y"]), crs=4326).to_crs(2056)
+    df["foreign_x"] = foreign.x.to_numpy()
+    df["foreign_y"] = foreign.y.to_numpy()
+
     missing = df["origin_municipality"].isna()
     df.loc[missing, ["interview_id", "interview_place", "trip_mode", "weight", "start_x", "start_y"]].to_csv(
         f"{context.path()}/unlocated_swiss_end.csv", index = False)
@@ -189,7 +198,7 @@ def process_from_to_trips(df_trips, context, rng):
     df = place_pt_border_points(df, context, rng)
 
     df = df[["cross_border_person_id", "interview_id", "start_location_source", "end_location_source",
-        "origin_municipality", "origin_canton_id", "origin_x", "origin_y",
+        "origin_municipality", "origin_canton_id", "origin_x", "origin_y", "foreign_x", "foreign_y",
         "destination_country", "destination_country_raw",
         "trip_mode", "trip_purpose",
         "interview_place", "interview_point_id", "interview_geometry_point",

@@ -34,7 +34,7 @@ def set_person_expansion_units(observations):
     return result
 
 
-def calibrate_demand(reference, observations):
+def calibrate_demand(reference, observations, car_targets=None):
     """Return calibrated observations and a ledger including unsupported targets.
 
     Car (including motorcycles) uses 2015 vehicle totals by interview-place ID.
@@ -46,6 +46,7 @@ def calibrate_demand(reference, observations):
     result["uncalibrated_group_weight"] = result["group_weight"]
     result["scaling_factor"] = 1.0
     result["calibration_source"] = "uncontrolled"
+    car_targets = car_targets or {}
     records = []
     for frame in (reference, observations):
         if (~np.isfinite(frame["weight"]) | frame["weight"].lt(0)).any():
@@ -83,6 +84,22 @@ def calibrate_demand(reference, observations):
             factor, source = pooled_factor, "pooled_residual_vehicle"
         else:
             factor, source = np.nan, "no_2021_support"
+
+        # Manual counts replace this residence population's share of the car
+        # control only. Keep the original residual-pool calculation above so an
+        # override cannot transfer extra demand to unrelated interview places.
+        override = car_targets.get(group)
+        target_entries = wanted
+        if override is not None:
+            target_entries = wanted * override["override_factor"]
+            if target_entries > 0 and raw <= 0:
+                raise ValueError("Manual car target at %s has no 2021 support in this residence population"
+                                 % override["interview_place"])
+            factor = target_entries / raw if raw > 0 else 0.0
+            source = "manual_interview_group_vehicle"
+            if raw > 0 and group not in supported:
+                logger.warning("Manual car target at %s uses sparse 2021 support (%d observations, %.1f effective).",
+                               override["interview_place"], count.get(group, 0), effective.get(group, 0))
         mask = result["trip_mode"].eq("car") & result["interview_place_id"].eq(group)
         result.loc[mask, "scaling_factor"] = factor
         result.loc[mask, "calibration_source"] = source
@@ -90,7 +107,10 @@ def calibrate_demand(reference, observations):
                             effective_observations_2021 = float(effective.get(group, 0)),
                             entries_2015 = wanted, entries_2021 = raw,
                             calibrated_entries = raw * factor if raw else 0.0,
-                            scaling_factor = factor, calibration_source = source))
+                            scaling_factor = factor, calibration_source = source,
+                            target_entries = target_entries,
+                            manual_override_factor = override["override_factor"] if override else 1.0,
+                            requested_both_directions = override["target_both_directions"] if override else np.nan))
 
     # Compare like-for-like passenger coverage. In particular, 2015 road coaches
     # must not inflate rail controls when that carrier has no 2021 observations.
@@ -111,6 +131,7 @@ def calibrate_demand(reference, observations):
     return result, pd.DataFrame(records, columns = [
         "interview_place_id", "observations_2021", "effective_observations_2021",
         "entries_2015", "entries_2021", "calibrated_entries", "scaling_factor", "calibration_source",
+        "target_entries", "manual_override_factor", "requested_both_directions",
     ])
 
 
@@ -188,7 +209,7 @@ def write_survey_audit(context, reference, observations, ledger, swiss_residents
         folder / "reference_occupancy_flags.csv", index = False)
     unusable = ~observations["location_usable"]
     logger.info("Cross-border vehicle controls: %.1f target entries, %.1f calibrated; %d unresolved survey locations (%.1f car entries).",
-                ledger["entries_2015"].sum(), ledger["calibrated_entries"].sum(), int(unusable.sum()),
+                ledger["target_entries"].sum(), ledger["calibrated_entries"].sum(), int(unusable.sum()),
                 observations.loc[unusable & observations["trip_mode"].eq("car"), "weight"].sum())
 
 

@@ -13,6 +13,9 @@ import matsim.config.tools as config_tools
 from mode_choice.routing import options as routing_options
 from mode_choice.routing.java import exports as routing_exports
 
+from data.cross_border.count_assignment_inputs import configure_reference, assigned_reference
+
+
 def configure(context):
     context.stage("matsim.config.config")
     context.stage("matsim.runtime.java")
@@ -57,7 +60,7 @@ def configure(context):
         if context.config("route_population_once"):
             routing_exports.configure(context)
     context.config("include_cross_border", default=False)
-    context.stage("data.cross_border.swiss_residents_od")
+    configure_reference(context)
     context.stage("data.spatial.swiss_border")
     context.config("cross_border_route_repair", True)
     if context.config("cross_border_route_repair"):
@@ -189,7 +192,7 @@ def execute(context):
 
     border_links = patch_directional_border_links(
         cross_border_destinations,
-        context.stage("data.cross_border.swiss_residents_od"),
+        assigned_reference(context),
         context.stage("data.spatial.swiss_border"),
         "%s/%snetwork.xml.gz" % (context.path(), context.config("output_prefix")),
         "%s/%sfacilities.xml.gz" % (context.path(), context.config("output_prefix")),

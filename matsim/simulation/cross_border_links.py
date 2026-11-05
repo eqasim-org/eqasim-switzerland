@@ -589,6 +589,10 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
     if geometry_path is not None:
         from matsim.simulation.border_road_matching import attach_road_details
         local_links = attach_road_details(local_links, network_path, geometry_path)
+    # Endpoint/nearest-link fallbacks must use the same preserved capacity as
+    # corridor matches, even though their candidates came from another table.
+    selection_capacities = (local_links.set_index("link_id")["selection_capacity"].to_dict()
+                            if "selection_capacity" in local_links else {})
 
     # Build a tabular assignment so preparation can patch XML and analysis stages
     # can export the exact same directional matching result.
@@ -643,7 +647,8 @@ def build_directional_border_link_table(df_cross_border_destinations, df_swiss_r
             "crosses_swiss_border": bool(matched_link["crosses_swiss_border"]),
             "match_type": matched_link["match_type"],
             "anchor_link_id": matched_link.get("anchor_link_id", link_id),
-            "selection_capacity": matched_link.get("selection_capacity", link.get("capacity", np.nan)),
+            "selection_capacity": matched_link.get("selection_capacity",
+                selection_capacities.get(link_id, link.get("capacity", np.nan))),
             "road_class": matched_link.get("road_class", ""),
             "corridor_distance": matched_link.get("corridor_distance", np.nan),
         })

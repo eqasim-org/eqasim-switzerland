@@ -3,13 +3,11 @@ import numpy as np
 # Only adult microcensus respondents are matched, whatever the mode or purpose
 MINIMUM_AGE = 18
 
-# The main activity (the middle one of home-X-home) of a matched chain lasts at least
-# this long, starts after MAIN_ACTIVITY_EARLIEST_START and ends before
-# MAIN_ACTIVITY_LATEST_END: shorter stops made agents cross the border to turn back at
-# once, and night shifts brought them home after the end of the simulation. [s]
+# The main activity (the middle one of home-X-home) must last at least
+# 30 minutes, start no earlier than 04:00, and end no later than 21:00.
 MINIMUM_MAIN_ACTIVITY_DURATION = 30 * 60
-MAIN_ACTIVITY_EARLIEST_START   = 4 * 3600
-MAIN_ACTIVITY_LATEST_END       = 21 * 3600
+MAIN_ACTIVITY_EARLIEST_START = 4 * 3600
+MAIN_ACTIVITY_LATEST_END = 21 * 3600
 
 def configure(context):
     context.config("data_path")
