@@ -17,6 +17,7 @@ def configure(context):
     context.config("matching_minimum_observations", 10)
     context.config("matching_enable_diagnostics", False)
     context.config("specific_day_scenario", default = "workday")
+    context.config("matching_density_bounds", [400., 950., 1800.])
 
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
@@ -25,6 +26,7 @@ def configure(context):
     context.stage("synthesis.population.sampled")
     context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
     context.stage("data.constants")
+    
     if context.config("census", "statpop") == "statpop":
         context.stage("synthesis.population.spatial.primary.education.locations", alias="education_locations")
 
@@ -450,6 +452,15 @@ def execute(context):
     assert df_source["mz_id"].duplicated().sum()==0, "Duplicate mz_id found in source dataframe. Please ensure mz_id is unique for each individual in the source."
 
     if const.census == "statpop":
+        # Density is already a resident count within 2.5 km on both sides.
+        # Three bins: <300, 300–1500, >=1500 residents/km²; -1 is unknown.
+        density_bounds = np.asarray(context.config("matching_density_bounds"), dtype=float)
+        density_bounds = density_bounds * np.pi * (const.POPULATION_DENSITY_RADIUS / 1000.) ** 2
+        for frame in (df_source, df_population):
+            density = pd.to_numeric(frame["population_density"], errors="coerce")
+            frame["population_density_class"] = np.where(
+                np.isfinite(density) & density.ge(0), np.digitize(density, density_bounds), -1)
+
         # age class
         AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
         df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
@@ -479,12 +490,13 @@ def execute(context):
         # TODO: 3 levels income class here
 
         columns_individual_matching = [
-            "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk",  "N_children_under_12", "sp_region", 
-            "broad_commute_distance_class", "commute_distance_class", "income_class", "canton_id", "work_location_type", "urban"
+            "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk", "population_density_class",  
+            "N_children_under_12", "sp_region", "broad_commute_distance_class", "commute_distance_class", 
+            "income_class", "canton_id", "work_location_type", "urban"
         ]
         mandatory_columns_individual_matching = [
-            "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk",  "N_children_under_12", "sp_region", 
-            "broad_commute_distance_class"
+            "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk", "population_density_class",
+            "N_children_under_12", "sp_region", "broad_commute_distance_class"
         ]
 
         df_population["marital_status"]    = df_population["marital_status"].astype(int)
@@ -554,8 +566,8 @@ def execute(context):
             logger.info(f"  - Matching normal people band: {band_name}")
             
             if band_name == "u15":
-                youth           = ["age_class", "sex", "ovgk", "sp_region", "urban", "canton_id"]
-                youth_mandatory = ["age_class", "sex","ovgk", "sp_region"]
+                youth           = ["age_class", "sex", "ovgk", "population_density_class", "sp_region", "urban", "canton_id"]
+                youth_mandatory = ["age_class", "sex","ovgk", "population_density_class", "sp_region"]
                 
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,
@@ -568,8 +580,11 @@ def execute(context):
                 )
             
             elif band_name == "15_23":
-                youth           = ["age_class", "sex", "employed", "car_availability", "ovgk", "employment_status", "sp_region", "broad_commute_distance_class", "urban", "work_location_type","commute_distance_class", "canton_id"]
-                youth_mandatory = ["age_class", "sex", "employed", "car_availability", "ovgk", "employment_status","sp_region"]
+                youth           = ["age_class", "sex", "employed", "car_availability", "ovgk", "population_density_class", 
+                                   "employment_status", "sp_region", "broad_commute_distance_class", "urban", "work_location_type",
+                                   "commute_distance_class", "canton_id"]
+                youth_mandatory = ["age_class", "sex", "employed", "car_availability", "ovgk", "population_density_class", 
+                                   "employment_status","sp_region"]
                 
                 df_target_band, df_population_work, removed_ids_list_band = run_statistical_matching_extended(
                     context,
