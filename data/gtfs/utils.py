@@ -1902,6 +1902,10 @@ def replace_agency_lines(swiss_feed, operator_feed, agency_id = "881", service_p
 
     # 2) the stops
     mapping = map_operator_stops(operator["stops"], swiss["stops"])
+    # the operator stops with the id of a Swiss stop are that stop (e.g. the TPG parent stations Parentch:1:sloid:...,
+    # which map_operator_stops leaves aside): added again, they would duplicate its id
+    swiss_ids = set(swiss["stops"]["stop_id"])
+    mapping.update({s: s for s in operator["stops"]["stop_id"] if s not in mapping and s in swiss_ids})
     unmatched = operator["stops"][~operator["stops"]["stop_id"].isin(mapping)].copy()
     unmatched["parent_station"] = unmatched["parent_station"].map(lambda p: mapping.get(p, p) if p else p)
     if len(unmatched):

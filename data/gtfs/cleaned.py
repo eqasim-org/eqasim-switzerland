@@ -2,7 +2,7 @@ import data.gtfs.utils as gtfs
 import os
 import pandas as pd
 import logging
-from data.gtfs.sources import get_input_files, selected_inputs, source_signatures
+from data.gtfs.sources import get_input_files, is_swiss_feed, selected_inputs, source_signatures
 
 logger = logging.getLogger("synpp")
 
@@ -75,7 +75,7 @@ def execute(context):
         feed = gtfs.merge_cross_agency_blocks(feed)
         feeds.append((path, feed))
 
-    swiss_idx = next((i for i, (p, _) in enumerate(feeds) if "fp" in os.path.basename(p)), None)
+    swiss_idx = next((i for i, (p, _) in enumerate(feeds) if is_swiss_feed(p)), None)
 
     # The TPG lines of the Swiss feed are replaced by the ones of the TPG own feed
     if tpg_file:

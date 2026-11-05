@@ -1,6 +1,9 @@
 """Resolve GTFS sources and identify changes without reading archive contents."""
 from pathlib import Path
+import logging
 import os
+
+logger = logging.getLogger("synpp")
 
 
 def get_input_files(base_path):
@@ -23,10 +26,23 @@ def selected_inputs(context):
     tpg = context.config('gtfs_tpg_file')
     if tpg:
         tpg = str(folder / tpg)
+        # A feed selected by gtfs_name that is not the Swiss feed (no 'fp' in its name, e.g. an already merged feed
+        # with the TPG lines) is used as it is: the TPG feed, whose file name is set by default, is not applied
+        if name and not any(is_swiss_feed(path) for path in files):
+            logger.info(f'gtfs_tpg_file not applied: {Path(files[0]).name} is not a Swiss feed (no "fp" in its name)')
+            return files, ''
         if not Path(tpg).is_file():
-            raise RuntimeError(f'gtfs_tpg_file not found: {tpg}')
+            if not name:
+                raise RuntimeError(f'gtfs_tpg_file not found: {tpg}')
+            logger.warning(f'gtfs_tpg_file not found: {tpg}. The TPG lines of {Path(files[0]).name} are kept.')
+            return files, ''
         files = [path for path in files if Path(path).resolve() != Path(tpg).resolve()]
     return files, tpg
+
+
+def is_swiss_feed(path):
+    """Whether a GTFS file is the Swiss feed, whose TPG lines gtfs_tpg_file replaces: 'fp' in its file name."""
+    return 'fp' in os.path.basename(path)
 
 
 def file_signatures(paths):
