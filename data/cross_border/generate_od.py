@@ -724,6 +724,12 @@ def read_2021_data(context):
 
     df2021 = pd.read_csv(data_path, encoding="latin1", sep = ";")
 
+    # These road-route fields are separate from FAHRTRICHTUNGGU (rail only).
+    # Keep unknown/blank exit codes as missing, without inventing an exit.
+    exit_codes = pd.to_numeric(df2021.get("GUAUSREISESTRASSE", pd.Series(index = df2021.index, dtype = object)), errors = "coerce")
+    exit_codes = exit_codes.where(exit_codes.ne(9999)).astype("Int64")
+    exit_names = read_road_exit_names(Path(data_path).with_name("AGQPV21_finale_Auswertungsdatenbank_Codebuch.xlsx")) if exit_codes.notna().any() else {}
+
     df2021 = df2021[["INTERVIEWID", "BEFRAGUNGSORTID", "BEFRAGUNGSORT", "GRENZABSCHNITT", "TAGESTYP", "VERKEHRSTRAEGER", "UEBERGANGSART", "FAHRZEUGTYP", "GRUPPENGROESSE",
                  "WOHNORTLANDISO", "WOHNORT_GISCO_ID", "STARTORTLANDISO", "STARTORT_GISCO_ID", "ZIELORTLANDISO", "ZIELORT_GISCO_ID",
                  "STARTORTORTLATITUDE", "STARTORTORTLONGITUDE",
@@ -736,6 +742,9 @@ def read_2021_data(context):
                   "start_y", "start_x", "end_y", "end_x", 
                   "trip_purpose", "nb_nights", "country1", "country2", "country3",
                   "train_type", "direction_crossing", "direction_alps", "travel_cat", "weight", "weight_vehicles"]
+
+    df2021["survey_exit_code"] = exit_codes
+    df2021["survey_exit_name"] = exit_codes.map(exit_names)
 
     df2021["interview_place"] = repair_interview_place_names(
         df2021["interview_place"], context.stage("data.cross_border.interview_places")["interview_place"])
@@ -756,6 +765,9 @@ def read_2021_data(context):
     df2021.loc[df2021["road_type"]=="1", "road_type"] = "road"
     df2021.loc[df2021["road_type"]=="2", "road_type"] = "rail"
     
+    # Keep the original vehicle type for occupancy validation before expansion.
+    df2021["survey_vehicle_type"] = pd.to_numeric(df2021["vehicle_type"], errors = "coerce")
+
     # 3. Identify vehicles
     df2021["vehicle_type"] = df2021["vehicle_type"].astype(str)
     df2021.loc[df2021["vehicle_type"]=="1", "vehicle_type"] = "car"
@@ -775,6 +787,12 @@ def read_2021_data(context):
     df2021["direction_crossing"] = df2021["direction_crossing"].astype(str)
     df2021.loc[df2021["direction_crossing"]=="1", "direction_crossing"] = "entering CH"
     df2021.loc[df2021["direction_crossing"]=="2", "direction_crossing"] = "leaving CH"
+
+    # BFS's road-border survey is conducted on entry. A blank rail-only field
+    # therefore does not make a road respondent's direction unknown (BFS 2023,
+    # Leistungen des privaten Personenverkehrs, p. 10, footnote 5).
+    road_border = df2021["road_type"].eq("road") & df2021["crossing_cat"].eq(1)
+    df2021.loc[road_border, "direction_crossing"] = "entering CH"
     
     # 6. For the Alps crossing, not used currently
     df2021["direction_alps"] = df2021["direction_alps"].astype(str)
@@ -813,10 +831,8 @@ def read_2021_data(context):
     df2021.loc[df2021["road_type"]=="road", "group_weight"] = df2021[df2021["road_type"]=="road"]["weight"] * df2021[df2021["road_type"]=="road"]["nb_passengers"]
     df2021["group_weight"] = df2021["group_weight"].astype(float)
 
-    # The rail weight is already a person weight (it does not grow with the group
-    # size), so a rail respondent stands for one person: expanding the record by
-    # its group size would count the other members of the group twice.
-    df2021.loc[df2021["road_type"]=="rail", "nb_passengers"] = 1
+    # Rail weights already count individuals; road occupancy still expands passengers.
+    df2021 = set_person_expansion_units(df2021)
 
     del df2021["road_type"]
     del df2021["vehicle_type"]

@@ -77,6 +77,12 @@ NEW_LINK_SIMPLIFY      = 2.0     # metres: tolerance when simplifying the offici
 # is connected with new links along the GTFS shape, from the last node on the shape before it (within
 # STOP_ACCESS_MAX_LENGTH) to a new node next to it, and on to the first node on the shape after it
 STOP_ACCESS_MAX_LENGTH = 400.0
+# A stop outside the corridor of its official line route can be moved to a platform of the operator (e.g. the TL stops
+# that come with its line routes) of the same station inside the corridor, at most this far away
+PLATFORM_MAX_DISTANCE = 300.0
+# A route with a stop further than this from its official line route, without a platform of the operator of its station
+# in the corridor, follows another path (e.g. a diversion or a newer route): it keeps its mapping
+REFERENCE_MISMATCH_DISTANCE = 150.0
 
 
 def read_line_agencies(routes_path):
@@ -117,6 +123,15 @@ DEFAULT_LINE_ROUTES = {
     "151": "PT_line_routes/Lausanne/Shape_lignes.shp",   # TL
 }
 
+# Platforms of the operators by GTFS agency_id (paths relative to data_path), for the routes compared with official
+# line routes: the stops (code in MNLP) and the table of their DIDOK station numbers (STOP_ID, STOP_DIDOK)
+DEFAULT_PLATFORMS = {
+    "151": {                                             # TL
+        "stops": "PT_line_routes/Lausanne/Shape_Arrets.shp",
+        "stations": "PT_line_routes/Lausanne/extrait_infos_arret_ATT5_2026.csv",
+    },
+}
+
 
 def resolve_line_routes(value, data_path, log = print):
     """pt_line_routes_path with absolute paths (relative ones are in data_path), without the files that do not exist:
@@ -132,6 +147,36 @@ def resolve_line_routes(value, data_path, log = print):
     if list(sources) == [""]:
         return sources[""]
     return sources
+
+
+def read_platforms(value, data_path, log = print):
+    """Platforms of the operators: {agency_id: {GTFS station id: [(platform code, x, y)]}}. value: {agency_id:
+    {"stops": shapefile, "stations": csv}} (see DEFAULT_PLATFORMS), paths absolute or relative to data_path. A DIDOK
+    number is the GTFS station id without the Swiss country code 85 (Port-Franc: 92098 -> 8592098)."""
+    absolute = lambda path: path if os.path.isabs(path) else os.path.join(data_path, path)
+    platforms = {}
+    for agency, paths in (value or {}).items():
+        stops_path, stations_path = absolute(paths["stops"]), absolute(paths["stations"])
+        missing = [path for path in (stops_path, stations_path) if not os.path.exists(path)]
+        if missing:
+            log(f"WARNING: platforms of agency {agency} not found at {', '.join(missing)}: not used")
+            continue
+        with open(stations_path, newline = "", encoding = "utf-8-sig") as f:
+            stations = {row["STOP_ID"]: row["STOP_DIDOK"] for row in csv.DictReader(f)}
+        gdf = gpd.read_file(stops_path)
+        gdf = gdf.to_crs(CRS) if gdf.crs is not None else gdf.set_crs(CRS)
+        by_station = defaultdict(list)
+        for code, geometry in zip(gdf["MNLP"], gdf.geometry):
+            number = str(stations.get(code) or "").strip()
+            if geometry is None or geometry.is_empty or not number.isdigit() or int(number) == 0:
+                continue
+            station = "85%05d" % int(number)
+            if code not in {c for c, _, _ in by_station[station]}:
+                by_station[station].append((code, geometry.x, geometry.y))
+        platforms[str(agency)] = dict(by_station)
+        log("  -> %d platform(s) of %d station(s) for agency %s" % (
+            sum(len(v) for v in by_station.values()), len(by_station), agency))
+    return platforms
 
 
 def official_line_key(keys, line_name, agency = None):
@@ -309,12 +354,15 @@ class Corridors:
             self.bounds = (0.0, 0.0, 0.0, 0.0)
         self._geometries = {}
         self._graphs = {}
+        self._through_stops = {}  # key of an official line route through stops it skips (through_stops) -> LineString
 
 
     def reference_line(self, key):
         """The reference route of a corridor key: its GTFS shape, or the official line route(s)."""
         if key[0] == SHAPE_KEY:
             return self.shapes[key[1]]
+        if key in self._through_stops:
+            return self._through_stops[key]
         line, selected = key
         return shapely.union_all([self.centerlines[line][i] for i in selected])
 
@@ -329,6 +377,8 @@ class Corridors:
         if key not in self._graphs:
             if key[0] == SHAPE_KEY:
                 self._graphs[key] = CenterlineGraph(self.shapes[key[1]])
+            elif key in self._through_stops:
+                self._graphs[key] = CenterlineGraph(self._through_stops[key])
             else:
                 line, selected = key
                 self._graphs[key] = CenterlineGraph(self.centerlines[line][selected[0]]) if len(selected) == 1 else None
@@ -387,6 +437,35 @@ class Corridors:
             shapely.prepare(geometry)
             self._geometries[key] = geometry
         return key, self._geometries[key], matched
+
+
+    def through_stops(self, key, stop_points):
+        """(key, geometry) of an official line route that passes all the stops of a route: where stops are further than
+        NEW_LINK_SNAP_DISTANCE from it (e.g. the official route is a later one that skips them), it goes in straight
+        lines through them between the stops before and after them on the official route. The key and geometry of the
+        official route itself if it passes all the stops or is not a single route."""
+        graph = self.centerline_graph(key)
+        if graph is None:
+            return key, self._geometries[key]
+        stop_xy = [tuple(c) for c in shapely.get_coordinates(stop_points)]
+        vertices = [graph.snap(x, y, NEW_LINK_SNAP_DISTANCE) for x, y in stop_xy]
+        if None not in vertices:
+            return key, self._geometries[key]
+
+        through_key = ("through_stops", key, tuple(v if v is not None else (round(x, 1), round(y, 1))
+                                                   for v, (x, y) in zip(vertices, stop_xy)))
+        if through_key not in self._through_stops:
+            coords = [graph.coords[vertices[0]] if vertices[0] is not None else stop_xy[0]]
+            for i in range(len(stop_xy) - 1):
+                along = graph.path(vertices[i], vertices[i + 1]) if None not in vertices[i:i + 2] else None
+                coords += along[0][1:] if along is not None else \
+                    [graph.coords[vertices[i + 1]] if vertices[i + 1] is not None else stop_xy[i + 1]]
+            line = LineString([c for c, previous in zip(coords, [None] + coords) if c != previous])
+            self._through_stops[through_key] = line
+            geometry = shapely.buffer(line, self.buffer_m)
+            shapely.prepare(geometry)
+            self._geometries[through_key] = geometry
+        return through_key, self._geometries[through_key]
 
 
 class CenterlineGraph:
@@ -1017,6 +1096,7 @@ class Schedule:
         self.facilities = {f.attrib["id"]: f for f in self.stops_element.iter("stopFacility")}
         self.copies = defaultdict(list)  # base stop id -> facility ids
         self.station_copies = defaultdict(list)  # station id (before any ":") -> facility ids
+        self.templates = {}  # base id of a platform of an operator -> attributes of its copies (platform_base)
         for facility_id in self.facilities:
             base_id = facility_id.split(".link:")[0]
             self.copies[base_id].append(facility_id)
@@ -1034,11 +1114,22 @@ class Schedule:
         return facility.attrib.get("name", facility_id) if facility is not None else facility_id
 
 
+    def platform_base(self, stop_id, code, x, y):
+        """Base id of a platform of an operator (e.g. a TL stop) at (x, y) that replaces the stop stop_id: in the
+        station of the stop, with its name and stop area (e.g. 8592098:platform:PFRAN_E)."""
+        base_id = "%s:platform:%s" % (stop_id.split(".link:")[0].split(":")[0], code)
+        if base_id not in self.templates:
+            attributes = dict(self.facilities[stop_id].attrib)
+            attributes.update(x = repr(float(x)), y = repr(float(y)))
+            self.templates[base_id] = attributes
+        return base_id
+
+
     def add_copy(self, base_id, link_id):
         facility_id = "%s.link:%s" % (base_id, link_id)
         if facility_id not in self.facilities:
-            template = self.facilities[self.copies[base_id][0]]
-            attributes = dict(template.attrib)
+            template = self.templates.get(base_id) or self.facilities[self.copies[base_id][0]].attrib
+            attributes = dict(template)
             attributes.update(id = facility_id, linkRefId = link_id)
             self.facilities[facility_id] = ET.SubElement(self.stops_element, "stopFacility", attributes)
             self.copies[base_id].append(facility_id)
@@ -1066,12 +1157,19 @@ REPORT_COLUMNS = [
 
 
 def check_and_correct(schedule, network, corridors, modes, min_share, correct, stop_radius,
-                      add_links = True, log = print, line_agencies = None, agencies = ()):
+                      add_links = True, log = print, line_agencies = None, agencies = (), platforms = None,
+                      through_stops_lines = ()):
     """Returns (report rows, links that need the route mode added, new link links used).
     If agencies are given, only the lines operated by one of them (line_agencies maps the line id
     to its agency) are compared with the official routes: lines of other operators can have the
     same name as an official line (e.g. line 7 in Geneva and in France).
+    platforms: {agency_id: {station id: [(code, x, y)]}} (read_platforms): the stops of the routes compared with an
+    official line route can be moved to them, and a route that takes another path than its official line route
+    (_follows_other_path) keeps its mapping (status other_path).
+    through_stops_lines: {(agency_id, normalized line name)} whose routes compared with an official line route are
+    compared with it through the stops it skips (Corridors.through_stops).
     With correct = True the schedule is modified in place."""
+    through_stops_lines = set(through_stops_lines or ())
     rows = []
     patched_links = set()
     used_new_links = set()
@@ -1104,12 +1202,16 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
             (float(schedule.facilities[s].attrib["x"]), float(schedule.facilities[s].attrib["y"]))
             for s in stop_ids
         ])
+        agency = line_agencies.get(line.attrib["id"]) if line_agencies else None
         reference = corridors.lookup(line_name, destination, stop_points, route_id = route.attrib["id"], line_id = line.attrib["id"],
-                                     agency = line_agencies.get(line.attrib["id"]) if line_agencies else None)
+                                     agency = agency)
         if reference is None:
             counts["no_reference"] += 1
             continue
         key, geometry, matched = reference
+        # Some official line routes skip stops of the GTFS (e.g. a later route): they are compared through them
+        if key[0] != SHAPE_KEY and (agency, normalize_line(line_name)) in through_stops_lines:
+            key, geometry = corridors.through_stops(key, stop_points)
         centerline = corridors.centerline(key)
         network.inside_lengths(key, geometry, centerline, corridors.reference_line(key))
 
@@ -1150,11 +1252,17 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
             n_stops_off = n_off, new_n_stops_off = "", off_lane_m = round(off_lane), new_off_lane_m = "",
         )
 
-        if row["status"] == "deviates" and correct:
+        # The platforms of the operator are only used with its official line routes (a GTFS shape follows the stops)
+        route_platforms = (platforms or {}).get(agency) if key[0] != SHAPE_KEY else None
+        if row["status"] == "deviates" and correct and route_platforms is not None \
+                and _follows_other_path(corridors, key, geometry, stop_ids, stop_points, route_platforms):
+            row["status"] = "other_path"
+        elif row["status"] == "deviates" and correct:
             cache_key = pattern[:2]
             if cache_key not in corrections:
                 corrections[cache_key] = _reroute_with_bus_links(
-                    schedule, network, corridors, key, geometry, stop_ids, stop_radius, path_cache, add_links
+                    schedule, network, corridors, key, geometry, stop_ids, stop_radius, path_cache, add_links,
+                    route_platforms,
                 )
             result = corrections[cache_key]
 
@@ -1197,6 +1305,20 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
     return rows, patched_links, used_new_links
 
 
+def _follows_other_path(corridors, key, geometry, stop_ids, stop_points, platforms):
+    """True if a stop of the route is further than REFERENCE_MISMATCH_DISTANCE from its official line route and its
+    station has no platform of the operator in the corridor: the route takes another path than the official route
+    (e.g. a diversion or a newer route), which would only drag it away from its stops."""
+    reference = corridors.reference_line(key)
+    for stop_id, point in zip(stop_ids, stop_points):
+        if reference.distance(point) <= REFERENCE_MISMATCH_DISTANCE:
+            continue
+        station = stop_id.split(".link:")[0].split(":")[0]
+        if not any(geometry.contains(Point(x, y)) for _, x, y in platforms.get(station, ())):
+            return True
+    return False
+
+
 def _apply(route_element, stop_elements, new_stop_ids, new_links):
     for element, stop_id in zip(stop_elements, new_stop_ids):
         element.set("refId", stop_id)
@@ -1206,7 +1328,9 @@ def _apply(route_element, stop_elements, new_stop_ids, new_links):
         ET.SubElement(route_element, "link", refId = link_id)
 
 
-def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, access_fallback = False):
+def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, access_fallback = False,
+             platforms = None):
+    """platforms: {station id: [(code, x, y)]} of the operator of the route (read_platforms), or None."""
     inside = network.inside_lengths(key, geometry)
 
     # candidate (facility id or None for a new copy, base id, link id, cost) for each stop
@@ -1271,6 +1395,17 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
         # path they may allow is a route that does not reach the platform (e.g. on a parallel street)
         elif near:
             options = near
+
+        # A stop outside the corridor (e.g. the GTFS quay of a street the official route does not take) can be moved
+        # to a platform of the operator of the same station inside it, on a link next to that platform
+        if platforms and not geometry.contains(point):
+            for code, px, py in platforms.get(base_id.split(":")[0], ()):
+                platform = Point(px, py)
+                if not geometry.contains(platform) or platform.distance(point) > PLATFORM_MAX_DISTANCE:
+                    continue
+                platform_base = schedule.platform_base(stop_id, code, px, py)
+                for link_id, distance in network.nearby_routing_links(px, py, MAX_STOP_LINK_DISTANCE, inside):
+                    options.setdefault(link_id, (None, platform_base, distance + PLATFORM_SWITCH_DISTANCE))
 
         # No usable road near the stop (pt2matsim put it on an artificial link of its own): it
         # stays where it is, and the legs to it are connected with new links along the official route.
@@ -1401,10 +1536,12 @@ def _add_bus_links(schedule, network, graph, key, geometry, stop_ids, stop_links
     return added
 
 
-def _reroute_with_bus_links(schedule, network, corridors, key, geometry, stop_ids, stop_radius, path_cache, add_links):
-    result = _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache)
+def _reroute_with_bus_links(schedule, network, corridors, key, geometry, stop_ids, stop_radius, path_cache, add_links,
+                            platforms = None):
+    result = _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, platforms = platforms)
     if result is None:  # e.g. the links added to reach a stop cannot be reached themselves
-        result = _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, access_fallback = True)
+        result = _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, access_fallback = True,
+                          platforms = platforms)
     graph = corridors.centerline_graph(key) if add_links else None
     if graph is None:
         return result
@@ -1429,8 +1566,9 @@ def _reroute_with_bus_links(schedule, network, corridors, key, geometry, stop_id
 
     chosen_stop_ids = result[0] if result is not None else stop_ids
     if _add_bus_links(schedule, network, graph, key, geometry, chosen_stop_ids, stop_links, leg_lengths, legs_off_route, path_cache):
-        result = _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache) \
-            or _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, access_fallback = True)
+        result = _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, platforms = platforms) \
+            or _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, access_fallback = True,
+                        platforms = platforms)
     return result
 
 
@@ -1488,7 +1626,7 @@ def run(schedule_path, network_path, shapefile_path, report_path, corrected_sche
         patched_network_path = None, modes = ("bus",), fallback_modes = ("car",), buffer_m = 30.0,
         min_share = 0.9, stop_radius = 80.0, add_links = True, log = print,
         gtfs_routes_path = None, agencies = (), gtfs_trips_path = None, gtfs_shapes_path = None,
-        input_geometry_path = None, output_geometry_path = None):
+        input_geometry_path = None, output_geometry_path = None, platforms = None, through_stops_lines = None):
     """Checks (and with corrected_schedule_path also corrects) the mapped routes. If routes had
     to use links without the route mode, or links added along the reference route, a network with
     the mode added / the new links is written to patched_network_path.
@@ -1496,10 +1634,15 @@ def run(schedule_path, network_path, shapefile_path, report_path, corrected_sche
     agencies (with gtfs_routes_path, the GTFS routes.txt) restricts the check to the lines of these
     agencies. With gtfs_trips_path and gtfs_shapes_path (the GTFS trips.txt and shapes.txt), a route is
     compared with the shape of its trip; the official line routes of shapefile_path (optional; one path, {agency_id:
-    path} or a list, see line_route_sources) are used for the routes without one."""
+    path} or a list, see line_route_sources) are used for the routes without one. platforms (read_platforms): the
+    platforms of the operators that the stops of the routes compared with an official line route can be moved to.
+    through_stops_lines: {agency_id: [line names]} whose official line routes are followed through the stops they skip
+    (see check_and_correct)."""
+    through_stops_lines = {(str(agency), normalize_line(line))
+                           for agency, lines in (through_stops_lines or {}).items() for line in lines}
     agencies = set(map(str, agencies or ()))
     line_agencies = None
-    if agencies or any(agency for agency, _ in line_route_sources(shapefile_path)):
+    if agencies or platforms or through_stops_lines or any(agency for agency, _ in line_route_sources(shapefile_path)):
         assert gtfs_routes_path, "gtfs_routes_path is needed to filter the lines by agency"
         line_agencies = read_line_agencies(gtfs_routes_path)
 
@@ -1528,6 +1671,7 @@ def run(schedule_path, network_path, shapefile_path, report_path, corrected_sche
         schedule, network, corridors, set(modes), min_share,
         correct = corrected_schedule_path is not None, stop_radius = stop_radius,
         add_links = add_links, log = log, line_agencies = line_agencies, agencies = agencies,
+        platforms = platforms, through_stops_lines = through_stops_lines,
     )
     write_report(rows, report_path)
 

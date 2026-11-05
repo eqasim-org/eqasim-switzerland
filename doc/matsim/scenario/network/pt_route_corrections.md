@@ -22,6 +22,32 @@ default `pt_route_modes: [bus]`; real-road capacities are unchanged. Set
 `pt_route_add_links: false` to restrict correction to existing connections and
 inspect unresolved routes before accepting new links.
 
+Official line references do not always serve the GTFS quays: TL's
+`Shape_lignes.shp` can follow another street than the quay of the national GTFS
+(e.g. line 17 at Port-Franc). `pt_route_platforms` gives, per operator, its stops
+and the table of their DIDOK numbers; by default TL's
+`PT_line_routes/Lausanne/Shape_Arrets.shp` and
+`PT_line_routes/Lausanne/extrait_infos_arret_ATT5_2026.csv`. A DIDOK number is the
+GTFS station id without the Swiss code `85`. When a stop of a route compared with
+an official line reference lies outside its corridor, the correction can move it
+to a platform of the same station inside the corridor, at most 300 m away; the
+corrected schedule then has a stop such as `8592098:platform:PFRAN_E`, with the
+platform's coordinates. A route with a stop more than 150 m from its reference and
+no such platform takes another path than the reference (e.g. a newer route) and
+keeps its mapping (`other_path` in the report). Routes compared with a GTFS shape,
+such as TPG's, are not affected.
+
+Some official line references skip stops of the GTFS: TL's line 32 reference is
+a later route via Renens VD, 1er Août, without Renens VD, Avenir, so its routes
+would keep their mapping (`other_path`). `pt_route_through_stops_lines` (default
+`{"151": ["32"]}`) lists such lines by GTFS agency. For their routes, the
+reference goes in straight lines through the stops more than 60 m from it,
+between the stops before and after them on the reference, and the routes are
+corrected against it as usual. The leg that has no road (line 32: the Rue du
+Simplon underpass at Renens gare, which OSM tags `motor_vehicle=permit` without
+bus access) then gets one straight bus-only link when `pt_route_add_links` is
+enabled.
+
 The stage writes a local schedule/network copy and `route_correction.csv`, with
 before/after route metrics and added-link counts. Existing detailed curves are
 preserved, reversed links receive reversed curves, and new links receive directed
