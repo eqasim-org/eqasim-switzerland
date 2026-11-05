@@ -6,6 +6,7 @@ import pandas as pd
 import polars as pl
 import geopandas as gpd
 from shapely import wkt
+from xml.sax.saxutils import escape
 
 import matsim.writers
 from matsim.writers import backlog_iterator
@@ -21,7 +22,10 @@ logger = logging.getLogger("synpp")
 HOME_DESTINATION_ID = -1
 
 def configure(context):
-    context.stage("synthesis.population.models.subscriptions")
+    # The zones of the regional subscriptions (and Léman Pass) of the Swiss synthetic population; false: without them
+    context.config("use_subscription_zones", default = True)
+    context.stage("synthesis.population.models.subscription_zones" if context.config("use_subscription_zones")
+                  else "synthesis.population.models.subscriptions", alias = "synthetic_persons")
     context.config("enable_mode_choice", False)
     context.stage("mode_choice.run" if context.config("enable_mode_choice") else "synthesis.population.trips_with_departures",
                   alias="population_trips")
@@ -58,7 +62,7 @@ def execute(context):
 
     cache_path    = context.path()
     cst           = context.stage("data.constants")
-    df_persons    = context.stage("synthesis.population.models.subscriptions").copy()
+    df_persons    = context.stage("synthetic_persons").copy()
     df_activities = align_activities(context.stage("synthesis.population.activities"), population_trips)
     df_vehicles   = context.stage("synthesis.vehicles.vehicles")[1]  
 
@@ -196,6 +200,11 @@ def execute(context):
         df_vehicles   = df_vehicles.sort_values(by = ["owner_id"])
     
     df_persons["is_car_passenger"] = df_persons["is_car_passenger"].fillna(False)
+
+    # Only the Swiss synthetic persons have subscription zones: the external and cross-border agents get none
+    for column in SUBSCRIPTION_ZONE_FIELDS:
+        df_persons[column] = df_persons.get(column, pd.Series("", index = df_persons.index)).fillna("")
+    df_persons["lemanpass_annual_chf"] = pd.to_numeric(df_persons.get("lemanpass_annual_chf", pd.Series(float("nan"), index = df_persons.index)), errors = "coerce")
     
     # Extra scenario markers stay available to PersonWriter; imported external
     # populations have no such classification and receive explicit False defaults.
@@ -204,7 +213,7 @@ def execute(context):
         df_persons[column] = coerce_boolean_series(df_persons.get(column, pd.Series(False, index=df_persons.index)), name=column)
     df_persons["non_private_model_status"] = df_persons.get(
         "non_private_model_status", pd.Series("ordinary_models", index=df_persons.index)).fillna("ordinary_models")
-    df_persons    = df_persons[PERSON_FIELDS + residence_flags + ["non_private_model_status"]]
+    df_persons    = df_persons[PERSON_FIELDS + SUBSCRIPTION_ZONE_FIELDS + ["lemanpass_annual_chf"] + residence_flags + ["non_private_model_status"]]
     df_activities = df_activities[ACTIVITY_FIELDS]
     df_vehicles   = df_vehicles[VEHICLE_FIELDS]
     df_vehicles["owner_id"] = df_vehicles["owner_id"].astype(int)
@@ -417,6 +426,8 @@ ACTIVITY_ATTRIBUTES_TO_SAVE = dict(municipalityType  = "municipality_type",
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "pt_subscription", "household_id", "is_car_passenger", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip", "income_class", "person_type", 
                  "cross_border_od", "bike_availability"]
+# synthesis.population.models.subscription_zones: the zones ("ZVV:110,121") and product of the regional subscriptions
+SUBSCRIPTION_ZONE_FIELDS = ["subscription_zones", "subscription_product", "lemanpass"]
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last","geometry", "destination_id", "following_mode", 
                    "municipality_type","municipality_id", "employee_density", "companies_density", "population_density", "ovgk"]
 PERSONS_DTYPES = {"person_id": int, "age": int, "car_availability": int, "bike_availability": int, "employed": bool, "driving_license": bool,
@@ -529,6 +540,14 @@ class PersonWriter:
         writer.add_attribute("carAvail", "java.lang.String", ["never", "always"][int(p.car_availability)])
 
         writer.add_attribute("subscriptions", "java.lang.String", ["none", "GA", "VA", "HT", "VA+HT"][int(p.pt_subscription)])
+        # the regional subscription: its zones, Verbundabo or Léman Pass, and the Léman Pass product and annual price
+        if p.subscription_product:
+            writer.add_attribute("subscriptionProduct", "java.lang.String", escape(p.subscription_product))
+        if p.subscription_zones:
+            writer.add_attribute("subscriptionZones", "java.lang.String", escape(p.subscription_zones))
+        if p.lemanpass:
+            writer.add_attribute("lemanPass", "java.lang.String", escape(p.lemanpass))
+            writer.add_attribute("lemanPassAnnualPrice", "java.lang.Double", str(float(p.lemanpass_annual_chf)))
 
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(getattr(p, "is_car_passenger", False)))
         # Keep assumptions discoverable in the final population XML, not only

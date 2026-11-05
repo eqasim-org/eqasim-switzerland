@@ -287,7 +287,7 @@ def execute(context):
     networks.append(unireso)
     logger.info("Unireso imported")
 
-    uniresoFR = data.pt_pricing.t651.authorities.uniresoFR.assign_zones_to_gtfs(gtfs)
+    uniresoFR = data.pt_pricing.t651.authorities.uniresoFR.assign_zones_to_gtfs(gtfs, cantons)
     networks.append(uniresoFR)
     logger.info("Unireso FR imported")
 

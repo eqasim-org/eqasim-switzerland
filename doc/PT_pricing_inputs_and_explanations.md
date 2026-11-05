@@ -31,3 +31,15 @@ The canton of Zurich has released an online map of the cantonal PT zones at [Geo
 If necessary, I can add more information about the stages leading from the raw PDFs to the final gtfs_zones.csv file.
 
 
+
+# Zone polygons (data.pt_pricing.zones)
+No official map of the zones exists for most fare networks. The stage `data.pt_pricing.zones` rebuilds one polygon per zone of each network from the municipalities of `tarifverbundkarte.geojson` ([SBB open data: Tarifverbundkarte](https://data.sbb.ch/explore/dataset/tarifverbundkarte/information/)), the networks they belong to, and the zones of the stops (`gtfs_zones.csv` of `data.pt_pricing.pt_pricing`, located with the stops of `data.gtfs.cleaned`):
+- a municipality belongs to the zone of at least 90 % of its stops; otherwise it is split by nearest stop (Bern, Lausanne...);
+- a municipality whose stops are all on a zone border (Wichtrach: Libero 626 and 710) is split between these zones;
+- a municipality without stops takes the zone of the neighbour with which it shares the longest border.
+
+The French zones of Unireso come from `unireso_france_zones.csv` (insee, commune, zone, optionally network) and the commune outlines of `communes_france.gpkg` (insee, name, geometry). A commune listed in several zones is split by its nearest stops.
+
+The French zones only come from that list: a Swiss stop given one of them is not counted for its municipality. `gtfs_zones.csv` gave Unireso zone 230 to the stops of Collonges VS, named like Collonges in the Ain; `uniresoFR.assign_zones_to_gtfs` now leaves out the stops inside the Swiss cantons, so regenerated inputs no longer have them.
+
+The stage returns a GeoDataFrame (network, zone, geometry, municipalities, name; EPSG:2056) and writes `pt_zones.gpkg` and an interactive map, `pt_zones.html`, in its cache folder. The map has one layer per network on an Esri background (Z-Pass layers hidden at first), a layer of the places in several regional networks (dashed outline), and a layer of the stops at zone or network borders (white dots, with all their zones on click). A click anywhere lists every zone of every network at that place, including the hidden layers, and outlines them. The input files are set by `pt_zones_municipalities_file`, `pt_zones_foreign_communes_file` and `pt_zones_foreign_zones_file` (relative to `data_path`, by default in `pt_pricing/`). The method is the same as in `gtfs_router/zones.py` of the Swiss PT explorer.

@@ -1,4 +1,4 @@
-def assign_zones_to_gtfs(gtfs):
+def assign_zones_to_gtfs(gtfs, cantons):
 
     zone_to_places = {
         "250": ["Versonnex", "Divonne-les-B", "Gex", "Grilly",
@@ -32,6 +32,10 @@ def assign_zones_to_gtfs(gtfs):
                 places_to_zones[place_name] += ("/" + key) 
 
     gtfs = gtfs[["stop_id", "stop_name", "geometry"]]
+
+    # The zones are French: the Swiss stops with the same names (Collonges VS, Collonges, école) are left out
+    switzerland = cantons[cantons["canton_id"] > 0].to_crs(gtfs.crs).geometry.union_all()   # not the French area (-1)
+    gtfs = gtfs[~gtfs.within(switzerland)].copy()
 
     gtfs["zones"] = None
 
