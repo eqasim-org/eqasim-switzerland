@@ -77,12 +77,24 @@ class CapacityCorrector:
         minimum_speed = self.context.config("minimum_speed")/3.6
         
         car_links = self.links.modes.str.split(',').map(lambda x: 'car' in x)
+
+        # Keep road attractiveness independent of the sampling-dependent uplift
+        # below. Carry it as an XML attribute through PT mapping/link splitting.
+        selection_capacity = self.links.loc[car_links, "capacity"].copy()
         
         self.links.loc[car_links, "capacity"] = \
             self.links.loc[car_links, ["capacity", "length", "freespeed"]].apply(
             lambda x: self._correct_capacity(x, sampling_rate, minimum_speed),
             axis=1)
-        return self.correct_from_manual_list()
+        self.correct_from_manual_list()
+        # Manual upper bounds still apply to both capacities. Taking the minimum
+        # retains those bounds without transferring the short-link uplift.
+        selection_capacity = np.minimum(selection_capacity, self.links.loc[car_links, "capacity"])
+        self.links.loc[car_links, "attributes"] = [
+            {**(attrs if isinstance(attrs, dict) else {}), "crossBorderSelectionCapacity": float(capacity)}
+            for attrs, capacity in zip(self.links.loc[car_links, "attributes"], selection_capacity)
+        ]
+        return self.links
 
     def correct_from_manual_list(self):
         """Apply street-specific upper bounds to all matching links.
@@ -200,6 +212,12 @@ class CapacityCorrector:
         # apply correction
         factor = self.context.config("capacity_factor_outside_border")
         self.links.loc[mask, "capacity"] *= factor
+        # Preserve the existing geographical reduction in selection weights too.
+        # Copy attribute dictionaries so the input network remains unchanged.
+        self.links.loc[mask, "attributes"] = self.links.loc[mask, "attributes"].map(
+            lambda attrs: {**attrs, "crossBorderSelectionCapacity": attrs["crossBorderSelectionCapacity"] * factor}
+            if isinstance(attrs, dict) and "crossBorderSelectionCapacity" in attrs else attrs
+        )
         
         return self.links
 

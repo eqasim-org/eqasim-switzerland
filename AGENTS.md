@@ -151,3 +151,14 @@ def execute(context):
 - Leave third-party environment files and generated analysis artifacts in their
   own directories. Moving source documentation must not alter installed packages
   or break generated report workflows.
+
+## Analysis maps
+
+- For new or updated Swiss and border-region maps, default to the swisstopo
+  national map served by geo.admin.ch WMTS, with visible attribution and a
+  background-opacity/dimming control. The user repeatedly encounters blocked
+  direct OpenStreetMap tiles; do not use that service as the default.
+- Verify representative tiles before delivery. Do not assume CARTO is key-free:
+  it now requires an API key. For maps beyond swisstopo coverage, verify another
+  accessible provider and its access requirements first. Preserve usable markers
+  and tables if tiles fail; do not promise permanent online availability.

@@ -2,6 +2,7 @@
 
 import gzip
 import heapq
+import logging
 from collections import defaultdict
 from types import SimpleNamespace
 
@@ -15,6 +16,8 @@ from matsim.scenario.network.utils.link_geometry import attach_link_geometries, 
 ANCHOR_RADIUS = 100.0
 PARALLEL_ROAD_TOLERANCE = 25.0
 MAX_CORRIDOR_DISTANCE = 2000.0
+
+logger = logging.getLogger(__name__)
 
 
 def attach_road_details(links, network_path, geometry_path):
@@ -31,19 +34,32 @@ def attach_road_details(links, network_path, geometry_path):
     for i, name in enumerate(['minx', 'miny', 'maxx', 'maxy']):
         links[name] = bounds[:, i]
 
-    # Read only the road class needed for continuity, not every network attribute.
+    # Read only road class and the capacity preserved before short-link uplift.
+    # Simulation capacities remain untouched; this column is only for selection.
     wanted = set(links.link_id)
     classes = {}
+    capacities = {}
     opener = gzip.open if str(network_path).endswith('.gz') else open
     with opener(network_path, 'rb') as stream:
         for _, element in etree.iterparse(stream, events=['end'], tag='link'):
             link_id = element.get('id')
             if link_id in wanted:
                 classes[link_id] = element.findtext("attributes/attribute[@name='osm:way:highway']", '')
+                value = element.findtext("attributes/attribute[@name='crossBorderSelectionCapacity']")
+                if value is not None:
+                    capacities[link_id] = float(value)
             element.clear()
             while element.getprevious() is not None:
                 del element.getparent()[0]
     links['road_class'] = links.link_id.map(classes).fillna('')
+    # Uncorrected or older networks may not have the attribute. Report the
+    # fallback so stale corrected networks do not silently appear fixed.
+    missing = ~links.link_id.isin(capacities)
+    if missing.any():
+        logger.warning("%d border-near links lack crossBorderSelectionCapacity; using network capacity. "
+                       "Rebuild from matsim.scenario.network.convert_osm if short-link correction was applied.",
+                       int(missing.sum()))
+    links['selection_capacity'] = links.link_id.map(capacities).where(~missing, links.capacity)
     return links
 
 
@@ -80,7 +96,7 @@ def match_road_corridor(point, direction, links):
     queue = []
     for anchor in anchors.itertuples(index=False):
         if _crosses_in_direction(anchor, direction):
-            return _result(anchor, anchor, anchor.capacity, 0.0)
+            return _result(anchor, anchor, getattr(anchor, 'selection_capacity', anchor.capacity), 0.0)
         # When the dot is already beyond the crossing in travel direction, trace
         # backwards. Otherwise follow the road forwards. This keeps capacities
         # on the correct carriageway even where the two directions differ.
@@ -90,7 +106,8 @@ def match_road_corridor(point, direction, links):
         position = anchor.road_geometry.project(point)
         node = anchor.from_node if reverse else anchor.to_node
         distance = position if reverse else anchor.road_geometry.length - position
-        heapq.heappush(queue, (distance + anchor.anchor_distance, node, reverse, anchor.link_id, anchor.capacity))
+        heapq.heappush(queue, (distance + anchor.anchor_distance, node, reverse, anchor.link_id,
+                               getattr(anchor, 'selection_capacity', anchor.capacity)))
     visited = set()
     while queue:
         distance, node, reverse, anchor_id, capacity = heapq.heappop(queue)
@@ -102,7 +119,7 @@ def match_road_corridor(point, direction, links):
         graph = backward if reverse else forward
         for other, link_id in graph[node]:
             link = rows[link_id]
-            bottleneck = min(capacity, link.capacity)
+            bottleneck = min(capacity, getattr(link, 'selection_capacity', link.capacity))
             if _crosses_in_direction(link, direction):
                 return _result(link, rows[anchor_id], bottleneck, distance)
             if (other, reverse) not in visited:

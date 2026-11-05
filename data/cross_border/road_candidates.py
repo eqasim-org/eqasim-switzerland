@@ -61,6 +61,8 @@ def weight_candidates(points, assignments):
             roads[direction + "_" + column] = ids.map(lookup[column]).to_numpy()
     # The road survey observes inbound traffic. Use the inbound corridor's total
     # capacity (already including lanes), not the sum of the two carriageways.
+    # The matcher uses crossBorderSelectionCapacity, excluding the numerical
+    # short-link uplift so sampling fraction does not bias crossing preferences.
     roads["physical_crossing"] = roads.entry_link_id.astype(str) + "|" + roads.exit_link_id.astype(str)
     unresolved = roads.entry_link_id.isna() | roads.exit_link_id.isna() | roads.entry_link_id.eq(roads.exit_link_id)
     roads.loc[unresolved, "physical_crossing"] = roads.loc[unresolved, "border_crossing_point_id"]

@@ -11,6 +11,8 @@ from sklearn.neighbors import KDTree
 
 from matsim.readers import read_network
 
+from data.cross_border.count_assignment_inputs import configure_foreign, assigned_foreign
+
 logger = logging.getLogger("synpp")
 
 _TILE_URL = "https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg"
@@ -37,7 +39,7 @@ RESULT_COLUMNS = [
 
 
 def configure(context):
-    context.stage("data.cross_border.generate_od")
+    configure_foreign(context)
     context.stage("data.spatial.swiss_border")
 
     context.config("border_offset", default = 50000)
@@ -49,7 +51,7 @@ def configure(context):
 
 
 def execute(context):
-    df            = context.stage("data.cross_border.generate_od")
+    df            = assigned_foreign(context)
     ch_border     = context.stage("data.spatial.swiss_border").copy()[0]
     border_offset = context.config("border_offset")
 
