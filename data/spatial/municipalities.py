@@ -1,7 +1,7 @@
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from data.osm.clean import read_outside_region
+from data.spatial.utils import read_outside_region
 from shapely.ops import unary_union
 
 

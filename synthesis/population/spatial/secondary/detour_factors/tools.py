@@ -9,7 +9,7 @@ from tqdm import tqdm
 import plotly.graph_objects as go
 from shapely.ops import unary_union
 from shapely import contains_xy
-from data.osm.clean import read_outside_region
+from data.spatial.utils import read_outside_region
 
 logger = logging.getLogger("synpp")
 

@@ -9,22 +9,20 @@ from shapely.ops import unary_union
 
 logger = logging.getLogger("synpp")
 
-def configure(context):
-    context.stage("data.spatial.swiss_border")
-    
+def configure(context):    
+    context.stage("data.spatial.simulation_region")
+
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 50000)
-    # we include the network of this region, i don't know if this is the right config param to use, to check later!
-    context.config("cross_border_exclude_shapefiles", default=None)
-    context.config("include_external_population", default = True)
+
     context.config("correct_osm_speeds", default = True)
     if context.config("correct_osm_speeds"):
         context.stage("data.osm.speed_corrections")
 
     context.config("use_latest_osm_for_correction", default = True)
-    context.config("latest_osm_for_correction", default = 'switzerland-261004.osm.pbf')
-    if context.config("use_latest_osm_for_correction") and not context.config("latest_osm_for_correction"):
+    context.config("latest_osm_for_correction", default=None)
+    if context.config("use_latest_osm_for_correction") and context.config("latest_osm_for_correction") == "":
         raise ValueError("If use_latest_osm_for_correction is True, latest_osm_for_correction must be provided.")
 
 
@@ -53,7 +51,9 @@ def execute(context):
         cleaned_file = mf.merge_files(context, osm_files, border, output_file, speed_corrections)
 
     if context.config("use_latest_osm_for_correction"):
-        latest_file = Path(context.config("data_path")) / "osm" / context.config("latest_osm_for_correction")
+        latest_name = context.config("latest_osm_for_correction")
+        # Retain the correction stage's legacy fallback when the option is omitted.
+        latest_file = Path(context.config("data_path")) / "osm" / (latest_name if latest_name is not None else "switzerland-261004.osm.pbf")
         cleaned_file = update_osm_latest(
             context, cleaned_file, latest_file,
             Path(context.path()) / "osm_network_updated.osm", speed_corrections,
@@ -64,23 +64,9 @@ def execute(context):
 ################### helper functions ####################
 
 def get_region(context):
-    # Bounding Area
-    border = context.stage("data.spatial.swiss_border")
-    border = border.reset_index()[["geometry"]].to_crs(epsg=2056)
-    
-    # Collect all geometries to combine
-    geometries = [unary_union(border.geometry)]
-    
-    # outside CH region
-    out_region_file = context.config("cross_border_exclude_shapefiles")
-    include_external_population = context.config("include_external_population")
-    if out_region_file is not None and include_external_population:
-        out_region = read_outside_region(out_region_file)
-        geometries.append(unary_union(out_region.geometry))
-    
-    # Combine border + outside regions into one geometry
-    combined = unary_union(geometries)
-    
+    # read simulation region
+    combined = context.stage("data.spatial.simulation_region")
+
     # Apply buffer
     buffer = context.config("border_offset")    
     if buffer <= 0:
@@ -92,23 +78,3 @@ def get_region(context):
     # Return as GeoDataFrame with single row
     result = gpd.GeoDataFrame(geometry=[combined], crs="EPSG:2056")
     return result
-
-
-def read_outside_region(out_region_file):    
-    if isinstance(out_region_file, (str, Path)):
-        out_region_file = [out_region_file]
-
-    if not isinstance(out_region_file, (list, tuple)):
-        raise TypeError("cross_border_exclude_shapefiles must be a path or a list of paths.")
-
-    gdfs = []   
-    for f in out_region_file:
-        suffix = Path(f).suffix.lower()
-        if suffix not in {".gpkg", ".shp"}:
-            raise TypeError(f"{f} is not a .gpkg or .shp file.")
-
-        gdf = gpd.read_file(f).to_crs(epsg=2056)
-        gdfs.append(gdf)
-
-    exclude_region = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs="EPSG:2056")
-    return exclude_region
