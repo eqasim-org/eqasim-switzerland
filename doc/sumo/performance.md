@@ -50,8 +50,34 @@ Regional cutting reads bounded batches, shares immutable indexes between threads
 and limits outstanding work. Native calls release the GIL. Metadata construction
 and XML parsing still contain Python work, so allocating more threads does not
 promise proportional acceleration. Regional validation occurs before publishing
-the cutter result. Assignment realization still groups distributions in memory;
-its peak memory is not yet bounded like regional cutting and route publication.
+the cutter result.
+
+Assignment realization now indexes trip metadata, route distributions and vehicle
+membership in a temporary disk-backed SQLite spool under its own stage directory.
+It reads and writes batches of 10,000 records; no national dictionary of source
+trips or list of realized vehicle objects is retained. The SQLite page cache is
+limited to 128 MiB and temporary sorting uses disk. No extra dependency is needed.
+Routes are stored once per distribution. Allocation uses the original seeded RNG
+and first-seen group/member order. One group of member IDs is shuffled at a time
+in a compact array (eight bytes per member), preserving the previous allocation
+without retaining its Python vehicle objects. Very large individual groups still
+need memory for that compact ID array.
+
+The final pass follows a disk departure/ID index and streams vehicles directly to
+XML. It holds the network, permission-validation indexes, bounded lookup caches
+and one loaded-cost interval. Edge-cost XML is cleared edge by edge rather than
+retaining a complete interval tree. Graph memory still scales with network size;
+this change removes the unbounded national vehicle/route-object allocations.
+Temporary spools are deleted on normal completion or handled exceptions. Hard
+process kills may leave temporary files in the failed stage directory. Output is
+published atomically after validation and writing complete, preserving any prior
+output when processing fails.
+
+Progress logs report source and assignment indexing counts, disk index building,
+allocation counts, cost-reading progress, loaded intervals, and timed/written
+vehicles with percentage and elapsed time. SQLite also emits a heartbeat during
+long index/allocation operations. This does not repeat marouter: its upstream
+assignment cache remains independent.
 
 ## Network and XML caches
 

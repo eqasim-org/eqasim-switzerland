@@ -1,121 +1,101 @@
 """Realize native macroscopic route distributions without another route search."""
 
-from collections import defaultdict
-import copy
 import math
-import random
 
 from sumo.scenario.network.tools import position, read_network, validate_routes
-from sumo.scenario.tools import elements, write_routes
+from sumo.scenario.tools import elements
 
 
 def materialize_assignment(assigned, weights, trips, network, output, seed, begin=0, interval=3600, context=None, kernel=None):
-    """Keep assigned paths, balance integer route shares, and estimate edge clocks.
+    """Realize shares on disk and stream validated, departure-sorted vehicles."""
+    import logging
+    from pathlib import Path
+    import tempfile
+    import time
+    from sumo.scenario.assignment_spool import AssignmentSpool
+    from sumo.scenario.population.writer import PopulationWriter
 
-    marouter's probabilities can be flow counts rather than normalized fractions.
-    Integer realization differs by less than one vehicle per route/distribution.
-    Travel times use the loaded cost slice containing the requested departure:
-    macroscopic assignment does not simulate a vehicle's progress between slices.
-    """
-    definitions, types = {}, {}
-    for element in elements(trips, ("vType", "trip")):
-        if element.tag == "vType":
-            types[element.get("id")] = copy.deepcopy(element)
-        else:
-            definitions[element.get("id")] = dict(element.attrib)
-    groups = defaultdict(list)
-    for element in elements(assigned, "vehicle"):
-        attributes = dict(element.attrib)
-        source_id = source_trip_id(attributes["id"], definitions)
-        # Geographic and edge endpoints belong to trips, not explicit vehicles.
-        source = {key: value for key, value in definitions[source_id].items()
-                  if key not in {"from", "to", "via", "fromLonLat", "toLonLat", "viaLonLat",
-                                 "fromXY", "toXY", "fromJunction", "toJunction", "fromTaz", "toTaz"}}
-        attributes = {**source, **attributes}
-        alternatives = element.findall("routeDistribution/route") or element.findall("route")
-        choices = []
-        for route in alternatives:
-            probability = float(route.get("probability", "1"))
-            edges = tuple(route.get("edges", "").split())
-            if not math.isfinite(probability) or probability < 0 or not edges:
-                raise ValueError(f"Invalid assigned route distribution for {attributes['id']}")
-            if probability:
-                choices.append((edges, probability))
-        if not choices:
-            raise ValueError(f"No positive assigned route probability for {attributes['id']}")
-        period = math.floor((float(attributes["depart"]) - float(begin)) / float(interval))
-        groups[(period, attributes.get("type"), tuple(choices))].append(attributes)
+    logger = logging.getLogger("synpp")
+    started = time.monotonic()
+    output = Path(output).resolve()
+    with tempfile.TemporaryDirectory(prefix="realization_", dir=output.parent) as temporary:
+        spool = AssignmentSpool(Path(temporary) / "assignment.sqlite")
+        try:
+            # Keep source lookup, distribution groups and sorting on disk.
 
-    # Realize every distribution, including native scale clones, with a seeded shuffle.
+            logger.info("SUMO realization: indexing source trip metadata in bounded batches")
+            types = spool.read_sources(trips)
+            logger.info("SUMO realization: reading assigned route distributions")
+            spool.read_assignments(assigned, begin, interval)
+            distributions = spool.allocate(seed)
+            logger.info("SUMO realization: reading network for route validation and clocks")
+            data = read_network(network, context=context)
+            state = {}
+            intervals = iter(_weight_intervals(weights))
+            current = None
+            completed = 0
+            target = Path(temporary) / output.name
 
-    rng = random.Random(seed)
-    vehicles = []
-    for (_, _, choices), members in groups.items():
-        total = math.fsum(probability for _, probability in choices)
-        targets = [len(members) * probability / total for _, probability in choices]
-        counts = [math.floor(target) for target in targets]
-        ranking = sorted(range(len(choices)), key=lambda i: (targets[i] - counts[i], rng.random()), reverse=True)
-        for index in ranking[:len(members) - sum(counts)]:
-            counts[index] += 1
-        rng.shuffle(members)
-        offset = 0
-        for (edges, _), count in zip(choices, counts):
-            for attributes in members[offset:offset + count]:
-                vehicles.append({"attributes": attributes, "edges": list(edges), "exit_times": [],
-                                 "route_attributes": {}, "parameters": {}})
-            offset += count
-    if not vehicles:
-        raise ValueError("Macroscopic assignment produced no individual vehicles")
-    data = read_network(network, context=context)
-    try:
-        validate_routes(vehicles, data, types)
-    except ValueError as error:
-        raise ValueError(f"Invalid native marouter assignment: {error}. Check class permissions and turn "
-                         "connectivity in the assignment network. "
-                         "Assigned paths are never silently replaced.") from error
+            # One loaded cost interval and one vehicle are live during final export.
 
-    # Accumulate loaded costs on the selected paths, correcting partial endpoint edges.
+            with PopulationWriter(target) as writer:
+                for definition in types.values(): writer.element(definition)
+                for attributes, edges in spool.selected():
+                    depart = float(attributes["depart"])
+                    while current is None or depart >= current[1]:
+                        current = None  # Release the preceding cost dictionary before parsing the next interval.
+                        current = next(intervals, None)
+                        if current is None:
+                            raise ValueError(f"Loaded edge costs do not cover departure {depart}")
+                        logger.info("SUMO realization: loaded costs [%.0f, %.0f); %d/%d vehicles written",
+                                    current[0], current[1], completed, spool.count)
+                    if depart < current[0]:
+                        raise ValueError(f"Loaded edge costs do not cover departure {depart}")
+                    vehicle = {"attributes": attributes, "edges": edges}
+                    try:
+                        validate_routes([vehicle], data, types, state=state)
+                    except ValueError as error:
+                        raise ValueError(f"Invalid native marouter assignment: {error}. Check class permissions and turn "
+                                         "connectivity in the assignment network. Assigned paths are never silently replaced.") from error
+                    exits, route_attrs = _edge_clocks(attributes, edges, data, current, kernel)
+                    writer.vehicle(attributes, edges, exits,
+                                   {"sumo_timing": "macroscopic_departure_slice"}, route_attrs)
+                    completed += 1
+                    if completed % 10000 == 0:
+                        elapsed = time.monotonic()-started
+                        logger.info("SUMO realization: timed/written %d/%d vehicles (%.1f%%); %.1fs elapsed",
+                                    completed, spool.count, 100*completed/spool.count, elapsed)
+            target.replace(output)
+            logger.info("SUMO realization complete: %d vehicles, %d distributions; %.1fs", completed, distributions, time.monotonic()-started)
+            return {"vehicles": completed, "distributions": distributions,
+                    "route_choice": "seeded balanced integer realization of assigned distributions",
+                    "timing": "loaded edge costs from each vehicle's departure interval",
+                    "post_assignment_routing": False}
+        finally:
+            spool.close()
 
-    intervals = iter(_weight_intervals(weights))
-    current = None
-    for vehicle in sorted(vehicles, key=lambda row: float(row["attributes"]["depart"])):
-        attributes, edges = vehicle["attributes"], vehicle["edges"]
-        depart = float(attributes["depart"])
-        while current is None or depart >= current[1]:
-            current = next(intervals, None)
-            if current is None:
-                raise ValueError(f"Loaded edge costs do not cover departure {depart}")
-        begin, end, costs = current
-        if depart < begin:
-            raise ValueError(f"Loaded edge costs do not cover departure {depart}")
-        if kernel is not None:
-            lengths = [data["edges"][edge]["length"] for edge in edges]
-            missing = next((edge for edge in edges if edge not in costs), None)
-            if missing is not None:
-                raise ValueError(f"No loaded travel time for assigned edge {missing} in [{begin}, {end})")
-            vehicle["exit_times"], distance = kernel.clocks(lengths, [costs[edge] for edge in edges], depart,
-                position(attributes.get("departPos", "0"), lengths[0]),
-                position(attributes.get("arrivalPos", "max"), lengths[-1]))
-            vehicle["route_attributes"]["routeLength"] = format(distance, ".12g")
-            vehicle["parameters"]["sumo_timing"] = "macroscopic_departure_slice"
-            continue
-        clock = depart
-        for index, edge_id in enumerate(edges):
-            length = data["edges"][edge_id]["length"]
-            start = position(attributes.get("departPos", "0"), length) if index == 0 else 0
-            stop = position(attributes.get("arrivalPos", "max"), length) if index == len(edges) - 1 else length
-            if stop < start:
-                raise ValueError(f"Arrival precedes departure position on route {attributes['id']}")
-            if edge_id not in costs:
-                raise ValueError(f"No loaded travel time for assigned edge {edge_id} in [{begin}, {end})")
-            clock += costs[edge_id] * (stop - start) / length
-            vehicle["exit_times"].append(clock)
-        vehicle["parameters"]["sumo_timing"] = "macroscopic_departure_slice"
-    write_routes(output, types, vehicles)
-    return {"vehicles": len(vehicles), "distributions": len(groups),
-            "route_choice": "seeded balanced integer realization of assigned distributions",
-            "timing": "loaded edge costs from each vehicle's departure interval",
-            "post_assignment_routing": False}
+
+def _edge_clocks(attributes, edges, data, current, kernel):
+    begin, end, costs = current
+    depart = float(attributes["depart"])
+    lengths = [data["edges"][edge]["length"] for edge in edges]
+    start = position(attributes.get("departPos", "0"), lengths[0])
+    stop = position(attributes.get("arrivalPos", "max"), lengths[-1])
+    missing = next((edge for edge in edges if edge not in costs), None)
+    if missing is not None:
+        raise ValueError(f"No loaded travel time for assigned edge {missing} in [{begin}, {end})")
+    if kernel is not None:
+        exits, distance = kernel.clocks(lengths, [costs[edge] for edge in edges], depart, start, stop)
+        return exits, {"routeLength": format(distance, ".12g")}
+    clock, exits = depart, []
+    for index, (edge_id, length) in enumerate(zip(edges, lengths)):
+        low = start if index == 0 else 0
+        high = stop if index == len(edges)-1 else length
+        if high < low:
+            raise ValueError(f"Arrival precedes departure position on route {attributes['id']}")
+        clock += costs[edge_id] * (high-low) / length
+        exits.append(clock)
+    return exits, {}
 
 
 def source_trip_id(vehicle_id, originals):
@@ -130,15 +110,21 @@ def source_trip_id(vehicle_id, originals):
 
 def _weight_intervals(path):
     previous_end = -math.inf
-    for interval in elements(path, "interval"):
-        begin, end = float(interval.get("begin")), float(interval.get("end"))
+    import logging
+    logger = logging.getLogger("synpp")
+    costs = {}
+    for element in elements(path, ("edge", "interval")):
+        if element.tag == "edge":
+            value = float(element.get("traveltime"))
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"Invalid loaded travel time for edge {element.get('id')}")
+            costs[element.get("id")] = value
+            if len(costs) % 250000 == 0:
+                logger.info("SUMO realization: reading loaded costs: %d edges in current interval", len(costs))
+            continue
+        begin, end = float(element.get("begin")), float(element.get("end"))
         if not math.isfinite(begin) or not math.isfinite(end) or not previous_end <= begin < end:
             raise ValueError("Loaded edge-cost intervals must be finite, ordered and nonoverlapping")
-        costs = {}
-        for edge in interval.findall("edge"):
-            value = float(edge.get("traveltime"))
-            if not math.isfinite(value) or value <= 0:
-                raise ValueError(f"Invalid loaded travel time for edge {edge.get('id')}")
-            costs[edge.get("id")] = value
         yield begin, end, costs
+        costs = {}
         previous_end = end

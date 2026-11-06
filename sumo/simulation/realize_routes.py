@@ -36,6 +36,6 @@ def execute(context):
 
 def validate(context):
     import hashlib
-    from sumo.scenario import assignment
+    from sumo.scenario import assignment, assignment_spool
     from sumo.native import kernels
-    return [hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest() for module in (assignment,kernels)]
+    return [hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest() for module in (assignment,assignment_spool,kernels)]
