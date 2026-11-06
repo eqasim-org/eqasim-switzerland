@@ -1,5 +1,53 @@
 # Matching validation and embedding analysis
 
+## V1–V3 population diary comparison
+
+Run or load both categorical matchers and compare their assigned diaries with:
+
+    uv run -m synpp config_dib_10.yml --run analysis.matching.compare_v1_v3
+
+The report is written to analysis_path/matching/v1_v3/report.html, alongside
+CSV tables and PNG/PDF figures. It shows 15 activity chains, activity counts,
+rates, start/end times and completed durations, for each full retained population
+and their common recipients. Survey results use survey weights. See the
+[V3 guide](../../synthesis/population/matching/V3.md) for constraints, thresholds,
+coverage and timing definitions. Matching inputs may need upstream preparation
+when caches are unavailable; the comparison requests no simulation run.
+The national report links to equivalent Geneva, Zürich and Vaud reports in
+geneva/, zurich/ and vaud/. Synthetic residents are selected by their own home
+canton, even if the assigned donor lives elsewhere. Each local survey reference
+uses respondents living in that same canton; distributions are normalized
+locally, with survey size and population coverage reported. Existing home-canton
+IDs are checked against data.spatial.cantons, avoiding repeated spatial joins.
+The national report also includes shopping, leisure and other incoming-distance
+heat maps: Survey, V1, V3 and V3 minus V1, for both full and common recipients.
+They show trip-weighted mean straight-line distance from the preceding activity,
+grouped by home residence on an EPSG:2056 square grid. They describe assigned
+diary lengths, not synthetic activity destinations or final simulated routes.
+Set matching_comparison_grid_size (metres, default 5000) and
+matching_comparison_map_min_people (default 5 contributing residents) to control
+resolution and support. Survey means use person weights; non-travellers do not
+contribute artificial zero distances. Unsupported cells are blank. CSV exports
+include unmodified means, valid/invalid trip weight, contributor counts, distinct
+donors and effective donor counts. Canton outlines come from data.spatial.cantons.
+Only colour limits are capped at the 98th percentile for legibility. Saved map
+tables and outlines support report-only regeneration without running matching.
+Geneva, Zürich and Vaud reports include the same maps, cropped to the selected
+canton and using matching_comparison_canton_grid_size (default 1000 metres).
+The same minimum-contributor threshold applies. Local maps use recipient home
+cantons and local survey residents; assigned donors can live in other cantons.
+All four reports also include incoming-distance density and binned cumulative
+curves for work, education, shopping, leisure and other activities, for both full
+and common populations. Distances use a linear horizontal scale below 1 km and
+a logarithmic scale above it; no long distances are clipped. Curves include
+valid distances for residents with unavailable home coordinates, since these
+distances remain usable even though they cannot be placed on the maps.
+Histograms, trip weights and excluded invalid-distance weights are saved in
+distance_distributions.csv. Saved report rebuilding includes these figures.
+Re-render saved comparison tables without matching with:
+
+    uv run -m analysis.matching.population_comparison /path/to/analysis/matching/v1_v3
+
 The [scientific manuscript and Overleaf instructions](paper.md) describe the
 paper sources, compiled PDF, evidence and limitations.
 

@@ -16,13 +16,18 @@ from synthesis.population.spatial.secondary.distance_distributions import execut
 
 class Context:
     def __init__(self, stages):
+        import tempfile
         self.stages = stages
+        self.directory = tempfile.TemporaryDirectory()
+
+    def path(self):
+        return self.directory.name
 
     def stage(self, name):
         return self.stages[name]
 
     def config(self, name):
-        return {"random_seed": 0, "specific_day_scenario": "workday"}[name]
+        return {"random_seed": 0, "specific_day_scenario": "workday", "trip_time_shuffle": "half_hour"}[name]
 
 
 class NonstudentEducationRecodingTest(unittest.TestCase):
@@ -61,6 +66,7 @@ class NonstudentEducationRecodingTest(unittest.TestCase):
             people[column] = None
         if border:
             people.loc[1, "cross_border_person_id"] = 901
+            people.loc[1, "border_crossing_direction"] = "exit"
             people.loc[1, "border_crossing_trip_mode"] = "car"
             people.at[1, "border_crossing_point"] = Point(2601000., 1201000.)
         trips = pd.DataFrame({"person_id": [101, 101], "trip_id": [1, 2],

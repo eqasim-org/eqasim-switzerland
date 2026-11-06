@@ -35,6 +35,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Experimental FLASH-TB routing and benchmarks](mode_choice/routing/flash/README.md)
 - [Java / FLASH population PT router comparison](analysis/pt_routers/README.md)
 - [Microcensus diary matching: learned V2 inputs and masks](synthesis/population/matching/README.md)
+- [Default V3 categorical matching and V1–V3 comparison](synthesis/population/matching/V3.md)
 - [Matching predictive validation and embedding analysis](analysis/matching/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
