@@ -3,10 +3,11 @@ import numpy as np
 # Only adult microcensus respondents are matched, whatever the mode or purpose
 MINIMUM_AGE = 18
 
-# Require at least 30 minutes at the middle activity of home-X-home chains.
-# Do not restrict its clock time: early shifts and late activities remain eligible.
+# The main activity (the middle one of home-X-home) must last at least
+# 30 minutes, start no earlier than 04:00, and end no later than 21:00.
 MINIMUM_MAIN_ACTIVITY_DURATION = 30 * 60
-
+MAIN_ACTIVITY_EARLIEST_START = 4 * 3600
+MAIN_ACTIVITY_LATEST_END = 21 * 3600
 
 def configure(context):
     context.config("data_path")
@@ -55,7 +56,9 @@ def execute(context):
 
     main_activities = main_activity_times(context.stage("data.microcensus.trips")[0])
     valid_ids = main_activities.index[
-        main_activities["end_time"] - main_activities["start_time"] >= MINIMUM_MAIN_ACTIVITY_DURATION
+        (main_activities["end_time"] - main_activities["start_time"] >= MINIMUM_MAIN_ACTIVITY_DURATION) &
+        (main_activities["start_time"] >= MAIN_ACTIVITY_EARLIEST_START) &
+        (main_activities["end_time"] <= MAIN_ACTIVITY_LATEST_END)
     ]
     mz_actchains = mz_actchains[mz_actchains["person_id"].isin(valid_ids)]
 
@@ -94,8 +97,6 @@ def execute(context):
             df.loc[mask_cb, "mz_person_id"] = sampled_ids
 
     assert len(df[df["mz_person_id"].isna()]) == 0
-
-    # Return the sampled population with its reproducible donor identifiers.
 
     return df
 

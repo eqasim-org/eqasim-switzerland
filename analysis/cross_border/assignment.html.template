@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Assigned border crossings</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{font-family:system-ui,sans-serif;color:#1c3140;background:#f3f6f8}body{margin:0}header,main{max-width:1500px;margin:auto;padding:24px}h1{margin:0;font-size:30px}h2{font-size:20px}.muted{color:#526575;font-size:14px;line-height:1.6}.notice{border-left:4px solid #d89123;background:#fff7e7;padding:14px;line-height:1.6}.controls{display:flex;gap:18px;flex-wrap:wrap;margin:18px 0}label{font-size:13px;display:flex;flex-direction:column;gap:6px}select,input{padding:9px;border:1px solid #bccad3;border-radius:5px;max-width:420px}#map{height:560px;background:white;border-radius:10px}.cards{display:flex;gap:15px;flex-wrap:wrap;margin:20px 0}.card{background:white;border:1px solid #dce4e9;padding:15px;border-radius:8px;min-width:150px}.card strong{display:block;font-size:25px}.scroll{overflow:auto;max-height:650px;background:white}table{border-collapse:collapse;width:100%;font-size:13px}th,td{padding:11px;border-bottom:1px solid #e4eaee;text-align:right;white-space:nowrap}th{position:sticky;top:0;background:#eaf0f4}th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}tbody tr:hover{background:#eef7fd;cursor:pointer}.popup{line-height:1.6;max-width:330px}.popup h3{margin:0 0 10px}a{color:#12689c}summary{cursor:pointer;padding:15px;background:#eaf0f4}#mapError{color:#9d5415}footer{padding:20px;font-size:13px}.leaflet-container{font:13px system-ui,sans-serif}
+</style></head><body>
+<header><h1>Assigned border crossings</h1><p class="muted">An early view of demand, before whole-population routing and simulation preparation.</p>
+<div class="notice"><b>Assignments are not simulated traffic counts.</b> Foreign visitors have an entry and an assumed return at the same crossing. Swiss cross-border residents contribute one assigned directional event. Transit contributes an entry and a separate exit; unlocated exits remain in the table. Ordinary Swiss/French traffic and freight are excluded. Later exclusions and route repair may change these numbers.</div><div id="countAllocation" class="muted"></div></header>
+<main><div class="controls">
+<label>Demand view<select id="cohort"><option value="expanded">Sample expanded to 100%</option><option value="sample">Raw sampled crossings</option><option value="full">Full population before sampling</option></select></label>
+<label>Interview place<select id="place"><option value="">All interview places</option></select></label>
+<label>Find a crossing<select id="crossing"><option value="">Select a crossing</option></select></label>
+<label>Background visibility<input id="opacity" type="range" min="0" max="1" step="0.05" value="0.65"></label>
+</div><div class="cards" id="cards"></div><div id="map"></div><p id="mapError"></p>
+<p class="muted">Dot size represents assigned crossings. Select a dot, a table row or a crossing in the menu. Identical directional road pairs within an interview place are combined; their source FIDs appear as aliases. The map uses swisstopo / geo.admin.ch without an API key. An internet connection is needed for tiles and the map library; the tables work offline.</p>
+<h2>Crossing assignments</h2><p class="muted" id="basis"></p>
+<div class="scroll"><table><thead><tr><th>FID</th><th>Crossing</th><th>Foreign visitors</th><th>Swiss</th><th>Transit</th><th>Entry</th><th>Exit</th><th>Total</th><th>Official reference*</th><th>Importance</th><th>Inbound capacity</th></tr></thead><tbody id="rows"></tbody></table></div>
+<p class="muted">* Official references usually cover <b>all motor vehicles</b>, while this report covers assigned survey car demand (including motorcycles). Annual daily averages, weekday averages and short campaigns are not interchangeable. Open the crossing popup for dates, coverage and source. A difference is not automatically an assignment error.</p>
+<details><summary>Survey entry controls and physical crossing totals</summary><p class="muted">Controls below are survey <b>entries</b> before geographic exclusions, population selection and sampling. They are not two-direction road counts. Transit exits appear at their physical exit place, which may differ from their interview place. Swiss outbound events are not survey entries. Do not double these controls and compare them blindly with every column.</p><div class="scroll"><table><thead><tr><th>Interview place</th><th>Foreign 2015 entries</th><th>Foreign 2021 entries</th><th>Foreign target entries</th><th>Swiss 2015 entries</th><th>Swiss target entries</th><th>Full entry</th><th>Full exit</th><th>Expanded entry</th><th>Expanded exit</th></tr></thead><tbody id="places"></tbody></table></div></details>
+<footer id="footer"></footer></main>
+<script id="assignment-data" type="application/json">__ASSIGNMENT_DATA__</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+const data=JSON.parse(document.getElementById('assignment-data').textContent);
+const el=id=>document.getElementById(id), fmt=x=>x==null?'—':Number(x).toLocaleString('en-CH',{maximumFractionDigits:1});
+const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const categories=['foreign_visitor','swiss','transit'];
+if(!data.metadata.include_sample){el('cohort').replaceChildren(new Option('Full population at cross-border assignment','full'));el('cohort').value='full';}
+const title=p=>`${p.fid==null?p.point_id:'FID '+p.fid} · ${p.name}`;
+let map=null,tiles=null,layer=null,markers=new Map();
+if(window.L){map=L.map('map').setView([46.85,8.25],8);tiles=L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg',{maxZoom:19,maxNativeZoom:18,noWrap:true,opacity:.65,attribution:'© <a href="https://www.swisstopo.admin.ch/">swisstopo</a>'}).addTo(map);layer=L.layerGroup().addTo(map);tiles.on('tileerror',()=>{el('mapError').textContent='Some background tiles could not load. Crossing markers and tables remain available.'});}
+else{el('mapError').textContent='The map library could not load. All results remain available in the tables.';el('map').style.height='0';}
+for(const name of [...new Set(data.points.map(p=>p.interview_place))].sort())el('place').add(new Option(name,name));
+const official=p=>p.official_low==null?'—':fmt(p.official_low)+(p.official_low===p.official_high?'':'–'+fmt(p.official_high));
+function popup(p){const view=el('cohort').value;let s=`<div class="popup"><h3>${esc(title(p))}</h3><b>${esc(p.interview_place)}</b><br>Aliases: ${esc(p.aliases||'—')}<br>Entry ${fmt(p[view+'_entry'])} · Exit ${fmt(p[view+'_exit'])}<br><b>Total ${fmt(p[view+'_total'])}</b><hr>Full: ${fmt(p.full_total)} · Raw sample: ${fmt(p.sample_total)}<br>Importance ${fmt(p.importance)} · Inbound capacity ${fmt(p.capacity)} veh/h<br>Selection weight ${fmt(p.weight)}<br>Prior group share ${p.prior_share==null?'—':fmt(100*p.prior_share)+'%'} (before OD feasibility)<br>Entry link ${esc(p.entry_link)}<br>Exit link ${esc(p.exit_link)}`;
+if(p.official_low!=null){s+=`<hr><b>Official reference: ${official(p)}</b><br>${esc(p.official_period)}<br>${esc(p.official_day_type)} · ${esc(p.official_scope)}<br>${esc(p.reference_note)}`;if(/^https?:\/\//.test(p.official_source))s+=`<br><a href="${esc(p.official_source)}" target="_blank" rel="noopener">Official source</a>`;}
+return s+'</div>';}
+function focus(id){const m=markers.get(id);if(m){map.setView(m.getLatLng(),14);m.openPopup();}}
+function render(){const view=el('cohort').value,place=el('place').value,points=data.points.filter(p=>!place||p.interview_place===place).sort((a,b)=>(b[view+'_total']||0)-(a[view+'_total']||0));
+el('crossing').replaceChildren(new Option('Select a crossing',''));markers.clear();if(layer)layer.clearLayers();el('rows').replaceChildren();
+for(const p of points){el('crossing').add(new Option(title(p),p.point_id));const row=document.createElement('tr');const vals=[p.fid??'—',p.name,...categories.map(c=>fmt((p[view+'_'+c+'_entry']||0)+(p[view+'_'+c+'_exit']||0))),fmt(p[view+'_entry']),fmt(p[view+'_exit']),fmt(p[view+'_total']),official(p),fmt(p.importance),fmt(p.capacity)];row.innerHTML=vals.map(v=>`<td>${esc(v)}</td>`).join('');row.onclick=()=>focus(p.point_id);el('rows').append(row);
+if(map&&p.lat!=null&&p.lon!=null){const m=L.circleMarker([p.lat,p.lon],{radius:Math.max(4,Math.min(24,4+Math.sqrt(p[view+'_total']||0)/18)),color:p.kind==='exit_only'?'#986433':'#146c9c',weight:1.5,fillOpacity:.7}).bindPopup(popup(p));m.addTo(layer);markers.set(p.point_id,m);}}
+const total=points.reduce((n,p)=>n+(p[view+'_total']||0),0),unresolved=points.filter(p=>p.kind==='unresolved').reduce((n,p)=>n+(p[view+'_total']||0),0);
+el('cards').innerHTML=[['Assigned crossings',fmt(total)],['Unlocated crossings',fmt(unresolved)],['Physical locations',points.filter(p=>p.lat!=null).length],['Population sample',data.metadata.include_sample?fmt(data.metadata.sampling_fraction*100)+'%':'Not requested']].map(([a,b])=>`<div class="card">${a}<strong>${b}</strong></div>`).join('');
+el('basis').textContent=`${el('cohort').selectedOptions[0].text}. Scenario: ${data.metadata.day}. ${data.metadata.full_population_basis}. Full-population transit exits are included only where the reported exit code identifies one physical location; other exits remain unresolved. ${data.metadata.include_sample?'Sampled transit exits use the existing through-crossing stage.':'Sampled counts are not computed in this early mode; blank sample columns do not mean zero demand.'}`;
+if(map&&place){const positions=points.filter(p=>p.lat!=null).map(p=>[p.lat,p.lon]);if(positions.length)map.fitBounds(positions,{padding:[35,35],maxZoom:13});}}
+for(const p of data.places){const fields=['interview_place','foreign_entries_2015','foreign_entries_2021','foreign_target_entries','swiss_entries_2015','swiss_target_entries','full_entry','full_exit','expanded_entry','expanded_exit'];const r=document.createElement('tr');r.innerHTML=fields.map((f,i)=>`<td>${esc(i?fmt(p[f]):p[f])}</td>`).join('');el('places').append(r);}
+el('footer').textContent=`Official reference file ${data.metadata.reference_file_present?'loaded':'not supplied'}. Aggregate exports: crossings.csv, interview_places.csv, assignment_counts.csv, reference_checks.csv and diagnostics.json.`;
+el('cohort').onchange=render;el('place').onchange=render;el('crossing').onchange=()=>focus(el('crossing').value);el('opacity').oninput=()=>{if(tiles)tiles.setOpacity(Number(el('opacity').value));};render();
+</script>
+<script>
+const allocationNotes=(data.metadata.count_assignment_groups||[]).filter(g=>g.extra_minutes_limit!=null);
+document.getElementById('countAllocation').textContent=allocationNotes.map(g=>
+  `${g.interview_place}: exact expected count shares; extra Swiss travel allowance ${g.extra_minutes_limit} min (initial 20, ceiling ${g.max_extra_minutes}). ${Number(g.expected_share_over_20_pct||0).toFixed(1)}% of movable expected crossings use more than 20 extra minutes. Integer draws and population sampling can change displayed counts.`
+).join(' ');
+</script>
+
+</body></html>

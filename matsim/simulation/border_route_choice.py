@@ -15,6 +15,7 @@ import pandas as pd
 import shapely
 from lxml import etree as ET
 
+from data.cross_border.count_assignment_inputs import assigned_reference
 from matsim.runtime import eqasim
 from matsim.simulation.border_endpoints import select_visitors
 
@@ -33,7 +34,7 @@ def repair_grouped_crossings(context, network_path, population_path, facilities_
         return destinations
     border = context.stage("data.spatial.swiss_border").to_crs(2056).union_all()
     people, audit = collect_people(
-        population_path, context.stage("data.cross_border.swiss_residents_od"),
+        population_path, assigned_reference(context),
         candidates, border_links,
         foreign_records(context, destinations) if destinations is not None else {})
     if not people:

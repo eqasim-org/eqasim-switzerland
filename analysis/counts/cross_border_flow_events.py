@@ -44,7 +44,6 @@ def configure(context):
 def execute(context):
 
     # Resolve the current simulation files and mutually exclusive traveller groups.
-
     from .cross_border_flow_cars import (
         _find_output_file, load_cross_border_person_ids, load_french_resident_person_ids,
         load_swiss_resident_cross_border_person_ids,
@@ -52,17 +51,19 @@ def execute(context):
     from .cross_border_flow_pt import load_transit_schedule
 
     simulation_path = get_simulation_path(context)
-    persons_path  = _find_output_file(simulation_path, "output_persons.csv.gz")
-    events_path   = _find_output_file(simulation_path, "output_events.xml.gz")
-    schedule_path = _find_output_file(simulation_path, "output_transitSchedule.xml.gz")
+    persons_path    = _find_output_file(simulation_path, "output_persons.csv.gz")
+    events_path     = _find_output_file(simulation_path, "output_events.xml.gz")
+    schedule_path   = _find_output_file(simulation_path, "output_transitSchedule.xml.gz")
 
     cross_border_ids      = load_cross_border_person_ids(persons_path)
     swiss_crossborder_ids = load_swiss_resident_cross_border_person_ids(persons_path)
     french_resident_ids   = load_french_resident_person_ids(persons_path)
+    
     logger.info(
         "Found %d cross-border persons (%d Swiss-resident) and %d non-cross-border France-resident persons in %s",
         len(cross_border_ids), len(swiss_crossborder_ids), len(french_resident_ids), persons_path,
     )
+
     group_ids = {
         "crossborder":       cross_border_ids - swiss_crossborder_ids,
         "swiss_crossborder": swiss_crossborder_ids,
@@ -82,8 +83,10 @@ def execute(context):
         pt_hourly    = os.path.join(context.path(), "pt_segment_riders_hourly.csv.gz"),
         pt_lines     = os.path.join(context.path(), "pt_segment_lines.csv.gz"),
     )
+
     _counts_frame(car, ["link_id", "hour"]).to_csv(paths["car_hourly"], index = False)
     _counts_frame(pt, ["from_stop", "to_stop", "hour"]).to_csv(paths["pt_hourly"], index = False)
+    
     pd.DataFrame(
         [(a, b, ", ".join(sorted(lines))) for (a, b), lines in lines_by_segment.items()],
         columns = ["from_stop", "to_stop", "lines"],
@@ -94,10 +97,12 @@ def execute(context):
 
 def _counts_frame(counts, keys):
     total_counts, group_counts = counts
+
     rows = [
         (*key, count, *(group_counts[group].get(key, 0) for group in GROUPS))
         for key, count in total_counts.items()
     ]
+
     return pd.DataFrame(rows, columns = [*keys, "total", *GROUPS])
 
 
@@ -106,22 +111,23 @@ def count_events(events_path, group_ids, vehicle_lines, line_labels=None):
     - car: (total Counter, {group: Counter}) of the car link entries keyed by (link id, hour)
     - pt: (total Counter, {group: Counter}) of the PT riders keyed by (from stop, to stop, hour)
     - lines_by_segment: {(from stop, to stop): set of line names}"""
-    car_total = Counter()
-    car_groups = {group: Counter() for group in GROUPS}
-    pt_total = Counter()
-    pt_groups = {group: Counter() for group in GROUPS}
+    
+    car_total        = Counter()
+    car_groups       = {group: Counter() for group in GROUPS}
+    pt_total         = Counter()
+    pt_groups        = {group: Counter() for group in GROUPS}
     lines_by_segment = defaultdict(set)
 
-    onboard = defaultdict(set)
+    onboard                 = defaultdict(set)
     last_departure_facility = {}
-    drivers = {}
-    active_lines = {}
-    transit_vehicles = set(vehicle_lines)
-    line_labels = line_labels or {}
+    drivers                 = {}
+    active_lines            = {}
+    transit_vehicles        = set(vehicle_lines)
+    line_labels             = line_labels or {}
 
     processed = 0
     with xopen.xopen(events_path, "rb") as f:
-        parser = ET.iterparse(f, events = ["start", "end"])
+        parser  = ET.iterparse(f, events = ["start", "end"])
         _, root = next(parser)  # <events> start tag, kept to periodically release finished events
 
         for event, elem in parser:
@@ -133,10 +139,11 @@ def count_events(events_path, group_ids, vehicle_lines, line_labels=None):
                 logger.info("Processed %d events...", processed)
 
             attrib = elem.attrib
-            etype = attrib.get("type")
+            etype  = attrib.get("type")
 
             if etype in LINK_ENTRY_EVENT_TYPES:
                 vehicle = attrib.get("vehicle", "")
+
                 if vehicle.endswith(CAR_VEHICLE_SUFFIX):
                     key = (attrib["link"], int(float(attrib["time"]) // 3600) % 24)
                     car_total[key] += 1
@@ -151,33 +158,39 @@ def count_events(events_path, group_ids, vehicle_lines, line_labels=None):
                 # both the driver to exclude and the line currently being operated.
                 vehicle = attrib["vehicleId"]
                 transit_vehicles.add(vehicle)
+
                 drivers[vehicle] = attrib["driverId"]
                 onboard.get(vehicle, set()).discard(attrib["driverId"])
-                line = attrib.get("transitLineId")
+
+                line                  = attrib.get("transitLineId")
                 active_lines[vehicle] = line_labels.get(line, line) or vehicle_lines.get(vehicle)
                 last_departure_facility.pop(vehicle, None)
+            
             elif etype == PERSON_ENTERS_VEHICLE_EVENT:
                 vehicle, person = attrib["vehicle"], attrib["person"]
                 if vehicle in transit_vehicles and person != drivers.get(vehicle):
                     onboard[vehicle].add(person)
+            
             elif etype == PERSON_LEAVES_VEHICLE_EVENT:
                 vehicle = attrib["vehicle"]
                 if vehicle in onboard:
                     onboard[vehicle].discard(attrib["person"])
                     if not onboard[vehicle]:
                         del onboard[vehicle]
+            
             elif etype == VEHICLE_DEPARTS_EVENT:
                 last_departure_facility[attrib["vehicle"]] = attrib["facility"]
+            
             elif etype == VEHICLE_ARRIVES_EVENT:
-                vehicle = attrib["vehicle"]
-                arrival_facility = attrib["facility"]
+                vehicle            = attrib["vehicle"]
+                arrival_facility   = attrib["facility"]
                 departure_facility = last_departure_facility.get(vehicle)
 
                 if departure_facility is not None and departure_facility != arrival_facility:
                     riders = onboard.get(vehicle, ())
                     if riders:
                         segment = (departure_facility, arrival_facility)
-                        key = (*segment, int(float(attrib["time"]) // 3600) % 24)
+                        key     = (*segment, int(float(attrib["time"]) // 3600) % 24)
 
                         pt_total[key] += len(riders)
                         for group, ids in group_ids.items():
