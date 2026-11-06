@@ -15,6 +15,11 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 
 ## Implementation guides
 
+- [Simulation-region OSM businesses and weekday opening hours](data/osm/businesses.md)
+- [Canton opening-hours regions and donor masks](data/osm/opening_hours_regions.md)
+- [Destination shopping/leisure opening hours](synthesis/population/destinations_opening_hours.md)
+- [Trip-time shuffling and comparison plots](synthesis/population/trip_time_shuffling.md)
+- [RDA opening-hours comparison and Slurm run](analysis/rda.md)
 - [Cross-border activity timing](data/cross_border/README.md)
 - [Shared MATSim configuration](matsim/config/README.md)
 - [Official raw BFS projection inputs and scaling](data/statpop/projections.md)

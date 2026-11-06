@@ -56,6 +56,7 @@ dependencies = [
     "zstandard>=0.25.0",
     "folium",
     "gtfs-kit",
+    "opening-hours-py>=2.1.4,<3",
 ]
 
 [tool.uv]

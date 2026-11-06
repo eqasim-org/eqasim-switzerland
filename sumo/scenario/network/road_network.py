@@ -28,7 +28,7 @@ def configure(context):
     if context.config("sumo_network_file") is None:
         context.config("sumo_osm_file", None)
         if context.config("sumo_osm_file") is None:
-            context.config("latest_osm_for_correction", "switzerland-261004.osm.pbf")
+            context.config("latest_osm_for_correction", None)
     filename = _configured_filename(context)
     if not isinstance(filename, (str, Path)) or not str(filename).strip():
         raise ValueError("SUMO network input must identify a single OSM file or SUMO network")
@@ -101,6 +101,8 @@ def _configured_filename(context):
         filename = context.config("sumo_osm_file")
         if filename is None:
             filename = context.config("latest_osm_for_correction")
+            if filename is None:
+                filename = "switzerland-261004.osm.pbf"
     return filename
 
 

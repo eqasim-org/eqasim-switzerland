@@ -150,23 +150,24 @@ class AngularTailSolver(RelaxationSolver):
 # ---------------------------
 # Optimized GravityChainSolver using Numba for the simulation loop
 # ---------------------------
-@njit
+@njit(cache=True)
 def _gravity_simulation_loop(locations, distances, alpha, eps, maximum_iterations, origin_weights, destination_weights):
     # locations: shape (N,2), distances: shape (L,) where L = N-1.
     N = locations.shape[0]
     L = distances.shape[0]
     valid = False
+    # Reuse scratch space instead of allocating four arrays every iteration.
+    diff = np.empty((L, 2))
+    lengths = np.empty(L)
+    offset = np.empty(L)
+    unit_dirs = np.empty((L, 2))
     for k in range(maximum_iterations):
         # Compute differences and lengths for each consecutive pair.
-        diff = np.empty((L, 2))
-        lengths = np.empty(L)
         for i in range(L):
             diff[i, 0] = locations[i, 0] - locations[i+1, 0]
             diff[i, 1] = locations[i, 1] - locations[i+1, 1]
             lengths[i] = np.sqrt(diff[i, 0] * diff[i, 0] + diff[i, 1] * diff[i, 1])
         # Compute offsets and unit directions.
-        offset = np.empty(L)
-        unit_dirs = np.empty((L, 2))
         for i in range(L):
             offset[i] = distances[i] - lengths[i]
             safe_length = lengths[i] if lengths[i] >= 1.0 else 1.0

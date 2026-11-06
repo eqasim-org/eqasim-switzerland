@@ -13,6 +13,7 @@ import pandas as pd
 from data.utils import coerce_boolean_series
 from synthesis.population.models.non_private import home_only_mask
 from . import matched_v1
+from . import opening_hours
 from .V3 import donors as donor_tools, inputs
 
 logger = logging.getLogger("synpp")
@@ -30,6 +31,7 @@ def execute(context):
     started = time.perf_counter()
     const = context.stage("data.constants")
     source, population, roster = inputs.prepare_inputs(context, const)
+    source, population = opening_hours.add_regions(context, source, population)
     threshold = int(context.config("matching_minimum_observations"))
     if threshold < 1:
         raise ValueError("matching_minimum_observations must be positive")
@@ -62,7 +64,12 @@ def execute(context):
                 if not valid.all():
                     logger.warning("V3 excluded %d invalid-weight donors in %s", (~valid).sum(), segment)
                     donors = donors.loc[valid].copy()
-                assigned, details = donor_tools.select_donors(donors, target, columns, mandatory, inputs.HARD[group],
+                hard = list(inputs.HARD[group])
+                matching_columns = list(columns)
+                if context.config("consider_opening_hours"):
+                    hard.append(opening_hours.REGION)
+                    matching_columns.append(opening_hours.REGION)
+                assigned, details = donor_tools.select_donors(donors, target, matching_columns, mandatory, hard,
                     seed=int(context.config("random_seed")) + segment * 2 + int(is_collective),
                     threshold=threshold, weight=weight)
                 details["age_group"], details["collective"] = group, is_collective
@@ -117,5 +124,6 @@ def _segments(population, source, const):
 
 def validate(context):
     paths = [Path(donor_tools.__file__), Path(inputs.__file__), Path(matched_v1.__file__),
+             Path(opening_hours.__file__),
              Path(__file__).with_name("commute.py"), Path(__file__).parent.parent / "models" / "non_private.py"]
     return hashlib.sha256(b"".join(p.read_bytes() for p in paths)).hexdigest()

@@ -3,9 +3,11 @@ import numpy as np
 import pandas as pd
 from synthesis.population.spatial.secondary.components import CustomDistanceSampler, CustomDiscretizationSolver, CandidateIndex, CustomFreeChainSolver
 from synthesis.population.spatial.secondary.problems import find_assignment_problems
+from synthesis.population.spatial.secondary.opening_hours import encode_schedules
 from synthesis.population.spatial.secondary.rda import AssignmentSolver, DiscretizationErrorObjective, \
     GravityChainSolver, AngularTailSolver, GeneralRelaxationSolver
 import logging
+import copy
 
 logger = logging.getLogger("synpp")
 
@@ -22,7 +24,12 @@ def configure(context):
     context.stage("synthesis.population.spatial.primary.locations")
 
     context.stage("synthesis.population.spatial.secondary.distance_distributions")
-    context.stage("synthesis.population.destinations")
+    context.config("consider_opening_hours", default=True)
+    tolerance = context.config("opening_hours_tolerance_minutes", default=10.)
+    if not np.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("opening_hours_tolerance_minutes must be finite and non-negative")
+    context.stage("synthesis.population.destinations_opening_hours" if context.config("consider_opening_hours")
+                  else "synthesis.population.destinations", alias="secondary_destinations")
 
     context.config("consider_detour_factor_in_sl", default=True)
     if context.config("consider_detour_factor_in_sl"):
@@ -46,10 +53,10 @@ def prepare_locations(context):
 
 
 def prepare_destinations(context):
-    df_destinations = context.stage("synthesis.population.destinations")
+    df_destinations = context.stage("secondary_destinations")
 
     identifiers = df_destinations["destination_id"].values
-    locations   = np.vstack(df_destinations["geometry"].apply(lambda x: np.array([x.x, x.y])).values)
+    locations = np.column_stack((df_destinations.geometry.x.to_numpy(), df_destinations.geometry.y.to_numpy()))
     number_employees = df_destinations["number_employees"].values
 
     data = {}
@@ -63,6 +70,9 @@ def prepare_destinations(context):
             ovgk=df_destinations["ovgk"].values[f],
             number_employees=np.nan_to_num(number_employees[f], nan=1.0, posinf=1.0, neginf=1.0)
         )
+        if context.config("consider_opening_hours") and purpose in ("shop", "leisure"):
+            data[purpose]["opening_schedule"] = encode_schedules(df_destinations.loc[f, purpose + "_open_intervals"])
+            data[purpose]["opening_tolerance_seconds"] = float(context.config("opening_hours_tolerance_minutes")) * 60.
 
     return data
 
@@ -88,7 +98,7 @@ def execute(context):
     crs  = c.CH1903_PLUS
 
     # Load car availability
-    df_car_availability     = context.stage("synthesis.population.enriched")[["person_id","car_availability","driving_license"]]
+    df_car_availability     = context.stage("synthesis.population.enriched")[["person_id","car_availability","driving_license"]].copy()
     df_car_availability["car_availability"] = ((df_car_availability["car_availability"].astype(int)==1) &
                                                (df_car_availability["driving_license"]).astype(int)==1).astype(bool)        
 
@@ -112,7 +122,7 @@ def execute(context):
     df_primary              = prepare_locations(context)
 
     # Prepare data
-    distance_distributions = context.stage("synthesis.population.spatial.secondary.distance_distributions")
+    distance_distributions = copy.deepcopy(context.stage("synthesis.population.spatial.secondary.distance_distributions"))
     destinations = prepare_destinations(context)
 
     # Resampling for calibration
@@ -185,7 +195,7 @@ def process(context, arguments):
     rng = np.random.RandomState(random_seed)
 
     # get destinations candidates
-    destinations = context.data("destinations").copy()
+    destinations = {purpose: values.copy() for purpose, values in context.data("destinations").items()}
     if not car_availability:
         # we add this condition here because people without car availability tend to
         # choose secondary location where public transport is more accessible (ovgk A, B, C, D)
@@ -194,6 +204,8 @@ def process(context, arguments):
             v["identifiers"] = v["identifiers"][mask]
             v["locations"]   = v["locations"][mask]
             v["number_employees"] = v["number_employees"][mask]
+            if "opening_schedule" in v:
+                v["opening_schedule"] = v["opening_schedule"][mask]
 
     # drop ovgk as it is not needed in the candidate index
     for v in destinations.values():
@@ -250,7 +262,9 @@ def process(context, arguments):
 
     last_person_id = None
 
-    for problem in find_assignment_problems(df_trips, df_primary):
+    problem_trips = (df_trips if any("opening_schedule" in values for values in destinations.values())
+                     else df_trips.drop(columns=["arrival_time", "departure_time"]))
+    for problem in find_assignment_problems(problem_trips, df_primary):
         result = assignment_solver.solve(problem)
 
         starting_activity_index = problem["activity_index"]
@@ -302,3 +316,11 @@ def process(context, arguments):
 
     df_convergence = pd.DataFrame.from_records(df_convergence, columns=["valid", "size"])
     return df_locations, df_convergence
+
+
+def validate(context):
+    import hashlib
+    from pathlib import Path
+    root = Path(__file__).parent
+    return hashlib.sha256(b"".join((root / name).read_bytes() for name in
+        ("opening_hours.py", "components.py", "problems.py", "rda.py"))).hexdigest()

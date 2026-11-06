@@ -2,6 +2,7 @@ import numba
 import numpy as np
 import pandas as pd
 import logging
+from synthesis.population.matching import opening_hours
 logger = logging.getLogger("synpp")
 
 """
@@ -12,6 +13,7 @@ It progressively decreases the minimum number of observations to ensure the most
 
 
 def configure(context):
+    opening_hours.configure(context)
     context.config("hot_deck_matching_runners", 1)
     context.config("random_seed")
     context.config("matching_minimum_observations", 10)
@@ -35,7 +37,8 @@ def validate(context):
     # Synpp hashes stage source but not imported commute-predictor helpers.
     import hashlib
     from pathlib import Path
-    return hashlib.sha256(Path(__file__).with_name("commute.py").read_bytes()).hexdigest()
+    return hashlib.sha256(Path(__file__).with_name("commute.py").read_bytes() +
+                          Path(opening_hours.__file__).read_bytes()).hexdigest()
 
 
 def compare_feature_distribution(df_population_sub, df_source_sub, feature, weight_col="person_weight"):
@@ -260,6 +263,34 @@ def nonparallel_statistical_matching(context, df_source, source_identifier, weig
                                   mandatory_columns, minimum_observations=0):
     
     random_seed = context.config("random_seed")
+
+    # Partition outside the relaxation recursion so even its final fallback
+    # remains inside the recipient's exact opening-hours region.
+    region = opening_hours.REGION
+    if region in df_target:
+        if region not in df_source or df_source[region].isna().any() or df_target[region].isna().any():
+            raise ValueError("Both matching frames require complete opening-hours regions")
+        assignments, all_levels = [], []
+        for label, target in df_target.groupby(region, sort=True):
+            source = df_source.loc[df_source[region].eq(label)]
+            target = target.drop(columns=region)
+            if source.empty:
+                assigned = target[[target_identifier] + columns].copy()
+                assigned[source_identifier] = -1
+                levels = np.full(len(target), -1, dtype=int)
+            else:
+                assigned, levels = statistical_matching(context.progress, source.drop(columns=region),
+                    source_identifier, weight, target, target_identifier, columns, mandatory_columns,
+                    random_seed, minimum_observations)
+            assignments.append(assigned)
+            all_levels.append(pd.Series(levels, index=assigned[target_identifier]))
+        if not assignments:
+            empty = df_target[[target_identifier] + columns].copy()
+            empty[source_identifier] = pd.Series(dtype="int64")
+            return empty, np.empty(0, dtype=int)
+        combined = pd.concat(assignments).set_index(target_identifier).loc[df_target[target_identifier]].reset_index()
+        levels = pd.concat(all_levels).reindex(df_target[target_identifier]).to_numpy()
+        return combined, levels
     
     return statistical_matching(context.progress, df_source, source_identifier, weight, df_target, target_identifier,
                                 columns, mandatory_columns, random_seed, minimum_observations)
@@ -399,6 +430,7 @@ def execute(context):
     from synthesis.population.models.non_private import home_only_mask
     held_out_home = df_population.loc[home_only_mask(df_population)].copy()
     df_population = df_population.loc[~home_only_mask(df_population)].copy()
+    df_source, df_population = opening_hours.add_regions(context, df_source, df_population)
     df_population["sex"] = df_population["sex"].astype(int)
     
     # add commute distance and work location type

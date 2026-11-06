@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 import geopandas as gpd
+from data.activity_purposes import SHOP, LEISURE
 
 import logging
 
@@ -86,11 +87,11 @@ def execute(context):
         1: "interaction",   # Transfer, change of mode, park car
         2: "work",          # Work
         3: "education",     # Education
-        4: "shop",          # Shopping
+        4: SHOP,            # Shopping
         5: "other",         # Chores, use of public services
         6: "work_secondary",          # Business activity
         7: "work_secondary",          # Business trip
-        8: "leisure",       # Leisure
+        8: LEISURE,         # Leisure
         9: "other",         # Bring children
         10: "other",        # Bring others (disabled, etc.)
         11: "home",         # Return home
@@ -178,11 +179,11 @@ def execute(context):
             1: "interaction",       # Transfer, change of mode, park car
             2: "work",              # Work
             3: "education",         # Education
-            4: "shop",              # Shopping
+            4: SHOP,                # Shopping
             5: "other",             # Chores, use of public services
             6: "work_secondary",    # Business activity
             7: "work_secondary",    # Business trip
-            8: "leisure",           # Leisure
+            8: LEISURE,             # Leisure
             9: "other",             # Bring children
             10: "other",            # Bring others (disabled, ...)
             11: "home",             # Return home
@@ -723,11 +724,11 @@ def execute(context):
             1: "other", # connection
             2: "work",
             3: "education",
-            4: "shop",
+            4: SHOP,
             5: "other",
             6: "work_secondary",
             7: "work_secondary",
-            8: "leisure",
+            8: LEISURE,
             9: "other", # accompanying kids
             10: "other", # accompanying others
             11: "home",
