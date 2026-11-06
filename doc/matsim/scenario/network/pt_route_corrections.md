@@ -40,7 +40,7 @@ such as TPG's, are not affected.
 Some official line references skip stops of the GTFS: TL's line 32 reference is
 a later route via Renens VD, 1er Août, without Renens VD, Avenir, so its routes
 would keep their mapping (`other_path`). `pt_route_through_stops_lines` (default
-`{}`, none; e.g. `{"151": ["32"]}`) lists such lines by GTFS agency. For their routes, the
+none; e.g. `{"151": ["32"]}`) lists such lines by GTFS agency. For their routes, the
 reference goes in straight lines through the stops more than 60 m from it,
 between the stops before and after them on the reference, and the routes are
 corrected against it as usual. The leg that has no road (line 32: the Rue du

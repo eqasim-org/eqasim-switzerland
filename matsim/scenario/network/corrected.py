@@ -33,8 +33,8 @@ def configure(context):
     context.config("pt_route_platforms", pt_route_check.DEFAULT_PLATFORMS)
     # Lines by GTFS agency_id whose official line routes skip some of their stops: the routes are corrected along them
     # through these stops (e.g. {"151": ["32"]}: the TL route of line 32 is a later one, without Renens VD, Avenir).
-    # None by default.
-    context.config("pt_route_through_stops_lines", {})
+    # None by default (not {}: synpp drops an empty dict option, which is then "not requested").
+    context.config("pt_route_through_stops_lines", None)
 
 
 def execute(context):
