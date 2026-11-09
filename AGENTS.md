@@ -74,8 +74,9 @@ def execute(context):
   a filename. `context.path(name)` gives its cache directory. Inspect the producer
   before constructing a path or changing a return type.
 - In particular, `data.gtfs.cleaned` writes extracted feed files under its
-  `output/` directory, including `output/routes.txt`. Its return value `"gtfs"`
-  is not the directory to append to the stage path.
+  `output/` directory, including `output/routes.txt`. It returns the path of the
+  compressed copy `merged-gtfs-<YYYYMMDD>.zip` (build date) in its cache
+  directory; consumers that need extracted files still read `output/`.
 - Treat upstream caches as read-only. Copy inputs into the consuming stage before
   editing them. Export copies of simulation results so cached simulations remain
   usable; do not move their files out of the cache.
