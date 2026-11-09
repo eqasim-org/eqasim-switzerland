@@ -7,7 +7,7 @@ from shapely import wkt
 from shapely.geometry import GeometryCollection, MultiPolygon, mapping
 from shapely.ops import transform, polygonize, unary_union
 from pyproj import Transformer
-from data.osm.clean import read_outside_region
+from data.spatial.utils import read_outside_region
 from shapely.validation import make_valid
  
  

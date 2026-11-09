@@ -6,27 +6,27 @@ from mode_choice.routing import options
 
 def configure(context):
     options.configure(context)
-    context.stage("mode_choice.routing.java.requests")
-    context.stage("mode_choice.routing.java.freight")
+    context.stage("mode_choice.routing.eqasim.requests")
+    context.stage("mode_choice.routing.eqasim.freight")
     if context.config("use_marouter_in_mode_choice"):
-        context.stage("mode_choice.routing.java.weights")
+        context.stage("mode_choice.routing.eqasim.weights")
     if context.config("route_population_once"):
-        context.stage("mode_choice.routing.java.preparation")
+        context.stage("mode_choice.routing.eqasim.preparation")
 
 
 def execute(context):
 
     # Use prepared freight coordinates when routes will be reused in MATSim.
 
-    freight = (pl.read_parquet(context.stage("mode_choice.routing.java.preparation")["freight"])
-               if context.config("route_population_once") else context.stage("mode_choice.routing.java.freight"))
-    cars = pl.scan_csv(context.stage("mode_choice.routing.java.requests"),
+    freight = (pl.read_parquet(context.stage("mode_choice.routing.eqasim.preparation")["freight"])
+               if context.config("route_population_once") else context.stage("mode_choice.routing.eqasim.freight"))
+    cars = pl.scan_csv(context.stage("mode_choice.routing.eqasim.requests"),
                        schema_overrides={"identifier": pl.String, "person_id": pl.String})
 
     # Weigh driver demand; non-drivers are zero-flow passenger probes only.
 
     if context.config("use_marouter_in_mode_choice"):
-        weights = context.stage("mode_choice.routing.java.weights").lazy()
+        weights = context.stage("mode_choice.routing.eqasim.weights").lazy()
         cars = cars.join(weights, on="identifier", how="inner", validate="1:1", maintain_order="left")
         freight = freight.drop("mode").lazy().join(weights, on="identifier", how="inner", validate="1:1", maintain_order="left")
     else:

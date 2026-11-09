@@ -81,6 +81,11 @@ def select_donors(source, target, source_space, target_space, *, rng, top_k, tem
     ess = np.full(len(target), np.nan)
     support = np.zeros(len(target), dtype=int)
     keys = ["employed", "is_student"]
+    region = "opening_hours_region"
+    if region in source or region in target:
+        if region not in source or region not in target or source[region].isna().any() or target[region].isna().any():
+            raise ValueError("Both matching frames require complete opening-hours regions")
+        keys.append(region)
     source_groups = source.groupby(keys, sort=True).indices
     diagnostics = []
     collective = coerce_boolean_series(target.get("collective_housing_resident",
@@ -91,8 +96,8 @@ def select_donors(source, target, source_space, target_space, *, rng, top_k, tem
                   if collective.any() else None)
     groups = target[keys].assign(requires_home_diary=collective)
     for key, target_rows in groups.groupby(keys + ["requires_home_diary"], sort=True).indices.items():
-        source_rows = source_groups.get(key[:2], np.array([], dtype=int))
-        if key[2]:
+        source_rows = source_groups.get(key[:len(keys)], np.array([], dtype=int))
+        if key[len(keys)]:
             source_rows = source_rows[donor_home[source_rows]]
         if not len(source_rows):
             continue
@@ -121,10 +126,12 @@ def select_donors(source, target, source_space, target_space, *, rng, top_k, tem
         expected = np.bincount(idx.ravel(), weights=probabilities.ravel(), minlength=len(weights))
         prior = weights / weights.sum()
         diagnostics.append({"employed": int(key[0]), "is_student": int(key[1]),
-                            "requires_home_diary": bool(key[2]),
+                            "requires_home_diary": bool(key[len(keys)]),
                             "recipients": len(target_rows), "donors": len(source_rows),
                             "reachable_donors": int(np.count_nonzero(expected)),
                             "expected_donor_tvd": float(np.abs(expected / len(target_rows) - prior).sum() / 2)})
+        if region in keys:
+            diagnostics[-1][region] = int(key[2])
     details = pd.DataFrame({"person_id": target["person_id"].to_numpy(),
                             "donor_pool_size": support, "distance_squared": distances, "candidate_ess": ess})
     return (assigned[:, 0] if n_draws == 1 else assigned), details, diagnostics

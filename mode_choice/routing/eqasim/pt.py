@@ -1,7 +1,7 @@
 """Single-pass Java PT routing, with components returned by the same request."""
 from pathlib import Path
 import polars as pl
-from mode_choice.routing.java.router import configure_mode, route_mode, read_results
+from mode_choice.routing.eqasim.router import configure_mode, route_mode, read_results
 from mode_choice.routing.results import complete_routes
 from mode_choice.data.frames import join_variables
 from mode_choice.defaults import PT_ROUTING_COLUMNS

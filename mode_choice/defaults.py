@@ -119,7 +119,7 @@ def execute(context):
     """Synpp dependency: changing defaults invalidates mode-choice stages."""
     return {**RUN_DEFAULTS, **CALIBRATION_DEFAULTS}
 
-ROUTER_SERVER_CLASS = "org.eqasim.switzerland.ch_cmdp.utils.routing.MultiModeRouterServer"
+ROUTER_SERVER_CLASS = "org.eqasim.switzerland.ch_cmdp.utils.routing.multimodalRouter.RunServer"
 ROUTER_SERVER_MODES = ("car", "truck", "car_passenger", "pt", "walk", "bike")
 SERVER_DEFAULTS = {
     "mode_choice_server_startup_timeout": 1800.0,
@@ -136,6 +136,7 @@ ROUTING_COST_FILENAME = "cost.parquet"
 ROUTER_CONFIG_INPUTS = {
     "transit": ("transitScheduleFile", "vehiclesFile"),
     "ptZones": ("ptZonesFilePath", "sbbDistancesPath", "pricingDescriptionPath"),
+    "swissRustRouting": ("libraryPath", "installationDirectory", "sourceDirectory"),
 }
 
 # Stage output contracts.

@@ -14,6 +14,7 @@ Transforms the synthetic trip table into a synthetic activity table.
 def configure(context):
     context.stage("synthesis.population.enriched")
     context.stage("synthesis.population.trips")
+    context.config("trip_time_shuffle", default="half_hour")
 
 
 def execute(context):
@@ -46,6 +47,10 @@ def execute(context):
         "purpose": last_activities["following_purpose"],
         "following_mode": None
     })
+    if context.config("trip_time_shuffle") == "half_hour":
+        # Late returns must still leave one minute for the final activity.
+        final_activities["end_time"] = np.maximum(
+            final_activities["end_time"], final_activities["start_time"] + 60.)
     final_activities["original_purpose"] = last_activities.get(
         "original_following_purpose", last_activities["following_purpose"])
 

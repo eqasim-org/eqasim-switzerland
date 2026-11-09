@@ -20,7 +20,7 @@ Each consumer copies the config into its own directory before editing it:
 | --- | --- |
 | `matsim.simulation.prepare` | Local pricing paths, calibrated PT parameters, counts and travel-time targets, calibration regions, simulation and calibration settings |
 | `matsim.config.pt` | Local network/schedule/vehicles/pricing files and PT parameters; remove population inputs and freight replanning |
-| `mode_choice.routing.java.config` | Copy the prepared PT config, resolve its transit/pricing paths and select fitted cost parameters |
+| `mode_choice.routing.eqasim.config` | Copy the prepared PT config, resolve its transit/pricing paths and select fitted cost parameters |
 | Cutter and output stages | Edit their existing cut or simulation-output config using shared tools; preserve fitted scenario settings |
 | `matsim.simulation.run_from_inputs` | Copy the supplied already-adapted config, preserve custom/fitted settings, resolve supporting paths and update local files, sampling and freight strategies |
 

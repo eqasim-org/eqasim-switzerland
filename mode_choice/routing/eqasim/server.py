@@ -6,9 +6,10 @@ import shutil
 
 from matsim.runtime.java import get_memories
 from mode_choice.defaults import ROUTING_DEFAULTS, SERVER_DEFAULTS, ROUTER_SERVER_CLASS, RUN_DEFAULTS
-from mode_choice.routing.java.client import RoutingServer
+from mode_choice.routing.eqasim.client import RoutingServer
 from mode_choice.routing.options import input_path
 from mode_choice.routing import options
+from mode_choice.routing.eqasim.runtime import validate_runtime
 
 
 def configure(context):
@@ -17,7 +18,7 @@ def configure(context):
     context.stage("matsim.runtime.eqasim")
     context.stage("matsim.runtime.java")
     context.stage("matsim.scenario.network.pt")
-    context.stage("mode_choice.routing.java.config")
+    context.stage("mode_choice.routing.eqasim.config")
     context.stage("calibration.car_routing_vot.optimal_value")
     context.config("threads", volatile=True)
     context.config("car_cost_model", RUN_DEFAULTS["car_cost_model"])
@@ -25,8 +26,10 @@ def configure(context):
         context.config(name, default)
     context.config("random_seed")
     context.config("input_downsampling")
+    context.config("mode_choice_marouter_iterations", 3)
+    context.config("mode_choice_use_rust_pt_router", True)
     if context.config("route_population_once"):
-        context.stage("mode_choice.routing.java.preparation")
+        context.stage("mode_choice.routing.eqasim.preparation")
 
 
 def execute(context):
@@ -37,22 +40,26 @@ def execute(context):
     binary = shutil.which(runtime["binary"])
     if binary is None:
         raise FileNotFoundError(f"Java binary not found: {runtime['binary']}")
-    config = str(Path(context.stage("mode_choice.routing.java.config")).resolve())
+    config = str(Path(context.stage("mode_choice.routing.eqasim.config")).resolve())
     jar = str((Path(context.path("matsim.runtime.eqasim")) / context.stage("matsim.runtime.eqasim")).resolve())
+    validate_runtime(jar)
     if context.config("prepare_sumo"):
         from sumo.routing.runtime import validate_sumo_runtime
         validate_sumo_runtime(jar)
     directory = Path(context.path()).resolve()
     temporary = directory / "java_tmp"
     temporary.mkdir(exist_ok=True)
-    xmx, xms = get_memories(context, runtime, runtime["memory"])
+    xmx, xms = get_memories(context, runtime, context.config("java_memory"))
 
     # Validate worker sizes, timeouts and the calibrated routing coefficient.
 
     sizes = {name: context.config(name) for name in ("threads", "mode_choice_routing_batch_size", "mode_choice_server_chunk_size")}
+    sizes["mode_choice_marouter_iterations"] = context.config("mode_choice_marouter_iterations")
     for name, value in sizes.items():
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
             raise ValueError(f"{name} must be a positive integer")
+    if not isinstance(context.config("mode_choice_use_rust_pt_router"), bool):
+        raise ValueError("mode_choice_use_rust_pt_router must be true or false")
     settings = {name: context.config("mode_choice_server_" + name) for name in
                 ("startup_timeout", "request_timeout", "shutdown_timeout", "poll_interval")}
     for name, value in settings.items():
@@ -63,7 +70,7 @@ def execute(context):
             or not math.isfinite(distance_utility) or distance_utility < 0):
         raise ValueError("calibration.car_routing_vot.optimal_value must return a finite, nonnegative routingDistanceUtility")
 
-    # Explicit CLI values override the config in the current MultiModeRouterServer.
+    # Explicit CLI values override the config in the current RunServer.
     # This coefficient is distinct from tolls-value-of-time/tolls-sigma, which
     # remain inherited from the supplied MATSim config.
 
@@ -73,7 +80,7 @@ def execute(context):
 
     # Start asynchronously; routing stages wait for readiness when needed.
 
-    network = (context.stage("mode_choice.routing.java.preparation")["network"] if context.config("route_population_once")
+    network = (context.stage("mode_choice.routing.eqasim.preparation")["network"] if context.config("route_population_once")
                else context.stage("matsim.scenario.network.pt")["network"])
     command = [binary, "-cp", jar, "-Xmx" + xmx, "-Xms" + xms, "-XX:+UseParallelGC",
                "-Djava.io.tmpdir=" + str(temporary), "-Dmatsim.useLocalDtds=true", "-Djava.awt.headless=true",
@@ -81,6 +88,8 @@ def execute(context):
                "--config-path", config, "--routingDistanceUtility", str(float(distance_utility)),
                "--compute-cost", "true", "--car-cost-model", cost_model,
                "--marouter", str(context.config("use_marouter_in_mode_choice")).lower(),
+               "--marouter-iterations", str(sizes["mode_choice_marouter_iterations"]),
+               "--use-rust-pt-router", str(context.config("mode_choice_use_rust_pt_router")).lower(),
                "--marouter-seed", str(context.config("random_seed")),
                "--marouter-sample-size", str(context.config("input_downsampling")),
                "--export-routes", str(context.config("route_population_once") or context.config("prepare_sumo")).lower(),
@@ -109,4 +118,4 @@ def validate(context):
 def ensure_server_started(context):
     # Synpp may load this stage's dictionary from disk in a new Python process.
     # Never mistake that cached dictionary for a live server.
-    RoutingServer.run_server_if_not_running(context.stage("mode_choice.routing.java.server"))
+    RoutingServer.run_server_if_not_running(context.stage("mode_choice.routing.eqasim.server"))

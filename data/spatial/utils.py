@@ -4,6 +4,7 @@ import geopandas as gpd
 import shapely.geometry as geo
 from sklearn.neighbors import KDTree
 import logging
+from pathlib import Path
 
 logger = logging.getLogger("synpp")
 
@@ -150,3 +151,23 @@ def convert_crs(x, y, original_crs="EPSG:2056", target_crs="EPSG:4326"):
     x4326 = gdf.geometry.x.values
     y4326 = gdf.geometry.y.values
     return x4326, y4326
+
+
+def read_outside_region(out_region_file):    
+    if isinstance(out_region_file, (str, Path)):
+        out_region_file = [out_region_file]
+
+    if not isinstance(out_region_file, (list, tuple)):
+        raise TypeError("cross_border_exclude_shapefiles must be a path or a list of paths.")
+
+    gdfs = []   
+    for f in out_region_file:
+        suffix = Path(f).suffix.lower()
+        if suffix not in {".gpkg", ".shp"}:
+            raise TypeError(f"{f} is not a .gpkg or .shp file.")
+
+        gdf = gpd.read_file(f).to_crs(epsg=2056)
+        gdfs.append(gdf)
+
+    exclude_region = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs="EPSG:2056")
+    return exclude_region

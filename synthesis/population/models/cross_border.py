@@ -41,7 +41,7 @@ import pandas as pd
 import geopandas as gpd
 import statsmodels.api as sm
 from catboost import CatBoostClassifier
-from data.osm.clean import read_outside_region
+from data.spatial.utils import read_outside_region
 import logging
 
 logger = logging.getLogger("synpp")

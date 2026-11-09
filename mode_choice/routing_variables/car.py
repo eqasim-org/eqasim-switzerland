@@ -1,5 +1,5 @@
 """Car time and distance, from Java or the hourly Pandana network."""
-from mode_choice.routing.java.router import configure_mode, car_backend, route_mode, save_costs
+from mode_choice.routing.eqasim.router import configure_mode, car_backend, route_mode, save_costs
 from mode_choice.routing.options import input_path
 from mode_choice.costs.car import calculate_driving_costs
 from dmc.parameters import Parameters

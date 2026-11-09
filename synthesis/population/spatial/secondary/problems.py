@@ -7,14 +7,19 @@ FIXED_PURPOSES = ["home", "work", "education"]
 def find_bare_assignment_problems(df):
     has_activity_duration = "activity_duration" in df.columns
     fields = FIELDS + (["activity_duration"] if has_activity_duration else [])
+    has_times = "arrival_time" in df and "departure_time" in df
+    if has_times:
+        fields += ["arrival_time", "departure_time"]
     problem = None
+    previous_person, previous_arrival = None, 0.
 
     for row in df[fields].itertuples(index=False):
-        if has_activity_duration:
-            person_id, trip_index, preceding_purpose, following_purpose, mode, travel_time, activity_duration = row
-        else:
-            person_id, trip_index, preceding_purpose, following_purpose, mode, travel_time = row
-            activity_duration = np.nan
+        person_id, trip_index, preceding_purpose, following_purpose, mode, travel_time = row[:6]
+        activity_duration = row[6] if has_activity_duration else np.nan
+        if has_times:
+            arrival, departure = row[-2:]
+            if person_id != previous_person:
+                previous_arrival = 0.
 
         if not problem is None and person_id != problem["person_id"]:
             # We switch person, but we're still tracking a problem. This is a tail!
@@ -27,6 +32,15 @@ def find_bare_assignment_problems(df):
                 person_id=person_id, trip_index=trip_index, purposes=[preceding_purpose],
                 modes=[], travel_times=[], activity_durations=[]
             )
+            if has_times:
+                problem["activity_start_times"] = [previous_arrival]
+                problem["activity_end_times"] = [departure]
+
+        if has_times:
+            problem["activity_end_times"][-1] = departure
+            problem["activity_start_times"].append(arrival)
+            problem["activity_end_times"].append(max(30 * 3600., arrival + 60.))
+            previous_person, previous_arrival = person_id, arrival
 
         problem["purposes"].append(following_purpose)
         problem["modes"].append(mode)
@@ -58,6 +72,11 @@ def find_assignment_problems(df, df_locations):
     for problem in find_bare_assignment_problems(df):
         origin_purpose = problem["purposes"][0]
         destination_purpose = problem["purposes"][-1]
+        if "activity_start_times" in problem:
+            selection = slice(1 if origin_purpose in FIXED_PURPOSES else None,
+                              -1 if destination_purpose in FIXED_PURPOSES else None)
+            for field in ("activity_start_times", "activity_end_times"):
+                problem[field] = np.asarray(problem[field][selection], dtype=float)
 
         # Reduce purposes
         if origin_purpose in FIXED_PURPOSES and destination_purpose in FIXED_PURPOSES:

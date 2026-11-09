@@ -15,6 +15,11 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 
 ## Implementation guides
 
+- [Simulation-region OSM businesses and weekday opening hours](data/osm/businesses.md)
+- [Canton opening-hours regions and donor masks](data/osm/opening_hours_regions.md)
+- [Destination shopping/leisure opening hours](synthesis/population/destinations_opening_hours.md)
+- [Trip-time shuffling and comparison plots](synthesis/population/trip_time_shuffling.md)
+- [RDA opening-hours comparison and Slurm run](analysis/rda.md)
 - [Cross-border activity timing](data/cross_border/README.md)
 - [Shared MATSim configuration](matsim/config/README.md)
 - [Official raw BFS projection inputs and scaling](data/statpop/projections.md)
@@ -30,6 +35,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Experimental FLASH-TB routing and benchmarks](mode_choice/routing/flash/README.md)
 - [Java / FLASH population PT router comparison](analysis/pt_routers/README.md)
 - [Microcensus diary matching: learned V2 inputs and masks](synthesis/population/matching/README.md)
+- [Default V3 categorical matching and V1–V3 comparison](synthesis/population/matching/V3.md)
 - [Matching predictive validation and embedding analysis](analysis/matching/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
 - [Zones of the regional PT subscriptions](synthesis/population/models/subscription_zones.md)

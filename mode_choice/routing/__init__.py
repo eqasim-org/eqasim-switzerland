@@ -1,1 +1,1 @@
-"""Java, Python and experimental FLASH routing implementations."""
+"""Routing backends: shared eqasim Java/Rust server, Python and optional FLASH."""

@@ -5,7 +5,7 @@ import pandas as pd
 import geopandas as gpd
 from shapely import wkt
 from shapely.ops import unary_union
-from data.osm.clean import read_outside_region
+from data.spatial.utils import read_outside_region
 from shapely.validation import make_valid
 from .penalty_calibration import multipolygone_to_polygone_wkt, reproject_to_lv95
 

@@ -1,7 +1,7 @@
 # Microcensus diary matching
 
-V1 is unchanged. `synthesis.population.matched` still selects V1 by default;
-set `matching_algorithm: v2` to use V2. The working configuration is not changed
+`synthesis.population.matched` selects V3 by default; set `matching_algorithm: v1`
+or `matching_algorithm: v2` to select an earlier algorithm. V1's code is unchanged
 by this revision.
 
 V1 uses an ordered, survey-weighted recursive hot deck with age bands and
@@ -68,7 +68,7 @@ survey-age eligibility and its existing removal/output conventions. For
 pipeline settings already declared by `configure`, use
 `MatchingOptions.from_context(context)` instead of `from_config`.
 
-The matching package contains the `matched_v1.py` and `matched_v2.py` stages;
+The matching package contains the `matched_v1.py`, `matched_v2.py` and `matched_v3.py` stages;
 all reusable V2 code lives in `V2/`. Import features from `V2.features`, donor
 selection from `V2.donors`, and neural components from `V2.model`, `V2.targets`
 and `V2.training`. The public estimator is `V2.DiaryMatcher`.
@@ -243,3 +243,15 @@ V2 restores the complete roster before household-count reconstruction and keeps
 recipient row order. Stage cache validation includes these shared helper sources.
 V1 itself is unchanged; exact-age/income features, training and latent-space
 retrieval remain specific to V2, including its employment/student safeguards.
+
+### V1 residential-density bins (STATPOP)
+
+V1 uses the existing upstream `population_density` field, a resident count
+within 2.5 km of home, for both survey donors and synthetic residents. The count
+is binned at values equivalent to 300 and 1,500 residents/km² over that circle:
+classes 0 (<300), 1 (300–<1,500), and 2 (>=1,500). Invalid/missing values use -1.
+`population_density_class` is the first mandatory attribute in all STATPOP age
+branches and the collective-resident branch. Thus even the existing last-resort
+prefix relaxation retains density; recipients with no donor in that density
+class follow the existing unmatched-recipient removal. ARE matching is unchanged.
+No upstream density calculation or matching algorithm is changed.

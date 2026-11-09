@@ -6,7 +6,7 @@ from matsim.config.tools import read_config
 
 
 def attach(context, requests):
-    prepared = context.stage("mode_choice.routing.java.preparation")
+    prepared = context.stage("mode_choice.routing.eqasim.preparation")
     facilities = pl.read_parquet(prepared["facilities"])
     locations = context.stage("synthesis.population.spatial.locations")
     persons = context.stage("synthesis.population.models.subscriptions")
@@ -41,12 +41,12 @@ def compatible_requests(context, source, target, mode):
     these rows keeps one bad endpoint from aborting a complete mixed request.
     Teleported modes need no allowed-link check.
     """
-    parameter = read_config(context.stage("mode_choice.routing.java.config")).find(
+    parameter = read_config(context.stage("mode_choice.routing.eqasim.config")).find(
         "module[@name='routing']/param[@name='networkModes']")
     network_modes = {value.strip() for value in parameter.get("value").split(",")} if parameter is not None else {"car", "bike"}
     if mode is not None and mode not in network_modes | {"car", "truck"}:
         return source
-    links = pl.scan_parquet(context.stage("mode_choice.routing.java.preparation")["links"])
+    links = pl.scan_parquet(context.stage("mode_choice.routing.eqasim.preparation")["links"])
     rows = pl.scan_csv(source, schema_overrides={"person_id": pl.String, "identifier": pl.String,
                                                 "origin_link_id": pl.String, "destination_link_id": pl.String})
     road_mode = (pl.lit(mode) if mode is not None else pl.col("mode")).replace("car_passenger", "car")

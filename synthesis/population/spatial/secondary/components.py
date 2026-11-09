@@ -2,6 +2,7 @@ import synthesis.population.spatial.secondary.rda as rda
 import sklearn.neighbors
 import numpy as np
 import logging
+from synthesis.population.spatial.secondary.opening_hours import eligible_candidates
 
 logger = logging.getLogger("synpp")
 
@@ -11,22 +12,28 @@ class CustomDistanceSampler(rda.FeasibleDistanceSampler):
 
         self.random = random
         self.distributions = distributions
+        self._cached_problem = None
+        self._selected_distributions = None
+        self._sorted_cdfs = {
+            id(item): bool(np.isfinite(item["cdf"]).all() and np.all(np.diff(item["cdf"]) >= 0))
+            for mode in distributions.values() for item in mode["distributions"]
+        }
 
     def sample_distances(self, problem):
-        distances = np.zeros((len(problem["modes"])))
-
-        for index, (mode, travel_time) in enumerate(zip(problem["modes"], problem["travel_times"])):
-            if mode == "remote_walk":
-                mode = "walk"
-            mode_distribution = self.distributions[mode]
-
-            bound_index = np.count_nonzero(travel_time > mode_distribution["bounds"])
-            mode_distribution = mode_distribution["distributions"][bound_index]
-
-            distances[index] = mode_distribution["values"][
-                np.count_nonzero(self.random.random_sample() > mode_distribution["cdf"])
-            ]
-
+        # Modes and travel times are fixed throughout one assignment problem.
+        if self._cached_problem is not problem:
+            selected = []
+            for mode, travel_time in zip(problem["modes"], problem["travel_times"]):
+                distribution = self.distributions["walk" if mode == "remote_walk" else mode]
+                item = distribution["distributions"][np.count_nonzero(travel_time > distribution["bounds"])]
+                selected.append((item["values"], item["cdf"], self._sorted_cdfs[id(item)]))
+            self._cached_problem, self._selected_distributions = problem, selected
+        distances = np.zeros(len(problem["modes"]))
+        uniforms = self.random.random_sample(len(self._selected_distributions))
+        for index, ((values, cdf, sorted_cdf), uniform) in enumerate(zip(self._selected_distributions, uniforms)):
+            # side='left' exactly matches count(uniform > cdf), including ties.
+            position = np.searchsorted(cdf, uniform, side="left") if sorted_cdf else np.count_nonzero(uniform > cdf)
+            distances[index] = values[position]
         return distances
 
 
@@ -66,7 +73,7 @@ class CandidateIndex:
 
     def query_batch(self, purpose, locations):
         locations = np.asarray(locations)
-        indices = self.indices[purpose].query(locations, k = self.number_candidates, return_distance = False)
+        indices = self.indices[purpose].query(locations, k = min(self.number_candidates, len(self.weights[purpose])), return_distance = False)
 
         candidate_weights = self.weights[purpose][indices]
         weight_sums = np.sum(candidate_weights, axis=1, keepdims=True)
@@ -90,9 +97,37 @@ class CandidateIndex:
 
         return identifiers, sampled_locations
 
+    def query_open_batch(self, purpose, locations, starts, ends):
+        schedules = self.data[purpose].get("opening_schedule")
+        if schedules is None:
+            return self.query_batch(purpose, locations)
+        identifiers, selected_locations = [], []
+        total = len(self.weights[purpose])
+        for location, start, end in zip(locations, starts, ends):
+            k = min(self.number_candidates, total)
+            while True:
+                candidates = self.indices[purpose].query(np.asarray(location).reshape(1, -1),
+                                                        k=k, return_distance=False)[0]
+                candidates = candidates[eligible_candidates(schedules, candidates, start, end,
+                    self.data[purpose].get("opening_tolerance_seconds", 600.))]
+                if len(candidates):
+                    # Retain the usual candidate count after filtering by hours.
+                    if len(candidates) >= self.number_candidates or k == total:
+                        candidates = candidates[:self.number_candidates]
+                        break
+                if k == total:
+                    raise ValueError(f"No eligible {purpose} destination for activity {start:.0f}–{end:.0f}s")
+                k = min(total, k * 2)
+            weights = self.weights[purpose][candidates]
+            probabilities = weights / weights.sum() if weights.sum() > 0 else np.full(len(weights), 1 / len(weights))
+            chosen = self.random.choice(candidates, p=probabilities)
+            identifiers.append(self.data[purpose]["identifiers"][chosen])
+            selected_locations.append(self.data[purpose]["locations"][chosen])
+        return np.asarray(identifiers), np.asarray(selected_locations)
+
     def sample(self, purpose, random):
         p = self.global_probabilities[purpose]
-        chosen = random.choice(np.arange(len(p)), p=p)
+        chosen = random.choice(len(p), p=p)
 
         identifier = self.data[purpose]["identifiers"][chosen]
         location = self.data[purpose]["locations"][chosen]
@@ -111,7 +146,12 @@ class CustomDiscretizationSolver(rda.DiscretizationSolver):
 
         for purpose in unique_purposes:
             purpose_indices = np.where(purposes == purpose)[0]
-            identifiers, purpose_locations = self.index.query_batch(purpose, locations[purpose_indices])
+            if "activity_start_times" in problem:
+                identifiers, purpose_locations = self.index.query_open_batch(
+                    purpose, locations[purpose_indices], problem["activity_start_times"][purpose_indices],
+                    problem["activity_end_times"][purpose_indices])
+            else:
+                identifiers, purpose_locations = self.index.query_batch(purpose, locations[purpose_indices])
 
             discretized_locations[purpose_indices] = purpose_locations
 

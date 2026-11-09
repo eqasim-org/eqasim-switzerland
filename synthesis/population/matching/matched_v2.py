@@ -12,11 +12,13 @@ from .V2.diagnostics import MatchingDiagnostics
 from .V2.inputs import prepare_inputs
 from .V2.provenance import implementation_token
 from .V2.wrappers import DiaryMatcher
+from . import opening_hours
 
 logger = logging.getLogger("synpp")
 
 
 def configure(context):
+    opening_hours.configure(context)
     configuration.configure(context)
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.trips")
@@ -35,6 +37,7 @@ def execute(context):
 
     const = context.stage("data.constants")
     source, population, trips = prepare_inputs(context, const)
+    source, population = opening_hours.add_regions(context, source, population)
     eligible = (population["age"] >= const.MZ_AGE_THRESHOLD if const.census == "statpop"
                 else population["age_class"] > 0)
     # Preserve home-only residents with no donor, exactly as in V1.

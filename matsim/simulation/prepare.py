@@ -11,7 +11,7 @@ from matsim.simulation.border_route_choice import repair_grouped_crossings
 
 import matsim.config.tools as config_tools
 from mode_choice.routing import options as routing_options
-from mode_choice.routing.java import exports as routing_exports
+from mode_choice.routing.eqasim import exports as routing_exports
 
 from data.cross_border.count_assignment_inputs import configure_reference, assigned_reference
 

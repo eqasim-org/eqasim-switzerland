@@ -16,6 +16,8 @@ BORDER_MATCH_COLUMNS = [
     "interview_geometry_point", "border_crossing_trip_mode", "interview_point_id",
     "border_crossing_point", "border_crossing_direction", "border_interview_place",
 ]
+ORIGINAL_PURPOSE_COLUMNS = ["original_preceding_purpose", "original_following_purpose"]
+TIME_SHUFFLE_METHODS = ("half_hour", "legacy", "none")
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -26,17 +28,9 @@ def configure(context):
 
     context.config("random_seed")
     context.config("specific_day_scenario", default = "workday")
-
-
-ORIGINAL_PURPOSE_COLUMNS = ["original_preceding_purpose", "original_following_purpose"]
-
-
-def validate(context):
-    # Synpp hashes this stage, but imported helpers also change its output.
-    import hashlib
-    from pathlib import Path
-    import data.microcensus.secondary_trips
-    return hashlib.sha256(Path(data.microcensus.secondary_trips.__file__).read_bytes()).hexdigest()
+    method = context.config("trip_time_shuffle", default="half_hour")
+    if method not in TIME_SHUFFLE_METHODS:
+        raise ValueError(f"trip_time_shuffle must be one of {TIME_SHUFFLE_METHODS}")
 
 
 def execute(context):
@@ -103,28 +97,10 @@ def execute(context):
                          "is_truck_driver", "is_outside_of_switzerland",
                          "is_crossing_the_border"] + ORIGINAL_PURPOSE_COLUMNS].sort_values(by=["person_id", "trip_id"])
 
-    # Diversify departure times
-    counts = df_trips[["person_id", "trip_id"]].groupby("person_id").size().reset_index(name="count")["count"].values
+    # Diversify activity starts, preserving trip durations and feasible chains.
 
-    interval = (df_trips[["person_id", "departure_time"]]
-                .groupby("person_id")
-                .min()
-                .reset_index()["departure_time"]
-                .values)
-
-    # If first departure time is just 5min after midnight, we only add a deviation of 5min
-    interval = np.minimum(1800.0, interval)
-
-    # Set up RNG
-    rng    = np.random.RandomState(context.config("random_seed"))
-    offset = rng.random_sample(size=(len(counts),)) * interval * 2.0 - interval
-    offset = np.repeat(offset, counts)
-
-    df_trips["departure_time"] += offset
-    df_trips["arrival_time"]   += offset
-    df_trips["departure_time"]  = np.round(df_trips["departure_time"])
-    df_trips["arrival_time"]    = np.round(df_trips["arrival_time"])
-    df_trips["trip_duration"]   = df_trips["arrival_time"] - df_trips["departure_time"]
+    rng = np.random.RandomState(context.config("random_seed"))
+    df_trips = shuffle_trip_times(df_trips, rng, context.config("trip_time_shuffle"))
 
     # Define trip index
     df_trips = df_trips.sort_values(by=["person_id", "trip_id"])
@@ -208,6 +184,11 @@ def execute(context):
     is_leaving = direction.eq("exit").to_numpy()
 
     sampled_times = sample_border_trip_times(context, df_cb_persons, is_leaving, rng)
+    if context.config("trip_time_shuffle") == "half_hour":
+        # Leave at least one minute for the initial border/home activity too.
+        delay = np.maximum(60. - sampled_times["departure_time"], 0.)
+        sampled_times["departure_time"] += delay
+        sampled_times["arrival_time"] += delay
 
     df_trips_cb = pd.DataFrame({
         "person_id": df_cb_persons["person_id"].values,
@@ -324,3 +305,101 @@ def _write_border_trip_audit(context, persons, generated):
     audit["generated_events"] = generated.loc[selected].astype(int)
     keys = ["border_interview_place", "border_crossing_trip_mode", "border_crossing_direction"]
     audit.groupby(keys, dropna=False).sum().to_csv(f"{context.path()}/swiss_crossing_trip_counts.csv")
+
+
+def validate(context):
+    # Synpp hashes this stage, but imported helpers also change its output.
+    import hashlib
+    from pathlib import Path
+    import data.microcensus.secondary_trips
+    return hashlib.sha256(Path(data.microcensus.secondary_trips.__file__).read_bytes()).hexdigest()
+
+
+def shuffle_trip_times(trips, rng, method="half_hour"):
+    """Shuffle diary times reproducibly without changing identifiers or row order.
+
+    half_hour anchors destination activity starts (arrivals) in their original
+    half-open 30-minute bins. Travel durations remain fixed; intermediate
+    activity durations may change. Forward/backward bounds reserve at least
+    60 seconds for the initial and each intermediate activity. Only when that
+    is impossible inside the original bins, extend their upper bounds by the
+    minimum necessary amount. After-midnight times keep their day offset.
+
+    legacy reproduces the former common +/-30-minute offset per person. none
+    provides an unshuffled reference. All modes advance the caller's RNG by
+    the legacy number of draws, keeping later border-trip sampling unchanged.
+    """
+    if method not in TIME_SHUFFLE_METHODS:
+        raise ValueError(f"Unknown trip time shuffle method: {method}")
+    if trips.person_id.isna().any() or trips.duplicated(["person_id", "trip_id"]).any():
+        raise ValueError("Time shuffling requires non-null person IDs and unique person/trip keys")
+    result = trips.copy()
+    if result.empty:
+        result["trip_duration"] = pd.Series(index=result.index, dtype=float)
+        return result
+
+    ordered = trips.reset_index(drop=True).sort_values(["person_id", "trip_id"])
+    order = ordered.index.to_numpy()
+    departure = ordered.departure_time.to_numpy(dtype=float)
+    arrival = ordered.arrival_time.to_numpy(dtype=float)
+    if not np.isfinite(departure).all() or not np.isfinite(arrival).all():
+        raise ValueError("Time shuffling requires finite departure and arrival times")
+    counts = ordered.groupby("person_id", sort=False).size().to_numpy()
+    first = np.r_[0, np.cumsum(counts)[:-1]]
+    state = rng.get_state()
+    person_uniform = rng.random_sample(len(counts))
+
+    if method == "legacy":
+        interval = np.minimum(1800., np.minimum.reduceat(departure, first))
+        offset = np.repeat(person_uniform * interval * 2. - interval, counts)
+        new_departure, new_arrival = np.round(departure + offset), np.round(arrival + offset)
+    elif method == "none":
+        new_departure, new_arrival = np.round(departure), np.round(arrival)
+    else:
+        duration = np.round(arrival) - np.round(departure)
+        gap = np.r_[0., departure[1:] - arrival[:-1]]
+        gap[first] = 0.
+        minimum_gap = np.full(len(ordered), 60.)
+        lower = np.floor(arrival / 1800.) * 1800.
+        latest = lower + 1799.
+        earliest = lower.copy()
+        levels = [first[counts > index] + index for index in range(int(counts.max()))]
+        earliest[first] = np.maximum(earliest[first], duration[first] + 60.)
+
+        # Propagate earliest/latest feasible arrivals across each person's chain.
+        for positions in levels[1:]:
+            earliest[positions] = np.maximum(earliest[positions],
+                earliest[positions - 1] + duration[positions] + minimum_gap[positions])
+        invalid = (departure < 0) | (duration < 0) | (gap < 0)
+        invalid_people = np.logical_or.reduceat(invalid, first)
+        valid = ~np.repeat(invalid_people, counts)
+        relaxed = (earliest > latest) & valid
+        if relaxed.any():
+            logger.warning("Time shuffle: extended %d arrival-bin upper bounds by up to %.0f seconds "
+                           "to retain one-minute activities", int(relaxed.sum()),
+                           float((earliest - latest)[relaxed].max()))
+        latest = np.maximum(latest, earliest)
+        for positions in reversed(levels[1:]):
+            latest[positions - 1] = np.minimum(latest[positions - 1],
+                latest[positions] - duration[positions] - minimum_gap[positions])
+        if invalid_people.any():
+            logger.warning("Time shuffle: retaining %d infeasible source chains (%d trips) unchanged",
+                           int(invalid_people.sum()), int((~valid).sum()))
+
+        # Use a separate stream for per-trip draws, preserving the border RNG.
+        trip_rng = np.random.RandomState(0)
+        trip_rng.set_state(state)
+        uniforms = trip_rng.random_sample(len(ordered))
+        new_arrival, new_departure = np.round(arrival), np.round(departure)
+        for index, positions in enumerate(levels):
+            positions = positions[valid[positions]]
+            minimum = earliest[positions] if index == 0 else np.maximum(lower[positions],
+                new_arrival[positions - 1] + duration[positions] + minimum_gap[positions])
+            new_arrival[positions] = minimum + np.floor(uniforms[positions] * (latest[positions] - minimum + 1.))
+            new_departure[positions] = new_arrival[positions] - duration[positions]
+
+    departures, arrivals = np.empty(len(trips)), np.empty(len(trips))
+    departures[order], arrivals[order] = new_departure, new_arrival
+    result["departure_time"], result["arrival_time"] = departures, arrivals
+    result["trip_duration"] = arrivals - departures
+    return result

@@ -13,7 +13,8 @@ def configure(context):
     context.stage("data.spatial.municipalities") # used in speed correction
     context.stage("data.spatial.swiss_border") # used in speed correction and geographic toll exclusion
     context.stage("calibration.road_regions.penalty_calibration")
-
+    context.stage("data.spatial.simulation_region")
+    
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 50000)
