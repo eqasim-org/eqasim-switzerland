@@ -1,10 +1,16 @@
 import data.gtfs.utils as gtfs
+import datetime
 import os
+import zipfile
 import pandas as pd
 import logging
 from data.gtfs.sources import get_input_files, is_swiss_feed, selected_inputs, source_signatures
 
 logger = logging.getLogger("synpp")
+
+# Deflate level of merged-gtfs-<date>.zip (the default of zlib). On the stop times of the Swiss feed, level 1 is
+# about 3.5 times faster but its ZIP is about 1.6 times larger: about half a minute for the whole feed at level 6.
+ZIP_COMPRESSION_LEVEL = 6
 
 """
 This file reads GTFS schedule.
@@ -143,10 +149,39 @@ def execute(context):
     columns = [c for c in merged_feed["calendar"].columns if c not in days] + days
     merged_feed["calendar"] = merged_feed["calendar"][columns]
 
-    # Write feed (not as a ZIP, but as files, for pt2matsim)
-    gtfs.write_feed(merged_feed, "%s/output" % context.path())
+    # Write feed: as files for pt2matsim and the other stages (output/), and as a compressed ZIP to share or reuse
 
-    return "gtfs"
+    output_path = "%s/output" % context.path()
+    gtfs.write_feed(merged_feed, output_path)
+    zip_path = write_zip(output_path, context.path())
+
+    # Return the merged feed (the other stages read the files of output/ with context.path)
+
+    return zip_path
+
+def write_zip(output_path, folder):
+    """The files of output_path compressed into folder/merged-gtfs-<YYYYMMDD>.zip, with the date of the build (as the
+    feeds merged by hand, e.g. merged_gtfs_20261103.zip). Files are streamed from disk (the Swiss feed has several GB)
+    into a temporary file renamed at the end, so that an interrupted run leaves no truncated ZIP."""
+    for name in os.listdir(folder):
+        if name.startswith("merged-gtfs-") and name.endswith(".zip"):
+            os.remove(os.path.join(folder, name))
+
+    zip_path = os.path.join(folder, "merged-gtfs-%s.zip" % datetime.date.today().strftime("%Y%m%d"))
+    tmp_path = "%s.tmp%d" % (zip_path, os.getpid())
+    logger.info(f"Writing GTFS data to {zip_path} ...")
+    try:
+        with zipfile.ZipFile(tmp_path, "w", compression = zipfile.ZIP_DEFLATED, compresslevel = ZIP_COMPRESSION_LEVEL) as archive:
+            for name in sorted(os.listdir(output_path)):
+                if name.endswith(".txt"):
+                    archive.write(os.path.join(output_path, name), arcname = name)
+        os.replace(tmp_path, zip_path)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+    return zip_path
+
 
 def scenario_date(context):
     """The day the feeds must run on: gtfs_filter_date, else gtfs_date if it is a date. None for a pt2matsim rule

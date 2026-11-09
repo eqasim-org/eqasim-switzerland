@@ -4,6 +4,8 @@ import geopandas as gpd
 import shapely.geometry as geo
 import os
 import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
 import os, pathlib
 import re
 import itertools
@@ -35,6 +37,46 @@ def _as_id_string(column):
         return str(value)
 
     return column.map(convert).astype(object)
+
+
+# Tables larger than this (bytes) are read with pyarrow (_read_csv_fast). Its numbers can differ from the ones of the C
+# parser of pandas in the last bit (pyarrow rounds the decimal text exactly), e.g. the coordinates of shapes.txt.
+FAST_READ_MIN_SIZE = 8 * 2 ** 20
+
+
+def _read_csv_fast(open_member):
+    """A GTFS table read with the multithreaded pyarrow parser (several times faster than the C parser of pandas on
+    the Swiss feed, whose stop_times.txt has several GB), as pandas would read it with engine = "pyarrow", except that
+    the columns pyarrow would read as dates or times stay text (e.g. arrival_time, as the C parser keeps them).
+    open_member() opens the file (it is read twice: the types of the columns, then the table). None where the result
+    could differ from pd.read_csv(f, skipinitialspace = True): if pyarrow fails, on an empty table, or if a header or
+    value starts with a space (which skipinitialspace removes)."""
+    try:
+        import pyarrow.csv as pacsv
+        from pandas._libs import lib
+        from pandas._libs.parsers import STR_NA_VALUES
+        from pandas.io._util import arrow_table_to_pandas
+
+        options = dict(null_values = sorted(STR_NA_VALUES), strings_can_be_null = True)
+        with open_member() as f:
+            schema = pacsv.open_csv(f, convert_options = pacsv.ConvertOptions(**options)).schema
+        text = {field.name: pa.string() for field in schema if pa.types.is_temporal(field.type)}
+        with open_member() as f:
+            table = pacsv.read_csv(f, convert_options = pacsv.ConvertOptions(column_types = text, **options))
+        if table.num_rows == 0:
+            return None
+        table = table.cast(pa.schema([field.with_type(pa.float64()) if pa.types.is_null(field.type) else field
+                                      for field in table.schema]))
+        df = arrow_table_to_pandas(table, dtype_backend = lib.no_default, null_to_int64 = True)
+    except Exception as e:
+        logger.info(f"    pyarrow could not read the table ({e}): read with the pandas parser")
+        return None
+    if any(str(c)[:1].isspace() for c in df.columns):
+        return None
+    for column in df.columns:
+        if pd.api.types.is_string_dtype(df[column]) and df[column].str.match(r"\s").fillna(False).astype(bool).any():
+            return None
+    return df
 
 
 def read_feed(path):
@@ -69,8 +111,12 @@ def read_feed(path):
             if "%s%s.txt" % (prefix, slot) in available_slots:
                 logger.info(f"  Loading {slot}.txt ...")
 
-                with zip.open("%s%s.txt" % (prefix, slot)) as f:
-                    feed[slot] = pd.read_csv(f, skipinitialspace = True, low_memory = False)
+                # the large tables with pyarrow (e.g. stop_times.txt of the Swiss feed, several GB), the others as before
+                name = "%s%s.txt" % (prefix, slot)
+                feed[slot] = _read_csv_fast(lambda: zip.open(name)) if zip.getinfo(name).file_size > FAST_READ_MIN_SIZE else None
+                if feed[slot] is None:
+                    with zip.open("%s%s.txt" % (prefix, slot)) as f:
+                        feed[slot] = pd.read_csv(f, skipinitialspace = True, low_memory = False)
             else:
                 logger.info(f"  Not loading {slot}.txt")
 
@@ -458,13 +504,22 @@ def despace_stop_ids(feed, replacement = ":::"):
     df_stops["stop_id"] = df_stops["stop_id"].astype(str)
 
     search_ids = list(df_stops[df_stops["stop_id"].str.contains(" ")]["stop_id"].unique())
-    replacement_ids = [item.replace(" ", replacement) for item in search_ids]
 
-    df_stops["stop_id"] = df_stops["stop_id"].replace(search_ids, replacement_ids)
+    def despace(values):
+        # the ids of stops.txt that have a space (one pass, rather than Series.replace with a list per id)
+        values = values.astype(str)
+        if search_ids:
+            found = values.isin(search_ids)
+            if found.any():
+                values = values.copy()
+                values[found] = values[found].str.replace(" ", replacement, regex = False)
+        return values
+
+    df_stops["stop_id"] = despace(df_stops["stop_id"])
 
     for reference_slot, reference_field in references:
         if reference_slot in feed:
-            feed[reference_slot][reference_field] = feed[reference_slot][reference_field].astype(str).replace(search_ids, replacement_ids)
+            feed[reference_slot][reference_field] = despace(feed[reference_slot][reference_field])
 
     logger.info(f"De-spaced {len(search_ids)}/{len(df_stops)} stops")
 
@@ -751,12 +806,34 @@ def time_to_seconds(t):
 
 
 def _times_to_seconds(times):
-    """Vectorised time_to_seconds: NaN for an empty or malformed time."""
-    parts = times.astype(str).str.split(":", expand = True)
-    if parts.shape[1] < 3:
-        return pd.Series(np.nan, index = times.index)
-    return (pd.to_numeric(parts[0], errors = "coerce") * 3600 + pd.to_numeric(parts[1], errors = "coerce") * 60
-            + pd.to_numeric(parts[2], errors = "coerce"))
+    """Vectorised time_to_seconds: NaN for an empty or malformed time. The times are split with pyarrow, and the parts
+    that are only digits converted directly: the others (e.g. " 05", "00.5") as by pd.to_numeric."""
+    strings = times.astype(str)
+    try:  # the strings of pandas >= 3 are already arrow arrays
+        values = pc.cast(pa.array(strings.array), pa.large_string())
+    except (TypeError, pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError):
+        values = pa.array(strings.to_numpy(dtype = object), type = pa.large_string(), from_pandas = True)
+    if isinstance(values, pa.ChunkedArray):
+        values = values.combine_chunks()
+
+    parts = pc.split_pattern(values, ":")
+    flat = pc.list_flatten(parts)
+    numbers = np.full(len(flat), np.nan)
+    digits = pc.fill_null(pc.match_substring_regex(flat, r"^[0-9]{1,9}$"), False).to_numpy(zero_copy_only = False)
+    if digits.any():
+        numbers[digits] = pc.cast(flat.filter(pa.array(digits)), pa.int64()).to_numpy()
+    if not digits.all():
+        others = ~digits
+        numbers[others] = pd.to_numeric(pd.Series(flat.filter(pa.array(others)).to_pylist(), dtype = object),
+                                        errors = "coerce").to_numpy(dtype = float)
+
+    # the hours, minutes and seconds are the first three parts (NaN with fewer)
+    first = parts.offsets.to_numpy()[:-1]
+    complete = pc.fill_null(pc.list_value_length(parts), 0).to_numpy(zero_copy_only = False) >= 3
+    seconds = np.full(len(values), np.nan)
+    first = first[complete]
+    seconds[complete] = numbers[first] * 3600 + numbers[first + 1] * 60 + numbers[first + 2]
+    return pd.Series(seconds, index = times.index)
 
 
 def _seconds_to_time(seconds):
@@ -821,34 +898,43 @@ def repair_backward_stop_times(feed, max_rounds = 5):
     return feed
 
 
-def expand_service_dates(feed):
+def expand_service_dates(feed, service_ids = None):
     """
     Expand calendar.txt (weekday flags between start_date/end_date) and
     calendar_dates.txt (exceptions) into a long table of (service_id, date)
-    pairs, one row per day a service is actually active.
+    pairs, one row per day a service is actually active. service_ids: only
+    these services (as strings), e.g. those of the trips that are looked at
+    (the Swiss feed has millions of service days).
     """
     weekday_cols = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-    records = []
+    df_active = pd.DataFrame({"service_id": pd.Series([], dtype = object),
+                              "date": pd.Series([], dtype = "datetime64[us]")})
 
     if "calendar" in feed:
-        df_cal = feed["calendar"].copy()
-        df_cal["start_date"] = pd.to_datetime(df_cal["start_date"], format="%Y%m%d")
-        df_cal["end_date"] = pd.to_datetime(df_cal["end_date"], format="%Y%m%d")
+        df_cal = feed["calendar"]
+        if service_ids is not None:
+            df_cal = df_cal[df_cal["service_id"].astype(str).isin(service_ids)]
+        start = pd.to_datetime(df_cal["start_date"], format = "%Y%m%d").to_numpy().astype("datetime64[D]")
+        end = pd.to_datetime(df_cal["end_date"], format = "%Y%m%d").to_numpy().astype("datetime64[D]")
 
-        for row in df_cal.itertuples(index=False):
-            dates = pd.date_range(row.start_date, row.end_date, freq="D")
-            if len(dates) == 0:
-                continue
-            flags = np.array([getattr(row, day) for day in weekday_cols])[dates.weekday]
-            active_dates = dates[flags.astype(bool)]
-            records.extend((row.service_id, d) for d in active_dates)
-
-    df_active = pd.DataFrame(records, columns=["service_id", "date"])
+        # one row per day between start_date and end_date, kept if the service runs on its weekday
+        counts = np.maximum((end - start).astype(np.int64) + 1, 0)
+        rows = np.repeat(np.arange(len(df_cal)), counts)
+        offsets = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts, counts)
+        dates = start[rows] + offsets.astype("timedelta64[D]")
+        weekday = (dates.astype(np.int64) + 3) % 7  # Monday = 0: 1970-01-01 was a Thursday
+        active = df_cal[weekday_cols].to_numpy()[rows, weekday].astype(bool)
+        if active.any():
+            df_active = pd.DataFrame({"service_id": df_cal["service_id"].to_numpy()[rows][active],
+                                      "date": dates[active].astype("datetime64[us]")})
 
     if "calendar_dates" in feed:
-        df_cd = feed["calendar_dates"].copy()
+        df_cd = feed["calendar_dates"]
+        if service_ids is not None:
+            df_cd = df_cd[df_cd["service_id"].astype(str).isin(service_ids)]
+        df_cd = df_cd.copy()
         df_cd["service_id"] = df_cd["service_id"].astype(str)
-        df_cd["date"] = pd.to_datetime(df_cd["date"].astype(str), format="%Y%m%d")
+        df_cd["date"] = pd.to_datetime(df_cd["date"].astype(str), format="%Y%m%d").astype("datetime64[us]")
 
         added = df_cd[df_cd["exception_type"] == 1][["service_id", "date"]]
         removed = df_cd[df_cd["exception_type"] == 2][["service_id", "date"]]
@@ -948,7 +1034,9 @@ def merge_cross_agency_blocks(feed, max_gap_s=600, min_gap_s=-60):
     last_arr_s = {tid: time_to_seconds(v[1]) for tid, v in last_of.items()}
 
     trip_service = df_trips.set_index("trip_id")["service_id"].astype(str)
-    service_dates = expand_service_dates(feed).groupby("service_id")["date"].apply(set).to_dict()
+    # only the services of the trips of the blocks: the whole calendar of the Swiss feed has millions of service days
+    service_dates = expand_service_dates(feed, set(trip_service[trip_service.index.isin(relevant_trip_ids)])) \
+        .groupby("service_id")["date"].apply(set).to_dict()
 
     runs = []
     for block_id, group in relevant.groupby("block_id"):

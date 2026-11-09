@@ -27,6 +27,9 @@ NO_MODE_PENALTY    = 1.3     # cost multiplier for links that do not allow the r
 CONTRAFLOW_PENALTY = 3.0     # cost multiplier for driving a one-way link of the corridor against its direction
 OPPOSITE_DIRECTION_COST = 300.0  # cost of a stop on a link that runs against the direction of travel
 U_TURN_COST        = 3000.0   # cost of turning back onto the reverse of the link just driven
+U_TURN_COSINE      = -0.9     # ... or onto a link heading more than ~154 degrees away from it, back along it:
+U_TURN_BACK_DISTANCE = 8.0    # ... the end of one link within this many metres of the other
+U_TURN_MIN_LENGTH  = 3.0      # metres: the heading of shorter links is not reliable
 U_TURN_MAX_SHARE_LOSS = 0.02  # a correction with fewer U-turns or repeated metres is kept if its share inside drops by at most this
 # A route that drives more than this many metres on links it has already driven goes round a loop (e.g. a stop
 # on the carriageway of the other direction). An out-and-back spur uses the two carriageways, so it repeats none.
@@ -34,6 +37,9 @@ MAX_REPEATED_LENGTH = 50.0
 # A stop further than this from its link is not served by the route (e.g. the route takes a parallel street):
 # a short detour of a long route keeps its share inside high, so the share alone does not reveal it.
 MAX_STOP_LINK_DISTANCE = 30.0
+# A stop on a link further than this, with a link in the direction of travel this much closer to it, is on the road
+# behind its platform (e.g. a bus station next to a main road)
+STOP_CLOSER_MARGIN = 10.0
 # The corridor around a reference route also holds the parallel lanes (e.g. the car lanes next to a bus lane or a tram
 # track shared with buses) and the other carriageway of a boulevard. A link costs 1 + d / LANE_SCALE times its length,
 # d its distance to the reference route (_link_lane_distances), so that the lane closest to it is taken. A GTFS shape
@@ -42,6 +48,13 @@ MAX_STOP_LINK_DISTANCE = 30.0
 LANE_SCALE = 2.0
 LANE_DISTANCE = 8.0
 MAX_OFF_LANE_LENGTH = 50.0
+# An official line route follows the middle of the road, less precisely than a GTFS shape: a link further than this from
+# it is off its road. A short detour on a parallel street keeps most of a long route in its corridor (e.g. TL line 2 at
+# Georgette, line 6 between Pont Marc Dufour and Languedoc), so the share inside alone does not reveal it.
+REFERENCE_LANE_DISTANCE = 20.0
+# pt2matsim joins stops that it cannot reach on the network with straight artificial links (e.g. TL line 32 under the
+# tracks at Renens VD, gare): a route with more than this many metres of them deviates
+MAX_ARTIFICIAL_LENGTH = 50.0
 # Short links of these modes only (e.g. a few metres of bus lane mapped as a cycleway in OSM) can close a gap in the
 # lane of a GTFS shape: they are used if they are on the lane (both ends within LANE_DISTANCE of the shape) and get
 # the route mode in the patched network, like the links of the fallback modes.
@@ -83,6 +96,16 @@ PLATFORM_MAX_DISTANCE = 300.0
 # A route with a stop further than this from its official line route, without a platform of the operator of its station
 # in the corridor, follows another path (e.g. a diversion or a newer route): it keeps its mapping
 REFERENCE_MISMATCH_DISTANCE = 150.0
+SLOID_PATTERN = re.compile(r"^ch:1:sloid:(\d+)")
+
+
+def station_id(stop_id):
+    """Station of a stop facility: the GTFS station id of its stop (before any ":"), or for a Swiss SLOID
+    (ch:1:sloid:92098:0:1164, the stop ids of the newer GTFS) the station with its DIDOK number (8592098). The copies
+    of a stop on other links (".link:") are of the same station."""
+    base_id = stop_id.split(".link:")[0]
+    match = SLOID_PATTERN.match(base_id)
+    return "85%05d" % int(match.group(1)) if match else base_id.split(":")[0]
 
 
 def read_line_agencies(routes_path):
@@ -473,8 +496,12 @@ class CenterlineGraph:
     followed even when the shapefile geometry is split in several parts."""
 
     JOIN_TOLERANCE = 20.0
+    # Points are snapped to the vertices: a GTFS shape can have vertices hundreds of metres apart on a straight road
+    # (e.g. line 83 at Viry, P+R), so that a stop on it would be further than NEW_LINK_SNAP_DISTANCE from any of them
+    MAX_VERTEX_SPACING = 10.0
 
     def __init__(self, geometry):
+        geometry = shapely.segmentize(geometry, self.MAX_VERTEX_SPACING)
         parts = list(geometry.geoms) if hasattr(geometry, "geoms") else [geometry]
         index, self.coords = {}, []
         self.adjacency = defaultdict(list)
@@ -547,6 +574,7 @@ class Network:
         self.links = {}  # id -> (from, to, freespeed, modes)
         self.new_nodes = {}  # id -> (x, y, z) of nodes of the new links
         self.new_links = {}  # id -> (from, to, length) of links added along the official route
+        self._new_heads = set()  # nodes that a new link arrives at
         self._new_links_cache = {}      # (from node, to node) -> ids of the new links between them
 
         opener = gzip.open if network_path.endswith(".gz") else open
@@ -595,6 +623,7 @@ class Network:
             self.adjacency[self.links[link_id][0]].append(link_id)
             self.incoming[self.links[link_id][1]].append(link_id)
         self._routing_pairs = {self.links[link_id][:2] for link_id in self.routing_ids}
+        self._headings = {}  # link id -> unit vector (_heading)
         self._reverse_links = {}  # one-way link id -> id of the link added against it
         self._reverse_of = {}  # id of a link added against a one-way link -> id of the one-way link
         self.access_shapes = []  # GTFS shapes of all the lines, to reach the stops their own shape does not pass
@@ -628,20 +657,42 @@ class Network:
         return a is not None and b is not None and a[0] == b[1] and a[1] == b[0]
 
 
-    def count_uturns(self, link_ids):
-        return sum(1 for a, b in zip(link_ids, link_ids[1:]) if self.is_reverse(a, b))
+    def count_uturns(self, link_ids, geometric = False):
+        known = [l for l in link_ids if l in self.links]
+        return sum(1 for a, b in zip(known, known[1:]) if self._turns_back(a, b, geometric))
 
 
-    def stops_off_links(self, schedule, stop_ids):
-        """Number of stops further than MAX_STOP_LINK_DISTANCE from the link they are on."""
+    def stops_off_links(self, schedule, stop_ids, closer = False):
+        """Number of stops not served by the link they are on: further than MAX_STOP_LINK_DISTANCE from it, or with
+        closer, further than STOP_CLOSER_MARGIN while a link in the direction of travel is STOP_CLOSER_MARGIN closer to
+        them (e.g. TL line 46 at Epalinges, Croisettes: on the road behind the bus station that the stop is in). closer is
+        for the routes compared with an official line route: a GTFS shape gives the lane of the bus (off_lane_length)."""
+        stop_xy = [(float(schedule.facilities[s].attrib["x"]), float(schedule.facilities[s].attrib["y"])) for s in stop_ids]
         n = 0
-        for stop_id in stop_ids:
-            facility = schedule.facilities[stop_id]
-            segment = self.segments.get(facility.attrib.get("linkRefId"))
-            if segment is not None and segment.distance(
-                    Point(float(facility.attrib["x"]), float(facility.attrib["y"]))) > MAX_STOP_LINK_DISTANCE:
+        for index, (stop_id, (x, y), travel) in enumerate(zip(stop_ids, stop_xy, travel_vectors(stop_xy))):
+            segment = self.segments.get(schedule.facilities[stop_id].attrib.get("linkRefId"))
+            if segment is None:
+                continue
+            distance = segment.distance(Point(x, y))
+            # not at the termini, where the bus turns on loops the network often lacks
+            between = 0 < index < len(stop_ids) - 1
+            if distance > MAX_STOP_LINK_DISTANCE or (closer and between and distance > STOP_CLOSER_MARGIN and
+                    self.closest_forward_distance(x, y, travel, distance) <= distance - STOP_CLOSER_MARGIN):
                 n += 1
         return n
+
+
+    def closest_forward_distance(self, x, y, travel, radius):
+        """Distance from a point to the closest routing link within radius that runs in the direction of travel
+        (inf if none or no direction)."""
+        if travel is None:
+            return math.inf
+        point = Point(x, y)
+        distances = [
+            self._tree.geometries[i].distance(point) for i in self._tree.query(point.buffer(radius), predicate = "intersects")
+            if self.routing_ids[i] not in self.gap_ids and self.direction_cosine(self.routing_ids[i], travel) > 0.3
+        ]
+        return min(distances, default = math.inf)
 
 
     def repeated_length(self, link_ids):
@@ -664,9 +715,13 @@ class Network:
         return link is not None and not link[3] & self.routing_modes and not link[3] & ARTIFICIAL_MODES
 
 
-    def add_bus_links(self, source_node, target_node, coords, inside):
+    def add_bus_links(self, source_node, target_node, coords, inside, two_way = False):
         """Links that only allow the routing modes from source_node to target_node through the
-        given coordinates (which lie on the official route). Returns the new link ids."""
+        given coordinates (which lie on the official route), with two_way also back from target_node to source_node: a
+        road missing in the network is usually missing for both directions, which would otherwise turn back or loop on
+        the links of the other one (e.g. TL line 68 at La Conversion, gare and Lutry, Landar). For official line routes,
+        which follow the middle of the road; a GTFS shape follows the lane of one direction. Only the links that routes
+        use are written to the network. Returns the new link ids (from source_node to target_node)."""
         if (source_node, target_node) in self._new_links_cache:
             for link_id in self._new_links_cache[(source_node, target_node)]:
                 if link_id not in inside:
@@ -685,6 +740,8 @@ class Network:
         # new road is a few links and not dozens of tiny ones.
         if len(points) > 2:
             points = [tuple(c) for c in LineString(points).simplify(NEW_LINK_SIMPLIFY).coords]
+        if two_way:  # an official line route, whose drawing can turn back on itself (_remove_spikes)
+            points = _remove_spikes(points)
 
         node_ids = [source_node]
         for i, c in enumerate(points[1:-1], start = 1):
@@ -696,26 +753,31 @@ class Network:
             node_ids.append(node_id)
         node_ids.append(target_node)
 
-        link_ids = []
-        for a, b in zip(node_ids, node_ids[1:]):
+        def add(a, b):
             link_id = "pt_bus_link_%d" % (len(self.new_links) + 1)
             segment = LineString([self.nodes[a], self.nodes[b]])
             self.links[link_id] = (a, b, NEW_LINK_SPEED, self.routing_modes)
             self.segments[link_id] = segment
             self.length[link_id] = segment.length
             self.new_links[link_id] = (a, b, segment.length)
+            self._new_heads.add(b)
             self.adjacency[a].append(link_id)
             self._expansions.pop(a, None)
             self.routing_ids_set.add(link_id)
             inside[link_id] = segment.length
-            link_ids.append(link_id)
+            return link_id
 
-        self._add_to_corridors(link_ids)
+        link_ids = [add(a, b) for a, b in zip(node_ids, node_ids[1:])]
+        reverse_ids = [add(b, a) for a, b in reversed(list(zip(node_ids, node_ids[1:])))] if two_way else []
+
+        self._add_to_corridors(link_ids + reverse_ids)
         self._new_links_cache[(source_node, target_node)] = link_ids
+        if reverse_ids:
+            self._new_links_cache.setdefault((target_node, source_node), reverse_ids)
         return link_ids
 
 
-    def add_stop_access(self, x, y, centerline, inside):
+    def add_stop_access(self, x, y, centerline, inside, two_way = False):
         """Links along a GTFS shape that reach a stop at (x, y) without a link near it (STOP_ACCESS_MAX_LENGTH).
         Returns the new links that end or (at the start of the shape) start at the node next to the stop. If the shape
         does not pass the stop (e.g. it ends before it), the closest shape of another line that does is used."""
@@ -759,10 +821,10 @@ class Network:
         stop_links = []
         if before is not None:
             coords = list(shapely.ops.substring(centerline, before[0], position).coords)[1:-1]
-            stop_links.append(self.add_bus_links(before[1], stop_node, coords, inside)[-1])
+            stop_links.append(self.add_bus_links(before[1], stop_node, coords, inside, two_way)[-1])
         if after is not None:
             coords = list(shapely.ops.substring(centerline, position, after[0]).coords)[1:-1]
-            links = self.add_bus_links(stop_node, after[1], coords, inside)
+            links = self.add_bus_links(stop_node, after[1], coords, inside, two_way)
             if before is None:
                 stop_links.append(links[0])
         return stop_links
@@ -779,6 +841,7 @@ class Network:
             self.segments[new_id] = segment
             self.length[new_id] = segment.length
             self.new_links[new_id] = (to_node, from_node, segment.length)
+            self._new_heads.add(from_node)
             self.adjacency[to_node].append(new_id)
             self.routing_ids_set.add(new_id)
             self._routing_pairs.add((to_node, from_node))
@@ -825,17 +888,18 @@ class Network:
         return dict(zip(link_ids, distances.tolist()))
 
 
-    def _off_lane_links(self, link_ids, centerline):
-        """The links further than LANE_DISTANCE from a GTFS shape (_link_lane_distances)."""
-        return {l for l, d in self._link_lane_distances(link_ids, centerline).items() if d > LANE_DISTANCE}
+    def _off_lane_links(self, link_ids, centerline, lane_distance = LANE_DISTANCE):
+        """The links further than lane_distance from a reference route (_link_lane_distances)."""
+        return {l for l, d in self._link_lane_distances(link_ids, centerline).items() if d > lane_distance}
 
 
-    def off_lane_length(self, link_ids, centerline):
-        """Metres of a route on links that are off the lane of a GTFS shape (0 without a shape)."""
+    def off_lane_length(self, link_ids, centerline, lane_distance = LANE_DISTANCE):
+        """Metres of a route on links further than lane_distance from a reference route: off the lane of a GTFS shape,
+        or off the road of an official line route (REFERENCE_LANE_DISTANCE). 0 without a reference."""
         if centerline is None:
             return 0.0
         known = [l for l in link_ids if l in self.segments and not self.is_artificial(l)]
-        off = self._off_lane_links(set(known), centerline)
+        off = self._off_lane_links(set(known), centerline, lane_distance)
         return sum(self.length[l] for l in known if l in off)
 
 
@@ -894,6 +958,19 @@ class Network:
         }
 
 
+    def can_enter(self, link_id):
+        """False if a link starts at a node added next to a stop (add_stop_access) that no link arrives at yet: the
+        node was added for a route that starts there, and another route cannot reach it."""
+        tail = self._ends(link_id)[0]
+        return tail not in self.new_nodes or tail in self._new_heads
+
+
+    def can_leave(self, link_id):
+        """False if a link ends at a node added next to a stop that no link leaves yet (a route ended there)."""
+        head = self._ends(link_id)[1]
+        return head not in self.new_nodes or bool(self.adjacency.get(head))
+
+
     def link_is_inside(self, link_id, inside):
         if link_id.startswith(REVERSE_PREFIX):
             link_id = link_id[len(REVERSE_PREFIX):]
@@ -928,9 +1005,40 @@ class Network:
         return self.links[link_id][:2]
 
 
-    def _turns_back(self, link_a, link_b):
+    def _turns_back(self, link_a, link_b, geometric = True):
+        """True if link_b turns back from link_a: onto its reverse, or with a heading more than U_TURN_ANGLE from it
+        (e.g. onto a parallel chain of new links next to the reverse, TL line 68 at La Conversion, gare)."""
         (a_from, a_to), (b_from, b_to) = self._ends(link_a), self._ends(link_b)
-        return a_from == b_to and a_to == b_from
+        if a_from == b_to and a_to == b_from:
+            return True
+        if not geometric:
+            return False
+        a, b = self._heading(link_a), self._heading(link_b)
+        if a is None or b is None or a[0] * b[0] + a[1] * b[1] >= U_TURN_COSINE:
+            return False
+        # driving back along the same road, not round a hairpin bend (whose legs part): the end of one link is next to
+        # the other
+        segment_a, segment_b = self._segment(link_a), self._segment(link_b)
+        return segment_a.distance(Point(segment_b.coords[-1])) <= U_TURN_BACK_DISTANCE \
+            or segment_b.distance(Point(segment_a.coords[0])) <= U_TURN_BACK_DISTANCE
+
+
+    def _segment(self, link_id):
+        return self.segments[link_id[len(REVERSE_PREFIX):] if link_id.startswith(REVERSE_PREFIX) else link_id]
+
+
+    def _heading(self, link_id):
+        """Unit vector of a link in its direction of travel (None if shorter than U_TURN_MIN_LENGTH or unknown)."""
+        heading = self._headings.get(link_id)
+        if heading is None and link_id not in self._headings:
+            base = link_id[len(REVERSE_PREFIX):] if link_id.startswith(REVERSE_PREFIX) else link_id
+            if base in self.links and self.length.get(base, 0.0) >= U_TURN_MIN_LENGTH:
+                (x0, y0), (x1, y1) = self.nodes[self.links[base][0]], self.nodes[self.links[base][1]]
+                norm = math.hypot(x1 - x0, y1 - y0)
+                sign = -1.0 if base != link_id else 1.0
+                heading = (sign * (x1 - x0) / norm, sign * (y1 - y0) / norm) if norm > 1e-6 else None
+            self._headings[link_id] = heading
+        return heading
 
 
     def _next_links(self, node, inside):
@@ -1012,6 +1120,7 @@ class Network:
         # A state is a link (with its tail and head node), or ("__end__", to_link) once a to_link is entered.
         # Since the next link always leaves the head of the current one, it turns back if it leads to its tail.
         tail, head = self._ends(from_link)
+        geometric = id(inside) not in self._shape_corridors  # U-turns by heading for the official line routes
         best = {from_link: 0.0}
         previous = {}
         found = {}
@@ -1029,14 +1138,14 @@ class Network:
 
             for to_link, to_head in targets.get(head, ()):
                 end = ("__end__", to_link)
-                final = cost + (U_TURN_COST if to_head == tail else 0.0)
+                final = cost + (U_TURN_COST if self._turns_back(state, to_link, geometric) else 0.0)
                 if final < best.get(end, math.inf):
                     best[end] = final
                     previous[end] = state
                     heapq.heappush(queue, (final, next(order), end, None, None))
 
             for next_id, step, next_head in self._expand(head, inside):
-                new_cost = cost + step + (U_TURN_COST if next_head == tail else 0.0)
+                new_cost = cost + step + (U_TURN_COST if self._turns_back(state, next_id, geometric) else 0.0)
                 if new_cost < best.get(next_id, math.inf):
                     best[next_id] = new_cost
                     previous[next_id] = state
@@ -1061,10 +1170,26 @@ class Network:
         """Routing links within `radius` of a point that lie in the corridor."""
         point = Point(x, y)
         found = self._tree.query(point.buffer(radius), predicate = "intersects")
-        return [
+        nearby = [
             (self.routing_ids[i], self._tree.geometries[i].distance(point))
             for i in found if self.link_is_inside(self.routing_ids[i], inside) and self.routing_ids[i] not in self.gap_ids
         ]
+        # the links added so far (not in the tree of the network links), e.g. on from a stop the route turned back at
+        new_ids, new_tree = self._new_links_tree()
+        if new_tree is not None and id(inside) not in self._shape_corridors:
+            nearby += [(new_ids[i], new_tree.geometries[i].distance(point))
+                       for i in new_tree.query(point.buffer(radius), predicate = "intersects")
+                       if self.link_is_inside(new_ids[i], inside)]
+        return nearby
+
+
+    def _new_links_tree(self):
+        """(ids, STRtree) of the links added so far, rebuilt when links were added."""
+        cached = getattr(self, "_new_tree", None)
+        if cached is None or len(cached[0]) != len(self.new_links):
+            ids = list(self.new_links)
+            cached = self._new_tree = (ids, STRtree([self.segments[l] for l in ids]) if ids else None)
+        return cached
 
 
     def against(self, link_id, inside):
@@ -1100,7 +1225,7 @@ class Schedule:
         for facility_id in self.facilities:
             base_id = facility_id.split(".link:")[0]
             self.copies[base_id].append(facility_id)
-            self.station_copies[base_id.split(":")[0]].append(facility_id)
+            self.station_copies[station_id(base_id)].append(facility_id)
 
 
     def routes(self):
@@ -1117,7 +1242,7 @@ class Schedule:
     def platform_base(self, stop_id, code, x, y):
         """Base id of a platform of an operator (e.g. a TL stop) at (x, y) that replaces the stop stop_id: in the
         station of the stop, with its name and stop area (e.g. 8592098:platform:PFRAN_E)."""
-        base_id = "%s:platform:%s" % (stop_id.split(".link:")[0].split(":")[0], code)
+        base_id = "%s:platform:%s" % (station_id(stop_id), code)
         if base_id not in self.templates:
             attributes = dict(self.facilities[stop_id].attrib)
             attributes.update(x = repr(float(x)), y = repr(float(y)))
@@ -1133,7 +1258,7 @@ class Schedule:
             attributes.update(id = facility_id, linkRefId = link_id)
             self.facilities[facility_id] = ET.SubElement(self.stops_element, "stopFacility", attributes)
             self.copies[base_id].append(facility_id)
-            self.station_copies[base_id.split(":")[0]].append(facility_id)
+            self.station_copies[station_id(base_id)].append(facility_id)
         return facility_id
 
 
@@ -1214,6 +1339,9 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
             key, geometry = corridors.through_stops(key, stop_points)
         centerline = corridors.centerline(key)
         network.inside_lengths(key, geometry, centerline, corridors.reference_line(key))
+        # metres off the lane of the GTFS shape, or off the road of the official line route
+        lane_line, lane_distance = (centerline, LANE_DISTANCE) if centerline is not None \
+            else (corridors.reference_line(key), REFERENCE_LANE_DISTANCE)
 
         # Lines with the same name exist in other cities: only routes serving the area of the
         # official route are compared.
@@ -1233,12 +1361,14 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
             continue
 
         share_inside, share_artificial = network.route_metrics(link_ids, key, geometry)
-        n_uturns = network.count_uturns(link_ids)
+        # the U-turns by heading (_turns_back) for the official line routes; along a GTFS shape, onto the reverse link
+        n_uturns = network.count_uturns(link_ids, geometric = centerline is None)
         repeated = network.repeated_length(link_ids)
-        n_off = network.stops_off_links(schedule, stop_ids)
+        n_off = network.stops_off_links(schedule, stop_ids, closer = centerline is None)
         applied = None
-        off_lane = network.off_lane_length(link_ids, centerline)
+        off_lane = network.off_lane_length(link_ids, lane_line, lane_distance)
         length = sum(network.length.get(l, 0.0) for l in link_ids)
+        artificial = share_artificial * length
         row = dict(
             line_name = line_name, line_id = line.attrib["id"], route_id = route.attrib["id"],
             destination = destination, mode = mode, n_stops = len(stop_ids), n_links = len(link_ids),
@@ -1246,7 +1376,8 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
             reference_matched = matched,
             share_inside = round(share_inside, 3), share_artificial = round(share_artificial, 3),
             status = "ok" if share_inside >= min_share and n_uturns == 0 and repeated <= MAX_REPEATED_LENGTH
-                     and n_off == 0 and off_lane <= MAX_OFF_LANE_LENGTH else "deviates",
+                     and n_off == 0 and off_lane <= MAX_OFF_LANE_LENGTH and artificial <= MAX_ARTIFICIAL_LENGTH
+                     else "deviates",
             new_share_inside = "", n_stops_moved = "", n_new_links = "",
             n_uturns = n_uturns, new_n_uturns = "", repeated_m = round(repeated), new_repeated_m = "",
             n_stops_off = n_off, new_n_stops_off = "", off_lane_m = round(off_lane), new_off_lane_m = "",
@@ -1270,16 +1401,18 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
                 row["status"] = "unchanged"
             else:
                 new_stop_ids, new_links, moved = result[:3]
-                new_share, _ = network.route_metrics(new_links, key, geometry)
-                new_uturns = network.count_uturns(new_links)
+                new_share, new_share_artificial = network.route_metrics(new_links, key, geometry)
+                new_artificial = new_share_artificial * sum(network.length.get(l, 0.0) for l in new_links)
+                new_uturns = network.count_uturns(new_links, geometric = centerline is None)
                 new_repeated = network.repeated_length(new_links)
-                new_off = network.stops_off_links(schedule, new_stop_ids)
-                new_off_lane = network.off_lane_length(new_links, centerline)
+                new_off = network.stops_off_links(schedule, new_stop_ids, closer = centerline is None)
+                new_off_lane = network.off_lane_length(new_links, lane_line, lane_distance)
                 # better: closer to the reference route, or fewer U-turns / loops / stops not served / metres off the
                 # lane without leaving it
                 fewer_detours = new_uturns <= n_uturns and new_repeated <= repeated + 1.0 and new_off <= n_off \
-                    and new_off_lane <= off_lane + 1.0 and (new_uturns < n_uturns or new_repeated < repeated - 1.0
-                                                           or new_off < n_off or new_off_lane < off_lane - 1.0)
+                    and new_off_lane <= off_lane + 1.0 and new_artificial <= artificial + 1.0 \
+                    and (new_uturns < n_uturns or new_repeated < repeated - 1.0 or new_off < n_off
+                         or new_off_lane < off_lane - 1.0 or new_artificial < artificial - 1.0)
                 if new_share > share_inside + 1e-6 or (fewer_detours and new_share >= share_inside - U_TURN_MAX_SHARE_LOSS):
                     _apply(route_element, stop_elements, new_stop_ids, new_links)
                     patched_links.update(l for l in new_links if network.lacks_mode(l))
@@ -1288,7 +1421,8 @@ def check_and_correct(schedule, network, corridors, modes, min_share, correct, s
                     row.update(
                         status = "corrected" if new_share >= min_share and new_uturns == 0
                                  and new_repeated <= MAX_REPEATED_LENGTH and new_off == 0
-                                 and new_off_lane <= MAX_OFF_LANE_LENGTH else "improved",
+                                 and new_off_lane <= MAX_OFF_LANE_LENGTH and new_artificial <= MAX_ARTIFICIAL_LENGTH
+                                 else "improved",
                         new_share_inside = round(new_share, 3), new_n_uturns = new_uturns, n_stops_moved = moved,
                         new_repeated_m = round(new_repeated), new_n_stops_off = new_off, new_off_lane_m = round(new_off_lane),
                         n_new_links = len(set(added)),
@@ -1313,7 +1447,7 @@ def _follows_other_path(corridors, key, geometry, stop_ids, stop_points, platfor
     for stop_id, point in zip(stop_ids, stop_points):
         if reference.distance(point) <= REFERENCE_MISMATCH_DISTANCE:
             continue
-        station = stop_id.split(".link:")[0].split(":")[0]
+        station = station_id(stop_id)
         if not any(geometry.contains(Point(x, y)) for _, x, y in platforms.get(station, ())):
             return True
     return False
@@ -1328,6 +1462,35 @@ def _apply(route_element, stop_elements, new_stop_ids, new_links):
         ET.SubElement(route_element, "link", refId = link_id)
 
 
+def _remove_spikes(points):
+    """Points of a new road without the vertices where it turns back on itself (heading reversed, U_TURN_COSINE):
+    drawing artefacts of the official line routes (e.g. TL line 49 at Belmont-sur-L., Chaffeises), which the bus does
+    not drive. The first and last points (network nodes) are kept."""
+    points = list(points)
+    changed = True
+    while changed and len(points) > 2:
+        changed = False
+        for i in range(1, len(points) - 1):
+            (x0, y0), (x1, y1), (x2, y2) = points[i - 1], points[i], points[i + 1]
+            a, b = (x1 - x0, y1 - y0), (x2 - x1, y2 - y1)
+            norm = math.hypot(*a) * math.hypot(*b)
+            if norm > 1e-9 and (a[0] * b[0] + a[1] * b[1]) / norm < U_TURN_COSINE:
+                del points[i]
+                changed = True
+                break
+    return points
+
+
+def travel_vectors(stop_xy):
+    """Direction of travel at each stop (from the previous to the next stop), None where they are too close."""
+    vectors = []
+    for index in range(len(stop_xy)):
+        before, after = stop_xy[max(index - 1, 0)], stop_xy[min(index + 1, len(stop_xy) - 1)]
+        travel = (after[0] - before[0], after[1] - before[1])
+        vectors.append(travel if math.hypot(*travel) >= 20.0 else None)
+    return vectors
+
+
 def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, access_fallback = False,
              platforms = None):
     """platforms: {station id: [(code, x, y)]} of the operator of the route (read_platforms), or None."""
@@ -1336,6 +1499,8 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
     # candidate (facility id or None for a new copy, base id, link id, cost) for each stop
     candidates = []
     stop_xy = [(float(schedule.facilities[s].attrib["x"]), float(schedule.facilities[s].attrib["y"])) for s in stop_ids]
+    centerline = network._centerlines.get(key)
+    travels = travel_vectors(stop_xy)
     for index, stop_id in enumerate(stop_ids):
         base_id = stop_id.split(".link:")[0]
         facility = schedule.facilities[stop_id]
@@ -1344,10 +1509,7 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
 
         # Direction of travel at the stop (from the previous to the next stop): a stop on the
         # other carriageway makes the bus overshoot and turn back.
-        before, after = stop_xy[max(index - 1, 0)], stop_xy[min(index + 1, len(stop_xy) - 1)]
-        travel = (after[0] - before[0], after[1] - before[1])
-        if math.hypot(*travel) < 20.0:
-            travel = None
+        travel = travels[index]
 
         options = {}  # link id -> (facility id or None for a new copy, base id, distance)
         for copy_id in schedule.copies[base_id]:
@@ -1367,7 +1529,7 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
         # its platforms are what the line serves: if this stop is not on the official route,
         # platforms of the same station that are can be used instead.
         if geometry.distance(point) > STATION_SWITCH_MIN_DISTANCE:
-            for copy_id in schedule.station_copies[base_id.split(":")[0]]:
+            for copy_id in schedule.station_copies[station_id(base_id)]:
                 facility = schedule.facilities[copy_id]
                 copy_base = copy_id.split(".link:")[0]
                 link_id = facility.attrib.get("linkRefId")
@@ -1380,12 +1542,19 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
                     )
 
         # No link near the stop (e.g. a forecourt or a bus loop missing in the network): it is reached by new links
-        # along the GTFS shape
-        # along the GTFS shape (only them: the other links would leave the platform aside, unless access_fallback)
-        centerline = network._centerlines.get(key)
-        near = {l: o for l, o in options.items() if o[2] <= MAX_STOP_LINK_DISTANCE}
-        if centerline is not None and not near:
-            access = network.add_stop_access(x, y, centerline, inside)
+        # along the GTFS shape, or the official line route (access_line), only them: the other links would leave the
+        # platform aside, unless access_fallback. The links added for another route that starts (or ends) at the stop
+        # do not serve it if this one cannot enter (or leave) them: the stop then gets its own access links.
+        near = {l: o for l, o in options.items() if o[2] <= MAX_STOP_LINK_DISTANCE
+                and (index == 0 or network.can_enter(l)) and (index == len(stop_ids) - 1 or network.can_leave(l))}
+        # A link much closer to the stop in the direction of travel serves it: not a road behind it (stops_off_links)
+        forward = [o[2] for l, o in near.items() if travel is not None and network.direction_cosine(l, travel) > 0.3]
+        if forward and centerline is None and not access_fallback and 0 < index < len(stop_ids) - 1:
+            near = {l: o for l, o in near.items() if o[2] <= STOP_CLOSER_MARGIN or o[2] < min(forward) + STOP_CLOSER_MARGIN}
+        access_line = centerline if centerline is not None or near else \
+            _access_line(network._reference_lines.get(key), stop_xy, index)
+        if access_line is not None and not near:
+            access = network.add_stop_access(x, y, access_line, inside, two_way = centerline is None)
             if access:
                 path_cache.clear()
                 access = {l: (None, base_id, network.segments[l].distance(point)) for l in access}
@@ -1399,12 +1568,17 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
         # A stop outside the corridor (e.g. the GTFS quay of a street the official route does not take) can be moved
         # to a platform of the operator of the same station inside it, on a link next to that platform
         if platforms and not geometry.contains(point):
-            for code, px, py in platforms.get(base_id.split(":")[0], ()):
+            for code, px, py in platforms.get(station_id(base_id), ()):
                 platform = Point(px, py)
                 if not geometry.contains(platform) or platform.distance(point) > PLATFORM_MAX_DISTANCE:
                     continue
                 platform_base = schedule.platform_base(stop_id, code, px, py)
-                for link_id, distance in network.nearby_routing_links(px, py, MAX_STOP_LINK_DISTANCE, inside):
+                links = network.nearby_routing_links(px, py, MAX_STOP_LINK_DISTANCE, inside)
+                # as for the stop itself: not a road behind the platform if a link in the direction of travel is closer
+                forward = [d for l, d in links if travel is not None and network.direction_cosine(l, travel) > 0.3]
+                if forward and not access_fallback and 0 < index < len(stop_ids) - 1:
+                    links = [(l, d) for l, d in links if d <= STOP_CLOSER_MARGIN or d < min(forward) + STOP_CLOSER_MARGIN]
+                for link_id, distance in links:
                     options.setdefault(link_id, (None, platform_base, distance + PLATFORM_SWITCH_DISTANCE))
 
         # No usable road near the stop (pt2matsim put it on an artificial link of its own): it
@@ -1472,7 +1646,7 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
     ]
 
     new_stop_ids, new_links, moved = [], [], 0
-    stop_links, leg_lengths, legs_off_route = [], [], []
+    stop_links, leg_lengths, legs_off_route, arrivals = [], [], [], []
     for i, j in enumerate(chosen):
         copy_id, base_id, _, _ = candidates[i][j]
         link_id = chosen_links[i]
@@ -1487,39 +1661,82 @@ def _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache
             leg = legs[(i, chosen[i - 1], j)]
             leg_lengths.append(sum(network.length[l] for l in leg))
             legs_off_route.append(_is_off_route(network, inside, stop_links[-2], leg, link_id))
+            arrivals.append(leg[-1] if leg else stop_links[-2])
             new_links.extend(leg)
             if link_id != chosen_links[i - 1]:
                 new_links.append(link_id)
-    return new_stop_ids, new_links, moved, stop_links, leg_lengths, legs_off_route
+    return new_stop_ids, new_links, moved, stop_links, leg_lengths, legs_off_route, arrivals
+
+
+def _access_line(reference, stop_xy, index):
+    """The part of an official line route closest to stop `index`, in the direction of travel (towards the next stop,
+    from the previous one at the last stop): stops without a link near them are reached along it
+    (Network.add_stop_access), as along a GTFS shape. The official routes can be in several parts that do not join."""
+    if reference is None or len(stop_xy) < 2:
+        return None
+    merged = shapely.line_merge(reference) if reference.geom_type == "MultiLineString" else reference
+    parts = [p for p in getattr(merged, "geoms", [merged]) if p.geom_type == "LineString" and p.length > 0]
+    if not parts:
+        return None
+    point = Point(stop_xy[index])
+    part = min(parts, key = point.distance)
+    # A part that ends where it starts (e.g. a spur that the line drives out and back, TL line 68 at Lutry, Landar):
+    # a neighbouring stop far from it projects on either of its ends and does not tell its direction. TL draws each
+    # direction of a line in its direction of travel, which is kept.
+    neighbour = Point(stop_xy[index + 1] if index + 1 < len(stop_xy) else stop_xy[index - 1])
+    closed = math.dist(part.coords[0], part.coords[-1]) <= CenterlineGraph.JOIN_TOLERANCE
+    if closed and part.distance(neighbour) > NEW_LINK_SNAP_DISTANCE:
+        return part
+    ahead = part.project(neighbour) - part.project(point)
+    if ahead < 0 if index + 1 < len(stop_xy) else ahead > 0:
+        part = part.reverse()
+    return part
 
 
 def _is_off_route(network, inside, from_link, leg, to_link):
     """True if the path between two stop links turns back, or keeps more than NEW_LINK_MAX_OUTSIDE metres
     outside the corridor: the network lacks the official route there (e.g. a bus-only passage missing in OSM)."""
     links = [from_link] + leg + [to_link]
-    if any(network._turns_back(a, b) for a, b in zip(links, links[1:])):
+    geometric = id(inside) not in network._shape_corridors
+    if any(network._turns_back(a, b, geometric) for a, b in zip(links, links[1:])):
         return True
     return sum(network.length[l] for l in leg if not network.link_is_inside(l, inside)) > NEW_LINK_MAX_OUTSIDE
 
 
-def _add_bus_links(schedule, network, graph, key, geometry, stop_ids, stop_links, leg_lengths, legs_off_route, path_cache):
+def _add_bus_links(schedule, network, graph, key, geometry, stop_ids, stop_links, leg_lengths, legs_off_route, path_cache,
+                   arrivals = None):
     """Adds new bus links along the official route for legs without a sensible connection in the
     network. `leg_lengths[i]` is the length of the path between stop i and i + 1 (inf if none),
-    `legs_off_route[i]` whether it turns back or leaves the corridor (_is_off_route).
+    `legs_off_route[i]` whether it turns back or leaves the corridor (_is_off_route), `arrivals[i]` the last link before
+    stop i + 1. Where the route turns back onto the link of a stop (e.g. TL line 68 at La Conversion, gare: the road
+    the bus leaves the station forecourt by is missing), bus links go on from where it turns back to the next stop.
     Returns the number of new links added."""
     inside = network.inside_lengths(key, geometry)
     added = 0
 
-    for i, leg_length in enumerate(leg_lengths):
+    def official_path(i, j):
         endpoints = []
-        for stop_id in (stop_ids[i], stop_ids[i + 1]):
+        for stop_id in (stop_ids[i], stop_ids[j]):
             facility = schedule.facilities[stop_id]
             endpoints.append(graph.snap(float(facility.attrib["x"]), float(facility.attrib["y"]), NEW_LINK_SNAP_DISTANCE))
         if None in endpoints or endpoints[0] == endpoints[1]:
-            continue
-
+            return None
         official = graph.path(*endpoints)
-        if official is None or official[1] > NEW_LINK_MAX_LENGTH:
+        return None if official is None or official[1] > NEW_LINK_MAX_LENGTH else official
+
+    for i, arrival in enumerate(arrivals if key[0] != SHAPE_KEY else ()):
+        if i + 2 >= len(stop_links) or not network._turns_back(arrival, stop_links[i + 1]):
+            continue
+        official = official_path(i + 1, i + 2)
+        source_node, target_node = network._ends(arrival)[1], network.links[stop_links[i + 2]][0]
+        if official is None or source_node == target_node or (source_node, target_node) in network._new_links_cache:
+            continue
+        network.add_bus_links(source_node, target_node, official[0], inside, two_way = key[0] != SHAPE_KEY)
+        added += 1
+
+    for i, leg_length in enumerate(leg_lengths):
+        official = official_path(i, i + 1)
+        if official is None:
             continue
         coords, official_length = official
         if leg_length <= NEW_LINK_RATIO * official_length + NEW_LINK_SLACK and not legs_off_route[i]:
@@ -1528,7 +1745,7 @@ def _add_bus_links(schedule, network, graph, key, geometry, stop_ids, stop_links
         source_node, target_node = network.links[stop_links[i]][1], network.links[stop_links[i + 1]][0]
         if source_node == target_node or (source_node, target_node) in network._new_links_cache:
             continue
-        network.add_bus_links(source_node, target_node, coords, inside)
+        network.add_bus_links(source_node, target_node, coords, inside, two_way = key[0] != SHAPE_KEY)
         added += 1
 
     if added:
@@ -1547,14 +1764,14 @@ def _reroute_with_bus_links(schedule, network, corridors, key, geometry, stop_id
         return result
 
     if result is not None:
-        stop_links, leg_lengths, legs_off_route = result[3], result[4], result[5]
+        stop_links, leg_lengths, legs_off_route, arrivals = result[3], result[4], result[5], result[6]
     else:
         # No connection at all: look for the legs without a path between the current stop links
         stop_links = [schedule.facilities[s].attrib.get("linkRefId") for s in stop_ids]
         if any(l not in network.segments for l in stop_links):
             return None
         inside = network.inside_lengths(key, geometry)
-        leg_lengths, legs_off_route = [], []
+        leg_lengths, legs_off_route, arrivals = [], [], None
         for a, b in zip(stop_links, stop_links[1:]):
             if a == b:
                 leg_lengths.append(0.0)
@@ -1565,7 +1782,8 @@ def _reroute_with_bus_links(schedule, network, corridors, key, geometry, stop_id
             legs_off_route.append(path is not None and _is_off_route(network, inside, a, path, b))
 
     chosen_stop_ids = result[0] if result is not None else stop_ids
-    if _add_bus_links(schedule, network, graph, key, geometry, chosen_stop_ids, stop_links, leg_lengths, legs_off_route, path_cache):
+    if _add_bus_links(schedule, network, graph, key, geometry, chosen_stop_ids, stop_links, leg_lengths, legs_off_route, path_cache,
+                      arrivals):
         result = _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, platforms = platforms) \
             or _reroute(schedule, network, key, geometry, stop_ids, stop_radius, path_cache, access_fallback = True,
                         platforms = platforms)

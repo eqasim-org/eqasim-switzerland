@@ -22,6 +22,36 @@ default `pt_route_modes: [bus]`; real-road capacities are unchanged. Set
 `pt_route_add_links: false` to restrict correction to existing connections and
 inspect unresolved routes before accepting new links.
 
+A route deviates when it drives more than 50 m off its reference: off the lane of
+a GTFS shape (links more than 8 m away), or off the road of an official line
+reference (more than 20 m away; these lines follow the middle of the road and are
+drawn less precisely). The share inside the 30 m corridor alone misses a short
+detour on a parallel street of a long route, e.g. TL line 2 at Georgette, line 6
+between Pont Marc Dufour and Languedoc, line 7 at Prilly-Malley, gare/aréna or line
+9 via Aubépines.
+
+A route with more than 50 m of pt2matsim artificial links also deviates. These are
+straight links where pt2matsim found no road, e.g. TL line 32 under the tracks at
+Renens VD, gare. For routes compared with an official line reference, an
+intermediate stop is not served from a link more than 10 m away when a link in the
+direction of travel is at least 10 m closer. This is usually the road behind the
+platform, e.g. TL lines 46 and 64 at Epalinges, Croisettes. The correction then
+uses the closer link, also for the TL platforms. GTFS shapes already give the lane,
+and the rule does not apply at the termini.
+
+Stations are recognised for both GTFS stop id formats: `8592098:0:10000` and the
+Swiss SLOID `ch:1:sloid:92098:0:1164` (newer feeds), both station `8592098`.
+
+A stop with no link within 30 m (e.g. a terminus loop missing in OSM, such as TL
+Pully, Clergère or Lausanne, Grand Vennes) is reached by bus-only links along the
+GTFS shape. Without a shape (TL), the part of the official line reference nearest
+the stop is used, oriented in the direction of travel. When two routes share such
+a terminus, one starting and one ending there, each gets the access link it needs.
+The results then no longer depend on which route is corrected first (e.g. TPG line
+54 at Versoix, Centre sportif). Stops are snapped to references densified to one
+vertex per 10 m. A GTFS shape with sparse vertices (e.g. TPG line 83/84 at Viry,
+P+R) can then receive links along it where the network lacks the road.
+
 Official line references do not always serve the GTFS quays: TL's
 `Shape_lignes.shp` can follow another street than the quay of the national GTFS
 (e.g. line 17 at Port-Franc). `pt_route_platforms` gives, per operator, its stops
