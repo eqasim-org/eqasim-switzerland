@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 def configure(context):
     context.stage("mode_choice.data.prepare")
-    context.stage("mode_choice.routing.java.freight")
+    context.stage("mode_choice.routing.eqasim.freight")
     context.stage("data.microcensus.shares")
 
 
@@ -26,7 +26,7 @@ def execute(context):
 
     # Freight and LCV are already vehicle demand, so retain their full weight.
 
-    freight = context.stage("mode_choice.routing.java.freight").select(
+    freight = context.stage("mode_choice.routing.eqasim.freight").select(
         "identifier", "mode", pl.lit(1.0).alias("weight"))
     summary.write_parquet(Path(context.path()) / "canton_weights.parquet")
     logger.info("MARouter canton demand: %s", summary.to_dicts())

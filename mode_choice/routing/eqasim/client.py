@@ -7,6 +7,7 @@ import atexit
 import csv
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
 import re
 import subprocess
@@ -28,6 +29,8 @@ class RoutingServer:
     server_endpoint = None
     config_path = None
     log_path = None
+    _reader = None
+    _ready = None
 
     @staticmethod
     def run_server_if_not_running(settings):
@@ -50,14 +53,39 @@ class RoutingServer:
             # Choose a fresh file on every actual launch, including cache reuse.
             # Keep it out of cached settings so idempotent startup still matches.
             log_path = directory / datetime.now(timezone.utc).strftime(SERVER_LOG_FILENAME_FORMAT)
-            with log_path.open("xb") as log:
-                process = subprocess.Popen(settings["command"], cwd=directory, stdout=log,
-                                           stderr=subprocess.STDOUT, start_new_session=True)
+            log_path.touch(exist_ok=False)
+            command = [*settings["command"], "--initialization-log-file", str(log_path)]
+            process = subprocess.Popen(command, cwd=directory, stdout=subprocess.PIPE,
+                                       stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                                       errors="replace", bufsize=1, start_new_session=True)
             RoutingServer.log_path = str(log_path)
             RoutingServer._settings = settings
             RoutingServer._process = process
             RoutingServer.config_path = settings["config_path"]
             RoutingServer.server_endpoint = None
+            ready = threading.Event()
+            RoutingServer._ready = ready
+            RoutingServer._reader = threading.Thread(
+                target=RoutingServer._read_output, args=(process, log_path, ready),
+                name="eqasim-router-logs", daemon=True)
+            RoutingServer._reader.start()
+
+    @staticmethod
+    def _read_output(process, log_path, ready):
+        # Java directs loader/native-preparation logs to this same file. Capture
+        # main-thread startup and native stdout here until readiness is confirmed.
+        logger = logging.getLogger(__name__)
+        with process.stdout, log_path.open("a", encoding="utf-8", buffering=1) as startup:
+            for line in process.stdout:
+                match = re.search(r"Multi-mode router listening on http://[^\s:]+:(\d+)", line)
+                if match:
+                    RoutingServer.server_endpoint = "http://127.0.0.1:" + match[1]
+                if not ready.is_set():
+                    startup.write(line)
+                else:
+                    level = (logging.ERROR if re.search(r"\bERROR\b", line) else
+                             logging.WARNING if re.search(r"\bWARN(?:ING)?\b", line) else logging.INFO)
+                    logger.log(level, "%s", line.rstrip())
 
     @staticmethod
     def _check_process():
@@ -66,20 +94,13 @@ class RoutingServer:
             raise RuntimeError("Routing server has not been started")
         code = process.poll()
         if code is not None:
-            raise RuntimeError(f"Routing server exited with code {code}; see {RoutingServer.log_path}")
+            location = ("runtime output is in the pipeline logs; initialization log: "
+                        if RoutingServer._ready is not None and RoutingServer._ready.is_set() else "see ")
+            raise RuntimeError(f"Routing server exited with code {code}; {location}{RoutingServer.log_path}")
 
     @staticmethod
     def _endpoint():
         RoutingServer._check_process()
-        if RoutingServer.server_endpoint is None:
-            # Port zero lets Java bind an unused port atomically. Read its startup
-            # announcement, without polling or blocking in the startup stage.
-            with open(RoutingServer.log_path, "rb") as log:
-                for line in log:
-                    match = re.search(rb"Multi-mode router listening on http://[^\s:]+:(\d+)", line)
-                    if match:
-                        RoutingServer.server_endpoint = "http://127.0.0.1:" + match[1].decode()
-                        break
         return RoutingServer.server_endpoint
 
     @staticmethod
@@ -111,8 +132,11 @@ class RoutingServer:
         except (URLError, TimeoutError):
             return False
         if state and state.get("status") == "failed":
-            raise RuntimeError(f"Routing server initialization failed: {state.get('error')}")
-        return bool(state and state.get("ready"))
+            raise RuntimeError(f"Routing server initialization failed: {state.get('error')}; see {RoutingServer.log_path}")
+        ready = bool(state and state.get("ready"))
+        if ready and RoutingServer._ready is not None:
+            RoutingServer._ready.set()
+        return ready
 
     @staticmethod
     def wait_until_ready(mode=None):
@@ -196,6 +220,9 @@ class RoutingServer:
                 else:
                     process.wait()
             finally:
+                if RoutingServer._reader is not None:
+                    RoutingServer._reader.join(timeout=RoutingServer._settings["shutdown_timeout"])
+                RoutingServer._reader = RoutingServer._ready = None
                 RoutingServer._process = RoutingServer._settings = None
                 RoutingServer.server_endpoint = RoutingServer.config_path = None
 

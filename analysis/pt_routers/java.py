@@ -8,8 +8,8 @@ import os
 import platform
 
 from mode_choice.routing import options
-from mode_choice.routing.java import pt as java_pt, requests
-from mode_choice.routing.java.client import RoutingServer
+from mode_choice.routing.eqasim import pt as java_pt, requests
+from mode_choice.routing.eqasim.client import RoutingServer
 from mode_choice.routing.python import prices
 from mode_choice.routing_variables import pt
 from analysis.pt_routers.context import ConfigureView, ExecuteView, private_server
@@ -21,9 +21,9 @@ def configure(context):
     context.stage('analysis.pt_routers.runtime')
     options.configure_pt(context)
     context.config('pt_router_analysis_source_server', '')
-    ignored = ['mode_choice.routing.java.requests']
+    ignored = ['mode_choice.routing.eqasim.requests']
     if context.config('pt_router_analysis_source_server'):
-        ignored.append('mode_choice.routing.java.server')
+        ignored.append('mode_choice.routing.eqasim.server')
     java_pt.configure(ConfigureView(context, {'mode_choice.data.prepare': 'analysis.pt_routers.inputs'}, ignored=ignored))
     context.config('threads', volatile=True)
     context.config('java_memory', '50G', volatile=True)
@@ -47,7 +47,7 @@ def execute(context):
         with open(source, 'rb') as stream:
             cached_settings = pickle.load(stream)
     else:
-        cached_settings = context.stage('mode_choice.routing.java.server')
+        cached_settings = context.stage('mode_choice.routing.eqasim.server')
     settings = private_server(cached_settings, directory / 'server')
     settings['request_timeout'] = context.config('mode_choice_server_request_timeout')
     settings['command'][settings['command'].index('--threads') + 1] = str(context.config('threads'))
@@ -55,9 +55,9 @@ def execute(context):
     settings['command'] = [('-Xmx' + xmx if value.startswith('-Xmx') else '-Xms' + xms if value.startswith('-Xms') else value) for value in settings['command']]
     jar = Path(context.path('analysis.pt_routers.runtime')) / context.stage('analysis.pt_routers.runtime')
     settings['command'][settings['command'].index('-cp') + 1] = str(jar.resolve())
-    view = ExecuteView(context, {'mode_choice.data.prepare': trips, 'mode_choice.routing.java.server': settings},
+    view = ExecuteView(context, {'mode_choice.data.prepare': trips, 'mode_choice.routing.eqasim.server': settings},
                        {'mode_choice_pt_routing_backend': 'java', 'mode_choice_pt_price_backend': 'python'})
-    view.stages['mode_choice.routing.java.requests'] = requests.execute(view)
+    view.stages['mode_choice.routing.eqasim.requests'] = requests.execute(view)
     trips.write_parquet(output / 'requests.parquet')
     repeats = context.config('pt_router_analysis_repeats')
     if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:

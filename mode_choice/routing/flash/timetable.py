@@ -12,7 +12,7 @@ def configure(context):
     context.config('data_path')
     context.config('gtfs_folder', 'gtfs')
     context.config('gtfs_name', '')
-    context.config('gtfs_tpg_file', '')
+    context.config('gtfs_tpg_file', 'gtfs_tpg_theorique_jour_ouvre.zip')
     context.config('gtfs_date', 'dayWithMostServices')
     context.config('flash_tb_date', '')
     context.config('flash_tb_preprocessing_threads', 1)

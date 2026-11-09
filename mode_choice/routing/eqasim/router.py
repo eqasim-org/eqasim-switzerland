@@ -2,11 +2,11 @@
 from pathlib import Path
 import polars as pl
 from mode_choice.defaults import ROUTING_DEFAULTS, CAR_ROUTING_BACKENDS, ROUTING_COST_FILENAME
-from mode_choice.routing.java.server import ensure_server_started
-from mode_choice.routing.java.client import RoutingServer
+from mode_choice.routing.eqasim.server import ensure_server_started
+from mode_choice.routing.eqasim.client import RoutingServer
 from mode_choice.routing.results import complete_routes
 from mode_choice.routing import options
-from mode_choice.routing.java import endpoints
+from mode_choice.routing.eqasim import endpoints
 
 
 def car_backend(context):
@@ -23,13 +23,13 @@ def configure_mode(context, mode):
     for name, default in ROUTING_DEFAULTS.items():
         context.config(name, default)
     if car_backend(context) == "java" or mode == "pt":
-        context.stage("mode_choice.routing.java.server")
-        context.stage("mode_choice.routing.java.requests")
+        context.stage("mode_choice.routing.eqasim.server")
+        context.stage("mode_choice.routing.eqasim.requests")
     if context.config("route_population_once"):
-        context.stage("mode_choice.routing.java.preparation")
-        context.stage("mode_choice.routing.java.config")
+        context.stage("mode_choice.routing.eqasim.preparation")
+        context.stage("mode_choice.routing.eqasim.config")
     if mode == "car" and (context.config("use_marouter_in_mode_choice") or context.config("route_population_once")):
-        context.stage("mode_choice.routing.java.road_requests")
+        context.stage("mode_choice.routing.eqasim.road_requests")
 
 
 def read_results(path, identifier, mapping, *, mode=None):
@@ -62,7 +62,7 @@ def route_mode(context, mode, *, compute_cost=None):
         ensure_server_started(context)
         output = Path(context.path()) / f"{mode}_routes.csv"
         mixed = mode == "car" and (context.config("use_marouter_in_mode_choice") or context.config("route_population_once"))
-        source = context.stage("mode_choice.routing.java.road_requests" if mixed else "mode_choice.routing.java.requests")
+        source = context.stage("mode_choice.routing.eqasim.road_requests" if mixed else "mode_choice.routing.eqasim.requests")
         if context.config("route_population_once") and mode != "pt":
             source = endpoints.compatible_requests(context, source, Path(context.path()) / "routable_requests.csv", None if mixed else mode)
         RoutingServer.route_csv(source, output, None if mixed else mode, compute_cost=compute_cost)

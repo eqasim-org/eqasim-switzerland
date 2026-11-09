@@ -25,7 +25,7 @@ provides the current PT component exports without changing the source scenario.
 
 For another configuration, add `analysis.pt_routers.analyse` to `run`. By default
 the input stage depends on `mode_choice.data.prepare`, Java uses
-`mode_choice.routing.java.server`, and FLASH uses `data.gtfs.cleaned/output`.
+`mode_choice.routing.eqasim.server`, and FLASH uses `data.gtfs.cleaned/output`.
 Optional existing-cache sources are:
 
 | Option | Meaning |

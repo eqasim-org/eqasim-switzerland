@@ -55,15 +55,15 @@ client are implementation helpers, not additional data stages.
 
 | Stage (prefix `mode_choice.`) | Output |
 | --- | --- |
-| `routing.java.server` | Serializable launch settings; starts Java asynchronously |
+| `routing.eqasim.server` | Serializable launch settings; starts Java asynchronously |
 | `data.trips` | Corrected source trips as Polars, with generated `trip_id` |
 | `tours.build` | `trip_id`, `tour_index`, `mode_choice_eligible` |
 | `data.prepare` | Eligible trips with person, location and spatial features |
-| `routing.java.requests` | Path to the shared Java request CSV |
-| `routing.java.freight` | Freight/LCV requests with population person IDs |
-| `routing.java.preparation` | Prepared network, facility endpoints and freight endpoints; conditional on route reuse |
-| `routing.java.weights` | Trip weights and `canton_weights.parquet` diagnostics; MARouter only |
-| `routing.java.road_requests` | One mixed car/freight/LCV CSV for joint assignment |
+| `routing.eqasim.requests` | Path to the shared Java request CSV |
+| `routing.eqasim.freight` | Freight/LCV requests with population person IDs |
+| `routing.eqasim.preparation` | Prepared network, facility endpoints and freight endpoints; conditional on route reuse |
+| `routing.eqasim.weights` | Trip weights and `canton_weights.parquet` diagnostics; MARouter only |
+| `routing.eqasim.road_requests` | One mixed car/freight/LCV CSV for joint assignment |
 | `routing_variables.car` | `trip_id`, car time and distance |
 | `routing_variables.car_passenger` | Car variables renamed for passengers; no routing call |
 | `routing_variables.pt` | `trip_id`, PT time/distance components and totals |
@@ -79,10 +79,10 @@ client are implementation helpers, not additional data stages.
 
 ```mermaid
 flowchart TD
-    server[routing.java.server] --> trips[data.trips]
+    server[routing.eqasim.server] --> trips[data.trips]
     trips --> identify[tours.build]
     identify --> features[data.prepare]
-    features --> requests[routing.java.requests]
+    features --> requests[routing.eqasim.requests]
     requests --> routes[routing_variables: car / pt / walk / bike]
     routes --> passenger[routing_variables.car_passenger]
     routes --> parking[costs.parking]
@@ -166,7 +166,7 @@ The context manager and calibration cleanup release reservations on errors too.
 
 `mode_choice_car_routing_backend` selects:
 
-- **`java`**: `MultiModeRouterServer` routes car.
+- **`java`**: `multimodalRouter.RunServer` routes car and trucks.
   Server times/distances are converted from seconds/metres to minutes/km.
 - **`pandana`**: Pandana routes car. Optional hourly linkstats
   supply car travel times by corrected departure hour.
@@ -195,7 +195,7 @@ Walk/bike do not inherit the car backend.
 
 The default `use_marouter_in_mode_choice: true` enables the incremental BPR road
 assignment in eqasim commit `ffcd5ade6a596c0f8a586cdd9de09e06fc2e3253`.
-`routing.java.road_requests` combines the eligible population's car alternatives and
+`routing.eqasim.road_requests` combines the eligible population's car alternatives and
 all enabled `synthesis.freight.trips` / `synthesis.lcv.trips` in **one** request.
 Every Java request starts with zero flows; splitting trucks into another request
 would lose their congestion contribution. Freight IDs match the population writer
@@ -205,7 +205,7 @@ retain only the passenger population's car rows.
 The server receives the configured `random_seed` and `input_downsampling`, so
 assignment is reproducible and capacity is scaled to the population sample once.
 It uses the existing MATSim `eqasim:vdf` settings. Recorded events are used only
-when MARouter is disabled. `routing.java.weights` is a separate Synpp stage,
+when MARouter is disabled. `routing.eqasim.weights` is a separate Synpp stage,
 registered only for MARouter. For each residence canton it computes:
 
 ```text
@@ -223,7 +223,7 @@ calibration still counts non-drivers and uses the full eligible population.
 Freight and LCV requests receive weight 1 because they already represent vehicle
 trips. Java multiplies weight by the vehicle PCU (cars 1, trucks normally 2).
 Weights never include `input_downsampling`; sample size scales capacity separately.
-`routing.java.weights/canton_weights.parquet` records the counts, shares and
+`routing.eqasim.weights/canton_weights.parquet` records the counts, shares and
 weights. Missing targets or positive demand without any available drivers raise
 an explicit error. Weights greater than one are allowed as vehicle-equivalent
 assignment multipliers, with a warning that the target exceeds available trips.
@@ -239,14 +239,14 @@ route_population_once: true
 mode_choice_car_routing_backend: java
 ```
 
-`routing.java.preparation` runs Java's normal facility placement and freight relocation
+`routing.eqasim.preparation` runs Java's normal facility placement and freight relocation
 before starting the server, without routing trips. It writes private prepared
-network and endpoint files. `routing.java.requests` joins those facility endpoints and
+network and endpoint files. `routing.eqasim.requests` joins those facility endpoints and
 uses the population writer's whole-second departure times. Requests carry
 `person_id` and the original zero-based `trip_index`, including gaps left by trips
 excluded from mode choice. The server then starts with `--export-routes true`.
 
-In `matsim.simulation.prepare`, `routing.java.exports.population_routes(context)` streams
+In `matsim.simulation.prepare`, `routing.eqasim.exports.population_routes(context)` streams
 the selected modes and truck routes into `mode_choice_routes.csv` and returns its
 path for `RunPopulationRouting --routes-path`. Upstream CSVs remain untouched.
 The combined file omits mode choice's globally unique `trip_id`: Java matches on
@@ -280,7 +280,7 @@ feasible mode sequence, selection reports an error identifying the person and
 tour. Duplicate or unknown routing identifiers remain errors.
 
 The server starts with `--compute-cost true` and the configured `car_cost_model`.
-`routing.java.config` creates a private copy of the PT routing config pointing to the
+`routing.eqasim.config` creates a private copy of the PT routing config pointing to the
 cost parameters from `dmc.parameter_files`, preserving relative transit/pricing input paths.
 Java car and PT routing request prices together with routes, save only `trip_id` and
 `car_cost_CHF` or `pt_cost_CHF` in their stage's `cost.parquet`, and return routing
@@ -309,7 +309,7 @@ The usual cost stages still read `cost.parquet`. No `savePtCostData` request or
 Java PT routing now makes one server request. The response contains total time
 and distance, separate in-vehicle time/distance, access/egress walking, transfer
 walking/waiting, initial waiting, transfers and optional fare/itinerary data.
-`routing.java.pt` reads the numerical components directly, using minutes and km.
+`routing.eqasim.pt` reads the numerical components directly, using minutes and km.
 Initial waiting remains separate from transfer waiting, as required by DMC.
 `route_population_once` controls itinerary reuse, not component availability.
 There is no supplemental `RunBatchPublicTransportRouter` call in Java mode-choice
@@ -338,17 +338,21 @@ population back to Pandas at their own boundary.
 
 ## Server lifecycle and logs
 
-`routing.java.server` launches Java without waiting for initialization. Loading can
+`routing.eqasim.server` launches Java without waiting for initialization. Loading can
 overlap subsequent Python stages once the mapped network and routing config exist;
 Synpp determines the dependency order. `data.trips`, feature preparation and Java
 routing ensure a live process exists even when launch settings came from Synpp's
 cache. The client waits for readiness only when routing is needed.
 
-Java binds to loopback on an automatically assigned port. Its stdout and stderr
-go exclusively to `server_logs_starting_at_<UTC timestamp>.logs` under the server
-stage's `context.path()`. Every actual launch creates a new file, including
-restarts from cached settings. Synpp can remove older logs when rebuilding the
-stage directory.
+Java binds to loopback on an automatically assigned port. Every launch creates
+`server_logs_starting_at_<UTC timestamp>.logs` under the server stage's
+`context.path()`, passed to Java as `--initialization-log-file`. Network/schedule
+loading, native preprocessing and startup output go there. After readiness,
+server stdout/stderr is forwarded to the pipeline logger (including warnings
+and errors). No `--log-file` override is supplied, so Java runtime logs stay on
+its console. A background reader captures the port announcement without blocking
+startup and is joined when the process stops. Synpp can remove older logs when
+rebuilding the stage directory.
 
 `run.execute` stops the owned server in `finally`. Client/preparation errors also
 clean up, with `atexit` covering normal interpreter exit or standalone routing
@@ -484,7 +488,15 @@ value with which it started.
 
 ## Routing implementations and PT pricing
 
-Backend-specific code lives under `mode_choice.routing.java`, `.python`, and `.flash`.
+Backend-specific code lives under `mode_choice.routing.eqasim`, `.python`, and `.flash`:
+
+- `eqasim/`: the shared Java server and Rust PT integration, launch/config/client,
+  per-mode requests, freight, canton weights, prices and itinerary exports.
+- `python/`: Pandana road routing, active-mode approximations and PT pricing.
+- `flash/`: the optional experimental PT backend and its native implementation.
+
+The existing `java` backend option selects the eqasim server; it does not mean PT
+must use RAPTOR. PT uses Rust inside this server by default.
 The `routing_variables` stages select implementations and return the existing trip-keyed outputs.
 Common option validation and failed-route handling remain in `routing.options` and `routing.results`.
 
@@ -509,3 +521,28 @@ See [FLASH setup, limitations and benchmarks](routing/flash/README.md).
 
 Renamed Synpp stages use new cache directories; routing/downstream stages can be rebuilt.
 The fitted DMC parameter stages were not renamed by this reorganization.
+
+
+### Iterative MARouter and Rust PT server
+
+The pinned runtime is `0c32bdb3230cffeae0ddef0909ac9366619cf95a`; its entry point is
+`org.eqasim.switzerland.ch_cmdp.utils.routing.multimodalRouter.RunServer`.
+The default car/truck and PT backends share this process. Configuration options:
+
+```yaml
+mode_choice_marouter_iterations: 3
+mode_choice_use_rust_pt_router: true  # false selects Java RAPTOR within RunServer
+```
+
+Each road pass is incremental; later passes average replacement flows using
+1/iteration. Trip weights and population capacity sampling remain independent.
+The server uses `swissRustRouting` from the MATSim config for native-library and
+installation settings. Relative library/source/installation paths are resolved
+before copying the config. Native initialization failures are reported; Python
+does not silently switch to a different PT backend.
+
+Backend stages were renamed from `mode_choice.routing.java.*` to
+`mode_choice.routing.eqasim.*`, which creates new Synpp cache identities. A supplied
+`eqasim_path` overrides the pinned build: use an updated JAR containing RunServer,
+or set it to an empty string to build the pin. Old server JARs are rejected before
+loading network data. `config_dib_10.yml` now selects the pinned build.

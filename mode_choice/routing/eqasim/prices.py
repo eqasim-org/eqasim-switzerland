@@ -1,14 +1,14 @@
 """Request PT fares from the shared Java server."""
 from pathlib import Path
 import logging
-from mode_choice.routing.java.client import RoutingServer
-from mode_choice.routing.java.server import ensure_server_started
-from mode_choice.routing.java.router import read_results
+from mode_choice.routing.eqasim.client import RoutingServer
+from mode_choice.routing.eqasim.server import ensure_server_started
+from mode_choice.routing.eqasim.router import read_results
 
 
 def configure(context):
-    context.stage('mode_choice.routing.java.server')
-    context.stage('mode_choice.routing.java.requests')
+    context.stage('mode_choice.routing.eqasim.server')
+    context.stage('mode_choice.routing.eqasim.requests')
 
 
 def execute(context, trips, routes):
@@ -26,5 +26,5 @@ def execute(context, trips, routes):
 
     ensure_server_started(context)
     output = Path(context.path()) / 'pt_prices.csv'
-    RoutingServer.cost_csv(context.stage('mode_choice.routing.java.requests'), output, 'pt')
+    RoutingServer.cost_csv(context.stage('mode_choice.routing.eqasim.requests'), output, 'pt')
     return read_results(output, 'identifier', {'cost': 'pt_cost_CHF'})

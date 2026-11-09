@@ -1,7 +1,7 @@
 """Select PT routing and pricing independently, keeping one trip-keyed contract."""
 from mode_choice.routing import options
-from mode_choice.routing.java.client import RoutingServer
-from mode_choice.routing.java.router import save_costs
+from mode_choice.routing.eqasim.client import RoutingServer
+from mode_choice.routing.eqasim.router import save_costs
 from mode_choice.routing.results import complete_routes
 from mode_choice.data.frames import join_variables
 
@@ -11,13 +11,13 @@ def configure(context):
     if options.pt_backend(context) == 'flash':
         from mode_choice.routing.flash import pt as routing
     else:
-        from mode_choice.routing.java import pt as routing
+        from mode_choice.routing.eqasim import pt as routing
     routing.configure(context)
     if options.pt_price_backend(context) == 'python':
         from mode_choice.routing.python import prices
         prices.configure(context)
     elif options.pt_backend(context) == 'flash':
-        from mode_choice.routing.java import prices
+        from mode_choice.routing.eqasim import prices
         prices.configure(context)
 
 
@@ -29,7 +29,7 @@ def execute(context):
         if options.pt_backend(context) == 'flash':
             from mode_choice.routing.flash import pt as routing
         else:
-            from mode_choice.routing.java import pt as routing
+            from mode_choice.routing.eqasim import pt as routing
         routes = routing.execute(context)
 
         return price_routes(context, routes)
@@ -47,7 +47,7 @@ def price_routes(context, routes):
     if options.pt_price_backend(context) == 'python':
         from mode_choice.routing.python import prices
     else:
-        from mode_choice.routing.java import prices
+        from mode_choice.routing.eqasim import prices
     trips = context.stage('mode_choice.data.prepare')
     costs = prices.execute(context, trips, routes)
 
