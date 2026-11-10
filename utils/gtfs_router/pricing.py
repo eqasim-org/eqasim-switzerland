@@ -54,9 +54,29 @@ def _fare_rounding(price, km):
     return _round_up(price, 0.2) if km < 69 else _round_up(price, 1.0)
 
 
-def _simplified(stop_id):
+SLOID = re.compile(r"^(?:Parent)?ch:1:sloid:(\d+)")   # the Swiss stop ids since 2026 (ch:1:sloid:3000:2:3)
+
+
+def java_station_id(stop_id):
     """The station of a stop id, as getZones in Java: the part before the first ':' or '.' (8501120:0:1 -> 8501120)."""
     return re.split(r"[:.]", stop_id)[0] if ":" in stop_id else stop_id
+
+
+def station_id(stop_id):
+    """The station of a stop id as a DiDok number, the key of gtfs_zones.csv and SBB_all_distances.csv: as
+    java_station_id, except for the SLOIDs, whose number is the DiDok number without the country code 85 when it has at
+    most 5 digits (ch:1:sloid:3000:2:3 -> 8503000) and the DiDok number itself otherwise (ch:1:sloid:1100008 -> 1100008).
+    The didok column of the feed is the reference: this rule gives it for all but a few of the SLOIDs of 2026."""
+    match = SLOID.match(stop_id)
+    if match:
+        number = match.group(1)
+        return number if len(number) > 5 else "85" + number.zfill(5)
+    return java_station_id(stop_id)
+
+
+def _simplified(stop_id):
+    """The station of a stop id (station_id): for a SLOID, its DiDok number rather than "ch" as in Java."""
+    return station_id(stop_id)
 
 
 @dataclass(frozen = True)

@@ -1,18 +1,11 @@
 """HTML page of analysis.pt.transit_schedule.visualize: the menu on the left third (search, layers, the timetable of
-a stop or the details of a line), the map on the rest. Same layout and helpers as the GTFS maps of
-data/gtfs/visualize_pages.py; the data is embedded once as JSON and the timetables are computed in the browser."""
-import json
-
-from data.gtfs.visualize_pages import COMMON_JS, HEAD, SWISSTOPO_TILES
+a stop or the details of a line), the map on the rest. Same layout and helpers as the transfer time map
+(leaflet_page.py); the data is embedded once as JSON and the timetables are computed in the browser."""
+from analysis.pt.transit_schedule import leaflet_page
 
 
 def page(title, data):
-    payload = json.dumps(data, separators = (",", ":"), ensure_ascii = False).replace("</", "<\\/")
-    return (HEAD.replace("__TITLE__", title)
-            + MENU
-            + COMMON_JS.replace("__DATA__", payload).replace("__TILES__", SWISSTOPO_TILES)
-            + SCRIPT
-            + "</script></body></html>\n")
+    return leaflet_page.page(title, MENU, data, SCRIPT)
 
 
 MENU = r"""

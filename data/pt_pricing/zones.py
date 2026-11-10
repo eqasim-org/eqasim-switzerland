@@ -33,6 +33,9 @@ import shapely
 from branca.element import MacroElement
 from jinja2 import Template
 
+from utils.gtfs_router.pricing import station_id
+from utils.gtfs_router.zones import foreign_communes
+
 logger = logging.getLogger("synpp")
 
 # the names of the networks of the map, as the pricing inputs call them (the others are the same)
@@ -40,7 +43,6 @@ NETWORK_NAMES = {"A-Welle": "Awelle", "ONDE VERTE": "OndeVerte", "engadin mobil"
                  "Tarifverbund Schwyz": "TVSZ", "Tarifverbund Zug": "ZVB", "OSTWIND": "Ostwind", "Tarifverbund Davos": "Davos",
                  "Tarifverbund Klosters": "Klosters"}
 MAJORITY = 0.9   # the share of its stops a zone needs for a whole municipality to be in it (else it is split)
-FOREIGN_NETWORK = "Unireso"   # the network of the communes abroad when their list has no network column
 
 # the background of the interactive map, and the colours of the zones (cycled within each network)
 ESRI_TILES = {"Esri World Topo": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
@@ -83,6 +85,9 @@ def execute(context):
             by_network.setdefault(network, set()).add(zone)
         rows += [(stop_id, n, next(iter(z)), geometry) for n, z in by_network.items() if len(z) == 1]
         border_rows += [(stop_id, n, z, geometry) for n, z in by_network.items() if len(z) > 1]
+    if not rows:
+        raise ValueError(f"No stop of {context.path('data.gtfs.cleaned')}/output/stops.txt has a zone in {zones_path}: their stop ids "
+                         "do not match (see the check of data.pt_pricing.pt_pricing)")
 
     every = gpd.GeoDataFrame(pd.DataFrame(rows, columns = ["stop", "network", "zone", "geometry"]), crs = 2056)
     border = gpd.GeoDataFrame(pd.DataFrame(border_rows, columns = ["stop", "network", "zones", "geometry"]), crs = 2056)
@@ -92,7 +97,7 @@ def execute(context):
     # The zones of the communes abroad only come from their list: a Swiss stop with such a zone (Collonges VS, named
     # like Collonges in zone 230 of Unireso) does not put its municipality in it.
 
-    abroad = read_foreign_communes(f"{data_path}/{context.config('pt_zones_foreign_communes_file')}",
+    abroad = foreign_communes(f"{data_path}/{context.config('pt_zones_foreign_communes_file')}",
                                    f"{data_path}/{context.config('pt_zones_foreign_zones_file')}")
     foreign = set(zip(abroad["network"], abroad["zone"]))
     swiss_stops = set(located["stop"]) | set(border["stop"])
@@ -218,8 +223,9 @@ def read_stop_zones(path):
 
 
 def simplified(stop_id):
-    """The station of a stop id, as getZones in eqasim-java: the part before the first ':' or '.' (8501120:0:1 -> 8501120)."""
-    return re.split(r"[:.]", stop_id)[0] if ":" in stop_id else stop_id
+    """The station of a stop id, as getZones in eqasim-java (8501120:0:1 -> 8501120), with the DiDok number of a SLOID
+    (utils.gtfs_router.pricing.station_id)."""
+    return station_id(stop_id)
 
 
 def read_stops(path):
@@ -250,7 +256,7 @@ def border_stops(stops, zones_by_stop, swiss_stops, foreign):
 def without_foreign_zones(located, border, foreign):
     """The stops in Swiss municipalities (located: one zone per network; border: several) without the zones of the
     communes abroad (foreign: {(network, zone)}). A border stop left with one zone is moved to located."""
-    located = located[[(n, z) not in foreign for n, z in zip(located["network"], located["zone"])]]
+    located = located[np.array([(n, z) not in foreign for n, z in zip(located["network"], located["zone"])], dtype = bool)]
     border = border.assign(zones = [{z for z in zones if (n, z) not in foreign} for n, zones in zip(border["network"], border["zones"])])
     single = border["zones"].map(len) == 1
     moved = border[single].assign(zone = border.loc[single, "zones"].map(lambda z: next(iter(z)))).drop(columns = "zones")
@@ -265,21 +271,6 @@ def split_by_stops(shape, stops):
     cells = gpd.GeoDataFrame(geometry = list(shapely.get_parts(cells)), crs = 2056)
     cells = gpd.sjoin(cells, stops[["zone", "geometry"]], predicate = "contains")
     return [(z, cell.intersection(shape)) for z, cell in cells.dissolve("zone").geometry.items()]
-
-
-def read_foreign_communes(communes_path, zones_path):
-    """The communes abroad and their zones, one row per commune and zone: id ("FR" and the INSEE code), name, network,
-    zone and geometry (EPSG:2056). A listed commune without an outline is left out, with a warning."""
-    listed = pd.read_csv(zones_path, dtype = str).apply(lambda s: s.str.strip())
-    if "network" not in listed:
-        listed["network"] = FOREIGN_NETWORK
-    communes = gpd.read_file(communes_path).to_crs(2056)[["insee", "name", "geometry"]]
-    missing = sorted(set(listed["insee"]) - set(communes["insee"]))
-    if missing:
-        logger.warning(f"  {len(missing)} communes of {zones_path} have no outline in {communes_path}: {', '.join(missing)}")
-    result = communes.merge(listed[["insee", "network", "zone"]], on = "insee")
-    result["id"] = "FR" + result["insee"]
-    return result[["id", "name", "network", "zone", "geometry"]]
 
 
 def write_map(zones, stops, path):

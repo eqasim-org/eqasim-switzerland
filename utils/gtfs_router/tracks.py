@@ -11,7 +11,7 @@ consecutive stops gets a track:
 - everything else (tram, boat...) and the pairs not found: a straight line.
 
 A "segment" is the track of one pair of stops, shared by all the trips going from the first to the second. For each
-segment, the zones it crosses are found by cutting it with the zone polygons (zones.py), which is what the pricing uses
+segment, the zones it crosses are found by cutting it with the zone polygons (data.pt_pricing.zones), which is what the pricing uses
 to know the zones of a ride, and its length is the distance of the ride.
 
 This is computed once for the whole feed (the same for all its dates) and kept in the cache. All the geometry is done
@@ -34,7 +34,6 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
-from .zones import zone_polygons
 
 logger = logging.getLogger("synpp")
 TO_LV95 = Transformer.from_crs(4326, 2056, always_xy = True)    # (lon, lat) -> Swiss coordinates in metres
@@ -42,7 +41,7 @@ TO_WGS84 = Transformer.from_crs(2056, 4326, always_xy = True)   # and back
 # how far a station looks for its operating points: 400 m, or 2 km if the station is within 150 m of a rail line (a
 # long station whose operating point is at one end)
 STATION_RADIUS_M = (400, 150, 2000)
-VERSION = 8                 # change it when the tracks computed change, so that the old cache files are not used
+VERSION = 9                 # change it when the tracks computed change, so that the old cache files are not used
 DRAW_TOLERANCE_M = 3        # the tracks drawn on the map are simplified to 3 m (not those used for the zones)
 CANDIDATES = 6              # the operating points tried for each station (the nearest can be on another line)
 RAIL_DETOUR = (1.5, 2000)   # a rail path is kept if shorter than 1.5 × the straight line + 2 km
@@ -66,7 +65,7 @@ class Tracks:
     x_zone: np.ndarray
     x_m: np.ndarray
     x_from: np.ndarray          # (metres from the start of its segment)
-    zones: gpd.GeoDataFrame     # the zone polygons (EPSG:2056), see zones.zone_polygons
+    zones: gpd.GeoDataFrame     # the zone polygons (EPSG:2056), those of data.pt_pricing.zones
 
     def segments(self, net, ride):
         """The segments of a ride of the router, in order."""
@@ -105,21 +104,18 @@ class Tracks:
         return points
 
 
-def build_tracks(net, pricing, lines_path, municipalities_path, schedule_path = None, matsim_network_path = None, cache_dir = None,
-                 foreign_communes_path = None, foreign_zones_path = None):
+def build_tracks(net, lines_path, zones, zones_path, schedule_path = None, matsim_network_path = None, cache_dir = None):
     """The Tracks of a network (the whole feed).
 
-    pricing: the Pricing, for the zones of the stops. lines_path: the SBB rail lines (linie-mit-polygon.geojson).
-    municipalities_path: the municipalities and their fare networks (tarifverbundkarte.geojson), for the zone polygons.
-    foreign_communes_path, foreign_zones_path: the communes abroad and their zones (communes_france.gpkg,
-    unireso_france_zones.csv), for the zones outside Switzerland (optional; see zones.py).
-    schedule_path, matsim_network_path: the MATSim schedule and network, for the bus routes (optional). cache_dir: where
-    the result is kept, and found again as long as the network and all these files are the same."""
-    inputs = [p for p in (lines_path, municipalities_path, schedule_path, matsim_network_path, foreign_communes_path, foreign_zones_path) if p]
-    pricing_files = [os.path.join(pricing.folder, f) for f in sorted(os.listdir(pricing.folder))]
+    lines_path: the SBB rail lines (linie-mit-polygon.geojson). zones: the zone polygons of data.pt_pricing.zones
+    (network, zone, geometry, municipalities, name; EPSG:2056), and zones_path the pt_zones.gpkg it wrote, which tells
+    the cache when they change. schedule_path, matsim_network_path: the MATSim schedule and network, for the bus routes
+    (optional). cache_dir: where the result is kept, and found again as long as the network and all these files are the
+    same."""
+    inputs = [p for p in (lines_path, zones_path, schedule_path, matsim_network_path) if p]
     if cache_dir:
         stamp = hashlib.md5(net.stop_ids.tobytes() + net.t_start.tobytes() + net.t_stop.tobytes()).hexdigest()
-        stamp += f"|{VERSION}|" + "|".join(f"{os.path.abspath(p)}:{os.path.getmtime(p)}" for p in inputs + pricing_files)
+        stamp += f"|{VERSION}|" + "|".join(f"{os.path.abspath(p)}:{os.path.getmtime(p)}" for p in inputs)
         cache = os.path.join(cache_dir, f"tracks_{net.date or 'feed'}_{hashlib.md5(stamp.encode()).hexdigest()[:10]}.pkl")
         if os.path.exists(cache):
             logger.info(f"Tracks from the cache {cache}")
@@ -216,7 +212,7 @@ def build_tracks(net, pricing, lines_path, municipalities_path, schedule_path = 
     for k in range(len(pairs)):   # the rest: straight lines
         if geometry[k] is None:
             geometry[k] = np.array([xy[a[k]], xy[b[k]]])
-    tracks = _assemble(net, pricing, municipalities_path, seg_of, geometry, source, foreign_communes_path, foreign_zones_path)
+    tracks = _assemble(net, zones, seg_of, geometry, source)
 
     if cache_dir:
         os.makedirs(cache_dir, exist_ok = True)
@@ -298,10 +294,10 @@ def _matsim(net, schedule_path, network_path, pairs, a, b, xy, beeline, geometry
     return found
 
 
-def _assemble(net, pricing, municipalities_path, seg_of, geometry, source, foreign_communes_path = None, foreign_zones_path = None):
+def _assemble(net, zones, seg_of, geometry, source):
     """The Tracks of the segments: their lengths, the zones they cross (cut with the zone polygons), and their
     simplified coordinates for the map."""
-    zones = zone_polygons(pricing, net, municipalities_path, foreign_communes_path, foreign_zones_path)
+    zones = zones[["network", "zone", "geometry", "municipalities", "name"]].reset_index(drop = True)
     lines = gpd.GeoDataFrame(geometry = [shapely.LineString(g) for g in geometry], crs = 2056)
     hits = gpd.sjoin(lines, zones[["network", "zone", "geometry"]], predicate = "intersects")
     inside = shapely.intersection(lines.geometry.values[hits.index.to_numpy()], zones.geometry.values[hits["index_right"].to_numpy()])

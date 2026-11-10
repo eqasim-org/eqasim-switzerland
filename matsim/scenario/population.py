@@ -22,7 +22,7 @@ logger = logging.getLogger("synpp")
 HOME_DESTINATION_ID = -1
 
 def configure(context):
-    # The zones of the regional subscriptions (and Léman Pass) of the Swiss synthetic population; false: without them
+    # The zones of the regional subscriptions of the Swiss synthetic population; false: without them
     context.config("use_subscription_zones", default = True)
     context.stage("synthesis.population.models.subscription_zones" if context.config("use_subscription_zones")
                   else "synthesis.population.models.subscriptions", alias = "synthetic_persons")
@@ -202,9 +202,7 @@ def execute(context):
     df_persons["is_car_passenger"] = df_persons["is_car_passenger"].fillna(False)
 
     # Only the Swiss synthetic persons have subscription zones: the external and cross-border agents get none
-    for column in SUBSCRIPTION_ZONE_FIELDS:
-        df_persons[column] = df_persons.get(column, pd.Series("", index = df_persons.index)).fillna("")
-    df_persons["lemanpass_annual_chf"] = pd.to_numeric(df_persons.get("lemanpass_annual_chf", pd.Series(float("nan"), index = df_persons.index)), errors = "coerce")
+    df_persons["subscription_zones"] = df_persons.get("subscription_zones", pd.Series("", index = df_persons.index)).fillna("")
     
     # Extra scenario markers stay available to PersonWriter; imported external
     # populations have no such classification and receive explicit False defaults.
@@ -213,7 +211,7 @@ def execute(context):
         df_persons[column] = coerce_boolean_series(df_persons.get(column, pd.Series(False, index=df_persons.index)), name=column)
     df_persons["non_private_model_status"] = df_persons.get(
         "non_private_model_status", pd.Series("ordinary_models", index=df_persons.index)).fillna("ordinary_models")
-    df_persons    = df_persons[PERSON_FIELDS + SUBSCRIPTION_ZONE_FIELDS + ["lemanpass_annual_chf"] + residence_flags + ["non_private_model_status"]]
+    df_persons    = df_persons[PERSON_FIELDS + ["subscription_zones"] + residence_flags + ["non_private_model_status"]]
     df_activities = df_activities[ACTIVITY_FIELDS]
     df_vehicles   = df_vehicles[VEHICLE_FIELDS]
     df_vehicles["owner_id"] = df_vehicles["owner_id"].astype(int)
@@ -426,8 +424,8 @@ ACTIVITY_ATTRIBUTES_TO_SAVE = dict(municipalityType  = "municipality_type",
 PERSON_FIELDS = ["person_id", "age", "car_availability", "employed", "driving_license", "sex", "home_x", "home_y", "pt_subscription", "household_id", "is_car_passenger", 
                  "has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip", "has_pt_loop_trip", "has_bike_loop_trip", "income_class", "person_type", 
                  "cross_border_od", "bike_availability"]
-# synthesis.population.models.subscription_zones: the zones ("ZVV:110,121") and product of the regional subscriptions
-SUBSCRIPTION_ZONE_FIELDS = ["subscription_zones", "subscription_product", "lemanpass"]
+# The subscriptions attribute by pt_subscription
+SUBSCRIPTIONS = ["none", "GA", "VA", "HT", "VA+HT"]
 ACTIVITY_FIELDS = ["person_id", "activity_index", "start_time", "end_time", "duration", "purpose", "is_last","geometry", "destination_id", "following_mode", 
                    "municipality_type","municipality_id", "employee_density", "companies_density", "population_density", "ovgk"]
 PERSONS_DTYPES = {"person_id": int, "age": int, "car_availability": int, "bike_availability": int, "employed": bool, "driving_license": bool,
@@ -441,6 +439,14 @@ def _require_cols(df, cols, df_name):
     missing = [c for c in cols if c not in df.columns]
     if missing:
         raise KeyError(f"{df_name} is missing required columns: {missing}")
+
+
+def format_regional_products(zones):
+    """The RegionalSubscriptionProducts attribute: the zones of the regional subscription per fare network, the networks
+    joined by "+", e.g. ZVV:110,121+Unireso:10; empty without zones. zones: subscription_zones of
+    synthesis.population.models.subscription_zones ("ZVV:110,121", several networks separated by ";")."""
+    networks = [part.split(":", 1) for part in str(zones or "").split(";") if ":" in part]
+    return "+".join(f"{network.strip()}:{','.join(z.strip() for z in codes.split(','))}" for network, codes in networks)
 
 
 def _na_to(x, to=None):
@@ -539,15 +545,11 @@ class PersonWriter:
         writer.add_attribute("home_coordinate_y", "java.lang.Double", str(p.home_y))
         writer.add_attribute("carAvail", "java.lang.String", ["never", "always"][int(p.car_availability)])
 
-        writer.add_attribute("subscriptions", "java.lang.String", ["none", "GA", "VA", "HT", "VA+HT"][int(p.pt_subscription)])
-        # the regional subscription: its zones, Verbundabo or Léman Pass, and the Léman Pass product and annual price
-        if p.subscription_product:
-            writer.add_attribute("subscriptionProduct", "java.lang.String", escape(p.subscription_product))
-        if p.subscription_zones:
-            writer.add_attribute("subscriptionZones", "java.lang.String", escape(p.subscription_zones))
-        if p.lemanpass:
-            writer.add_attribute("lemanPass", "java.lang.String", escape(p.lemanpass))
-            writer.add_attribute("lemanPassAnnualPrice", "java.lang.Double", str(float(p.lemanpass_annual_chf)))
+        writer.add_attribute("subscriptions", "java.lang.String", SUBSCRIPTIONS[int(p.pt_subscription)])
+        # the zones of the regional subscription, per fare network (see format_regional_products)
+        regional_products = format_regional_products(p.subscription_zones)
+        if regional_products:
+            writer.add_attribute("RegionalSubscriptionProducts", "java.lang.String", escape(regional_products))
 
         writer.add_attribute("isCarPassenger", "java.lang.Boolean", writer.true_false(getattr(p, "is_car_passenger", False)))
         # Keep assumptions discoverable in the final population XML, not only

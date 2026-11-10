@@ -52,8 +52,7 @@ def configure(context):
     context.config("threads", volatile = True)
     context.config("gtfs_date", "dayWithMostServices")   # the same default as data.gtfs.cleaned
 
-    # The inputs of the zone polygons and tracks, relative to data_path (the same as data.pt_pricing.zones)
-    context.config("pt_zones_municipalities_file", default = "pt_pricing/tarifverbundkarte.geojson")
+    # The communes abroad and the rail lines of the tracks, relative to data_path (the same as data.pt_pricing.zones)
     context.config("pt_zones_foreign_communes_file", default = "pt_pricing/communes_france.gpkg")
     context.config("pt_zones_foreign_zones_file", default = "pt_pricing/unireso_france_zones.csv")
     context.config("pt_zones_lines_file", default = "pt_pricing/linie-mit-polygon.geojson")
@@ -74,6 +73,7 @@ def configure(context):
     context.stage("synthesis.population.spatial.primary.locations")
     context.stage("data.gtfs.cleaned")
     context.stage("data.pt_pricing.pt_pricing")
+    context.stage("data.pt_pricing.zones")
     if context.config("subscription_zones_bus_tracks"):
         context.stage("matsim.scenario.network.pt")
 
@@ -85,7 +85,7 @@ def execute(context):
     persons = context.stage("synthesis.population.models.subscriptions")
     work, education = context.stage("synthesis.population.spatial.primary.locations")[:2]
 
-    # Load the timetable, the fares and the tracks of the rides with the zones they cross.
+    # Load the timetable, the fares, the zone polygons (data.pt_pricing.zones) and the tracks of the rides with the zones they cross.
 
     data_path = context.config("data_path")
     data_file = lambda option: os.path.join(data_path, context.config(option))
@@ -97,10 +97,10 @@ def execute(context):
         paths = context.stage("matsim.scenario.network.pt")
         schedule_path, network_path = paths["schedule"], paths["network"]
 
+    zones = context.stage("data.pt_pricing.zones")
+    zones_path = "%s/pt_zones.gpkg" % context.path("data.pt_pricing.zones")
+    tracks = build_tracks(net, data_file("pt_zones_lines_file"), zones, zones_path, schedule_path, network_path, cache_dir = context.path())
     foreign = [data_file("pt_zones_foreign_communes_file"), data_file("pt_zones_foreign_zones_file")]
-    tracks = build_tracks(net, Pricing(pricing_path), data_file("pt_zones_lines_file"), data_file("pt_zones_municipalities_file"),
-                          schedule_path, network_path, cache_dir = context.path(),
-                          foreign_communes_path = foreign[0], foreign_zones_path = foreign[1])
     pricing = Pricing(pricing_path, tracks = tracks)
     rows = foreign_stop_zones(net, tracks.zones, *foreign)
     added = pricing.add_stop_zones(zip(rows["stop_id"], rows["network"], rows["zone"]))
