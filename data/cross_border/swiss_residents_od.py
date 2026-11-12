@@ -33,7 +33,7 @@ def configure(context):
     context.stage("data.spatial.cantons")
     context.stage("data.cross_border.interview_places")
     context.stage("data.cross_border.road_candidates")
-    context.stage("data.cross_border.car_targets")
+    context.stage("data.cross_border.car_target_calibration")
     context.stage("data.cross_border.pt_gateways")
     context.stage("data.spatial.swiss_border")
     context.stage("data.spatial.nuts")
@@ -55,7 +55,7 @@ def execute(context):
     # affects passengers only; it cannot change the number of generated drivers.
 
     borders, calibration = calibrate_demand(
-        borders2015, borders2021, context.stage("data.cross_border.car_targets"))
+        borders2015, borders2021, context.stage("data.cross_border.car_target_calibration"))
     borders = repair_car_occupancy(borders, rng)
     write_survey_audit(context, borders2015, borders, calibration, swiss_residents = True)
     borders = borders.loc[borders["location_usable"]].copy()
@@ -209,13 +209,8 @@ def process_from_to_trips(df_trips, context, rng):
 
 def place_pt_border_points(df, context, rng):
     """
-    Moves the border activity of the public transport records off the interview
-    place: to the real foreign end of the trip if it lies within border_offset of
-    the Swiss border (the simulated perimeter), and otherwise to a gateway station
-    of the surveyed crossing (data.cross_border.pt_gateways, see generate_od.
-    sample_gateway) - among those served by long-distance trains for the
-    long-distance travellers. Same rule as data.cross_border.generate_od for the
-    foreign residents. The
+    Moves every foreign public transport endpoint to a served gateway station
+    of the surveyed crossing, using the same rule as foreign residents. The
     interview_point_id is left untouched: it remains the crossing the record was
     surveyed at.
     """
@@ -235,27 +230,22 @@ def place_pt_border_points(df, context, rng):
 
     points = df["border_crossing_point"].values.copy()
     moved_to_gateway = 0
+    nearby_pt_rng = np.random.RandomState(context.config("random_seed"))
 
     for index in np.flatnonzero(is_pt):
-        if is_close[index]:
-            points[index] = ends.iloc[index]
-            continue
-
         candidates = grouped_gateways.get(df["interview_place"].iloc[index])
         if candidates is None or len(candidates) == 0:
-            continue
-
-        if df["train_category"].iloc[index] == "long_distance" and candidates["has_long_distance"].any():
-            candidates = candidates[candidates["has_long_distance"]]
+            raise ValueError(f"No rail gateway for {df['interview_place'].iloc[index]!r}; check the transit schedule or gateway overrides")
 
         home = Point(df["origin_x"].iloc[index], df["origin_y"].iloc[index])
-        points[index] = sample_gateway(candidates, ends.iloc[index], home, rng)["geometry"]
+        points[index] = sample_gateway(candidates, ends.iloc[index], home,
+                                       nearby_pt_rng if is_close[index] else rng,
+                                       train_category = df["train_category"].iloc[index])["geometry"]
         moved_to_gateway += 1
 
     df["border_crossing_point"] = points
 
-    logger.info("Swiss residents by public transport: %d placed at their real destination abroad, %d at a pt gateway station, %d left on the interview place",
-                int((is_pt & is_close).sum()), moved_to_gateway, int(is_pt.sum() - (is_pt & is_close).sum() - moved_to_gateway))
+    logger.info("Swiss residents by public transport: all %d foreign endpoints placed at a rail gateway", moved_to_gateway)
 
     return df
 

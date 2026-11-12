@@ -265,6 +265,14 @@ def attach_references(counts, references, day, reference_cohort="expanded"):
         if int(ref["fid"]) in used:
             raise ValueError("Duplicate traffic-count reference FID")
         used.add(int(ref["fid"]))
+        if ref.get("keep_assignment") is True:
+            if ref.get("low") is not None or ref.get("high") is not None:
+                raise ValueError("Unmeasured retained sites must not supply count targets")
+            if matches.sum() == 1:
+                i = result.index[matches][0]
+                result.loc[i, ["name", "reference_note"]] = [ref["name"], ref.get("note", "")]
+            audit.append(dict(fid=ref["fid"], status="explicitly_unmeasured"))
+            continue
         low, high = float(ref["low"]), float(ref.get("high", ref["low"]))
         if not np.isfinite([low, high]).all() or low <= 0 or high < low:
             raise ValueError("Traffic-count references require 0 < low <= high")
