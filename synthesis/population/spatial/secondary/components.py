@@ -6,6 +6,34 @@ from synthesis.population.spatial.secondary.opening_hours import eligible_candid
 
 logger = logging.getLogger("synpp")
 
+
+class DestinationAcceptance:
+    """Soft proposal acceptance, with one factor per distinct activity purpose."""
+
+    def __init__(self, destinations, random):
+        self.random = random
+        self.probabilities = {}
+        for purpose, data in destinations.items():
+            values = np.asarray(data.get("proposal_acceptance", np.ones(len(data["identifiers"]))), dtype=float)
+            if values.shape != (len(data["identifiers"]),) or not np.all(
+                    np.isfinite(values) & (values >= 0) & (values <= 1)):
+                raise ValueError("Proposal acceptance must be aligned probabilities in [0, 1]")
+            selected = values < 1
+            self.probabilities[purpose] = dict(zip(data["identifiers"][selected], values[selected]))
+
+    def probability(self, problem, discretization):
+        by_purpose = {}
+        for purpose, identifier in zip(problem["purposes"], discretization["identifiers"], strict=True):
+            probability = self.probabilities.get(purpose, {}).get(identifier, 1.0)
+            by_purpose[purpose] = min(by_purpose.get(purpose, 1.0), probability)
+        # Stable ordering avoids process-dependent set iteration in products.
+        return float(np.prod([by_purpose[purpose] for purpose in sorted(by_purpose)]))
+
+    def accept(self, probability):
+        # Deterministic cases do not advance this separate random stream.
+        return probability >= 1 or (probability > 0 and self.random.random_sample() < probability)
+
+
 class CustomDistanceSampler(rda.FeasibleDistanceSampler):
     def __init__(self, random, distributions, maximum_iterations = 1000):
         rda.FeasibleDistanceSampler.__init__(self, random=random, maximum_iterations=maximum_iterations)

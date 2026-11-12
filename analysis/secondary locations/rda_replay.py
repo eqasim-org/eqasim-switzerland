@@ -22,7 +22,24 @@ def replay_rda(cache, cohort, inputs, draws, seed):
                          on=['person_id','trip_id'],validate='one_to_one').reset_index(drop=True)
     if len(frame) != len(cohort) or not np.isfinite(frame.travel_time).all() or (frame.travel_time < 0).any():
         raise ValueError('RDA replay needs a finite nonnegative travel time for every common survey trip')
-    destinations = locations_rda.prepare_destinations(SimpleNamespace(stage=cache.stage))
+    # Older frozen caches predate the optional country preferences.
+    recorded = cache.settings
+    acceptance = recorded.get('secondary_rda_france_acceptance', 1.0)
+    prefix = 'secondary_rda_france_acceptance.'
+    if any(prefix + purpose in recorded for purpose in locations_rda.FRANCE_PURPOSES):
+        acceptance = {purpose: recorded.get(prefix + purpose, 1.0)
+                      for purpose in locations_rda.FRANCE_PURPOSES}
+    country_config = {
+        'secondary_rda_france_acceptance': acceptance,
+        'secondary_rda_france_repair_attempts': recorded.get('secondary_rda_france_repair_attempts', 0),
+        'generate_outbound_flows': cache.config('generate_outbound_flows', False),
+        # This observed-origin replay supplies no activity time windows.
+        'consider_opening_hours': False,
+    }
+    def destination_stage(name):
+        return cache.stage('synthesis.population.destinations' if name == 'secondary_destinations' else name)
+    destinations = locations_rda.prepare_destinations(SimpleNamespace(
+        stage=destination_stage, config=country_config.__getitem__))
     distributions = copy.deepcopy(cache.stage('synthesis.population.spatial.secondary.distance_distributions'))
     locations_rda.resample_distributions(distributions, dict(car=.8,car_passenger=1.,pt=1.,bike=0.,walk=0.,
         walk_loop=0.,bike_loop=0.,car_loop=.8,pt_loop=1.,car_passenger_loop=1.,remote_walk=0.))
@@ -46,7 +63,8 @@ def replay_rda(cache, cohort, inputs, draws, seed):
             primary['home'] = primary.geometry
             primary['work'] = primary.geometry
             primary['education'] = primary.geometry
-            data = dict(distance_distributions=distributions,detour_factor=detour)
+            data = dict(distance_distributions=distributions,detour_factor=detour,
+                        france_repair_attempts=country_config['secondary_rda_france_repair_attempts'])
             context = SimpleNamespace(data=lambda name:copy.deepcopy(destinations) if name=='destinations' else data[name],
                                       progress=SimpleNamespace(update=lambda:None))
             rng_seed = int(np.random.SeedSequence([seed,draw,int(car),7241]).generate_state(1)[0])

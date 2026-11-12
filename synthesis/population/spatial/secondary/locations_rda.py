@@ -1,18 +1,22 @@
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from synthesis.population.spatial.secondary.components import CustomDistanceSampler, CustomDiscretizationSolver, CandidateIndex, CustomFreeChainSolver
+import shapely
+from synthesis.population.spatial.secondary.components import CustomDistanceSampler, CustomDiscretizationSolver, CandidateIndex, CustomFreeChainSolver, DestinationAcceptance
 from synthesis.population.spatial.secondary.problems import find_assignment_problems
 from synthesis.population.spatial.secondary.opening_hours import encode_schedules
 from synthesis.population.spatial.secondary.rda import AssignmentSolver, DiscretizationErrorObjective, \
     GravityChainSolver, AngularTailSolver, GeneralRelaxationSolver
 import logging
 import copy
+from collections.abc import Mapping
+from synthesis.population.spatial.secondary.fallback_repair import SwissFallbackRepair
 
 logger = logging.getLogger("synpp")
 
 NUMBER_CANDIDATES = 20
 ALPHA_PROBABILITIES = 0.8
+FRANCE_PURPOSES = ("shop", "leisure", "other")
 
 def configure(context):
     context.stage("data.constants")
@@ -35,8 +39,162 @@ def configure(context):
     if context.config("consider_detour_factor_in_sl"):
         context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
 
+    context.config("secondary_rda_france_acceptance", 1.0)
+    context.config("secondary_rda_france_repair_attempts", 0)
+    context.config("generate_outbound_flows", False)
+    acceptance = france_acceptance(context.config("secondary_rda_france_acceptance"))
+    repair_attempts = france_repair_attempts(context.config("secondary_rda_france_repair_attempts"))
+    if repair_attempts:
+        if not context.config("generate_outbound_flows") or not any(value < 1 for value in acceptance.values()):
+            raise ValueError("French fallback repair requires outbound flows and active French proposal acceptance")
+        context.stage("data.spatial.swiss_border")
+    if context.config("generate_outbound_flows") and any(value < 1 for value in acceptance.values()):
+        context.stage("data.locations_fr.secondary")
+
     context.config("random_seed")
     context.config("threads", volatile=True)
+
+
+def execute(context):
+
+    # Load coordinate constants.
+
+    c    = context.stage("data.constants")
+    crs  = c.CH1903_PLUS
+
+    # Load car availability
+
+    df_car_availability     = context.stage("synthesis.population.enriched")[["person_id","car_availability","driving_license"]].copy()
+    df_car_availability["car_availability"] = ((df_car_availability["car_availability"].astype(int)==1) &
+                                               (df_car_availability["driving_license"]).astype(int)==1).astype(bool)        
+
+    # Load trips and primary locations
+
+    df_trips                = context.stage("synthesis.population.trips").sort_values(by=["person_id", "trip_index"])
+
+    # Border-crossing agents are located directly from data.cross_border.swiss_residents_od
+    # (see synthesis.population.spatial.locations), using the actual border-crossing point they
+    # were matched to in synthesis.population.trips. "border" is not a destination purpose known
+    # to this solver (see prepare_destinations), so these agents must be excluded here.
+
+    is_cb_trip   = (df_trips["preceding_purpose"] == "border") | (df_trips["following_purpose"] == "border")
+    cb_person_ids = set(df_trips.loc[is_cb_trip, "person_id"])
+    df_trips     = df_trips[~df_trips["person_id"].isin(cb_person_ids)]
+
+    df_trips                = pd.merge(df_trips, df_car_availability[["person_id","car_availability"]], how="left", on="person_id")
+    df_trips["travel_time"] = df_trips["arrival_time"] - df_trips["departure_time"]
+
+    # Duration of the activity reached by each trip; used by detour-factor heuristics.
+
+    df_trips["activity_duration"] = df_trips.groupby("person_id")["departure_time"].shift(-1) - df_trips["arrival_time"]
+    df_trips["activity_duration"] = df_trips["activity_duration"].fillna(0.0)
+    df_trips.loc[df_trips["activity_duration"] < 0.0, "activity_duration"] = 0.0
+    df_primary              = prepare_locations(context)
+
+    # Prepare data
+
+    distance_distributions = copy.deepcopy(context.stage("synthesis.population.spatial.secondary.distance_distributions"))
+    destinations = prepare_destinations(context)
+
+    # Resampling for calibration
+
+    resample_distributions(distance_distributions, dict(
+        car=0.8, car_passenger=1.0, pt=1.0, bike=0.0, walk=0.0, walk_loop=0.0, bike_loop=0.0, 
+        car_loop=0.8, pt_loop=1.0, car_passenger_loop = 1.0, remote_walk = 0.0
+    ))
+
+    # Segment into subsamples (pt agents with car availability / without car availability in the same batch)
+
+    processes = max(1, min(context.config("threads"), 24))
+
+    unique_person_ids_carAvail = df_trips[df_trips["car_availability"] == True]["person_id"].unique()
+    unique_person_ids_noCar = df_trips[df_trips["car_availability"] == False]["person_id"].unique()
+    
+    number_of_persons = len(unique_person_ids_carAvail) + len(unique_person_ids_noCar)
+    processes_carAvail = int((len(unique_person_ids_carAvail)/number_of_persons) * processes)
+    unique_person_ids_carAvail = np.array_split(unique_person_ids_carAvail, processes_carAvail)
+    unique_person_ids_noCar = np.array_split(unique_person_ids_noCar, processes - processes_carAvail)
+    unique_person_ids = unique_person_ids_carAvail + unique_person_ids_noCar
+    assert len(unique_person_ids) == processes
+
+    rng = np.random.RandomState(context.config("random_seed"))
+    random_seeds = rng.randint(10000, size=processes)
+
+    # Create batch problems for parallelization
+
+    batches = []
+
+    for index in range(processes):
+        batch_trips = df_trips[df_trips["person_id"].isin(unique_person_ids[index])]
+        batches.append((
+            batch_trips,
+            df_primary[df_primary["person_id"].isin(unique_person_ids[index])],
+            random_seeds[index],
+            crs,
+            batch_trips["car_availability"].iloc[0] # all persons in batch have same car availability
+        ))
+
+    # Load detour factors if they are used
+
+    detour_factor = None
+    if context.config("consider_detour_factor_in_sl"):
+        detour_factor = context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
+
+    # Run algorithm in parallel
+
+    with context.progress(label="Assigning secondary locations to persons", total=number_of_persons):
+        with context.parallel(processes = processes, data=dict(
+                distance_distributions = distance_distributions,
+                destinations = destinations,
+                france_repair_attempts = france_repair_attempts(context.config("secondary_rda_france_repair_attempts")),
+                detour_factor = detour_factor
+                )) as parallel:
+            df_locations, df_convergence = [], []
+
+            for df_locations_item, df_convergence_item in parallel.imap_unordered(process, batches):
+                df_locations.append(df_locations_item)
+                df_convergence.append(df_convergence_item)
+
+    df_locations = pd.concat(df_locations).sort_values(by=["person_id", "trip_index"])
+    df_convergence = pd.concat(df_convergence)
+
+    logger.info("Success rate: %f", df_convergence["valid"].mean())
+    logger.info("RDA country preference: %d rejected valid proposals, %d valid fallbacks, %d invalid preference fallbacks",
+                df_convergence["rejected_valid_candidates"].sum(),
+                df_convergence["preference_fallback"].sum(),
+                df_convergence["preference_invalid_fallback"].sum())
+    logger.info("RDA French fallback repair: %d attempted chains, %d repaired, %d evaluated replacements",
+                df_convergence["repair_attempted"].sum(), df_convergence["repair_success"].sum(),
+                df_convergence["repair_trials"].sum())
+
+    # Return stage results.
+
+    return df_locations, df_convergence
+
+
+def france_acceptance(value):
+    """Accept scalar/purpose probabilities; omitted purposes are unrestricted."""
+    values = dict(value) if isinstance(value, Mapping) else dict.fromkeys(FRANCE_PURPOSES, value)
+    unknown = set(values) - set(FRANCE_PURPOSES)
+    if unknown:
+        raise ValueError("Unknown secondary_rda_france_acceptance purposes: %s" % sorted(unknown))
+    result = dict.fromkeys(FRANCE_PURPOSES, 1.0)
+    for purpose, probability in values.items():
+        try:
+            probability = float(probability)
+        except (TypeError, ValueError) as error:
+            raise ValueError("French proposal acceptance must be finite probabilities in [0, 1]") from error
+        if not np.isfinite(probability) or not 0 <= probability <= 1:
+            raise ValueError("French proposal acceptance must be finite probabilities in [0, 1]")
+        result[purpose] = probability
+    return result
+
+
+def france_repair_attempts(value):
+    """A zero default disables local fallback repair without changing RNG draws."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) or value < 0:
+        raise ValueError("secondary_rda_france_repair_attempts must be a nonnegative integer")
+    return int(value)
 
 
 def prepare_locations(context):
@@ -54,6 +212,17 @@ def prepare_locations(context):
 
 def prepare_destinations(context):
     df_destinations = context.stage("secondary_destinations")
+    acceptance = france_acceptance(context.config("secondary_rda_france_acceptance"))
+    french_ids = set()
+    if context.config("generate_outbound_flows") and any(value < 1 for value in acceptance.values()):
+        french_ids = set(context.stage("data.locations_fr.secondary")["destination_id"])
+        logger.info("French RDA proposal acceptance: %s", acceptance)
+    is_french = df_destinations["destination_id"].isin(french_ids).to_numpy()
+    repair_swiss = None
+    if france_repair_attempts(context.config("secondary_rda_france_repair_attempts")):
+        border = context.stage("data.spatial.swiss_border").to_crs(df_destinations.crs).geometry.union_all()
+        shapely.prepare(border)
+        repair_swiss = shapely.intersects(border, df_destinations.geometry.array) & ~is_french
 
     identifiers = df_destinations["destination_id"].values
     locations = np.column_stack((df_destinations.geometry.x.to_numpy(), df_destinations.geometry.y.to_numpy()))
@@ -66,6 +235,7 @@ def prepare_destinations(context):
 
         data[purpose] = dict(
             identifiers=identifiers[f],
+            proposal_acceptance=np.where(is_french[f], acceptance.get(purpose, 1.0), 1.0),
             locations=locations[f],
             ovgk=df_destinations["ovgk"].values[f],
             number_employees=np.nan_to_num(number_employees[f], nan=1.0, posinf=1.0, neginf=1.0)
@@ -73,6 +243,8 @@ def prepare_destinations(context):
         if context.config("consider_opening_hours") and purpose in ("shop", "leisure"):
             data[purpose]["opening_schedule"] = encode_schedules(df_destinations.loc[f, purpose + "_open_intervals"])
             data[purpose]["opening_tolerance_seconds"] = float(context.config("opening_hours_tolerance_minutes")) * 60.
+        if repair_swiss is not None:
+            data[purpose]["repair_swiss"] = repair_swiss[f]
 
     return data
 
@@ -93,101 +265,6 @@ def resample_distributions(distributions, factors):
             distribution["cdf"] = resample_cdf(distribution["cdf"], factors[mode])
 
 
-def execute(context):
-    c    = context.stage("data.constants")
-    crs  = c.CH1903_PLUS
-
-    # Load car availability
-    df_car_availability     = context.stage("synthesis.population.enriched")[["person_id","car_availability","driving_license"]].copy()
-    df_car_availability["car_availability"] = ((df_car_availability["car_availability"].astype(int)==1) &
-                                               (df_car_availability["driving_license"]).astype(int)==1).astype(bool)        
-
-    # Load trips and primary locations
-    df_trips                = context.stage("synthesis.population.trips").sort_values(by=["person_id", "trip_index"])
-
-    # Border-crossing agents are located directly from data.cross_border.swiss_residents_od
-    # (see synthesis.population.spatial.locations), using the actual border-crossing point they
-    # were matched to in synthesis.population.trips. "border" is not a destination purpose known
-    # to this solver (see prepare_destinations), so these agents must be excluded here.
-    is_cb_trip   = (df_trips["preceding_purpose"] == "border") | (df_trips["following_purpose"] == "border")
-    cb_person_ids = set(df_trips.loc[is_cb_trip, "person_id"])
-    df_trips     = df_trips[~df_trips["person_id"].isin(cb_person_ids)]
-
-    df_trips                = pd.merge(df_trips, df_car_availability[["person_id","car_availability"]], how="left", on="person_id")
-    df_trips["travel_time"] = df_trips["arrival_time"] - df_trips["departure_time"]
-    # Duration of the activity reached by each trip; used by detour-factor heuristics.
-    df_trips["activity_duration"] = df_trips.groupby("person_id")["departure_time"].shift(-1) - df_trips["arrival_time"]
-    df_trips["activity_duration"] = df_trips["activity_duration"].fillna(0.0)
-    df_trips.loc[df_trips["activity_duration"] < 0.0, "activity_duration"] = 0.0
-    df_primary              = prepare_locations(context)
-
-    # Prepare data
-    distance_distributions = copy.deepcopy(context.stage("synthesis.population.spatial.secondary.distance_distributions"))
-    destinations = prepare_destinations(context)
-
-    # Resampling for calibration
-    resample_distributions(distance_distributions, dict(
-        car=0.8, car_passenger=1.0, pt=1.0, bike=0.0, walk=0.0, walk_loop=0.0, bike_loop=0.0, 
-        car_loop=0.8, pt_loop=1.0, car_passenger_loop = 1.0, remote_walk = 0.0
-    ))
-
-    # Segment into subsamples (pt agents with car availability / without car availability in the same batch)
-    processes = max(1, min(context.config("threads"), 24))
-
-    unique_person_ids_carAvail = df_trips[df_trips["car_availability"] == True]["person_id"].unique()
-    unique_person_ids_noCar = df_trips[df_trips["car_availability"] == False]["person_id"].unique()
-    
-    number_of_persons = len(unique_person_ids_carAvail) + len(unique_person_ids_noCar)
-    processes_carAvail = int((len(unique_person_ids_carAvail)/number_of_persons) * processes)
-    unique_person_ids_carAvail = np.array_split(unique_person_ids_carAvail, processes_carAvail)
-    unique_person_ids_noCar = np.array_split(unique_person_ids_noCar, processes - processes_carAvail)
-    unique_person_ids = unique_person_ids_carAvail + unique_person_ids_noCar
-    assert len(unique_person_ids) == processes
-
-    rng = np.random.RandomState(context.config("random_seed"))
-    random_seeds = rng.randint(10000, size=processes)
-
-    # Create batch problems for parallelization
-    batches = []
-
-    for index in range(processes):
-        batch_trips = df_trips[df_trips["person_id"].isin(unique_person_ids[index])]
-        batches.append((
-            batch_trips,
-            df_primary[df_primary["person_id"].isin(unique_person_ids[index])],
-            random_seeds[index],
-            crs,
-            batch_trips["car_availability"].iloc[0] # all persons in batch have same car availability
-        ))
-
-    # Load detour factors if they are used
-    detour_factor = None
-    if context.config("consider_detour_factor_in_sl"):
-        detour_factor = context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
-
-    # Run algorithm in parallel
-    with context.progress(label="Assigning secondary locations to persons", total=number_of_persons):
-        with context.parallel(processes = processes, data=dict(
-                distance_distributions = distance_distributions,
-                destinations = destinations,
-                detour_factor = detour_factor
-                )) as parallel:
-            df_locations, df_convergence = [], []
-
-            for df_locations_item, df_convergence_item in parallel.imap_unordered(process, batches):
-                df_locations.append(df_locations_item)
-                df_convergence.append(df_convergence_item)
-
-    df_locations = pd.concat(df_locations).sort_values(by=["person_id", "trip_index"])
-    df_convergence = pd.concat(df_convergence)
-
-    logger.info("Success rate: %f", df_convergence["valid"].mean())
-
-    # df_locations.to_csv("/cluster/project/cmdp/asallard/analysis/Crossborder/MZ/secondary_destinations.csv", index=False)
-
-    return df_locations, df_convergence
-
-
 def process(context, arguments):
     df_trips, df_primary, random_seed, crs, car_availability = arguments
 
@@ -201,11 +278,9 @@ def process(context, arguments):
         # choose secondary location where public transport is more accessible (ovgk A, B, C, D)
         for k,v in destinations.items():
             mask = (v["ovgk"]=='A') | (v["ovgk"]=='B') | (v["ovgk"]=='C') | (v["ovgk"]=='D')
-            v["identifiers"] = v["identifiers"][mask]
-            v["locations"]   = v["locations"][mask]
-            v["number_employees"] = v["number_employees"][mask]
-            if "opening_schedule" in v:
-                v["opening_schedule"] = v["opening_schedule"][mask]
+            for field, value in v.items():
+                if np.ndim(value) > 0:
+                    v[field] = value[mask]
 
     # drop ovgk as it is not needed in the candidate index
     for v in destinations.values():
@@ -245,12 +320,23 @@ def process(context, arguments):
 
     assignment_objective = DiscretizationErrorObjective(
         thresholds=thresholds, random=rng, detour_factor=detour_factor)
+    proposal_acceptance = None
+    if any(np.any(data.get("proposal_acceptance", np.array([1.0])) < 1) for data in destinations.values()):
+        proposal_acceptance = DestinationAcceptance(
+            destinations, np.random.RandomState((int(random_seed) + 1000003) % (2**32)))
+    fallback_repair = None
+    if any("repair_swiss" in data for data in destinations.values()):
+        fallback_repair = SwissFallbackRepair(
+            destinations, assignment_objective, random_seed, context.data("france_repair_attempts"),
+            number_candidates=NUMBER_CANDIDATES, alpha_probabilities=ALPHA_PROBABILITIES)
     assignment_solver = AssignmentSolver(
         distance_sampler=distance_sampler,
         relaxation_solver=relaxation_solver,
         discretization_solver=discretization_solver,
         objective=assignment_objective,
-        maximum_iterations=200
+        maximum_iterations=200,
+        proposal_acceptance=proposal_acceptance,
+        fallback_repair=fallback_repair
     )
 
     person_ids = []
@@ -280,8 +366,14 @@ def process(context, arguments):
             x_coordinates.append(locations[:, 0])
             y_coordinates.append(locations[:, 1])
 
-        df_convergence.append((
-            result["valid"], problem["size"]
+        df_convergence.append(dict(
+            person_id=problem["person_id"], activity_index=problem["activity_index"],
+            size=problem["size"], **{key: result[key] for key in (
+                "valid", "attempts", "valid_candidates", "rejected_valid_candidates",
+                "preference_accepted", "preference_probability", "preference_fallback",
+                "preference_invalid_fallback", "pre_repair_valid", "pre_repair_probability",
+                "repair_attempted", "repair_trials", "repair_success", "repair_status"
+            )}
         ))
 
         if problem["person_id"] != last_person_id:
@@ -314,7 +406,12 @@ def process(context, arguments):
     )
     assert not df_locations["geometry"].isna().any()
 
-    df_convergence = pd.DataFrame.from_records(df_convergence, columns=["valid", "size"])
+    df_convergence = pd.DataFrame.from_records(df_convergence, columns=[
+        "valid", "size", "person_id", "activity_index", "attempts", "valid_candidates",
+        "rejected_valid_candidates", "preference_accepted", "preference_probability",
+        "preference_fallback", "preference_invalid_fallback", "pre_repair_valid", "pre_repair_probability",
+        "repair_attempted", "repair_trials", "repair_success", "repair_status"
+    ])
     return df_locations, df_convergence
 
 
