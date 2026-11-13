@@ -137,7 +137,8 @@ def survey(cache):
         'driving_license', 'municipality_type', 'home_x', 'home_y', 'work_x', 'work_y']].copy()
     persons['car_available'] = persons.pop('car_availability').ne(2)  # 0=always, 1=sometimes, 2=never
     persons = persons.rename(columns={'person_weight': 'weight'})
-    trips = cache.stage('data.microcensus.trips')[0].copy()
+    trips = (cache.stage('data.microcensus.secondary_trips').copy()
+             if cache.candidates('data.microcensus.secondary_trips') else cache.stage('data.microcensus.trips')[0].copy())
     frame = trips.loc[trips.purpose.isin(PURPOSES)].merge(persons, on='person_id', validate='many_to_one')
     audit = {'weekday_secondary_trips_age_unrestricted': len(frame), 'survey_years': years}
     valid = np.isfinite(frame[['origin_x', 'origin_y', 'destination_x', 'destination_y', 'home_x', 'home_y']]).all(axis=1)

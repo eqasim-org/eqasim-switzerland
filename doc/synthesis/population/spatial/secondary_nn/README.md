@@ -17,6 +17,37 @@ config:
 uv run -m synpp config_dib_10.yml
 ```
 
+## Distance-free hierarchy-first routing
+
+With `secondary_nn_use_target_distance: false`, the default is now
+`secondary_nn_no_distance_routing: hierarchy`. Train the same four experts without
+any target-distance input. The selector, cross-fitted expert replicas, and selector
+training split are absent from the dependency graph. Each expert uses the full
+permitted survey pool and retains its configured person holdout for early stopping.
+There are four expert fits, just as in the distance-enabled pipeline.
+
+Inference samples the region first. If its entire enclosing box lies within
+`secondary_nn_hierarchy_short_threshold_m: 1600.0` of the original trip origin,
+switch immediately to the short-range expert. Otherwise sample the subregion,
+then the fine cell, applying the same conservative check at each level. Cells
+straddling the threshold continue through the hierarchy; a nearby centroid of a
+large cell cannot prematurely force a short trip. Finally check the actual
+sampled facility distance and refine once if it is at most 1.6 km.
+
+Short refinement always uses the original origin, rather than treating the
+hierarchy proposal as a second trip origin. Its existing origin-centred 1.8 km
+choice neighbourhood and expansion rules remain in place, allowing overlapping
+options beyond the routing boundary. There is no second routing decision after
+refinement, no added target-distance weighting, and no target-distance-based
+stationary bypass in this mode. Existing purpose and accessibility masks apply
+at every step. Boxes are cached once, so level checks require only scalar maths.
+`last_routing_level` records where the refinement was triggered.
+
+Explicit `secondary_nn_no_distance_routing: learned_selector` retains the previous
+cross-fitted mixture for historical experiments. Reports recover recorded policy
+from completed caches, including older runs without this new option. Distance-enabled
+routing and the 1.5 km short-expert training cutoff are unchanged.
+
 ## Purpose eligibility and spatial masks
 
 Secondary diary labels share the base facility offers: `work_secondary` uses
@@ -236,8 +267,8 @@ transition. Maximum epochs must exceed the warm-up period.
 The schedule applies separately within each allowed expert training pool; it
 never admits the selector's outer validation people or an excluded cross-fitting
 fold. `secondary_nn_crossfit_folds` remains three for unbiased selector inputs.
-There are four production expert fits with distance and sixteen expert fits
-without distance, plus one selector fit, rather than 24 and 96 network fits.
+There are four expert fits in both distance modes by default. The explicit legacy
+`learned_selector` policy uses sixteen expert fits plus one selector fit.
 
 `cross_validation_folds.json` records reserved and rotation people;
 `loss_history.json` records the phase, validation fold per epoch, best final-phase
@@ -278,7 +309,9 @@ Hierarchy and distance-free experts retain the shared distribution weight 0.1.
 Previous sweep reports used earlier choice-set/training versions; their rankings
 do not establish performance of the current model.
 
-## Cross-fitted probabilistic expert mixture
+## Legacy cross-fitted probabilistic expert mixture
+
+This section applies only to explicit `secondary_nn_no_distance_routing: learned_selector`.
 
 The historical `short_trip_classifier` stage name is retained, but it now saves
 a probabilistic mixture gate rather than a cost-difference regressor.

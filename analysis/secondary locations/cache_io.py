@@ -95,6 +95,10 @@ class RunCache:
             if len(candidates) == 1 and key in self.meta[candidates[0]]['config']:
                 return self.meta[candidates[0]]['config'][key]
         # Historical assignments must not replay with a newly edited sampling policy.
+        if key == 'secondary_nn_no_distance_routing':
+            return 'learned_selector'
+        if key == 'secondary_nn_hierarchy_short_threshold_m':
+            return 1600.
         if key == 'secondary_nn_short_sampling':
             return 'neural'
         if key == 'secondary_nn_short_distance_sigma_fraction':
@@ -114,8 +118,10 @@ class RunCache:
     def provenance(self):
         keys = ['locations_algorithm', 'secondary_nn_use_target_distance', 'random_seed',
                 'input_downsampling', 'scaling_year', 'census', 'specific_day_scenario',
+                'secondary_nn_no_distance_routing', 'secondary_nn_hierarchy_short_threshold_m',
                 'secondary_nn_short_trip_threshold_m', 'secondary_nn_short_sampling', 'secondary_nn_no_car_no_pt_weight',
                 'secondary_nn_short_distance_sigma_fraction', 'secondary_nn_short_distance_sigma_min_m']
         return dict(config=str(self.path), config_sha256=hashlib.sha256(self.path.read_bytes()).hexdigest(),
                     cache=str(self.directory), root=self.root, method=self.kind,
+                    debug=bool(self.meta[self.root].get("debug",False)),
                     recorded_settings={k: self.config(k) for k in keys}, artifacts=dict(self.used))

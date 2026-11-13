@@ -1,8 +1,8 @@
 # Paths are relative to the repository root. Simulation paths come from these files.
 configs:
-  - config_dib_10_rda.yml
-  - config_dib_10_nn_distance.yml
-  - config_dib_10_nn_no_distance.yml
+  - config_dib_10.yml
+  - config_dib_10_sNN.yml
+  - config_dib_10_sNNnD.yml
 output: analysis/secondary locations/results
 seed: 518745
 threads: 4
