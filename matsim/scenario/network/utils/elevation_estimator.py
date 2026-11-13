@@ -84,7 +84,7 @@ class ElevationEstimator:
         if self.coordinates is not None:
             return nodes
         
-    def run_on_nodes(self, nodes):
+    def run_on_nodes(self, nodes, *, interpolate_missing=True):
         if not isinstance(nodes, pd.DataFrame) or nodes.empty or "x" not in nodes or "y" not in nodes:
             raise ValueError("nodes must be a non-empty DataFrame with 'x' and 'y' columns.")
                 
@@ -100,7 +100,8 @@ class ElevationEstimator:
         if self.elevations_df is not None and not self.elevations_df.empty:
             self._save_elevations_to_csv()
         
-        nodes = self.fill_nans(nodes)  # Fill any remaining NaNs after initial assignment
+        if interpolate_missing:
+            nodes = self.fill_nans(nodes)  # Preserve existing network behaviour.
         return nodes
 
     def _assign_from_cache_and_fetch_missing(self, nodes):

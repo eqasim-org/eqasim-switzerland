@@ -21,6 +21,8 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Calibrated airport municipality-allocation model](data/airports/model.md)
 - [Sampled airport trips, endpoints, modes and departure times](data/airports/trips.md)
 
+- [MOBIS walking-speed and terrain-slope calibration](calibration/walking_speed.md)
+
 - [Simulation-region OSM businesses and weekday opening hours](data/osm/businesses.md)
 - [Canton opening-hours regions and donor masks](data/osm/opening_hours_regions.md)
 - [Destination shopping/leisure opening hours](synthesis/population/destinations_opening_hours.md)
