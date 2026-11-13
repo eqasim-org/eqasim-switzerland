@@ -22,18 +22,7 @@ def replay_rda(cache, cohort, inputs, draws, seed):
                          on=['person_id','trip_id'],validate='one_to_one').reset_index(drop=True)
     if len(frame) != len(cohort) or not np.isfinite(frame.travel_time).all() or (frame.travel_time < 0).any():
         raise ValueError('RDA replay needs a finite nonnegative travel time for every common survey trip')
-    # Resolve the alias against the policy recorded by the completed RDA producer.
-    producer = cache.resolve('synthesis.population.spatial.secondary.locations_rda')
-    recorded = cache.meta[producer]['config']
-    opening = bool(recorded.get('consider_opening_hours',False))
-    destination_stage = ('synthesis.population.destinations_opening_hours' if opening
-                         else 'synthesis.population.destinations')
-    def stage(name):
-        return cache.stage(destination_stage if name == 'secondary_destinations' else name)
-    def config(name):
-        return {'consider_opening_hours':opening,
-                'opening_hours_tolerance_minutes':recorded.get('opening_hours_tolerance_minutes',10.)}[name]
-    destinations = locations_rda.prepare_destinations(SimpleNamespace(stage=stage,config=config))
+    destinations, country_config = prepare_replay_destinations(cache, locations_rda)
     distributions = copy.deepcopy(cache.stage('synthesis.population.spatial.secondary.distance_distributions'))
     locations_rda.resample_distributions(distributions, dict(car=.8,car_passenger=1.,pt=1.,bike=0.,walk=0.,
         walk_loop=0.,bike_loop=0.,car_loop=.8,pt_loop=1.,car_passenger_loop=1.,remote_walk=0.))
@@ -58,7 +47,8 @@ def replay_rda(cache, cohort, inputs, draws, seed):
             primary['home'] = primary.geometry
             primary['work'] = primary.geometry
             primary['education'] = primary.geometry
-            data = dict(distance_distributions=distributions,detour_factor=detour)
+            data = dict(distance_distributions=distributions,detour_factor=detour,
+                        france_repair_attempts=country_config['secondary_rda_france_repair_attempts'])
             context = SimpleNamespace(data=lambda name:copy.deepcopy(destinations) if name=='destinations' else data[name],
                                       progress=SimpleNamespace(update=lambda:None))
             rng_seed = int(np.random.SeedSequence([seed,draw,int(car),7241]).generate_state(1)[0])
@@ -81,3 +71,32 @@ def replay_rda(cache, cohort, inputs, draws, seed):
     result['selected_short'],result['short_probability'] = np.nan,np.nan
     result['destination_pt'] = accessibility(result.destination_x,result.destination_y,cache.stage('data.spatial.ovgk'))
     return decorate(result,'rda')
+
+
+def prepare_replay_destinations(cache, locations_rda):
+    # Replay the completed producer's opening-hours and country-preference policy.
+    producer = cache.resolve('synthesis.population.spatial.secondary.locations_rda')
+    recorded = cache.meta[producer]['config']
+    opening = bool(recorded.get('consider_opening_hours', False))
+    destination_stage = ('synthesis.population.destinations_opening_hours' if opening
+                         else 'synthesis.population.destinations')
+    prefix = 'secondary_rda_france_acceptance.'
+    policy = recorded if any(key == prefix[:-1] or key.startswith(prefix) for key in recorded) else cache.settings
+    acceptance = policy.get('secondary_rda_france_acceptance', 1.0)
+    if any(prefix + purpose in policy for purpose in locations_rda.FRANCE_PURPOSES):
+        acceptance = {purpose: policy.get(prefix + purpose, 1.0)
+                      for purpose in locations_rda.FRANCE_PURPOSES}
+    country_config = {
+        'secondary_rda_france_acceptance': acceptance,
+        'secondary_rda_france_repair_attempts': recorded.get(
+            'secondary_rda_france_repair_attempts', cache.settings.get('secondary_rda_france_repair_attempts', 0)),
+        'generate_outbound_flows': recorded.get(
+            'generate_outbound_flows', cache.settings.get('generate_outbound_flows', False)),
+        'consider_opening_hours': opening,
+        'opening_hours_tolerance_minutes': recorded.get('opening_hours_tolerance_minutes', 10.),
+    }
+    def stage(name):
+        return cache.stage(destination_stage if name == 'secondary_destinations' else name)
+    destinations = locations_rda.prepare_destinations(SimpleNamespace(
+        stage=stage, config=country_config.__getitem__))
+    return destinations, country_config

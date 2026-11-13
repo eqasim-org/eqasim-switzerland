@@ -35,15 +35,21 @@ class AssignmentObjective:
         raise NotImplementedError()
 
 class AssignmentSolver:
-    def __init__(self, distance_sampler, relaxation_solver, discretization_solver, objective, maximum_iterations=1000):
+    def __init__(self, distance_sampler, relaxation_solver, discretization_solver, objective,
+                 maximum_iterations=1000, proposal_acceptance=None, fallback_repair=None):
         self.maximum_iterations    = maximum_iterations
         self.relaxation_solver     = relaxation_solver
         self.distance_sampler      = distance_sampler
         self.discretization_solver = discretization_solver
         self.objective             = objective
+        self.proposal_acceptance   = proposal_acceptance
+        self.fallback_repair       = fallback_repair
 
     def solve(self, problem):
         best_result = None
+        valid_candidates = 0
+        rejected_candidates = 0
+        accepted = False
 
         for assignment_iteration in range(self.maximum_iterations):
             distance_result = self.distance_sampler.sample(problem)
@@ -52,6 +58,10 @@ class AssignmentSolver:
             discretization_result = self.discretization_solver.solve(problem, relaxation_result["locations"])
 
             assignment_result = self.objective.evaluate(problem, distance_result, relaxation_result, discretization_result)
+            assignment_result.update(
+                distance=distance_result, relaxation=relaxation_result,
+                discretization=discretization_result, iterations=assignment_iteration
+            )
 
             is_better = False
             if best_result is None:
@@ -65,13 +75,41 @@ class AssignmentSolver:
             if is_better:
                 best_result = assignment_result
 
-                assignment_result["distance"]       = distance_result
-                assignment_result["relaxation"]     = relaxation_result
-                assignment_result["discretization"] = discretization_result
-                assignment_result["iterations"]     = assignment_iteration
+            # Country preference is checked only after physical feasibility.
+            # A rejection repeats the whole proposal, including distance sampling.
+            if assignment_result["valid"]:
+                valid_candidates += 1
+                if self.proposal_acceptance is None or self.proposal_acceptance.accept(
+                        self.proposal_acceptance.probability(problem, discretization_result)):
+                    best_result = assignment_result
+                    accepted = True
+                    break
+                rejected_candidates += 1
 
-            if best_result["valid"]:
-                break
+        # At the attempt limit, preserve the best physical solution and expose
+        # whether the country preference or geometric feasibility was unmet.
+        probability = (1.0 if self.proposal_acceptance is None else
+                       self.proposal_acceptance.probability(problem, best_result["discretization"]))
+        repair_diagnostics = dict(repair_attempted=False, repair_trials=0,
+                                  repair_success=False, repair_status="not_attempted")
+        original_valid, original_probability = bool(best_result["valid"]), probability
+        if not accepted and probability < 1 and self.fallback_repair is not None:
+            best_result, repair_diagnostics = self.fallback_repair.repair(problem, best_result)
+            probability = self.proposal_acceptance.probability(problem, best_result["discretization"])
+            if repair_diagnostics["repair_success"]:
+                assert best_result["valid"] and probability == 1
+                accepted = True
+        best_result.update(
+            attempts=assignment_iteration + 1,
+            valid_candidates=valid_candidates,
+            rejected_valid_candidates=rejected_candidates,
+            preference_accepted=accepted,
+            preference_probability=probability,
+            preference_fallback=bool(not accepted and best_result["valid"] and probability < 1),
+            preference_invalid_fallback=bool(not best_result["valid"] and probability < 1),
+            pre_repair_valid=original_valid, pre_repair_probability=original_probability,
+            **repair_diagnostics
+        )
 
         return best_result
     
