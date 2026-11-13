@@ -15,6 +15,12 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 
 ## Implementation guides
 
+- [Airport demand: workflow, evidence, configuration and refresh](data/airports/README.md)
+- [Geneva airport regional passenger demand](data/airports/geneva.md)
+- [Zurich airport passenger demand and available evidence](data/airports/zurich.md)
+- [Calibrated airport municipality-allocation model](data/airports/model.md)
+- [Sampled airport trips, endpoints, modes and departure times](data/airports/trips.md)
+
 - [Simulation-region OSM businesses and weekday opening hours](data/osm/businesses.md)
 - [Canton opening-hours regions and donor masks](data/osm/opening_hours_regions.md)
 - [Destination shopping/leisure opening hours](synthesis/population/destinations_opening_hours.md)
