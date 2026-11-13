@@ -7,6 +7,7 @@ from matsim.config.tools import change_params, get_regions_path, resolve_output_
 from .cutter_tools import cut_csv_to_region, cut_csv_to_network, cut_and_save_network_geometry
 import matsim.config.tools as config_tools
 from .file_paths import FilePaths, simulation_root
+from utils.gtfs_router.lemanpass import JAVA_FILES as LEMANPASS_FILES, write_java_tables as write_lemanpass_tables
 
 logger = logging.getLogger("synpp")
 
@@ -81,12 +82,15 @@ def execute(context):
         shutil.copy(global_shares_output_path, f"{output_path}/global_target_mode_shares.csv" )
     shutil.copy(cantonal_shares_output_path, f"{output_path}/cantonal_target_mode_shares.csv" )
 
-    # 3. pricing parameters
-    sbb_path, zones_path, pricing_path = (files.get(name) for name in
-                                          ("SBB_all_distances.csv", "gtfs_zones.csv", "pricingDescription.xml"))
-    shutil.copy(sbb_path, f"{output_path}/SBB_all_distances.csv" )
-    shutil.copy(zones_path, f"{output_path}/gtfs_zones.csv" )
-    shutil.copy(pricing_path, f"{output_path}/pricingDescription.xml" )
+    # 3. pricing parameters (empty Léman Pass tables first, replaced by those of the source when it has them)
+    write_lemanpass_tables(None, output_path)
+    for filename in config_tools.PT_PRICING_FILES.values():
+        try:
+            shutil.copy(files.get(filename), f"{output_path}/{filename}")
+        except FileNotFoundError:
+            if filename not in LEMANPASS_FILES.values():
+                raise
+            logger.warning(f"No {filename} in the source scenario: an empty Léman Pass table is used")
 
     # 4. calibration files (special regions and target files)
     calibrate_network, calibrate_disutilities, calibrate_freespeed, calibrate_agent_acs, calibrate_subpopulations = config_tools.get_network_cal_config_as_bool(context)
@@ -167,8 +171,6 @@ def execute(context):
                         ("eqasim:networkCalibration.agentAscsCalibration.highCountWeight","1.1"),
                         ("eqasim:networkCalibration.agentAscsCalibration.mediumCountWeight","1.05"),
                         ("eqasim:networkCalibration.agentAscsCalibration.lowCountWeight","1.0"),
-                        ("ptZones.ptZonesFilePath", "gtfs_zones.csv"),
-                        ("ptZones.sbbDistancesPath", "SBB_all_distances.csv"),
-                        ("ptZones.pricingDescriptionPath", "pricingDescription.xml")
+                        *((f"ptZones.{parameter}", filename) for parameter, filename in config_tools.PT_PRICING_FILES.items()),
                         ] )
     return output_path

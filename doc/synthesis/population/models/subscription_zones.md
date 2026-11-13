@@ -19,21 +19,37 @@ and the ride tracks (`zones`, `tracks`), the Léman Pass (`lemanpass`) and the m
    `data.pt_pricing.zones` (built from `tarifverbundkarte.geojson`, the zones of the
    stops in `gtfs_zones.csv` and the French communes of Unireso). The ride tracks are
    cut with the same polygons, so the stage uses one set of zones throughout.
+   The municipality outlines leave out the lakes and are coarse at the borders, so
+   a home or destination in no zone but within 100 m of one (`SNAP_M` in
+   `utils/gtfs_router/verbund.py`) is placed in the nearest zone, with the Z-Passes
+   that share it. In the 5% population this concerns 86 Verbundabo homes, mostly on
+   the shores of the Zürichsee; every home farther from a zone is in a municipality
+   without a fare network.
 3. The agents are grouped by zone OD. The subscription covers:
    - the home zone, without a destination or with one in the same zone;
    - the zones of the home network along the commute, within one network;
    - the Z-Pass zones along the commute, between two networks joined by a Z-Pass;
+   - in these two cases, always the home and destination zones too (a journey can
+     start or end with a walk to or from a stop of a neighbouring zone);
    - the zones of the home network until the first ride that leaves it, between
      two networks;
    - the zones of the destination network back from the destination, for a home
      in no network.
-4. In each zone OD, `subscription_zones_samples` commutes are routed on the
-   timetable of one day, leaving at `subscription_zones_departure`. The other
-   agents of the OD get the zones of one of these journeys, drawn with
-   `random_seed`. Without any journey, the home and destination zones are used.
+4. The commute of every agent whose home and destination are in different zones
+   is routed on the timetable of one day, leaving at `subscription_zones_departure`,
+   with the route-choice weights of the MATSim PT router
+   (`calibration.pt_routing.pt_routing_parameters`, calibrated when
+   `calibrate_pt_routing_params` is true),
+   and the agent gets the zones of its own journey. An agent without a journey gets
+   those of another agent of its zone OD, drawn with `random_seed`; without any
+   journey in the OD, the home and destination zones are used. With
+   `subscription_zones_samples` > 0, only that many commutes are routed per zone OD
+   and the other agents copy one of them: in the 5% test population (2026-11-10),
+   75% of the copying agents got the exact zones of their own journey and 16% missed
+   at least one zone (39% for Z-Pass commutes of five or more zones).
 5. A commute into the Léman Pass area abroad gets the cheapest annual Léman Pass
-   product that covers it, when `lemanpass.csv` and `lemanpass_places.csv` are in
-   `subscription_zones_lemanpass_path`. A product of zones only (`Zone 10 + Zone 230`)
+   product that covers it, when the tpg fare table (`tpg_<date>_Fare-system_Geneva.xlsx`)
+   is in `subscription_zones_lemanpass_path`. A product of zones only (`Zone 10 + Zone 230`)
    covers every journey inside its zones, trains included: Genève - Lancy-Bachet by
    train and the bus to Saint-Julien gets `Zone 10 + Zone 230`. This rule is in the
    eqasim copy of `lemanpass.py`, not yet in the Swiss PT explorer.
@@ -44,8 +60,8 @@ and the ride tracks (`zones`, `tracks`), the Léman Pass (`lemanpass`) and the m
 | --- | --- | --- |
 | `subscription_zones_date` | empty | Routing date (YYYYMMDD); empty: `gtfs_date` if it is a date, else the first Tuesday of the feed |
 | `subscription_zones_departure` | `07:30` | Departure time of the routed commutes |
-| `subscription_zones_samples` | 3 | Commutes routed per zone OD |
-| `subscription_zones_lemanpass_path` | `pt_pricing/output` | Folder of the Léman Pass inputs, relative to `data_path` |
+| `subscription_zones_samples` | 0 | Commutes routed per zone OD; 0: every agent |
+| `subscription_zones_lemanpass_path` | `pt_pricing/output` | Folder of the tpg fare table, relative to `data_path` |
 | `subscription_zones_bus_tracks` | `true` | Buses follow their routes in `matsim.scenario.network.pt`; `false`: straight lines, without that dependency |
 | `pt_zones_lines_file` | `pt_pricing/linie-mit-polygon.geojson` | SBB rail lines, for the train tracks |
 | `subscription_zones_map_agents` | 400 | Agents drawn on the control map, spread over the cases; 0: no map |
@@ -54,9 +70,21 @@ The zone polygons use the `pt_zones_*` files of `data.pt_pricing.zones`. The
 timetable is the output of `data.gtfs.cleaned`, and the fares those of
 `data.pt_pricing.pt_pricing`. Routing uses `threads` processes.
 
-The Léman Pass inputs are in `pt_pricing/output` (copied from the Swiss PT explorer).
-They are written from the tpg fare table with
-`python -m utils.gtfs_router.lemanpass <fare table.xlsx> <folder>`.
+The Léman Pass fares are read directly from the tpg fare table, as in the Swiss PT
+explorer (sheets 1 and 3, the latest table if there are several). Reading it takes
+about 10 s, so the result is cached in the stage folder (`lemanpass_<hash>.pkl`) and
+read again only when the file changes. Without the table, the `lemanpass.csv` and
+`lemanpass_places.csv` written by older versions are read if they are in the folder.
+
+The stage also attaches the Léman Pass to the pricing (`pricing.lemanpass`), so
+`Pricing.price` can use a Léman Pass single ticket. It covers the train part of a
+journey into the area abroad and the bus and tram rides around it, and is kept when
+it is cheaper than the usual tickets. A usual Unireso ticket with a zone abroad is
+kept only if no Léman Pass ticket fits: Unireso itself sells only Zone 10. Single tickets have adult, child (6-15), youth
+(16-25) and half-fare prices. The half-fare card applies only to tickets with Swiss
+fares: SBB, a zone network with a stop in Switzerland, or a distance-based ticket with
+no stop abroad. Under 16, half fare applies everywhere. Town zones sold only with their
+station (Zone 300, Thonon) no longer include the other stations inside them.
 
 In the current synthetic population, the work and education places of the Swiss
 residents are in Switzerland, also for those who cross the border: their trips

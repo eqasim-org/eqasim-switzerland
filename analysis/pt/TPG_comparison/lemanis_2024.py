@@ -3,6 +3,8 @@ import os
 
 import pandas as pd
 
+import gtfs_utils
+
 
 # Lemanis 2024: average occupancy (people on board) of each Leman Express train at the station
 # where it crosses the border, per weekday and month. It is a load on the border-crossing
@@ -10,8 +12,10 @@ import pandas as pd
 # line and direction on the load of the trains when they cross the border.
 FILE_NAME = "tpg_heures_passage_frontières_trains_LemanExpress_GTFS2024.xlsx"
 
-# Months kept: the other ones are not representative of the simulated (school-term) weekday.
-MONTHS = ["novembre"]
+# The simulation is an average working day of the year: all the months are kept, each weekday of each month weighted
+# by its number of days in the year of the data (school and public holidays included)
+MONTHS = {"janvier": 1, "février": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6, "juillet": 7, "août": 8,
+          "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12}
 
 # "F": Switzerland -> France, "CH": France -> Switzerland
 DIRECTION_SHEETS = {"F": "Sens Suisse->FR", "CH": "Sens France->CH"}
@@ -49,12 +53,22 @@ def resolve_days(day):
     else:
         raise ValueError(f"Unsupported specific_day_scenario: '{day}'")
 
-    return ["2 - Mardi"]#[_DAY_LABELS[name] for name in names]
+    return [_DAY_LABELS[name] for name in names]
+
+
+def day_weights(year, days):
+    """{(day label, month name): number of these weekdays in that month of the year}"""
+    dates = pd.date_range(f"{year}-01-01", f"{year}-12-31")
+    labels = {i: label for i, label in enumerate(_DAY_LABELS.values())}
+    counts = pd.Series(1, index = dates).groupby([dates.weekday, dates.month]).sum()
+    months = {number: name for name, number in MONTHS.items()}
+
+    return {(labels[weekday], months[month]): n for (weekday, month), n in counts.items() if labels[weekday] in days}
 
 
 def load_border_loads(lemanis_path, day = "workday"):
-    """Daily load of the trains at the border, per line and direction, as the mean over the days of
-    `day` of the sum over the trains of their occupancy (averaged over MONTHS).
+    """Daily load of the trains at the border, per line and direction: the sum over the trains of their mean occupancy,
+    for each weekday of `day` and month, averaged over these (weekday, month) weighted by their number of days.
 
     Returns a data frame with the columns line, direction, lemanis_load, lemanis_trains."""
     path = os.path.join(lemanis_path, FILE_NAME)
@@ -71,14 +85,20 @@ def load_border_loads(lemanis_path, day = "workday"):
         if direction == "F":
             df = df[df["stop"].str.upper().isin(_SWISS_BORDER_STOPS)]
 
-        # mean over the months for each train and day, then sum over the trains of a day
-        per_train = df.groupby(["day", "line", "train"], as_index = False)["occupancy"].mean()
-        per_day   = per_train.groupby(["day", "line"]).agg(load = ("occupancy", "sum"), trains = ("train", "nunique"))
+        # the load of a (weekday, month): the sum over its trains (a line without train that day counts 0)
+        per_day = df.groupby(["day", "month", "line"]).agg(load = ("occupancy", "sum"), trains = ("train", "nunique"))
+        cells   = df[["day", "month"]].drop_duplicates()
+        lines   = sorted(df["line"].unique())
+        full_index = pd.MultiIndex.from_tuples([(d, m, l) for d, m in cells.itertuples(index = False) for l in lines],
+                                               names = ["day", "month", "line"])
+        per_day = per_day.reindex(full_index, fill_value = 0).reset_index()
 
-        full_index = pd.MultiIndex.from_product([days, sorted(per_train["line"].unique())], names = ["day", "line"])
-        per_day    = per_day.reindex(full_index, fill_value = 0)
-
-        mean = per_day.groupby("line").mean().reset_index()
+        weights = day_weights(int(df["year"].iloc[0]), days)
+        per_day["weight"] = [weights[(d, m)] for d, m in zip(per_day["day"], per_day["month"])]
+        mean = per_day.groupby("line").apply(lambda g: pd.Series({
+            "load": (g["load"] * g["weight"]).sum() / g["weight"].sum(),
+            "trains": (g["trains"] * g["weight"]).sum() / g["weight"].sum(),
+        })).reset_index()
 
         for row in mean.itertuples():
             records.append({"line": row.line, "direction": direction,
@@ -98,7 +118,7 @@ def matsim_border_loads(counts, route_stops, stop_alias, input_downsampling):
     day, the cumulative boardings minus alightings of the stops up to it. So no vehicle level
     information is needed."""
     counts = counts[counts["line_name"].isin(BORDER_STATIONS)].copy()
-    counts["stop_base"] = counts["stop_id_gtfs"].str.split(":").str[0]
+    counts["stop_base"] = counts["stop_id_gtfs"].map(gtfs_utils.stop_code)
 
     records = []
     unknown_routes = set()
@@ -109,7 +129,7 @@ def matsim_border_loads(counts, route_stops, stop_alias, input_downsampling):
             unknown_routes.add((line_id, route_id))
             continue
 
-        sequence = [stop_alias.get(stop, stop).split(":")[0] for stop in (s.split(".")[0] for s in stops)]
+        sequence = [gtfs_utils.stop_code(stop_alias.get(stop, stop)) for stop in (s.split(".")[0] for s in stops)]
         swiss, french = BORDER_STATIONS[line_name]
 
         if swiss not in sequence or french not in sequence:

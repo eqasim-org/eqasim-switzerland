@@ -3,7 +3,7 @@ import shutil
 import matsim.runtime.eqasim as eqasim
 from matsim.config.tools import (
     java_boolean, parse_boolean, copy_config, adapt_existing_scenario,
-    resolve_output_file, scenario_input_parameters, change_params,
+    resolve_output_file, scenario_input_parameters, change_params, PT_PRICING_FILES,
 )
 import logging
 logger = logging.getLogger("synpp")
@@ -53,7 +53,7 @@ def execute(context):
     destination = os.path.join(output_path, config)
     copy_config(origin, destination, input_paths={
         "eqasim": ("modeParametersPath", "costParametersPath"),
-        "ptZones": ("ptZonesFilePath", "sbbDistancesPath", "pricingDescriptionPath"),
+        "ptZones": tuple(PT_PRICING_FILES),
         "eqasim:alphaCalibration": ("filePath",),
         "eqasim:networkCalibration": ("countsFile",),
         "eqasim:networkCalibration.costCalibration": ("specialRegionPath",),

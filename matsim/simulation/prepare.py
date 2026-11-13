@@ -122,16 +122,7 @@ def execute(context):
 
     # PT pricing
 
-    sbb_path, zones_path, pricing_path = context.stage("data.pt_pricing.pt_pricing")
-
-    sbb_output_path =  f"{context.path()}/SBB_all_distances.csv" 
-    shutil.copy(sbb_path, sbb_output_path)
-
-    zones_output_path =  f"{context.path()}/gtfs_zones.csv" 
-    shutil.copy(zones_path, zones_output_path)
-
-    pricing_output_path =  f"{context.path()}/pricingDescription.xml" 
-    shutil.copy(pricing_path, pricing_output_path)
+    config_tools.copy_pt_pricing_files(context.stage("data.pt_pricing.pt_pricing"), context.path())
 
     # copy the mode shares        
 

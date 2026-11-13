@@ -1,6 +1,8 @@
 """Paths to files copied into a cut scenario; no config parsing or copying."""
 from pathlib import Path
 
+from utils.gtfs_router.lemanpass import JAVA_FILES as LEMANPASS_FILES
+
 
 def simulation_root(context):
     source = context.config("cutter.scenario_path")
@@ -41,12 +43,15 @@ class FilePaths:
             "SBB_all_distances.csv": ("data.pt_pricing.pt_pricing", 0),
             "gtfs_zones.csv": ("data.pt_pricing.pt_pricing", 1),
             "pricingDescription.xml": ("data.pt_pricing.pt_pricing", 2),
+            **{filename: ("data.pt_pricing.pt_pricing", (3, name)) for name, filename in LEMANPASS_FILES.items()},
             "geometry": ("matsim.scenario.network.pt", "geometry"),
             "counts": ("analysis.counts.target", None),
             "travel_times": ("analysis.travel_times.APIs.target", None),
         }
         stage, key = stages[name]
         result = self.context.stage(stage)
+        if isinstance(key, tuple):   # a path in a dict of the result (the Léman Pass tables of data.pt_pricing.pt_pricing)
+            return result[key[0]][key[1]]
         return result if key is None else result[key]
 
     def regions(self, kind):

@@ -163,7 +163,7 @@ def match_line_directions(tpg_data_path, tpg_stops, counts_ge):
     counts_ge = counts_ge[["stop_id_gtfs", "line_name", "line_main_direction", "hour", "boardings", "alightings"]]
 
     counts_ge = counts_ge.copy()
-    counts_ge["stop_id_gtfs_base"] = counts_ge["stop_id_gtfs"].str.split(":").str[0]
+    counts_ge["stop_id_gtfs_base"] = counts_ge["stop_id_gtfs"].map(gtfs_utils.stop_code)
     counts_ge = counts_ge.groupby(["stop_id_gtfs_base", "line_name", "line_main_direction", "hour"])[["boardings", "alightings"]].sum().reset_index()
     counts_ge = counts_ge.merge(
         line_directions.rename(columns = {"line": "line_name", "direction": "direction_letter"}),

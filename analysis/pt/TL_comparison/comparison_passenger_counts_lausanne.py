@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from config import Config  # pyright: ignore[reportMissingImports]
 from pt_data import PtData # pyright: ignore[reportMissingImports]
 import comparison          # pyright: ignore[reportMissingImports]
+import gtfs_utils          # pyright: ignore[reportMissingImports]
 import line_matching       # pyright: ignore[reportMissingImports]
 import interactive_map     # pyright: ignore[reportMissingImports]
 import plotting            # pyright: ignore[reportMissingImports]
@@ -53,6 +54,11 @@ def configure(context):
     context.config("analysis.pt.tl_rebuild_counts", default = False)
     if context.config("analysis.pt.tl_rebuild_counts"):
         context.stage("analysis.pt.TL_comparison.tl_2024")
+
+    # Add the MBC counts (Morges region, analysis.pt.TL_comparison.mbc_2024) to the TL ones
+    context.config("analysis.pt.include_mbc", default = True)
+    if context.config("analysis.pt.include_mbc"):
+        context.stage("analysis.pt.TL_comparison.mbc_2024")
 
     context.config("analysis.pt.min_stop_avg_events",   default = 10.0)
     context.config("analysis.pt.min_stop_active_hours", default = 6)
@@ -92,6 +98,8 @@ def execute(context):
         sbb_year                = context.config("analysis.pt.tl_sbb_year"),
         counts_source           = context.config("analysis.pt.counts_source"),
         day_scenario            = context.config("specific_day_scenario"),
+        mbc_stats_path          = (context.stage("analysis.pt.TL_comparison.mbc_2024")["path"]
+                                   if context.config("analysis.pt.include_mbc") else None),
     )
 
     return dict(done = True, path = output_dir)
@@ -198,15 +206,20 @@ def line_modes_of(counts, mode_of_line_id):
     return {str(name): mode for name, mode in zip(modes["line_name"], modes["mode"])}
 
 
-def build_tl_mofr(data, tl_stats_path):
+def build_tl_mofr(data, tl_stats_path, mbc_stats_path = None):
     cfg = data.cfg
 
     counts = data.counts_in(data.stops_in_perimeter, own_lines_only = True)
-    counts["stop_id_gtfs_base"] = counts["stop_id_gtfs"].astype(str).str.split(":").str[0]
+    counts["stop_id_gtfs_base"] = counts["stop_id_gtfs"].map(gtfs_utils.stop_code)
     counts["line_name"] = counts["line_name"].astype(str)
 
     print(f"Loading the TL stats from {tl_stats_path}")
     tl_mofr = load_tl_line_stats(tl_stats_path)
+
+    # the MBC counts (mbc_2024) have the line names of the simulation and no line in common with the TL
+    if mbc_stats_path:
+        print(f"Loading the MBC stats from {mbc_stats_path}")
+        tl_mofr = _sum_stats(pd.concat([tl_mofr, load_tl_line_stats(mbc_stats_path)], ignore_index = True))
 
     # one transit line per line name, the one that the TL counts: the others are other networks or other modes
     counts = line_matching.select_line_ids(counts, tl_mofr, data.stop_coordinates, MAX_STOP_DISTANCE, label = "TL")
@@ -284,7 +297,10 @@ def build_tl_mofr(data, tl_stats_path):
 
 def run(gtfs_path, perimeter_shapefile, tl_processed_counts_path, matsim_output_folder, input_downsampling,
         output_dir = None, min_stop_avg_events = 10.0, min_stop_active_hours = 6, map_hour_start = 6, map_hour_end = 22,
-        night_hours = 5, sbb_path = None, sbb_year = 2024, counts_source = "auto", day_scenario = "workday"):
+        night_hours = 5, sbb_path = None, sbb_year = 2024, counts_source = "auto", day_scenario = "workday",
+        mbc_stats_path = None):
+
+    reference_name = REFERENCE_NAME + (" + MBC" if mbc_stats_path else "")
 
     tpg_data.counts_source_available(matsim_output_folder, counts_source)
 
@@ -308,7 +324,7 @@ def run(gtfs_path, perimeter_shapefile, tl_processed_counts_path, matsim_output_
     output_dir = output_dir or os.path.join(matsim_output_folder, "pt_comparison_tl_2024")
     os.makedirs(output_dir, exist_ok = True)
 
-    tl_mofr = build_tl_mofr(data, resolve_tl_stats_path(tl_processed_counts_path))
+    tl_mofr = build_tl_mofr(data, resolve_tl_stats_path(tl_processed_counts_path), mbc_stats_path)
 
     stop_hour_df     = comparison.build_stop_hour_table(tl_mofr, data.gtfs_stops, data.stops_in_perimeter)
     global_hourly_df = comparison.build_global_hourly_table(stop_hour_df)
@@ -321,11 +337,11 @@ def run(gtfs_path, perimeter_shapefile, tl_processed_counts_path, matsim_output_
     windowed_full_day_df.to_csv(os.path.join(output_dir, "tl_stop_full_day_comparison.csv"), index = False)
 
     plotting.plot_global_hourly_comparison(
-        global_hourly_df, os.path.join(output_dir, "tl_global_hourly_comparison.png"), reference_name = REFERENCE_NAME,
+        global_hourly_df, os.path.join(output_dir, "tl_global_hourly_comparison.png"), reference_name = reference_name,
     )
     interactive_map.build_hourly_map(
         stop_hour_df, os.path.join(output_dir, "tl_stop_map_by_hour.html"),
-        perimeter_shapefile = perimeter_shapefile, hour_range = hour_range, reference_name = REFERENCE_NAME,
+        perimeter_shapefile = perimeter_shapefile, hour_range = hour_range, reference_name = reference_name,
     )
 
     sbb_station_df = None
@@ -335,7 +351,7 @@ def run(gtfs_path, perimeter_shapefile, tl_processed_counts_path, matsim_output_
 
     interactive_map.build_full_day_map(
         windowed_stop_hour_df, windowed_full_day_df, os.path.join(output_dir, f"tl_stop_map_{map_hour_start}_{map_hour_end}.html"),
-        perimeter_shapefile = perimeter_shapefile, reference_name = REFERENCE_NAME, sbb_station_df = sbb_station_df,
+        perimeter_shapefile = perimeter_shapefile, reference_name = reference_name, sbb_station_df = sbb_station_df,
     )
 
     return output_dir
@@ -352,6 +368,7 @@ def main(argv = None):
     parser.add_argument("--gtfs", required = True, help = "GTFS of the simulated schedule: output folder of data.gtfs.cleaned (or a zip)")
     parser.add_argument("--perimeter", required = True, help = "Shapefile of the Lausanne perimeter")
     parser.add_argument("--tl-processed", required = True, help = "Folder with tl2024_agg_workday_<date>.csv")
+    parser.add_argument("--mbc-counts", default = None, help = "mbc2024_agg_workday.csv of analysis.pt.TL_comparison.mbc_2024, added to the TL counts")
     parser.add_argument("--input-downsampling", type = float, required = True)
     parser.add_argument("--output-dir", default = None)
     parser.add_argument("--min-stop-avg-events", type = float, default = 10.0)
@@ -372,6 +389,7 @@ def main(argv = None):
         min_stop_active_hours = args.min_stop_active_hours,
         map_hour_start = args.map_hour_start, map_hour_end = args.map_hour_end, night_hours = args.night_hours,
         sbb_path = args.sbb_path, sbb_year = args.sbb_year, counts_source = args.counts_source, day_scenario = args.day_scenario,
+        mbc_stats_path = args.mbc_counts,
     )
     print("Results written to", output_dir)
 

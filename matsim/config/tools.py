@@ -10,9 +10,25 @@ import os.path
 import pandas as pd
 import gzip
 
+from utils.gtfs_router.lemanpass import JAVA_FILES as LEMANPASS_FILES
+
 
 TRUE_VALUES = frozenset({"1", "true", "t", "yes", "y", "on"})
 FALSE_VALUES = frozenset({"0", "false", "f", "no", "n", "off", ""})
+# The PT pricing inputs of a scenario (data.pt_pricing.pt_pricing), by their parameter of the ptZones module: the fare
+# zones of the stops, the SBB distances, the fare description and the Léman Pass tables (see
+# utils.gtfs_router.lemanpass.write_java_tables), all next to the config
+# The parameter of each Léman Pass table (the names of the tables are those of LEMANPASS_FILES)
+LEMANPASS_PARAMETERS = {
+    "products": "lemanPassProductsPath",
+    "stations": "lemanPassStationsPath",
+}
+PT_PRICING_FILES = {
+    "ptZonesFilePath": "gtfs_zones.csv",
+    "sbbDistancesPath": "SBB_all_distances.csv",
+    "pricingDescriptionPath": "pricingDescription.xml",
+    **{parameter: LEMANPASS_FILES[name] for name, parameter in LEMANPASS_PARAMETERS.items()},
+}
 
 
 def compression_variants(path):
@@ -172,12 +188,20 @@ def add_SBBPT_module(config_path):
 
 
 def add_ptZones_module(config_path, directory=None, *, local=False):
+    """Point the ptZones module to the PT pricing inputs (PT_PRICING_FILES) in directory, or next to the config."""
     directory = Path(directory) if directory is not None and not local else Path()
-    change_params(config_path, {
-        "ptZones.ptZonesFilePath": str(directory / "gtfs_zones.csv"),
-        "ptZones.sbbDistancesPath": str(directory / "SBB_all_distances.csv"),
-        "ptZones.pricingDescriptionPath": str(directory / "pricingDescription.xml"),
-    }, create=True)
+    change_params(config_path, {f"ptZones.{parameter}": str(directory / filename)
+                                for parameter, filename in PT_PRICING_FILES.items()}, create=True)
+
+
+def copy_pt_pricing_files(pt_pricing, directory):
+    """Copy the PT pricing inputs (the result of data.pt_pricing.pt_pricing) into directory, under the names of
+    PT_PRICING_FILES."""
+    sbb_path, zones_path, pricing_path, lemanpass_paths = pt_pricing
+    sources = {"ptZonesFilePath": zones_path, "sbbDistancesPath": sbb_path, "pricingDescriptionPath": pricing_path,
+               **{LEMANPASS_PARAMETERS[name]: path for name, path in lemanpass_paths.items()}}
+    for parameter, filename in PT_PRICING_FILES.items():
+        shutil.copy(sources[parameter], os.path.join(directory, filename))
 
 
 def adjust_pt_routing_parameters(config_path, parameters):

@@ -10,8 +10,16 @@ and rides in no network. There is no single price list, so the ticket is rebuilt
    shares with another ride, or else to its own (group_rides).
 3. The price in that network: by number of zones, by SBB tariff kilometres, or by distance for the rides in no network
    (the calculators: zone_price, sbb_price, default_price).
+   With the Léman Pass (Pricing.lemanpass, see utils.gtfs_router.lemanpass), a journey into its area abroad can also take a
+   Léman Pass single ticket for its train part and the rides around it, the other rides priced as above: the cheaper
+   of the two ways is kept. With the Léman Pass, Unireso only sells the tickets of Zone 10: a way of paying with a
+   Unireso ticket into its zones abroad is not kept, unless no Léman Pass ticket fits the journey (_lemanpass_zones).
 4. Free travel (GA, under 6, Junior card, Gleis 7, regional and zone subscriptions), half fare, 1st class, and the
-   discounts (by age, for students, for the people living or studying in a network's area).
+   discounts (by age, for students, for the people living or studying in a network's area). The half-fare card is a
+   Swiss card: a distance-based ticket with a stop abroad (a French train or bus) has no half fare with it, nor a zone
+   network ticket all abroad; a zone network ticket into Switzerland keeps it (tpg sells Unireso Zone 10 + Zone 210 at
+   the reduced fare), and so does SBB, whose distance table only has places with the Swiss tariff. Under 16, half fare
+   holds everywhere (and the Léman Pass has its own child and youth prices).
 
 The fares themselves are read from the files of data/pricing (pricingDescription.xml, gtfs_zones.csv,
 SBB_all_distances.csv), so they can be changed without touching the code. Pricing.fares gives them as JSON and
@@ -33,10 +41,16 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 import pandas as pd
 
+from .lemanpass import HOME_ZONE as LEMANPASS_HOME_ZONE, NETWORK as LEMANPASS_NETWORK, single_profiles
+
 PT_REGIONAL_RADIUS_KM = 10.0   # a regional subscription is valid when the origin and the destination are this close to home
 FIRST_CLASS_FACTOR = 1.7    # 1st class: the 2nd class price times this, rounded as usual
 MIN_ZONE_M = 200            # with the tracks: a zone crossed on less than this does not count (the stops at the border of two zones)
 RESIDENT_RADIUS_M = 1000    # without the zone polygons: a place is in the area of the networks of the stops this close to it
+# the stops in Switzerland, by their id: the Swiss stops (8501120, 8501120:0:1, Parent8501120, ch:1:sloid:...) and the
+# Swiss stations in the French feed (StopPoint:OCETrain:::TER-85162727, Genève-Champel). Not the French coaches stopping
+# in Geneva (FR:...), whose rides go abroad anyway. The Swiss stops abroad (Liechtenstein, Jestetten) have the Swiss fares.
+SWISS_STOP = re.compile(r"^(?:Parent)?85\d{5}(?::|$)|^ch:1:sloid:|^StopPoint:OCE\w*:::\w*-85\d{6}$")
 
 
 def _java_round(value):
@@ -154,6 +168,8 @@ class RideZones:
     sbb_km: float               # the SBB tariff distance between its first and last stops (-1: not on the SBB)
     from_name: str = ""
     to_name: str = ""
+    in_switzerland: bool = True # a stop in Switzerland (SWISS_STOP)
+    abroad: bool = False        # a stop outside Switzerland
 
 
 @dataclass
@@ -184,6 +200,7 @@ class Pricing:
         zones of a ride are the zones its track crosses and its distance is the length of the track; else the zones of
         its stops and the straight-line distances between them."""
         self.folder, self.cap, self.tracks = folder, cap, tracks
+        self.lemanpass = None   # the LemanPass (utils.gtfs_router.lemanpass), for the journeys into its area abroad; None: not priced
         self._areas = {}   # (lat, lon) rounded -> the networks whose area holds it
         self._read_description(os.path.join(folder, "pricingDescription.xml"))
         self._read_zones(os.path.join(folder, "gtfs_zones.csv"))
@@ -314,7 +331,8 @@ class Pricing:
             zones = self.track_zones(zones, stop_ids, self.tracks.crossed(network, ride), lambda a: self.tracks.pieces(network, ride, a))
             km = self.tracks.length_m(network, ride) / 1000
         sbb_km = self.sbb_distances.get((_simplified(stop_ids[0]), _simplified(stop_ids[-1])), -1.0) if "SBB" in zones else -1.0
-        return RideZones(zones, km, sbb_km, network.stop_names[ride.stops[0]], network.stop_names[ride.stops[-1]])
+        swiss = [bool(SWISS_STOP.match(s)) for s in stop_ids]
+        return RideZones(zones, km, sbb_km, network.stop_names[ride.stops[0]], network.stop_names[ride.stops[-1]], any(swiss), not all(swiss))
 
     def track_zones(self, zones, stop_ids, crossed, pieces_of):
         """The zones of a ride in each of its networks, from its track rather than only its stops.
@@ -557,15 +575,15 @@ class Pricing:
             if home_km <= PT_REGIONAL_RADIUS_KM:
                 return PriceResult(0.0, 0.0, km)
 
-        # the zone subscriptions: what is left to pay of each ride, and the subscriptions that were used
-        rides, used = [], set()
+        # the zone subscriptions: what is left to pay of each ride (None: nothing), and the subscriptions used on it
+        paid, used = [], []
         for r, whole in zip(journey.rides, wholes):
             part = self.uncovered_ride(network, r, t.subscriptions) if t.subscriptions else whole
-            if part is not None:
-                rides.append(part)
-            if part is None or part.zones != whole.zones or part.network_km != whole.network_km:   # a subscription helped
-                used |= {n for s in r.stops if (n := self.covering(str(network.stop_ids[s]), t.subscriptions))}
-        parts = [(f"{n} subscription", 0.0) for n in sorted(used)]
+            paid.append(part)
+            helped = part is None or part.zones != whole.zones or part.network_km != whole.network_km
+            used.append({n for s in r.stops if (n := self.covering(str(network.stop_ids[s]), t.subscriptions))} if helped else set())
+        rides = [p for p in paid if p is not None]
+        parts = [(f"{n} subscription", 0.0) for n in sorted(set().union(*used))]
         if not rides:
             return PriceResult(0.0, 0.0, km, parts)
         paid_km = sum(r.network_km for r in rides)
@@ -573,20 +591,26 @@ class Pricing:
         # one ticket per network, with half fare (half-fare card or under 16), 1st class and the largest discount
         half = t.halbtax or t.age < 16
         factor = FIRST_CLASS_FACTOR if t.first_class else 1.0
-        discounts, areas = {}, []   # areas: the networks where the traveller lives or studies, found when first needed
-
-        def lives_in(authority):
-            if not areas:
-                areas.append(set().union(*(self.networks_at(network, p) for p in (t.home, t.study) if p)))
-            return authority in areas[0]
-
-        for authority, group in self.group_rides(rides).items():
-            price = self._calculate(authority, group, half, factor)
-            discount = max((d for d in self.discounts if d.applies(authority, t, lives_in)), key = lambda d: d.percent, default = None)
-            if discount is not None and discount.percent > 0:
-                price, discounts[authority] = _java_round(price * (1.0 - discount.percent / 100.0)), discount
-            parts.append((authority, price))
+        tickets, discounts = self._tickets(rides, network, t, half, factor)
+        parts += tickets
         price = _java_round(sum(p for _, p in parts))
+
+        # or a Léman Pass single ticket for some rides (with no subscription: it is bought whole), and the others as above.
+        # Unireso only sells Zone 10 then: a way with a Unireso ticket abroad is kept only if no Léman Pass ticket fits
+        if self.lemanpass is not None:
+            profiles = single_profiles(t.age, t.halbtax)
+            best = math.inf if self._lemanpass_zones(rides) else price
+            for start, end, trip, lp_price in self.lemanpass.single_tickets(journey.rides, wholes, network, self, profiles, 2 - t.first_class):
+                outside = [k for k in range(len(paid)) if not start <= k < end]
+                rest = [paid[k] for k in outside if paid[k] is not None]
+                if self._lemanpass_zones(rest):
+                    continue
+                rest_tickets, rest_discounts = self._tickets(rest, network, t, half, factor) if rest else ([], {})
+                total = _java_round(lp_price + sum(p for _, p in rest_tickets))
+                if total < best:
+                    subscriptions = sorted(set().union(*(used[k] for k in outside)))
+                    parts = [(f"{n} subscription", 0.0) for n in subscriptions] + [(f"Léman Pass ({trip})", lp_price)] + rest_tickets
+                    price, discounts, best = total, rest_discounts, total
 
         # the older model: a price by distance only
         old = max(2.8, 2 * (0.21 * paid_km - 0.00015 * paid_km ** 2)) * factor
@@ -597,6 +621,42 @@ class Pricing:
             cap = 35.0 if half else 60.0
             price, old = min(price, cap), min(old, cap)
         return PriceResult(price, old, km, parts, discounts)
+
+    def _lemanpass_zones(self, rides):
+        """Whether the usual tickets of rides include a Unireso ticket with a zone abroad (other than Zone 10), which the
+        Léman Pass sells rather than Unireso (isAbroadTicket in Java)."""
+        group = self.group_rides(rides).get(LEMANPASS_NETWORK, []) if rides else []
+        return any(str(z) != LEMANPASS_HOME_ZONE for r in group for z in r.zones.get(LEMANPASS_NETWORK, ()))
+
+    @staticmethod
+    def _swiss_ticket(authority, rides):
+        """Whether the ticket of an authority for rides has the Swiss fares, where the half-fare card holds: SBB always,
+        a zone network with a stop in Switzerland, a distance-based ticket with no stop abroad."""
+        if authority == SBB.id:
+            return True
+        if authority == NONE.id:
+            return not any(r.abroad for r in rides)
+        return any(r.in_switzerland for r in rides)
+
+    def _tickets(self, rides, network, t, half, factor):
+        """The tickets of rides (RideZones), one per network: ([(authority, price)], {authority: the Discount applied}),
+        with half fare (under 16, or with the half-fare card on a ticket with the Swiss fares, see _swiss_ticket), the 1st
+        class factor and the largest discount of each."""
+        parts, discounts, areas = [], {}, []   # areas: the networks where the traveller lives or studies, found when first needed
+
+        def lives_in(authority):
+            if not areas:
+                areas.append(set().union(*(self.networks_at(network, p) for p in (t.home, t.study) if p)))
+            return authority in areas[0]
+
+        for authority, group in self.group_rides(rides).items():
+            half_here = half and (t.age < 16 or self._swiss_ticket(authority, group))
+            price = self._calculate(authority, group, half_here, factor)
+            discount = max((d for d in self.discounts if d.applies(authority, t, lives_in)), key = lambda d: d.percent, default = None)
+            if discount is not None and discount.percent > 0:
+                price, discounts[authority] = _java_round(price * (1.0 - discount.percent / 100.0)), discount
+            parts.append((authority, price))
+        return parts, discounts
 
     # ------------------------------------------------------------------ fares, as the price editor shows and changes them
 

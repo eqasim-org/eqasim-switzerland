@@ -51,6 +51,11 @@ def configure(context):
     context.config("analysis.pt.tl_rebuild_counts", default = False)
     if context.config("analysis.pt.tl_rebuild_counts"):
         context.stage("analysis.pt.TL_comparison.tl_2024")
+
+    # Add the MBC counts (Morges region, analysis.pt.TL_comparison.mbc_2024) to the TL ones
+    context.config("analysis.pt.include_mbc", default = True)
+    if context.config("analysis.pt.include_mbc"):
+        context.stage("analysis.pt.TL_comparison.mbc_2024")
     context.config("analysis.pt.night_hours",       default = 5)
 
     context.config("analysis.pt.line_comparison_output_id", default = None)  # the run of output_id by default
@@ -66,13 +71,14 @@ def execute(context):
     if isinstance(lines, str):
         lines = [line.strip() for line in lines.split(",") if line.strip()]
 
+    mbc_path = context.stage("analysis.pt.TL_comparison.mbc_2024")["path"] if context.config("analysis.pt.include_mbc") else None
     output_dir = run(
-        simulation_path, read_tl_table(os.path.join(data_path, context.config("analysis.pt.tl_processed_counts_path"))),
+        simulation_path, read_tl_table(os.path.join(data_path, context.config("analysis.pt.tl_processed_counts_path")), mbc_path),
         "%s/output" % context.path("data.gtfs.cleaned"),
         input_downsampling = context.config("input_downsampling"), lines = lines,
         night_hours = context.config("analysis.pt.night_hours"),
         output_dir = os.path.join(simulation_path, TL_OUTPUT_FOLDER),
-        reference_name = "TL", prefix = "tl", elevation_path = os.path.join(data_path, ELEVATION_PATH),
+        reference_name = "TL + MBC" if mbc_path else "TL", prefix = "tl", elevation_path = os.path.join(data_path, ELEVATION_PATH),
     )
 
     return dict(done = True, path = output_dir)
@@ -91,16 +97,9 @@ STOP_ALIASES = {}
 
 
 def base_code(stop_id):
-    """The stop of a platform, a MATSim stop facility or a GTFS stop: the UIC number of the Swiss stops (8592910:0:W,
-    Parent8592910, 8592910.link:123 -> 8592910; the SLOIDs ch:1:sloid:92693:0:1 -> 8592693), else the whole id without the
-    MATSim link (FR:74085:ZE:58041:HAUTExSAVOIE, StopPoint:OCETrain:::TER-87745588)."""
-    stop = str(stop_id).split(".link:")[0].split(".")[0]
-    if stop.startswith("Parent"):
-        stop = stop[len("Parent"):]
-    parts = stop.split(":")
-    if stop.startswith("ch:1:sloid:") and len(parts) > 3:
-        return "85" + parts[3].zfill(5) if len(parts[3]) <= 5 else ":".join(parts[:4])
-    return parts[0] if parts[0].isdigit() else stop
+    """The stop of a platform, a MATSim stop facility or a GTFS stop: its station code (gtfs_utils.stop_code), e.g.
+    8592910:0:W, Parent8592910, 8592910.link:123 and the SLOID ch:1:sloid:92910:0:1 -> 8592910."""
+    return gtfs_utils.stop_code(stop_id)
 
 
 def code_of(stop_id):
@@ -143,7 +142,9 @@ def stop_coordinates(gtfs_path, codes):
     return {code: to_lv95.transform(row.stop_lon, row.stop_lat) for code, row in stops.iterrows()}
 
 
-def read_tl_table(processed_dir):
+def read_tl_table(processed_dir, mbc_path = None):
+    """The latest processed TL counts, with the MBC counts of mbc_path (mbc_2024: same columns, line names of the
+    simulation) when given."""
     candidates = sorted(
         path for path in glob.glob(os.path.join(processed_dir, "tl2024_agg_workday_*.csv"))
         if re.fullmatch(r"tl2024_agg_workday_\d{8}\.csv", os.path.basename(path))
@@ -153,6 +154,9 @@ def read_tl_table(processed_dir):
 
     print(f"TL counts: {candidates[-1]}")
     tl = pd.read_csv(candidates[-1])
+    if mbc_path:
+        print(f"MBC counts: {mbc_path}")
+        tl = pd.concat([tl, pd.read_csv(mbc_path)], ignore_index = True)
     tl["tl_line"]   = tl["line_direction"].str.rsplit("_", n = 1).str[0]
     tl["line"]      = tl["tl_line"].replace(TL_TO_MATSIM_LINE)
     tl["direction"] = tl["line_direction"].str[-1]
@@ -889,6 +893,7 @@ def main(argv = None):
     parser = argparse.ArgumentParser(description = "Map comparing the MATSim and TL passengers of the lines")
     parser.add_argument("--simulation-path", required = True, help = "MATSim output folder (pt_passenger_counts.csv.gz and transit schedule)")
     parser.add_argument("--tl-processed", required = True, help = "Folder with tl2024_agg_workday_<date>.csv")
+    parser.add_argument("--mbc-counts", default = None, help = "mbc2024_agg_workday.csv of analysis.pt.TL_comparison.mbc_2024, added to the TL counts")
     parser.add_argument("--gtfs", required = True, help = "GTFS of the simulated schedule: output folder of data.gtfs.cleaned (or a zip)")
     parser.add_argument("--input-downsampling", type = float, required = True)
     parser.add_argument("--lines", nargs = "*", default = [], help = "MATSim line names (default: all the lines of the TL data)")
@@ -897,8 +902,8 @@ def main(argv = None):
     parser.add_argument("--elevations", default = None, help = "Elevation cache of the pipeline (<data_path>/osm/elevations.csv)")
     args = parser.parse_args(argv)
 
-    run(args.simulation_path, read_tl_table(args.tl_processed), args.gtfs, args.input_downsampling, args.lines, args.night_hours,
-        args.output_dir, elevation_path = args.elevations)
+    run(args.simulation_path, read_tl_table(args.tl_processed, args.mbc_counts), args.gtfs, args.input_downsampling, args.lines,
+        args.night_hours, args.output_dir, reference_name = "TL + MBC" if args.mbc_counts else "TL", elevation_path = args.elevations)
 
 
 if __name__ == "__main__":

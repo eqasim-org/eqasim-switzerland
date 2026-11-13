@@ -28,6 +28,10 @@ _SCHOOL_HOLIDAYS_2024 = [
     ]
 ]
 
+# The simulation is an average working day: all the days from Monday to Friday, the school and the public holidays
+# that fall on a weekday included. Only the weekends are left out.
+WORKDAY_TYPES = ("Weekday", "School holiday", "Bank holiday")
+
 _DIRECTION_LETTER = {"Aller": "H", "Retour": "R"}
 
 _COUNT_COLUMNS = [
@@ -42,8 +46,8 @@ def classify_day_type(dates, bank_holidays = _BANK_HOLIDAYS_2024, school_holiday
 
     day_type = pd.Series(np.where(weekday <= 4, "Weekday", None), index = range(len(dates)))
 
-    # School holidays are weekdays like the others: only the bank holidays are left out. Pass
-    # school_holidays to label them as "School holiday" (and so leave them out) again.
+    # The weekdays of the school holidays (school_holidays) and the public holidays (bank_holidays) get their own label,
+    # but are working days like the others (WORKDAY_TYPES): only Saturdays and Sundays are not.
     is_school_holiday = np.zeros(len(dates), dtype = bool)
     for start, end in school_holidays:
         is_school_holiday |= (dates >= start) & (dates <= end)
@@ -91,12 +95,13 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path):
     raw["Horaire Tranche Stop Théo."] = raw["Horaire Tranche Stop Théo."].astype("int16")
     print(f"  -> {len(raw)} rows with a valid hour bin")
 
-    print("Classifying day type per date and restricting to Weekdays...")
+    print("Classifying day type per date and restricting to the working days (Monday to Friday)...")
     dates = pd.to_datetime(raw["Date"], format = "%d.%m.%Y")
     unique_dates = dates.drop_duplicates()
     day_type_by_date = pd.Series(classify_day_type(unique_dates), index = unique_dates)
-    raw = raw[dates.map(day_type_by_date).values == "Weekday"]
-    print(f"  -> {len(raw)} rows on Weekday-type days")
+    print(f"  days per type: {day_type_by_date.value_counts().to_dict()}")
+    raw = raw[pd.Series(dates.map(day_type_by_date).values).isin(WORKDAY_TYPES).values]
+    print(f"  -> {len(raw)} rows on working days")
 
     print("Mapping stops to GTFS ids...")
     crosswalk = load_stop_crosswalk(tpg_data_path)

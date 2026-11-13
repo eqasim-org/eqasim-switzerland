@@ -70,13 +70,8 @@ class Cost:
 
 
 EARLIEST_ARRIVAL = Cost()
-# the route-choice parameters of eqasim-switzerland: a minute on a bus counts 1.58 minutes of train, waiting 1.72,
-# walking 1.97, and a change from 0.10 h (train to train) to 0.22 h (train to another vehicle)
-SWISS_COST = Cost.from_eqasim({
-    "travelTimeRail_u_h": -1.0, "travelTimeBus_u_h": -1.5836037239192158, "travelTimeTram_u_h": -1.1222785629604182,
-    "travelTimeSubway_u_h": -1.1222785629604182, "travelTimeOther_u_h": -1.5836037239192158, "waitTime_u_h": -1.72,
-    "walkTime_u_h": -1.97, "perTransfer_u": 0.0, "raptorPenalties:transfer_intermodal": 0.21802854138692665,
-    "raptorPenalties:transfer_rail": 0.10055599178047361, "raptorPenalties:transfer_other": 0.1772974263245458})
+# The route-choice cost of eqasim-switzerland is Cost.from_eqasim(<calibration.pt_routing.pt_routing_parameters>), the
+# parameters of the MATSim router (see synthesis.population.models.subscription_zones).
 
 
 @njit(cache = True)

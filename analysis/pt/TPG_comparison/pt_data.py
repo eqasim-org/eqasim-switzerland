@@ -134,9 +134,9 @@ class PtData:
 
     @cached_property
     def stop_coordinates(self):
-        """{GTFS stop code without platform suffix: (lat, lon)}"""
+        """{GTFS station code (gtfs_utils.stop_code): (lat, lon)}"""
         stops  = self.gtfs_stops.drop_duplicates("stop_id")
-        coords = stops.assign(code = stops["stop_id"].astype(str).str.split(":").str[0])
+        coords = stops.assign(code = stops["stop_id"].map(gtfs_utils.stop_code))
         coords = coords.groupby("code")[["stop_lat", "stop_lon"]].mean()
 
         return {code: (row.stop_lat, row.stop_lon) for code, row in coords.iterrows()}

@@ -100,15 +100,16 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path,
     raw["hour"] = arrival[arrival.notna()].dt.hour.astype("int16")
     print(f"  -> {len(raw)} rows with a valid arrival timestamp")
 
-    print("Classifying day type per date and restricting to Weekdays...")
+    print("Classifying day type per date and restricting to the working days (Monday to Friday)...")
     dates = pd.to_datetime(raw["DExploitCourse"], format = "%Y-%m-%d")
     unique_dates = dates.drop_duplicates()
     day_type_by_date = pd.Series(
         tpg_raw_stats_2024.classify_day_type(unique_dates, bank_holidays = bank_holidays, school_holidays = school_holidays),
         index = unique_dates,
     )
-    raw = raw[dates.map(day_type_by_date).values == "Weekday"]
-    print(f"  -> {len(raw)} rows on Weekday-type days")
+    print(f"  days per type: {day_type_by_date.value_counts().to_dict()}")
+    raw = raw[pd.Series(dates.map(day_type_by_date).values).isin(tpg_raw_stats_2024.WORKDAY_TYPES).values]
+    print(f"  -> {len(raw)} rows on working days")
 
     print("Mapping stops to GTFS ids...")
     crosswalk = tpg_raw_stats_2024.load_stop_crosswalk(tpg_data_path)

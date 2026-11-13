@@ -1,4 +1,4 @@
-"""The PT pricing inputs: SBB_all_distances.csv, gtfs_zones.csv and pricingDescription.xml.
+"""The PT pricing inputs: SBB_all_distances.csv, gtfs_zones.csv, pricingDescription.xml and the Léman Pass tables.
 
 gtfs_zones.csv gives the fare zones of each stop by its id. It was made for feeds whose stop ids are DiDok numbers
 (8503000, 8503000:0:3, Parent8503000). Since the 2026 timetable, the Swiss feed uses SLOIDs (ch:1:sloid:3000:2:3), so
@@ -12,33 +12,51 @@ each feed stop in a commune of the list of zones abroad (unireso_france_zones.cs
 communes_france.gpkg) gets the zone of its commune, unless gtfs_zones.csv already gives it a zone of that network. A
 commune listed in several zones (Pougny: 240 and 250) gives each of its stops the zone of the nearest stop that has one
 of them, else the first listed.
+
+The single tickets of the Léman Pass (the tickets across the border around Geneva) are read from the fare table of tpg
+(tpg_<date>_Fare-system_Geneva.xlsx in pt_pricing_lemanpass_path) and written as two CSV files for eqasim-java,
+described in utils.gtfs_router.lemanpass.write_java_tables: lemanpass_products.csv (one row per product, with its
+places and its prices) and lemanpass_stations.csv (the stops of each station). The zone of each station is that of its stops in gtfs_zones.csv,
+the stops abroad included. Without the fare table, the tables have only their header (no Léman Pass).
+
+The stage returns (SBB_all_distances.csv, gtfs_zones.csv, pricingDescription.xml, {name: path of a Léman Pass table}),
+the names being those of utils.gtfs_router.lemanpass.JAVA_FILES.
 """
 import csv
 import logging
 import os
+import re
 import shutil
+from types import SimpleNamespace
 
 import geopandas as gpd
 import pandas as pd
 
-from utils.gtfs_router.pricing import java_station_id, station_id
+from utils.gtfs_router.lemanpass import NETWORK as LEMANPASS_NETWORK, LemanPass, fare_table_path, write_java_tables
+from utils.gtfs_router.pricing import Pricing, java_station_id, station_id
 from utils.gtfs_router.zones import foreign_communes
 
 logger = logging.getLogger("synpp")
+
+# An SNCF stop id with the UIC code of its station and a check digit: StopPoint:OCETrain:::TER-85171421 -> 8517142
+SNCF_STOP = re.compile(r"^StopPoint:OCE\w*:::\w*-(\d{7})\d$")
 
 
 def configure(context):
     context.config("data_path")
     pt_pricing_option = context.config("generate_pt_pricing_inputs", default=False)
 
-    # Re-keying of gtfs_zones.csv to the stop ids of the feed: auto (when the check below fails), always or never
-    context.config("pt_pricing_rekey_stops", default = "auto")
+    # Re-keying of gtfs_zones.csv to the stop ids of the feed: always (a row for each feed stop it does not find, with the
+    # zones of its station), auto (only when the check below fails; the SNCF stops always) or never
+    context.config("pt_pricing_rekey_stops", default = "always")
     # The share of the feed stops of priced stations that must be found in gtfs_zones.csv for auto to keep it as it is
     context.config("pt_pricing_min_stop_coverage", default = 0.9)
 
     # The communes abroad and their zones, relative to data_path (the same as data.pt_pricing.zones)
     context.config("pt_zones_foreign_communes_file", default = "pt_pricing/communes_france.gpkg")
     context.config("pt_zones_foreign_zones_file", default = "pt_pricing/unireso_france_zones.csv")
+    # The folder of the fare table of tpg (tpg_<date>_Fare-system_Geneva.xlsx), relative to data_path; without it, no Léman Pass
+    context.config("pt_pricing_lemanpass_path", default = "pt_pricing/output")
 
     context.stage("data.gtfs.cleaned")
 
@@ -80,7 +98,8 @@ def execute(context):
     zones_path   = f"{context.path()}/gtfs_zones.csv"
     pricing_path = f"{context.path()}/pricingDescription.xml"
 
-    # Check that the stop ids of the feed are found in gtfs_zones.csv, and re-key it to them if needed.
+    # Check that the stop ids of the feed are found in gtfs_zones.csv, and add the feed stops it does not find (by their
+    # id or their station, as Python and Java look them up) with the zones of their station. Existing rows are kept.
 
     mode = str(context.config("pt_pricing_rekey_stops")).lower()
     if mode not in ("auto", "always", "never"):
@@ -98,6 +117,13 @@ def execute(context):
     elif mode == "auto":
         logger.info("  gtfs_zones.csv kept as it is: the feed uses its stop ids")
 
+        # The SNCF stops of the stations of gtfs_zones.csv (the Léman Express in Geneva) all the same: their ids hold no
+        # DiDok number, so neither Python nor Java can find their station
+
+        rows = rekeyed_rows(zones, stops[stops["stop_id"].str.match(SNCF_STOP)])
+        _append_rows(zones_path, list(zones.columns), rows)
+        logger.info(f"  SNCF stops: {len(rows)} added to gtfs_zones.csv with the zones of their station")
+
     # Give the feed stops in the communes abroad the zone of their commune, as rows of their own.
 
     communes_path = os.path.join(data_path, context.config("pt_zones_foreign_communes_file"))
@@ -111,9 +137,53 @@ def execute(context):
     else:
         logger.warning(f"Stops abroad: no zones without {communes_path} and {listed_path}")
 
+    # Write the Léman Pass fares as flat tables for eqasim-java.
+
+    lemanpass_paths = write_lemanpass(os.path.join(data_path, context.config("pt_pricing_lemanpass_path")), stops, context.path())
+
     # Return the paths of the pricing inputs.
 
-    return sbb_path, zones_path, pricing_path
+    return sbb_path, zones_path, pricing_path, lemanpass_paths
+
+
+def validate(context):
+    """Reruns the stage when an input file of data_path changes (e.g. new fares in pricingDescription.xml)."""
+    data_path = context.config("data_path")
+    files = [f"{data_path}/pt_pricing/output/pricingDescription.xml"]
+    if not context.config("generate_pt_pricing_inputs"):
+        files += [f"{data_path}/pt_pricing/output/SBB_all_distances.csv", f"{data_path}/pt_pricing/output/gtfs_zones.csv"]
+    files += [os.path.join(data_path, context.config(option)) for option in ("pt_zones_foreign_communes_file", "pt_zones_foreign_zones_file")]
+    excel = fare_table_path(os.path.join(data_path, context.config("pt_pricing_lemanpass_path")))
+    if excel:
+        files.append(excel)
+    return [(path, os.path.getsize(path), os.path.getmtime(path)) for path in files if os.path.exists(path)]
+
+
+def write_lemanpass(folder, stops, output):
+    """Writes the Léman Pass tables (utils.gtfs_router.lemanpass.write_java_tables) in output, from the fare table of tpg
+    in folder and the pricing inputs of output, and returns their paths (tables with only a header without the fare
+    table). stops: the feed
+    stops (stop_id, stop_name, stop_lat, stop_lon). The zone of a station is the Unireso zone of its stops in
+    gtfs_zones.csv (the lowest, with a warning, when they have several)."""
+    excel = fare_table_path(folder)
+    if excel is None:
+        logger.warning(f"Léman Pass: no fare table of tpg in {folder}, the Léman Pass tables are empty")
+        return write_java_tables(None, output)
+
+    pricing = Pricing(output)
+    net = SimpleNamespace(stop_ids = stops["stop_id"].to_numpy(), stop_names = stops["stop_name"].to_numpy(),
+                          stop_lat = stops["stop_lat"].astype(float).to_numpy(), stop_lon = stops["stop_lon"].astype(float).to_numpy())
+
+    def station_zone(stop_ids):
+        zones = sorted({z for s in stop_ids for a, z in pricing._stop_zones(s) if a.id == LEMANPASS_NETWORK})
+        if len(zones) > 1:
+            logger.warning(f"  Léman Pass: stops {', '.join(stop_ids)} in the zones {', '.join(zones)}; zone {zones[0]} kept")
+        return zones[0] if zones else None
+
+    lemanpass = LemanPass(excel, net, station_zone)   # read each time: the stage folder is new on each run
+    paths = write_java_tables(lemanpass, output)
+    logger.info(f"Léman Pass tables written: {', '.join(os.path.basename(p) for p in paths.values())}")
+    return paths
 
 
 def check_stop_ids(zones, stops):
@@ -213,30 +283,37 @@ def _zoned_keys(zones):
 
 def _by_station(zones):
     """The rows of gtfs_zones.csv with zones by station: {DiDok number: [row dicts]} (Parent8578189 and 8578189:0:1 are in
-    station 8578189). The ids that are not DiDok numbers (StopArea:OCE...) are in no station."""
+    station 8578189). The ids that are not DiDok numbers (StopArea:OCE..., 0:CHRA of the buses of Annecy) are in no
+    station."""
     result = {}
     for row in zones[zones["zones"].str.strip() != ""].to_dict("records"):
         key = row["stop_id"].strip()
         station = java_station_id(key[len("Parent"):] if key.startswith("Parent") else key)
-        if station.isdigit():
+        if _is_didok(station):
             result.setdefault(station, []).append(row)
     return result
 
 
+def _is_didok(station):
+    """Whether a station key is a DiDok number (7 digits: 8501008, 1400001), not the start of another id (0:CHRA -> 0)."""
+    return len(station) == 7 and station.isdigit()
+
+
 def _read_feed_stops(path):
     """The stops of the feed: stop_id, stop_name, station (its DiDok number: the didok column when there is one, else
-    from the stop id as utils.gtfs_router.pricing.station_id; empty when it is not a DiDok number), stop_lat, stop_lon."""
+    from the stop id as utils.gtfs_router.pricing.station_id, or the UIC code of an SNCF stop id; empty when it is not a
+    DiDok number), stop_lat, stop_lon."""
     columns = pd.read_csv(path, nrows = 0).columns
     stops = pd.read_csv(path, dtype = str, keep_default_na = False,
                         usecols = [c for c in ("stop_id", "stop_name", "stop_lat", "stop_lon", "didok") if c in columns])
     stops["stop_id"] = stops["stop_id"].str.strip()
-    from_id = stops["stop_id"].map(station_id)
+    from_id = stops["stop_id"].map(lambda s: m.group(1) if (m := SNCF_STOP.match(s)) else station_id(s))
     if "didok" in stops:
         didok = stops["didok"].str.strip().str.split(".").str[0]
         stops["station"] = didok.where(didok != "", from_id)
     else:
         stops["station"] = from_id
-    stops["station"] = stops["station"].where(stops["station"].str.isdigit(), "")
+    stops["station"] = stops["station"].where(stops["station"].map(_is_didok), "")
     return stops[["stop_id", "stop_name", "station", "stop_lat", "stop_lon"]]
 
 

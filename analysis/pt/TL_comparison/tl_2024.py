@@ -12,10 +12,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 import gtfs_utils # pyright: ignore[reportMissingImports]
 
-# All the workdays, school holidays included (public holidays are DI, Saturdays SA). Most lines have SU for the school
-# term and SHU/VHU/VU for the holidays; the LEB (line 77) has LJ (Monday to Thursday) and VE (Friday), and Vlj/Vlv/Vve
-# for the holidays
-WEEKDAY_TYPES = ("SU", "SHU", "VHU", "VU", "LJ", "VE", "Vlj", "Vlv", "Vve")
+# The simulation is an average working day: all the dates from Monday to Friday are kept, whatever their timetable
+# (type_horaire SU for the school term, SHU/VHU/VU for the holidays, LJ/VE/Vlj/Vlv/Vve for the LEB, and DI for the
+# public holidays that fall on a weekday). The weekends (SA, DI) are left out.
+WORKDAYS = range(5)
 
 _USECOLS = ["date", "type_horaire", "ligne", "sens", "id_parcours_type", "code_arret", "libelle_arret",
             "heure_arrivee_arret", "monte", "descendu"]
@@ -64,7 +64,8 @@ def _read_file(path):
         dtype = {"type_horaire": "category", "sens": "category", "code_arret": "category", "libelle_arret": "category"},
     )
 
-    df = df[(df["type_horaire"].isin(WEEKDAY_TYPES)) & df["sens"].notna() & df["monte"].notna() & df["descendu"].notna()]
+    workday = pd.to_datetime(df["date"], format = "%Y-%m-%d").dt.weekday.isin(WORKDAYS)
+    df = df[workday & df["sens"].notna() & df["monte"].notna() & df["descendu"].notna()]
     df = df.assign(
         hour = df["heure_arrivee_arret"].astype(str).str.slice(11, 13).astype(int) % 24,
         sens = df["sens"].astype(str), code_arret = df["code_arret"].astype(str), libelle_arret = df["libelle_arret"].astype(str),
@@ -174,7 +175,7 @@ def build_stop_crosswalk(gtfs_path, tl_stops):
     with gtfs_utils.open_gtfs_file(gtfs_path, "stops.txt") as f:
         gtfs = pd.read_csv(f, dtype = {"stop_id": str, "stop_name": str}, usecols = ["stop_id", "stop_name", "stop_lat", "stop_lon"])
 
-    gtfs["gtfs_code"] = gtfs["stop_id"].str.replace("^Parent", "", regex = True).str.split(":").str[0]
+    gtfs["gtfs_code"] = gtfs["stop_id"].map(gtfs_utils.stop_code)
     gtfs["name"]      = gtfs["stop_name"].map(_normalize_name)
     gtfs["tail"]      = gtfs["stop_name"].str.partition(", ")[2].map(_normalize_name)
     gtfs["in_area"]   = gtfs["stop_lat"].between(*_NETWORK_AREA["lat"]) & gtfs["stop_lon"].between(*_NETWORK_AREA["lon"])

@@ -2,9 +2,10 @@
 
 synthesis.population.models.subscriptions gives who has a Verbundabo (pt_subscription 2, or 4 with the half-fare card)
 but not which zones it covers. They are found from the commute, as in the Swiss PT explorer (utils.gtfs_router.verbund):
-the home and the place of education (else of work) are placed in the fare zones, and a few commutes of each zone OD are
-routed on the timetable to find the zones in between. A commute into the Léman Pass area abroad gets a Léman Pass
-subscription when lemanpass.csv and lemanpass_places.csv are in subscription_zones_lemanpass_path.
+the home and the place of education (else of work) are placed in the fare zones, and the commute of every agent whose
+home and destination are in different zones is routed on the timetable to find the zones in between. A commute into the Léman Pass area abroad gets a Léman Pass
+subscription when the fare table of tpg (tpg_<date>_Fare-system_Geneva.xlsx) is in subscription_zones_lemanpass_path
+(else the lemanpass.csv and lemanpass_places.csv of older versions, if they are there).
 
 The persons are returned with the columns of the subscriptions stage and, for the agents with a Verbundabo,
 subscription_operator (the fare network), subscription_zones ("ZVV:110,121"; empty when none is found),
@@ -23,11 +24,12 @@ import pandas as pd
 from branca.element import Element, MacroElement
 from jinja2 import Template
 
-from utils.gtfs_router.csa import Router, SWISS_COST
+from utils.gtfs_router.csa import Cost, Router
 from utils.gtfs_router.feed import build_network, day_of
+from utils.gtfs_router.lemanpass import load as load_lemanpass
 from utils.gtfs_router.pricing import Pricing
 from utils.gtfs_router.tracks import TO_WGS84, build_tracks
-from utils.gtfs_router.verbund import ROUTED, VERBUND_CODES, commute_zones, commutes, load_lemanpass, od_matrix, verbund_zones
+from utils.gtfs_router.verbund import ROUTED, VERBUND_CODES, commute_zones, commutes, od_matrix, verbund_zones
 from utils.gtfs_router.zones import foreign_stop_zones
 
 logger = logging.getLogger("synpp")
@@ -62,9 +64,10 @@ def configure(context):
     # The date of the routed commutes (YYYYMMDD); empty: gtfs_date if it is a date, else the first Tuesday of the feed
     context.config("subscription_zones_date", default = "")
     context.config("subscription_zones_departure", default = "07:30")
-    # The commutes routed in each zone OD: the other agents of the OD get the zones of one of them
-    context.config("subscription_zones_samples", default = 3)
-    # The folder of lemanpass.csv and lemanpass_places.csv, relative to data_path; without them, no Léman Pass
+    # The commutes routed in each zone OD; 0: every agent's own commute. With n > 0, the other agents of the OD get the
+    # zones of one of the n journeys (faster, for tests, but 16% of these agents then miss a zone of their own journey)
+    context.config("subscription_zones_samples", default = 0)
+    # The folder of the fare table of tpg (tpg_<date>_Fare-system_Geneva.xlsx), relative to data_path; without it, no Léman Pass
     context.config("subscription_zones_lemanpass_path", default = "pt_pricing/output")
     # The buses follow the roads of their MATSim routes; false: straight lines between their stops
     context.config("subscription_zones_bus_tracks", default = True)
@@ -74,6 +77,7 @@ def configure(context):
     context.stage("data.gtfs.cleaned")
     context.stage("data.pt_pricing.pt_pricing")
     context.stage("data.pt_pricing.zones")
+    context.stage("calibration.pt_routing.pt_routing_parameters")   # the route choice of MATSim
     if context.config("subscription_zones_bus_tracks"):
         context.stage("matsim.scenario.network.pt")
 
@@ -106,13 +110,14 @@ def execute(context):
     added = pricing.add_stop_zones(zip(rows["stop_id"], rows["network"], rows["zone"]))
     logger.info(f"Zones of the stops abroad: {added} stops of {len(rows)} in the listed communes given the zone of their commune")
 
-    # Route the commutes on the network of one date.
+    # Route the commutes on the network of one date, weighed as by the PT router of MATSim.
 
     date = routing_date(context.config("subscription_zones_date") or context.config("gtfs_date"), net)
     logger.info(f"Routing the commutes of the Verbundabos on {date}")
     day = net.on(date)
-    router = Router(day, cost = SWISS_COST)
-    lemanpass = load_lemanpass(data_file("subscription_zones_lemanpass_path"), day, tracks.zones)
+    router = Router(day, cost = Cost.from_eqasim(context.stage("calibration.pt_routing.pt_routing_parameters")))
+    lemanpass = load_lemanpass(data_file("subscription_zones_lemanpass_path"), day, tracks.zones, cache_dir = context.path())
+    pricing.lemanpass = lemanpass   # the Léman Pass single tickets in the prices of the journeys
 
     result = verbund_zones(persons, work, education, tracks.zones, router, day, pricing,
                            departure = context.config("subscription_zones_departure"),

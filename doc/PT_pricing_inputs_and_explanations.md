@@ -43,3 +43,36 @@ The French zones of Unireso come from `unireso_france_zones.csv` (insee, commune
 The French zones only come from that list: a Swiss stop given one of them is not counted for its municipality. `gtfs_zones.csv` gave Unireso zone 230 to the stops of Collonges VS, named like Collonges in the Ain; `uniresoFR.assign_zones_to_gtfs` now leaves out the stops inside the Swiss cantons, so regenerated inputs no longer have them.
 
 The stage returns a GeoDataFrame (network, zone, geometry, municipalities, name; EPSG:2056) and writes `pt_zones.gpkg` and an interactive map, `pt_zones.html`, in its cache folder. The map has one layer per network on an Esri background (Z-Pass layers hidden at first), a layer of the places in several regional networks (dashed outline), and a layer of the stops at zone or network borders (white dots, with all their zones on click). A click anywhere lists every zone of every network at that place, including the hidden layers, and outlines them. The input files are set by `pt_zones_municipalities_file`, `pt_zones_foreign_communes_file` and `pt_zones_foreign_zones_file` (relative to `data_path`, by default in `pt_pricing/`). `synthesis.population.models.subscription_zones` uses these polygons, for the zones of the homes and destinations and of the ride tracks (`utils/gtfs_router/tracks.py`).
+
+# Files passed to MATSim (data.pt_pricing.pt_pricing)
+The stage `data.pt_pricing.pt_pricing` returns `(SBB_all_distances.csv, gtfs_zones.csv, pricingDescription.xml, {name: Léman Pass table})`. The MATSim preparation copies these files next to the config. `matsim.config.tools.PT_PRICING_FILES` lists them with their parameters in the `ptZones` module:
+
+| Parameter | File |
+| --- | --- |
+| `ptZonesFilePath` | `gtfs_zones.csv`: the zones of the stops. The stage adds a row for each feed stop that Python and Java would not find by its id or its station, with the zones of its station (`pt_pricing_rekey_stops`, default `always`; existing rows are kept). This includes the SNCF ids of stations (`StopPoint:OCETrain:::TER-85171421` is Lancy-Bachet, `8517142`). It also adds the feed stops in the French communes of Unireso, with the zone of their commune. |
+| `sbbDistancesPath` | `SBB_all_distances.csv` |
+| `pricingDescriptionPath` | `pricingDescription.xml` |
+| `lemanPassProductsPath` | `lemanpass_products.csv` |
+| `lemanPassStationsPath` | `lemanpass_stations.csv` |
+
+The Léman Pass tables hold the single tickets only; subscriptions are not passed to MATSim. They come from the tpg fare table (`tpg_<date>_Fare-system_Geneva.xlsx` in `pt_pricing_lemanpass_path`, by default `pt_pricing/output`). Without that table they are written with their header only, which means no Léman Pass. They are UTF-8, comma-separated CSV files with a header.
+
+- `lemanpass_products.csv`: one row per product (trip type of the fare table), 1,102 in the 2025 table.
+  - `product_id`, and `label`, the trip type, for reading only.
+  - `pieces`, `end_a`, `end_b` and `cover`: lists of places separated by `|`. A place is `station:<name>` (a station of `lemanpass_stations.csv`) or `zone:<number>` (a Unireso zone, as in `gtfs_zones.csv`). `pieces` are the pieces of the product. `end_a` and `end_b` are the places its two ends hold, with the stations inside its zones already listed. `cover` is only filled for a product made of zones only (`Zone 10 + Zone 230`): every place it covers.
+  - The price in CHF for each traveller and class: `adult_2`, `adult_1`, `child_2`, `child_1` (6-15), `youth_2`, `youth_1` (16-25), `reduced_2` and `reduced_1` (with the half-fare card; only 30 products have it). A price is empty when the table has none; when it has two, only the lower is kept.
+- `lemanpass_stations.csv`: one row per rail stop of a Léman Pass station: `stop_id` (the GTFS and transit schedule id), `station`, `zone` (its Unireso zone) and `country` (`FR` or `SW`).
+
+A journey needs the Léman Pass only if one of its places is abroad: a station with country `FR`, or a zone other than 10.
+
+How a journey is matched (as in `utils/gtfs_router/lemanpass.py`):
+
+1. **Train part.** It runs from the first to the last rail ride that starts and ends at a stop of `lemanpass_stations.csv`.
+2. **First and last places.**
+   - With a train part, the first places are its boarding station plus the Unireso zones of the rides before it. The last places are its alighting station plus the zones of the rides after it.
+   - With buses and trams only, they are the zones of the first and last stops (the lowest zone for a stop on a border).
+3. **Abroad.** The journey needs the Léman Pass only if one of these places, or a zone it crosses, is abroad.
+4. **Fitting products.** A product fits when both of these hold:
+   - The zones of the rides inside the train part are `piece`s. With buses and trams only, every zone of the rides must be a `piece`.
+   - `end_a` holds the first places and `end_b` the last ones, or the reverse; or its `cover` holds all of them.
+5. **Price.** The cheapest fitting product counts, over the traveller's columns: `adult`, plus `child` from 6 to 15, `youth` from 16 to 25 and `reduced` with the half-fare card, in the traveller's class. A single ticket covers the train part and the Unireso rides right before and after it. It is kept when it is cheaper than the usual tickets for those rides. With the Léman Pass, Unireso only sells Zone 10 tickets: a usual way of paying that has a Unireso ticket with another zone (abroad) is dropped, even when it is cheaper. It is kept only if no Léman Pass ticket fits the journey. The Java model applies the same rule.

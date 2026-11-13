@@ -43,7 +43,7 @@ def _load_gtfs_and_matched_counts(data):
     tpg_lines = tpg_lines.merge(tpg_stops[["stop_code", "gtfs_code"]], left_on = "Code", right_on = "stop_code", how = "inner")
     tpg_lines = tpg_lines.rename(columns = {"Ligne": "line_name"})[["line_name", "gtfs_code"]]
     tpg_lines["gtfs_code"] = tpg_lines["gtfs_code"].astype(str)
-    counts_ge["stop_id_gtfs_base"] = counts_ge["stop_id_gtfs"].astype(str).str.split(":").str[0]
+    counts_ge["stop_id_gtfs_base"] = counts_ge["stop_id_gtfs"].map(gtfs_utils.stop_code)
     counts_ge = line_matching.select_line_ids(counts_ge, tpg_lines, data.stop_coordinates, label = "TPG")
     counts_ge = counts_ge.drop(columns = "stop_id_gtfs_base")
 
@@ -76,7 +76,7 @@ def _build_lemanis_period_mofr(data):
 
     lemanis_codes = set(lemanis_stats["gtfs_code"])
     all_stop_ids  = gtfs_stops["stop_id"].astype(str)
-    lemanis_stop_ids = all_stop_ids[all_stop_ids.str.split(":").str[0].isin(lemanis_codes)].values
+    lemanis_stop_ids = all_stop_ids[all_stop_ids.map(gtfs_utils.stop_code).isin(lemanis_codes)].values
 
     matsim_counts = data.counts_in(lemanis_stop_ids)
 
@@ -87,7 +87,7 @@ def _build_lemanis_period_mofr(data):
     print(f"Lemanis lines matched to MATSim line names: {sorted(set(lex_lines) - set(missing_lines))}")
 
     matsim_counts = matsim_counts[matsim_counts["line_name"].isin(lex_lines)].copy()
-    matsim_counts["stop_id_gtfs_base"] = matsim_counts["stop_id_gtfs"].str.split(":").str[0]
+    matsim_counts["stop_id_gtfs_base"] = matsim_counts["stop_id_gtfs"].map(gtfs_utils.stop_code)
     matsim_counts["boardings"]  = matsim_counts["boardings"]  / cfg.input_downsampling
     matsim_counts["alightings"] = matsim_counts["alightings"] / cfg.input_downsampling
 
@@ -233,7 +233,7 @@ def run_stop_all_lines(data, output_dir, stop = "Annemasse"):
     counts.to_csv(f"{output_dir}/tpg_stop_all_lines_{slug}.csv", index = False)
     lemanis_df = None
     if cfg.include_lemanis:
-        stop_bases = set(selected["stop_id"].astype(str).str.split(":").str[0])
+        stop_bases = set(selected["stop_id"].map(gtfs_utils.stop_code))
         lemanis_stats = _load_lemanis_period_stats(cfg)
         lemanis_stats = lemanis_stats[lemanis_stats["gtfs_code"].astype(str).isin(stop_bases)]
 
@@ -270,7 +270,7 @@ def run_sbb_stations(data, output_dir, year = 2024, day = "workday", prefix = "t
         print(f"WARNING: no SBB station of {cfg.sbb_path} lies inside the perimeter {cfg.perimeter_shapefile}: nothing to map")
 
     counts    = data.matsim_counts
-    movements = counts.groupby(counts["stop_id_gtfs"].str.split(":").str[0])[["boardings", "alightings"]].sum() / cfg.input_downsampling
+    movements = counts.groupby(counts["stop_id_gtfs"].map(gtfs_utils.stop_code))[["boardings", "alightings"]].sum() / cfg.input_downsampling
     movements = movements["boardings"] + movements["alightings"]
 
     stations["matsim_total"]   = stations["uic"].map(movements).fillna(0.0)

@@ -10,7 +10,7 @@ import tempfile
 import yaml
 from synpp.pipeline import flatten
 
-from matsim.config.tools import read_config, resolve_output_file
+from matsim.config.tools import PT_PRICING_FILES, read_config, resolve_output_file
 from matsim.cutter import scenario
 
 
@@ -79,8 +79,8 @@ def validate_inputs(directory, prefix):
         ("households", "inputFile"), ("facilities", "inputFacilitiesFile"),
         ("vehicles", "vehiclesFile"), ("transit", "transitScheduleFile"),
         ("transit", "vehiclesFile"), ("eqasim", "modeParametersPath"),
-        ("eqasim", "costParametersPath"), ("ptZones", "ptZonesFilePath"),
-        ("ptZones", "sbbDistancesPath"), ("ptZones", "pricingDescriptionPath"),
+        ("eqasim", "costParametersPath"),
+        *(("ptZones", parameter) for parameter in PT_PRICING_FILES),
     ):
         value = tree.xpath("string(/config/module[@name=$group]/param[@name=$name]/@value)",
                            group=group, name=name)

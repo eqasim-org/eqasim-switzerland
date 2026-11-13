@@ -10,6 +10,36 @@ import numpy as np
 import pandas as pd
 from shapely import Point
 
+from utils.gtfs_router.pricing import SLOID, station_id
+
+# The UIC code (8 digits, the last one a check digit) at the end of an SNCF stop id: StopArea:OCE87745497,
+# StopPoint:OCETrain TER-87745497
+SNCF_CODE = re.compile(r"OCE\D*?(\d{8})$")
+
+
+def stop_code(stop_id):
+    """The station code of a GTFS stop or MATSim stop facility, shared by its platforms, the stop map and the counts of
+    the operators (DiDok numbers):
+    - a Swiss SLOID (Parent)ch:1:sloid:1120:0:276884 -> 8501120, ch:1:sloid:1400015 -> 1400015 (utils.gtfs_router.pricing);
+    - an id that starts with a number (8501120:0:3, Parent8501120, 8774549) -> that number;
+    - an SNCF id (StopArea:OCE87745497, StopPoint:OCETrain TER-87745497) -> its UIC code without check digit (8774549);
+    - any other id (FR:74085:ZE:58041:HAUTExSAVOIE) unchanged.
+    The link of a MATSim stop facility (8501120:0:3.link:123) is dropped first."""
+    stop = str(stop_id).split(".link:")[0]
+    if SLOID.match(stop):
+        return station_id(stop)
+
+    stop = stop.split(".")[0]
+    if stop.startswith("Parent"):
+        stop = stop[len("Parent"):]
+
+    head = stop.split(":")[0]
+    if head.isdigit():
+        return head
+
+    match = SNCF_CODE.search(stop)
+    return match.group(1)[:7] if match else stop
+
 def open_gtfs_file(gtfs_path, name):
     """Opens the file name (e.g. "stops.txt") of a GTFS: a folder (the output of data.gtfs.cleaned) or a zip."""
     if os.path.isdir(gtfs_path):
@@ -43,15 +73,17 @@ def read_gtfs_stops(gtfs_path):
 
 
 def add_missing_base_stops(gtfs_stops):
-    base_ids = gtfs_stops["stop_id"].str.split(":").str[0]
+    """Adds a stop whose id is the station code (stop_code) of the stops that have no stop with that id, e.g. 8501120 for
+    the SLOIDs of Lausanne: the counts of the operators and the comparisons refer to the stations by these codes. It is
+    placed at the parent station when the GTFS has one, else at one of the platforms."""
+    base_ids = gtfs_stops["stop_id"].map(stop_code)
     missing  = ~base_ids.isin(set(gtfs_stops["stop_id"]))
 
     if not missing.any():
         return gtfs_stops
 
-    synthetic = gtfs_stops[missing].copy()
-    synthetic["stop_id"] = base_ids[missing]
-    synthetic = synthetic.drop_duplicates("stop_id")
+    synthetic = gtfs_stops[missing].assign(stop_id = base_ids[missing])
+    synthetic = synthetic.sort_values("location_type", ascending = False, kind = "stable").drop_duplicates("stop_id")
 
     return pd.concat([gtfs_stops, synthetic], ignore_index = True)
 
@@ -185,19 +217,19 @@ def supplement_with_schedule_stops(gtfs_stops, schedule_path, max_distance = 300
     tree = cKDTree(np.column_stack([reference.geometry.x, reference.geometry.y]))
     reference_names = [_normalize_stop_name(n) for n in reference["stop_name"]]
 
-    # GTFS stops by UIC station code (the first 7 digits of the 8-digit SNCF code, which is
-    # the number the Swiss stop ids start with)
+    # GTFS platforms by UIC station code (stop_code: the DiDok number of the Swiss stops, the first 7 digits of the
+    # 8-digit SNCF code)
     by_uic = {}
-    for stop_id in reference["stop_id"]:
-        match = re.match(r"^(?:Parent)?(\d{7})(?!\d)", stop_id)
-        if match:
-            by_uic.setdefault(match.group(1), []).append(stop_id)
+    platforms = reference[(reference["location_type"] == 0) & ~reference["stop_id"].str.startswith("Parent")]
+    for stop_id in platforms["stop_id"]:
+        code = stop_code(stop_id)
+        if len(code) == 7 and code.isdigit():
+            by_uic.setdefault(code, []).append(stop_id)
 
     alias = {}
     for stop_id, name, geometry in zip(unknown["stop_id"], unknown["stop_name"], unknown.geometry):
         # 1. same station code, e.g. StopPoint:OCETrain:::TER-87745000 -> 8774500
-        code = re.search(r"(?<!\d)(\d{8})$", stop_id)
-        candidates = [c for c in by_uic.get(code.group(1)[:7], []) if not c.startswith("Parent")] if code else []
+        candidates = by_uic.get(stop_code(stop_id), [])
         if candidates:
             alias[stop_id] = min(candidates, key = lambda c: (len(c), c))
             continue

@@ -74,7 +74,7 @@ def execute(context):
 
     # Load the stops with one zone in a network, and the stops at the border of zones (several zones in the same network).
 
-    _, zones_path, _ = context.stage("data.pt_pricing.pt_pricing")
+    zones_path = context.stage("data.pt_pricing.pt_pricing")[1]
     zones_by_stop = read_stop_zones(zones_path)
     stops = read_stops(f"{context.path('data.gtfs.cleaned')}/output/stops.txt")
 

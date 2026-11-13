@@ -8,11 +8,12 @@ commute, the trip the subscription is most likely bought for:
    of a remote worker is their home). The other agents have none.
 2. Their home and destination are placed in the fare zones (the zone polygons of zones.py, drawn from the
    Tarifverbundkarte and the zones of the stops). The home network is the regional network the home is in (not a
-   Z-Pass).
+   Z-Pass). A place in no zone but within SNAP_M of one (a home on a lake shore) is in the nearest one.
 3. The agents are grouped by the zones of their home and destination (the zone OD matrix, od_matrix.csv):
    - no destination, or the same zone: the home zone;
    - two zones of the same network: the zones of that network along the commute;
    - two networks joined by a Z-Pass (Baden - Zürich: ZPassAwelle): the Z-Pass zones along the commute;
+   in these two cases, the home and destination zones are always added;
    - two networks (Zürich - Bern): the zones of the home network along the commute until the first ride that leaves
      it, where the SBB (or another network) takes over; of that ride, only the zone of its boarding stop;
    - a home in no network and a destination in one (Sion - Lausanne): the other way round, the zones of the
@@ -20,16 +21,18 @@ commute, the trip the subscription is most likely bought for:
      only the zone of its alighting stop.
    Agents outside every network with a destination in none, or with no route, keep what can be found: their home
    (or destination) zone, or nothing.
-4. In each group that needs a route, a few agents (samples) are drawn and their exact commute is routed on the
-   timetable (gtfs_router). They keep the zones of their own journey; the others of the group get the zones of one of
-   these journeys, drawn at random (so a group keeps the variety of its routes). A group where no journey is found gets
-   the home and destination zones of the network.
+4. The exact commute of every agent of a group that needs a route is routed on the timetable (gtfs_router), and the
+   agent gets the zones of its own journey (with samples > 0, only that many agents per group are routed, and the
+   others get the zones of one of their journeys, drawn at random). An agent without a journey gets the zones of the
+   journey of another agent of its group, drawn at random; a group where no journey is found gets the home and
+   destination zones of the network.
 
 5. A commute that goes into the Léman Pass area abroad (a French station of the Léman Pass, or a Unireso zone other
    than Zone 10: Geneva - Annemasse, Thonon - Geneva) is covered by a Léman Pass subscription rather than a
    Verbundabo: the cheapest annual one (2nd class, for 6-25 year olds or adults) whose two ends hold the stations of
    the train part of the journey and the zones of the rides before and after it (see lemanpass). Its
-   Unireso zones stay in verbund_zones. This needs lemanpass.csv and lemanpass_places.csv in the pricing folder.
+   Unireso zones stay in verbund_zones. This needs the fare table of tpg (tpg_<date>_Fare-system_Geneva.xlsx) in the
+   pricing folder (lemanpass.load).
 
 verbund_zones() returns one row per agent with a Verbundabo: its operator and zones, and verbund_zones in the format
 of the subscriptions of the Swiss PT explorer ("ZVV:110,121"); subscription (Verbundabo or Léman Pass), lemanpass (the
@@ -41,14 +44,13 @@ its command line.
 """
 import logging
 import multiprocessing
-import os
 import time
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from .lemanpass import FILES as LEMANPASS_FILES, LemanPass, subscription_profile
+from .lemanpass import subscription_profile
 from .pricing import MIN_ZONE_M
 from .tracks import TO_LV95, TO_WGS84
 
@@ -56,6 +58,11 @@ logger = logging.getLogger("synpp")
 
 VERBUND_CODES = (2, 4)   # pt_subscription of synthesis.population.models.subscriptions: 2 Verbundabo, 4 with the half-fare card
 OUTSIDE_CELL_M = 10_000     # the homes or destinations in no zone are grouped by squares of this size
+# A place in no regional zone but this close to one is in it: the outlines of the municipalities, hence of the zones,
+# leave out the lakes and are coarse at the borders, so homes on the shore (Zollikon on the Zürichsee) fall just outside.
+# In the 5% population of 2026-11-10, all the homes in no municipality were within 100 m of a zone, and all the homes
+# farther away were in a municipality of no network.
+SNAP_M = 100
 ROUTED = ("intra", "zpass", "inter", "destination")   # the cases whose zones come from the routed commute
 
 _shared = {}   # what the routing workers use: the router, the network, the pricing, the Léman Pass (set before they fork)
@@ -91,9 +98,11 @@ def locate(x, y, zones):
     zpass = pd.Series([{} for _ in range(n)], index = range(n), dtype = object)
     valid = np.isfinite(x) & np.isfinite(y)
     points = gpd.GeoDataFrame(geometry = gpd.points_from_xy(x[valid], y[valid]), index = np.flatnonzero(valid), crs = 2056)
-    hits = gpd.sjoin(points, zones[["network", "zone", "geometry"]], predicate = "within")
+    zones = zones[["network", "zone", "geometry"]]
+    hits = gpd.sjoin(points, zones, predicate = "within").reset_index(names = "point")[["point", "network", "zone"]]
+    hits = pd.concat([hits, snapped(points, zones, hits)], ignore_index = True)
     # the polygons of a network can overlap a little at their borders: one zone per point and network
-    hits = hits.reset_index(names = "point").sort_values(["point", "network", "zone"]).drop_duplicates(["point", "network"])
+    hits = hits.sort_values(["point", "network", "zone"]).drop_duplicates(["point", "network"])
     is_zpass = hits["network"].str.startswith("ZPass")
     regional = hits[~is_zpass].drop_duplicates("point")   # a point in two regional networks: the first by name
     network[regional["point"].to_numpy()] = regional["network"].to_numpy()
@@ -101,6 +110,26 @@ def locate(x, y, zones):
     for point, net, z in zip(hits.loc[is_zpass, "point"], hits.loc[is_zpass, "network"], hits.loc[is_zpass, "zone"]):
         zpass[point][net] = z
     return network, zone, zpass
+
+
+def snapped(points, zones, hits, max_distance = SNAP_M):
+    """The zones of the points in no regional zone but within max_distance of one, as rows of hits (point, network,
+    zone): the nearest regional zone, and the Z-Pass zones about as close (they share its outline) for the Z-Passes the
+    point is not already in."""
+    regional = zones[~zones["network"].str.startswith("ZPass")]
+    loose = points[~points.index.isin(hits.loc[~hits["network"].str.startswith("ZPass"), "point"])]
+    if len(loose) == 0:
+        return hits.iloc[0:0]
+    near = gpd.sjoin_nearest(loose, regional, max_distance = max_distance, distance_col = "distance").reset_index(names = "point")
+    near = near.sort_values(["point", "distance", "network", "zone"]).drop_duplicates("point")
+    if len(near) == 0:
+        return hits.iloc[0:0]
+    reach = gpd.GeoDataFrame({"point": near["point"].to_numpy()}, crs = points.crs,
+                             geometry = points.geometry[near["point"]].buffer(near["distance"].to_numpy() + 1.0).to_numpy())
+    zpass = gpd.sjoin(reach, zones[zones["network"].str.startswith("ZPass")], predicate = "intersects")[["point", "network", "zone"]]
+    zpass = zpass[~zpass.set_index(["point", "network"]).index.isin(hits.set_index(["point", "network"]).index)]
+    logger.info(f"  {len(near)} places within {max_distance:.0f} m of a zone but in none (lake shores, borders): given the nearest zone")
+    return pd.concat([near[["point", "network", "zone"]], zpass], ignore_index = True)
 
 
 def classify(agents, zones):
@@ -222,14 +251,14 @@ def _route_one(task):
 
 
 def route_samples(agents, router, net, pricing, departure, samples, seed, workers = 1, lemanpass = None):
-    """What is found by routing the commute of a few agents of each group that needs a route: {agent index: (zones,
-    needs) or None}, see _route_one."""
+    """What is found by routing the commute of the agents of each group that needs a route: {agent index: (zones,
+    needs) or None}, see _route_one. samples: the agents routed per group, drawn at random (seed); 0 or None: all."""
     needs = agents[agents["case"].isin(ROUTED)]
     rng = np.random.default_rng(seed)
     drawn = []
     for _, group in needs.groupby("od", sort = True):
         index = group.index.to_numpy()
-        drawn.extend(index if len(index) <= samples else rng.choice(index, samples, replace = False))
+        drawn.extend(index if not samples or len(index) <= samples else rng.choice(index, samples, replace = False))
     drawn = np.sort(np.asarray(drawn, dtype = int))
     lon, lat = TO_WGS84.transform(agents["home_x"].to_numpy()[drawn], agents["home_y"].to_numpy()[drawn])
     dlon, dlat = TO_WGS84.transform(agents["destination_x"].to_numpy()[drawn], agents["destination_y"].to_numpy()[drawn])
@@ -257,7 +286,7 @@ def route_samples(agents, router, net, pricing, departure, samples, seed, worker
 
 # ------------------------------------------------------------------ the whole
 
-def verbund_zones(persons, work, education, zones, router, net, pricing, departure = "07:30", samples = 3, seed = 0, workers = 1,
+def verbund_zones(persons, work, education, zones, router, net, pricing, departure = "07:30", samples = 0, seed = 0, workers = 1,
                   lemanpass = None):
     """The zones of the Verbundabo of each agent who has one, as a DataFrame: person_id, purpose, case, home_network,
     destination_network, operator, zones (e.g. "110,121"), verbund_zones ("ZVV:110,121", empty when none is found),
@@ -269,6 +298,7 @@ def verbund_zones(persons, work, education, zones, router, net, pricing, departu
     persons, work, education: the persons of synthesis.population.models.subscriptions and the work and education places of
     synthesis.population.spatial.primary.locations; zones: the zone polygons (tracks.zones);
     router, net, pricing: the router on the network of a date, that network, and the Pricing with the tracks;
+    samples: the commutes routed per group (0: every agent's own commute);
     lemanpass: the LemanPass (None: no Léman Pass subscriptions)."""
 
     # The commutes and their zones.
@@ -276,7 +306,7 @@ def verbund_zones(persons, work, education, zones, router, net, pricing, departu
     agents = classify(commutes(persons, work, education), zones)
     logger.info("Agents with a Verbundabo by case: " + ", ".join(f"{c} {n}" for c, n in agents["case"].value_counts().items()))
 
-    # The zones along the commutes of a few agents of each group.
+    # The zones along the commutes of the agents of each group (all of them unless samples is set).
 
     routed = route_samples(agents, router, net, pricing, departure, samples, seed, workers, lemanpass)
 
@@ -334,8 +364,10 @@ def final_zones(case, home_zone, destination_zone, routed = None, method = None)
         zones = (destination_zone,) + tuple(routed or ())
         method = method if routed is not None else "fallback"
     elif routed is not None:
-        # the home zone is always in the subscription (the journey can start with a walk to a stop of the next zone)
-        zones = (home_zone,) + tuple(routed)
+        # the home zone is always in the subscription (the journey can start with a walk to a stop of the next zone), and
+        # so is the destination zone of the same network (intra, zpass: the journey can end with a walk from a stop of
+        # the zone before); for inter, the destination is in another network
+        zones = (home_zone,) + tuple(routed) + ((destination_zone,) if case != "inter" and isinstance(destination_zone, str) else ())
     else:
         zones, method = (home_zone,) + ((destination_zone,) if case != "inter" and isinstance(destination_zone, str) else ()), "fallback"
     return tuple(sorted(dict.fromkeys(zones), key = lambda v: (len(v), v))), method
@@ -372,14 +404,6 @@ def commute_zones(home, destination, zones, router, net, pricing, departure = "0
             "subscription": "Léman Pass" if product else "Verbundabo", "lemanpass": product[0] if product else None,
             "lemanpass_annual_chf": product[1] if product else None, "lemanpass_needs": [sorted(n) for n in needs[:2]] if needs else None,
             "journey": journey, "rides": rides}
-
-
-def load_lemanpass(folder, net, zones):
-    """The LemanPass of the pricing folder, or None (with a message) when its inputs are not there."""
-    if folder and all(os.path.exists(os.path.join(folder, f)) for f in LEMANPASS_FILES):
-        return LemanPass(folder, net, zones)
-    logger.info(f"No Léman Pass subscriptions: no {' and '.join(LEMANPASS_FILES)} in {folder} (python -m utils.gtfs_router.lemanpass)")
-    return None
 
 
 def od_matrix(result):

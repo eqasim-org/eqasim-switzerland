@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "TPG_comparison"))
 sys.path.insert(0, os.path.join(HERE, "..", "transit_schedule"))
 
+import gtfs_utils # pyright: ignore[reportMissingImports]
 import matsim_events
 import visualize
 
@@ -91,7 +92,7 @@ def execute(context):
 # ---------------------------------------------------------------------------
 
 def stop_code(facility):
-    return str(facility).split(":")[0].split(".")[0]
+    return gtfs_utils.stop_code(facility)
 
 
 def read_pt_events(events_path, stops, routes, near_codes, target):
