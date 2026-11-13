@@ -406,13 +406,12 @@ def derive_water_features(features, distance_m=30.0):
 
 def candidate_points(features):
     """Create visit points from the already eligible OSM stage output."""
-    allowed = {"park", "garden", "viewpoint", "attraction", "cable_station", "worship",
-               "piste", "ski_area", "riverside_path", "shore_path"}
+    allowed = {"park", "garden", "worship", "riverside_path", "shore_path"}
     places = features.loc[features.kind.isin(allowed)].copy()
     if places.empty:
         return places
     # Prefer explicit attractions and stations over area interiors when they coincide.
-    priority = {"cable_station": 0, "viewpoint": 1, "attraction": 2, "worship": 3}
+    priority = {"viewpoint": 1, "attraction": 2, "worship": 3}
     places["priority"] = places.kind.map(priority).fillna(4)
     places = places.sort_values(["priority", "osm_id", "kind"]).reset_index(drop=True)
     paths = features.loc[features.kind == "path"]

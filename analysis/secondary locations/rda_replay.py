@@ -18,11 +18,22 @@ def replay_rda(cache, cohort, inputs, draws, seed):
     raw = cache.stage('data.microcensus.trips')[0]
     times = raw[['person_id','trip_id','departure_time','arrival_time','mode']].copy()
     times['travel_time'] = times.arrival_time - times.departure_time
-    frame = inputs.merge(times[['person_id','trip_id','travel_time','mode']],
+    frame = inputs.merge(times[['person_id','trip_id','travel_time','mode','departure_time','arrival_time']],
                          on=['person_id','trip_id'],validate='one_to_one').reset_index(drop=True)
     if len(frame) != len(cohort) or not np.isfinite(frame.travel_time).all() or (frame.travel_time < 0).any():
         raise ValueError('RDA replay needs a finite nonnegative travel time for every common survey trip')
-    destinations = locations_rda.prepare_destinations(SimpleNamespace(stage=cache.stage))
+    # Resolve the alias against the policy recorded by the completed RDA producer.
+    producer = cache.resolve('synthesis.population.spatial.secondary.locations_rda')
+    recorded = cache.meta[producer]['config']
+    opening = bool(recorded.get('consider_opening_hours',False))
+    destination_stage = ('synthesis.population.destinations_opening_hours' if opening
+                         else 'synthesis.population.destinations')
+    def stage(name):
+        return cache.stage(destination_stage if name == 'secondary_destinations' else name)
+    def config(name):
+        return {'consider_opening_hours':opening,
+                'opening_hours_tolerance_minutes':recorded.get('opening_hours_tolerance_minutes',10.)}[name]
+    destinations = locations_rda.prepare_destinations(SimpleNamespace(stage=stage,config=config))
     distributions = copy.deepcopy(cache.stage('synthesis.population.spatial.secondary.distance_distributions'))
     locations_rda.resample_distributions(distributions, dict(car=.8,car_passenger=1.,pt=1.,bike=0.,walk=0.,
         walk_loop=0.,bike_loop=0.,car_loop=.8,pt_loop=1.,car_passenger_loop=1.,remote_walk=0.))
@@ -40,7 +51,8 @@ def replay_rda(cache, cohort, inputs, draws, seed):
             identifiers = selected.index.to_numpy()
             trips = pd.DataFrame(dict(person_id=identifiers,trip_index=0,preceding_purpose='home',
                 following_purpose=selected.purpose.to_numpy(),mode=selected['mode'].to_numpy(),
-                travel_time=selected.travel_time.to_numpy(),activity_duration=selected.activity_duration_h.to_numpy()*3600))
+                travel_time=selected.travel_time.to_numpy(),activity_duration=selected.activity_duration_h.to_numpy()*3600,
+                departure_time=selected.departure_time.to_numpy(),arrival_time=selected.arrival_time.to_numpy()))
             primary = gpd.GeoDataFrame(dict(person_id=identifiers),
                 geometry=gpd.points_from_xy(selected.origin_x,selected.origin_y),crs=2056)
             primary['home'] = primary.geometry

@@ -88,3 +88,4 @@ CuttingBoundries
 /sumo/**/_sumo_networks/
 
 /doc/mode_choice/routing/flash/benchmark_results.json
+submit_jobs*
