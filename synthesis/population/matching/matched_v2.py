@@ -12,23 +12,15 @@ from .V2.diagnostics import MatchingDiagnostics
 from .V2.inputs import prepare_inputs
 from .V2.provenance import implementation_token
 from .V2.wrappers import DiaryMatcher
+from .V2 import model as model_stage
 from . import opening_hours
 
 logger = logging.getLogger("synpp")
 
 
 def configure(context):
-    opening_hours.configure(context)
-    configuration.configure(context)
-    context.stage("data.microcensus.persons")
-    context.stage("data.microcensus.trips")
-    context.stage("data.microcensus.activity_chains")
-    context.stage("synthesis.population.sampled")
-    context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
-    context.stage("data.constants")
-    context.stage("data.microcensus.commute")
-    if context.config("census", "statpop") == "statpop":
-        context.stage("synthesis.population.spatial.primary.education.locations", alias="education_locations")
+    model_stage.configure(context)
+    context.stage("synthesis.population.matching.V2.model")
 
 
 def execute(context):
@@ -54,15 +46,14 @@ def execute(context):
     if source.empty:
         raise ValueError("No eligible domestic microcensus donors for the configured scenario day")
 
-    # Fit or load a compatible model in this stage's own cache directory.
+    # Reuse the model fitted by the dedicated training stage.
 
     target = population.loc[eligible].reset_index(drop=True)
-    matcher = DiaryMatcher(MatchingOptions.from_context(context), cache_directory=output)
-    matcher.fit(source, trips)
+    matcher = context.stage("synthesis.population.matching.V2.model")
 
     # Retrieve learned neighbours within employment/student masks and sample complete diaries.
 
-    prediction = matcher.predict(target)
+    prediction = matcher.match(target)
     assigned = prediction.donor_ids
     matched = assigned >= 0
     result.loc[eligible, "mz_person_id"] = assigned

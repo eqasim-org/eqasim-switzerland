@@ -3,7 +3,7 @@
 import hashlib
 from pathlib import Path
 
-from . import population_comparison, distance_maps
+from . import population_comparison, distance_maps, density_comparison, interactive_maps
 
 
 def configure(context):
@@ -42,5 +42,6 @@ def execute(context):
 
 
 def validate(context):
-    return hashlib.sha256(Path(population_comparison.__file__).read_bytes() +
-                          Path(distance_maps.__file__).read_bytes()).hexdigest()
+    return hashlib.sha256(b"".join(Path(module.__file__).read_bytes() for module in
+        (population_comparison, distance_maps, density_comparison, interactive_maps)) +
+        Path(interactive_maps.__file__).with_name("interactive_distances.html.template").read_bytes()).hexdigest()

@@ -24,7 +24,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [MOBIS walking-speed and terrain-slope calibration](calibration/walking_speed.md)
 
 - [Simulation-region OSM businesses and weekday opening hours](data/osm/businesses.md)
-- [Canton opening-hours regions and donor masks](data/osm/opening_hours_regions.md)
+- [Municipality opening-hours regions and donor masks](data/osm/opening_hours_regions.md)
 - [Destination shopping/leisure opening hours](synthesis/population/destinations_opening_hours.md)
 - [Trip-time shuffling and comparison plots](synthesis/population/trip_time_shuffling.md)
 - [RDA opening-hours comparison and Slurm run](analysis/rda.md)

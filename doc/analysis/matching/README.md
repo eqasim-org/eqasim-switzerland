@@ -1,5 +1,68 @@
 # Matching validation and embedding analysis
 
+## Combined V1, V2 and V3 report
+
+The stage analysis.matching.compare_algorithms writes
+analysis_path/matching/v1_v2_v3/report.html and links to Geneva, Zürich and Vaud
+reports. It uses existing shared report tools, including timing/distance
+distributions, top 15 chains, activity-count distributions, mean activities per
+resident, and shares both among non-home purposes and among all activities
+including home. A genuine non-travel survey day contributes one home activity.
+
+To explicitly rerun the three matchers and the report using config_dib_10.yml
+in debug mode, without editing the configuration file:
+
+    uv run -m analysis.matching.run_comparison --config config_dib_10.yml --debug
+
+Debug mode reuses completed upstream population, survey, anchor and geography
+caches without normal validation. It executes the three requested matching
+stages and the report; no population rebuild or transport simulation is requested.
+V2 is trained with the configured settings. Thread counts for small numerical
+batches are capped by the runner; the configured model, seed and population
+sample are retained. Existing selected matching-stage caches are replaced by
+their new results, as in Synpp debug mode; upstream input caches stay read-only.
+
+To execute only the analysis stage against existing matching caches:
+
+    uv run -m analysis.matching.run_comparison --config config_dib_10.yml --debug --reuse-matches
+
+The stage also works as a normal Synpp stage via --run
+analysis.matching.compare_algorithms, with normal cache validation. Once its
+CSV/JSON evidence exists, regenerate all report figures without any Synpp or
+matching execution:
+
+    uv run -m analysis.matching.population_comparison /path/to/analysis/matching/v1_v2_v3
+
+### Cohorts and interpretation
+
+Before any population comparison, remove explicitly held-out home-only residents
+and all age-eligible recipients with no real donor in any method. This exclusion
+is applied consistently across all three methods. Genuine home-only survey
+diaries remain in the survey and donor distributions. cohort_exclusions.csv
+records the regional counts; coverage.csv records method-specific retention.
+Common-cohort figures, shown first for chains/counts/times, use exactly the same
+recipients for all methods; full-cohort figures additionally show coverage effects.
+The survey is weighted by person weights. Population summaries use recipient
+counts and donor reuse. Comparisons are descriptive rather than independent
+predictive-accuracy tests. run_manifest.json records the actual cache directories
+and available producer reports; debug mode can reuse older cached inputs.
+
+### Residential density and maps
+
+The national report groups people by their own home population density using
+matching_density_bounds (currently 400, 950 and 1800 residents/km²). Upstream
+counts within the density radius are divided by circle area to interpret the
+cut points. Unknown density has its own group. Density plots and CSVs compare
+activity rates and chain shares on the common matched population. They describe
+associations, not causal density effects; demographics can also differ by area.
+
+All reports include interactive distance maps with a swisstopo national WMTS
+background, visible attribution and background-opacity control. Supported grids
+and tables remain usable if tiles fail; static PNG/PDF figures provide an offline
+fallback if the external map library is unavailable. The three methods and the
+V2−V1/V3−V1 differences can be selected. Representative Geneva/Zürich/Vaud tiles
+were verified during implementation; online availability is not guaranteed.
+
 ## V1–V3 population diary comparison
 
 Run or load both categorical matchers and compare their assigned diaries with:
@@ -445,3 +508,119 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
 The combined workflow is a research-informed evaluation design for this
 pipeline. It is not a claim of a new theorem, state-of-the-art accuracy, causal
 identification, or guaranteed publication acceptance.
+
+## Predictive validation of all three algorithms
+
+`analysis.matching.validate_algorithms` reproduces the paper's individual-level
+held-out diary scores for the current V1, V2 and V3 implementations. It calls the
+actual V1 and V3 stages with survey respondents as recipients; V2 uses its
+production fit/predict wrapper. It does not change any matching algorithm.
+
+Submit from the repository root:
+
+    sbatch analysis/matching/submit_predictive.slurm config_dib_10.yml
+
+The launcher uses Synpp debug mode to reuse the existing survey, population,
+anchor and geography inputs without rebuilding them. Defaults are 12,000 survey
+respondents, two household-disjoint folds and ten independent donor draws per
+fold: **20 matching executions per algorithm**, with two V2 training fits.
+The stage rejects settings with `matching_predictive_folds *
+matching_predictive_draws > 20`. Completed draws and compatible V2 model artifacts
+are reused on restart. An experiment identity prevents reuse with different
+inputs or settings. In this Microcensus reader, the respondent ID is HHNR, so it
+also identifies the household when a separate household column is absent.
+
+Outputs are in `<analysis_path>/matching/predictive_v1_v2_v3/`. `report.html`
+explains energy and variogram scores, complete-chain and event Brier scores,
+CRPS, probability calibration, interval coverage and computation times. Scores
+use the same successfully matched respondents across all three algorithms;
+coverage is reported separately. Paired household bootstrap intervals, canton
+and density subgroups, education-commute provenance, covariate balance and
+population-reweighted sensitivity scores are exported as CSV. Donor indices and
+fold membership are retained for auditing.
+
+This experiment is smaller than the paper's original three-fold, two-seed,
+20-draw protocol to respect the execution limit. Equal ten-draw ensembles keep
+method comparisons consistent, but cannot provide finely resolved probability
+estimates. In particular, even a correctly specified continuous predictive law
+has only 9/11 expected coverage for the range of ten independent draws; nominal
+95% interpolated intervals must be interpreted with that limitation.
+
+Household separation avoids selecting the respondent or their household as a
+donor. It does not establish population representativeness. Work-location type
+and some education-commute inputs can reflect observed diary information;
+shared source cleaning and commute imputation precede splitting. Scores measure
+prediction conditional on those inputs. Population reweighting assumes transfer
+of conditional behaviour and must be assessed together with overlap and balance.
+
+Rebuild the HTML and figures from saved evidence without executing any matcher:
+
+    uv run -m analysis.matching.predictive_report /path/to/analysis/matching/predictive_v1_v2_v3
+
+Local checks cover common-cohort scoring and deterministic report rebuilding.
+A cache-backed input probe also checks V1/V3 preparation, education-anchor IDs,
+recipient order and donor/test separation without executing either matcher.
+
+The predictive report now presents 13 figures before its expandable numerical
+appendix. Every figure has an introduction, caption and direction of improvement.
+Score panels mark the lowest point estimate, and paired comparison panels show
+household bootstrap intervals. Behaviour figures compare observed held-out days
+with all saved donor draws: daily distance and travel-time distributions, mean
+trips, mean visits by purpose, and the complete distribution of visit counts
+(including zero visits). Predicted distributions use recipient survey weights
+divided across their draws, without applying donor survey weights a second time.
+The same 11,999 jointly matched respondents are used in the completed default
+experiment. Distances are daily sums of straight-line trip distances. These
+figures describe the held-out survey benchmark, not known population totals.
+`observed_predicted_daily_means.csv`, `activity_count_distributions.csv` and
+`daily_distribution_quantiles.csv` provide the plotted evidence. No matcher or
+neural training is invoked by the standalone report renderer.
+
+## One shared V2 model and repeated matching
+
+The current experiment is `analysis.matching.repeat_experiments`. Submit it with:
+
+    sbatch analysis/matching/submit_predictive.slurm config_dib_10.yml
+
+The launcher explicitly runs `synthesis.population.matching.V2.model` followed
+by the experiment in Synpp debug mode. Existing upstream inputs are reused;
+there is no population rebuild or MATSim run. V2 is fitted once using all
+eligible donor data with 90% for fitting and 10% for early-stopping validation.
+Monitoring begins after completing epoch 10. The configured patience (12 by
+default) stops training on a validation plateau; the best monitored checkpoint
+is retained. The maximum remains 100 epochs by default.
+
+The Microcensus experiment uses the full eligible survey, partitioned into three
+household-disjoint donor-exclusion groups. Each recipient can draw only from the
+other two groups. Fifty complete matching repetitions per method give fifty
+predicted diaries per person. V1 and V3 therefore make 150 group-level calls each
+(three groups per whole-survey repetition); V2 uses the same fitted encoder for
+all groups and draws, without retraining. Per-person scores evaluate the full
+50-draw empirical predictive distributions.
+
+This is **donor-restricted reconstruction**, not unseen-diary validation. Most
+recipients contributed to fitting the encoder. The report separately shows
+scores for respondents used for fitting and those reserved for early stopping;
+the latter also influenced checkpoint selection and are not an untouched final
+test set. Source eligibility cleaning and some input predictors also use diary
+information. This protocol is deliberately different from the archived
+household-held-out experiment above.
+
+The second section matches the entire configured synthetic population ten times
+per method. It saves mappings, coverage, means, count/distance distributions and
+chain shares. National, Geneva (25), Zürich (1), Vaud (22) and residence-density
+summaries use the same residents successfully matched by every method in every
+repetition, excluding explicit home-only scenario bypasses. Genuine non-travel
+survey days remain eligible. Figure ranges describe matching randomness only;
+the survey is a descriptive reference rather than a known correct population.
+
+Output is `<analysis_path>/matching/repeated_shared_v1_v2_v3/report.html`, with
+two sections and click-to-open metric definitions. Per-draw checkpoints preserve
+completed matching work. The experiment identity rejects incompatible reuse.
+Rebuild the report without any fitting or matching using:
+
+    uv run -m analysis.matching.repeated_report /path/to/analysis/matching/repeated_shared_v1_v2_v3
+
+If only summary generation was interrupted, call `summarize_population()` from
+`analysis.matching.repeated_report` before the renderer; it uses saved mappings
+and survey outcomes only.

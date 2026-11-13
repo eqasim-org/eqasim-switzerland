@@ -1,0 +1,50 @@
+<!doctype html><meta charset="utf-8"><title>__TITLE__: incoming distances</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>body{font:15px/1.4 sans-serif;margin:15px}#map{height:520px;background:#eee}label{margin-right:12px}td,th{padding:4px;border:1px solid #ddd}table{border-collapse:collapse}#status{color:#654}#legend{padding:8px}</style>
+<h2>__TITLE__: assigned incoming distances by home area</h2>
+<p>Cells locate homes, not synthetic activity destinations. Values are mean straight-line distances from the preceding activity. All cell data are embedded in this file. © <a href="https://www.swisstopo.admin.ch/">swisstopo</a> / geo.admin.ch. Background tiles and the map library require internet access; tables and the report's static figures remain available without it.</p>
+<label>Method <select id="method"></select></label>
+<label>Purpose <select id="purpose"><option value="shop">Shopping</option><option value="leisure">Leisure</option><option value="other">Other</option></select></label>
+<label>Cohort <select id="scope"><option value="common">Common recipients</option><option value="full">Full retained populations</option></select></label>
+<label>Background opacity <input id="opacity" type="range" min="0" max="1" step=".05" value=".65"></label>
+<div id="status"></div><div id="map"></div><div id="legend"></div>
+<p><a href="distance_map_cells.csv">Download all cell statistics (CSV)</a> · <a href="distance_map_coverage.csv">Coordinate coverage</a></p>
+<div id="selected"></div><h3>Supported-cell summaries (available offline)</h3>__TABLE__
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const DATA=__DATA__;
+const el=id=>document.getElementById(id);
+const methods=['Survey',...DATA.methods,...DATA.methods.filter(m=>m!=='V1').map(m=>m+' − V1')];
+for(const name of methods){const option=document.createElement('option');option.textContent=name;option.value=name;el('method').appendChild(option);}
+el('method').value=DATA.methods.includes('V3')?'V3':'Survey';
+let map,tiles,layer;
+if(window.L){
+ map=L.map('map',{preferCanvas:true});
+ tiles=L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg',{opacity:.65,maxZoom:19,maxNativeZoom:18,noWrap:true,attribution:'© <a href="https://www.swisstopo.admin.ch/">swisstopo</a> / geo.admin.ch'}).addTo(map);
+ tiles.on('tileerror',()=>el('status').textContent='Some background tiles could not load. Cell overlays and tables remain available.');
+ for(const ring of DATA.outlines)L.polyline(ring,{color:'#555',weight:1,interactive:false}).addTo(map);
+ const bounds=DATA.outlines.length?DATA.outlines.flat():DATA.squares.flat();
+ if(bounds.length)map.fitBounds(L.latLngBounds(bounds));else map.setView([46.85,8.2],8);
+ layer=L.layerGroup().addTo(map);
+}else el('status').textContent='Map library unavailable. Use the summaries below, CSV download and static report figures.';
+function render(){
+ const method=el('method').value,purpose=el('purpose').value,scope=el('scope').value;
+ const rows=DATA.rows.filter(r=>r[2]===purpose&&r[3]===scope);
+ let selected=[];const difference=method.includes(' − ');
+ if(difference){const model=method.split(' − ')[0],base=new Map(rows.filter(r=>r[1]==='V1').map(r=>[r[0],r]));selected=rows.filter(r=>r[1]===model&&base.has(r[0])).map(r=>[r[0],r[4]-base.get(r[0])[4],Math.min(r[5],base.get(r[0])[5])]);}
+ else selected=rows.filter(r=>r[1]===method).map(r=>[r[0],r[4],r[5]]);
+ const values=selected.map(r=>Math.abs(r[1])).sort((a,b)=>a-b),limit=Math.max(.1,values[Math.floor(.98*(values.length-1))]||1);
+ if(layer)layer.clearLayers();
+ for(const [cell,value,n] of selected){
+  const strength=Math.min(1,Math.abs(value)/limit);
+  const color=difference?`hsl(${value>=0?0:220},70%,${97-strength*55}%)`:`hsl(${240-strength*240},70%,50%)`;
+  if(layer)L.polygon(DATA.squares[cell],{weight:0,fillOpacity:.72,fillColor:color}).bindPopup(`${method} · ${purpose}<br>${value.toFixed(2)} km<br>${n} contributing residents`).addTo(layer);
+ }
+ el('legend').textContent=difference?`Difference scale: −${limit.toFixed(2)} to +${limit.toFixed(2)} km; blue = shorter, red = longer than V1. Only jointly supported cells are shown.`:`Mean distance scale: 0 to ${limit.toFixed(2)} km (blue to red).`;
+ el('legend').textContent+=' Colours saturate at the 98th percentile; CSV values are not clipped. Uncoloured areas lack sufficient support.';
+ const head='<tr><th>Cell</th><th>Distance / difference (km)</th><th>Contributing residents</th></tr>';
+ el('selected').innerHTML='<h3>Current selection: '+selected.length+' supported cells (first 100 shown)</h3><table>'+head+selected.slice(0,100).map(r=>`<tr><td>${r[0]}</td><td>${r[1].toFixed(2)}</td><td>${r[2]}</td></tr>`).join('')+'</table>';
+}
+for(const id of ['method','purpose','scope'])el(id).onchange=render;
+el('opacity').oninput=()=>{if(tiles)tiles.setOpacity(Number(el('opacity').value));};render();
+</script>

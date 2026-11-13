@@ -41,6 +41,10 @@ def execute(context):
     eligible = population.age.ge(const.MZ_AGE_THRESHOLD) if const.census == "statpop" else population.age_class.gt(0)
     collective = coerce_boolean_series(population.get("collective_housing_resident",
         pd.Series(False, index=population.index)), name="collective_housing_resident")
+    logger.info("V3 start: %d recipients, %d eligible for matching, %d home-only bypasses, "
+                "%d eligible donors; day=%s, preferred candidate pool=%d, opening-hours regions=%s",
+                len(roster), int(eligible.sum()), int(home_only_mask(roster).sum()), len(source),
+                context.config("specific_day_scenario"), threshold, context.config("consider_opening_hours"))
 
     # Match each age/residence segment using exact hard blocks and JIT profile searches.
 
@@ -62,17 +66,32 @@ def execute(context):
                 weights = pd.to_numeric(donors[weight], errors="coerce")
                 valid = np.isfinite(weights) & weights.gt(0)
                 if not valid.all():
-                    logger.warning("V3 excluded %d invalid-weight donors in %s", (~valid).sum(), segment)
+                    logger.warning("V3 %s/%s: excluded %d donors with non-positive or non-finite %s",
+                                   group, "collective" if is_collective else "ordinary", (~valid).sum(), weight)
                     donors = donors.loc[valid].copy()
                 hard = list(inputs.HARD[group])
                 matching_columns = list(columns)
                 if context.config("consider_opening_hours"):
                     hard.append(opening_hours.REGION)
                     matching_columns.append(opening_hours.REGION)
+                label = f"{group}/{'collective home-only' if is_collective else 'ordinary'}"
+                logger.info("V3 %s: %d recipients, %d eligible donors before hard masks; hard=[%s]; "
+                            "sex remains a relaxable preference",
+                            label, len(target), len(donors), ", ".join(hard))
                 assigned, details = donor_tools.select_donors(donors, target, matching_columns, mandatory, hard,
                     seed=int(context.config("random_seed")) + segment * 2 + int(is_collective),
                     threshold=threshold, weight=weight)
                 details["age_group"], details["collective"] = group, is_collective
+                matched = assigned >= 0
+                pools = details.loc[matched, "donor_pool_size"]
+                logger.info("V3 %s result: matched %d/%d (%.1f%%), no compatible hard-mask donor=%d; "
+                            "exact mandatory preferences=%d, relaxed mandatory preferences=%d, "
+                            "candidate pools below %d=%d; pool size min/median/max=%d/%.0f/%d",
+                            label, int(matched.sum()), len(target), 100. * matched.mean(), int((~matched).sum()),
+                            int((matched & details.mandatory_mismatches.eq(0)).sum()),
+                            int((matched & details.mandatory_mismatches.gt(0)).sum()), threshold,
+                            int(details.below_threshold.sum()), int(pools.min()) if len(pools) else 0,
+                            float(pools.median()) if len(pools) else 0., int(pools.max()) if len(pools) else 0)
                 diagnostics.append(details)
                 mapping = pd.Series(assigned, index=target.person_id)
                 selector = result.person_id.isin(target.person_id)
@@ -98,9 +117,19 @@ def execute(context):
         "held_home_only": int(home_only_mask(roster).sum()),
         "below_threshold": int(details.below_threshold.sum()),
         "mandatory_relaxed": int(details.mandatory_mismatches.gt(0).sum()),
+        "unmatched_hard_masks": int(details.mz_person_id.lt(0).sum()),
+        "matched_but_removed_with_household": int((details.removed & details.mz_person_id.ge(0)).sum()),
+        "other_household_members_removed": len(removed) - int(details.removed.sum()),
         "elapsed_seconds": time.perf_counter() - started}
     (output / "matching_report.json").write_text(json.dumps(report, indent=2))
-    logger.info("V3 matching: %s", report)
+    logger.info("V3 finished in %.1fs: %d/%d eligible recipients retained with donors; "
+                "%d residents removed (%d lacked hard-mask donors, %d matched recipients removed with their household, "
+                "%d other household members); "
+                "%d home-only bypasses retained without donors",
+                report["elapsed_seconds"], report["matched"], report["eligible_recipients"], report["removed"],
+                report["unmatched_hard_masks"], report["matched_but_removed_with_household"],
+                report["other_household_members_removed"], report["held_home_only"])
+    logger.info("V3 diagnostics: %s; report: %s", output / "matching_diagnostics.csv", output / "matching_report.json")
     result = result.loc[~result.person_id.isin(removed)].reset_index(drop=True)
     if not set(details.person_id) == set(population.loc[eligible, "person_id"]):
         raise RuntimeError("V3 segments did not cover every eligible recipient exactly once")

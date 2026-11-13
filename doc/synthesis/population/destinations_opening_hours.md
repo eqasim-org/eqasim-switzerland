@@ -118,7 +118,7 @@ them unless its mismatch to one continuous interval fits the budget. Known
 closed schedules remain excluded. The filter does not alter trip times.
 
 When opening hours are enabled, the three donor-matching stages also use the
-[canton opening-hours regions](../../data/osm/opening_hours_regions.md) as
+[municipality opening-hours regions](../../data/osm/opening_hours_regions.md) as
 strict residence-region masks.
 
 Schedules are parsed once into numeric arrays before multiprocessing. A

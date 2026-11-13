@@ -6,6 +6,59 @@ from .features import CATEGORICAL_GROUPS
 from .runtime import torch, nn, F, to_tensors
 
 
+def configure(context):
+    from . import configuration
+    from synthesis.population.matching import opening_hours
+    configuration.configure(context)
+    opening_hours.configure(context)
+    for stage in ("data.microcensus.persons", "data.microcensus.trips",
+                  "data.microcensus.activity_chains", "data.microcensus.commute",
+                  "synthesis.population.sampled", "data.constants"):
+        context.stage(stage)
+    context.stage("synthesis.population.spatial.primary.work.work_locations", alias="work_locations")
+    if context.config("census", "statpop") == "statpop":
+        context.stage("synthesis.population.spatial.primary.education.locations", alias="education_locations")
+
+
+def execute(context):
+
+    # Prepare the complete eligible survey and use one internal validation split.
+
+    from pathlib import Path
+    import json
+    import time
+    from dataclasses import replace
+    from .inputs import prepare_inputs
+    from .configuration import MatchingOptions
+    from .wrappers import DiaryMatcher
+    from synthesis.population.matching import opening_hours
+    source, population, trips = prepare_inputs(context, context.stage("data.constants"))
+    source, _ = opening_hours.add_regions(context, source, population)
+    options = replace(MatchingOptions.from_context(context), overwrite=False)
+    if options.validation_fraction != .1:
+        raise ValueError("The shared V2 model requires a 10% internal validation split")
+
+    # Fit once, retaining the fitted wrapper and explicit split membership.
+
+    started = time.perf_counter()
+    matcher = DiaryMatcher(options, cache_directory=context.path()).fit(source, trips)
+    matcher.training_wall_seconds_ = time.perf_counter() - started
+    directory = Path(context.path())
+    (directory / "training_report.json").write_text(json.dumps(matcher.training_report_, indent=2))
+    membership = source[["mz_id"]].copy()
+    membership["training_role"] = np.where(source.mz_id.isin(matcher.validation_ids_), "early_stopping_validation", "fit")
+    membership.to_csv(directory / "training_membership.csv", index=False)
+
+    # Return the reusable model; consumers only call its match method.
+
+    return matcher
+
+
+def validate(context):
+    from .provenance import implementation_token
+    return implementation_token()
+
+
 if torch is not None:
     class EmbeddingGRUModel(nn.Module):
         def __init__(self, cont_dim, cardinalities, n_activity, n_mode, dropout=0.2,
