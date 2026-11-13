@@ -1,10 +1,10 @@
 import json
 import os
 import shutil
-import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely import intersects, linestrings, prepare
+from shapely import intersects, prepare
+from pathlib import Path
 from scipy.spatial import cKDTree
 from matsim.readers import read_network
 from matsim.scenario.network.utils.network_attribute_assigner import NetworkAttributeAssigner
@@ -15,16 +15,19 @@ from matsim.scenario.network.utils.pt_stop_reader import read_stop_coordinates
 from matsim.scenario.network.utils.speed_corrector import SpeedCorrector
 from matsim.scenario.network.utils.traffic_light_matcher import TrafficLightsMatcher
 from matsim.scenario.network.utils.link_geometry import (
-    GEOMETRY_COLUMN, attach_link_geometries, write_link_geometries,
+    GEOMETRY_COLUMN, attach_link_geometries, write_link_geometries, get_network_geometry
 )
+from matsim.scenario.network.utils.border_crossings import crossing_links, write_crossings
 
 import logging
 logger = logging.getLogger("synpp:\t\t NetworkHandler")
 
 class NetworkHandler:
-    def __init__(self, context, network_path: str, detailed_network_path:str, schedule_path: str = None):
+    def __init__(self, context, network_path: str, detailed_network_path:str, schedule_path: str = None,
+                 path_to_border_crossing_links: str = None):
         self.network_path = network_path
         self.detailed_network_path = detailed_network_path
+        self.path_to_border_crossing_links = path_to_border_crossing_links
         self.schedule_path = schedule_path
         self.net = read_network(network_path, context=context)
         self.context = context
@@ -45,6 +48,7 @@ class NetworkHandler:
         self._adjust_mountain_links_speed_if_requested()
         self._route_bike_if_requested()
         self._final_cleaning()
+        self._tag_border_crossing_points()
         return self._save_processed_network(save_as_pickle, network_pickle)
 
     def _assign_network_attributes(self):
@@ -88,16 +92,7 @@ class NetworkHandler:
             existing_tolls = links.attributes.map(lambda a: isinstance(a, dict) and "toll" in a)
             candidates = links.loc[has_tolls | existing_tolls]
             if not candidates.empty:
-                crs = self.net.network_attrs.get("coordinateReferenceSystem", "EPSG:2056")
-                if GEOMETRY_COLUMN in candidates:
-                    shapes = candidates[GEOMETRY_COLUMN]
-                else:
-                    nodes = self.net.nodes.set_index("node_id")[["x", "y"]]
-                    shapes = linestrings(np.stack([
-                        nodes.loc[candidates.from_node].to_numpy(),
-                        nodes.loc[candidates.to_node].to_numpy(),
-                    ], axis=1))
-                geometries = gpd.GeoSeries(shapes, index=candidates.index, crs=crs).to_crs(2056)
+                geometries = get_network_geometry(self.net, candidates)
                 border = self.context.stage("data.spatial.swiss_border").to_crs(2056).union_all().buffer(10)
                 prepare(border)
                 excluded = candidates.index[intersects(border, geometries.array)]
@@ -209,6 +204,32 @@ class NetworkHandler:
         if self.context.config("route_bike"):
             logger.info("Routing Bike...")
             self.net.links = networkCleaner(self.net).add_bike_to_network()
+
+    def _tag_border_crossing_points(self):
+        # Detect true country transitions using full, directed, LV95 link shapes.
+        country = self.context.stage("data.spatial.swiss_border").to_crs(2056).union_all()
+        geometries = get_network_geometry(self.net)
+        crossings = crossing_links(self.net.links, geometries, country)
+        crossing_ids = set(crossings.link_id)
+
+        # Copy dictionaries so tagging never mutates shared/upstream attributes.
+        attributes = self.net.links.attributes if "attributes" in self.net.links else [{}] * len(self.net.links)
+        updated = []
+        for link_id, original in zip(self.net.links.link_id.astype(str), attributes):
+            values = dict(original) if isinstance(original, dict) else {}
+            values.pop("ch_border_crossing", None)
+            if link_id in crossing_ids:
+                values["ch_border_crossing"] = True
+            updated.append(values)
+        self.net.links["attributes"] = updated
+
+        # Export final link IDs and exact intersection points; one link may cross more than once.
+        path = Path(self.path_to_border_crossing_links) if self.path_to_border_crossing_links else (
+            Path(self.context.path()) / "border_crossing_links.parquet")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_crossings(crossings, path)
+        logger.info("Tagged %d Swiss-border links; exported %d intersection points to %s",
+                    len(crossing_ids), len(crossings), path)
 
     def _final_cleaning(self):
         logger.info("Final Cleaning of Network...")

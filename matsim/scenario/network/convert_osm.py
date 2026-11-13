@@ -4,6 +4,8 @@ import re
 import matsim.runtime.pt2matsim as pt2matsim
 from matsim.scenario.network.utils.network_handler import NetworkHandler
 import shutil
+import hashlib
+from pathlib import Path
 
 def configure(context):
     context.stage("matsim.scenario.network.convert_osm_pt2matsim")
@@ -74,5 +76,17 @@ def execute(context):
     schedule_path = context.stage("matsim.scenario.network.convert_pt_schedule")["schedule"]
 
     network_pickle = "%s/network.pkl" % context.path() # faster to read if we need it in the pipeline, it should be read from this file from now on
+    path_to_border_crossing_links = "%s/border_crossing_links.parquet" % context.path()
 
-    return NetworkHandler(context, network_path, detailed_network_path, schedule_path = schedule_path).process_network(save_as_pickle = True, network_pickle = network_pickle)
+    return NetworkHandler(context, network_path, detailed_network_path,
+                          schedule_path = schedule_path,
+                          path_to_border_crossing_links = path_to_border_crossing_links
+                          ).process_network(save_as_pickle = True, network_pickle = network_pickle)
+
+
+def validate(context):
+    """Include imported network/geometry helpers in conversion cache validation."""
+    digest = hashlib.sha256()
+    for name in ("network_handler.py", "link_geometry.py", "border_crossings.py"):
+        digest.update((Path(__file__).parent / "utils" / name).read_bytes())
+    return digest.hexdigest()

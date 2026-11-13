@@ -48,6 +48,10 @@ config:
 
     # Scenario scope and calibration
     use_freight: true # Include freight vehicles.
+    use_npvm_freight: true # NPVM truck matrices; false selects the GTE/GQGV method.
+    npvm_freight_use_border_crossings: true # Use road crossings for foreign freight endpoints.
+    npvm_freight_crossing_source: route # route (saved), network, or interview.
+    npvm_freight_routing_overwrite: false # True reroutes and replaces the saved NPVM crossing assignments.
     use_lcv: true # Include light commercial vehicles.
     include_cross_border: false # Generate additional foreign-resident cross-border flows.
     generate_outbound_flows: false # Generate Swiss residents' outbound trips beyond the existing survey trips.
