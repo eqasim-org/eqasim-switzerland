@@ -11,6 +11,8 @@ import re
 import itertools
 import logging
 
+from utils.gtfs_router.pricing import SLOID, station_id
+
 logger = logging.getLogger("synpp")
 
 
@@ -574,8 +576,14 @@ def extract_station_code(stop_id):
     different ID schemes by different source feeds. E.g. Swiss "8501023"
     and French SNCF "StopArea:OCE85010231" both encode Coppet: Swiss GTFS
     uses the bare 7-digit UIC code, SNCF embeds the 8-digit code (7 digits
-    + check digit) in its own ID scheme.
+    + check digit) in its own ID scheme. A Swiss SLOID gives its DiDok number
+    (ch:1:sloid:1023:0:5 -> 8501023, see utils.gtfs_router.pricing.station_id).
     """
+    # Swiss SLOIDs since 2026 (ch:1:sloid:1120:0:276884, Parentch:1:sloid:1120): their DiDok number (8501120). Their
+    # platform part can have 7 digits of its own, which must not be taken for the station
+    if SLOID.match(str(stop_id)):
+        return station_id(str(stop_id))
+
     matches = re.findall(r"\d{7,8}", str(stop_id))
     if not matches:
         return None

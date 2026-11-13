@@ -138,8 +138,8 @@ def execute(context):
     merged_feed = gtfs.fill_calendar_from_dates(merged_feed)
     merged_feed = gtfs.drop_unused_shapes(merged_feed)
 
-    # Not used by pt2matsim: what data.gtfs.visualize shows about the merge (the source feed of the routes and stops,
-    # and where each transfer comes from)
+    # Not used by pt2matsim: diagnostics of the merge (the source feed of the routes and stops, and where each transfer
+    # comes from, shown by analysis.pt.transit_schedule.transfers)
     _write_diagnostics(context.path(), merged_feed, sources, ids_by_feed, transfers_feeds, transfers_bridged, transfers_manual, transfers_nearby)
 
     # Fix for pt2matsim (will be fixed after PR #173)

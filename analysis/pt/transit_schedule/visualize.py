@@ -14,7 +14,9 @@ from shapely.ops import unary_union
 
 import matsim.scenario.network.utils.pt_route_check as pt_route_check
 from analysis.pt.transit_schedule import page
+from analysis.pt.transit_schedule import transfers as gtfs_transfers
 from analysis.output_files import find_simulation_output
+from utils.gtfs_router.pricing import SLOID, station_id
 
 NETWORK_CRS = "epsg:2056"
 
@@ -74,8 +76,16 @@ def configure(context):
     context.config("pt_route_agencies", ["881", "151"])  # same default as matsim.scenario.network.corrected
     # Reference of a route: the GTFS shape of its trip, else the official line route (line_routes_path)
     context.config("pt_route_gtfs_shapes", True)
+
+    # Second map of the stage, transfer_times_map.html: the GTFS transfer times (transfers.txt of data.gtfs.cleaned) in
+    # the Geneva and Lausanne perimeters, the same settings as the TPG and TL comparisons (relative to data_path or absolute)
+    context.config("analysis.pt.transit_schedule_transfers", default = True)
+    context.config("analysis.pt.tpg_perimeter", default = "spatial/MMT/CMDP_Limites_WG84.shp")
+    context.config("analysis.pt.tl_perimeter", default = "spatial/LausanneExtent/LausanneExtent.shp")
+
     if context.config("pt_route_gtfs_shapes") or isinstance(context.config("pt_line_routes_path"), dict) or (
-            context.config("analysis.pt.transit_schedule_route_check") and context.config("pt_route_agencies")):
+            context.config("analysis.pt.transit_schedule_route_check") and context.config("pt_route_agencies")) \
+            or context.config("analysis.pt.transit_schedule_transfers"):
         context.stage("data.gtfs.cleaned")
 
     source = context.config("analysis.pt.transit_schedule_source")
@@ -155,7 +165,22 @@ def execute(context):
         gtfs_trips_path = gtfs_trips_path, gtfs_shapes_path = gtfs_shapes_path,
     )
 
-    return dict(done = True, path = output_file, route_check = report_path)
+    # Map of the GTFS transfer times, and the table of the rules it shows.
+
+    transfers_map = transfers_table = None
+    if context.config("analysis.pt.transit_schedule_transfers"):
+        data_path = context.config("data_path")
+        perimeters = {name: path if os.path.isabs(path) else os.path.join(data_path, path) for name, path in (
+            ("Geneva", context.config("analysis.pt.tpg_perimeter")), ("Lausanne", context.config("analysis.pt.tl_perimeter")))}
+        gtfs_path = os.path.join(context.path("data.gtfs.cleaned"), "output")
+        transfers = gtfs_transfers.load_transfers(gtfs_path, os.path.join(context.path("data.gtfs.cleaned"), "diagnostics"), perimeters)
+        transfers_table = os.path.join(output_dir, "transfer_times.csv")
+        transfers[1].to_csv(transfers_table, index = False)
+        transfers_map = os.path.join(output_dir, "transfer_times_map.html")
+        gtfs_transfers.write_map(gtfs_path, transfers, transfers_map)
+
+    return dict(done = True, path = output_file, route_check = report_path,
+                transfers_map = transfers_map, transfers_table = transfers_table)
 
 
 def _find_output_file(simulation_path, filename):
@@ -341,7 +366,10 @@ def load_transit_schedule(schedule_path):
 def _extract_station_code(stop_id):
     # pt2matsim appends ".link:<linkId>" to stop ids; the link id can itself be a 7-8 digit
     # number and must not be mistaken for the station code (it would merge unrelated stops).
-    matches = re.findall(r"\d{7,8}", str(stop_id).split(".link:")[0])
+    stop_id = str(stop_id).split(".link:")[0]
+    if SLOID.match(stop_id):   # a Swiss SLOID (ch:1:sloid:1120:0:276884): its DiDok number
+        return station_id(stop_id)
+    matches = re.findall(r"\d{7,8}", stop_id)
     if not matches:
         return None
     code = matches[-1]
@@ -773,7 +801,15 @@ if __name__ == "__main__":
     parser.add_argument("--gtfs-shapes", default = None, help = "GTFS shapes.txt")
     parser.add_argument("--agency", action = "append", default = [],
                          help = "Only check the lines of this GTFS agency_id (repeatable)")
+    parser.add_argument("--gtfs-transfers", default = None,
+                         help = "Cache directory of data.gtfs.cleaned: also writes the map of its transfer times "
+                                "(output/transfers.txt, and where they come from in diagnostics/transfers.csv) within the "
+                                "--transfer-perimeter, transfer_times_map.html next to --output")
+    parser.add_argument("--transfer-perimeter", action = "append", default = [],
+                         help = "Polygon file of the transfer times shown (repeatable; needed with --gtfs-transfers)")
     args = parser.parse_args()
+    if args.gtfs_transfers and not args.transfer_perimeter:
+        parser.error("--gtfs-transfers needs at least one --transfer-perimeter")
     args.line_routes = {(s.split("=", 1)[0] if "=" in s else ""): s.split("=", 1)[-1] for s in args.line_routes} or None
     if args.line_routes and list(args.line_routes) == [""]:
         args.line_routes = args.line_routes[""]
@@ -802,3 +838,10 @@ if __name__ == "__main__":
         route_check_rows = route_check_rows,
         gtfs_routes_path = args.gtfs_routes, gtfs_trips_path = args.gtfs_trips, gtfs_shapes_path = args.gtfs_shapes,
     )
+
+    if args.gtfs_transfers:
+        gtfs_path = os.path.join(args.gtfs_transfers, "output")
+        gtfs_transfers.write_map(gtfs_path, gtfs_transfers.load_transfers(
+            gtfs_path, os.path.join(args.gtfs_transfers, "diagnostics"),
+            {os.path.basename(path): path for path in args.transfer_perimeter},
+        ), os.path.join(os.path.dirname(args.output) or ".", "transfer_times_map.html"))

@@ -7,17 +7,18 @@ not which zones it covers. This stage finds them from the commute, with the meth
 of the Swiss PT explorer (`verbund_zones.py` of
 [swiss-pt-explorer](https://github.com/AuroreSallard/swiss-pt-explorer)). The code
 it needs is copied into `utils/gtfs_router/`: the timetable reader (`feed`), the
-router (`csa`), the fares and stop zones (`pricing`), the zone polygons and ride
-tracks (`zones`, `tracks`), the Léman Pass (`lemanpass`) and the method itself
+router (`csa`), the fares and stop zones (`pricing`), the zones of the stops abroad
+and the ride tracks (`zones`, `tracks`), the Léman Pass (`lemanpass`) and the method itself
 (`verbund`). Keep these copies in step with the Swiss PT explorer.
 
 ## Method
 
 1. Each agent with a Verbundabo gets a commute destination: the place of education
    for students, else the workplace. The others have none.
-2. The home and destination are placed in the zone polygons, built from
-   `tarifverbundkarte.geojson` and the zones of the stops (`gtfs_zones.csv`), as in
-   `data.pt_pricing.zones`.
+2. The home and destination are placed in the zone polygons of
+   `data.pt_pricing.zones` (built from `tarifverbundkarte.geojson`, the zones of the
+   stops in `gtfs_zones.csv` and the French communes of Unireso). The ride tracks are
+   cut with the same polygons, so the stage uses one set of zones throughout.
 3. The agents are grouped by zone OD. The subscription covers:
    - the home zone, without a destination or with one in the same zone;
    - the zones of the home network along the commute, within one network;
@@ -89,8 +90,9 @@ method, product, number of zones and network.
 
 `matsim.scenario.population` uses this stage instead of the subscriptions stage
 (`use_subscription_zones`, default `true`). The Swiss synthetic persons with a
-regional subscription get the person attributes `subscriptionProduct`
-(`Verbundabo` or `Léman Pass`), `subscriptionZones` (when zones are found), and, for
-a Léman Pass, `lemanPass` (its trip type) and `lemanPassAnnualPrice` (CHF). The
-external and cross-border agents get none of them. With
+regional subscription get the person attribute `RegionalSubscriptionProducts`: the
+zones per fare network, the networks joined by `+`, e.g. `ZVV:110,121` or
+`ZVV:110,121+Unireso:10`. It is left out when no zones are found. A Léman Pass is
+written like any other regional subscription (its product is not written), and
+`subscriptions` keeps its values (`none`, `GA`, `VA`, `HT`, `VA+HT`). The external and cross-border agents get no zones. With
 `use_subscription_zones: false`, the population is written as before.

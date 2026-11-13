@@ -50,6 +50,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Traffic-count matching](analysis/counts/matching/README.md)
 - [Shared cross-border event analysis](analysis/counts/cross_border_events.md)
 - [TL and TPG public-transport comparisons](analysis/pt/comparisons.md)
+- [GTFS transfer time map](analysis/pt/transfer_times.md)
 - [Bus route corrections using GTFS shapes](matsim/scenario/network/pt_route_corrections.md)
 - [NPVM freight demand and source selection](synthesis/freight/npvm/README.md)
 - [Swiss-border network links and freight crossing export](matsim/scenario/network/border_crossings.md)
