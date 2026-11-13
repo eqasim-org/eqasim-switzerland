@@ -40,7 +40,7 @@ def configure(context):
     context.stage("data.cross_border.road_exit_points")
     context.stage("data.cross_border.interview_places")
     context.stage("data.cross_border.road_candidates")
-    context.stage("data.cross_border.car_targets")
+    context.stage("data.cross_border.car_target_calibration")
     context.stage("data.cross_border.pt_gateways")
 
     context.config("border_offset", default = 50000)
@@ -62,7 +62,7 @@ def execute(context):
     # affects passengers only; it cannot change the number of generated drivers.
 
     borders, calibration = calibrate_demand(
-        borders2015, borders2021, context.stage("data.cross_border.car_targets"))
+        borders2015, borders2021, context.stage("data.cross_border.car_target_calibration"))
     borders = repair_car_occupancy(borders, rng)
     write_survey_audit(context, borders2015, borders, calibration)
     borders = borders.loc[borders["location_usable"]].copy()
@@ -202,7 +202,7 @@ def repair_interview_place_names(names, known):
     return names.replace(mapping)
 
 
-def sample_gateway(candidates, point, other_point, rng):
+def sample_gateway(candidates, point, other_point, rng, direction = "both", train_category = None):
     """
     One gateway station of a crossing (data.cross_border.pt_gateways) for a public
     transport traveller whose real end abroad is point, the other end of the trip
@@ -212,9 +212,18 @@ def sample_gateway(candidates, point, other_point, rng):
     GATEWAY_DETOUR_FACTOR), one is drawn in proportion to its departures of trains
     coming from beyond the perimeter, where the traveller lives: not the local
     trains of the stations next to the border (Pougny-Chancy). Without such trains,
-    in proportion to all departures, and evenly for the gateways of
-    cross_border_pt_gateways_file, which have none.
+    in proportion to all departures. Require service in the journey's direction;
+    visitors and Swiss-resident reference endpoints require both directions.
     """
+    if direction not in ("entry", "exit", "both"):
+        raise ValueError(f"Unknown gateway direction: {direction}")
+    required = ["entry_departures", "exit_departures"] if direction == "both" else [direction + "_departures"]
+    candidates = candidates.loc[(candidates[required] > 0).all(axis = 1)]
+    if candidates.empty:
+        raise ValueError(f"No rail gateway with {direction} service; check the crossing's transit schedule or gateway overrides")
+    if train_category == "long_distance" and candidates["has_long_distance"].any():
+        candidates = candidates.loc[candidates["has_long_distance"]]
+
     detour = candidates.geometry.distance(point).values
     if other_point is not None:
         detour = detour + candidates.geometry.distance(other_point).values
@@ -271,6 +280,7 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     # and whether the respondent was on a long-distance train.
     points["restrict_to_place"] = df[restrict_column].values if restrict_column is not None else True
     points["train_category"] = df["train_category"].values if "train_category" in df.columns else None
+    points["origin_gateway_id"] = df["origin_point_id"].values if column_name == "destination" and "origin_point_id" in df else None
 
     # The other end of the trip (destination when projecting the origin, and
     # vice-versa), used below to minimize the total origin->crossing->destination
@@ -290,6 +300,12 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
     proxy_source = "start_location_source" if column_name == "origin" else "end_location_source"
     crossing_proxy = df.get(proxy_source, pd.Series("reported", index = df.index)).eq("crossing_proxy").to_numpy()
     close_mask = close_mask & ~crossing_proxy
+    # Every foreign rail end starts/finishes at a served station, even when its
+    # survey coordinate lies inside the road perimeter. Preserve the old road
+    # RNG stream: these newly projected nearby rail ends use their own stream.
+    points["new_pt_projection"] = close_mask & points["label"].eq("pt")
+    nearby_pt_rng = np.random.RandomState(context.config("random_seed")) if points["new_pt_projection"].any() else None
+    close_mask = close_mask & ~points["label"].eq("pt")
     far_mask = ~close_mask
 
     far_points   = points[far_mask].copy()
@@ -308,32 +324,39 @@ def project_point_series_close_to_border(df, x, y, distance_threshold, default_p
         ["geometry", "border_crossing_point_id", "label", "interview_place", "importance", "selection_weight", "canonical_point_id"]].reset_index(drop = True)
     grouped_points = {k: v for k, v in interview_points.groupby(["label", "interview_place"])}
 
-    # Public transport points are not moved onto the interview place, a station on
-    # the border where most long-distance trains do not stop, but onto a gateway
-    # station further abroad (data.cross_border.pt_gateways): the one closest to the
-    # real point, among those served by long-distance trains for the long-distance
-    # travellers. Interview places without gateways fall back to the interview place.
-    pt_gateways = context.stage("data.cross_border.pt_gateways")[
-        ["geometry", "gateway_id", "interview_place", "has_long_distance", "departures", "far_departures"]].reset_index(drop = True)
+    # Every foreign rail endpoint uses a gateway served across its crossing.
+    # Keep the survey endpoint separately for residence/OD accounting. Missing
+    # rail supply is an error, never a reason to fall back to road coordinates.
+    pt_gateways = context.stage("data.cross_border.pt_gateways").reset_index(drop = True)
     grouped_gateways = {k: v for k, v in pt_gateways.groupby("interview_place")}
 
     def sample_pt_gateway(row):
         candidates = grouped_gateways.get(row["interview_place"]) if row["restrict_to_place"] else pt_gateways
 
         if candidates is None or len(candidates) == 0:
-            return None
+            raise ValueError(f"No rail gateway for {row['interview_place']!r}; check the transit schedule or gateway overrides")
 
-        if row["train_category"] == "long_distance" and candidates["has_long_distance"].any():
-            candidates = candidates[candidates["has_long_distance"]]
+        # A transit journey must retain two distinct border sides. Selecting both
+        # ends independently from all gateways can collapse it to a zero-length
+        # trip at the same foreign station, especially for Germany--Germany ODs.
+        if restrict_column is not None and not row["restrict_to_place"]:
+            candidates = candidates.loc[candidates["interview_place"] != row["interview_place"]]
+        if restrict_column is not None and column_name == "destination":
+            origin = pt_gateways.loc[pt_gateways["gateway_id"] == row["origin_gateway_id"]]
+            if len(origin):
+                candidates = candidates.loc[
+                    ~candidates["interview_place"].isin(origin["interview_place"])
+                    & (candidates.geometry.distance(origin.geometry.iloc[0]) > 1.0)]
 
-        gateway = sample_gateway(candidates, row["geometry"], row["other_geometry"], rng)
+        direction = "both" if restrict_column is None else ("entry" if column_name == "origin" else "exit")
+        gateway = sample_gateway(candidates, row["geometry"], row["other_geometry"],
+                                 nearby_pt_rng if row["new_pt_projection"] else rng,
+                                 direction = direction, train_category = row["train_category"])
         return pd.Series({"geometry": gateway["geometry"], "border_crossing_point_id": gateway["gateway_id"], "is_pt_gateway": True})
 
     def sample_far_point(row):
         if row["label"] == "pt":
-            gateway = sample_pt_gateway(row)
-            if gateway is not None:
-                return gateway
+            return sample_pt_gateway(row)
 
         candidates = grouped_points.get((row["label"], row["interview_place"]))
 
@@ -585,7 +608,7 @@ def process_through_trips(through_trips, N, context, rng):
 
     df = df_sampled.copy().reset_index()
 
-    # The survey observed one crossing only. A far-away public transport end is moved
+    # The survey observed one crossing only. Every foreign public transport end is moved
     # onto a gateway of that crossing if it is the end the crossing is closer to, and
     # onto the closest gateway of any crossing otherwise (data.cross_border.pt_gateways).
     starts = gpd.GeoSeries(gpd.points_from_xy(df["start_x"], df["start_y"]), crs = "EPSG:4326").to_crs("EPSG:2056")
