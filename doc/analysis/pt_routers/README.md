@@ -168,3 +168,88 @@ After generating the CSVs, append the measured results to the saved report with:
 ```bash
 uv run -m analysis.pt_routers.raptor_diagnosis <comparison-output-directory>
 ```
+
+## Observed microcensus trips: Rust, SwissRailRaptor, FLASH and Google
+
+Run `analysis.pt_routers.microcensus.analyse` to compare the three current
+production routing implementations on observed public-transport trips from
+`data.microcensus.trips`. Eqasim runs twice, with `--use-rust-pt-router true` and
+`false`, respectively; the latter uses SwissRailRaptor. Both use the same JAR,
+network, schedule and config. FLASH uses the normal shared preprocessing under
+`data_path/gtfs/flash_tb`. No population synthesis, mode choice or DMC estimation
+is required by this analysis. Fares and road assignment are disabled.
+
+```yaml
+run:
+  - analysis.pt_routers.microcensus.analyse
+config:
+  pt_microcensus_sample_size: null  # All observed PT trips; integer for a seeded sample.
+  pt_microcensus_repeats: 2         # First and warm calls, with persistent workers.
+  pt_microcensus_batch_size: 5000   # Eqasim worker batching.
+  pt_microcensus_timeout: 7200.0    # Startup and routing request timeout, seconds.
+  pt_microcensus_output_folder: pt_microcensus
+  threads: 24
+  flash_tb_preprocessing_threads: 24
+  flash_tb_query_threads: 24
+  use_marouter_in_mode_choice: false
+  route_population_once: false
+  prepare_sumo: false
+```
+
+Keep the regular `data_path`, `output_path`, `random_seed`, GTFS date and scenario
+configuration too. The private `config_pt_microcensus.yml` copies the working
+scenario settings; `sbatch run_pt_microcensus.sh` requests 24 CPUs, 120 GB and six
+hours, including room for the first full-country FLASH preprocessing. The script
+loads the same Java, compiler and Maven proxy environment as `run.sh`.
+The Rust router's locked dependencies require Rust **1.88 or newer**; the cluster's
+`rust/1.85.0` module is insufficient. The launcher prefers the standalone Rust
+1.90.0 installation at `${XDG_DATA_HOME:-$HOME/.local/share}/eqasim/toolchains/rust-1.90.0`,
+sets `RUSTC` explicitly, and checks the compiler before starting Synpp. Set
+`PT_ROUTER_RUST_PREFIX` to use another installation, or provide a sufficiently
+new compiler on `PATH`. The standalone installation does not modify shell profiles
+or replace the cluster modules.
+
+Optional `pt_microcensus_source_config` reuses an existing `matsim.config.pt` XML
+without rebuilding the network. Optional `pt_microcensus_source_gtfs` supplies the
+corresponding full cleaned `output/` directory. These overrides must come from the
+same scenario/date and GTFS archives named in the configuration. They stay
+read-only. Without overrides, the analysis depends on the normal producers.
+`pt_router_analysis_eqasim_commit` / `pt_router_analysis_eqasim_path` select the
+comparison JAR, defaulting to the pipeline's current pinned commit. Each backend
+has its own Synpp stage so completed routing can be resumed without rerunning it.
+
+The Google reference comes from `dmc.data.clean_routed_data`; no API calls are
+made. This reference already filters the source survey, so an absent Google row
+is **missing reference coverage**, not a known API routing failure. The analysis
+also verifies original `HHNR`/`WEGNR` using departure time and origin/destination
+coordinates within one metre: survey cleaning can split loops and renumber trips.
+Ambiguous or altered journeys remain in the routing experiment but are excluded
+from Google pairwise comparisons.
+
+The HTML report and CSV/Parquet files under `output_path/pt_microcensus/` include:
+
+- PT journeys found, pure walking fallbacks, missing rows and invalid components;
+  complete valid journeys are counted separately from journeys with partial data.
+- Distributions of total and in-vehicle times, access/egress and transfer times,
+  transfers and available distances, including means, medians and percentiles.
+- Every pair of routers, and each router versus Google, matched by trip ID, with
+  mean differences, MAE, RMSE, correlation and transfer agreement.
+- Success by detailed survey mode, border status, distance band and departure hour.
+- Startup, first-call and warm-call timings, worker counts and FLASH preprocessing
+  reuse. The original Google runtime is unavailable.
+- Identical request inputs, original backend results, classified results and a
+  trip-aligned comparison table. `selection.json` documents input exclusions and
+  Google matching coverage.
+
+Some saved Google transfer times are negative. The report retains the raw values
+in `google_raw_routes.parquet`, excludes these measurements from component
+statistics, and still compares otherwise valid total travel times. Numeric
+comparisons use jointly found PT journeys with finite, nonnegative values for
+each metric, with the matched count shown explicitly. Weighted reachability uses
+survey person weights; other statistics are unweighted trip summaries.
+
+The selected modern scenario day is used for all three routers, preserving survey
+time of day, including after-midnight times. Historical Google query dates and
+chosen departures can differ. Total-time/waiting conventions, route objectives,
+GTFS coverage and geometric versus mapped-network distances can also differ.
+These are descriptive comparisons rather than a claim that Google is ground truth.

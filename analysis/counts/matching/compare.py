@@ -13,6 +13,7 @@ def configure(context):
     configure_simulation_path(context)
     context.config("output_prefix", "switzerland_")
     context.config("analysis.counts.flow_aggregation_window", default= 1)
+    context.config("use_link_stats_in_counts_analysis", False)
 
 def execute(context):        
     simulation_path = get_simulation_path(context)
@@ -21,7 +22,8 @@ def execute(context):
     # searching for link stats file 
     linkstats_file = glob_output_files(os.path.join(iterations_directory, "it.*", "*.linkstats.txt"))
     counts_file = glob_output_files(os.path.join(iterations_directory, "it.*", "*.traffic_flow_daily_counts.csv"))
-    files = counts_file if counts_file else linkstats_file
+    use_counts_file = counts_file and not context.config("use_link_stats_in_counts_analysis")
+    files = counts_file if use_counts_file else linkstats_file
 
     if not files:
         raise FileNotFoundError(f"No counts nor link stats files found in {iterations_directory}")
