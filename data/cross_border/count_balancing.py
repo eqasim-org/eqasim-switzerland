@@ -9,11 +9,12 @@ from scipy.special import logsumexp
 
 
 def allocate(mass, cost, target, allowed, penalty=10., temperature=5.):
-    """Smooth geographical allocation with soft observed-count margins.
+    """Smooth geographical allocation with soft or exact crossing margins.
 
     Every OD row retains its demand. The bounded crossing-variable dual penalises
     column deviations instead of moving geographically implausible trips to
-    force an exact count fit. All time parameters are minutes per crossing.
+    force an exact count fit. With penalty=None the margins are exact.
+    All time parameters are minutes per crossing.
     """
     if ((mass <= 0).any() or not np.isfinite(target).all()
             or (penalty is None and (target < 0).any())
@@ -33,16 +34,25 @@ def allocate(mass, cost, target, allowed, penalty=10., temperature=5.):
 
     bounds = None if penalty is None else [(-penalty, penalty)] * cost.shape[1]
     started = perf_counter()
+    # Near an exact fit, objective improvements can approach floating-point
+    # precision before the gradient meets gtol. The default 20 line-search
+    # steps can then terminate with ABNORMAL even for a feasible allocation.
     fit = minimize(objective, np.zeros(cost.shape[1]), jac=True, method='L-BFGS-B',
-                   bounds=bounds, options={'ftol': 1e-12, 'gtol': 1e-9, 'maxiter': 2000})
-    if not fit.success:
-        raise RuntimeError(fit.message)
+                   bounds=bounds, options={'ftol': 1e-12, 'gtol': 1e-9,
+                                           'maxiter': 2000, 'maxls': 100})
     score = kernel + fit.x[None, :] / temperature
     flows = mass[:, None] * np.exp(score - logsumexp(score, axis=1)[:, None])
+    gap = float(np.max(np.abs(flows.sum(axis=0) - target)))
+    if not fit.success:
+        raise RuntimeError('Crossing allocation optimiser failed after %d iterations: %s; '
+                           'maximum column residual %.6g crossings' % (fit.nit, fit.message, gap))
+    if penalty is None and gap > .1:
+        raise CountAssignmentConflict('Exact crossing allocation stopped with maximum column residual '
+                                      '%.6g crossings (tolerance 0.1)' % gap)
     assert np.allclose(flows.sum(axis=1), mass)
     assert np.all(flows[~allowed] == 0)
     return flows, dict(seconds=perf_counter()-started, iterations=int(fit.nit),
-                       bias_minutes=fit.x.tolist())
+                       bias_minutes=fit.x.tolist(), max_column_residual=gap)
 
 
 def feasible(mass, target, allowed):

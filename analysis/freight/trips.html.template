@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Freight &amp; LCV · Origin–destination explorer</title>
+<style>__LEAFLET_CSS__</style>
+<style>
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,sans-serif;background:#f3f5f8;color:#172d43}header{padding:18px 24px;background:#142c43;color:#fff}h1{font-size:23px;margin:0 0 6px}header p{margin:0;color:#cad9e6}.layout{display:grid;grid-template-columns:330px 1fr;height:calc(100vh - 100px);min-height:550px}aside{padding:18px;overflow:auto;background:#fff;box-shadow:1px 0 8px #0001;z-index:500}#map{height:100%;background:#e5eaf0}label{display:block;margin:16px 0 5px;font-weight:600}select,button,input[type=number]{padding:8px;border:1px solid #becbd7;border-radius:5px;font:inherit}select{width:100%}button{cursor:pointer;background:#edf3f8;color:#172d43}button:hover{background:#dce9f3}input[type=range]{width:100%}.times{display:flex;align-items:center;gap:8px}.times input{width:80px}.muted{font-size:12px;color:#51657a;line-height:1.6}.stat{font-size:28px;font-weight:700;margin:18px 0 0}.legend{padding:12px 0;line-height:1.9}.origin{color:#138478}.destination{color:#c05a13}#details{border-top:1px solid #dce3eb;padding-top:12px;line-height:1.8;overflow-wrap:anywhere}#tileStatus{color:#984411}.bottom{padding:18px 24px}table{width:100%;border-collapse:collapse;font-size:12px;background:white}th,td{padding:9px;text-align:left;border-bottom:1px solid #e0e6ec}tbody tr{cursor:pointer}tbody tr:hover{background:#e7f2f8}summary{cursor:pointer}#destinationSummary{margin:12px 0}#destinationTable{margin-bottom:20px}.zone-controls{border-top:1px solid #dce3eb;margin-top:14px;padding-top:5px}#source{white-space:pre-wrap;overflow-wrap:anywhere}#reset{margin-top:12px}.download{margin:12px 0}@media(max-width:750px){.layout{grid-template-columns:1fr;height:auto}aside{max-height:440px}#map{height:65vh}header{padding:14px}.bottom{padding:12px}.table-wrap{overflow:auto}}
+</style></head><body>
+<header><h1>Freight &amp; LCV OD explorer</h1><p>Generated trip demand · Switzerland · Directional origins and destinations</p></header>
+<div class="layout"><aside>
+<label for="dataset">1. Demand</label><select id="dataset"><option value="Freight">Freight</option><option value="LCV">LCV — light commercial vehicles</option></select>
+<label for="view">2. Show</label><select id="view"><option value="zones">Zones</option><option value="trips">Trips</option><option value="origins">Origins</option><option value="destinations">Destinations</option></select>
+<div class="zone-controls" id="zoneControls">
+<label for="direction">3. Trips for the selected zone</label><select id="direction"><option value="outgoing">Outgoing — where trips go to</option><option value="incoming">Incoming — which zones trips come from</option></select>
+<p class="muted" id="zoneHelp"></p><label for="selectedZone">Click a zone or choose it here</label><select id="selectedZone"><option value="">Choose a zone…</option></select>
+<button id="clearZone">Clear zone selection</button><button id="fitZone">Zoom to selected zone</button>
+<div id="zoneSelection" class="muted" role="status"></div><a href="#connectionList">Connected zones, counts and shares ↓</a></div>
+<div class="stat" id="count"></div><div id="summary" class="muted"></div>
+<label>Departure hours [start, end)</label><div class="times"><input id="start" type="number" min="0" step="1" value="0" aria-label="Start hour"><span>to</span><input id="end" type="number" min="0" step="1" value="30" aria-label="End hour"><button id="apply">Apply</button></div>
+<button id="reset">Reset time filter</button><div id="filterError" role="status"></div>
+
+<label for="opacity">Background opacity <span id="opacityValue">65%</span></label><input id="opacity" type="range" min="0" max="100" value="65">
+<label for="lineOpacity">Trip opacity</label><input id="lineOpacity" type="range" min="1" max="100" value="12">
+<button id="fit">Fit visible trips</button><button id="swiss">Switzerland</button>
+<div class="legend" id="legend"></div>
+<div id="details">Click a line, endpoint or table row for trip details.</div>
+<p class="muted">Straight lines connect generated OD coordinates; they are not road routes. All valid trips are included, with no extra map sampling. Counts refer to cached trip records and are not expanded to a full population or deduplicated into physical vehicles.</p>
+<div class="muted" id="quality"></div><p class="muted" id="tileStatus" role="status"></p>
+</aside><div id="map" aria-label="Interactive OD map"></div></div>
+<div class="bottom"><section id="connectionsSection"><h2 id="connectionList">Connected zones</h2><div id="connectionSummary" class="muted"></div><button id="clearConnection">Show all connected zones</button>
+<div class="table-wrap"><table><thead><tr><th id="connectionHeading">Destination zone</th><th>Name</th><th>Trips</th><th id="shareHeading">Share of outgoing trips</th></tr></thead><tbody id="connectionTable"></tbody></table></div>
+<p class="muted">Click a connected-zone row to show that OD pair and zoom to its polygon. Same-zone trips are included. Zones follow the configured demand source: NPVM traffic zones, or NUTS regions for legacy freight. Foreign freight endpoints lie on the Swiss border. Select overlapping NUTS regions from the zone list.</p></section>
+<button class="download" id="download">Download filtered ODs (CSV)</button><div id="tableSummary" class="muted"></div><div class="table-wrap"><table><thead><tr><th>Trip / agent ID</th><th>Departure</th><th>Origin (lat, lon)</th><th>Destination (lat, lon)</th><th>Type</th><th>Origin zone</th><th>Destination zone</th></tr></thead><tbody id="table"></tbody></table></div>
+<details><summary>Source and scope</summary><p class="muted">Source coordinates: EPSG:2056, transformed to WGS84. Display coordinates rounded to six decimal places. Freight IDs are agent_id; LCV IDs are trip_id. Unknown departure times are included when the time filter is reset.</p><pre id="source" class="muted"></pre></details></div>
+<script>__LEAFLET_JS__</script>
+<script>
+'use strict';
+const DATA=__DATA__;
+const META=__META__;
+const el=id=>document.getElementById(id), fmt=n=>n.toLocaleString('en-GB');
+const map=L.map('map',{preferCanvas:true}).setView([46.85,8.25],8);
+const tiles=L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg',{opacity:.65,maxZoom:19,maxNativeZoom:18,noWrap:true,attribution:'© <a href="https://www.swisstopo.admin.ch/">swisstopo</a>'}).addTo(map);
+tiles.on('tileerror',()=>{el('tileStatus').textContent='Some background tiles could not load. OD lines, points and the table remain usable. Swisstopo coverage is limited outside Switzerland.'});
+L.control.scale({imperial:false}).addTo(map);
+let visible=[], selected=null, projected=[], allTimes=true;
+let selectedZone='', connectedZone='', zoneLayer=null, connectionCounts=new Map();
+let zoneLookup=new Map(), zoneLayers=new Map();
+map.createPane('zones').style.zIndex=350;
+const isZones=()=>el('view').value==='zones';
+const isIncoming=()=>el('direction').value==='incoming';
+const selectedIndex=()=>isIncoming()?8:7;
+const connectedIndex=()=>isIncoming()?7:8;
+function zoneName(id){const p=zoneLookup.get(id);return p?`${id} · ${p.name}`:id;}
+function timeRows(){const start=Number(el('start').value)*3600,end=Number(el('end').value)*3600;return DATA[el('dataset').value].rows.filter(r=>allTimes||(r[5]!==null&&r[5]>=start&&r[5]<end));}
+function zoneStyle(feature){
+ const id=feature.properties.id,count=connectionCounts.get(id)||0;
+ if(id===selectedZone)return {color:'#58409c',weight:3,fillColor:'#8068c0',fillOpacity:.35};
+ if(selectedZone&&count){const max=Math.max(1,...connectionCounts.values());return {color:isIncoming()?'#087c6c':'#be661c',weight:id===connectedZone?3:1.5,fillColor:isIncoming()?'#138478':'#e9812c',fillOpacity:.15+.5*Math.sqrt(count/max)};}
+ return {color:'#496f91',weight:.8,fillColor:'#87a4c0',fillOpacity:selectedZone ? .015 : .06};
+}
+function populateZones(){
+ if(zoneLayer)map.removeLayer(zoneLayer);
+ zoneLookup=new Map(DATA[el('dataset').value].zones.features.map(f=>[f.properties.id,f.properties]));zoneLayers=new Map();
+ zoneLayer=L.geoJSON(DATA[el('dataset').value].zones,{pane:'zones',bubblingMouseEvents:false,pointToLayer:(feature,latlng)=>L.circle(latlng,{radius:400,pane:'zones',bubblingMouseEvents:false}),style:zoneStyle,onEachFeature(feature,layer){const id=feature.properties.id;zoneLayers.set(id,layer);layer.on('click',()=>{selectedZone=id;connectedZone='';el('selectedZone').value=id;update();});}});
+}
+function zoneOptions(){
+ el('selectedZone').replaceChildren();const all=document.createElement('option');all.value='';all.textContent='Choose a zone…';el('selectedZone').append(all);
+ const counts=new Map();for(const r of timeRows())counts.set(r[selectedIndex()],(counts.get(r[selectedIndex()])||0)+1);
+ for(const id of [...zoneLookup.keys()].sort()){const option=document.createElement('option');option.value=id;option.textContent=`${zoneName(id)} (${fmt(counts.get(id)||0)} ${isIncoming()?'incoming':'outgoing'})`;el('selectedZone').append(option);}
+ el('selectedZone').value=selectedZone;
+}
+function updateConnections(zoneTrips){
+ connectionCounts=new Map();for(const r of zoneTrips)connectionCounts.set(r[connectedIndex()],(connectionCounts.get(r[connectedIndex()])||0)+1);
+ const pairs=[...connectionCounts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+ const incoming=isIncoming(),kind=incoming?'Origin':'Destination',direction=incoming?'incoming':'outgoing';
+ el('connectionTable').replaceChildren();
+ if(isZones()&&selectedZone){for(const [id,count] of pairs){const tr=document.createElement('tr');for(const value of [id,zoneLookup.get(id)?.name||id,fmt(count),(100*count/zoneTrips.length).toFixed(1)+'%']){const td=document.createElement('td');td.textContent=value;tr.append(td);}tr.onclick=()=>{connectedZone=id;update();const layer=zoneLayers.get(id);if(layer)map.fitBounds(layer.getBounds(),{padding:[35,35],maxZoom:12});};el('connectionTable').append(tr);}}
+ el('connectionList').textContent=incoming?'Where trips come from — origin zones':'Where trips go to — destination zones';
+ el('connectionHeading').textContent=kind+' zone';el('shareHeading').textContent='Share of '+direction+' trips';
+ el('connectionSummary').textContent=selectedZone?`${zoneName(selectedZone)} · ${fmt(zoneTrips.length)} ${direction} trips · ${fmt(pairs.length)} ${kind.toLowerCase()} zones in the selected time range.`:'Click a zone or choose one above to see connected zones and trip counts.';
+ el('zoneSelection').textContent=selectedZone?`${incoming?'To':'From'} ${zoneName(selectedZone)}${connectedZone?' · '+(incoming?'from ':'to ')+zoneName(connectedZone):''}`:'No zone selected';
+ if(zoneLayer&&isZones()){zoneLayer.setStyle(zoneStyle);zoneLayer.eachLayer(layer=>{const id=layer.feature.properties.id;const tip=document.createElement('span');tip.textContent=`${zoneName(id)}${selectedZone?' · '+fmt(connectionCounts.get(id)||0)+' '+(incoming?'trips to':'trips from')+' selected zone':''}${id===selectedZone?' · selected zone':''}`;if(layer.getTooltip())layer.setTooltipContent(tip);else layer.bindTooltip(tip,{sticky:true});});}
+}
+function syncMode(){
+ const zones=isZones();el('zoneControls').hidden=!zones;el('connectionsSection').hidden=!zones;
+ if(zoneLayer){if(zones&&!map.hasLayer(zoneLayer))zoneLayer.addTo(map);else if(!zones&&map.hasLayer(zoneLayer))map.removeLayer(zoneLayer);}
+ const scope=DATA[el('dataset').value].zone_system==='NPVM'?'NPVM traffic zones.':'NUTS freight regions; levels can overlap. Use the list to select any region. Foreign polygons may lie outside national-map coverage.';
+ el('zoneHelp').textContent=scope+' Click a zone to highlight '+(isIncoming()?'the origin zones of its incoming trips.':'the destination zones of its outgoing trips.')+' Selected trips are drawn as lines.';
+ el('legend').textContent=zones?'Purple: selected zone. '+(isIncoming()?'Green: origin zones of incoming trips.':'Orange: destination zones of outgoing trips.')+' Darker fill means more trips. Arrows follow origin → destination.':'Green points: origins. Orange points: destinations. Trip arrows point toward destinations.';
+}
+const canvas=L.DomUtil.create('canvas','od-canvas',map.getPanes().overlayPane);
+canvas.style.pointerEvents='none';
+function clock(t){if(t===null)return 'Unknown';const seconds=Math.floor(t);return `${String(Math.floor(seconds/3600)).padStart(2,'0')}:${String(Math.floor(seconds%3600/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;}
+function project(){
+ const size=map.getSize(), ratio=window.devicePixelRatio||1;
+ canvas.width=size.x*ratio;canvas.height=size.y*ratio;canvas.style.width=size.x+'px';canvas.style.height=size.y+'px';
+ L.DomUtil.setPosition(canvas,map.containerPointToLayerPoint([0,0]));
+ const ctx=canvas.getContext('2d');ctx.scale(ratio,ratio);
+ projected=visible.map(r=>({r,a:map.latLngToContainerPoint([r[1],r[2]]),b:map.latLngToContainerPoint([r[3],r[4]])}));
+ const mode=el('view').value, alpha=Number(el('lineOpacity').value)/100;
+ if(mode==='zones'&&!selectedZone){projected=[];return;}
+ const inView=p=>Math.max(p.a.x,p.b.x)>=0&&Math.min(p.a.x,p.b.x)<=size.x&&Math.max(p.a.y,p.b.y)>=0&&Math.min(p.a.y,p.b.y)<=size.y;
+ ctx.strokeStyle=el('dataset').value==='LCV'?'#1267a0':'#833fa1';ctx.lineWidth=.7;ctx.globalAlpha=alpha;
+ if(mode==='trips'||mode==='zones'){
+  ctx.beginPath();for(const p of projected){if(!inView(p))continue;ctx.moveTo(p.a.x,p.a.y);ctx.lineTo(p.b.x,p.b.y);}ctx.stroke();
+  ctx.beginPath();for(const p of projected){if(!inView(p))continue;const dx=p.b.x-p.a.x,dy=p.b.y-p.a.y,d=Math.hypot(dx,dy);if(d<25)continue;const x=p.a.x+dx*.65,y=p.a.y+dy*.65,ux=dx/d,uy=dy/d;ctx.moveTo(x-4*ux+2*uy,y-4*uy-2*ux);ctx.lineTo(x,y);ctx.lineTo(x-4*ux-2*uy,y-4*uy+2*ux);}ctx.stroke();
+ }
+ ctx.globalAlpha=Math.max(alpha,.2);
+ for(const [index,color] of [['a','#138478'],['b','#c05a13']]){
+  if((mode==='origins'&&index==='b')||(mode==='destinations'&&index==='a'))continue;
+  ctx.fillStyle=color;ctx.beginPath();for(const p of projected){const q=p[index];if(q.x<0||q.y<0||q.x>size.x||q.y>size.y)continue;ctx.moveTo(q.x+1.6,q.y);ctx.arc(q.x,q.y,1.6,0,2*Math.PI);}ctx.fill();
+ }
+ if(selected){const a=map.latLngToContainerPoint([selected[1],selected[2]]),b=map.latLngToContainerPoint([selected[3],selected[4]]);ctx.globalAlpha=1;ctx.strokeStyle='#101c28';ctx.lineWidth=3;if(mode==='trips'||mode==='zones'){ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}for(const [p,c] of [[a,'#138478'],[b,'#c05a13']]){if((mode==='origins'&&p===b)||(mode==='destinations'&&p===a))continue;ctx.beginPath();ctx.fillStyle=c;ctx.arc(p.x,p.y,6,0,2*Math.PI);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();}}
+}
+function choose(r,zoom=false){selected=r;el('details').replaceChildren();const title=document.createElement('strong');title.textContent=`${el('dataset').value} ${r[0]}`;el('details').append(title,document.createElement('br'),`Departure: ${clock(r[5])}`,document.createElement('br'),`Origin: ${r[1]}, ${r[2]}`,document.createElement('br'),`Destination: ${r[3]}, ${r[4]}`,document.createElement('br'),`Type: ${r[6]}`,document.createElement('br'),`Origin zone: ${zoneName(r[7])}`,document.createElement('br'),`Destination zone: ${zoneName(r[8])}`);if(zoom)map.fitBounds([[r[1],r[2]],[r[3],r[4]]],{padding:[60,60],maxZoom:13});project();}
+function distance(p,a,b){const dx=b.x-a.x,dy=b.y-a.y;const t=dx||dy?Math.max(0,Math.min(1,((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy))):0;return Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy);}
+map.on('click',e=>{if(isZones())return;let best=null,d=9;const mode=el('view').value;for(const p of projected){const v=mode==='trips'?distance(e.containerPoint,p.a,p.b):e.containerPoint.distanceTo(mode==='origins'?p.a:p.b);if(v<d){best=p.r;d=v;}}if(best)choose(best);});
+map.on('moveend resize zoomend',project);
+function update(){
+ const payload=DATA[el('dataset').value], start=Number(el('start').value),end=Number(el('end').value);
+ if(!allTimes&&(!Number.isFinite(start)||!Number.isFinite(end)||start<0||end<=start)){el('filterError').textContent='Enter an end hour greater than the start hour.';return;}
+ el('filterError').textContent='';const base=timeRows();const zoneTrips=isZones()&&selectedZone?base.filter(r=>r[selectedIndex()]===selectedZone):base;visible=isZones()&&connectedZone?zoneTrips.filter(r=>r[connectedIndex()]===connectedZone):zoneTrips;selected=null;syncMode();updateConnections(zoneTrips);zoneOptions();
+ el('count').textContent=fmt(visible.length)+' trips';el('summary').textContent=`of ${fmt(payload.diagnostics.source_trips)} cached ${el('dataset').value} records · ${allTimes?'all departure times':`${start}:00 ≤ departure < ${end}:00`}`;
+ const q=payload.diagnostics;el('quality').textContent=`${fmt(q.invalid_coordinates)} invalid-coordinate records excluded. ${fmt(q.unknown_departures)} unknown departure times. ${fmt(q.coincident_endpoints)} trips have identical origin and destination coordinates (shown as points).`;
+ el('details').textContent=isZones()?'Click a zone for connections, or a trip-table row for trip details.':'Click a line, endpoint or trip-table row for trip details.';
+ el('table').replaceChildren();for(const r of visible.slice(0,100)){const tr=document.createElement('tr');for(const value of [r[0],clock(r[5]),`${r[1]}, ${r[2]}`,`${r[3]}, ${r[4]}`,r[6],r[7],r[8]]){const td=document.createElement('td');td.textContent=value;tr.append(td);}tr.onclick=()=>choose(r,true);el('table').append(tr);}
+ el('tableSummary').textContent=`Showing the first ${fmt(Math.min(100,visible.length))} of ${fmt(visible.length)} filtered trips. CSV includes every filtered trip. Zones mode draws trip lines after you select a zone.`;
+ el('source').textContent=JSON.stringify({...META,selected_dataset:el('dataset').value,diagnostics:q},null,2);project();
+}
+el('dataset').onchange=()=>{selectedZone='';connectedZone='';connectionCounts=new Map();populateZones();update();};
+el('selectedZone').onchange=()=>{selectedZone=el('selectedZone').value;connectedZone='';update();};
+el('direction').onchange=()=>{connectedZone='';update();};
+el('clearZone').onclick=()=>{selectedZone='';connectedZone='';el('selectedZone').value='';update();};
+el('clearConnection').onclick=()=>{connectedZone='';update();};
+el('fitZone').onclick=()=>{const layer=zoneLayers.get(selectedZone);if(layer)map.fitBounds(layer.getBounds(),{padding:[35,35],maxZoom:12});};
+el('apply').onclick=()=>{allTimes=false;update();};
+el('reset').onclick=()=>{allTimes=true;el('start').value=0;el('end').value=30;update();};
+el('view').onchange=()=>{connectedZone='';update();};el('lineOpacity').oninput=project;
+el('opacity').oninput=()=>{const value=Number(el('opacity').value);tiles.setOpacity(value/100);el('opacityValue').textContent=value+'%';};
+el('fit').onclick=()=>{if(visible.length){const bounds=L.latLngBounds([]);for(const r of visible){bounds.extend([r[1],r[2]]);bounds.extend([r[3],r[4]]);}map.fitBounds(bounds,{padding:[25,25],maxZoom:13});}};
+el('swiss').onclick=()=>map.setView([46.85,8.25],8);
+el('download').onclick=()=>{const quote=v=>'"'+String(v??'').replaceAll('"','""')+'"';const csv=['id,origin_lat,origin_lon,destination_lat,destination_lon,departure_seconds,vehicle_type,origin_zone,destination_zone',...visible.map(r=>r.map(quote).join(','))].join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=el('dataset').value.toLowerCase()+'_ods.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+populateZones();update();
+</script></body></html>

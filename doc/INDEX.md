@@ -15,8 +15,16 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 
 ## Implementation guides
 
+- [Airport demand: workflow, evidence, configuration and refresh](data/airports/README.md)
+- [Geneva airport regional passenger demand](data/airports/geneva.md)
+- [Zurich airport passenger demand and available evidence](data/airports/zurich.md)
+- [Calibrated airport municipality-allocation model](data/airports/model.md)
+- [Sampled airport trips, endpoints, modes and departure times](data/airports/trips.md)
+
+- [MOBIS walking-speed and terrain-slope calibration](calibration/walking_speed.md)
+
 - [Simulation-region OSM businesses and weekday opening hours](data/osm/businesses.md)
-- [Canton opening-hours regions and donor masks](data/osm/opening_hours_regions.md)
+- [Municipality opening-hours regions and donor masks](data/osm/opening_hours_regions.md)
 - [Destination shopping/leisure opening hours](synthesis/population/destinations_opening_hours.md)
 - [Trip-time shuffling and comparison plots](synthesis/population/trip_time_shuffling.md)
 - [RDA opening-hours comparison and Slurm run](analysis/rda.md)
@@ -37,6 +45,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Microcensus diary matching: learned V2 inputs and masks](synthesis/population/matching/README.md)
 - [Default V3 categorical matching and V1–V3 comparison](synthesis/population/matching/V3.md)
 - [Matching predictive validation and embedding analysis](analysis/matching/README.md)
+- [RDA secondary destination calibration](synthesis/population/spatial/secondary/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
 - [Zones of the regional PT subscriptions](synthesis/population/models/subscription_zones.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
@@ -44,9 +53,16 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [TL and TPG public-transport comparisons](analysis/pt/comparisons.md)
 - [GTFS transfer time map](analysis/pt/transfer_times.md)
 - [Bus route corrections using GTFS shapes](matsim/scenario/network/pt_route_corrections.md)
+- [NPVM freight demand and source selection](synthesis/freight/npvm/README.md)
+- [Swiss-border network links and freight crossing export](matsim/scenario/network/border_crossings.md)
+- [NPVM versus legacy freight comparison](analysis/freight/compare.md)
+- [NPVM network versus interview-place crossings](analysis/freight/compare_crossing_sources.md)
+- [Foreign freight regions and selected border anchors](analysis/freight/border_crossings.md)
+- [Freight and LCV zone and trip explorer](analysis/freight/trips_html.md)
 - [Road-user map and activity-purpose shares](analysis/counts/road_users/README.md)
 - [Cross-border survey entries and through-trip exits](data/cross_border/README.md)
 - [Early cross-border assignment analysis](analysis/cross_border_assignment.md)
+- [Swiss residents' secondary activities abroad](analysis/secondary_abroad.md)
 - [Count-guided crossing assignment](data/cross_border/README.md#count-guided-physical-crossing-shares)
 - [Group O count-share allocation experiment](analysis/cross_border_count_share_trial.md)
 - [French population and trip explorer](analysis/french_activities.md)

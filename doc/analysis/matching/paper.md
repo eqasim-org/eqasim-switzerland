@@ -1,134 +1,90 @@
 # Matching manuscript and Overleaf project
 
-The research manuscript lives in `analysis/matching/paper/` as requested. It is
-an analysis artifact, separate from repository guides. It contains editable
-LaTeX sections, a BibTeX bibliography, publication-sized PDF figures, aggregate
+The manuscript is in `analysis/matching/paper/`. It is a generated analysis
+artifact with editable LaTeX sections, BibTeX references, figures, aggregate
 numerical evidence, a compiled PDF and a self-contained Overleaf ZIP.
 
 - PDF: `analysis/matching/paper/main.pdf`
 - Overleaf: `analysis/matching/paper/eqasim_matching_overleaf.zip`
-- Main document: `analysis/matching/paper/main.tex`
-- Author information/title: `analysis/matching/paper/metadata.tex`
-- Provenance and checks: `evidence.json`, `build_info.json`
+- Main source: `analysis/matching/paper/main.tex`
+- Authors, affiliation, contact and title: `metadata.tex`
+- Numerical evidence and build checks: `evidence.json`, `build_info.json`
 
-Upload the ZIP as a new Overleaf project, select `main.tex` as the main document,
-and use **pdfLaTeX**. Standard BibTeX/natbib support is sufficient. The bundle
-contains its figures and tables; no cluster path, raw survey, Python execution,
-model fitting or network data fetch is needed to compile it. Authors are
-anonymous until the agreed names/affiliations are entered in `metadata.tex`.
+Upload the ZIP to Overleaf and compile `main.tex` using pdfLaTeX and BibTeX.
+No Python execution, private data, cluster path or network request is needed
+for compilation. The authors, affiliation and contact email are preserved from
+the previous project. The current preprint template is retained; the content
+is oriented towards Transportation's travel-behaviour, policy and planning scope.
 
-There is no default page cap, following the revised manuscript requirements.
-The build verifies the actual page count, rejects unresolved references/citations
-and overfull boxes, and packages the sources only after successful checks. An
-optional `--max-pages N` enforces a future submission limit including references.
+## Current empirical revision
+
+The manuscript uses the completed `repeated_shared_v1_v2_v3` experiment:
+37,876 survey respondents, one encoder with a 34,088/3,788 fitting/validation
+split, three household donor-exclusion groups, 50 diary draws per respondent,
+and ten full configured-population assignments per method. This supersedes the
+older paper's 12,000-person, fold-refitted results. The three display names are
+Recursive Hot-Deck Matching (RHDM), Behaviour-Supervised Latent Matching (BSLM),
+and Order-independent Hot-Deck Matching (OHDM).
+
+The paper presents eqasim's established recursive hot deck as the default-method
+reference. This describes the reference approach, not the current private
+configuration's `matching_algorithm: v3` selection. The model explanation covers
+inputs, encoder/decoder architecture, losses, training and donor sampling rather
+than pipeline files, classes or stage-specific exceptions.
+
+The replay is explicitly donor-restricted reconstruction: respondents are kept
+out of their own donor group, but most contributed to encoder fitting. The 10%
+validation group chooses the checkpoint and is not an untouched final test set.
+Separate training-role results are provided. The population comparison is
+sensitivity analysis, with the survey as a descriptive reference rather than
+known target-population behaviour. Ranges over ten assignments quantify matching
+randomness only. No transport simulation or policy effect is newly estimated.
+
+## Local analysis and figures
+
+Saved assignments are joined to the sampled population by person ID. Central
+areas are 2 km circles around Zürich HB and Genève-Cornavin, using base-stop
+coordinates from the scenario GTFS feed in EPSG:2056. They include 9,643 and
+13,899 eligible synthetic residents. Within 4 km of each station, homes are also
+grouped into 1 km grid cells. Cells require at least 100 residents and the
+relative count comparison requires at least 0.05 RHDM visits per person-day.
+All qualifying cells are retained: 44 around Zürich and 37 around Geneva.
+These results concern residents' diaries, not destinations or traffic inside
+those areas. National reconstructed means are checked against saved report means.
+
+All manuscript graphics use the latest experiment. They include the model
+architecture, replay errors, training-role diagnostics, probability calibration,
+daily-distance distributions, national/canton visit counts, the fifteen most
+frequent survey purpose chains, central-area contrasts and the complete local
+cell-difference distributions. A fresh five-panel t-SNE illustration of the
+single fitted encoder is included in the appendix as a high-resolution PNG.
+No old permutation-importance, raw-input kNN or transported-risk results are
+mixed into the revised experiment.
+
+`prepare_latest.py` reads the saved experiment and creates aggregate tables and
+figures. It never calls a matching algorithm or fits an encoder. Its optional
+model-cache argument loads the existing encoder only for the t-SNE projection.
+The evidence records source-file hashes and the actual fitted-model options.
+Private person IDs, donor maps and model files are excluded from the ZIP.
 
 ```bash
+uv run -m analysis.matching.paper.prepare_latest \
+  --results /path/to/analysis/matching/repeated_shared_v1_v2_v3 \
+  --roster /path/to/sampled-population.p \
+  --stops /path/to/gtfs/output/stops.txt \
+  --model-cache /path/to/shared-model.p
 module load texlive/20220321
-.venv/bin/python analysis/matching/paper/build.py
+uv run -m analysis.matching.paper.build
 ```
 
-## Method terminology
+There is no default page cap. The build checks actual page count, unresolved
+citations/references, bibliography warnings and overfull boxes. It packages only
+current sections, cited figures and current aggregate evidence, preserving older
+artifacts outside the archive. The previous Overleaf project is backed up under
+`paper/review/manuscript_before_shared_model_revision.zip`.
 
-The abstract defines **Recursive Hot-Deck Matching (RHDM)** for the existing
-recursive matcher and **Behaviour-Supervised Latent Matching (BSLM)** for the
-learned matcher. The manuscript text, tables and figure labels subsequently use
-these abbreviations. Archived data and replay identifiers retain `V1`/`V2` for
-compatibility; `evidence.json` records their display-name mapping.
-
-The employment/student hard mask is explained in the methodology as a downstream
-eqasim compatibility safeguard. It is not presented as a headline contribution
-in the abstract, introduction or conclusion. Matching status does not require a
-work or education trip on every observed day.
-
-## Figures and empirical scope
-
-Figure 1 is a detailed, editable TikZ network architecture: the numeric/missing
-inputs and four categorical projections, 48-value concatenation, 64-unit encoder,
-16-value latent representation, training noise, recurrent prediction heads,
-trip-count/reconstruction branches and separate real-diary retrieval path.
-
-Figure 4 uses the original 1,500 held-out respondents and original t-SNE
-coordinates in five panels: age, income, density, recorded sex and work-location
-type. The added attributes are joined one-to-one from the survey cache after
-its prepared feature fingerprint is verified against the original experiment.
-The categorical panels have discrete legends; no projection is refitted.
-
-Figure 6 compares observed survey, RHDM-matched and BSLM-matched **purpose-chain
-frequencies in the held-out survey experiment**. Its ten categories are fixed
-by the survey-weighted observed ranking. Denominators include every recipient;
-the remaining chains appear in a separate panel. Recipient survey weights are
-used for all three distributions, and 500 household-bootstrap intervals average
-model/draw repeats per recipient first. Full-distribution total variation is
-reported descriptively without claiming a significant difference between methods.
-
-The donor draws were not originally exported, but can be replayed using saved
-fold IDs, normalized embeddings, weights, settings and seeds. BSLM requires neither
-model loading nor training; RHDM uses its original unchanged implementation. Input
-feature/trip fingerprints, donor/recipient household separation and **both**
-per-person energy and ordered purpose/mode Brier scores are checked against the
-archive before accepting chain shares. This revision verified agreement to
-floating-point precision across all six fold/repeat combinations.
-
-Only aggregate frequencies, intervals and replay audit information enter the
-paper bundle. Resumable donor-index arrays remain in a private temporary
-replay directory and are not included in the ZIP. The replay is not a new
-full-population application and does not supply BSLM population matches.
-
-Figure 7 retains an explicitly labelled weighting-sensitivity illustration:
-the same observed survey days under survey weights and estimated target weights.
-Important balance checks fail for that reweighting. It is presented as sensitivity,
-not as measured target behaviour or a corrected population distribution.
-
-The paper defines raw-input nearest neighbours and status-stratified random
-matching before using their short labels. It also introduces network layers,
-regression/classification losses, CRPS/Brier scores and representation/shift
-diagnostics in words before interpreting the figures.
-
-## Scientific qualifications
-
-The manuscript reports improvement over RHDM and also the simple controls that
-equal or beat BSLM on several outcomes. Upstream survey `work_location_type` partly
-uses the observed trip diary. Holding households out during training does not
-remove that input dependence, so these are conditional prepared-covariate
-results. An outcome-independent feature ablation is needed for fully blind
-raw-input validation. Target transport also fails important balance checks.
-
-The references distinguish the California paper (San Francisco/San Diego) from
-Los Angeles support documented by the California implementation. The published
-Paris paper's DOI/article number is **10.1016/j.trc.2021.103291**. The Switzerland
-baseline source is a 2022 technical report. Sources were checked against
-publisher, author/institutional or official framework records.
-
-## Reproducing the replay and manuscript evidence
-
-Run the donor-only replay with explicitly selected trusted local Synpp artifacts:
-
-```bash
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-.venv/bin/python -m analysis.matching.paper.replay_matching \
-    --validation /path/to/analysis.matching.validation__HASH.cache \
-    --persons /path/to/data.microcensus.persons__HASH.p \
-    --trips /path/to/data.microcensus.trips__HASH.p \
-    --chains /path/to/data.microcensus.activity_chains__HASH.p \
-    --pipeline /path/to/pipeline.json
-```
-
-The selected person cache must reproduce the archived feature fingerprint.
-Similar-looking caches from different imputation seeds can have different
-fingerprints; mismatches are rejected. This tool does not run validation,
-retrain models, repeat feature permutations or modify upstream caches. It does
-repeat the inexpensive matching selections if verified resume files are absent.
-
-Then prepare publication figures and numerical tables:
-
-```bash
-.venv/bin/python -m analysis.matching.paper.prepare_artifacts \
-    --reports /path/to/matching/rebuilt \
-    --chains /path/to/data.microcensus.activity_chains__HASH.p \
-    --persons /path/to/data.microcensus.persons__HASH.p
-```
-
-Rebuild the PDF afterwards. The scripts export aggregate evidence and file
-fingerprints without respondent IDs. Pickle inputs must be trusted local stage
-artifacts. Interpretational text and manually described source/runtime settings
-must be reviewed if a new experiment replaces the archived one.
+Before journal submission, authors still need to confirm funding, competing
+interests, contributions and any required AI-assistance disclosure under the
+journal's current instructions. These declarations are not inferred from code
+or funding assumptions. The manuscript itself includes a factual data/code
+availability paragraph.

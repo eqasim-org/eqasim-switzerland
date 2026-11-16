@@ -27,6 +27,7 @@ COUNT_ZOOM_AREAS = {
 
 
 def configure(context):
+    context.config("secondary_nn_no_distance_routing", "hierarchy")
     context.config("secondary_nn_model_validation_rotation_epochs", 3)
     context.config("secondary_nn_model_validation_holdout_fraction", 0.1)
     context.stage("synthesis.population.spatial.secondary_nn.mobility")
@@ -41,7 +42,8 @@ def configure(context):
     context.config("secondary_nn_energy_projections", 8)
     if not context.config("secondary_nn_use_target_distance"):
         context.config("secondary_nn_crossfit_fold", -1)
-        context.stage("synthesis.population.spatial.secondary_nn.training_split")
+        if context.config("secondary_nn_no_distance_routing") == "learned_selector":
+            context.stage("synthesis.population.spatial.secondary_nn.training_split")
     context.stage("synthesis.population.spatial.secondary_nn.h3")
     context.stage("synthesis.population.spatial.secondary.detour_factors.factors")
     context.stage("synthesis.population.spatial.secondary_nn.mz_chains")

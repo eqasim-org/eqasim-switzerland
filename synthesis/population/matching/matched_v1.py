@@ -233,9 +233,13 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
         df_matching, assigned_levels = recursive_iteration_statmatch(df_source, source_identifier, weight, df_target, target_identifier, columns, None,
                          rng, minimum_observations)
 
-        share_of_matched_agents = round(len(df_matching) / initial_nb_of_agents * 100,2) + percentage_matched
-        
-        logger.info(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
+        retained = int(np.count_nonzero(assigned_levels >= 1))
+        rejected = len(df_matching) - retained
+        share_of_matched_agents = 100. * retained / initial_nb_of_agents + percentage_matched
+        logger.info("V1 final preference relaxation: %d/%d remaining recipients matched at least the first "
+                    "ordered attribute (%s); %d zero-attribute fallbacks will be rejected. "
+                    "Accepted %.2f%% of this cohort so far; opening-hours region masks are never relaxed.",
+                    retained, len(df_matching), columns[0], rejected, share_of_matched_agents)
         
         return df_matching, assigned_levels
 
@@ -252,7 +256,11 @@ def statistical_matching(progress, df_source, source_identifier, weight, df_targ
 
         share_of_matched_agents = len(df_matching_on_mandatory) / initial_nb_of_agents * 100 + percentage_matched
 
-        logger.info(f"{minimum_observations} obs required - {share_of_matched_agents:.2f}% of the population matched.")
+        log = logger.info if len(df_matching_on_mandatory) else logger.debug
+        log("V1 preference pass: minimum donor observations=%d; accepted %d/%d remaining recipients "
+            "with all mandatory preferences, retrying %d; cumulative %.2f%% of this cohort",
+            minimum_observations, len(df_matching_on_mandatory), len(df_target),
+            len(df_not_matching_on_mandatory), share_of_matched_agents)
         
         matching_the_missing, levels = statistical_matching(progress, df_source, source_identifier, weight, df_not_matching_on_mandatory, target_identifier, columns, mandatory_columns, random_seed, next_minimum_observations, share_of_matched_agents, initial_nb_of_agents)
         
@@ -273,8 +281,12 @@ def nonparallel_statistical_matching(context, df_source, source_identifier, weig
         assignments, all_levels = [], []
         for label, target in df_target.groupby(region, sort=True):
             source = df_source.loc[df_source[region].eq(label)]
+            logger.info("V1 opening-hours region %s: %d recipients, %d eligible donors; region equality is hard",
+                        label, len(target), len(source))
             target = target.drop(columns=region)
             if source.empty:
+                logger.warning("V1 region %s: rejecting %d recipients because this cohort has no donor in the same region",
+                               label, len(target))
                 assigned = target[[target_identifier] + columns].copy()
                 assigned[source_identifier] = -1
                 levels = np.full(len(target), -1, dtype=int)
@@ -306,6 +318,10 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     
     if population_selector is not None:
         df_target = df_target.loc[population_selector].copy()
+    logger.info("V1 %s cohort: %d recipients, %d donors before region masks; ordered attributes=[%s]; "
+                "mandatory preferences=[%s] (may relax at the final pass)",
+                "collective home-only" if option == "household" else "ordinary", len(df_target), len(df_source),
+                ", ".join(columns), ", ".join(mandatory_columns or []))
 
     df_assignment, levels = nonparallel_statistical_matching(
         context,
@@ -328,10 +344,13 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
     #    count: np.count_nonzero(levels >= count) for count in range(len(columns) + 1)
     #})
 
-    for count in range(len(columns) + 1):
-        matched_count = np.count_nonzero(levels >= count)
-        matched_percent = 100 * matched_count / len(df_target) if len(df_target) > 0 else 0.0
-        logger.info(f"{count} matched levels: {matched_count} ({matched_percent:.2f}%)")
+    mandatory_count = len(mandatory_columns or [])
+    logger.info("V1 cohort search result: all attributes=%d; mandatory preferences with some optional relaxed=%d; "
+                "some mandatory preferences relaxed=%d; rejected no-attribute fallback=%d; rejected empty region pool=%d",
+                int(np.count_nonzero(levels == len(columns))),
+                int(np.count_nonzero((levels >= max(1, mandatory_count)) & (levels < len(columns)))),
+                int(np.count_nonzero((levels >= 1) & (levels < mandatory_count))),
+                int(np.count_nonzero(levels == 0)), int(np.count_nonzero(levels < 0)))
         
     # Remove and track unmatchable households (i.e. head of household)
 
@@ -354,10 +373,8 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
         removed_households_count = sum(unmatchable_household_selector)
         removed_persons_count    = sum(unmatchable_person_selector)
 
-        logger.info("Unmatchable heads of household: %d", removed_households_count)
-        logger.info("  Removed households: %d", removed_households_count)
-        logger.info("  Removed persons: %d", removed_persons_count)
-        logger.info("")
+        logger.info("V1 collective cohort: %d unmatched recipients triggered removal of %d households (%d residents)",
+                    int(np.count_nonzero(levels < 1)), len(removed_household_ids), removed_persons_count)
 
         assert (len(df_target)     == initial_target_length     - removed_households_count)
         assert (len(df_population) == initial_population_length - removed_persons_count)
@@ -376,8 +393,8 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
 
         removed_persons_count = sum(unmatchable_person_selector)
 
-        logger.info("  Removed persons: %d", removed_persons_count)
-        logger.info("")
+        logger.info("V1 ordinary cohort: retained %d/%d recipients; removed %d without a retained attribute match "
+                    "or compatible region donor", len(df_target), initial_target_length, removed_persons_count)
 
         assert (len(df_target)     == initial_target_length     - removed_persons_count)
         assert (len(df_population) == initial_population_length - removed_persons_count)
@@ -395,7 +412,8 @@ def get_mz_persons(context):
     persons_with_work_purpose = set(df_trips[(df_trips["origin_purpose"].isin(work_activities)) | 
                                              (df_trips["purpose"].isin(work_activities))]["person_id"])
     persons_to_remove = persons_with_work_purpose - employed_persons
-    logger.info(f"Removing {len(persons_to_remove)} persons who are not employed but have 'work' as a purpose in their activity chain.")
+    logger.info("Donor eligibility: excluded %d non-employed survey respondents whose diary contains work activities",
+                len(persons_to_remove))
 
     df_persons = df_persons[~df_persons["person_id"].isin(persons_to_remove)]
     from synthesis.population.matching.commute import donor_commutes
@@ -430,6 +448,9 @@ def execute(context):
     from synthesis.population.models.non_private import home_only_mask
     held_out_home = df_population.loc[home_only_mask(df_population)].copy()
     df_population = df_population.loc[~home_only_mask(df_population)].copy()
+    logger.info("V1 start: %d recipients, %d home-only bypasses, %d day/border-eligible donors; day=%s; "
+                "opening-hours region mask=%s", len(df_population) + len(held_out_home), len(held_out_home),
+                len(df_source), scenario_day, context.config("consider_opening_hours"))
     df_source, df_population = opening_hours.add_regions(context, df_source, df_population)
     df_population["sex"] = df_population["sex"].astype(int)
     
@@ -545,7 +566,7 @@ def execute(context):
         df_source["canton_id"]         = df_source["canton_id"].astype(int)
         df_source["ovgk"]              = (df_source["ovgk"] != "None").astype(int)
 
-        logger.info("Statistical matching starting (normal people split by age band with band-filtered source)")
+        logger.info("V1 matching ordinary residents in separate age-band donor pools")
 
         # --- NORMAL PEOPLE: split into age bands + filter source by same band ---
         df_population_work = df_population.copy()
@@ -595,7 +616,8 @@ def execute(context):
                     top_n=8
                 )
 
-            logger.info(f"  - Matching normal people band: {band_name}")
+            logger.info("V1 age band %s: %d ordinary recipients, %d donors after age filtering",
+                        band_name, int(sel.sum()), len(src_band))
             
             if band_name == "u15":
                 youth           = ["age_class", "sex", "ovgk", "population_density_class", "sp_region", "urban", "canton_id"]
@@ -680,7 +702,8 @@ def execute(context):
             )
             df_source_center = df_source_center[df_source_center["activity_chain"] == "home"]
 
-            logger.info("Second statistical matching starting - people with collective residence")
+            logger.info("V1 collective residents: %d recipients, %d home-only donor diaries; broad donor age-band filter bypassed",
+                        int(population_selector.sum()), len(df_source_center))
 
             df_target_center, df_population_center, removed_ids_list_center  = run_statistical_matching_extended(
                 context,
@@ -765,11 +788,7 @@ def execute(context):
             )
         ]["age_class"] == 0))
 
-    logger.info("Matching is done. In total, the following observations were removed from the census: ")
-
     removed_person_ids = removed_ids_list[0]
-    pct_removed = 100.0 * len(removed_person_ids) / number_of_population_persons if number_of_population_persons > 0 else 0.0
-    logger.info("  Persons: %d (%.2f%%)", len(removed_person_ids), pct_removed)
 
     # Return
     if not held_out_home.empty:
@@ -778,4 +797,9 @@ def execute(context):
         home_mapping = held_out_home[["person_id", "household_id"]].copy()
         home_mapping["mz_person_id"] = -1
         df_matching = pd.concat([df_matching, home_mapping], ignore_index=True)
+    input_count = len(context.stage("synthesis.population.sampled"))
+    logger.info("V1 finished: %d input residents; retained %d with donors and %d without donors "
+                "(below-age/home-only bypasses); %d absent from the returned roster; reported removal IDs=%d",
+                input_count, int(df_matching.mz_person_id.ge(0).sum()), int(df_matching.mz_person_id.lt(0).sum()),
+                input_count - len(df_matching), len(removed_person_ids))
     return df_matching, removed_person_ids

@@ -28,6 +28,57 @@ def configure(context):
         context.stage("data.locations_fr.secondary")
 
 
+def execute(context):
+    df_destinations = context.stage("synthesis.population.destinations_statent")
+
+    # add remote work locations
+    df_remote_work = context.stage("remote_work_locations")
+    df_destinations = pd.concat([df_destinations, df_remote_work], ignore_index=True)
+
+    # add the french population
+    if context.config("generate_outbound_flows"):
+        df_FR = context.stage("data.locations_fr.secondary")
+        df_destinations = pd.concat([df_destinations, df_FR], ignore_index=True)
+
+    # add cross-border interview / border-crossing points. These keep their
+    # string "BCP_..." destination_id and have all offers_* set to False, so
+    # they are not (yet) selectable by the secondary-location choice models.
+    df_borders = build_border_destinations(context)
+    df_destinations = pd.concat([df_destinations, df_borders], ignore_index=True)
+
+    # Several raw BPE records can collapse onto the same destination_id (e.g.
+    # one SIRET, several sites); merge them since MATSim needs unique ids.
+    offers_columns = [c for c in df_destinations.columns if c.startswith("offers_")]
+    other_columns  = [c for c in df_destinations.columns
+                       if c not in offers_columns and c not in ("destination_id", "number_employees")]
+
+    aggregation = {c: "any" for c in offers_columns}
+    aggregation["number_employees"] = "sum"
+    aggregation.update({c: "first" for c in other_columns})
+
+    df_destinations = df_destinations.groupby("destination_id", as_index = False).agg(aggregation)
+    df_destinations = gpd.GeoDataFrame(df_destinations, geometry = "geometry", crs = df_borders.crs)
+
+    # Fill gaps in the NN leisure catalogue without creating employment locations.
+    if context.config("locations_algorithm").lower() in NN_ALGORITHMS:
+        municipalities, _ = context.stage("data.spatial.municipalities")
+        municipalities = municipalities.merge(context.stage("data.spatial.municipality_types"))
+        df_destinations = add_osm_destinations(
+            df_destinations, context.stage("data.osm.secondary_features"),
+            municipalities, context.stage("data.spatial.ovgk"),
+            radius_m=float(context.config("secondary_nn_osm_destination_radius_m")),
+        )
+    return df_destinations
+
+
+
+
+
+
+
+
+
+###########################################################################
 def build_border_destinations(context):
     border_frames = []
 
@@ -105,45 +156,3 @@ def build_border_destinations(context):
                "offers_work_secondary", "offers_education_secondary", "offers_home_secondary",
                "ovgk", "municipality_id", "municipality_type", "geometry"]]
 
-
-def execute(context):
-    df_destinations = context.stage("synthesis.population.destinations_statent")
-
-    # add remote work locations
-    df_remote_work = context.stage("remote_work_locations")
-    df_destinations = pd.concat([df_destinations, df_remote_work], ignore_index=True)
-
-    # add the french population
-    if context.config("generate_outbound_flows"):
-        df_FR = context.stage("data.locations_fr.secondary")
-        df_destinations = pd.concat([df_destinations, df_FR], ignore_index=True)
-
-    # add cross-border interview / border-crossing points. These keep their
-    # string "BCP_..." destination_id and have all offers_* set to False, so
-    # they are not (yet) selectable by the secondary-location choice models.
-    df_borders = build_border_destinations(context)
-    df_destinations = pd.concat([df_destinations, df_borders], ignore_index=True)
-
-    # Several raw BPE records can collapse onto the same destination_id (e.g.
-    # one SIRET, several sites); merge them since MATSim needs unique ids.
-    offers_columns = [c for c in df_destinations.columns if c.startswith("offers_")]
-    other_columns  = [c for c in df_destinations.columns
-                       if c not in offers_columns and c not in ("destination_id", "number_employees")]
-
-    aggregation = {c: "any" for c in offers_columns}
-    aggregation["number_employees"] = "sum"
-    aggregation.update({c: "first" for c in other_columns})
-
-    df_destinations = df_destinations.groupby("destination_id", as_index = False).agg(aggregation)
-    df_destinations = gpd.GeoDataFrame(df_destinations, geometry = "geometry", crs = df_borders.crs)
-
-    # Fill gaps in the NN leisure catalogue without creating employment locations.
-    if context.config("locations_algorithm").lower() in NN_ALGORITHMS:
-        municipalities, _ = context.stage("data.spatial.municipalities")
-        municipalities = municipalities.merge(context.stage("data.spatial.municipality_types"))
-        df_destinations = add_osm_destinations(
-            df_destinations, context.stage("data.osm.secondary_features"),
-            municipalities, context.stage("data.spatial.ovgk"),
-            radius_m=float(context.config("secondary_nn_osm_destination_radius_m")),
-        )
-    return df_destinations

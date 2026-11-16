@@ -11,6 +11,7 @@ PREFIX = 'synthesis.population.spatial.secondary_nn.'
 
 
 def configure(context):
+    context.config("secondary_nn_no_distance_routing", "hierarchy")
     context.config('secondary_nn_use_target_distance', True)
     if context.config('secondary_nn_use_target_distance'):
         return

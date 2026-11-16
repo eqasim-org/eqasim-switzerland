@@ -234,8 +234,8 @@ def maps(datasets, observed, predictions, regions, purposes, basemap, directory)
             if vmax <= 0: continue
             norm = PowerNorm(gamma=.5, vmin=0, vmax=vmax)
             fig, axes = plt.subplots(2, 4, figsize=(10.2, 6.2))
-            titles = ['Observed · replay sample', 'RDA · single-leg replay', 'NN · distance input', 'NN · learned selector',
-                      'Observed · full survey', 'RDA · population', 'NN · distance input', 'NN · learned selector']
+            titles = ['Observed · replay sample', 'RDA · single-leg replay', 'NN · distance input', LABELS['nn_no_distance'],
+                      'Observed · full survey', 'RDA · population', 'NN · distance input', LABELS['nn_no_distance']]
             for i,(ax,title,grid) in enumerate(zip(axes.flat,titles,grids)):
                 geographic_background(ax, region, basemap)
                 from city_centres import center_xy

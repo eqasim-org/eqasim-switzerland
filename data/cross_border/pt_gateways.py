@@ -44,6 +44,50 @@ def configure(context):
     context.stage("matsim.scenario.network.convert_pt_schedule")
 
 
+def execute(context):
+
+    # Load the rail supply and surveyed crossings.
+
+    border_offset = context.config("border_offset")
+    swiss_border = context.stage("data.spatial.swiss_border").copy().iloc[0]
+
+    df_points = context.stage("data.cross_border.interview_places")
+    df_points = df_points[df_points["label"] == "pt"].reset_index(drop = True)
+
+    schedule_path = context.stage("matsim.scenario.network.convert_pt_schedule")["schedule"]
+    df_stops, routes = read_schedule(schedule_path)
+    logger.info("Read %d stops and %d rail routes from %s", len(df_stops), len(routes), schedule_path)
+
+    # Build directional gateways and apply explicit station overrides.
+
+    df_gateways = find_gateways(df_stops, routes, df_points, swiss_border, border_offset)
+
+    override_path = context.config("cross_border_pt_gateways_file")
+    if override_path:
+        df_gateways = apply_overrides(df_gateways, df_points, override_path)
+
+    df_gateways = df_gateways.sort_values(["interview_place", "distance_to_border"]).reset_index(drop = True)
+    df_gateways["gateway_id"] = "PTG_" + df_gateways.index.astype(str)
+
+    df_gateways = gpd.GeoDataFrame(df_gateways, geometry = gpd.points_from_xy(df_gateways["x"], df_gateways["y"]), crs = "EPSG:2056")
+    df_gateways = df_gateways.drop(columns = ["x", "y"])
+
+    for place in df_points["interview_place"]:
+        gateways = df_gateways[df_gateways["interview_place"] == place]
+        if len(gateways) == 0:
+            logger.warning("pt interview place %s: no rail gateway found; demand at this crossing will require a schedule fix or gateway override.", place)
+        else:
+            logger.info("pt interview place %s: gateways %s (long distance: %s)", place,
+                        ", ".join(gateways["gateway_name"]),
+                        ", ".join(gateways.loc[gateways["has_long_distance"], "gateway_name"]) or "none")
+
+    # Export the gateway audit and return the station table.
+
+    df_gateways.to_file(os.path.join(context.path(), "pt_gateways.gpkg"), driver = "GPKG")
+
+    return df_gateways
+
+
 def read_schedule(path):
     """ Stops and routes of a MATSim transit schedule (only what is needed here). """
     stops, routes = [], []
@@ -142,19 +186,29 @@ def find_gateways(df_stops, routes, df_points, swiss_border, border_offset):
                 abroad.append(stop_id)
                 position += step
 
-            for stop_id in abroad:
-                rows.append((point_index, stop_id, route["departures"], route["departures"] if from_far else 0, long_distance))
+            # Model the Swiss journey from the first foreign stop served by
+            # this train. Retaining every upstream station would reintroduce
+            # long foreign trips and sparse local services at distant gateways.
+            # Express and regional trains can have different first stops.
+            for stop_id in abroad[:1]:
+                entering = not in_ch[index]
+                rows.append((point_index, stop_id, route["departures"], route["departures"] if from_far else 0,
+                             long_distance, route["departures"] if entering else 0,
+                             0 if entering else route["departures"]))
 
-    df = pd.DataFrame(rows, columns = ["point_index", "stop_id", "departures", "far_departures", "has_long_distance"])
+    df = pd.DataFrame(rows, columns = ["point_index", "stop_id", "departures", "far_departures", "has_long_distance",
+                                       "entry_departures", "exit_departures"])
     if len(df) == 0:
         return pd.DataFrame(columns = ["interview_place", "border_crossing_point_id", "gateway_name", "x", "y",
-                                       "departures", "far_departures", "has_long_distance", "distance_to_border"])
+                                       "departures", "far_departures", "has_long_distance", "distance_to_border",
+                                       "entry_departures", "exit_departures"])
 
     df["gateway_name"] = stops.loc[df["stop_id"], "name"].values
 
     # One gateway per station: the platforms of a station share its name.
     df = df.groupby(["point_index", "gateway_name"]).agg(
         departures = ("departures", "sum"), far_departures = ("far_departures", "sum"), has_long_distance = ("has_long_distance", "any"), stop_id = ("stop_id", "first"),
+        entry_departures = ("entry_departures", "sum"), exit_departures = ("exit_departures", "sum"),
     ).reset_index()
 
     max_departures = df.groupby("point_index")["departures"].transform("max")
@@ -167,13 +221,15 @@ def find_gateways(df_stops, routes, df_points, swiss_border, border_offset):
     df["border_crossing_point_id"] = df_points["border_crossing_point_id"].values[df["point_index"]]
 
     return df[["interview_place", "border_crossing_point_id", "gateway_name", "x", "y",
-               "departures", "far_departures", "has_long_distance", "distance_to_border"]]
+               "departures", "far_departures", "has_long_distance", "distance_to_border",
+               "entry_departures", "exit_departures"]]
 
 
 def apply_overrides(df_gateways, df_points, path):
     df_override = pd.read_csv(path)
 
-    missing = {"interview_place", "gateway_name", "x", "y", "has_long_distance"} - set(df_override.columns)
+    missing = {"interview_place", "gateway_name", "x", "y", "has_long_distance",
+               "entry_departures", "exit_departures"} - set(df_override.columns)
     if missing:
         raise RuntimeError(f"cross_border_pt_gateways_file is missing the columns {sorted(missing)}")
 
@@ -182,47 +238,15 @@ def apply_overrides(df_gateways, df_points, path):
         raise RuntimeError(f"cross_border_pt_gateways_file lists unknown pt interview places: {sorted(unknown)}")
 
     df_override = df_override.merge(df_points[["interview_place", "border_crossing_point_id"]], on = "interview_place")
-    df_override["departures"] = np.nan
+    for column in ("entry_departures", "exit_departures"):
+        values = pd.to_numeric(df_override[column], errors = "raise")
+        if not np.isfinite(values).all() or (values < 0).any():
+            raise ValueError(f"Gateway override {column} must contain finite, nonnegative service counts")
+        df_override[column] = values
+    df_override["departures"] = df_override["entry_departures"] + df_override["exit_departures"]
     df_override["far_departures"] = np.nan
     df_override["distance_to_border"] = np.nan
     df_override["has_long_distance"] = df_override["has_long_distance"].astype(bool)
 
     df_gateways = df_gateways[~df_gateways["interview_place"].isin(df_override["interview_place"])]
     return pd.concat([df_gateways, df_override[df_gateways.columns]], ignore_index = True)
-
-
-def execute(context):
-    border_offset = context.config("border_offset")
-    swiss_border = context.stage("data.spatial.swiss_border").copy().iloc[0]
-
-    df_points = context.stage("data.cross_border.interview_places")
-    df_points = df_points[df_points["label"] == "pt"].reset_index(drop = True)
-
-    schedule_path = context.stage("matsim.scenario.network.convert_pt_schedule")["schedule"]
-    df_stops, routes = read_schedule(schedule_path)
-    logger.info("Read %d stops and %d rail routes from %s", len(df_stops), len(routes), schedule_path)
-
-    df_gateways = find_gateways(df_stops, routes, df_points, swiss_border, border_offset)
-
-    override_path = context.config("cross_border_pt_gateways_file")
-    if override_path:
-        df_gateways = apply_overrides(df_gateways, df_points, override_path)
-
-    df_gateways = df_gateways.sort_values(["interview_place", "distance_to_border"]).reset_index(drop = True)
-    df_gateways["gateway_id"] = "PTG_" + df_gateways.index.astype(str)
-
-    df_gateways = gpd.GeoDataFrame(df_gateways, geometry = gpd.points_from_xy(df_gateways["x"], df_gateways["y"]), crs = "EPSG:2056")
-    df_gateways = df_gateways.drop(columns = ["x", "y"])
-
-    for place in df_points["interview_place"]:
-        gateways = df_gateways[df_gateways["interview_place"] == place]
-        if len(gateways) == 0:
-            logger.warning("pt interview place %s: no gateway found, its far-away travellers stay on the interview place.", place)
-        else:
-            logger.info("pt interview place %s: gateways %s (long distance: %s)", place,
-                        ", ".join(gateways["gateway_name"]),
-                        ", ".join(gateways.loc[gateways["has_long_distance"], "gateway_name"]) or "none")
-
-    df_gateways.to_file(os.path.join(context.path(), "pt_gateways.gpkg"), driver = "GPKG")
-
-    return df_gateways

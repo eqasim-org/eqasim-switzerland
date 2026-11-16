@@ -711,6 +711,8 @@ class HierarchicalLocationChoiceModel:
         if short_wrapper is not None:
             self.wrappers["short"] = short_wrapper
         self.use_target_distance = "target_distance" in self.c.person_trip_cols
+        self.no_distance_routing = "hierarchy"
+        self.hierarchy_short_threshold_m = 1600.0
         self.short_trip_classifier = None
         self.short_trip_threshold_m = 1500.0
         self.short_query_radius_m = 200.0
@@ -770,6 +772,7 @@ class HierarchicalLocationChoiceModel:
         )
         if short_trip_classifier_path is not None:
             obj.short_trip_classifier = joblib.load(short_trip_classifier_path)
+            obj.no_distance_routing = "learned_selector"
         return obj
 
     @classmethod
@@ -779,8 +782,11 @@ class HierarchicalLocationChoiceModel:
         local_model_path = context.stage("synthesis.population.spatial.secondary_nn.local_model")[0]
         short_model_path = context.stage("synthesis.population.spatial.secondary_nn.short_range_model")[0]
         use_target_distance = bool(context.config("secondary_nn_use_target_distance"))
+        routing = context.config("secondary_nn_no_distance_routing") or "hierarchy"
+        if routing not in ("hierarchy", "learned_selector"):
+            raise ValueError("Distance-free routing must be hierarchy or learned_selector")
         classifier_path = None
-        if not use_target_distance and load_selector:
+        if not use_target_distance and load_selector and routing == "learned_selector":
             classifier_path = context.stage("synthesis.population.spatial.secondary_nn.short_trip_classifier")[0]
 
         obj = cls.load(
@@ -803,8 +809,13 @@ class HierarchicalLocationChoiceModel:
             raise ValueError("Retrain secondary_nn models for the configured target-distance option")
         if "remaining_distance_budget_m" not in obj.c.person_trip_cols:
             raise ValueError("Retrain all secondary_nn experts with remaining-chain features")
-        if not use_target_distance and load_selector and not hasattr(obj.short_trip_classifier, "feature_scaler"):
+        if not use_target_distance and load_selector and routing == "learned_selector" and not hasattr(obj.short_trip_classifier, "feature_scaler"):
             raise ValueError("Retrain the distance-free selector as a cross-fitted probabilistic mixture")
+        obj.no_distance_routing = routing
+        threshold = context.config("secondary_nn_hierarchy_short_threshold_m") if routing == "hierarchy" and load_selector else None
+        obj.hierarchy_short_threshold_m = 1600. if threshold is None else float(threshold)
+        if not np.isfinite(obj.hierarchy_short_threshold_m) or obj.hierarchy_short_threshold_m <= 0:
+            raise ValueError("Hierarchy short threshold must be finite and positive")
         obj.accessibility_weight = float(accessibility_weight)
         if not np.isfinite(obj.accessibility_weight) or not 0 < obj.accessibility_weight <= 1:
             raise ValueError("Accessibility weight must lie in (0, 1]")
@@ -834,6 +845,10 @@ class HierarchicalLocationChoiceModel:
                 no_pt_weight=self.accessibility_weight if self.accessibility_weight < 1 else .01)
         self.level2_to_level1 = {leaf: middle for branches in h3_tree.values() for middle, leaves in branches.items() for leaf in leaves}
         self.l1_siblings = _reverse_tree(h3_tree)  # {level1: [sibling_level1s]} — built once for O(1) fallback widening
+        # Cache enclosing boxes once; inference needs only a few scalar operations per level.
+        self._routing_bounds = ({str(cell): bounds for cells in h3_geo.values()
+                                 for cell, bounds in zip(cells.h3_index, cells.geometry.bounds.to_numpy())}
+                                if not self.use_target_distance and self.no_distance_routing == "hierarchy" else {})
         self._build_destination_support_masks(h3_tree)
         if self.accessibility_weight < 1:
             self._build_pt_soft_weights(h3_tree, h3_data, context.stage("synthesis.population.destinations"))
@@ -1098,8 +1113,10 @@ class HierarchicalLocationChoiceModel:
             )
 
     def assert_ready_for_prediction(self):
-        if not self.use_target_distance and (self.short_trip_classifier is None or self.s is None):
-            raise RuntimeError("Distance-free model selection requires the short-trip classifier and short-range model")
+        if not self.use_target_distance and self.s is None:
+            raise RuntimeError("Distance-free routing requires the short-range expert")
+        if not self.use_target_distance and self.no_distance_routing == "learned_selector" and self.short_trip_classifier is None:
+            raise RuntimeError("The learned-selector policy requires its saved selector")
         assert self.destination_index is not None and self.destination_fallback is not None and self.l1_siblings is not None, (
             "Destination pools / sibling map are not initialized. Call build_candidates_and_trees(context) before predict()."
         )
@@ -1244,6 +1261,10 @@ class HierarchicalLocationChoiceModel:
         if self.s is not None:
             self.s._current_origin_detour_index = self._current_origin_detour_index
 
+        if not self.use_target_distance and self.no_distance_routing == "hierarchy" and force_expert is None:
+            return self._predict_hierarchy_with_short_refinement(person_matrix, home_x, home_y, work_x, work_y,
+                origin_x, origin_y, has_work, purpose, rng)
+
         safe_target_distance = float(target_distance) if np.isfinite(target_distance) and float(target_distance) >= 0.0 else np.inf
         if force_expert not in (None, "short", "hierarchy"):
             raise ValueError("force_expert must be short or hierarchy")
@@ -1295,6 +1316,46 @@ class HierarchicalLocationChoiceModel:
             purpose, level1_h3, level2_h3, rng, self._current_can_drive, home_x, home_y,
             origin_x=origin_x, origin_y=origin_y, target_distance=target_distance if self.use_target_distance else None)
         return destination_id, geom
+
+    def _cell_within_short_radius(self, cell, origin_x, origin_y):
+        xmin, ymin, xmax, ymax = self._routing_bounds[cell]
+        far_x = max(abs(xmin-origin_x), abs(xmax-origin_x))
+        far_y = max(abs(ymin-origin_y), abs(ymax-origin_y))
+        return np.hypot(far_x, far_y) <= self.hierarchy_short_threshold_m
+
+    def _predict_hierarchy_with_short_refinement(self, person_matrix, home_x, home_y, work_x, work_y,
+                                                 origin_x, origin_y, has_work, purpose, rng):
+        # A coarse cell must fit entirely in the short catchment; boundary cells are refined.
+        geometry = dict(home_x=home_x,home_y=home_y,work_x=work_x,work_y=work_y,
+                        origin_x=origin_x,origin_y=origin_y,has_work=has_work,purpose=purpose,rng=rng)
+        self.last_selected_expert, self.last_short_probability = "hierarchy", 0.
+        self.last_routing_level = "hierarchy"
+        root = self._predict_level0_from_person(person_matrix, **geometry)
+        middle = leaf = None
+        switch = self._cell_within_short_radius(root,origin_x,origin_y)
+        level = "regional"
+        if not switch:
+            middle = self._predict_level1_from_person(person_matrix,level0_h3=root,**geometry)
+            switch = self._cell_within_short_radius(middle,origin_x,origin_y)
+            level = "subregional"
+        if not switch:
+            leaf = self._predict_level2_from_person(person_matrix,level0_h3=root,level1_h3=middle,**geometry)
+            switch = self._cell_within_short_radius(leaf,origin_x,origin_y)
+            level = "local"
+        if not switch:
+            candidate = self.sample_company_in_l2(purpose,middle,leaf,rng,self._current_can_drive,home_x,home_y,
+                origin_x=origin_x,origin_y=origin_y,target_distance=None)
+            switch = np.hypot(candidate[1].x-origin_x,candidate[1].y-origin_y) <= self.hierarchy_short_threshold_m
+            level = "facility"
+            if not switch:
+                return candidate
+
+        # Refine once around the original origin, keeping the overlapping short choice set.
+        self.last_selected_expert, self.last_short_probability = "short", 1.
+        self.last_routing_level = level
+        leaf = self._predict_short_level2_from_person(person_matrix,target_distance=0.,**geometry)
+        return self.sample_company_in_l2(purpose,self.level2_to_level1[leaf],leaf,rng,self._current_can_drive,
+            home_x,home_y,origin_x=origin_x,origin_y=origin_y,target_distance=None)
 
     def expert_leaf_probabilities(self, observed_leaf, **inputs):
         """Exact probability mass at the observed coordinate leaf for both experts.

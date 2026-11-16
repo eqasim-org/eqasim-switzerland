@@ -76,6 +76,12 @@ def execute(context):
 
     for place, choices in groups.items():
         persons = demand[demand.interview_place.eq(place)].copy().reset_index(drop=True)
+        # Explicitly unmeasured sites retain their people and cannot attract new ones.
+
+        retained = ~persons.old_point.isin(choices.point_id)
+        retained_people = int(retained.sum())
+        retained_crossings = float(persons.loc[retained, "mass"].sum()) if retained_people else 0.
+        persons = persons.loc[~retained].reset_index(drop=True)
         if persons.empty:
             audit.append(dict(interview_place=place, status="no_assigned_road_people"))
             continue
@@ -95,7 +101,8 @@ def execute(context):
                            "%.1f%% of movable expected crossings use the expanded range.",
                            place, summary["extra_minutes_limit"], summary["expected_share_over_20_pct"])
         replacements.append(changed)
-        audit.append(dict(interview_place=place, **summary))
+        audit.append(dict(interview_place=place, **summary, unmeasured_people_retained=retained_people,
+                          unmeasured_crossings_retained=retained_crossings))
         totals.append(details.assign(interview_place=place))
         anchors.extend(offsets)
 
@@ -140,13 +147,20 @@ def validate(context):
 
 
 def reference_groups(sites, references):
-    """Only complete, geographically checked physical-site sets can define shares."""
+    """Require checked coverage, allowing explicit retention at unmeasured sites."""
     refs = pd.DataFrame(references)
     if refs.empty:
         return {}, []
-    required = {"fid", "x", "y", "low"}
+    required = {"fid", "x", "y"}
     if not required.issubset(refs) or refs.fid.duplicated().any():
         raise ValueError("Count references require unique fid and x/y/low/high")
+    if "low" not in refs:
+        refs["low"] = np.nan
+    if "keep_assignment" not in refs:
+        refs["keep_assignment"] = False
+    refs["keep_assignment"] = refs.keep_assignment.fillna(False)
+    if not refs.keep_assignment.isin([True, False]).all():
+        raise ValueError("keep_assignment must be a boolean")
     if "high" not in refs:
         refs["high"] = refs.low
     else:
@@ -165,12 +179,21 @@ def reference_groups(sites, references):
             continue
         values = refs.loc[choices.fid]
         xy = values[["x", "y"]].to_numpy(float)
-        ranges = values[["low", "high"]].to_numpy(float)
-        if (not np.isfinite(xy).all() or not np.isfinite(ranges).all()
-                or (ranges <= 0).any() or (ranges[:, 0] > ranges[:, 1]).any()
+        if (not np.isfinite(xy).all()
                 or (np.linalg.norm(xy-choices[["x", "y"]].to_numpy(), axis=1) > 50).any()):
+            raise ValueError("Invalid/stale count reference for %s; check FIDs and coordinates" % place)
+        retained = values.keep_assignment.to_numpy(bool)
+        if values.loc[retained, ["low", "high"]].notna().any().any():
+            raise ValueError("Unmeasured retained sites must not supply count targets")
+        for fid in choices.loc[retained, "fid"]:
+            audit.append(dict(interview_place=place, fid=int(fid), status="unchanged_explicitly_unmeasured"))
+        choices = choices.loc[~retained].reset_index(drop=True)
+        values = values.loc[~retained]
+        ranges = values[["low", "high"]].to_numpy(float)
+        if (not np.isfinite(ranges).all()
+                or (ranges <= 0).any() or (ranges[:, 0] > ranges[:, 1]).any()):
             raise ValueError("Invalid/stale count reference for %s; check FIDs, coordinates and ranges" % place)
-        if len(choices) == 1:
+        if len(choices) <= 1:
             audit.append(dict(interview_place=place, status="unchanged_single_crossing"))
             continue
         choices["reference"] = ranges.mean(axis=1)

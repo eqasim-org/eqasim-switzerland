@@ -430,3 +430,34 @@ Dashed circles on maps and dotted figure lines mark a 2 km reference radius.
 `findings.md` states the measured 2 km contrasts, including negative contrasts.
 These descriptive single-run figures carry no between-seed uncertainty intervals.
 The ordinary `generate_report` command produces all of these additions.
+
+## Focused secondary comparison jobs
+
+The current comparison configs are `config_dib_10_sNN.yml` (distance input),
+`config_dib_10_sNNnD.yml` (hierarchy-first without distance), and
+`config_dib_10.yml` (existing RDA result). Submit the NN stages and a dependent
+report from the repository root:
+
+```bash
+uv run python scripts/submit_secondary_comparison.py --dry-run
+uv run python scripts/submit_secondary_comparison.py
+```
+
+The submitter creates private run-specific YAML copies under
+`logs/secondary_comparison_<UTC timestamp>/` and keeps the source configs' usual
+run targets intact. It enables Synpp debug mode and explicitly requests the four
+experts plus secondary assignment. It verifies that exactly six stages execute,
+checks every reused cache is complete, and checks mobility, chain and H3 feature
+schemas before submitting either job. Debug mode reuses upstream caches without
+full source/configuration invalidation; it is intended for this focused experiment.
+The per-run manifest records the actual fallback cache keys. Each job uses the
+source config's thread count, 5G memory per CPU, and a 24-hour time allowance.
+Existing cached expert/assignment results for the requested stage keys are
+replaced by the debug rerun. Upstream caches and RDA assignments are only read.
+
+A report-only job is submitted with `afterok:<distance-job>:<no-distance-job>`.
+Its explicit config arguments select the existing RDA results and the two focused
+NN runs. `submissions.json` records job IDs and config paths; logs use
+`logs/<job-name>_<job-id>.log`. The report updates `results/report.html`, including
+the RDA survey replay maps and city-centre visitation figures. Report provenance
+marks debug assignments and records the actual cache dependencies.

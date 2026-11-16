@@ -255,3 +255,20 @@ branches and the collective-resident branch. Thus even the existing last-resort
 prefix relaxation retains density; recipients with no donor in that density
 class follow the existing unmatched-recipient removal. ARE matching is unchanged.
 No upstream density calculation or matching algorithm is changed.
+
+## Shared model stage
+
+`synthesis.population.matching.V2.model` is also a Synpp training stage. It
+returns a fitted `DiaryMatcher`. `matched_v2` depends on that stage and calls
+`matcher.match(population)`; it does not fit a second encoder. The model stage
+exports `training_report.json` and `training_membership.csv`. Its 10% validation
+partition chooses the early-stopping checkpoint, beginning with epoch 10;
+training must allow at least ten epochs. `matching_embedding_patience` controls
+plateau stopping, while `matching_embedding_epochs` remains the maximum.
+
+`matcher.with_donors(ids)` returns a view with a restricted donor pool and the
+same fitted encoder and feature processor. `matcher.match(recipients,
+donor_ids=ids, n_draws=50, random_seed=...)` offers the same restriction directly.
+Donor row indices refer to the restricted pool in the supplied ID order. Neither
+operation fits or changes the original matcher. This supports donor-exclusion
+experiments while retaining one trained model.

@@ -29,6 +29,7 @@ MODEL_NAME = 'expert_selector.pkl'
 
 
 def configure(context):
+    context.config("secondary_nn_no_distance_routing", "hierarchy")
     context.config("secondary_nn_model_validation_rotation_epochs", 3)
     context.config("secondary_nn_model_validation_holdout_fraction", 0.1)
     context.config('secondary_nn_use_target_distance', True)

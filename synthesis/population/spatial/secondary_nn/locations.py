@@ -23,6 +23,7 @@ _WORKER_PROGRESS_FLUSH_EVERY = 100
 _CHUNCK_SIZE_PERSONS = 10000
 
 def configure(context):
+    context.config("secondary_nn_no_distance_routing", "hierarchy")
     context.config("secondary_nn_use_target_distance", True)
     context.stage("data.constants")
     context.stage("data.spatial.ovgk")
@@ -41,11 +42,12 @@ def configure(context):
     context.stage("synthesis.population.spatial.secondary_nn.subregional_model")
     context.stage("synthesis.population.spatial.secondary_nn.local_model")
     context.stage("synthesis.population.spatial.secondary_nn.short_range_model")
-    if not context.config("secondary_nn_use_target_distance"):
+    if not context.config("secondary_nn_use_target_distance") and context.config("secondary_nn_no_distance_routing") == "learned_selector":
         context.stage("synthesis.population.spatial.secondary_nn.short_trip_classifier")
 
     context.config("random_seed")
     context.config("threads", volatile=True)
+    context.config("secondary_nn_hierarchy_short_threshold_m", 1600.0)
     context.config("secondary_nn_short_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
     context.config("secondary_nn_short_query_radius_m", 200.0)
     context.config("secondary_nn_short_min_candidates", 6)
@@ -447,7 +449,7 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
 
             elif following_purpose in SECONDARY_SET:
                 target_distance = target_distance_arr[local_idx]
-                if target_distance<DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION:# less than 10 meters, it doesn't move from current location
+                if (wrapper.use_target_distance or wrapper.no_distance_routing == "learned_selector") and target_distance<DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION:# less than 10 meters, it doesn't move from current location
                     next_x, next_y = current_x, current_y                    
                     geom = Point(next_x, next_y)
                     locations_records.append((person_id, trip_index, destination_id, geom))

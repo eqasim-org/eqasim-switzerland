@@ -40,9 +40,11 @@ class EmbeddingTrainer:
     def _fit_model(x, y, train_indices, validation_indices, *, random_seed,
                               epochs, batch_size, lr, dropout, weight_decay, loss_weights,
                               proj_dims, use_class_weighting, latent_noise_std,
-                              lr_decay_step, lr_decay_gamma, patience=12):
+                              lr_decay_step, lr_decay_gamma, patience=12, min_epochs=10):
         if torch is None:
             raise RuntimeError("PyTorch is required for matched_v2")
+        if epochs < min_epochs:
+            raise ValueError("Maximum epochs must be at least min_epochs")
         rng = np.random.RandomState(random_seed)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         kwargs = dict(cont_dim=x["cont"].shape[1], cardinalities=x["cardinalities"],
@@ -92,8 +94,9 @@ class EmbeddingTrainer:
                 total, weight_sum = 0.0, 0.0
                 components = {}
                 with torch.no_grad():
-                    for start in range(0, len(validation_indices), batch_size):
-                        idx = validation_indices[start:start + batch_size]
+                    monitored = validation_indices if epoch + 1 >= min_epochs else []
+                    for start in range(0, len(monitored), batch_size):
+                        idx = monitored[start:start + batch_size]
                         output = model(to_tensors(x, idx, device), y["act_tgt"].shape[1])
                         # Select on behavioural prediction, without class reweighting or regularizers.
                         evaluation_weights = {key: value for key, value in loss_weights.items()
@@ -110,6 +113,11 @@ class EmbeddingTrainer:
                 history.append({"epoch": epoch + 1, "train_loss": train_total / train_weight,
                                 "validation_loss": score if weight_sum else None,
                                 **{"validation_" + k: v / weight_sum for k, v in components.items()}})
+                if epoch + 1 < min_epochs:
+                    if epoch == 0 or (epoch + 1) % 5 == 0:
+                        logger.info("V2 warm-up epoch %d/%d: train %.4f; validation monitoring starts at %d",
+                                    epoch + 1, epochs, train_total / train_weight, min_epochs)
+                    continue
                 if score < best_loss - 1e-6:
                     best_loss, best_state, stale = score, copy.deepcopy(model.state_dict()), 0
                     best_epoch = epoch + 1
@@ -123,6 +131,9 @@ class EmbeddingTrainer:
             model.load_state_dict(best_state)
         model.eval()
         model.training_report = {"best_epoch": best_epoch, "train_persons": len(train_indices),
+                                 "min_epochs": min_epochs, "validation_monitoring_start_epoch": min_epochs,
+                                 "epochs_completed": len(history), "patience": patience,
+                                 "stopping_reason": "validation_plateau" if len(validation_indices) and stale >= patience else "maximum_epochs",
                                  "validation_persons": len(validation_indices), "history": history}
         return model, kwargs
 

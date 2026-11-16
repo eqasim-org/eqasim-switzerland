@@ -1,6 +1,7 @@
 """Reusable fit/transform/predict interface for whole-diary matching."""
 
 from dataclasses import dataclass
+import copy
 
 import numpy as np
 import pandas as pd
@@ -61,7 +62,28 @@ class DiaryMatcher:
         self.model_, self.processor_ = fitted, processor
         self.training_report_, self.donors_, self.donor_embeddings_ = report, source, embeddings
         self.selector_ = DonorSelector(**self.options.retrieval)
+        from .training import split_training_rows
+        train, validation = split_training_rows(source, self.options.validation_fraction, self.options.random_seed)
+        self.training_ids_ = source.iloc[train].mz_id.to_numpy(copy=True)
+        self.validation_ids_ = source.iloc[validation].mz_id.to_numpy(copy=True)
         return self
+
+    def with_donors(self, donor_ids):
+        """Restrict donor availability without refitting or changing the encoder."""
+        self._require_fitted()
+        ids = pd.Index(donor_ids)
+        if ids.has_duplicates or not ids.isin(self.donors_.mz_id).all() or ids.empty:
+            raise ValueError("Donor IDs must be a non-empty unique subset of fitted donors")
+        rows = pd.Series(np.arange(len(self.donors_)), index=self.donors_.mz_id).loc[ids].to_numpy()
+        view = copy.copy(self)
+        view.donors_ = self.donors_.iloc[rows].reset_index(drop=True).copy()
+        view.donor_embeddings_ = self.donor_embeddings_[rows].copy()
+        return view
+
+    def match(self, population, *, donor_ids=None, n_draws=1, random_seed=None):
+        """Match using the fitted encoder and, optionally, a restricted donor pool."""
+        matcher = self if donor_ids is None else self.with_donors(donor_ids)
+        return matcher.predict(population, n_draws=n_draws, random_seed=random_seed)
 
     def transform(self, frame):
         self._require_fitted()

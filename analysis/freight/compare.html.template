@@ -1,0 +1,120 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Freight comparison · NPVM and legacy</title>
+<style>__LEAFLET_CSS__</style><style>
+*{box-sizing:border-box}body{margin:0;background:#f2f5f9;color:#1b3048;font:14px system-ui,sans-serif}header{background:#142c43;color:white;padding:26px 4vw}h1{margin:0 0 8px;font-size:28px}header p{color:#d7e2ef;margin:0}.wrap{max-width:1500px;margin:auto;padding:24px}.notice{background:#fff4d8;border-left:4px solid #d99722;padding:15px 18px;line-height:1.65;margin-bottom:18px}.controls{display:flex;gap:18px;flex-wrap:wrap;padding:18px;background:white;border-radius:9px;position:sticky;top:0;z-index:1000;box-shadow:0 3px 12px #20334b15}label{display:block;font-size:12px;font-weight:650;margin-bottom:5px}select{font:inherit;padding:8px;border:1px solid #bdccdc;border-radius:5px}.muted{color:#53677d;font-size:12px;line-height:1.65}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:20px 0}.distance-cards{grid-template-columns:repeat(3,1fr)}.card,.panel{background:white;border-radius:10px;padding:18px;box-shadow:0 2px 9px #26354c09}.big{font-size:27px;font-weight:700;margin:8px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:18px 0}.chart{height:390px}.tall{height:920px}.panel h2{font-size:18px;margin:0 0 8px}.map{height:520px;border-radius:6px;background:#e5eaf0}.legend{display:flex;justify-content:space-between;gap:12px;font-size:12px;margin:14px 0}.key{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px}.legacy{background:#c06436}.npvm{background:#216db1}table{border-collapse:collapse;width:100%;font-size:12px}th,td{padding:9px;border-bottom:1px solid #e0e7ef;text-align:right}th:first-child,td:first-child{text-align:left}.scroll{overflow:auto}#tileStatus{color:#924d11}pre{white-space:pre-wrap;overflow-wrap:anywhere}input[type=range]{width:140px}a{color:#1c64a3}section{scroll-margin-top:100px}.exports{display:flex;gap:14px;flex-wrap:wrap;line-height:2}h3{font-size:15px}@media(max-width:850px){.grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr 1fr}.controls{position:static}.distance-cards{grid-template-columns:1fr}.wrap{padding:14px}.map{height:420px}.tall{height:1050px}}
+</style></head><body>
+<header><h1>Freight demand · NPVM versus legacy</h1><p>Trip volumes, OD distances, departure times and spatial distribution · Generated demand before MATSim</p></header>
+<main class="wrap">
+<div class="notice"><strong>Compare the generated scenarios with their original assumptions.</strong> <span id="basis"></span><br>Distances are straight-line distances between generated coordinates. Foreign endpoints are placed on the Swiss border, so international distances exclude the foreign parts of trips. These are vehicle-trip records, not distinct physical trucks or routed journeys.</div>
+<div class="controls">
+<div><label for="scope">Traffic scope</label><select id="scope"><option value="all">All freight trips</option><option value="domestic">Both source zones domestic</option><option value="crossborder">One source zone abroad</option><option value="transit">Both source zones abroad</option></select></div>
+<div><label for="endpoint">Canton maps · endpoints</label><select id="endpoint"><option value="origin">Origins</option><option value="destination">Destinations</option></select></div>
+<div><label for="measure">Canton maps · measure</label><select id="measure"><option value="trips">Trip endpoints</option><option value="locations">Distinct coordinate locations</option></select></div>
+<div><label for="normalization">Distribution charts</label><select id="normalization"><option value="percent">Percent within each method</option><option value="count">Trip counts</option></select></div>
+<div><label for="opacity">Map background opacity <span id="opacityValue">65%</span></label><input id="opacity" type="range" min="0" max="100" value="65"></div>
+<div><label for="locations">Canton maps · location overlay</label><input id="locations" type="checkbox"> Show trip endpoints in 5 km cells</div>
+</div>
+<div class="legend"><span><i class="key legacy"></i>Legacy GTE/GQGV</span><span><i class="key npvm"></i>NPVM LW/LZ</span><span>Every valid trip included; no additional map sampling</span></div>
+<div class="cards"><div class="card"><span>Legacy trips</span><div class="big" id="legacyTotal"></div><div class="muted" id="legacyShare"></div></div><div class="card"><span>NPVM trips</span><div class="big" id="npvmTotal"></div><div class="muted" id="npvmShare"></div></div><div class="card"><span>NPVM − legacy</span><div class="big" id="difference"></div><div class="muted" id="differenceShare"></div></div><div class="card"><span>Median OD distance</span><div class="big" id="medians"></div><div class="muted">Legacy / NPVM · km, straight line</div></div></div>
+<div class="cards distance-cards"><div class="card"><span>Legacy · total OD distance</span><div class="big" id="legacyDistance"></div><div class="muted">Sum of valid trip distances · km</div></div><div class="card"><span>NPVM · total OD distance</span><div class="big" id="npvmDistance"></div><div class="muted">Sum of valid trip distances · km</div></div><div class="card"><span>NPVM − legacy · total distance</span><div class="big" id="distanceDifference"></div><div class="muted" id="distanceDifferenceShare"></div></div></div>
+<p class="muted">Total distance sums each valid trip once, at the configured sample fraction and selected traffic scope. These are straight-line OD kilometres, not routed vehicle-kilometres; foreign journey sections are excluded by border placement.</p>
+<div class="grid"><section class="panel"><h2>Total trips</h2><div id="totals" class="chart"></div></section><section class="panel"><h2>Domestic and international composition</h2><div id="composition" class="chart"></div><div class="muted">Classification uses original source zones, before border placement. These are OD categories; foreign-to-foreign ODs are not a check of the simulated route.</div></section></div>
+<div class="grid"><section class="panel"><h2>OD distance distribution</h2><div id="distances" class="chart"></div><div class="muted">Common 5 km bins; last bin is 500+ km. Zero-distance trips are included. Invalid distances are excluded and counted in the summary.</div></section><section class="panel"><h2>Cumulative OD distance</h2><div id="cdf" class="chart"></div><div class="muted">All valid distances contribute; the curve is represented by 1,001 empirical quantiles.</div></section></div>
+<section class="panel"><h2>Departure times</h2><div id="departures" class="chart"></div><p class="muted">Both methods use the same freight departure profile. Differences mainly reflect random sampling; this is not an independent comparison of observed schedules. Hours after 24 are preserved.</p></section>
+<h2>Origins and destinations by canton</h2><p class="muted">Use Canton maps · endpoints to switch between origins and destinations. Trip endpoints count repeated visits; distinct locations count unique coordinates rounded to 1 mm. Foreign source zones remain External even when their coordinates lie on a Swiss canton boundary. Maps share one numeric colour scale. Optional 5 km cells show domestic endpoints in blue and foreign border proxies in grey.</p>
+<div class="grid"><section class="panel"><h2>Legacy GTE/GQGV</h2><div id="legacyMap" class="map"></div></section><section class="panel"><h2>NPVM</h2><div id="npvmMap" class="map"></div></section></div>
+<div id="mapLegend" class="muted"></div><div id="tileStatus" class="muted" role="status"></div>
+<div class="grid"><section class="panel"><h2 id="cantonTitle">Canton trip endpoints</h2><div id="cantons" class="chart tall"></div></section><section class="panel"><h2>NPVM − legacy by canton</h2><div id="delta" class="chart tall"></div></section></div>
+<h2>Origins and destinations by NPVM zone · difference</h2>
+<p class="muted">This map shows <strong>NPVM − legacy</strong> trip counts on the same NPVM zone layer. Blue means more NPVM trips; orange means fewer; neutral means no change. Select origin trips or destination trips below. Traffic scope and background opacity controls also apply. NPVM retains its original domestic OD zone IDs; legacy domestic endpoints are assigned by generated coordinates. Foreign endpoints stay External.</p>
+<section class="panel"><label for="zoneEndpoint">Difference based on</label><select id="zoneEndpoint"><option value="origin">Origin trips — NPVM − legacy</option><option value="destination">Destination trips — NPVM − legacy</option></select>
+<h2 id="zoneDifferenceTitle" style="margin-top:16px">Origin-trip difference by NPVM zone</h2><div id="zoneDifferenceMap" class="map"></div>
+<div class="legend"><span><i class="key legacy"></i>Fewer NPVM trips</span><span><i class="key" style="background:#e2e6eb"></i>No difference</span><span><i class="key npvm"></i>More NPVM trips</span></div><div id="zoneMapLegend" class="muted"></div></section>
+<section class="panel" style="margin-top:18px"><h2>NPVM zone differences</h2><label for="zoneSearch">Find a zone by ID or name</label><input id="zoneSearch" type="search" placeholder="e.g. 101001 or Genève" style="padding:8px;width:min(100%,400px)"><p id="zoneTableSummary" class="muted"></p><div class="scroll"><table><thead><tr><th>NPVM zone</th><th>NPVM − legacy trips</th><th>Change vs legacy</th></tr></thead><tbody id="zoneTable"></tbody></table></div></section>
+<section class="panel"><h2>Comparison summary</h2><div class="scroll"><table><thead><tr><th>Statistic</th><th>Legacy</th><th>NPVM</th></tr></thead><tbody id="summaryTable"></tbody></table></div><p class="muted">Unassigned domestic endpoints are retained separately (for example, NPVM domestic zones in Liechtenstein). If a domestic endpoint intersects more than one canton boundary, the lowest canton ID is used once and the ambiguity is counted. Unique coordinates and geographic counts describe generated endpoints, not measured establishment activity.</p></section>
+<section class="panel" style="margin-top:18px"><h2>Canton and external endpoint counts</h2><div class="scroll"><table><thead><tr><th>Canton/category</th><th>Legacy</th><th>NPVM</th><th>Difference</th><th>Change</th></tr></thead><tbody id="cantonTable"></tbody></table></div></section>
+<section class="panel" style="margin-top:18px"><h2>Download aggregate results</h2><div class="exports"><a href="summary.csv">Summary</a><a href="canton_counts.csv">Canton counts</a><a href="npvm_zone_counts.csv">NPVM zone counts</a><a href="distance_distribution.csv">Distance bins</a><a href="departure_times.csv">Departure hours</a><a href="source_counts.csv">GTE/GQGV and LW/LZ totals</a><a href="canton_od.csv">Canton OD counts</a><a href="location_cells.csv">Location cells</a><a href="provenance.json">Source information</a></div><details><summary>Configuration assumptions and source caches</summary><pre id="provenance" class="muted"></pre></details></section>
+</main>
+<script>__LEAFLET_JS__</script><script>__PLOTLY_JS__</script><script>
+'use strict';
+const DATA=__DATA__;
+const META=__META__;
+const el=id=>document.getElementById(id), fmt=n=>n===null||n===undefined?'—':Number(n).toLocaleString('en-GB',{maximumFractionDigits:2});
+const COLORS={Legacy:'#c06436',NPVM:'#216db1'},models=['Legacy','NPVM'];
+const maps={},tiles={},layers={},markers={};
+for(const [model,id] of [['Legacy','legacyMap'],['NPVM','npvmMap'],['zoneDifference','zoneDifferenceMap']]){
+ maps[model]=L.map(id,{preferCanvas:true}).setView([46.85,8.25],7);
+ tiles[model]=L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg',{opacity:.65,maxZoom:19,maxNativeZoom:18,noWrap:true,attribution:'© <a href="https://www.swisstopo.admin.ch/">swisstopo</a>'}).addTo(maps[model]);
+ tiles[model].on('tileerror',()=>{el('tileStatus').textContent='Some background tiles could not load. Canton and NPVM zone polygons, location cells, charts and tables remain usable.';});
+ L.control.scale({imperial:false}).addTo(maps[model]);
+}
+function selected(model){return DATA.models[model][el('scope').value];}
+function plot(id,data,layout={}){return Plotly.react(id,data,{margin:{l:65,r:20,t:25,b:70},paper_bgcolor:'#fff',plot_bgcolor:'#fff',font:{family:'system-ui',color:'#24394f'},legend:{orientation:'h',y:1.16},...layout},{responsive:true,displaylogo:false,toImageButtonOptions:{format:'png',scale:2}});}
+function bar(model,x,y,extra={}){return {name:model,x,y,type:'bar',marker:{color:COLORS[model]},...extra};}
+function values(model){return selected(model).endpoints[el('endpoint').value];}
+function counts(model,id){return values(model)[id]?.[el('measure').value]||0;}
+function percent(n,d){return d?100*n/d:0;}
+function row(parent,values){const tr=document.createElement('tr');for(const v of values){const td=document.createElement('td');td.textContent=v;tr.append(td);}parent.append(tr);}
+function chartDistribution(){
+ const normalized=el('normalization').value==='percent';
+ plot('distances',models.map(model=>{const s=selected(model);return bar(model,DATA.distance_labels,s.histogram.map(n=>normalized?percent(n,s.valid_distances):n));}),{barmode:'group',xaxis:{title:{text:'Straight-line OD distance (km)'},type:'category',nticks:12},yaxis:{title:{text:normalized?'Share of valid trips (%)':'Trips'}}});
+ plot('cdf',models.map(model=>({name:model,x:selected(model).cdf_x,y:selected(model).cdf_y,type:'scatter',mode:'lines',line:{color:COLORS[model],width:2}})),{xaxis:{title:{text:'Straight-line OD distance (km)'}},yaxis:{title:{text:'Cumulative share (%)'},range:[0,100]}});
+ const hours=[...new Set(models.flatMap(model=>Object.keys(selected(model).hours).map(Number)))].sort((a,b)=>a-b);
+ plot('departures',models.map(model=>{const s=selected(model),valid=Object.values(s.hours).reduce((a,b)=>a+b,0);return bar(model,hours,hours.map(h=>normalized?percent(s.hours[h]||0,valid):(s.hours[h]||0)));}),{barmode:'group',xaxis:{title:{text:'Departure hour'},dtick:1},yaxis:{title:{text:normalized?'Share of valid departures (%)':'Trips'}}});
+}
+function mapsAndCantons(){
+ const ids=DATA.cantons.map(c=>c.id),names=DATA.cantons.map(c=>c.name),endpoint=el('endpoint').value,measure=el('measure').value;
+ const max=Math.max(1,...models.flatMap(model=>ids.map(id=>counts(model,id))));
+ for(const model of models){
+  if(layers[model])maps[model].removeLayer(layers[model]);if(markers[model])maps[model].removeLayer(markers[model]);
+  layers[model]=L.geoJSON(DATA.zones,{style(feature){const n=counts(model,feature.properties.id);return {color:'#3a5872',weight:1,fillColor:'#216db1',fillOpacity:n ? .12+.72*Math.sqrt(n/max) : .02};},onEachFeature(feature,layer){const id=feature.properties.id,tip=document.createElement('div');tip.textContent=`${feature.properties.canton_name}: ${fmt(counts(model,id))} ${measure==='trips'?'trip endpoints':'distinct locations'} · NPVM − legacy: ${fmt(counts('NPVM',id)-counts('Legacy',id))}`;layer.bindTooltip(tip,{sticky:true});layer.bindPopup(tip.cloneNode(true));}}).addTo(maps[model]);
+  drawLocationCells(model,model);
+ }
+ el('mapLegend').textContent=`Shared scale (square-root opacity): 0 to ${fmt(max)} ${measure==='trips'?'trip endpoints':'distinct coordinate locations'} per canton. Foreign source endpoints are excluded from canton fills and retained in the table below.`;
+ const label=(endpoint==='origin'?'Origins':'Destinations')+' · '+(measure==='trips'?'trip endpoints':'distinct locations');el('cantonTitle').textContent=label;
+ plot('cantons',models.map(model=>({name:model,y:names,x:ids.map(id=>counts(model,id)),type:'bar',orientation:'h',marker:{color:COLORS[model]}})),{barmode:'group',margin:{l:155,r:20,t:35,b:55},yaxis:{autorange:'reversed'},xaxis:{title:{text:label}}});
+ const delta=ids.map(id=>counts('NPVM',id)-counts('Legacy',id));plot('delta',[{x:delta,y:names,type:'bar',orientation:'h',marker:{color:delta.map(n=>n>=0?COLORS.NPVM:COLORS.Legacy)},hovertemplate:'%{y}: %{x}<extra>NPVM − legacy</extra>'}],{margin:{l:155,r:20,t:35,b:55},yaxis:{autorange:'reversed'},xaxis:{title:{text:'Difference · '+label},zeroline:true,zerolinewidth:2}});
+ el('cantonTable').replaceChildren();for(const c of [...DATA.cantons,...Object.entries(DATA.special).map(([id,name])=>({id,name}))]){const a=counts('Legacy',c.id),b=counts('NPVM',c.id);row(el('cantonTable'),[c.name,fmt(a),fmt(b),fmt(b-a),a?fmt(100*(b/a-1))+'%':'—']);}
+}
+function drawLocationCells(model,key){
+ if(markers[key])maps[key].removeLayer(markers[key]);
+ markers[key]=L.layerGroup();if(el('locations').checked){for(const [lat,lon,n,external] of selected(model).cells[el('endpoint').value]){const tip=document.createElement('span');tip.textContent=`${fmt(n)} ${el('endpoint').value} trip endpoints in this 5 km cell · ${external?'foreign source-zone border proxies':'domestic source zone'}`;L.circleMarker([lat,lon],{radius:Math.min(12,2+Math.log2(1+n)),color:external?'#48525c':'#216db1',weight:1,fillOpacity:.45}).bindTooltip(tip).addTo(markers[key]);}markers[key].addTo(maps[key]);}
+}
+function zoneCounts(model,id){return selected(model).npvm_endpoints[el('zoneEndpoint').value][id]?.trips||0;}
+function zoneDifference(id){return zoneCounts('NPVM',id)-zoneCounts('Legacy',id);}
+function signed(n){return n>0?'+'+fmt(n):fmt(n);}
+function zoneTooltip(feature){
+ const id=feature.properties.id,tip=document.createElement('div');tip.textContent=`NPVM ${id} · ${feature.properties.name} · ${el('zoneEndpoint').value} trips: NPVM − legacy ${signed(zoneDifference(id))} (NPVM ${fmt(zoneCounts('NPVM',id))}; legacy ${fmt(zoneCounts('Legacy',id))})`;return tip;
+}
+function updateZoneTable(){
+ const query=el('zoneSearch').value.trim().toLocaleLowerCase();
+ const zones=DATA.npvm_zones.features.map(f=>({id:f.properties.id,name:f.properties.name,a:zoneCounts('Legacy',f.properties.id),b:zoneCounts('NPVM',f.properties.id)})).filter(z=>(z.a||z.b)&&(!query||(z.id+' '+z.name).toLocaleLowerCase().includes(query))).sort((a,b)=>Math.abs(b.b-b.a)-Math.abs(a.b-a.a)||a.id.localeCompare(b.id));
+ el('zoneTable').replaceChildren();for(const z of zones.slice(0,100))row(el('zoneTable'),[z.id+' · '+z.name,signed(z.b-z.a),z.a?fmt(100*(z.b/z.a-1))+'%':'—']);
+ for(const [id,label] of Object.entries(DATA.npvm_special)){const a=zoneCounts('Legacy',id),b=zoneCounts('NPVM',id);row(el('zoneTable'),[label,signed(b-a),a?fmt(100*(b/a-1))+'%':'—']);}
+ el('zoneTableSummary').textContent=`Showing ${Math.min(100,zones.length)} of ${fmt(zones.length)} matching zones with nonzero counts, sorted by absolute difference. All ${fmt(DATA.npvm_zones.features.length)} zones are mapped; complete counts are in the NPVM zone CSV. External/unassigned/invalid rows below always refer to the full selected scope.`;
+}
+function npvmZoneMaps(){
+ const maximum=Math.max(0,...DATA.npvm_zones.features.map(f=>Math.abs(zoneDifference(f.properties.id)))),scale=Math.max(1,maximum),key='zoneDifference';
+ const style=feature=>{const d=zoneDifference(feature.properties.id);return {color:'#526477',weight:.6,fillColor:d>0?COLORS.NPVM:d<0?COLORS.Legacy:'#e2e6eb',fillOpacity:d ? .2+.65*Math.sqrt(Math.abs(d)/scale) : .12};};
+ if(layers[key])layers[key].setStyle(style);
+ else layers[key]=L.geoJSON(DATA.npvm_zones,{style,onEachFeature(feature,layer){layer.bindTooltip(()=>zoneTooltip(feature),{sticky:true});layer.bindPopup(()=>zoneTooltip(feature));}}).addTo(maps[key]);
+ el('zoneDifferenceTitle').textContent=(el('zoneEndpoint').value==='origin'?'Origin':'Destination')+'-trip difference by NPVM zone · NPVM − legacy';
+ el('zoneMapLegend').textContent=maximum?`Symmetric difference scale: −${fmt(maximum)} to +${fmt(maximum)} trips per zone. Darker fill means a larger absolute difference (square-root opacity). All ${fmt(DATA.npvm_zones.features.length)} zones remain visible, including zero differences.`:'Every NPVM zone has zero trip-count difference in this scope.';
+ updateZoneTable();
+}
+function update(){
+ const a=selected('Legacy'),b=selected('NPVM');el('legacyTotal').textContent=fmt(a.total);el('npvmTotal').textContent=fmt(b.total);el('difference').textContent=fmt(b.total-a.total);el('differenceShare').textContent=a.total?fmt(100*(b.total/a.total-1))+'% relative to legacy':'No legacy trips in this scope';
+ el('legacyShare').textContent=fmt(percent(a.total,DATA.models.Legacy.all.total))+'% of all legacy trips';el('npvmShare').textContent=fmt(percent(b.total,DATA.models.NPVM.all.total))+'% of all NPVM trips';el('medians').textContent=fmt(a.median_km)+' / '+fmt(b.median_km);
+ el('legacyDistance').textContent=fmt(a.total_distance_km);el('npvmDistance').textContent=fmt(b.total_distance_km);el('distanceDifference').textContent=fmt(b.total_distance_km-a.total_distance_km);el('distanceDifferenceShare').textContent=a.total_distance_km?fmt(100*(b.total_distance_km/a.total_distance_km-1))+'% relative to legacy':'No legacy distance in this scope';
+ plot('totals',[{x:models,y:[a.total,b.total],type:'bar',marker:{color:models.map(m=>COLORS[m])},text:[a.total,b.total].map(fmt),textposition:'auto'}],{yaxis:{title:{text:'Sampled vehicle trips'}}});
+ const traffic=['domestic','crossborder','transit'],labels=['Both domestic','One abroad','Both abroad'];plot('composition',models.map(model=>bar(model,labels,traffic.map(s=>DATA.models[model][s].total))),{barmode:'group',yaxis:{title:{text:'Sampled trips (all traffic scopes)'}}});
+ chartDistribution();mapsAndCantons();npvmZoneMaps();
+ el('summaryTable').replaceChildren();const fields=[['Trips','total'],['Total straight-line OD distance (km)','total_distance_km'],['Valid OD distances','valid_distances'],['Invalid OD distances','invalid_distances'],['Zero-distance trips','zero_distance'],['Mean OD distance (km)','mean_km'],['Median OD distance (km)','median_km'],['90th percentile (km)','p90_km'],['95th percentile (km)','p95_km'],['99th percentile (km)','p99_km'],['Invalid departure times','invalid_departures']];for(const [label,key] of fields)row(el('summaryTable'),[label,fmt(a[key]),fmt(b[key])]);
+ for(const end of ['origin','destination']){for(const metric of ['trips','locations']){const name=end+' '+(metric==='trips'?'trip endpoints':'distinct coordinates');row(el('summaryTable'),['Swiss canton '+name,...models.map(m=>fmt(DATA.cantons.reduce((sum,c)=>sum+selected(m).endpoints[end][c.id][metric],0)))]);row(el('summaryTable'),['External '+name,...models.map(m=>fmt(selected(m).endpoints[end].External[metric]))]);}row(el('summaryTable'),['Ambiguous canton boundaries · '+end,...models.map(m=>fmt(selected(m).boundary_ties[end]))]);}
+}
+for(const id of ['scope','endpoint','measure','normalization','locations'])el(id).onchange=update;
+el('opacity').oninput=()=>{const value=Number(el('opacity').value);el('opacityValue').textContent=value+'%';for(const tile of Object.values(tiles))tile.setOpacity(value/100);};
+el('basis').textContent=`Sample fraction: ${fmt(100*META.input_downsampling)}%. Legacy survey scaling: ${META.enable_scaling?'enabled, target '+META.scaling_year:'disabled'}. NPVM supplied daily matrices × ${META.npvm_freight_demand_factor}. No adjustment has been made to force the two methods to have equal totals or the same target year.`;
+el('zoneSearch').oninput=updateZoneTable;
+el('zoneEndpoint').onchange=npvmZoneMaps;
+el('provenance').textContent=JSON.stringify(META,null,2);update();
+</script></body></html>

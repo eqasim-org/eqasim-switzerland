@@ -13,6 +13,7 @@ def configure(context):
     context.config("matching_embedding_top_k", 20)
     context.config("matching_embedding_temperature", 0.5)
     context.config("matching_embedding_epochs", 100)
+    context.config("matching_embedding_min_epochs", 10)
     context.config("matching_embedding_batch_size", 128)
     context.config("matching_embedding_lr", 5.0e-3)
     context.config("matching_embedding_lr_decay_step", 15)
@@ -38,7 +39,7 @@ def configure(context):
     context.config("matching_trip_distance_scale", 30000.0)
     context.config("matching_loss_weight_duration", 0.5)
     context.config("matching_loss_weight_activity_duration", 0.5)
-    context.config("matching_embedding_validation_fraction", 0.15)
+    context.config("matching_embedding_validation_fraction", 0.10)
     context.config("matching_embedding_patience", 12)
     context.config("matching_v2_raw_feature_weight", 0.0)
     context.config("matching_v2_balance_strength", 0.0)
@@ -48,7 +49,7 @@ def configure(context):
 
 
 def validate_options(context):
-    positive_ints = ("matching_embedding_top_k", "matching_embedding_epochs", "matching_embedding_batch_size",
+    positive_ints = ("matching_embedding_top_k", "matching_embedding_epochs", "matching_embedding_min_epochs", "matching_embedding_batch_size",
                      "matching_embedding_max_sequence_len", "matching_embedding_lr_decay_step",
                      "matching_embedding_patience", "matching_v2_query_batch_size",
                      "matching_embedding_geo_proj_dim", "matching_embedding_cars_proj_dim",
@@ -57,6 +58,9 @@ def validate_options(context):
         value = context.config(name)
         if not np.isfinite(float(value)) or int(value) != float(value) or int(value) < 1:
             raise ValueError(f"{name} must be a positive integer")
+    minimum = int(context.config("matching_embedding_min_epochs"))
+    if minimum < 10 or minimum > int(context.config("matching_embedding_epochs")):
+        raise ValueError("V2 requires 10 <= matching_embedding_min_epochs <= matching_embedding_epochs")
     for name in ("matching_embedding_temperature", "matching_trip_count_scale", "matching_trip_distance_scale",
                  "matching_embedding_lr", "matching_embedding_lr_decay_gamma"):
         if not np.isfinite(float(context.config(name))) or float(context.config(name)) <= 0:
@@ -97,6 +101,7 @@ class MatchingOptions:
         if not any(losses[key] for key in ("activity", "trip_count", "mode", "departure", "distance", "duration", "activity_duration")):
             raise ValueError("At least one behavioural matching loss must be positive")
         training = {"random_seed": seed, "loss_weights": losses,
+                    "min_epochs": int(context.config("matching_embedding_min_epochs")),
                     "proj_dims": {key: int(context.config("matching_embedding_" + key + "_proj_dim"))
                                   for key in ("geo", "cars", "emp", "misc")},
                     "use_class_weighting": as_bool(context.config("matching_use_class_weighting")),

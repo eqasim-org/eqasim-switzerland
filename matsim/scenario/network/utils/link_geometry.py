@@ -4,8 +4,11 @@ import logging
 from math import dist
 from pathlib import Path
 
-from shapely import from_wkt, to_wkt
+from shapely import from_wkt, to_wkt, linestrings, is_geometry, get_type_id, is_empty, get_coordinates
 from shapely.geometry import LineString
+import numpy as np
+import geopandas as gpd
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 GEOMETRY_COLUMN = "_detailed_geometry"
@@ -113,3 +116,44 @@ def copy_link_geometries_with_additions(source_path, output_path, new_shapes, re
                     shapes[reverse_id] = LineString(list(shape.coords)[::-1])
         for link_id, shape in shapes.items():
             writer.writerow({"LinkId": link_id, "Geometry": to_wkt(shape, rounding_precision=-1)})
+
+
+
+def get_network_geometry(network, links=None):
+    """Return directed shapes in LV95, preserving subset row order and labels.
+
+    Detailed curves take precedence. Only missing shapes use node endpoints;
+    an invalid supplied shape raises rather than silently flattening a curve.
+    """
+    links = network.links if links is None else links
+    crs = getattr(network, "network_attrs", {}).get("coordinateReferenceSystem") or "EPSG:2056"
+    if links.empty:
+        return gpd.GeoSeries([], index=links.index, crs=crs).to_crs(2056)
+    shapes = links[GEOMETRY_COLUMN].tolist() if GEOMETRY_COLUMN in links else [None] * len(links)
+    missing = np.array([shape is None or shape is pd.NA or (
+        isinstance(shape, float) and np.isnan(shape)) for shape in shapes])
+    if missing.any():
+        nodes = network.nodes[["node_id", "x", "y"]].copy()
+        nodes["node_id"] = nodes.node_id.astype(str)
+        if nodes.node_id.duplicated().any():
+            raise ValueError("Cannot construct link geometry: duplicate network node IDs")
+        nodes = nodes.set_index("node_id")[["x", "y"]]
+        selected = links.iloc[np.flatnonzero(missing)]
+        try:
+            endpoints = np.stack([nodes.loc[selected.from_node.astype(str)].to_numpy(dtype=float),
+                                  nodes.loc[selected.to_node.astype(str)].to_numpy(dtype=float)], axis=1)
+        except KeyError as error:
+            raise ValueError("Cannot construct link geometry: missing endpoint node") from error
+        for position, shape in zip(np.flatnonzero(missing), linestrings(endpoints)):
+            shapes[position] = shape
+    shapes = np.asarray(shapes, dtype=object)
+    invalid = ~is_geometry(shapes)
+    if not invalid.any():
+        invalid = (get_type_id(shapes) != 1) | is_empty(shapes)
+    if invalid.any():
+        raise ValueError(f"Invalid directed geometry for link {links.link_id.iloc[np.flatnonzero(invalid)[0]]}")
+    coordinates, positions = get_coordinates(shapes, return_index=True)
+    finite = np.isfinite(coordinates).all(axis=1)
+    if not finite.all():
+        raise ValueError(f"Invalid directed geometry for link {links.link_id.iloc[positions[~finite][0]]}")
+    return gpd.GeoSeries(shapes, index=links.index, crs=crs).to_crs(2056)

@@ -116,7 +116,7 @@ def prepare(output, mappings, roster, persons, trips, const, day, *, cantons=Non
         swiss.geometry = swiss.geometry.simplify(200, preserve_topology=True)
         outlines = [feature["geometry"] for feature in json.loads(swiss.to_json())["features"] if feature["geometry"]]
     metadata = {"crs": "EPSG:2056", "grid_size_m": size, "min_contributing_people": int(min_people),
-        "region": region, "canton_id": canton_id,
+        "region": region, "canton_id": canton_id, "algorithms": list(mappings),
         "distance": "Survey straight-line origin-to-destination leg distance, in kilometres, grouped by destination purpose.",
         "geography": "Cells locate recipient homes for V1/V3 and respondent homes for Survey. Synthetic activity destinations are not inferred.",
         "mean": "Trip-weighted arithmetic mean: sum of valid incoming leg distances divided by valid incoming trip count; survey person weights apply to every reported leg.",
@@ -168,6 +168,8 @@ def render(output, save):
     output = Path(output)
     info = json.loads((output / "distance_map_manifest.json").read_text())
     cells = pd.read_csv(output / "distance_map_cells.csv")
+    from .interactive_maps import write as write_interactive
+    write_interactive(output, cells, info)
     size = info["grid_size_m"]
     rings = []
     for geom in info["outlines"]:
@@ -209,27 +211,38 @@ def render(output, save):
             values = frame.mean_distance_km.dropna().to_numpy()
             vmax = max(float(np.quantile(values, .98)), .1) if len(values) else 1.
             norm = Normalize(0, vmax)
-            fig, axes = plt.subplots(1, 4, figsize=(17, 5.5), layout="constrained")
-            for ax, dataset in zip(axes[:3], ("Survey", "V1", "V3")):
+            algorithms = info.get("algorithms", [name for name in cells.dataset.unique() if name != "Survey"])
+            datasets = ["Survey", *sorted(algorithms)]
+            comparisons = [(name, "V1") for name in sorted(algorithms) if name != "V1"]
+            panels = len(datasets) + len(comparisons)
+            if panels <= 4:
+                fig, axes = plt.subplots(1, panels, figsize=(17, 5.5), layout="constrained")
+            else:
+                fig, axes = plt.subplots(2, 3, figsize=(15, 9), layout="constrained")
+            axes = np.asarray(axes).reshape(-1)
+            for ax, dataset in zip(axes, datasets):
                 rows = frame.loc[frame.dataset.eq(dataset)]
                 collection = draw(ax, rows, rows.mean_distance_km, norm, "viridis", dataset)
-            fig.colorbar(collection, ax=list(axes[:3]), orientation="horizontal", fraction=.06, pad=.04,
+            fig.colorbar(collection, ax=list(axes[:len(datasets)]), orientation="horizontal", fraction=.06, pad=.04,
                          label="Mean incoming trip distance (km)", extend="max")
-            paired = frame.loc[frame.dataset.isin(["V1", "V3"])].pivot(index=["cell_x", "cell_y"], columns="dataset", values="mean_distance_km")
-            paired = paired.reindex(columns=["V1", "V3"]).dropna()
-            paired["difference"] = paired.V3 - paired.V1
-            bound = max(float(np.quantile(np.abs(paired.difference), .98)), .1) if len(paired) else 1.
-            rows = paired.reset_index()
-            collection = draw(axes[3], rows, rows.difference, TwoSlopeNorm(vmin=-bound, vcenter=0, vmax=bound), "RdBu_r", "V3 minus V1")
-            fig.colorbar(collection, ax=axes[3], orientation="horizontal", fraction=.06, pad=.04,
-                         label="Difference in mean distance (km)", extend="both")
+            for position, (method, baseline) in enumerate(comparisons, start=len(datasets)):
+                paired = frame.loc[frame.dataset.isin([baseline, method])].pivot(index=["cell_x", "cell_y"], columns="dataset", values="mean_distance_km")
+                paired = paired.reindex(columns=[baseline, method]).dropna()
+                paired["difference"] = paired[method] - paired[baseline]
+                bound = max(float(np.quantile(np.abs(paired.difference), .98)), .1) if len(paired) else 1.
+                rows = paired.reset_index()
+                collection = draw(axes[position], rows, rows.difference, TwoSlopeNorm(vmin=-bound, vcenter=0, vmax=bound), "RdBu_r", f"{method} minus {baseline}")
+                fig.colorbar(collection, ax=axes[position], orientation="horizontal", fraction=.06, pad=.04,
+                             label="Difference in mean distance (km)", extend="both")
+            for ax in axes[panels:]:
+                ax.axis("off")
             fig.suptitle(f"{info.get('region', 'Switzerland')} — {LABELS[purpose]}: distance from the previous activity — {scope} population")
             caption = (f"Each square is {size / 1000:g} km wide and locates a person's home, not the trip origin or activity destination. "
                 f"Colour shows the trip-weighted mean straight-line distance into {LABELS[purpose].lower()} from the preceding activity. "
                 f"Cells with fewer than {info['min_contributing_people']} contributing people are uncoloured (grey within the mapped region); this does not mean zero distance. "
-                "Survey uses person weights; V1/V3 use the assigned survey legs and synthetic recipients' homes. Non-travellers do not contribute artificial zero distances. "
-                "The first three panels share a colour scale. Colour limits use the 98th percentile of supported cell values; underlying CSV means are not clipped. "
-                "The difference is shown only where both methods have support. Positive values mean longer V3 distances. Full uses each retained population; common uses the same recipients in both methods. "
+                "Survey uses person weights; Population methods use the assigned survey legs and synthetic recipients' homes. Non-travellers do not contribute artificial zero distances. "
+                "All absolute-distance panels share a colour scale. Colour limits use the 98th percentile of supported cell values; underlying CSV means are not clipped. "
+                "The difference is shown only where both methods have support. Positive differences mean longer distances than V1. Full uses each retained population; common uses the same recipients in the compared methods. "
                 "These maps describe assigned diary lengths before synthetic activity locations are assigned. They are not maps of final simulated routes.")
             save(fig, f"{scope}_distance_{purpose}", caption)
 
@@ -240,7 +253,8 @@ def render_distributions(output, save):
     output = Path(output)
     table = pd.read_csv(output / "distance_distributions.csv")
     info = json.loads((output / "distance_map_manifest.json").read_text())
-    colors = {"Survey": "#333333", "V1": "#dd8452", "V3": "#4c72b0"}
+    colors = {"Survey": "#333333", "V1": "#dd8452", "V2": "#55a868", "V3": "#4c72b0"}
+    datasets = ["Survey", *sorted(set(table.dataset) - {"Survey"})]
     for scope in ("full", "common"):
         for metric in ("density", "cdf"):
             fig, axes = plt.subplots(2, 3, figsize=(13, 7))
@@ -248,7 +262,8 @@ def render_distributions(output, save):
             fig.suptitle(f"{info.get('region', 'Switzerland')} — {title} — {scope} population")
             for ax, purpose in zip(axes.flat, DISTANCE_PURPOSES):
                 available = False
-                for dataset, color in colors.items():
+                for dataset in datasets:
+                    color = colors[dataset]
                     rows = table.loc[table.scope.eq(scope) & table.purpose.eq(purpose) & table.dataset.eq(dataset)]
                     if rows.empty or rows.valid_trip_weight.iloc[0] <= 0:
                         ax.plot([], [], color=color, label=f"{dataset} (no valid trips)")

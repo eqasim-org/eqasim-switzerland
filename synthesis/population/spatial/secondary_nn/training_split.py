@@ -34,7 +34,7 @@ def execute(context):
 
 
 def expert_persons(context, frame):
-    if context.config('secondary_nn_use_target_distance'):
+    if context.config('secondary_nn_use_target_distance') or context.config("secondary_nn_no_distance_routing") == "hierarchy":
         return frame.copy()
     split = context.stage('synthesis.population.spatial.secondary_nn.training_split')
     fold = int(context.config('secondary_nn_crossfit_fold'))

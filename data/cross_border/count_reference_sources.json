@@ -1,0 +1,1110 @@
+[
+  {
+    "fid": 85,
+    "name": "Col-des-Roches",
+    "source": "astra",
+    "station": "174",
+    "metric": "annual",
+    "period": "2023 annual weekday average",
+    "day_type": "weekday",
+    "note": "OFROU station 174.",
+    "group": "O"
+  },
+  {
+    "fid": 105,
+    "name": "La Cure",
+    "source": "astra",
+    "station": "188",
+    "metric": "months",
+    "months": [
+      6,
+      7,
+      8,
+      10
+    ],
+    "period": "2023 June/July/August/October monthly weekday averages",
+    "day_type": "weekday",
+    "note": "Range across available monthly means, not a confidence interval or complete annual average.",
+    "group": "O"
+  },
+  {
+    "fid": 150,
+    "name": "Les Brenets / Villers-le-Lac",
+    "source": "doubs",
+    "road": "D2E1",
+    "pr": "01+200",
+    "year": 2023,
+    "period": "2023 annual daily estimate",
+    "day_type": "all_days",
+    "note": "D2E1 PR01+200; approach-road count.",
+    "group": "O"
+  },
+  {
+    "fid": 164,
+    "name": "Bois-d’Amont / Le Brassus",
+    "source": "vaud",
+    "counter": "VD_PERIO_02005",
+    "start": "2024-09-05",
+    "end": "2024-09-11",
+    "period": "5–11 September 2024",
+    "day_type": "weekday",
+    "note": "VD_PERIO_02005, about 420 m from crossing. Short campaign; excludes 2.3% unclassified vehicles.",
+    "group": "O"
+  },
+  {
+    "fid": 192,
+    "name": "Le Poteau / Les Charbonnières",
+    "source": "vaud",
+    "counter": "VD_PERIO_02069",
+    "start": "2024-09-05",
+    "end": "2024-09-11",
+    "period": "5–11 September 2024",
+    "day_type": "weekday",
+    "note": "VD_PERIO_02069, about 56 m from crossing; short campaign.",
+    "group": "O"
+  },
+  {
+    "fid": 193,
+    "name": "Le Cerneux-Péquignot / Montlebon",
+    "source": "doubs",
+    "road": "D48",
+    "pr": "57+000",
+    "year": 2019,
+    "period": "2019 annual daily estimate",
+    "day_type": "all_days",
+    "note": "D48 PR57+000; older approach-road count.",
+    "group": "O"
+  },
+  {
+    "fid": 194,
+    "name": "Biaufond / Fournet-Blancheroche",
+    "source": "doubs",
+    "road": "D464",
+    "pr": "83+000",
+    "year": 2023,
+    "period": "2023 annual daily estimate",
+    "day_type": "all_days",
+    "note": "D464 PR83+000.",
+    "group": "O"
+  },
+  {
+    "fid": 253,
+    "name": "Les Verrières",
+    "source": "astra",
+    "station": "173",
+    "metric": "annual",
+    "period": "2023 annual weekday average",
+    "day_type": "weekday",
+    "note": "OFROU station 173, about 740 m inland; not an exact border count.",
+    "group": "O"
+  },
+  {
+    "fid": 270,
+    "name": "L’Auberson–Sainte-Croix",
+    "source": "vaud",
+    "counter": "VD_PERIO_04001",
+    "start": "2024-09-05",
+    "end": "2024-09-11",
+    "period": "5–11 September 2024",
+    "day_type": "weekday",
+    "note": "VD_PERIO_04001, about 1.3 km from crossing; approach-road count from a short campaign.",
+    "group": "O"
+  },
+  {
+    "fid": 78,
+    "aliases": [
+      78
+    ],
+    "group": "G",
+    "name": "Arogno",
+    "source": "ticino_2025",
+    "counter": 1514,
+    "page": 148,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 48,
+    "aliases": [
+      48,
+      250
+    ],
+    "group": "G",
+    "name": "Chiasso Strada",
+    "source": "ticino_2025",
+    "counter": 2611,
+    "page": 244,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 108,
+    "aliases": [
+      108
+    ],
+    "group": "G",
+    "name": "Gandria",
+    "source": "ticino_2023",
+    "counter": 1502,
+    "page": 112,
+    "period": "2023 published annual weekday average",
+    "day_type": "weekday",
+    "note": "2023 published annual fallback; 2024/2025 compilation has no annual TFM. 316 operating days in 2023."
+  },
+  {
+    "fid": 152,
+    "aliases": [
+      152
+    ],
+    "group": "G",
+    "name": "Pedrinate",
+    "source": "ticino_2025",
+    "counter": 1609,
+    "page": 182,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 83,
+    "aliases": [
+      83,
+      84
+    ],
+    "group": "G",
+    "name": "Pizzamiglio",
+    "source": "ticino_2025",
+    "counter": 1607,
+    "page": 178,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 80,
+    "aliases": [
+      80
+    ],
+    "group": "G",
+    "name": "Ponte Faloppia",
+    "source": "ticino_2025",
+    "counter": 1610,
+    "page": 184,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 242,
+    "aliases": [
+      242
+    ],
+    "group": "G",
+    "name": "Unmatched additional crossing, FID 242",
+    "source": "unmeasured",
+    "note": "Separate from FID 43 in the assignment; no distinct counter identified. Not merged into Brusata. Keep existing assignment; excluded from count-share redistribution, without an invented traffic count."
+  },
+  {
+    "fid": 81,
+    "aliases": [
+      81
+    ],
+    "group": "H",
+    "name": "Arzo",
+    "source": "ticino_2025",
+    "counter": 1618,
+    "page": 196,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 43,
+    "aliases": [
+      43
+    ],
+    "group": "H",
+    "name": "Brusata",
+    "source": "ticino_2025",
+    "counter": 1603,
+    "page": 172,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 157,
+    "aliases": [
+      157
+    ],
+    "group": "H",
+    "name": "Brusino Finate",
+    "source": "ticino_2025",
+    "counter": 1604,
+    "page": 174,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 243,
+    "aliases": [
+      243
+    ],
+    "group": "H",
+    "name": "Cassinone",
+    "source": "ticino_2025",
+    "counter": 1517,
+    "page": 154,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 102,
+    "aliases": [
+      102
+    ],
+    "group": "H",
+    "name": "Dirinella",
+    "source": "ticino_2021",
+    "counter": 521,
+    "page": 46,
+    "period": "2021 published annual weekday average",
+    "day_type": "weekday",
+    "note": "2021 annual fallback, 274 operating days. 2025 has December only; 2023/2024 compilation has no annual TFM."
+  },
+  {
+    "fid": 100,
+    "aliases": [
+      100
+    ],
+    "group": "H",
+    "name": "Fornasette",
+    "source": "ticino_2025",
+    "counter": 1516,
+    "page": 152,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 166,
+    "aliases": [
+      166,
+      167
+    ],
+    "group": "H",
+    "name": "Indemini area",
+    "source": "unmeasured",
+    "note": "No official 2025 counter found. FIDs are aliases of the same physical road in current road_candidates cache; geographical label inferred. Keep existing assignment; excluded from count-share redistribution, without an invented traffic count."
+  },
+  {
+    "fid": 168,
+    "aliases": [
+      99,
+      168
+    ],
+    "group": "H",
+    "name": "Ligornetto",
+    "source": "ticino_2025",
+    "counter": 1619,
+    "page": 198,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "FIDs are aliases of the same physical road in the current road_candidates cache; count once."
+  },
+  {
+    "fid": 44,
+    "aliases": [
+      44
+    ],
+    "group": "H",
+    "name": "Marcetto",
+    "source": "ticino_2025",
+    "counter": 1613,
+    "page": 188,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 101,
+    "aliases": [
+      101
+    ],
+    "group": "H",
+    "name": "Ponte Cremenaga",
+    "source": "ticino_2025",
+    "counter": 1515,
+    "page": 150,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 53,
+    "aliases": [
+      53
+    ],
+    "group": "H",
+    "name": "Ponte Tresa",
+    "source": "ticino_2025",
+    "counter": 1520,
+    "page": 160,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published 2025 weekday mean; two months lack published monthly means."
+  },
+  {
+    "fid": 98,
+    "aliases": [
+      98
+    ],
+    "group": "H",
+    "name": "San Pietro di Stabio",
+    "source": "ticino_2025",
+    "counter": 1616,
+    "page": 192,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 151,
+    "aliases": [
+      151
+    ],
+    "group": "H",
+    "name": "Stabio-Gaggiolo",
+    "source": "ticino_2024",
+    "counter": 1614,
+    "page": 160,
+    "period": "2024 published annual weekday average",
+    "day_type": "weekday",
+    "note": "2024 actual border counter; replaces 2025 inland counter 051, never added to it."
+  },
+  {
+    "fid": 36,
+    "aliases": [
+      36
+    ],
+    "group": "I",
+    "name": "Brissago / Madonna di Ponte",
+    "source": "ticino_2025",
+    "counter": 3,
+    "page": 32,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 267,
+    "aliases": [
+      128,
+      267
+    ],
+    "group": "I",
+    "name": "Camedo",
+    "source": "ticino_2025",
+    "counter": 1410,
+    "page": 130,
+    "period": "2025 published annual weekday average",
+    "day_type": "weekday",
+    "note": "Published combined TFM, both directions; includes all motor vehicles."
+  },
+  {
+    "fid": 38,
+    "aliases": [
+      38
+    ],
+    "group": "M",
+    "name": "Hermance",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "133",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "132",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 66,
+    "aliases": [
+      66
+    ],
+    "group": "M",
+    "name": "Monniaz",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2522",
+        "direction": "entry",
+        "year": 2024
+      },
+      {
+        "counter": "2521",
+        "direction": "exit",
+        "year": 2024
+      }
+    ],
+    "period": "2024 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 88,
+    "aliases": [
+      88,
+      92
+    ],
+    "group": "M",
+    "name": "Anières — route de Thonon",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "131",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "130",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 141,
+    "aliases": [
+      141
+    ],
+    "group": "M",
+    "name": "Cara",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2562",
+        "direction": "entry",
+        "year": 2024
+      },
+      {
+        "counter": "2561",
+        "direction": "exit",
+        "year": 2024
+      }
+    ],
+    "period": "2024 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 146,
+    "aliases": [
+      146
+    ],
+    "group": "M",
+    "name": "Croix-de-Rozon",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "121",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "120",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 171,
+    "aliases": [
+      171
+    ],
+    "group": "M",
+    "name": "Mon-Idée",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Mon-Idée official counters only, assigned directly to FID 171. Pierre-à-Bochet FID 257 was removed from the crossing layer by user instruction; its historical counters 126/127 and their 4,943 passages are excluded.",
+    "counters": [
+      {
+        "counter": "129",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "128",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)",
+    "official_fid": 171
+  },
+  {
+    "fid": 172,
+    "aliases": [
+      172
+    ],
+    "group": "M",
+    "name": "Fossard",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "125",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "124",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 173,
+    "aliases": [
+      173
+    ],
+    "group": "M",
+    "name": "Veyrier",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "123",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "122",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 174,
+    "aliases": [
+      174
+    ],
+    "group": "M",
+    "name": "Pierre-Grand",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2622",
+        "direction": "entry",
+        "year": 2024
+      },
+      {
+        "counter": "2621",
+        "direction": "exit",
+        "year": 2024
+      }
+    ],
+    "period": "2024 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 175,
+    "aliases": [
+      175
+    ],
+    "group": "M",
+    "name": "Landecy",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "119",
+        "direction": "entry",
+        "year": 2024
+      },
+      {
+        "counter": "118",
+        "direction": "exit",
+        "year": 2024
+      }
+    ],
+    "period": "2024 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 178,
+    "aliases": [
+      178
+    ],
+    "group": "M",
+    "name": "Perly",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Counter is inland/offset; do not treat as an exact border screenline without checking intervening junctions. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "37",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "38",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 179,
+    "aliases": [
+      179
+    ],
+    "group": "M",
+    "name": "Certoux",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Counter is inland/offset; do not treat as an exact border screenline without checking intervening junctions. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2642",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "2641",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 180,
+    "aliases": [
+      180
+    ],
+    "group": "M",
+    "name": "Soral I",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2662",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "2661",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 181,
+    "aliases": [
+      181
+    ],
+    "group": "M",
+    "name": "Soral II",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2682",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "2681",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 182,
+    "aliases": [
+      182
+    ],
+    "group": "M",
+    "name": "Sézegnin",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2702",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "2701",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 183,
+    "aliases": [
+      183
+    ],
+    "group": "M",
+    "name": "Chancy II — Valleiry",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Counter is inland/offset; do not treat as an exact border screenline without checking intervening junctions. Named Chancy II counter matches the Haute-Savoie crossing, not the geographically closer Chancy I (FID 184, Ain). Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2742",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "2741",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 264,
+    "aliases": [
+      264
+    ],
+    "group": "M",
+    "name": "Cornières",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2582",
+        "direction": "entry",
+        "year": 2024
+      },
+      {
+        "counter": "2581",
+        "direction": "exit",
+        "year": 2024
+      }
+    ],
+    "period": "2024 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 266,
+    "aliases": [
+      266
+    ],
+    "group": "M",
+    "name": "Moillesulaz",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "16961",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "16927",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (365 jrs/an)"
+  },
+  {
+    "fid": 110,
+    "aliases": [
+      110
+    ],
+    "group": "N",
+    "name": "Chavannes-de-Bogis / Divonne",
+    "source": "vaud",
+    "day_type": "weekday",
+    "note": "Short campaign, not annual mean.  Approximately 421 m inland on RC6, approach-road proxy. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counter": "VD_MOBILE_021250",
+    "start": "2025-11-14",
+    "end": "2025-11-20",
+    "period": "2025-11-14 to 2025-11-20 weekday campaign average"
+  },
+  {
+    "fid": 119,
+    "aliases": [
+      119
+    ],
+    "group": "N",
+    "name": "Ferney-Voltaire / tunnel",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Ferney retained by user instruction. Sum 11,204 entry (2019) + 10,011 exit (2025) = 21,215 solely as a relative allocation reference. Not a coherent 2025 two-direction observation; preserve directional years. Reference match accepted on 10 November 2026.",
+    "counters": [
+      {
+        "counter": "23551",
+        "direction": "entry",
+        "year": 2019
+      },
+      {
+        "counter": "23555",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "Mixed-year weekday proxy: entry 2019 + exit 2025",
+    "allow_mixed_direction_years": true
+  },
+  {
+    "fid": 140,
+    "aliases": [
+      140
+    ],
+    "group": "N",
+    "name": "Collex-Bossy",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2782",
+        "direction": "entry",
+        "year": 2024
+      },
+      {
+        "counter": "2781",
+        "direction": "exit",
+        "year": 2024
+      }
+    ],
+    "period": "2024 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 142,
+    "aliases": [
+      142
+    ],
+    "group": "N",
+    "name": "Crassier",
+    "source": "vaud",
+    "day_type": "weekday",
+    "note": "Short campaign, not annual mean. Jour(s) supprimé(s) de l'analyse: 05.10.2023.Données rééquilibrées pour avoir 5 jours ouvrables et 2 jours de week-end. Approximately 14 m from crossing. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counter": "VD_MOBILE_021094",
+    "start": "2023-10-04",
+    "end": "2023-10-11",
+    "period": "2023-10-04 to 2023-10-11 weekday campaign average"
+  },
+  {
+    "fid": 184,
+    "aliases": [
+      184
+    ],
+    "group": "N",
+    "name": "Chancy I — pont",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "291",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "290",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 185,
+    "aliases": [
+      185
+    ],
+    "group": "N",
+    "name": "La Plaine / Challex",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2762",
+        "direction": "entry",
+        "year": 2024
+      },
+      {
+        "counter": "2761",
+        "direction": "exit",
+        "year": 2024
+      }
+    ],
+    "period": "2024 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 187,
+    "aliases": [
+      187
+    ],
+    "group": "N",
+    "name": "Dardagny",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Counter is inland/offset; do not treat as an exact border screenline without checking intervening junctions. Dardagny counter is 1.7 km inland and may include other local flows; nearest-point matching would incorrectly select FID 186. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2382",
+        "direction": "entry",
+        "year": 2024
+      },
+      {
+        "counter": "2381",
+        "direction": "exit",
+        "year": 2024
+      }
+    ],
+    "period": "2024 published weekday average (1 fois tous les 5 ans)"
+  },
+  {
+    "fid": 189,
+    "aliases": [
+      189
+    ],
+    "group": "N",
+    "name": "Meyrin",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "2822",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "2821",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 190,
+    "aliases": [
+      190
+    ],
+    "group": "N",
+    "name": "Mategnin",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Counter is inland/offset; do not treat as an exact border screenline without checking intervening junctions. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "135",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "134",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 191,
+    "aliases": [
+      191
+    ],
+    "group": "N",
+    "name": "Sauverny",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "281",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "280",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 255,
+    "aliases": [
+      126,
+      255
+    ],
+    "group": "N",
+    "name": "Vireloup",
+    "source": "geneva",
+    "day_type": "weekday",
+    "note": "Both directions summed once. Published reference year; measurement campaign frequency retained separately. Reference match accepted on 10 November 2026 for within-group count-share allocation; not an absolute group-volume target.",
+    "counters": [
+      {
+        "counter": "137",
+        "direction": "entry",
+        "year": 2025
+      },
+      {
+        "counter": "136",
+        "direction": "exit",
+        "year": 2025
+      }
+    ],
+    "period": "2025 published weekday average (3 semaines/an)"
+  },
+  {
+    "fid": 186,
+    "aliases": [
+      186
+    ],
+    "group": "N",
+    "name": "Unmatched crossing FID 186",
+    "source": "unmeasured",
+    "note": "No verified official counter. Retain current assignment outside measured-site count-share redistribution; do not reuse the Dardagny approach counter here."
+  }
+]

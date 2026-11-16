@@ -10,6 +10,8 @@ def configure(context):
     context.stage("matsim.runtime.java")
     context.stage("matsim.runtime.eqasim")
     context.stage("calibration.car_routing_vot.optimal_value")
+    context.stage("calibration.walking_speed.model")
+
     context.config("input_downsampling")
     context.config("output_prefix", "switzerland_")
     context.config("random_seed")
@@ -23,29 +25,45 @@ def configure(context):
 def execute(context):
     path = str(Path(context.path()) / f"{context.config('output_prefix')}config.xml")
     eqasim.run(context, "org.eqasim.core.scenario.config.RunGenerateConfig", [
-        "--output-path", path,
-        "--prefix", context.config("output_prefix"),
-        "--sample-size", context.config("input_downsampling"),
-        "--random-seed", context.config("random_seed"),
-        "--threads", context.config("threads"),
-        "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator",
-    ])
+                "--output-path", path,
+                "--prefix", context.config("output_prefix"),
+                "--sample-size", context.config("input_downsampling"),
+                "--random-seed", context.config("random_seed"),
+                "--threads", context.config("threads"),
+                "--eqasim-configurator", "org.eqasim.switzerland.ch_cmdp.SwitzerlandConfigurator",
+                ])
+
     eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.scenario.RunAdaptConfig", [
-        "--input-path", path, "--output-path", path,
-        "--downsamplingRate", context.config("input_downsampling"),
-        "--replanningRate", "0.05",
-        "--hasFreight", tools.java_boolean(context.config("use_freight")),
-        "--prefix", context.config("output_prefix"),
-        "--carCostModel", context.config("car_cost_model").lower(),
-        "--routingDistanceUtility", context.stage("calibration.car_routing_vot.optimal_value"),
-        "--routeBikeInNetwork", tools.java_boolean(context.config("route_bike")),
-    ])
+                "--input-path", path, "--output-path", path,
+                "--downsamplingRate", context.config("input_downsampling"),
+                "--replanningRate", "0.05",
+                "--hasFreight", tools.java_boolean(context.config("use_freight")),
+                "--prefix", context.config("output_prefix"),
+                "--carCostModel", context.config("car_cost_model").lower(),
+                "--routingDistanceUtility", context.stage("calibration.car_routing_vot.optimal_value"),
+                "--routeBikeInNetwork", tools.java_boolean(context.config("route_bike")),
+                ]
+                + args_walking_speed_parameters(context)
+                 )
+
     if not tools.parse_boolean(context.config("useScheduleBasedTransport")):
         tools.add_SBBPT_module(path)
     tools.add_ptZones_module(path)
     tools.change_params(path, {"eqasim.useScheduleBasedTransport": tools.parse_boolean(
         context.config("useScheduleBasedTransport"))}, create=True)
     return path
+
+
+def args_walking_speed_parameters(context):
+    walking_params = context.stage("calibration.walking_speed.model")
+    return [
+        "--walk-model", "mobis",
+        "--walk-v0_m_s", str(walking_params["v0_m_s"]),
+        "--walk-k", str(walking_params["k"]),
+        "--walk-uphill_penalty", str(walking_params["uphill_penalty"]),
+        "--walk-flat_grade", str(walking_params["flat_grade"]),
+        "--walk-detour_factor", str(walking_params["detour_factor"])
+    ]
 
 
 def adapt_for_routing(context, config_path, *, local=False):

@@ -39,6 +39,8 @@ def prepare_inputs(source, cohort):
         if name == 'data.microcensus.persons':
             return survey_persons
         value = source.stage(name)
+        if name == 'data.microcensus.secondary_trips':
+            return value.loc[value.person_id.isin(cohort.person_id)].copy()
         if name == 'data.microcensus.trips':
             return (value[0].loc[value[0].person_id.isin(cohort.person_id)].copy(),*value[1:])
         return value
@@ -97,7 +99,8 @@ def replay(cache, cohort, inputs, draws, seed, threads, shared_detour=None):
                 # Stable common seeds across NN variants, independent of ordering.
                 rng = np.random.RandomState(np.random.SeedSequence([seed, int(row.person_id), int(row.trip_id), draw]).generate_state(1)[0])
                 distance = float(row.target_distance)
-                if distance < DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION:
+                stationary = (wrapper.use_target_distance or wrapper.no_distance_routing == "learned_selector") and distance < DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION
+                if stationary:
                     x, y = row.origin_x, row.origin_y
                     short = True
                 else:
@@ -115,7 +118,7 @@ def replay(cache, cohort, inputs, draws, seed, threads, shared_detour=None):
                         chain_state_vector=row.chain_state)
                     x, y = geom.x, geom.y
                     short = wrapper.last_selected_expert == "short"
-                probability = 1.0 if distance < DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION else wrapper.last_short_probability
+                probability = 1.0 if stationary else wrapper.last_short_probability
                 records.append((row.person_id, row.trip_id, draw, x, y, short, probability))
             if (i + 1) % 250 == 0:
                 LOG.info('%s replay: %d/%d survey trips', cache.kind, i + 1, len(frame))

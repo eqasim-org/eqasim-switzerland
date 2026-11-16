@@ -4,6 +4,7 @@ import logging
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 
 
 REGION = "opening_hours_region"
@@ -38,8 +39,13 @@ def assign_regions(persons, regions):
         raise ValueError("Opening-hours regions must have unique, non-null IDs")
     polygons = regions[[REGION, "geometry"]].to_crs(2056)
     points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(coordinates[:, 0], coordinates[:, 1]), crs=2056)
-    joined = gpd.sjoin(points, polygons, how="left", predicate="intersects")
+    # Query the point tree with the few detailed polygons. GEOS prepares these
+    # polygons once instead of repeatedly scanning their vertices per home.
+    # Preserve intersects (including boundaries) and the lowest-ID tie rule.
+    matches = gpd.sjoin(polygons, points, how="inner", predicate="intersects")
+    joined = pd.DataFrame({REGION: matches[REGION].to_numpy()}, index=matches["index_right"].to_numpy())
     joined = joined.sort_values(REGION).loc[lambda df: ~df.index.duplicated()]
+    joined = joined.reindex(points.index)
     missing = joined[REGION].isna()
     if missing.any():
         nearest = gpd.sjoin_nearest(points.loc[joined.index[missing]], polygons, how="left")

@@ -18,8 +18,8 @@ YOUTH = ["age_class", "sex", "employed", "car_availability", "ovgk", "population
          "employment_status", "sp_region", "broad_commute_distance_class", "urban", "work_location_type",
          "commute_distance_class", "canton_id"]
 YOUTH_MANDATORY = YOUTH[:8]
-HARD = {"child": ["age_class", "sex"], "youth": ["age_class", "sex", "employed", "car_availability"],
-        "adult": ["sex", "car_availability", "employed", "employment_status"]}
+HARD = {"child": ["age_class"], "youth": ["age_class", "employed", "car_availability"],
+        "adult": ["car_availability", "employed", "employment_status"]}
 
 
 def scenario_mask(persons, day):

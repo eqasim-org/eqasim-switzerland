@@ -260,7 +260,7 @@ class Progress:
 
 
 @pytest.mark.parametrize("distance_enabled, loss_kind", [(True, "crps_energy"), (True, "relative"), (False, "crps_energy")])
-def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch, distance_enabled, loss_kind):
+def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch, distance_enabled, loss_kind, routing="learned_selector"):
     """Exercise the real stage chain on a small Swiss geometry and population."""
     import importlib
     from data.constants import Constants
@@ -275,7 +275,7 @@ def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch
             return np.ones(np.broadcast_shapes(np.shape(a), np.shape(b)))
     class Context:
         def __init__(self):
-            self.configs = dict(random_seed=17, threads=2, secondary_nn_use_target_distance=distance_enabled,
+            self.configs = dict(random_seed=17, threads=2, secondary_nn_use_target_distance=distance_enabled,secondary_nn_no_distance_routing=routing,
                 secondary_nn_selector_draws=10, secondary_nn_selector_max_iter=5,
                 secondary_nn_selector_min_samples_leaf=2)
             if loss_kind != "crps_energy":
@@ -366,7 +366,7 @@ def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch
         original_mobility = module.training_mobility
         def mobility(ctx, frame, _original=original_mobility):
             reserved = context.stages[split_stage].query("partition == 'validation'").person_id
-            if not distance_enabled:
+            if not distance_enabled and routing == "learned_selector":
                 assert set(frame.person_id).isdisjoint(reserved)
             return _original(ctx, frame)
         monkeypatch.setattr(module, "training_mobility", mobility)
@@ -441,6 +441,22 @@ def test_all_experts_and_selector_train_reload_and_predict(tmp_path, monkeypatch
         inputs["target_distance"] = 50000.
         model.predict(**inputs, rng=np.random.default_rng(11))
         assert model.last_selected_expert == "hierarchy"
+        return
+    if routing == "hierarchy":
+        model = HierarchicalLocationChoiceModel.build(context,optimize=False)
+        model.assert_ready_for_prediction()
+        assert model.short_trip_classifier is None
+        assert "target_distance" not in model.c.person_trip_cols
+        row = pd.DataFrame(records).merge(pd.DataFrame(chains),on=["person_id","trip_id"]).merge(persons,on="person_id").iloc[0]
+        row["has_work"] = True
+        for column,value in tools.mobility_features(persons,constants,survey=True).iloc[0].items():
+            row[column] = value
+        inputs = selector.prediction_inputs(row)
+        outputs = []
+        for distance in [0.,500.,50000.]:
+            inputs["target_distance"] = distance
+            outputs.append(model.predict(**inputs,rng=np.random.default_rng(17)))
+        assert all(p[0]==outputs[0][0] and p[1].equals(outputs[0][1]) for p in outputs)
         return
     from synthesis.population.spatial.secondary_nn import cross_fitted_experts
     final = {name: context.stages[cross_fitted_experts.PREFIX + name] for name in cross_fitted_experts.MODELS}
@@ -522,11 +538,11 @@ def test_secondary_stage_graphs_schedule_enrichment_and_selector_conditionally()
     from synpp.pipeline import process_stages
     root = Path(__file__).resolve().parents[1]
     config = yaml.safe_load((root / "config_dib_10.yml").read_text())["config"]
-    for algorithm, distance in [("rda", True), ("nn", True), ("nn", False)]:
-        settings = dict(config, locations_algorithm=algorithm, secondary_nn_use_target_distance=distance)
+    for algorithm, distance, routing in [("rda", True, "hierarchy"), ("nn", True, "hierarchy"), ("nn", False, "hierarchy"), ("nn", False, "learned_selector")]:
+        settings = dict(config, locations_algorithm=algorithm, secondary_nn_use_target_distance=distance, secondary_nn_no_distance_routing=routing)
         registry = process_stages([dict(descriptor="synthesis.population.spatial.secondary.locations",
                                         config={}, downstream=[])], settings)
         names = {stage["wrapper"].name for stage in registry.values()}
         assert ("data.osm.secondary_features" in names) == (algorithm == "nn")
-        assert ("synthesis.population.spatial.secondary_nn.short_trip_classifier" in names) == (algorithm == "nn" and not distance)
-        assert ("synthesis.population.spatial.secondary_nn.training_split" in names) == (algorithm == "nn" and not distance)
+        assert ("synthesis.population.spatial.secondary_nn.short_trip_classifier" in names) == (algorithm == "nn" and not distance and routing == "learned_selector")
+        assert ("synthesis.population.spatial.secondary_nn.training_split" in names) == (algorithm == "nn" and not distance and routing == "learned_selector")
