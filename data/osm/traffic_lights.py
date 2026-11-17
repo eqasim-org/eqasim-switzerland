@@ -10,7 +10,8 @@ logger = logging.getLogger(__name__)
 
 def configure(context):
     context.stage("data.spatial.swiss_border")
-
+    context.stage("data.spatial.simulation_region")
+    
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 50000)
