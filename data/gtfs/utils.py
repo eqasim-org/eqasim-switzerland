@@ -859,9 +859,10 @@ def repair_backward_stop_times(feed, max_rounds = 5):
     order = st.assign(_seq = sequence).sort_values(["trip_id", "_seq"], kind = "stable").index
 
     trip = st.loc[order, "trip_id"].astype(str).to_numpy()
-    arrival = _times_to_seconds(st.loc[order, "arrival_time"]).to_numpy(dtype = float)
-    departure = _times_to_seconds(st.loc[order, "departure_time"]).to_numpy(dtype = float)
-    distance = (pd.to_numeric(st.loc[order, "shape_dist_traveled"], errors = "coerce").to_numpy(dtype = float)
+    # copies: the arrays of pandas 3 can be read-only views, and the repaired times are written into them
+    arrival = _times_to_seconds(st.loc[order, "arrival_time"]).to_numpy(dtype = float, copy = True)
+    departure = _times_to_seconds(st.loc[order, "departure_time"]).to_numpy(dtype = float, copy = True)
+    distance = (pd.to_numeric(st.loc[order, "shape_dist_traveled"], errors = "coerce").to_numpy(dtype = float, copy = True)
                 if "shape_dist_traveled" in st.columns else np.full(len(order), np.nan))
 
     def shifted(values, k, fill):
