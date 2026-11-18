@@ -10,8 +10,8 @@ from data.utils import coerce_boolean_series
 
 def configure(context):
     context.config("random_seed")
-    context.config("matching_embedding_top_k", 20)
-    context.config("matching_embedding_temperature", 0.5)
+    context.config("matching_embedding_top_k", 200)
+    context.config("matching_embedding_temperature", 0.1)
     context.config("matching_embedding_epochs", 100)
     context.config("matching_embedding_min_epochs", 10)
     context.config("matching_embedding_batch_size", 128)

@@ -28,9 +28,11 @@ def configure(context):
     matched_v3.configure(context)
     context.stage(MODEL)
     context.config("analysis_path")
-    context.config("matching_repeat_microcensus", 50)
-    context.config("matching_repeat_population", 10)
+    context.config("matching_repeat_microcensus", 100)
+    context.config("matching_repeat_population", 20)
     context.config("matching_repeat_bootstrap", 500)
+    context.config("matching_repeat_output_name", "repeated_shared_v1_v2_v3")
+    context.config("matching_repeat_render", True)
 
 
 def execute(context):
@@ -41,8 +43,8 @@ def execute(context):
     seed = int(context.config("random_seed"))
     micro_draws = int(context.config("matching_repeat_microcensus"))
     population_draws = int(context.config("matching_repeat_population"))
-    if not 2 <= micro_draws <= 50 or not 1 <= population_draws <= 10:
-        raise ValueError("Require 2..50 Microcensus repetitions and 1..10 population repetitions")
+    if not 2 <= micro_draws <= 100 or not 1 <= population_draws <= 20:
+        raise ValueError("Require 2..100 Microcensus repetitions and 1..20 population repetitions")
     const = context.stage("data.constants")
     if const.census != "statpop":
         raise ValueError("The repeated experiment currently requires STATPOP")
@@ -51,7 +53,7 @@ def execute(context):
     if not source.mz_id.equals(matcher.donors_.mz_id):
         raise ValueError("Experiment donors differ from shared model donors")
     source["household_id"] = source.get("household_id", source.mz_id)
-    output = Path(context.config("analysis_path")) / "matching" / "repeated_shared_v1_v2_v3"
+    output = Path(context.config("analysis_path")) / "matching" / context.config("matching_repeat_output_name")
     output.mkdir(parents=True, exist_ok=True)
     identity = {"seed": seed, "micro_draws": micro_draws, "population_draws": population_draws,
                 "implementation": validate(context), "source": _frame_hash(source),
@@ -80,7 +82,7 @@ def execute(context):
     times = [dict(algorithm="V2", fold=-1, draw=-1, phase="fit_shared_once",
                   seconds=matcher.training_wall_seconds_)]
 
-    # Repeat whole-Microcensus matching 50 times, restricting donors by three groups.
+    # Repeat whole-Microcensus matching the configured number of times, restricting donors by three groups.
 
     groups = source.household_id.fillna(source.mz_id)
     for fold, (train, test) in enumerate(GroupKFold(3, shuffle=True, random_state=seed).split(source, groups=groups)):
@@ -116,7 +118,7 @@ def execute(context):
             global_rows = _global_rows(train, selected)
             np.savez_compressed(directory / f"{name}_donor_rows.npz", rows=global_rows,
                                 test_ids=target.person_id.to_numpy(), source_ids=source.mz_id.to_numpy())
-            scored = score_ensembles(outcomes, labels, test, global_rows, scaled)
+            scored = _score_batches(outcomes, labels, test, global_rows, scaled)
             scored["mz_id"], scored["algorithm"], scored["fold"] = target.person_id.to_numpy(), name, fold
             scores.append(scored)
         pd.concat(scores, ignore_index=True).to_csv(micro / "out_of_fold_scores.csv", index=False)
@@ -129,7 +131,7 @@ def execute(context):
         density_bounds=list(context.config("matching_density_bounds")))
     (micro / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
-    # Repeat matching of the entire configured synthetic population ten times.
+    # Repeat matching of the entire configured synthetic population the configured number of times.
 
     pop = output / "population"
     pop.mkdir(exist_ok=True)
@@ -155,13 +157,22 @@ def execute(context):
             pd.DataFrame(times).to_csv(output / "runtime.csv", index=False)
             logger.info("Full synthetic population %s repetition %d/%d", name, draw + 1, population_draws)
     manifest.update(population_repetitions=population_draws, population_eligible=int(eligible.sum()),
-                    model_stage=MODEL, interpretation="Shared-model donor-restricted reconstruction, not unseen-diary prediction")
+                    retrieval_options=matcher.options.retrieval, model_stage=MODEL, interpretation="Shared-model donor-restricted reconstruction, not unseen-diary prediction")
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
     # Save summaries and render both report sections without further matching.
 
+    if not context.config("matching_repeat_render"):
+        return str(output)
     repeated_report.summarize_population(output)
     return repeated_report.render(output)
+
+
+def _score_batches(outcomes, labels, test, global_rows, scaled, batch_size=512):
+    """Bound the quadratic ensemble-distance allocation for larger draw counts."""
+    return pd.concat([score_ensembles(outcomes, labels, test[start:start + batch_size],
+        global_rows[start:start + batch_size], scaled)
+        for start in range(0, len(test), batch_size)], ignore_index=True)
 
 
 def _frame_hash(frame):

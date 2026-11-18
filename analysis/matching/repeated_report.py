@@ -23,11 +23,11 @@ DEFINITIONS = {
     "Event Brier": "Square the difference between the predicted probability of an event and its observed zero/one indicator; then average over people. Events include any work, education, travel, car driving or public transport. Lower is better.",
     "Calibration": "Group respondents by predicted probability and compare the group-average prediction with its observed event frequency. Closer to the diagonal is better. A model may be calibrated while failing to distinguish different people, so predictive accuracy is also needed.",
     "Coverage": "Matching coverage is the proportion receiving a valid donor in every requested draw. Higher is better, but it does not measure accuracy. Prediction-interval coverage instead counts observed values inside an ensemble interval; the two concepts are different.",
-    "CRPS / energy ensembles": "Scores evaluate the empirical distribution of all donor draws using the V-statistic convention, including identical pairs. Fifty draws are used per Microcensus person. Equal draw counts permit comparisons between algorithms; this does not make them independent models.",
+    "CRPS / energy ensembles": "Scores evaluate the empirical distribution of all donor draws using the V-statistic convention, including identical pairs. The draw count is recorded in the experiment manifest. Equal draw counts permit comparisons between algorithms; this does not make them independent models.",
     "Daily distance": "Sum of straight-line distances of all trips in a person's observed or donated diary, including return-home trips. This is not routed distance. For Microcensus the person's observed day is the benchmark. For synthetic residents the survey is only a descriptive reference, not known ground truth.",
     "Activity counts": "Count trip arrivals with a given non-home purpose, including repeated visits. A person with no shopping visits contributes zero. Means include all eligible people, rather than only those doing the activity. Closer to the observed benchmark is better for aggregate agreement, but not proof of individual accuracy.",
     "Activity chains": "A complete ordered sequence of activity purposes in a diary. For population charts, the survey's fifteen most frequent chains are shown as shares of all person-days, retaining other chains in the denominator. This descriptive purpose-chain plot differs from the Microcensus chain Brier score, whose labels also include travel modes.",
-    "Uncertainty": "Microcensus error bars resample households, holding the encoder and group split fixed. Population error bars show the minimum and maximum across ten matching repetitions. They describe matching randomness, not demographic, survey, model-fitting or forecasting uncertainty.",
+    "Uncertainty": "Microcensus error bars resample households, holding the encoder and group split fixed. Population error bars show the minimum and maximum across the configured matching repetitions. They describe matching randomness, not demographic, survey, model-fitting or forecasting uncertainty.",
     "Computation": "Wall-clock time for the actual training or matching calls in the same job. The shared encoder is fitted once. Matching times include algorithm diagnostics. Lower is faster, but hardware, caching and prediction quality must also be considered.",
     "Donor-restricted reconstruction": "The encoder is learned once with 90% of eligible survey respondents; 10% monitor validation loss and choose the checkpoint. Three separate groups restrict donor availability only. A recipient can never select their own household's diary, but their behaviour may have contributed to training. This is reconstruction under donor exclusion, not fully held-out model validation.",
 }
@@ -237,7 +237,7 @@ def render(directory):
         ax.margins(y=.25); ax.legend(ncols=4)
         figure(fig, f"population_activities_{group}", f"{label}: shopping, work and other visits",
             "The average includes residents with zero visits; repeated visits count separately. Coloured bars average "
-            "ten matching repetitions; whiskers show their range. The survey is a descriptive reference, so there "
+            "the configured matching repetitions; whiskers show their range. The survey is a descriptive reference, so there "
             "is no unconditional higher-is-better or lower-is-better direction.")
         fig, ax = plt.subplots(figsize=(10, 4))
         for algorithm in ("Survey reference", *ALGORITHMS):
@@ -266,7 +266,7 @@ def render(directory):
             ax.invert_yaxis(); ax.legend(ncols=4)
             figure(fig, f"population_chains_{group}", f"{label}: fifteen most frequent survey activity chains",
                 "The survey's top fifteen chains define the displayed categories; other chains remain in the "
-                "denominator. Coloured shares are averaged over ten repetitions. Similar aggregate shares can "
+                "denominator. Coloured shares are averaged over the configured repetitions. Similar aggregate shares can "
                 "coexist with different individual matches. No aggregate agreement alone establishes a winner.")
     fig, axes = plt.subplots(2, 3, figsize=(13, 7))
     for ax, (purpose, label) in zip(axes.flat, PURPOSES):
@@ -300,7 +300,7 @@ def render(directory):
         ax.tick_params(axis="x", rotation=20); ax.legend(fontsize=8); ax.grid(alpha=.2)
     figure(fig, "population_density_totals", "How do the matched days vary with residence density?",
         "Residents are grouped by their own home density, while the survey reference uses respondents' own "
-        "density. Points average ten population matching repetitions and whiskers show their range. Trends are "
+        "density. Points average the configured population matching repetitions and whiskers show their range. Trends are "
         "associations, not causal density effects. Neither higher nor lower values are intrinsically better.")
     population_html = "".join(sections)
     style = ('<style>body{font:16px/1.6 sans-serif;max-width:1300px;margin:40px auto;padding:20px}img{max-width:100%}'
