@@ -13,6 +13,10 @@ communes_france.gpkg) gets the zone of its commune, unless gtfs_zones.csv alread
 commune listed in several zones (Pougny: 240 and 250) gives each of its stops the zone of the nearest stop that has one
 of them, else the first listed.
 
+The French local networks (data.pt_pricing.french_networks: STAR'T, EVA'D and TAC) are then added as zone networks: the
+stops served by their operators get their zones in gtfs_zones.csv, with a higher priority than the other networks (the
+network priority column), and their fares are written to pricingDescription.xml.
+
 The single tickets of the Léman Pass (the tickets across the border around Geneva) are read from the fare table of tpg
 (tpg_<date>_Fare-system_Geneva.xlsx in pt_pricing_lemanpass_path) and written as two CSV files for eqasim-java,
 described in utils.gtfs_router.lemanpass.write_java_tables: lemanpass_products.csv (one row per product, with its
@@ -32,8 +36,9 @@ from types import SimpleNamespace
 import geopandas as gpd
 import pandas as pd
 
+from data.pt_pricing import french_networks
 from utils.gtfs_router.lemanpass import NETWORK as LEMANPASS_NETWORK, LemanPass, fare_table_path, write_java_tables
-from utils.gtfs_router.pricing import Pricing, java_station_id, station_id
+from utils.gtfs_router.pricing import LOCATION_COLUMN, Pricing, java_station_id, station_id
 from utils.gtfs_router.zones import foreign_communes
 
 logger = logging.getLogger("synpp")
@@ -59,6 +64,7 @@ def configure(context):
     context.config("pt_pricing_lemanpass_path", default = "pt_pricing/output")
 
     context.stage("data.gtfs.cleaned")
+    context.stage("data.spatial.swiss_border")
 
     if pt_pricing_option:
         context.stage("data.pt_pricing.t603.create_sbb_distances")
@@ -137,6 +143,27 @@ def execute(context):
     else:
         logger.warning(f"Stops abroad: no zones without {communes_path} and {listed_path}")
 
+    # Add the French local networks (data.pt_pricing.french_networks): the zones of the stops of their operators, with
+    # their priority, and their fares.
+
+    if os.path.exists(communes_path):
+        french_networks.add_column(zones_path, french_networks.PRIORITY_COLUMN)
+        columns = list(pd.read_csv(zones_path, nrows = 0).columns)
+        rows = french_networks.zone_rows(french_networks.FRENCH_NETWORKS, stops, "%s/output" % context.path("data.gtfs.cleaned"),
+                                         communes_path, listed_path, columns)
+        _append_rows(zones_path, columns, rows)
+        french_networks.add_authorities(pricing_path, french_networks.FRENCH_NETWORKS)
+    else:
+        logger.warning(f"French networks: not priced without {communes_path}")
+
+    # Locate the feed stops: whether each one is in the area of the Swiss fares, where the half-fare card holds (the Swiss
+    # border, with Liechtenstein and the enclaves of Büsingen and Campione), rather than guessing it from its id.
+
+    area = swiss_fare_area(context.stage("data.spatial.swiss_border"), data_path)
+    located = locate_stops(zones_path, stops, area)
+    logger.info(f"Feed stops in the area of the Swiss fares: {located['swiss']} of {located['stops']}, "
+                f"{located['added']} added to gtfs_zones.csv without zones")
+
     # Write the Léman Pass fares as flat tables for eqasim-java.
 
     lemanpass_paths = write_lemanpass(os.path.join(data_path, context.config("pt_pricing_lemanpass_path")), stops, context.path())
@@ -184,6 +211,58 @@ def write_lemanpass(folder, stops, output):
     paths = write_java_tables(lemanpass, output)
     logger.info(f"Léman Pass tables written: {', '.join(os.path.basename(p) for p in paths.values())}")
     return paths
+
+
+def swiss_fare_area(swiss_border, data_path):
+    """The area of the Swiss fares, as one geometry (EPSG:2056): the Swiss border (data.spatial.swiss_border), with the
+    other areas of its boundaries file (swissBOUNDARIES3D: Liechtenstein and the enclaves of Büsingen and Campione), where
+    the Swiss fares and the half-fare card hold too."""
+    area = gpd.GeoSeries(swiss_border, crs = 2056).union_all()
+    path = "%s/spatial/country/swissBOUNDARIES3D_1_5_TLM_LANDESGEBIET.shp" % data_path
+    if os.path.exists(path):
+        others = gpd.read_file(path, encoding = "latin1").to_crs(2056)
+        area = area.union(others.loc[others["NAME"] != "Schweiz", "geometry"].union_all())
+    return area
+
+
+def locate_stops(path, stops, area):
+    """Writes whether each feed stop is in area to the LOCATION_COLUMN of gtfs_zones.csv (true / false): on the rows of
+    the stop, or on a row of its own without zones for a stop that has none. The other rows (stations by DiDok number)
+    are left empty. Returns the counts {"stops", "swiss", "added"}.
+
+    stops: the feed stops (stop_id, stop_name, stop_lat, stop_lon)."""
+    points = gpd.GeoSeries(gpd.points_from_xy(stops["stop_lon"].astype(float), stops["stop_lat"].astype(float)), crs = 4326).to_crs(2056)
+    inside = dict(zip(stops["stop_id"], points.within(area).to_numpy()))
+    names = dict(zip(stops["stop_id"], stops["stop_name"]))
+
+    with open(path, encoding = "utf-8", newline = "") as f:
+        rows = list(csv.reader(f))
+    header, rows = rows[0], rows[1:]
+    if LOCATION_COLUMN not in header:
+        header = header + [LOCATION_COLUMN]
+        rows = [row + [""] for row in rows]
+    stop_index, location_index = header.index("stop_id"), header.index(LOCATION_COLUMN)
+
+    seen = set()
+    for row in rows:
+        stop_id = row[stop_index].strip()
+        if stop_id in inside:
+            row[location_index] = "true" if inside[stop_id] else "false"
+            seen.add(stop_id)
+    added = []
+    for stop_id in stops["stop_id"]:
+        if stop_id not in seen:
+            row = dict.fromkeys(header, "")
+            row.update({"stop_id": stop_id, "stop_name": names[stop_id], "tarif network": "[nan]", "local network": "[nan]",
+                        LOCATION_COLUMN: "true" if inside[stop_id] else "false"})
+            added.append([row[c] for c in header])
+            seen.add(stop_id)
+
+    with open(path, "w", encoding = "utf-8", newline = "") as f:
+        writer = csv.writer(f, lineterminator = "\n")
+        writer.writerow(header)
+        writer.writerows(rows + added)
+    return {"stops": len(inside), "swiss": int(sum(inside.values())), "added": len(added)}
 
 
 def check_stop_ids(zones, stops):

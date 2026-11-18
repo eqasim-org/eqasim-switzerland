@@ -32,6 +32,7 @@ are the calculators, and the readers of utils/pricing/inputs are Pricing.__init_
 ride is the sum of the straight-line distances between its stops (the MATSim route distance in Java).
 """
 import copy
+import itertools
 import math
 import os
 import re
@@ -47,10 +48,16 @@ PT_REGIONAL_RADIUS_KM = 10.0   # a regional subscription is valid when the origi
 FIRST_CLASS_FACTOR = 1.7    # 1st class: the 2nd class price times this, rounded as usual
 MIN_ZONE_M = 200            # with the tracks: a zone crossed on less than this does not count (the stops at the border of two zones)
 RESIDENT_RADIUS_M = 1000    # without the zone polygons: a place is in the area of the networks of the stops this close to it
-# the stops in Switzerland, by their id: the Swiss stops (8501120, 8501120:0:1, Parent8501120, ch:1:sloid:...) and the
-# Swiss stations in the French feed (StopPoint:OCETrain:::TER-85162727, Genève-Champel). Not the French coaches stopping
-# in Geneva (FR:...), whose rides go abroad anyway. The Swiss stops abroad (Liechtenstein, Jestetten) have the Swiss fares.
-SWISS_STOP = re.compile(r"^(?:Parent)?85\d{5}(?::|$)|^ch:1:sloid:|^StopPoint:OCE\w*:::\w*-85\d{6}$")
+# the stops in Switzerland by their id, only for the inputs that do not locate the stops (gtfs_zones.csv without the
+# LOCATION_COLUMN): the Swiss stops (8501120, 8501120:0:1, Parent8501120, ch:1:sloid:1120:0:1; the SLOIDs of the stops
+# abroad in the Swiss feed have 7 digits, ch:1:sloid:1400001 is Évian-les-Bains) and the Swiss stations in the French
+# feed (StopPoint:OCETrain:::TER-85162727, Genève-Champel)
+SWISS_STOP = re.compile(r"^(?:Parent)?85\d{5}(?::|$)|^(?:Parent)?ch:1:sloid:\d{1,6}(?!\d)|^StopPoint:OCE\w*:::\w*-85\d{6}$")
+# the optional columns of gtfs_zones.csv: the priority of the network of a row (the French local networks), and whether a
+# feed stop is in the area of the Swiss fares (true / false, located with the Swiss border by data.pt_pricing.pt_pricing)
+PRIORITY_COLUMN = "network priority"
+LOCATION_COLUMN = "in switzerland"
+LOCAL_PRIORITY = 3   # the priority of the French local networks (PRIORITY_COLUMN), above the others (2) and the Z-Pass (1)
 
 
 def _java_round(value):
@@ -168,7 +175,7 @@ class RideZones:
     sbb_km: float               # the SBB tariff distance between its first and last stops (-1: not on the SBB)
     from_name: str = ""
     to_name: str = ""
-    in_switzerland: bool = True # a stop in Switzerland (SWISS_STOP)
+    in_switzerland: bool = True # a stop in the area of the Swiss fares (Pricing.is_swiss_stop)
     abroad: bool = False        # a stop outside Switzerland
 
 
@@ -233,12 +240,19 @@ class Pricing:
         for a in root.findall("authority"):
             name = a.find("name").get("value")
             c = {"full": None, "halbtax": None, "double": set(), "center": None, "center_price": float("nan"),
-                 "center_price_halbtax": float("nan"), "additional_price": float("nan"), "additional_price_halbtax": float("nan")}
+                 "center_price_halbtax": float("nan"), "additional_price": float("nan"), "additional_price_halbtax": float("nan"),
+                 "by_age": []}
             center_based = a.find("zonalBased").get("value") == "centerbased"
             if not center_based:
                 for p in a.findall("priceListByZone"):
-                    prices = [float(v) for v in p.get("prices").split(", ")]
-                    c["halbtax" if p.get("halbtax") == "true" else "full"] = prices
+                    prices = [float(v.strip()) for v in p.get("prices").split(",")]
+                    if p.get("age_range"):
+                        # the prices of some ages (age_range="6_15"), on the tickets within some zones if zones is given
+                        low, high = (int(x) for x in p.get("age_range").split("_"))
+                        zones = {z.strip() for z in p.get("zones").split(",")} if p.get("zones") else None
+                        c["by_age"].append((low, high, prices, zones))
+                    else:
+                        c["halbtax" if p.get("halbtax") == "true" else "full"] = prices
                 two = a.find("zonesCountingAsTwo")
                 if two is not None:
                     c["double"] = {z.strip() for z in two.get("zones").split(", ")}
@@ -256,13 +270,23 @@ class Pricing:
 
     def _read_zones(self, path):
         """The fare networks and the zones of each stop, from gtfs_zones.csv (ZonalReader in Java): the networks of the
-        'tarif network' column (Z-Pass: priority 1, the others 2), and the zones of the 'zones' column ("ZVV:110, ...")."""
+        'tarif network' column (Z-Pass: priority 1, the others 2, or the highest of the optional 'network priority'
+        column of their rows: the French local networks, 3), and the zones of the 'zones' column ("ZVV:110, ...")."""
         df = pd.read_csv(path, dtype = str, keep_default_na = False)
+        priorities = df[PRIORITY_COLUMN] if PRIORITY_COLUMN in df else pd.Series("", index = df.index)
         self.authorities = {}
-        for text in df["tarif network"]:
+        for text, given in zip(df["tarif network"], priorities):
             for auth in re.sub(r"[\[\]' ]", "", text).split(","):
                 if auth and auth != "nan":
-                    self.authorities.setdefault(auth, Authority(auth, 1 if "ZPass" in auth else 2))
+                    priority = self.authorities.get(auth, Authority(auth, 1 if "ZPass" in auth else 2)).priority
+                    if given.strip():
+                        priority = max(priority, int(given))
+                    self.authorities[auth] = Authority(auth, priority)
+        # where the feed stops are ('in switzerland' column: located with the Swiss border by data.pt_pricing.pt_pricing)
+        self.in_switzerland = {}
+        if LOCATION_COLUMN in df:
+            located = df[df[LOCATION_COLUMN].str.strip() != ""]
+            self.in_switzerland = dict(zip(located["stop_id"].str.strip(), located[LOCATION_COLUMN].str.strip().str.lower() == "true"))
         self.zones_by_stop = {}   # stop id -> {(Authority, zone)}
         for stop_id, text in zip(df["stop_id"].str.strip(), df["zones"]):
             for entry in text.split(","):
@@ -290,6 +314,12 @@ class Pricing:
         return added
 
     # ------------------------------------------------------------------ rides
+
+    def is_swiss_stop(self, stop_id):
+        """Whether a stop is in the area of the Swiss fares, where the half-fare card holds: as gtfs_zones.csv locates it
+        (with the Swiss border); for a stop it does not locate (older inputs), by its id (SWISS_STOP)."""
+        located = self.in_switzerland.get(stop_id)
+        return located if located is not None else bool(SWISS_STOP.match(stop_id))
 
     def _stop_zones(self, stop_id):
         """The (Authority, zone) of a stop: those of its id and of its station (getZones in Java)."""
@@ -330,9 +360,23 @@ class Pricing:
         if self.tracks is not None and ride.pos >= 0:
             zones = self.track_zones(zones, stop_ids, self.tracks.crossed(network, ride), lambda a: self.tracks.pieces(network, ride, a))
             km = self.tracks.length_m(network, ride) / 1000
+        zones = self.local_zones(zones, stop_ids)
         sbb_km = self.sbb_distances.get((_simplified(stop_ids[0]), _simplified(stop_ids[-1])), -1.0) if "SBB" in zones else -1.0
-        swiss = [bool(SWISS_STOP.match(s)) for s in stop_ids]
+        swiss = [self.is_swiss_stop(s) for s in stop_ids]
         return RideZones(zones, km, sbb_km, network.stop_names[ride.stops[0]], network.stop_names[ride.stops[-1]], any(swiss), not all(swiss))
+
+    def local_zones(self, zones, stop_ids):
+        """The zones of a ride in the French local networks (priority LOCAL_PRIORITY): the fewest zones that hold one zone
+        of each of its stops (smallest_zone_cover). A stop shared by two operators of a network is in both of their zones
+        (Thonon: STAR'T A and EVA'D), for the transfers, but a bus ride Évian - Thonon is one EVA'D zone. The other
+        networks are left as they are (cleanZoneInfo in Java does the same)."""
+        result = dict(zones)
+        for auth, listed in zones.items():
+            if len(listed) < 2 or self.authorities.get(auth, NONE).priority < LOCAL_PRIORITY:
+                continue
+            cover = set(smallest_zone_cover([{z for a, z in self._stop_zones(s) if a.id == auth} for s in dict.fromkeys(stop_ids)]))
+            result[auth] = [z for z in listed if z in cover]
+        return result
 
     def track_zones(self, zones, stop_ids, crossed, pieces_of):
         """The zones of a ride in each of its networks, from its track rather than only its stops.
@@ -504,10 +548,14 @@ class Pricing:
         minimum = _round_up((self.sbb_min_halbtax if halbtax else self.sbb_min) * factor, 0.2)
         return _java_round(max(price / 2.0 if halbtax else price, minimum))
 
-    def zone_price(self, authority, rides, halbtax, factor = 1.0):
+    def zone_price(self, authority, rides, halbtax, factor = 1.0, age = None):
         """The price of rides in a zone network: the price list by number of zones visited (the zones counting as two
         count twice; beyond the end of the list, its last price), or for a network around a centre zone, the price of the
         centre zone plus a price for each other zone (the default price if the centre zone is not visited).
+
+        The list of the traveller's age (priceListByZone with age_range, and zones: only on the tickets within them) is
+        used if one applies; else the half-fare list with halbtax, the full one without (or the other one if a network
+        has only one: no half-fare list, as in the French local networks, means no half fare).
 
         factor: 1st class, the 2nd class price times it rounded up to 20 cents (the SBB rule, used for the zone
         networks too until their own rules are checked)."""
@@ -515,8 +563,10 @@ class Pricing:
         zones = {z for r in rides for z in r.zones.get(authority, [])}
         if not zones:
             raise ValueError("At least one zone must be visited")
-        if c["full"] is not None and c["halbtax"] is not None:
-            prices = c["halbtax"] if halbtax else c["full"]
+        if c["full"] is not None or c["halbtax"] is not None:
+            by_age = next((p for low, high, p, within in c["by_age"]
+                           if age is not None and low <= age <= high and (within is None or zones <= within)), None)
+            prices = by_age or ((c["halbtax"] or c["full"]) if halbtax else (c["full"] or c["halbtax"]))
             n = len(zones) + sum(1 for z in zones if z in c["double"])
             price = _java_round(prices[min(n, len(prices)) - 1])
             if factor != 1.0:
@@ -532,12 +582,12 @@ class Pricing:
             price = self.default_price(rides, halbtax, factor)
         return _java_round(price)
 
-    def _calculate(self, authority, rides, halbtax, factor = 1.0):
-        """The price of one ticket: the rides priced by an authority."""
+    def _calculate(self, authority, rides, halbtax, factor = 1.0, age = None):
+        """The price of one ticket: the rides priced by an authority (age: for the price lists by age)."""
         if authority == "SBB":
             return self.sbb_price(rides, halbtax, factor)
         if authority in self.calculators:
-            return self.zone_price(authority, rides, halbtax, factor)
+            return self.zone_price(authority, rides, halbtax, factor, age)
         return self.default_price(rides, halbtax, factor)   # "None" and the authorities without a price description
 
     # ------------------------------------------------------------------ journey
@@ -597,7 +647,8 @@ class Pricing:
 
         # or a Léman Pass single ticket for some rides (with no subscription: it is bought whole), and the others as above.
         # Unireso only sells Zone 10 then: a way with a Unireso ticket abroad is kept only if no Léman Pass ticket fits
-        if self.lemanpass is not None:
+        # (not for a journey whose tickets are all of the French local networks: their zone prices come first)
+        if self.lemanpass is not None and not all(self.authorities.get(a, NONE).priority >= LOCAL_PRIORITY for a, _ in tickets):
             profiles = single_profiles(t.age, t.halbtax)
             best = math.inf if self._lemanpass_zones(rides) else price
             for start, end, trip, lp_price in self.lemanpass.single_tickets(journey.rides, wholes, network, self, profiles, 2 - t.first_class):
@@ -651,7 +702,7 @@ class Pricing:
 
         for authority, group in self.group_rides(rides).items():
             half_here = half and (t.age < 16 or self._swiss_ticket(authority, group))
-            price = self._calculate(authority, group, half_here, factor)
+            price = self._calculate(authority, group, half_here, factor, t.age)
             discount = max((d for d in self.discounts if d.applies(authority, t, lives_in)), key = lambda d: d.percent, default = None)
             if discount is not None and discount.percent > 0:
                 price, discounts[authority] = _java_round(price * (1.0 - discount.percent / 100.0)), discount
@@ -741,6 +792,23 @@ class Pricing:
                 other.discounts.append(Discount(str(d.get("name") or f"Discount {k + 1}")[:60], percent, ages[0], ages[1], d.get("student"), tuple(networks),
                                                 d.get("residents", False)))
         return other
+
+
+def smallest_zone_cover(stop_zones):
+    """The fewest zones that hold one zone of each stop (stop_zones: the set of zones of each stop), as a sorted list;
+    between as few zones, the ones held by the most stops, then the first by their ids (smallestZoneCover in Java)."""
+    everything = sorted(set().union(*stop_zones)) if stop_zones else []
+    needed = [s for s in stop_zones if s]
+    for size in range(1, len(everything) + 1):
+        best, best_held = None, -1
+        for candidate in itertools.combinations(everything, size):   # in the order of the ids: the first one wins ties
+            if all(any(z in s for z in candidate) for s in needed):
+                held = sum(sum(1 for z in candidate if z in s) for s in needed)
+                if held > best_held:
+                    best, best_held = list(candidate), held
+        if best is not None:
+            return best
+    return everything
 
 
 def _object(value, where, keys = None):

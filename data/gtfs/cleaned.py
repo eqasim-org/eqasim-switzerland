@@ -45,6 +45,14 @@ def configure(context):
     # lines, at the request of TPG). Only used with gtfs_tpg_file.
     context.config("gtfs_tpg_removed_lines", default = ["A1", "A2", "A3", "A4", "A5", "A6"])
 
+    # Agencies of the merged feed replaced by another one: {removed: replacement}. Their routes, trips and the stops only
+    # they serve are removed when the replacement is in the feed. By default the copies of the French bus networks in the
+    # Swiss feed that the French feeds have entirely: EVA'D, STAR'T, TAC, SIBRA (priced as data.pt_pricing.french_networks)
+    # and Mobi'Vals (RDTAin in the Swiss feed). The other rides published twice are removed one by one on the scenario day
+    # (gtfs.drop_duplicate_trips).
+    context.config("gtfs_replaced_agencies", default = {"87_EVA": "EVAD", "87_BUT": "THONON:Network:1:LOC", "87_TAC": "1",
+                                                        "87_RDT": "MOBIVALS:Network:1:LOC", "87_SIB": "SIBRA"})
+
     # Transfer times added between the stops closer than this without a rule (see gtfs.add_nearby_transfers). MATSim
     # lets the passengers walk between stops up to its beeline walk distance (transitRouter.maxBeelineWalkConnectionDistance,
     # 300 m): both should be the same. 0: no times added.
@@ -122,6 +130,8 @@ def execute(context):
 
     # Merge feeds
     merged_feed = gtfs.merge_feeds(feeds) if len(feeds) > 1 else feeds[0]
+    merged_feed = gtfs.drop_replaced_agencies(merged_feed, context.config("gtfs_replaced_agencies"))
+    merged_feed = gtfs.drop_duplicate_trips(merged_feed, scenario_date(context))
     merged_feed = gtfs.rename_swiss_leman_routes(merged_feed)
     transfers_feeds = _transfer_pairs(merged_feed)
     merged_feed = gtfs.bridge_cross_source_stations(merged_feed)

@@ -76,3 +76,46 @@ How a journey is matched (as in `utils/gtfs_router/lemanpass.py`):
    - The zones of the rides inside the train part are `piece`s. With buses and trams only, every zone of the rides must be a `piece`.
    - `end_a` holds the first places and `end_b` the last ones, or the reverse; or its `cover` holds all of them.
 5. **Price.** The cheapest fitting product counts, over the traveller's columns: `adult`, plus `child` from 6 to 15, `youth` from 16 to 25 and `reduced` with the half-fare card, in the traveller's class. A single ticket covers the train part and the Unireso rides right before and after it. It is kept when it is cheaper than the usual tickets for those rides. With the Léman Pass, Unireso only sells Zone 10 tickets: a usual way of paying that has a Unireso ticket with another zone (abroad) is dropped, even when it is cheaper. It is kept only if no Léman Pass ticket fits the journey. The Java model applies the same rule.
+
+# French local networks (data.pt_pricing.french_networks)
+`data.pt_pricing.pt_pricing` adds the French local networks to `gtfs_zones.csv` and `pricingDescription.xml`, so that they are priced as the Swiss zone networks, in Python and in eqasim-java. Each network of `FRENCH_NETWORKS` is defined in `data/pt_pricing/french_networks.py` by:
+
+- the agencies of the feed that operate it;
+- the fare zone of each commune it serves, by INSEE code (outlines from `pt_zones_foreign_communes_file`);
+- the zone of the stops of an agency in no listed commune;
+- its prices in CHF by number of zones: full, and for some ages (`AgePrices`, optionally only on the tickets within some zones).
+
+Only the stops served by its agencies get its zones: a Léman Express ride to Thonon-les-Bains is not a STAR'T ticket. The new rows have a `network priority` of 3, above the other zone networks (2) and the Z-Pass (1). The column is optional: Python (`Pricing._read_zones`) and Java (`ZonalReader`) use the usual priorities without it. A ride whose stops are all in two networks goes to the one of the highest priority. A STAR'T bus in Thonon, whose stops are also in Unireso zone 300 abroad, is therefore priced by STAR'T. A journey with a Léman Express train stays with Unireso and the Léman Pass, the only network common to all its rides.
+
+In `pricingDescription.xml`, a French network has a full price list and price lists by age, but no half-fare list, so the half-fare card never applies:
+
+```xml
+<priceListByZone halbtax="false" prices="1.11, 2.03"/>
+<priceListByZone age_range="6_15" prices="1.02, 1.85"/>
+<priceListByZone age_range="65_150" prices="1.02, 1.85" zones="A, B"/>
+```
+
+A list with `age_range` is used for the travellers of those ages, instead of the full and half-fare lists. With `zones`, it is only used when all the zones of the ticket are among them. Children under 6 travel free, as everywhere.
+
+| Network | Agencies | Zones | 1 zone | 2 zones | Reduced: 1 zone | Reduced: 2 zones |
+| --- | --- | --- | --- | --- | --- | --- |
+| `StartEvad` | STAR'T (`THONON:Network:1:LOC`), EVA'D (`EVAD`) | A, B (STAR'T, by commune), EVAD (every EVA'D stop) | 1.11 | 2.03 | 1.02 | 1.85 |
+| `TAC` | TAC Mobilités (`1`) | 210, 230 (the Unireso zone of the commune) | 1.60 | 2.35 | | |
+| `Arvi` | Arvi Mobilités (`TMBB`, with its Les Carroz - Flaine lines) | Arvi | 1.11 | | | |
+| `ProximiTi` | ProximiTi (`1_m10`) | ProximiTi | 1.60 | | | |
+| `SIBRA` | SIBRA (`SIBRA`) | SIBRA | 1.88 | | | |
+
+`StartEvad`: the reduced fares are for ages 6 to 15 in both networks, and for 65 or more in STAR'T only (zones A and B). STAR'T zone A: Allinges, Anthy-sur-Léman, Armoy, Cervens, Draillant, Lyaud, Margencel, Orcier, Perrignier, Sciez and Thonon-les-Bains, and the STAR'T stop in Évian-les-Bains. Zone B: Ballaison, Brenthonne, Bons-en-Chablais, Chens-sur-Léman, Douvaine, Excenevex, Fessy, Loisin, Lully, Massongy, Messery, Nernier, Veigy-Foncenex and Yvoire, Annemasse, Machilly, Saint-Cergues and Ville-la-Grand, and the STAR'T stop in Cranves-Sales. Prices converted from 1.20 EUR, 2.20 EUR, 1.10 EUR and 2.00 EUR.
+
+`TAC`: the same prices for all ages from 6, converted from 1.70 EUR and 2.50 EUR. `Arvi`, `ProximiTi` and `SIBRA`: one price for all ages from 6 and all their trips, converted from 1.20 EUR, 1.70 EUR and 2.00 EUR. The Les Carroz - Flaine lines of Arvi are assumed to cost the same (no price published). Zone 210 + 10 (Geneva) is a Léman Pass ticket: the TAC stops are all in France.
+
+The stops of two operators of a network at the same place (the same name within 50 m: EVA'D and STAR'T in Thonon) get the zones of both, for the transfers. A ride of a French network is priced with the fewest zones that hold one zone of each of its stops (`smallest_zone_cover` in Python, `smallestZoneCover` in Java), so an EVA'D bus from Évian to Thonon is one zone, EVAD. A journey with an EVA'D ride and a STAR'T ride is one ticket of two zones, A and EVAD.
+
+A journey whose tickets are all of the French networks is priced by them, never by a Léman Pass ticket.
+
+`pt_zones_foreign_zones_file` (`unireso_france_zones.csv`) also lists the communes of Annemasse Agglo and around in zone 210: Bonne, Bossey, Contamine-sur-Arve, Cranves-Sales, Étrembières, Juvigny, Saint-Cergues, Vétraz-Monthoux and Ville-la-Grand (added in November 2026).
+
+The Swiss feed also has copies of these networks and of Mobi'Vals (`87_BUT`, `87_EVA`, `87_TAC`, `87_SIB`, `87_RDT`). `data.gtfs.cleaned` removes them when the French feeds have the networks (`gtfs_replaced_agencies`), with the stops that only they serve. It then removes the other rides published twice on the scenario day (`gtfs.drop_duplicate_trips`): two trips of two agencies with first and last stops within 300 m, their times within 3 minutes and at most 3 stops more or fewer. It keeps the train if only one is typed as a train; of two trains, the Swiss feed's (as `drop_duplicate_sncf_trips`); otherwise the French feed's. The times are compared as written: Europe/Paris, Europe/Zurich and Europe/Berlin have the same time all year.
+
+# Stops in the area of the Swiss fares
+The half-fare card only holds on tickets with a stop in the area of the Swiss fares. `data.pt_pricing.pt_pricing` locates every feed stop with `data.spatial.swiss_border`, plus Liechtenstein and the enclaves of Büsingen and Campione from the same boundaries file, and writes `true` or `false` in the `in switzerland` column of `gtfs_zones.csv`. A feed stop without zones gets a row of its own. Python (`Pricing.is_swiss_stop`) and Java (`ZonalRegistry.isInSwitzerland`) read it. Only for inputs without the column do they still guess from the stop id.

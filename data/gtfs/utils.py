@@ -2066,3 +2066,144 @@ def drop_unused_shapes(feed):
     if feed["shapes"].empty:
         del feed["shapes"]
     return feed
+
+
+def drop_replaced_agencies(feed, replacements):
+    """Removes the agencies of the feed that another agency of it replaces, with their routes, trips, stop times and
+    frequencies, and then the stops no trip serves any more (and the transfers between them).
+
+    replacements: {agency id to remove: the agency id that replaces it}, e.g. the copies of the French bus networks in
+    the Swiss feed (87_BUT: STAR'T) when the French feed has them (THONON:Network:1:LOC). An agency whose replacement is
+    not in the feed is kept, so that its lines are not lost without the other feed."""
+    if "agency" not in feed or not replacements:
+        return feed
+    agencies = set(feed["agency"]["agency_id"].astype(str))
+    removed = {a for a, by in replacements.items() if a in agencies and str(by) in agencies}
+    for a, by in replacements.items():
+        if a in agencies and a not in removed:
+            logger.info(f"Agency {a} kept: the agency {by} that replaces it is not in the feed")
+    if not removed:
+        return feed
+
+    routes = feed["routes"]
+    removed_routes = set(routes.loc[routes["agency_id"].astype(str).isin(removed), "route_id"].astype(str))
+    trip_ids = set(feed["trips"].loc[feed["trips"]["route_id"].astype(str).isin(removed_routes), "trip_id"].astype(str))
+    feed, dropped = _drop_trips(feed, trip_ids)
+    feed["agency"] = feed["agency"][~feed["agency"]["agency_id"].astype(str).isin(removed)]
+    feed["routes"] = routes[~routes["route_id"].astype(str).isin(removed_routes)]
+
+    logger.info(f"Replaced agencies removed: {', '.join(sorted(removed))}: {len(removed_routes)} routes, {len(trip_ids)} "
+                f"trips, {len(dropped)} stops")
+    return feed
+
+
+def drop_duplicate_trips(feed, date, max_time_diff_s = 180, max_distance_m = 300, max_stop_difference = 3):
+    """Removes the rides published twice in the merged feed on a date (the scenario day): two trips of two agencies,
+    both running that day, whose first stops (and last stops) are within max_distance_m of each other, with their
+    departure (arrival) times within max_time_diff_s, and whose numbers of stops differ by at most max_stop_difference
+    (one feed may list a stop more, or place a stop elsewhere). E.g. the coaches and the trains of the SNCF in the Swiss
+    feed (87_LEX) and in the French feeds.
+
+    The copy kept: the train if only one of them is a train (the Swiss feed has some TER as coaches); of two trains, the
+    one of the agency outside Europe/Paris, as drop_duplicate_sncf_trips (the Swiss feed joins them to their Swiss
+    continuation); otherwise the one of the agency in Europe/Paris (the feed of the French operator, whose agencies the
+    French networks are priced with; the timezone only tells the feeds apart, since Paris, Zurich and Berlin have the
+    same time: ProximiTi, in Europe/Zurich, counts as a Swiss feed here). With the same timezone, the agency with more trips that day. The removed trips are
+    removed on every date: for them, the feed is right on that date only. Returns the feed (unchanged without a date)."""
+    if not date or "agency" not in feed:
+        return feed
+    active = get_active_service_ids(feed, date)
+    trips = feed["trips"][feed["trips"]["service_id"].astype(str).isin(active)][["trip_id", "route_id"]].astype(str)
+    trips = trips.merge(feed["routes"][["route_id", "agency_id", "route_type"]].astype(str), on = "route_id")
+    timezone = dict(zip(feed["agency"]["agency_id"].astype(str), feed["agency"]["agency_timezone"].astype(str)))
+    rail = {"0", "1", "2", "12"} | {str(t) for t in range(100, 118)} | {str(t) for t in range(400, 406)}
+
+    # the first and last stops of the trips that day, with their times and coordinates. The times of the feeds are
+    # compared as they are written: the timezones of their agencies (Europe/Zurich, Europe/Paris, and Europe/Berlin
+    # in the Swiss feed) have exactly the same time, all year (CET/CEST, the same changes to summer time)
+    st = feed["stop_times"][["trip_id", "stop_sequence", "stop_id", "arrival_time", "departure_time"]].copy()
+    st["trip_id"] = st["trip_id"].astype(str)
+    st = st[st["trip_id"].isin(set(trips["trip_id"]))]
+    if st.empty:
+        return feed
+    stops = feed["stops"][["stop_id", "stop_lat", "stop_lon"]].copy()
+    stops["stop_id"] = stops["stop_id"].astype(str)
+    st["stop_id"] = st["stop_id"].astype(str)
+    st = st.merge(stops, on = "stop_id")
+    st["seq"] = pd.to_numeric(st["stop_sequence"], errors = "coerce")
+    st = st.sort_values(["trip_id", "seq"], kind = "stable")
+    lat0 = np.radians(st["stop_lat"].astype(float).mean())
+    st["x"] = np.radians(st["stop_lon"].astype(float)) * np.cos(lat0) * 6371000
+    st["y"] = np.radians(st["stop_lat"].astype(float)) * 6371000
+    g = st.groupby("trip_id")
+    first, last = g.first(), g.last()
+    head = pd.DataFrame({"n": g.size(), "dep": _times_to_seconds(first["departure_time"]).to_numpy(dtype = float),
+                         "arr": _times_to_seconds(last["arrival_time"]).to_numpy(dtype = float),
+                         "x0": first["x"], "y0": first["y"], "x1": last["x"], "y1": last["y"]}, index = first.index)
+    head = head.reset_index().merge(trips[["trip_id", "agency_id", "route_type"]], on = "trip_id").dropna(subset = ["dep", "arr"])
+
+    # candidate pairs: the trips whose ends and times are all within the tolerances (a k-d tree on the first and last
+    # stops and the times scaled to metres, with the largest difference), then the exact conditions
+    from scipy.spatial import cKDTree
+    scale = max_distance_m / max(max_time_diff_s, 1)
+    points = np.c_[head["x0"], head["y0"], head["x1"], head["y1"], head["dep"] * scale, head["arr"] * scale]
+    found = cKDTree(points).query_pairs(max_distance_m, p = np.inf, output_type = "ndarray")
+    a, b = head.iloc[found[:, 0]].reset_index(drop = True), head.iloc[found[:, 1]].reset_index(drop = True)
+    pairs = pd.concat([a.add_suffix("_a"), b.add_suffix("_b")], axis = 1)
+    pairs = pairs[(pairs["agency_id_a"] != pairs["agency_id_b"])
+                  & ((pairs["n_a"] - pairs["n_b"]).abs() <= max_stop_difference)
+                  & (np.hypot(pairs["x0_a"] - pairs["x0_b"], pairs["y0_a"] - pairs["y0_b"]) <= max_distance_m)
+                  & (np.hypot(pairs["x1_a"] - pairs["x1_b"], pairs["y1_a"] - pairs["y1_b"]) <= max_distance_m)]
+    pairs = pairs.drop_duplicates(["trip_id_a", "trip_id_b"])
+    if pairs.empty:
+        logger.info(f"Duplicate trips on {date:%Y-%m-%d}: none")
+        return feed
+
+    # the copy to remove of each pair
+    count = trips.groupby("agency_id").size()
+    removed = set()
+    for row in pairs.itertuples(index = False):
+        if row.trip_id_a in removed or row.trip_id_b in removed:
+            continue
+        rail_a, rail_b = row.route_type_a in rail, row.route_type_b in rail
+        paris_a, paris_b = timezone.get(row.agency_id_a) == "Europe/Paris", timezone.get(row.agency_id_b) == "Europe/Paris"
+        if rail_a != rail_b:
+            drop_a = rail_b
+        elif paris_a != paris_b:
+            drop_a = paris_a if rail_a else paris_b
+        else:
+            drop_a = count.get(row.agency_id_a, 0) < count.get(row.agency_id_b, 0)
+        removed.add(row.trip_id_a if drop_a else row.trip_id_b)
+
+    by_agency = trips[trips["trip_id"].isin(removed)].groupby("agency_id").size().sort_values(ascending = False)
+    feed, dropped = _drop_trips(feed, removed)
+    logger.info(f"Duplicate trips on {date:%Y-%m-%d}: {len(removed)} removed ({', '.join(f'{a} {n}' for a, n in by_agency.items())}), "
+                f"{len(dropped)} stops no longer served")
+    return feed
+
+
+def _drop_trips(feed, trip_ids):
+    """Removes trips (ids as str) with their stop times and frequencies, then the stops only they served (and their
+    stations if none of their stops is left) and the transfers of those stops. Returns (feed, the removed stop ids)."""
+    feed = dict(feed)
+    trip_ids = set(trip_ids)
+    stop_times = feed["stop_times"]
+    removed_times = stop_times["trip_id"].astype(str).isin(trip_ids)
+    their_stops = set(stop_times.loc[removed_times, "stop_id"].astype(str))
+    feed["trips"] = feed["trips"][~feed["trips"]["trip_id"].astype(str).isin(trip_ids)]
+    feed["stop_times"] = stop_times[~removed_times]
+    if "frequencies" in feed:
+        feed["frequencies"] = feed["frequencies"][~feed["frequencies"]["trip_id"].astype(str).isin(trip_ids)]
+
+    stops = feed["stops"]
+    served = set(feed["stop_times"]["stop_id"].astype(str))
+    dropped = their_stops - served
+    if "parent_station" in stops:
+        parent = stops.set_index(stops["stop_id"].astype(str))["parent_station"].dropna().astype(str)
+        left = set(parent[~parent.index.isin(dropped)])   # the stations of the stops that are kept
+        dropped |= {p for p in set(parent[parent.index.isin(dropped)]) if p not in left and p not in served}
+    feed["stops"] = stops[~stops["stop_id"].astype(str).isin(dropped)]
+    if "transfers" in feed:
+        t = feed["transfers"]
+        feed["transfers"] = t[~(t["from_stop_id"].astype(str).isin(dropped) | t["to_stop_id"].astype(str).isin(dropped))]
+    return feed, dropped
