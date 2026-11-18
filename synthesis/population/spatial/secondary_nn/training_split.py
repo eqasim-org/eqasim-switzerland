@@ -34,6 +34,7 @@ def execute(context):
 
 
 def expert_persons(context, frame):
+    frame = frame.loc[~shared_test_people(frame.person_id, context.config('random_seed'))].copy()
     if context.config('secondary_nn_use_target_distance') or context.config("secondary_nn_no_distance_routing") == "hierarchy":
         return frame.copy()
     split = context.stage('synthesis.population.spatial.secondary_nn.training_split')
@@ -44,3 +45,11 @@ def expert_persons(context, frame):
             raise ValueError('Unknown cross-fitting fold')
         eligible &= split.fold.ne(fold)
     return frame.loc[frame.person_id.isin(split.loc[eligible, 'person_id'])].copy()
+
+
+def shared_test_people(ids, seed, fraction=.1):
+    """Stable person partition independent of expert eligibility and row order."""
+    import hashlib
+    return np.asarray([int.from_bytes(hashlib.blake2b(
+        f"{int(seed)}:{int(person)}".encode(), digest_size=8).digest(), 'little') / 2**64 < fraction
+        for person in ids], dtype=bool)

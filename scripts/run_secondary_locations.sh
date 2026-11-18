@@ -21,4 +21,7 @@ unset DISPLAY
 repository_directory="$1"
 config_path="$2"
 cd "$repository_directory"
+if [[ -n "${3:-}" ]]; then
+    uv run -m synpp "$3"
+fi
 uv run -m synpp "$config_path"

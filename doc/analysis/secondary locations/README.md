@@ -453,7 +453,9 @@ full source/configuration invalidation; it is intended for this focused experime
 The per-run manifest records the actual fallback cache keys. Each job uses the
 source config's thread count, 5G memory per CPU, and a 24-hour time allowance.
 Existing cached expert/assignment results for the requested stage keys are
-replaced by the debug rerun. Upstream caches and RDA assignments are only read.
+replaced by the debug rerun. A separate preliminary graph refreshes microcensus
+trips, persons, secondary-purpose recoding and NN chain features. Existing synthetic
+population and spatial inputs, and the RDA assignments, are reused.
 
 A report-only job is submitted with `afterok:<distance-job>:<no-distance-job>`.
 Its explicit config arguments select the existing RDA results and the two focused
@@ -461,3 +463,17 @@ NN runs. `submissions.json` records job IDs and config paths; logs use
 `logs/<job-name>_<job-id>.log`. The report updates `results/report.html`, including
 the RDA survey replay maps and city-centre visitation figures. Report provenance
 marks debug assignments and records the actual cache dependencies.
+
+The current distance-policy refresh requires all four experts to be retrained;
+`--short-only` is rejected to prevent mixing incompatible feature schemas or
+survey targets. The dependent report compares both NNs and the completed RDA run.
+
+## Investigating saved results
+
+Run `uv run python "analysis/secondary locations/investigate_results.py"` to
+produce distance-band, routing, checkpoint-validation and stationary-target
+diagnostics under `results/investigation/`. Use `--results <directory>` for a
+different saved report. This reads caches without running the models.
+See the [14 November investigation](investigation_20261114.md) for findings and
+prioritized experiments. Audit errors score individual draws; the report's
+paired error averages repeated distances before scoring each trip.

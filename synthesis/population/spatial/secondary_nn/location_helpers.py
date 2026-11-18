@@ -196,6 +196,7 @@ def _get_first_location(grp, home_x, home_y, work_x, work_y, edu_x, edu_y, has_w
             'departure_time_normalized': max(0, first["departure_time_normalized"]-8.0/24.0),
             "activity_duration_h": 8.0,  # assume 8h duration for the first activity, consistent with mz_chains.py
             "target_distance": first["trip_origin_distance_from_home"],
+            "loop_at_origin": False,
             "activity_chain": first["activity_chain"]
         }
 

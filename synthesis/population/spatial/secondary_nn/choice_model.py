@@ -41,7 +41,8 @@ class ResidualBlock(nn.Module):
     
 
 class NeuralChoiceModel(nn.Module):
-    def __init__(self, person_input_dim, candidate_input_dim, person_hidden_dim=32, hidden_dim=64, dropout_rate=0.15, mask_threshold=1e-4):
+    def __init__(self, person_input_dim, candidate_input_dim, person_hidden_dim=32, hidden_dim=64, dropout_rate=0.15, mask_threshold=1e-4,
+                 osm_feature_indices=None, osm_hidden_dim=8, osm_embedding_dim=4):
         super().__init__()
         self.person_input_dim = int(person_input_dim)
         self.candidate_input_dim = int(candidate_input_dim)
@@ -51,14 +52,40 @@ class NeuralChoiceModel(nn.Module):
         self.mask_threshold = float(mask_threshold)
         self._device = torch.device("cpu")
 
+        # Compress only the OSM block; mobility, accessibility and distances stay separate.
+
+        self.osm_feature_indices = None if osm_feature_indices is None else list(osm_feature_indices)
+        self.osm_hidden_dim, self.osm_embedding_dim = int(osm_hidden_dim), int(osm_embedding_dim)
+        self.osm_encoder = None
+        encoded_width = self.candidate_input_dim
+        if self.osm_feature_indices is not None:
+            indices = self.osm_feature_indices
+            if (not indices or len(set(indices)) != len(indices)
+                    or any(not isinstance(i, int) or not 0 <= i < self.candidate_input_dim for i in indices)
+                    or min(self.osm_hidden_dim, self.osm_embedding_dim) < 1):
+                raise ValueError("Invalid OSM encoder feature indices or dimensions")
+            self.register_buffer('_osm_indices', torch.tensor(indices, dtype=torch.long), persistent=False)
+            self._osm_min_index = min(indices)
+            self.register_buffer('_other_indices', torch.tensor(
+                [i for i in range(self.candidate_input_dim) if i not in indices], dtype=torch.long), persistent=False)
+            self.osm_encoder = nn.Sequential(nn.Linear(len(indices), self.osm_hidden_dim), nn.SiLU(),
+                nn.Linear(self.osm_hidden_dim, self.osm_embedding_dim), nn.SiLU())
+            encoded_width += self.osm_embedding_dim - len(indices)
+
         self.person_tower = ResidualBlock(person_input_dim, person_hidden_dim, dropout_rate=dropout_rate)
-        self.utility_tower = ResidualBlock(person_hidden_dim + candidate_input_dim, hidden_dim, 
+        self.utility_tower = ResidualBlock(person_hidden_dim + encoded_width, hidden_dim,
                                            dropout_rate=dropout_rate, apply_residual=False)
 
         # Small mask head from the last hidden dimension: predicts candidate plausibility.
         self.mask_layer = nn.Linear(hidden_dim, 1)
         self.utility_head = nn.Linear(hidden_dim, 1)
         self._init_weights()
+
+    def architecture_config(self):
+        return dict(person_input_dim=self.person_input_dim, candidate_input_dim=self.candidate_input_dim,
+                    person_hidden_dim=self.person_hidden_dim, hidden_dim=self.hidden_dim, dropout_rate=self.dropout_rate,
+                    osm_feature_indices=self.osm_feature_indices, osm_hidden_dim=self.osm_hidden_dim,
+                    osm_embedding_dim=self.osm_embedding_dim)
     
     def _init_weights(self):
         nn.init.constant_(self.mask_layer.bias, 3.0)
@@ -71,10 +98,21 @@ class NeuralChoiceModel(nn.Module):
         if person_dynamic.ndim == 1:  person_dynamic  = person_dynamic.unsqueeze(0)
         if candidate_static.ndim == 2:  candidate_static  = candidate_static.unsqueeze(0)
         if candidate_dynamic.ndim == 2: candidate_dynamic = candidate_dynamic.unsqueeze(0)
+
+        # Encode shared static cells before broadcasting over people in the minibatch.
+
+        osm_embedding = None
+        if self.osm_encoder is not None:
+            if self._osm_min_index < candidate_dynamic.shape[-1]:
+                raise ValueError("OSM features must belong to the static candidate block")
+            osm_input = candidate_static.index_select(-1, self._osm_indices - candidate_dynamic.shape[-1])
+            osm_embedding = self.osm_encoder(osm_input)
         # Reconstruct combined tensors preserving the [dynamic|static] training layout.
         # candidate_static may be [1, N, C] (broadcast) — expand to match dynamic's batch dim.
         if candidate_static.shape[0] == 1 and candidate_dynamic.shape[0] > 1:
             candidate_static = candidate_static.expand(candidate_dynamic.shape[0], -1, -1)
+            if osm_embedding is not None:
+                osm_embedding = osm_embedding.expand(candidate_dynamic.shape[0], -1, -1)
         person_x    = torch.cat([person_static, person_dynamic], dim=-1)          # [B, person_input_dim]
         candidate_x = torch.cat([candidate_dynamic, candidate_static], dim=-1)    # [B, N, candidate_input_dim]
         if candidate_x.shape[-1] != self.candidate_input_dim:
@@ -84,6 +122,8 @@ class NeuralChoiceModel(nn.Module):
                 "Check candidate_input_dim at model construction."
             )
 
+        if osm_embedding is not None:
+            candidate_x = torch.cat([candidate_x.index_select(-1,self._other_indices),osm_embedding],dim=-1)
         batch_size, n_candidates, _ = candidate_x.shape
         person_embedding = self.person_tower(person_x)
         person_embedding = person_embedding[:, None, :].expand(batch_size, n_candidates, self.person_hidden_dim)
@@ -119,7 +159,8 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
                        refit_full=False, auxiliary_relative_distance_loss_weight=0.0,
                        early_stopping_min_epochs=0, cross_validate=False, validation_seed=None,
                        relative_distance_underestimation_factor=1.0, rotating_holdout=False,
-                       validation_rotation_epochs=3, validation_holdout_fraction=0.1):
+                       validation_rotation_epochs=3, validation_holdout_fraction=0.1,
+                       individual_radius_loss_weight=0., individual_radius_tolerance_m=75., facility_radius_penalties=None):
     """Train the choice model with rotating or fixed-fold validation.
 
     ``validation_groups`` keeps related samples (for example, trips belonging to
@@ -252,8 +293,31 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
                           for score, _ in prepared_scores)
         logger.info("Prepared distribution geometry: %.2f GiB", cache_bytes / 1024**3)
 
+    # Penalize mass on individually wrong radii; opposite errors must not cancel.
+
+    radius_weight = float(individual_radius_loss_weight)
+    radius_tolerance = float(individual_radius_tolerance_m)
+    if not np.isfinite([radius_weight,radius_tolerance]).all() or min(radius_weight,radius_tolerance) < 0:
+        raise ValueError("Individual radius settings must be finite and nonnegative")
+    radius_penalties = None
+    if radius_weight > 0:
+        if distance_candidates_tensor is None or float(distance_loss_weight) <= 0:
+            raise ValueError("Individual radius scoring requires origin distances and a positive main loss weight")
+        error = distance_candidates_tensor - distance_targets_tensor[:, None]
+        scale = (distance_targets_tensor[:, None]+short_floor).clamp_min(short_floor)
+        excess = torch.relu(error.abs()-radius_tolerance)/scale
+        radius_penalties = F.smooth_l1_loss(excess,torch.zeros_like(excess),reduction="none")
+        radius_penalties *= torch.where(error < 0,underestimation_factor,1.)
+        if facility_radius_penalties is not None:
+            radius_penalties = torch.as_tensor(facility_radius_penalties, dtype=torch.float32, device=device)
+            if radius_penalties.shape != mask_tensor.shape or not torch.isfinite(radius_penalties).all():
+                raise ValueError("Invalid facility radius scores")
+        logger.info("Individual-radius score weight=%.3f, cell tolerance=%.1f m",radius_weight,radius_tolerance)
+
     def regularization(indices, probabilities):
         values = probabilities.new_zeros(len(indices))
+        if radius_penalties is not None:
+            values = (probabilities*radius_penalties[indices]).sum(-1)*(radius_weight/float(distance_loss_weight))
         if float(distance_loss_weight) == 0:
             return values
         if prepared_scores:
@@ -353,6 +417,7 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
             patience=early_stopping_patience, min_delta=early_stopping_min_delta,
             min_epochs=min_epochs, seed=cv_seed, logger=logger_instance or logger, path=path,
             history_settings=dict(distance_loss_kind=distance_loss_kind,
+                individual_radius_loss_weight=radius_weight, individual_radius_tolerance_m=radius_tolerance,
                 distance_loss_weight=float(distance_loss_weight),
                 relative_distance_underestimation_factor=underestimation_factor,
                 auxiliary_relative_distance_loss_weight=auxiliary_weight,
@@ -599,6 +664,7 @@ def train_choice_model(model, person_static_x, person_dynamic_x, candidate_stati
             "epochs_completed": len(train_losses),
             "refit_full": bool(refit_full), "refit_rows": n_samples if refit_full else 0,
             "refit_epochs": refit_epochs, "distance_loss_kind": distance_loss_kind,
+            "individual_radius_loss_weight": radius_weight, "individual_radius_tolerance_m": radius_tolerance,
             "distribution_scale_m": float(distribution_scale_m),
             "energy_projections": int(energy_projections),
             "distance_loss_weight": float(distance_loss_weight),

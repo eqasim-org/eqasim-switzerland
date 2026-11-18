@@ -12,7 +12,6 @@ from sklearn.neighbors import KDTree
 from .h3 import H3_LEVEL_NAMES
 from .hierarchical_utils import (
     SECONDARY_ACTIVITIES,
-    DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION,
     sanitize_work_coordinates,
     build_hierarchical_candidate_batch_numba,
 )
@@ -25,12 +24,15 @@ from .feature_encoding import (
     fit_person_trip_matrix,
     add_detour_factor_feature,
 )
+from .feature_encoding import OSM_CANDIDATE_INDICES
+from .tools import CompactOriginSupply, facility_radius_geometry
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import ShortRangeChoiceWrapper
 
 from .tools import (model_validation_options, training_mobility, enrich_candidate_tensor,
                     destination_offer_masks, destination_support_masks, origin_training_choice_sets)
 from .training_split import expert_persons
+from .trip_distances import spatial_training_trips
 
 logger = logging.getLogger("synpp: short_range_model")
 
@@ -38,6 +40,8 @@ MODEL_NAME = "short_range_model.pt"
 SHORT_RANGE_MODEL_THRESHOLD = 1500.0
 
 def configure(context):
+    context.config("secondary_nn_feature_version", 3)
+    context.config("secondary_nn_compress_osm_features", True)
     context.config("secondary_nn_no_distance_routing", "hierarchy")
     context.config("secondary_nn_model_validation_rotation_epochs", 3)
     context.config("secondary_nn_model_validation_holdout_fraction", 0.1)
@@ -74,7 +78,7 @@ def configure(context):
 
     context.config("overwrite_short_range_model_if_exists", True)
     context.config("short_range_model_batch_size", 256)
-    context.config("short_range_model_epochs", 60)
+    context.config("short_range_model_epochs", 120)
     context.config("short_range_model_learning_rate", 4e-3)
     context.config("short_range_model_dropout_rate", 0.35)
     context.config("short_range_model_weight_decay", 1e-2)
@@ -87,7 +91,9 @@ def configure(context):
     context.config("secondary_nn_short_trip_threshold_m", SHORT_RANGE_MODEL_THRESHOLD)
     context.config("secondary_nn_short_query_radius_m", 200.0)
     context.config("secondary_nn_short_min_candidates", 6)
-    context.config("short_range_trip_min_m", DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION)
+    context.config("short_range_trip_min_m", 0.0)
+    context.config("secondary_nn_short_radius_loss_weight", 0.5)
+    context.config("secondary_nn_short_radius_tolerance_m", 75.)
     context.config("secondary_nn_distance_loss_weight", 0.07)
     context.config("secondary_nn_distance_loss_short_floor_m", 100.0)
 
@@ -113,7 +119,7 @@ def execute(context):
     mz_persons["car_availability"] = (mz_persons["car_availability"] != constants.CAR_AVAILABILITY_NEVER)
 
     # Preserve nonstudent education recoding in the filtered NN training pool.
-    mz_trips = context.stage("data.microcensus.secondary_trips")
+    mz_trips = spatial_training_trips(context.stage("data.microcensus.secondary_trips"))
     mz_trips = mz_trips.loc[mz_trips.person_id.isin(mz_persons.person_id)].copy()
     mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "purpose", "origin_purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
@@ -277,6 +283,7 @@ def execute(context):
 
     purpose_categories = [str(purpose) for purpose in SECONDARY_ACTIVITIES]
     person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(
+        origin_context=CompactOriginSupply.from_context(context).matrix(df.origin_x, df.origin_y),
         mobility_matrix=training_mobility(context, df),
         age=age,
         sex=sex,
@@ -339,6 +346,12 @@ def execute(context):
     candidate_tensor = enrich_candidate_tensor(candidate_tensor, cand_x, cand_y, valid_mask, h3_geo_level2)
     candidate_dist_home_m = candidate_tensor[:, :, 0].astype(np.float32)
     candidate_dist_last_m = candidate_tensor[:, :, 2].astype(np.float32)
+    facility_penalties = None
+    if context.config("secondary_nn_use_target_distance"):
+        candidate_dist_last_m, facility_penalties = facility_radius_geometry(
+            df, choices, all_h3, mapped, destinations,
+            tolerance_m=context.config("secondary_nn_short_radius_tolerance_m"),
+            underestimation_factor=context.config("secondary_nn_short_relative_underestimation_factor"))
     candidate_tensor, candidate_static_scaler, candidate_dynamic_scaler = fit_candidate_tensor(candidate_tensor, valid_mask, random_state=int(context.config("random_seed")))
 
     logger.info("\t Training short-range neural choice model...")
@@ -352,6 +365,7 @@ def execute(context):
     model = NeuralChoiceModel(
         person_input_dim=person_trip_matrix.shape[1],
         candidate_input_dim=candidate_tensor.shape[2],
+        osm_feature_indices=OSM_CANDIDATE_INDICES if context.config("secondary_nn_compress_osm_features") else None,
         person_hidden_dim=32,
         hidden_dim=32,
         dropout_rate=float(context.config("short_range_model_dropout_rate")),
@@ -408,6 +422,10 @@ def execute(context):
         observed_xy=df[["destination_x", "destination_y"]].to_numpy(dtype=np.float32, copy=True)
             if loss_kind == "crps_energy" else None,
         distance_loss_short_floor_m=float(context.config("secondary_nn_distance_loss_short_floor_m")),
+        individual_radius_loss_weight=(float(context.config("secondary_nn_short_radius_loss_weight"))
+            if context.config("secondary_nn_use_target_distance") else 0.),
+        facility_radius_penalties=facility_penalties,
+        individual_radius_tolerance_m=float(context.config("secondary_nn_short_radius_tolerance_m")),
         relative_distance_underestimation_factor=(
             float(context.config("secondary_nn_short_relative_underestimation_factor"))
             if context.config("secondary_nn_use_target_distance") and loss_kind == "relative" else 1.0),

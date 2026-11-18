@@ -695,27 +695,43 @@ def selector_origin_context(context):
 
 
 def pt_destination_support(h3_data, destinations, tree, purposes):
-    """Propagate actual purpose-eligible A-D facility support through the coordinate tree."""
+    """Aggregate eligible facility quality distributions through the coordinate tree."""
     offers = [name for name in destinations if name.startswith('offers_')]
     mapped = h3_data['destinations'][['destination_id', 'level_2']].merge(
         destinations[['destination_id', 'ovgk', *offers]], on='destination_id', how='left', validate='one_to_one')
-    good_pt = mapped.ovgk.isin(['A', 'B', 'C', 'D']).to_numpy()
-    leaves = {base: dict.fromkeys(mapped.loc[mask & good_pt, 'level_2'].dropna(), True)
-              for base, mask in destination_offer_masks(mapped).items()}
+    quality = np.exp(-.65*encode_ovgk(mapped.ovgk))
+    leaves = {}
+    for base, mask in destination_offer_masks(mapped).items():
+        eligible = mapped.loc[mask, ['level_2']].copy()
+        eligible['score'] = quality[mask]
+        leaves[base] = eligible.groupby('level_2').score.agg(['sum', 'count']).to_dict('index')
+    def combine(nodes):
+        return dict(sum=sum(node['sum'] for node in nodes), count=sum(node['count'] for node in nodes))
+    empty = dict(sum=0., count=0)
     middle, roots = {}, {}
     for purpose in purposes:
         base = base_activity_purpose(purpose)
-        middle[base] = {branch: any(leaves[base].get(leaf, False) for leaf in cells)
-                        for branches in tree.values() for branch, cells in branches.items()}
-        roots[base] = {root: any(middle[base][branch] for branch in branches)
-                       for root, branches in tree.items()}
+        middle[base] = {branch: combine([leaves[base].get(leaf, empty) for leaf in cells])
+                       for branches in tree.values() for branch, cells in branches.items()}
+        roots[base] = {root: combine([middle[base][branch] for branch in branches])
+                      for root, branches in tree.items()}
     return roots, middle, leaves
 
 
 def soft_pt_weights(cell_ids, support, purposes, weight):
-    """A positive array per purpose; cells with no A-D facility retain reduced mass."""
-    masks = destination_support_masks(cell_ids, support, purposes)
-    return {purpose: np.where(mask, 1., weight).astype(np.float32) for purpose, mask in masks.items()}
+    """Grade actual eligible quality continuously while retaining positive mass."""
+    result = {}
+    minimum_score = np.exp(-.65*4)
+    for purpose in purposes:
+        nodes = support[base_activity_purpose(purpose)]
+        scores = []
+        for cell in cell_ids:
+            node = nodes.get(cell, dict(sum=0., count=0))
+            score = node['sum']/max(node['count'], 1)
+            scores.append(weight+(1-weight)*np.clip((score-minimum_score)/(1-minimum_score), 0, 1))
+        result[purpose] = np.asarray(scores, dtype=np.float32)
+        result[base_activity_purpose(purpose)] = result[purpose]
+    return result
 
 
 def encode_ovgk(values):
@@ -740,3 +756,56 @@ class AccessibilityLookup:
             indices = self.tree.query(Point(*key), predicate="intersects")
             self.cache[key] = float(self.codes[indices].min()) if len(indices) else 4.
         return self.cache[key]
+
+
+class CompactOriginSupply:
+    """Cache compact opportunity totals on a 200 m origin grid, within 1.5 km."""
+
+    def __init__(self, cells):
+        self.tree = cKDTree(np.column_stack([cells.centroid.x, cells.centroid.y]))
+        self.values = np.column_stack([cells.shop, cells.leisure,
+            cells.num_statent, *[cells[name] for name in OSM_FEATURES]]).astype(float)
+        self.cache = {}
+
+    @classmethod
+    def from_context(cls, context):
+        return cls(context.stage('synthesis.population.spatial.secondary_nn.h3')[1]['level_2'])
+
+    def at(self, x, y):
+        key = (int(np.floor(x/200)), int(np.floor(y/200)))
+        if key not in self.cache:
+            indices = self.tree.query_ball_point((np.asarray(key)+.5)*200, 1500.)
+            totals = np.log1p(np.maximum(self.values[indices].sum(axis=0), 0))/10
+            self.cache[key] = np.asarray([totals[0], totals[1], totals[3:].mean(), totals[2]], dtype=np.float32)
+        return self.cache[key]
+
+    def matrix(self, x, y):
+        return np.stack([self.at(a, b) for a, b in zip(x, y)])
+
+
+def facility_radius_geometry(frame, choices, all_cells, mapped, destinations, tolerance_m=75., underestimation_factor=2.):
+    """Precompute kernel-weighted facility radii and individual relative losses."""
+    data = mapped.merge(destinations[['destination_id', 'geometry', 'number_employees']], on='destination_id', validate='one_to_one')
+    pools = {}
+    for purpose, mask in destination_offer_masks(data).items():
+        for leaf, group in data.loc[mask].groupby('level_2'):
+            pools[purpose, str(leaf)] = (np.asarray([[point.x, point.y] for point in group.geometry]),
+                np.maximum(group.number_employees.to_numpy(float), 1.)**.7)
+    width = max(map(len, choices))
+    radii = np.zeros((len(frame), width), np.float32)
+    penalties = np.zeros_like(radii)
+    for i, (row, cells) in enumerate(zip(frame.itertuples(index=False), choices)):
+        target = float(row.target_distance)
+        sigma = max(1., .1*target)
+        tolerance = min(float(tolerance_m), max(1., .1*target))
+        for j, cell in enumerate(cells):
+            xy, mass = pools[base_activity_purpose(row.purpose), str(all_cells[cell])]
+            distances = np.hypot(xy[:, 0]-row.origin_x, xy[:, 1]-row.origin_y)
+            logits = -.5*((distances-target)/sigma)**2
+            weights = mass*np.exp(logits-logits.max())
+            weights /= weights.sum()
+            radii[i, j] = weights@distances
+            error = np.maximum(abs(distances-target)-tolerance, 0)/(target+100.)
+            huber = np.where(error < 1., .5*error**2, error-.5)
+            penalties[i, j] = weights@(huber*np.where(distances < target, underestimation_factor, 1.))
+    return radii, penalties

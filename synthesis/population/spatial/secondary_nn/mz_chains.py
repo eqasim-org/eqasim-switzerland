@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from .hierarchical_utils import encode_purpose
 from .chain_state import survey_chain_states
+from .trip_distances import distance_observations
 from .tools import accessibility_at_points, encode_ovgk
 
 def configure(context):
@@ -39,12 +40,14 @@ def execute(context):
         + (trips_sorted.loc[has_work_location, "destination_y"] - trips_sorted.loc[has_work_location, "work_y"]) ** 2
     )
 
-    trips_sorted["crowfly_distance"] = trips_sorted["crowfly_distance"].to_numpy(dtype=np.float64)
-    trips_sorted["crowfly_distance"] = np.where(
-        np.isfinite(trips_sorted["crowfly_distance"]) & (trips_sorted["crowfly_distance"] >= 0.0),
-        trips_sorted["crowfly_distance"],
-        0.0,
-    )
+    # Use geometry when informative, otherwise preserve explicit loops or use travelled distance.
+
+    distances = distance_observations(trips_sorted)
+    if distances.reference_distance_m.isna().any():
+        raise ValueError("Diary trips without usable coordinates or positive reported distance")
+    trips_sorted["crowfly_distance"] = distances.reference_distance_m
+    trips_sorted["loop_at_origin"] = distances.loop_at_origin
+    trips_sorted["distance_source"] = distances.distance_source
 
     trips_sorted["daily_longest_distance_from_home"] = (
         trips_sorted.groupby("person_id")["trip_destination_distance_from_home"].transform("max")
@@ -99,4 +102,4 @@ def execute(context):
                          "trip_destination_distance_from_home", "trip_destination_distance_from_work", 
                          "daily_longest_distance_from_home", "daily_longest_distance_from_work", "daily_crowfly_total", 
                          "crowfly_consumed_before_trip", "trip_position_class","departure_time_normalized", "activity_duration_h",
-                         "activity_chain", "trip_origin_distance_from_home", "target_distance", "chain_state"]]
+                         "activity_chain", "trip_origin_distance_from_home", "target_distance", "chain_state", "loop_at_origin", "distance_source"]]

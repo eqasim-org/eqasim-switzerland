@@ -52,7 +52,7 @@ def prepare(caches, output):
         LOG.info('%s: %s', cache.kind, audit)
         del frame
         gc.collect()
-    reference = next((c for c in caches if c.kind == 'rda'), caches[0])
+    reference = next((c for c in caches if c.kind == 'nn_distance'), caches[0])
     frame, audit = survey(reference)
     frame.to_parquet(output / 'survey.parquet', index=False)
     manifest['audit']['survey'] = audit
@@ -79,7 +79,7 @@ def replay_models(caches, settings, output, prepared):
     if cohort.empty:
         raise ValueError('No survey people with trips originating in the selected regions')
     cohort.to_parquet(output / 'replay_observed.parquet', index=False)
-    reference = next((c for c in caches if c.kind == 'rda'), caches[0])
+    reference = next((c for c in caches if c.kind == 'nn_distance'), caches[0])
     inputs = prepare_inputs(reference, cohort)
     input_sha256 = replay_input_fingerprint(inputs)
     predictions, detour = [], None
@@ -115,7 +115,7 @@ CAPTIONS = {
 '04_home_to_destination_accessibility': 'Residential-to-destination accessibility transition probabilities, separately by car access. Each home-class row sums to 100% before independent rounding; absent cells are blank rather than evidence of a zero probability. Every panel uses the same color scale. Destination accessibility is evaluated from the same cached ÖV polygon source.',
 '05_person_level_activity_spaces': 'Secondary-destination radius of gyration and repeated-visit share among people with at least two secondary arrival legs. Radius is computed around each person’s mean secondary destination, counting repeated visits. Revisited cells use a fixed 250 m LV95 grid. Each person contributes once with their person weight, rather than once per trip. These statistics describe secondary destinations, not a complete daily activity space.',
 '06_observed_origin_survey_replay': 'Saved NN models evaluated on exactly the same sampled survey people and trips, resetting each trip to its observed origin and using observed chain features. Multiple destination draws are averaged for paired NN differences and have total weight equal to the observed trip weight. Histograms pool differences beyond ±40 km into the outer bins. The same income imputation and other observed inputs are held fixed across both NNs. Existing survey records may have been used to fit the models: this is a conditional diagnostic, not an out-of-sample performance estimate. It does not reproduce sequential synthetic-population rollout.',
-'08_model_selection_diagnostic': 'Observed-origin replay diagnostic: share of nonstationary survey trips routed to the short-range branch, by observed distance and car access. The distance-input pipeline may use direct distance-conditioned facility sampling in that branch; consult the recorded run policy. The dotted separator marks 1.5 km. Hierarchy-first routing uses the predicted location rather than a learned selector; legacy selector runs retain their recorded policy. Neither receives the plotted trip distance as an inference input; distance is used here only for retrospective stratification. This is not held-out classifier performance. Lines average fitted local-expert probabilities when available, with historical decisions as a fallback. The table counts actual weighted draws; routing is probabilistic when distance is absent. Stationary trips below 10 m are excluded.',
+'08_model_selection_diagnostic': 'Observed-origin replay diagnostic: share of nonstationary survey trips routed to the short-range branch, by observed distance and car access. The distance-input pipeline may use direct distance-conditioned facility sampling in that branch; consult the recorded run policy. The dotted separator marks 1.5 km. Hierarchy-first routing uses the predicted location rather than a learned selector; legacy selector runs retain their recorded policy. Neither receives the plotted trip distance as an inference input; distance is used here only for retrospective stratification. This is not held-out classifier performance. Lines average fitted local-expert probabilities when available, with historical decisions as a fallback. The table counts actual weighted draws; routing is probabilistic when distance is absent. Explicit zero-displacement loop references are excluded.',
 '09_city_centre_population': 'Person-level share making at least one secondary visit within the indicated city-centre radius, among people with eligible city-origin trips. Fixed centres use the configured coordinates; the dotted line is 2 km. Each person counts once per purpose, rather than once per trip. All destinations remain in the denominator, including those outside the map. These are independently synthesized populations; differences can include population composition. Radius sensitivity avoids selecting a single catchment to favor a model. Single-run descriptive curves have no between-seed uncertainty intervals.',
 '10_city_centre_survey_replay': 'Same person-level city-centre visitation measure for identical sampled microcensus people/trips. For each draw, a person qualifies if any eligible trip visits the catchment; draw-specific indicators are averaged using person weights. This controls the surveyed cohort, while methods use their own assignment rules. RDA uses observed-origin single-leg tails, not full-chain assignment. The results are diagnostic and not independent held-out validation.',
 '07_map': 'Spatial distribution of secondary destinations for the indicated purpose and city-origin cohort. Top: the same sampled microcensus trips, observed destinations versus observed-origin RDA and NN replay. RDA reuses the production solver on single-leg tails with observed mode/travel time, and does not use future primary anchors. Bottom: full observed survey reference and independently generated synthetic populations, RDA versus the two NNs. Dashed circles mark the same fixed 2 km centre catchment. Every panel uses identical LV95 extent, 500 m cells and a shared square-root color normalization. Cell values are weighted destination mass per 1,000 eligible city-origin trips; out-of-frame destinations remain in the denominator and their visible share is annotated. Survey draw weights sum to the observed trip weight. Rows compare distributional patterns rather than identical population compositions. Zero cells are transparent. Roads, lakes and municipal boundaries are local inputs; no tile server is contacted.'}
@@ -158,6 +158,7 @@ def figures_and_report(caches, settings, output, prepared):
     figures.contrast_figure(car, pt, images)
     figures.transition_figure(transition, datasets, images)
     figures.activity_figure(persons, images)
+    test_summary = None
     replay_path = output / 'replay_manifest.json'
     replay_manifest = json.loads(replay_path.read_text()) if replay_path.exists() else None
     if replay_manifest and replay_manifest['generation'] == prepared['generation']:
@@ -168,6 +169,22 @@ def figures_and_report(caches, settings, output, prepared):
         replay_summary, paired = paired_replay_summary(observed, predictions)
         replay_summary.to_csv(tables / 'paired_replay_summary.csv', index=False)
         paired.to_parquet(output / 'paired_replay_distances.parquet', index=False)
+        from synthesis.population.spatial.secondary_nn.training_split import shared_test_people
+        seed = replay_manifest['seed']
+        test_observed = observed.loc[shared_test_people(observed.person_id, seed) & observed.coordinate_valid]
+        test_predictions = predictions.loc[predictions.person_id.isin(test_observed.person_id)]
+        test_summary, _ = paired_replay_summary(test_observed, test_predictions)
+        test_summary.to_csv(tables / 'heldout_replay_summary.csv', index=False)
+        test_joined = test_predictions.merge(test_observed[['person_id', 'trip_id', 'distance_km', 'destination_x', 'destination_y', 'coordinate_valid']].rename(
+            columns={'distance_km': 'observed_km', 'destination_x': 'observed_x', 'destination_y': 'observed_y', 'coordinate_valid': 'observed_coordinate_valid'}),
+            on=['person_id', 'trip_id'], validate='many_to_one')
+        test_rows = []
+        for method, group in test_joined.groupby('dataset', observed=True):
+            test_rows.append(dict(dataset=method, trips=len(group[['person_id', 'trip_id']].drop_duplicates()),
+                per_draw_radius_mae_km=np.average(abs(group.distance_km-group.observed_km), weights=group.weight),
+                per_draw_endpoint_error_km=(np.average(np.hypot(group.loc[group.observed_coordinate_valid, "destination_x"]-group.loc[group.observed_coordinate_valid, "observed_x"], group.loc[group.observed_coordinate_valid, "destination_y"]-group.loc[group.observed_coordinate_valid, "observed_y"])/1000, weights=group.loc[group.observed_coordinate_valid, "weight"]) if group.observed_coordinate_valid.any() else np.nan)))
+        pd.DataFrame(test_rows).to_csv(tables / 'heldout_per_draw_errors.csv', index=False)
+
         figures.replay_figure(observed, predictions, images)
         selector_table, selector_trips = selector_diagnostics(observed, predictions.loc[predictions.dataset.isin(['nn_distance','nn_no_distance'])])
         selector_table.to_csv(tables / 'selector_diagnostic.csv', index=False)
@@ -221,6 +238,7 @@ def figures_and_report(caches, settings, output, prepared):
                 continue
             findings.append(f'- {label}, {LABELS[row.dataset]}: {row.difference_km:+.2f} km (95% person-cluster interval {row.low_km:+.2f} to {row.high_km:+.2f}); {row.retained_weight_share:.1%} of contrasted-trip weight retained.')
     caveats = [
+        'Survey distance references use coordinate displacement when positive; explicit coincident loop modes remain zero. Other coincident endpoints use travelled distance divided by 1.3, an estimated Euclidean proxy. Unreliable coordinates are excluded from spatial learning and endpoint-error evaluation.',
         'The survey reference period and synthetic scaling year can differ. Consult cohort coverage and recorded run settings; matching a historical marginal distribution is not the scientific objective.',
         'The microcensus supplies a behavioral reference, not a distribution-fitting objective. Raw population contrasts may reflect different population composition; standardized results restrict to shared support.',
         'These are straight-line secondary-arrival-leg distances and assigned pre-simulation locations, not MATSim routed distances, travel times or a complete daily travel budget.',
@@ -242,7 +260,7 @@ def figures_and_report(caches, settings, output, prepared):
         if cache.kind.startswith('nn'):
             weight = cache.config('secondary_nn_no_car_no_pt_weight', 1.)
             if weight < 1:
-                caveats.insert(0, f'{LABELS[cache.kind]} uses a prediction-time accessibility rule: without both car availability and a driving licence, cell probabilities receive weight {weight:g} when no purpose-eligible A–D facility exists. The rule is soft and preserves positive mass. Accessibility patterns therefore reflect both learned attractiveness and this specified mobility rule.')
+                caveats.insert(0, f'{LABELS[cache.kind]} uses a prediction-time accessibility rule: purpose-eligible facility quality is graded from A through no coverage, with positive floor {weight:g}. The effect is weaker for drivers and stronger for non-drivers with a PT subscription. Accessibility patterns therefore reflect both learned attractiveness and this specified mobility rule.')
     findings += ['', '## Interpretation and limits', ''] + ['- ' + line for line in caveats]
     (output / 'findings.md').write_text('\n'.join(findings) + '\n')
     overview = overall[['dataset', 'trips', 'persons', 'mean_km', 'median_km', 'p90_km', 'short_share', 'long_share_20km']]
@@ -251,6 +269,9 @@ def figures_and_report(caches, settings, output, prepared):
     document += '<h2>Cohort coverage and exclusions</h2>' + pd.DataFrame(prepared['audit']).T.to_html()
     document += '<div class="note"><h2>How to interpret this comparison</h2><ul>' + ''.join('<li>' + html.escape(note) + '</li>' for note in caveats) + '</ul></div>'
     document += '<p><a href="findings.md">Numerical findings</a> · <a href="captions.md">Figure captions</a> · <a href="prepared_manifest.json">Data provenance</a></p>'
+    test_table = tables / 'heldout_replay_summary.csv'
+    if test_summary is not None:
+        document += '<h2>Shared person test partition</h2><p>These people were excluded from fitting all four NN experts and their person scalers. Only valid, distinct observed endpoints enter this test table. RDA remains a descriptive reference. Errors average repeated distances per trip.</p>' + pd.read_csv(test_table).to_html(index=False)
     document += '<h2>Standardized car contrast</h2>' + car.to_html(index=False, float_format=lambda v: f'{v:.3f}')
     document += '<h2>Standardized accessibility contrast</h2>' + pt.to_html(index=False, float_format=lambda v: f'{v:.3f}')
     document += ''.join(gallery) + '<h2>Machine-readable tables</h2><ul>' + ''.join(f'<li><a href="tables/{p.name}">{p.name}</a></li>' for p in sorted(tables.glob('*.csv'))) + '</ul></body></html>'

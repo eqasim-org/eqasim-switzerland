@@ -772,6 +772,11 @@ def execute(context):
 
                 new_row = loops_multistage.loc[base_index].copy()
 
+                # Allocate the original loop distance equally between its two legs.
+
+                loops_multistage.loc[base_index, "w_rdist"] *= 0.5
+                new_row["w_rdist"] *= 0.5
+
                 loops_multistage.loc[base_index, "destination_x"] = int(x)
                 loops_multistage.loc[base_index, "destination_y"] = int(y)
                 loops_multistage.loc[base_index, "arrival_time"]  = int(arrival)
