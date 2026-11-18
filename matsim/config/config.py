@@ -48,7 +48,7 @@ def execute(context):
 
     if not tools.parse_boolean(context.config("useScheduleBasedTransport")):
         tools.add_SBBPT_module(path)
-    tools.add_ptZones_module(path)
+    tools.add_pt_pricing_module(path)
     tools.change_params(path, {"eqasim.useScheduleBasedTransport": tools.parse_boolean(
         context.config("useScheduleBasedTransport"))}, create=True)
     return path
@@ -68,7 +68,7 @@ def args_walking_speed_parameters(context):
 
 def adapt_for_routing(context, config_path, *, local=False):
     """Set local pricing files and PT parameters before routing any trips."""
-    tools.add_ptZones_module(config_path, context.path(), local=local)
+    tools.add_pt_pricing_module(config_path, context.path(), local=local)
     if local:
         tools.change_params(config_path, tools.mode_choice_parameter_paths(context, local=True), create=True)
     tools.adjust_pt_routing_parameters(

@@ -18,6 +18,7 @@ def configure(context):
     context.stage("dmc.data.prepare_routed_data")
     context.stage("dmc.data.prepare_survey_data")
     context.stage("data.microcensus.persons")
+    context.stage("dmc.data.subscription_zones")   # the zones of the Verbundabos, for the PT prices
     context.stage("data.microcensus.trips")
     context.stage("data.constants")
     context.stage("matsim.config.pt")

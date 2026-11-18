@@ -45,7 +45,7 @@ The French zones only come from that list: a Swiss stop given one of them is not
 The stage returns a GeoDataFrame (network, zone, geometry, municipalities, name; EPSG:2056) and writes `pt_zones.gpkg` and an interactive map, `pt_zones.html`, in its cache folder. The map has one layer per network on an Esri background (Z-Pass layers hidden at first), a layer of the places in several regional networks (dashed outline), and a layer of the stops at zone or network borders (white dots, with all their zones on click). A click anywhere lists every zone of every network at that place, including the hidden layers, and outlines them. The input files are set by `pt_zones_municipalities_file`, `pt_zones_foreign_communes_file` and `pt_zones_foreign_zones_file` (relative to `data_path`, by default in `pt_pricing/`). `synthesis.population.models.subscription_zones` uses these polygons, for the zones of the homes and destinations and of the ride tracks (`utils/gtfs_router/tracks.py`).
 
 # Files passed to MATSim (data.pt_pricing.pt_pricing)
-The stage `data.pt_pricing.pt_pricing` returns `(SBB_all_distances.csv, gtfs_zones.csv, pricingDescription.xml, {name: Léman Pass table})`. The MATSim preparation copies these files next to the config. `matsim.config.tools.PT_PRICING_FILES` lists them with their parameters in the `ptZones` module:
+The stage `data.pt_pricing.pt_pricing` returns `(SBB_all_distances.csv, gtfs_zones.csv, pricingDescription.xml, {name: Léman Pass table})`. The MATSim preparation copies these files next to the config. `matsim.config.tools.PT_PRICING_FILES` lists them with their parameters in the `ptPricing` module (formerly `ptZones`; `matsim.config.tools.read_config` renames it in older configs):
 
 | Parameter | File |
 | --- | --- |

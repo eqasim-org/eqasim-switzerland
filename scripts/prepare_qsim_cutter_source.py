@@ -6,7 +6,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from matsim.config.tools import PT_PRICING_FILES, change_params, read_config, resolve_output_file, write_config
+from matsim.config.tools import PT_PRICING_FILES, PT_PRICING_MODULE, change_params, read_config, resolve_output_file, write_config
 
 
 def prepare(source, target, refresh=False):
@@ -52,7 +52,7 @@ def prepare(source, target, refresh=False):
         "eqasim.useScheduleBasedTransport": False,
         "eqasim.modeParametersPath": str(mode_parameters if mode_parameters.is_file() else source / "calibrated_dmc_parameters.yml"),
         "eqasim.costParametersPath": str(source / "cost_parameters.yml"),
-        **{f"ptZones.{parameter}": str(source / filename) for parameter, filename in PT_PRICING_FILES.items()},
+        **{f"{PT_PRICING_MODULE}.{parameter}": str(source / filename) for parameter, filename in PT_PRICING_FILES.items()},
         "eqasim:alphaCalibration.activate": False,
         "eqasim:calibration.activate": False,
         "eqasim:calibration.runCalibration": False,

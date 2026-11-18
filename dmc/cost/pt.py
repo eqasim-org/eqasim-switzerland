@@ -1,5 +1,6 @@
 import os
 import matsim.runtime.eqasim as eqasim
+from matsim.scenario.population import format_regional_products
 import numpy as np
 import pandas as pd
 import logging
@@ -43,6 +44,11 @@ def estimate_cost_from_eqasim_java(df, context, pt_regional_radius_km):
     
     df = df.merge(persons, on="person_id", how="left")
 
+    # The zones of the Verbundabos (dmc.data.subscription_zones), as the RegionalSubscriptionProducts of the population
+    zones = context.stage("dmc.data.subscription_zones")
+    df = df.merge(zones[["person_id", "subscription_zones"]], on="person_id", how="left")
+    df["RegionalSubscriptionProducts"] = df["subscription_zones"].map(format_regional_products)
+
     logger.warning("Gleis 7 subscription is not considered in the pt cost calculation, all persons are considered as not having it.")
     logger.warning("Thisis because this subscription is not considered by the subscriptions model, and thus are not considered in the simulation.")
     df["subscriptions_gleis7"] = False
@@ -67,7 +73,7 @@ def estimate_cost_from_eqasim_java(df, context, pt_regional_radius_km):
     df = df[["ID", "originX", "originY", "destinationX", "destinationY",
              "homeX", "homeY", "departureTime_s", "age",
              "hasGA", "hasHalbtaxSubscription", "hasVerbundAbo",
-             "hasStreckenAbo", "hasGleis7Abo", "hasJuniorAbo",]]
+             "hasStreckenAbo", "hasGleis7Abo", "hasJuniorAbo", "RegionalSubscriptionProducts"]]
     
     requests_path = context.path() + "/mzPricesRequests.csv"
     df.to_csv(requests_path, index = False)
@@ -84,11 +90,11 @@ def estimate_cost_from_eqasim_java(df, context, pt_regional_radius_km):
             (df_out["departureTime_s"].equals(df["departureTime_s"]))):
             return df_out
 
-    eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.utils.pricing.RunComputeTransitPrices",
+    # The Java pricing has no radius option: regional subscriptions are priced by their zones (RegionalSubscriptionProducts)
+    eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.mode_choice.costs.pt.RunComputeTransitPrices",
                ["--config-path", config_path,
                "--requests-path", requests_path,
-               "--output-path", output_path,
-               "--ptRegionalRadius_km", str(pt_regional_radius_km)],
+               "--output-path", output_path],
                )
     
     assert os.path.exists(output_path)    

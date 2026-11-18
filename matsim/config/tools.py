@@ -15,8 +15,12 @@ from utils.gtfs_router.lemanpass import JAVA_FILES as LEMANPASS_FILES
 
 TRUE_VALUES = frozenset({"1", "true", "t", "yes", "y", "on"})
 FALSE_VALUES = frozenset({"0", "false", "f", "no", "n", "off", ""})
-# The PT pricing inputs of a scenario (data.pt_pricing.pt_pricing), by their parameter of the ptZones module: the fare
-# zones of the stops, the SBB distances, the fare description and the Léman Pass tables (see
+# The config module of the PT pricing (SwissPtPricingConfigGroup in eqasim-java), and its former name: read_config
+# renames a ptZones module of an older config, which Java still reads with a warning
+PT_PRICING_MODULE = "ptPricing"
+LEGACY_PT_PRICING_MODULE = "ptZones"
+# The PT pricing inputs of a scenario (data.pt_pricing.pt_pricing), by their parameter of the ptPricing module: the
+# fare zones of the stops, the SBB distances, the fare description and the Léman Pass tables (see
 # utils.gtfs_router.lemanpass.write_java_tables), all next to the config
 # The parameter of each Léman Pass table (the names of the tables are those of LEMANPASS_FILES)
 LEMANPASS_PARAMETERS = {
@@ -116,8 +120,26 @@ def java_boolean(value, option_name="value"):
 
 
 def read_config(path):
-    return etree.parse(str(path), etree.XMLParser(load_dtd=False, no_network=True,
+    tree = etree.parse(str(path), etree.XMLParser(load_dtd=False, no_network=True,
                                                  resolve_entities=False, remove_blank_text=True))
+    rename_legacy_pt_pricing_module(tree)
+    return tree
+
+
+def rename_legacy_pt_pricing_module(tree):
+    """Rename the ptZones module of an older config to ptPricing. If the config has both, the parameters of ptPricing
+    are kept and those only in ptZones are moved into it."""
+    root = tree.getroot() if hasattr(tree, "getroot") else tree
+    for legacy in root.findall(f"module[@name='{LEGACY_PT_PRICING_MODULE}']"):
+        module = root.find(f"module[@name='{PT_PRICING_MODULE}']")
+        if module is None:
+            legacy.set("name", PT_PRICING_MODULE)
+            continue
+        names = {param.get("name") for param in module.findall("param")}
+        for param in legacy.findall("param"):
+            if param.get("name") not in names:
+                module.append(param)
+        root.remove(legacy)
 
 
 def write_config(tree, path):
@@ -187,10 +209,10 @@ def add_SBBPT_module(config_path):
     }, create=True)
 
 
-def add_ptZones_module(config_path, directory=None, *, local=False):
-    """Point the ptZones module to the PT pricing inputs (PT_PRICING_FILES) in directory, or next to the config."""
+def add_pt_pricing_module(config_path, directory=None, *, local=False):
+    """Point the ptPricing module to the PT pricing inputs (PT_PRICING_FILES) in directory, or next to the config."""
     directory = Path(directory) if directory is not None and not local else Path()
-    change_params(config_path, {f"ptZones.{parameter}": str(directory / filename)
+    change_params(config_path, {f"{PT_PRICING_MODULE}.{parameter}": str(directory / filename)
                                 for parameter, filename in PT_PRICING_FILES.items()}, create=True)
 
 

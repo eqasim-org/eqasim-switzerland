@@ -17,6 +17,7 @@ import html
 import json
 import logging
 import os
+from types import SimpleNamespace
 
 import folium
 import numpy as np
@@ -49,37 +50,17 @@ MAP_SIMPLIFY_M = 20   # the tolerance of the simplified zone outlines of the map
 
 
 def configure(context):
-    context.config("data_path")
+    configure_routing(context)
     context.config("random_seed")
-    context.config("threads", volatile = True)
-    context.config("gtfs_date", "dayWithMostServices")   # the same default as data.gtfs.cleaned
-
-    # The communes abroad and the rail lines of the tracks, relative to data_path (the same as data.pt_pricing.zones)
-    context.config("pt_zones_foreign_communes_file", default = "pt_pricing/communes_france.gpkg")
-    context.config("pt_zones_foreign_zones_file", default = "pt_pricing/unireso_france_zones.csv")
-    context.config("pt_zones_lines_file", default = "pt_pricing/linie-mit-polygon.geojson")
 
     # The agents on the control map (subscription_zones_map.html), drawn by case; 0: no map
     context.config("subscription_zones_map_agents", default = 400)
-    # The date of the routed commutes (YYYYMMDD); empty: gtfs_date if it is a date, else the first Tuesday of the feed
-    context.config("subscription_zones_date", default = "")
-    context.config("subscription_zones_departure", default = "07:30")
     # The commutes routed in each zone OD; 0: every agent's own commute. With n > 0, the other agents of the OD get the
     # zones of one of the n journeys (faster, for tests, but 16% of these agents then miss a zone of their own journey)
     context.config("subscription_zones_samples", default = 0)
-    # The folder of the fare table of tpg (tpg_<date>_Fare-system_Geneva.xlsx), relative to data_path; without it, no Léman Pass
-    context.config("subscription_zones_lemanpass_path", default = "pt_pricing/output")
-    # The buses follow the roads of their MATSim routes; false: straight lines between their stops
-    context.config("subscription_zones_bus_tracks", default = True)
 
     context.stage("synthesis.population.models.subscriptions")
     context.stage("synthesis.population.spatial.primary.locations")
-    context.stage("data.gtfs.cleaned")
-    context.stage("data.pt_pricing.pt_pricing")
-    context.stage("data.pt_pricing.zones")
-    context.stage("calibration.pt_routing.pt_routing_parameters")   # the route choice of MATSim
-    if context.config("subscription_zones_bus_tracks"):
-        context.stage("matsim.scenario.network.pt")
 
 
 def execute(context):
@@ -89,35 +70,12 @@ def execute(context):
     persons = context.stage("synthesis.population.models.subscriptions")
     work, education = context.stage("synthesis.population.spatial.primary.locations")[:2]
 
-    # Load the timetable, the fares, the zone polygons (data.pt_pricing.zones) and the tracks of the rides with the zones they cross.
+    # Load the timetable, the fares, the zone polygons and the router of one date (routing_tools).
 
-    data_path = context.config("data_path")
-    data_file = lambda option: os.path.join(data_path, context.config(option))
-    pricing_path = context.path("data.pt_pricing.pt_pricing")
-    net = build_network("%s/output" % context.path("data.gtfs.cleaned"), cache_dir = context.path())
+    tools = routing_tools(context)
+    tracks, router, day, pricing, lemanpass, date = tools.tracks, tools.router, tools.day, tools.pricing, tools.lemanpass, tools.date
 
-    schedule_path, network_path = None, None
-    if context.config("subscription_zones_bus_tracks"):
-        paths = context.stage("matsim.scenario.network.pt")
-        schedule_path, network_path = paths["schedule"], paths["network"]
-
-    zones = context.stage("data.pt_pricing.zones")
-    zones_path = "%s/pt_zones.gpkg" % context.path("data.pt_pricing.zones")
-    tracks = build_tracks(net, data_file("pt_zones_lines_file"), zones, zones_path, schedule_path, network_path, cache_dir = context.path())
-    foreign = [data_file("pt_zones_foreign_communes_file"), data_file("pt_zones_foreign_zones_file")]
-    pricing = Pricing(pricing_path, tracks = tracks)
-    rows = foreign_stop_zones(net, tracks.zones, *foreign)
-    added = pricing.add_stop_zones(zip(rows["stop_id"], rows["network"], rows["zone"]))
-    logger.info(f"Zones of the stops abroad: {added} stops of {len(rows)} in the listed communes given the zone of their commune")
-
-    # Route the commutes on the network of one date, weighed as by the PT router of MATSim.
-
-    date = routing_date(context.config("subscription_zones_date") or context.config("gtfs_date"), net)
-    logger.info(f"Routing the commutes of the Verbundabos on {date}")
-    day = net.on(date)
-    router = Router(day, cost = Cost.from_eqasim(context.stage("calibration.pt_routing.pt_routing_parameters")))
-    lemanpass = load_lemanpass(data_file("subscription_zones_lemanpass_path"), day, tracks.zones, cache_dir = context.path())
-    pricing.lemanpass = lemanpass   # the Léman Pass single tickets in the prices of the journeys
+    # Route the commutes on the network of that date, weighed as by the PT router of MATSim.
 
     result = verbund_zones(persons, work, education, tracks.zones, router, day, pricing,
                            departure = context.config("subscription_zones_departure"),
@@ -147,6 +105,64 @@ def execute(context):
         persons[column] = persons[column].fillna("")
     assert persons.loc[persons["pt_subscription"].isin(VERBUND_CODES), "subscription_product"].ne("").all()
     return persons
+
+
+def configure_routing(context):
+    """Declares the options and stages of routing_tools: shared with dmc.data.subscription_zones, so that the persons of
+    the survey get their zones as the synthetic persons do."""
+    context.config("data_path")
+    context.config("threads", volatile = True)
+    context.config("gtfs_date", "dayWithMostServices")   # the same default as data.gtfs.cleaned
+
+    # The communes abroad and the rail lines of the tracks, relative to data_path (the same as data.pt_pricing.zones)
+    context.config("pt_zones_foreign_communes_file", default = "pt_pricing/communes_france.gpkg")
+    context.config("pt_zones_foreign_zones_file", default = "pt_pricing/unireso_france_zones.csv")
+    context.config("pt_zones_lines_file", default = "pt_pricing/linie-mit-polygon.geojson")
+
+    # The date of the routed commutes (YYYYMMDD); empty: gtfs_date if it is a date, else the first Tuesday of the feed
+    context.config("subscription_zones_date", default = "")
+    context.config("subscription_zones_departure", default = "07:30")
+    # The folder of the fare table of tpg (tpg_<date>_Fare-system_Geneva.xlsx), relative to data_path; without it, no Léman Pass
+    context.config("subscription_zones_lemanpass_path", default = "pt_pricing/output")
+    # The buses follow the roads of their MATSim routes; false: straight lines between their stops
+    context.config("subscription_zones_bus_tracks", default = True)
+
+    context.stage("data.gtfs.cleaned")
+    context.stage("data.pt_pricing.pt_pricing")
+    context.stage("data.pt_pricing.zones")
+    context.stage("calibration.pt_routing.pt_routing_parameters")   # the route choice of MATSim
+    if context.config("subscription_zones_bus_tracks"):
+        context.stage("matsim.scenario.network.pt")
+
+
+def routing_tools(context):
+    """What verbund_zones needs to route the commutes (see configure_routing), cached in the folder of the calling stage:
+    net (the timetable), tracks (the rides with the zones they cross), pricing (with the stops abroad and the Léman
+    Pass), date, day (the network of that date), router (weighed as the PT router of MATSim) and lemanpass."""
+    data_file = lambda option: os.path.join(context.config("data_path"), context.config(option))
+    net = build_network("%s/output" % context.path("data.gtfs.cleaned"), cache_dir = context.path())
+
+    schedule_path, network_path = None, None
+    if context.config("subscription_zones_bus_tracks"):
+        paths = context.stage("matsim.scenario.network.pt")
+        schedule_path, network_path = paths["schedule"], paths["network"]
+
+    zones = context.stage("data.pt_pricing.zones")
+    zones_path = "%s/pt_zones.gpkg" % context.path("data.pt_pricing.zones")
+    tracks = build_tracks(net, data_file("pt_zones_lines_file"), zones, zones_path, schedule_path, network_path, cache_dir = context.path())
+    foreign = [data_file("pt_zones_foreign_communes_file"), data_file("pt_zones_foreign_zones_file")]
+    pricing = Pricing(context.path("data.pt_pricing.pt_pricing"), tracks = tracks)
+    rows = foreign_stop_zones(net, tracks.zones, *foreign)
+    added = pricing.add_stop_zones(zip(rows["stop_id"], rows["network"], rows["zone"]))
+    logger.info(f"Zones of the stops abroad: {added} stops of {len(rows)} in the listed communes given the zone of their commune")
+
+    date = routing_date(context.config("subscription_zones_date") or context.config("gtfs_date"), net)
+    logger.info(f"Routing the commutes of the Verbundabos on {date}")
+    day = net.on(date)
+    router = Router(day, cost = Cost.from_eqasim(context.stage("calibration.pt_routing.pt_routing_parameters")))
+    lemanpass = load_lemanpass(data_file("subscription_zones_lemanpass_path"), day, tracks.zones, cache_dir = context.path())
+    pricing.lemanpass = lemanpass   # the Léman Pass single tickets in the prices of the journeys
+    return SimpleNamespace(net = net, tracks = tracks, pricing = pricing, date = date, day = day, router = router, lemanpass = lemanpass)
 
 
 def routing_date(value, net):

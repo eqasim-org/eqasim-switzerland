@@ -4,7 +4,7 @@ Fitted coefficients/scales stay in the DMC parameter files; shared estimation
 constants stay in dmc.constants. Override runtime defaults in config_dib_10.yml.
 """
 from dmc.constants import constants as DMC
-from matsim.config.tools import PT_PRICING_FILES
+from matsim.config.tools import PT_PRICING_FILES, PT_PRICING_MODULE
 
 MODES = ("car", "pt", "bike", "walk", "car_passenger")
 VEHICLE_MODES = {MODES.index("car"): 0, MODES.index("bike"): 1}
@@ -136,7 +136,7 @@ ROUTING_COST_FILENAME = "cost.parquet"
 # Files read by MultiModeRouter, relative to the original MATSim config.
 ROUTER_CONFIG_INPUTS = {
     "transit": ("transitScheduleFile", "vehiclesFile"),
-    "ptZones": tuple(PT_PRICING_FILES),
+    PT_PRICING_MODULE: tuple(PT_PRICING_FILES),
     "swissRustRouting": ("libraryPath", "installationDirectory", "sourceDirectory"),
 }
 

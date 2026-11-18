@@ -233,7 +233,7 @@ class TransitRouter:
             weights = graph.es["time"]
             self.graphs[name] = (graph, weights, np.asarray(graph.es["link_index"], dtype=int), np.asarray(weights))
         self.link_lookup = {str(link): i for i, link in enumerate(network["links"].link_id)}
-        self.outside_components = np.asarray(network["outside_graph"].connected_components(mode="weak").membership)
+        self.reach = {}
         links = network["links"].set_index("link_id")
         c = network["crossings"].copy()
         c["from_index"] = c.link_id.map(links.from_index)
@@ -259,10 +259,20 @@ class TransitRouter:
         return (frame.assign(distance=distance).sort_values(["distance", "link_id"], kind="stable")
                 .drop_duplicates(["border_x", "border_y"]).head(3))
 
+    def reachable(self, node, mode):
+        # One-way roads make weak components too coarse: keep only directed reachability.
+        key = int(node), mode
+        if key not in self.reach:
+            graph = self.graphs["outside_graph"][0]
+            mask = np.zeros(graph.vcount(), dtype=bool)
+            mask[graph.subcomponent(int(node), mode=mode)] = True
+            self.reach[key] = mask
+        return self.reach[key]
+
     def route(self, origin, destination):
         best = None
-        entries = self.entries[self.outside_components[self.entries.from_index] == self.outside_components[int(origin["to_index"])]]
-        exits = self.exits[self.outside_components[self.exits.to_index] == self.outside_components[int(destination["from_index"])]]
+        entries = self.entries[self.reachable(origin["to_index"], "out")[self.entries.from_index]]
+        exits = self.exits[self.reachable(destination["from_index"], "in")[self.exits.to_index]]
         for entry in self.nearest(entries, origin).itertuples():
             approach = self.path("outside_graph", origin["to_index"], entry.from_index)
             if approach is None:

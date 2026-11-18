@@ -51,9 +51,10 @@ JAVA_COLUMNS = {"products": ["product_id", "label", "pieces", "end_a", "end_b", 
 HOME_ZONE = "10"      # the Unireso zone of Geneva: a journey into any other zone, or to a French station, is abroad
 VERSION = 1           # change it when what is read from the fare table changes, so that the old cache files are not used
 NETWORK = "Unireso"   # the network of the zones of the Léman Pass in the zone polygons and the stop zones
-# the ids of the rail stops: the stations of the Swiss feed (85xxxxx, and 87xxxxx for the French ones) and the SNCF
-# train stops (not those of their coaches, OCECar)
-RAIL_STOP = r"^(?:Parent)?8[57]\d{5}(?::|$)|OCETrain"
+# the ids of the rail stops: the stations of the Swiss feed (85xxxxx, and 87xxxxx for the French ones; since 2026 the
+# SLOIDs of the Swiss stations, ch:1:sloid:1008 for 8501008, as SwissPtRoutePredictor.simplifyStopId in Java) and the
+# SNCF train stops (not those of their coaches, OCECar)
+RAIL_STOP = r"^(?:Parent)?(?:8[57]\d{5}|ch:1:sloid:\d{1,5})(?::|$)|OCETrain"
 MIN_ZONE_M = 200      # a zone crossed by a ride for less than this does not count (as in the pricing)
 HEADER_ROW = 6        # the row of the column names in the sheets of the fare table (from 0)
 TICKETS = {"Billet Léman Pass": "single", "Abonnement Léman Pass annuel": "annual", "Abonnement Léman Pass mensuel": "monthly",

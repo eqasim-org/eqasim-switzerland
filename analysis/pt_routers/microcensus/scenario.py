@@ -19,7 +19,7 @@ def execute(context):
         'network': ['inputNetworkFile'], 'transit': ['transitScheduleFile', 'vehiclesFile'],
         'vehicles': ['vehiclesFile'], 'facilities': ['inputFacilitiesFile'],
         'eqasim': ['costParametersPath', 'modeParametersPath'],
-        'sbbPt': ['sbbDataFile'], 'ptZones': ['ptZonesFilePath', 'sbbDistancesPath', 'pricingDescriptionPath']})
+        'sbbPt': ['sbbDataFile'], tools.PT_PRICING_MODULE: list(tools.PT_PRICING_FILES)})
     tools.disable_population_inputs(target)
     tree = tools.read_config(target)
     network = tree.find("module[@name='network']/param[@name='inputNetworkFile']").get('value')

@@ -171,6 +171,6 @@ def execute(context):
                         ("eqasim:networkCalibration.agentAscsCalibration.highCountWeight","1.1"),
                         ("eqasim:networkCalibration.agentAscsCalibration.mediumCountWeight","1.05"),
                         ("eqasim:networkCalibration.agentAscsCalibration.lowCountWeight","1.0"),
-                        *((f"ptZones.{parameter}", filename) for parameter, filename in config_tools.PT_PRICING_FILES.items()),
+                        *((f"{config_tools.PT_PRICING_MODULE}.{parameter}", filename) for parameter, filename in config_tools.PT_PRICING_FILES.items()),
                         ] )
     return output_path

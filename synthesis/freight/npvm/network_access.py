@@ -45,13 +45,9 @@ def validate(context):
     from matsim.scenario.network.utils import border_crossings, link_geometry
     code = b"".join(Path(module.__file__).read_bytes() for module in
                     (freight_crossings, border_crossings, link_geometry))
-    directory = Path(context.path(NETWORK_STAGE))
-    inputs = []
-    for name in ("network.pkl", "detailed_network.csv"):
-        path = directory / name
-        stat = path.stat() if path.is_file() else None
-        inputs.append([name, stat.st_size, stat.st_mtime_ns] if stat else [name, None])
-    return {"helpers": hashlib.sha256(code).hexdigest(), "inputs": inputs}
+    # Synpp's validation context cannot see other stages' paths; changes to the
+    # converted network already invalidate this stage through its dependency.
+    return {"helpers": hashlib.sha256(code).hexdigest()}
 
 
 def prepare_network(network, geometry_path):

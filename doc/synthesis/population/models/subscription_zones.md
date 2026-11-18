@@ -124,3 +124,14 @@ zones per fare network, the networks joined by `+`, e.g. `ZVV:110,121` or
 written like any other regional subscription (its product is not written), and
 `subscriptions` keeps its values (`none`, `GA`, `VA`, `HT`, `VA+HT`). The external and cross-border agents get no zones. With
 `use_subscription_zones: false`, the population is written as before.
+
+## Microcensus persons (dmc.data.subscription_zones)
+
+The Java pricing pays a trip with a Verbundabo outside the subscription's zones
+(`RegionalSubscriptionProducts`). The mode choice estimation prices the microcensus
+trips with it, so the microcensus persons with a Verbundabo get zones too.
+`dmc.data.subscription_zones` routes their commutes with the same method and options
+(`configure_routing` and `routing_tools` of this stage). The destination is their place
+of education, else their work place. Only employed persons with a work place in
+Switzerland or its border regions count. `dmc.cost.pt` writes the zones into the
+price requests in the `RegionalSubscriptionProducts` column.

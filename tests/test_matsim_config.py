@@ -54,7 +54,7 @@ def base(tmp_path):
         'eqasim.costParametersPath': 'cost_parameters.yml',
         'custom.marker': 'keep this',
     }, create=True)
-    tools.add_ptZones_module(path)
+    tools.add_pt_pricing_module(path)
     tree = tools.read_config(path)
     replanning = tools.get_module(tree, 'replanning')
     for group in ('freight', 'crossborder', 'null'):
@@ -95,14 +95,14 @@ def test_tools_strict_creation_indices_comments_and_dedup(base):
 def test_pt_updates_are_idempotent(base, pt_parameters):
     for _ in range(2):
         tools.add_SBBPT_module(base)
-        tools.add_ptZones_module(base, base.parent)
+        tools.add_pt_pricing_module(base, base.parent)
         tools.adjust_pt_routing_parameters(base, pt_parameters)
     tree = tools.read_config(base)
     assert len(tree.findall("module[@name='SBBTransit']")) == 1
-    assert len(tree.findall("module[@name='ptZones']")) == 1
+    assert len(tree.findall("module[@name='ptPricing']")) == 1
     assert len(tree.findall("module[@name='swissRailRaptor']/parameterset")) == 81
     assert value(base, 'eqasim:raptor.travelTimeRail_u_h') == '-1.0'
-    assert value(base, 'ptZones.ptZonesFilePath') == str(base.parent / 'gtfs_zones.csv')
+    assert value(base, 'ptPricing.ptZonesFilePath') == str(base.parent / 'gtfs_zones.csv')
 
 
 @pytest.mark.parametrize('schedule', [False, True])
@@ -150,7 +150,8 @@ def stage_inputs(tmp_path, base, pt_parameters):
         'matsim.scenario.households': files['households'],
         'dmc.parameter_files': (files['mode.yml'], files['cost.yml']),
         'data.microcensus.shares': (files['global.csv'], files['cantonal.csv']),
-        'data.pt_pricing.pt_pricing': (files['sbb.csv'], files['zones.csv'], files['pricing.xml']),
+        'data.pt_pricing.pt_pricing': (files['sbb.csv'], files['zones.csv'], files['pricing.xml'],
+                                       {k: files['zones.csv'] for k in ('products', 'stations')}),
         'calibration.pt_routing.pt_routing_parameters': pt_parameters,
         'calibration.car_routing_vot.optimal_value': .73,
         'analysis.counts.target': '/calibration/counts.csv',
@@ -193,7 +194,7 @@ def test_prepare_preserves_local_calibration_and_files(tmp_path, monkeypatch, ba
     assert 'matsim.config.config' in context.dependencies
     assert value(result, 'eqasim.routingDistanceUtility') == '0.73'
     assert value(result, 'custom.marker') == 'keep this'
-    assert value(result, 'ptZones.ptZonesFilePath') == str(context.directory / 'gtfs_zones.csv')
+    assert value(result, 'ptPricing.ptZonesFilePath') == str(context.directory / 'gtfs_zones.csv')
     if active:
         assert value(result, 'eqasim:networkCalibration.countsFile') == '/calibration/counts.csv'
         assert value(result, 'eqasim:networkCalibration.freespeedCalibration.observedTripsFile') == '/calibration/trips.csv'
@@ -216,7 +217,7 @@ def test_pt_configs_copy_base_and_disable_population(tmp_path, monkeypatch, base
     for parameter in ('facilities.inputFacilitiesFile', 'households.inputFile', 'plans.inputPlansFile', 'vehicles.vehiclesFile'):
         assert value(result, parameter) == 'null'
     assert not tools.read_config(result).xpath("//parameterset[param[@name='subpopulation'][@value='freight']]")
-    assert value(result, 'ptZones.ptZonesFilePath') == str(context.directory / 'gtfs_zones.csv')
+    assert value(result, 'ptPricing.ptZonesFilePath') == str(context.directory / 'gtfs_zones.csv')
     assert value(result, 'eqasim:raptor.travelTimeRail_u_h') == '-1.0'
     assert 'calibration.pt_routing.pt_routing_parameters' in context.dependencies
     assert value(result, 'eqasim.routingDistanceUtility') == '0.73'

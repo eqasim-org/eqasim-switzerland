@@ -3,7 +3,7 @@ import shutil
 import matsim.runtime.eqasim as eqasim
 from matsim.config.tools import (
     java_boolean, parse_boolean, copy_config, adapt_existing_scenario,
-    resolve_output_file, scenario_input_parameters, change_params, PT_PRICING_FILES,
+    resolve_output_file, scenario_input_parameters, change_params, PT_PRICING_FILES, PT_PRICING_MODULE,
 )
 import logging
 logger = logging.getLogger("synpp")
@@ -53,7 +53,7 @@ def execute(context):
     destination = os.path.join(output_path, config)
     copy_config(origin, destination, input_paths={
         "eqasim": ("modeParametersPath", "costParametersPath"),
-        "ptZones": tuple(PT_PRICING_FILES),
+        PT_PRICING_MODULE: tuple(PT_PRICING_FILES),
         "eqasim:alphaCalibration": ("filePath",),
         "eqasim:networkCalibration": ("countsFile",),
         "eqasim:networkCalibration.costCalibration": ("specialRegionPath",),
@@ -89,7 +89,7 @@ def execute(context):
         ])
     else:
         # Run simulation with vdf
-        eqasim.run(context, "org.eqasim.switzerland.RunVDFSimulation", [
+        eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunVDFSimulation", [
             "--config-path", config_path,
             "--config:controler.outputDirectory", os.path.join(output_path, "simulation_output"),
             "--config:controler.lastIteration", str(1),

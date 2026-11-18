@@ -20,10 +20,8 @@ def configure(context):
     context.stage("analysis.counts.cantons.aargau")
     context.stage("analysis.counts.cantons.bern")
     context.stage("analysis.counts.cantons.ch")
-    context.stage("analysis.counts.cantons.geneva",
-                  alias="geneva_counts" if geneva_source == "geneva" else None)
-    context.stage("analysis.counts.cantons.transcality",
-                  alias="geneva_counts" if geneva_source == "transcality" else None)
+    # Only the selected Geneva source is required.
+    context.stage(f"analysis.counts.cantons.{geneva_source}", alias="geneva_counts")
     context.stage("analysis.counts.cantons.luzern")
     context.stage("analysis.counts.cantons.saint_gallen")
     context.stage("analysis.counts.cantons.vaud")
