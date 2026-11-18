@@ -2,6 +2,7 @@
 
 import logging
 from enum import Enum
+from types import SimpleNamespace
 
 import geopandas as gpd
 import pandas as pd
@@ -41,7 +42,15 @@ class TrafficDataMatcher:
 
     def match(self, network, counts, mode=None, search_radius=10,
               prioritize_road_types=False, road_types_stopping_type = "secondary",
-              directional_search_radius=50, max_angle_difference=45):
+              directional_search_radius=50, max_angle_difference=45, station_overrides=None):
+        from .station_overrides import match_station_overrides, station_key
+        override_counts = None
+        if station_overrides:
+            override_keys = {station_key(key) for key in station_overrides}
+            selected = counts.counts.id.map(station_key).isin(override_keys)
+            override_counts = counts.counts.loc[selected].copy()
+            counts_all = counts
+            counts = SimpleNamespace(counts=counts.counts.loc[~selected].copy())
         has_manual_direction = {"osm_id", "angle"}.issubset(counts.counts.columns)
         if mode is None:
             if not has_manual_direction:
@@ -70,6 +79,15 @@ class TrafficDataMatcher:
             raise RuntimeError(
                 f"{mode.value} matching must return exactly {expected_links} link(s) per station."
             )
+
+        if override_counts is not None:
+            matched["is_station_override"] = False
+            matched["expected_links"] = expected_links
+            if not override_counts.empty:
+                overrides = match_station_overrides(self, network, override_counts, station_overrides)
+                if not overrides.empty:
+                    matched = gpd.GeoDataFrame(pd.concat([matched, overrides], ignore_index=True), geometry="geometry", crs=counts.counts.crs)
+            counts = counts_all
 
         total = counts.counts["id"].nunique()
         found = matched["id"].nunique()

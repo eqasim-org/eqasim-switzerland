@@ -405,8 +405,14 @@ class Plotter:
         flows = flows.merge(matched[["id","link_id"]], on="id", how="left"
                     ).merge(network.links[["link_id","highway"]], on="link_id",how="left")
         flows = flows[flows.highway.notna()]
+        if "is_station_override" in flows:
+            mixed = flows.groupby("id").highway.transform("nunique").gt(1)
+            flows.loc[flows.is_station_override.fillna(False) & mixed, "highway"] = "mixed"
+        # A station total is one observation, even when several measured links
+        # share its type. Mixed footprints cannot be allocated to each road type.
+        flows = flows.drop_duplicates(subset=["id", "highway"])
         
-        highway_to_plot = ROAD_TYPE_PRIORITY[:14]
+        highway_to_plot = (*ROAD_TYPE_PRIORITY[:14], "mixed")
         flows = flows[flows.highway.isin(highway_to_plot)]
         
         if counts is not None and distance_to_border>0:

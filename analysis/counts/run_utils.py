@@ -10,6 +10,8 @@ from pathlib import Path
 import seaborn as sns
 import logging
 import json
+from .cantons.ch_overrides import REINSTATED_STATION_IDS
+from .matching.station_overrides import station_key
 
 logger = logging.getLogger("synpp")
 
@@ -18,6 +20,16 @@ IDS_TO_DROP = set([ # these are in very complexe intersections, very probably wi
     "35", "157", "507", "852", "851", "83", "68", "285", "221", "296", "690", "296", "311", 
     "618", "112", "675", "799", "277", "6", "760", "577", 
 ])
+
+
+def manual_exclusion_mask(df, city=None):
+    """Apply junction exclusions, allowing only explicitly reinstated Swiss matches."""
+    ids = df["id"].map(station_key)
+    reviewed = df.get("is_station_override", pd.Series(False, index=df.index)).fillna(False).astype(bool)
+    swiss = (pd.Series(city == "ch", index=df.index) if city is not None
+             else df.get("city", pd.Series("", index=df.index)).eq("ch"))
+    reinstated = swiss & reviewed & ids.isin(REINSTATED_STATION_IDS)
+    return ids.isin(IDS_TO_DROP) & ~reinstated
 
 
 def filter_data(df, network, require_simulated=True):
@@ -62,17 +74,23 @@ def filter_data(df, network, require_simulated=True):
     
     ### FILTERS
     len_before = len(df)  
+    def curated(rows):
+        if "is_station_override" not in rows:
+            return pd.Series(False, index=rows.index)
+        return rows.is_station_override.fillna(False).astype(bool)
     # We filter out the data matched to links that are far
     df = df[df.distance.apply(lambda x: max(x)<30)]
     # filter out the data where the distance to links is significantly differente
     # maybe these are one way, but matched with two links
-    df = df[df.distance.apply(lambda x: (max(x)-min(x))<15)]
+    df = df[curated(df) | df.distance.apply(lambda x: (max(x)-min(x))<15)]
     # filter out those with different highway types
     highways = df.link_id.apply(lambda x: [link_feat.get(xi, {}).get('highway', None) for xi in x])
-    df = df[highways.apply(np.unique).apply(len)==1]
+    mixed = highways.apply(np.unique).apply(len).gt(1)
+    df.loc[curated(df) & mixed, "highway"] = "mixed"
+    df = df[curated(df) | ~mixed]
     # if the difference in umber of lanes is more than one, then we suspect it, to be removed
     permlanes = df.link_id.apply(lambda x: [link_feat.get(lk, {}).get('permlanes', -1e5) for lk in x])
-    df = df[permlanes.apply(lambda x: (max(x)-min(x))<=1)]
+    df = df[curated(df) | permlanes.apply(lambda x: (max(x)-min(x))<=1)]
     # Filter outliers (comes from matching) while keeping highway as a column.
     def remove_outliers(data, column):
         grouped = data.groupby('highway')[column]
@@ -88,8 +106,8 @@ def filter_data(df, network, require_simulated=True):
     if require_simulated:
         df = remove_outliers(df, 'sim_vphpl').reset_index(drop=True)
         
-    # filter the ones located in very complex intersections
-    df = df[~df['id'].astype(str).isin(IDS_TO_DROP)].copy().reset_index(drop=True)
+    # Reviewed Swiss footprints replace the old assumption of a two-link junction.
+    df = df[~manual_exclusion_mask(df)].copy().reset_index(drop=True)
 
     len_after = len(df)
     logger.info(f"\t Filtered dataset: {len_after} records remaining (removed {len_before - len_after} records)")

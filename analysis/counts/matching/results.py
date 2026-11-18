@@ -4,12 +4,16 @@ import os
 
 
 def save_count_results(city, matched, flows, output_directory):
-    grouped_matches = matched.groupby("id").agg({
+    aggregation = {
         "geometry": "first",
         "link_id": list,
         "road_geometry": list,
         "distance": list,
-    }).reset_index()
+    }
+    for column in ("measurement_group", "reference_osm_id", "override_match_method"):
+        if column in matched:
+            aggregation[column] = list
+    grouped_matches = matched.groupby("id").agg(aggregation).reset_index()
 
     results = flows.merge(grouped_matches, on="id", how="left")
     results["city"] = city.lower()

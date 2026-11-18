@@ -6,6 +6,8 @@ Prepare matched Transcality detector profiles for count comparison.
 import json
 import logging
 import os
+import hashlib
+from pathlib import Path
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -23,8 +25,23 @@ SOURCE_FILES = {
     "CANTON_LOOPS_LANE_BASED": "measurements_induction_loops.csv",
 }
 
+# Daily corrections supplied from the Geneva traffic-count map:
+# https://www.arcgis.com/apps/mapviewer/index.html?url=https://vector.sitg.ge.ch/arcgis/rest/services/OTC_COMPTAGE_TRAFIC/FeatureServer/0&source=sd
+# Each tuple receives ONE corrected total, shared by its detector profiles.
+DAILY_FLOW_OVERRIDES = {
+    ("astra_200_4", "astra_200_5", "astra_200_6", "2071.2"): 28327,
+    ("2017.1",): 11207,
+    ("315.2",): 6691,
+    ("017.0.102",): 5533,
+    ("017.0.103",): 11196,
+    ("035.0.106",): 2276,
+}
+EXCLUDED_DETECTOR_IDS = {"316.2"}
+SITG_OVERRIDES_FILE = os.path.join("sitg", "transcality_overrides_2025.csv")
+
 
 def configure(context):
+    context.config("correct_transcality_counts", default=True)
     context.config("data_path")
     context.config(
         "counts_path",
@@ -35,7 +52,9 @@ def configure(context):
 def execute(context):
     input_path = os.path.join(context.config("counts_path"), "Transcality")
     output_path = os.path.join(context.path(), "processed_data.gpkg")
-    counts = prepare_transcality_counts(input_path)
+    counts = prepare_transcality_counts(
+        input_path, correct_transcality_counts=context.config("correct_transcality_counts")
+    )
 
     counts.to_file(output_path, driver="GPKG")
     counts.drop(columns="geometry").to_csv(
@@ -51,10 +70,12 @@ def execute(context):
     return output_path
 
 
-def prepare_transcality_counts(input_path):
+def prepare_transcality_counts(input_path, *, correct_transcality_counts=True, apply_sitg_overrides=True):
     """Build directional daily counts and 24-hour profiles from source rates."""
     input_path = os.fspath(input_path)
     matched = _read_matches(os.path.join(input_path, "matched_points.csv"))
+    if correct_transcality_counts:
+        matched = matched[~matched.detid.isin(EXCLUDED_DETECTOR_IDS)].copy()
     measurements = _read_measurements(
         os.path.join(input_path, "transcality_counts"), matched
     )
@@ -93,6 +114,10 @@ def prepare_transcality_counts(input_path):
         )
         profile = profile[~profile["OBJECTID"].isin(incomplete.index)]
 
+    if correct_transcality_counts:
+        overrides = {**(_read_sitg_overrides(input_path) if apply_sitg_overrides else {}), **DAILY_FLOW_OVERRIDES}
+        profile = _apply_daily_flow_overrides(profile, overrides)
+
     metadata = hourly.groupby("OBJECTID", as_index=False).agg(
         source=("source", "first"),
         detector_ids=("detid", lambda values: ", ".join(dict.fromkeys(values))),
@@ -122,6 +147,65 @@ def prepare_transcality_counts(input_path):
         ["flow", "flow_lower", "flow_upper"]
     ].round(2)
     return gpd.GeoDataFrame(result, geometry="geometry", crs="EPSG:2056")
+
+
+def _read_sitg_overrides(input_path):
+    """Load reviewed 2025 weekday corrections from the local SITG snapshot."""
+    path = os.path.join(input_path, SITG_OVERRIDES_FILE)
+    if not os.path.exists(path):
+        return {}
+    rows = pd.read_csv(path, dtype={"detector_id": str})
+    if rows.detector_id.isna().any() or rows.detector_id.duplicated().any():
+        raise ValueError("SITG corrections require unique nonempty detector IDs")
+    if not (pd.to_numeric(rows.count_year).eq(2025).all()
+            and pd.to_numeric(rows.daily_flow).gt(0).all()
+            and np.isfinite(pd.to_numeric(rows.daily_flow)).all()):
+        raise ValueError("SITG corrections require positive 2025 weekday totals")
+    protected = {detector for group in DAILY_FLOW_OVERRIDES for detector in group} | EXCLUDED_DETECTOR_IDS
+    if rows.detector_id.isin(protected).any():
+        raise ValueError("SITG corrections must not replace explicit manual corrections/exclusions")
+    return {(row.detector_id,): float(row.daily_flow) for row in rows.itertuples()}
+
+
+def _apply_daily_flow_overrides(profile, overrides=None):
+    """Preserve profile shapes while correcting totals before link aggregation."""
+    profile = profile.copy()
+    detector_ids = profile.OBJECTID.str.split(":", n=1).str[1]
+    for detectors, daily_flow in (DAILY_FLOW_OVERRIDES if overrides is None else overrides).items():
+        selected = detector_ids.isin(detectors)
+        present = set(detector_ids[selected])
+        if not present:
+            continue
+        if present != set(detectors):
+            raise ValueError(f"Incomplete Transcality correction group: missing {sorted(set(detectors) - present)}")
+        original = profile.loc[selected, "hourly_flow"].sum()
+        if not np.isfinite(original) or original <= 0:
+            raise ValueError(f"Cannot rescale nonpositive Transcality flow for {detectors}")
+        factor = daily_flow / original
+        columns = ["hourly_flow", "hourly_lower", "hourly_upper"]
+        profile.loc[selected, columns] *= factor
+
+        # Allocate hundredths across hours/detectors so the exported profiles
+        # and their aggregated daily count both sum to the exact correction.
+        values = profile.loc[selected, "hourly_flow"].to_numpy() * 100
+        cents = np.floor(values).astype(np.int64)
+        remainder = int(round(daily_flow * 100)) - int(cents.sum())
+        order = np.argsort(-(values - cents), kind="stable")
+        cents[order[:remainder]] += 1
+        profile.loc[selected, "hourly_flow"] = cents / 100
+        profile.loc[selected, ["hourly_lower", "hourly_upper"]] = profile.loc[
+            selected, ["hourly_lower", "hourly_upper"]
+        ].round(2)
+        logger.info("Corrected Transcality %s total: %.2f -> %.2f vehicles/day.",
+                    ", ".join(detectors), original, daily_flow)
+    return profile
+
+
+def validate(context):
+    if not context.config("correct_transcality_counts"):
+        return "transcality-corrections-disabled"
+    path = Path(context.config("counts_path")) / "Transcality" / SITG_OVERRIDES_FILE
+    return hashlib.sha256(path.read_bytes() if path.exists() else b"no-sitg-overrides").hexdigest()
 
 
 def _read_matches(path):

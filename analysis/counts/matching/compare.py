@@ -123,6 +123,21 @@ class Compare:
         match_summary["directions_represented"] = (
             match_summary["directions_represented"].astype(int)
         )
+        override_ids = set()
+        if "is_station_override" in matched:
+            overridden = matched.loc[matched.is_station_override.fillna(False)]
+            override_ids = set(overridden.id)
+            if override_ids and get_average:
+                raise ValueError("Station overrides require summing measurement groups (get_average=False)")
+            for station_id, group in overridden.groupby("id"):
+                expected = group.expected_links.unique()
+                if (len(expected) != 1 or len(group) != expected[0]
+                        or group.measurement_group.nunique() != expected[0]
+                        or group.link_id.nunique() != expected[0]):
+                    raise ValueError(f"Incomplete or duplicated measurement groups for station {station_id}")
+                match_summary.loc[match_summary.id.eq(station_id), "directions_represented"] = group.direction_number.nunique()
+            match_summary["is_station_override"] = match_summary.id.isin(override_ids)
+            match_summary["measurement_groups_matched"] = match_summary.matched_link_ids.map(len)
     
         # Get unique simulation links for filtering
         all_links = matched.link_id.unique()
@@ -135,8 +150,16 @@ class Compare:
     
         # Merge simulated flow values
         df_sim = df_sim[['link_id', 'flow']].rename(columns={'link_id': 'sim_link', 'flow': 'sim_flow'})
-        _matched = _matched.merge(df_sim, on='sim_link', how='left')
+        _matched = _matched.merge(df_sim, on='sim_link', how='left', validate='many_to_one')
         _matched = _matched[_matched["sim_flow"].notna()].reset_index(drop=True)
+        if override_ids:
+            available = _matched.groupby("id").size()
+            expected = matched.groupby("id").size()
+            incomplete = {station_id for station_id in override_ids
+                          if available.get(station_id, 0) != expected[station_id]}
+            if incomplete:
+                logger.warning("Missing simulation statistics for override stations %s; excluding entire station totals.", sorted(incomplete, key=str))
+                _matched = _matched.loc[~_matched.id.isin(incomplete)]
         
         if get_average:
             # Separate by direction and aggregate
@@ -146,7 +169,8 @@ class Compare:
             simulated_flow = same.add(oppo, fill_value=np.nan, level="index").reset_index()
             simulated_flow = simulated_flow[simulated_flow.sim_flow.notna()].reset_index(drop=True)
         else:
-            assert all(_matched.groupby('id').apply(len)<3), "More than two links for one count"
+            ordinary = _matched.loc[~_matched.id.isin(override_ids)]
+            assert all(ordinary.groupby('id').size()<3), "More than two links for one ordinary count"
             simulated_flow = _matched.groupby('id')['sim_flow'].sum().reset_index()
     
         # Merge with counts
