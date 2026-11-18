@@ -30,6 +30,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [RDA opening-hours comparison and Slurm run](analysis/rda.md)
 - [Cross-border activity timing](data/cross_border/README.md)
 - [Shared MATSim configuration](matsim/config/README.md)
+- [Final synthetic scenario dataframes and MATSim export](synthesis/prepared/README.md)
 - [Official raw BFS projection inputs and scaling](data/statpop/projections.md)
 - [SUMO overview and stage flowcharts](sumo/WORKFLOW.md)
 - [SUMO runtime and road network](sumo/README.md)

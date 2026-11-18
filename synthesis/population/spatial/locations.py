@@ -5,7 +5,7 @@ from data.statpop.density import impute_parallel as impute_statpop
 from data.spatial.ovgk import impute_parallel as impute_ovgk
 from data.cross_border.destinations import make_entry_border_facility_id, make_exit_border_facility_id
 from dmc.constants import constants
-from matsim.scenario.population import HOME_DESTINATION_ID
+from synthesis.prepared.schema import HOME_DESTINATION_ID
 
 
 def configure(context):

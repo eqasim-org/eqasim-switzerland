@@ -1,138 +1,33 @@
+"""Write prepared facilities as MATSim facilities.xml.gz."""
+
 import gzip
 import io
-from .population import HOME_DESTINATION_ID
-from data.cross_border.activities import THROUGH_DESTINATION_PREFIX
 import matsim.writers
 
 
 def configure(context):
-    context.stage("synthesis.population.destinations")
-    context.stage("synthesis.population.enriched")
-
-    context.config("include_cross_border", default = False)
-    if context.config("include_cross_border"):
-        context.stage("data.cross_border.generate_cross_border_traffic")
-
-    context.config("include_external_population", default = True)
-    if context.config("include_external_population"):
-        context.stage("data.external_population.read_outputs")
-
-
-FIELDS = [
-    "destination_id", "destination_x", "destination_y",
-    "offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other"
-]
-
-
-def make_options(item):
-    options = []
-    if item[4]: options.append("work")
-    if item[5]: options.append("education")
-    if item[6]: options.append("other")
-    if item[7]: options.append("leisure")
-    if item[8]: options.append("shop")
-    return options
+    context.stage("synthesis.prepared.facilities")
 
 
 def execute(context):
-    cache_path = context.path()
 
-    # First, write actual facilities (from STATENT)
-    df_statent = context.stage("synthesis.population.destinations")
-    df_statent = df_statent[FIELDS]
+    # Read final IDs, coordinates and activity options from the preparation stage.
 
-    with gzip.open("%s/facilities.xml.gz" % cache_path, "w+") as f:
-        with io.BufferedWriter(f, buffer_size=1024 * 1024 * 1024 * 2) as raw_writer:
-            writer = matsim.writers.FacilitiesWriter(raw_writer)
+    facilities = context.stage("synthesis.prepared.facilities").facilities
+    output = "%s/facilities.xml.gz" % context.path()
+
+    # Serialize facilities without interpreting raw population or business columns.
+
+    with gzip.open(output, "wb") as stream:
+        with io.BufferedWriter(stream, buffer_size=2 * 1024**3) as buffered:
+            writer = matsim.writers.FacilitiesWriter(buffered)
             writer.start_facilities()
-
-            for item in context.progress(df_statent.itertuples(), total=len(df_statent)):
-                writer.start_facility(item[1], int(item[2]), int(item[3]))
-                if item[4]: writer.add_activity("work")
-                if item[5]: writer.add_activity("education")
-                if item[6]: writer.add_activity("other")
-                if item[7]: writer.add_activity("leisure")
-                if item[8]: writer.add_activity("shop")
+            for row in context.progress(
+                facilities.itertuples(index=False), total=len(facilities)
+            ):
+                writer.start_facility(row.facility_id, row.x, row.y)
+                for purpose in row.activity_options:
+                    writer.add_activity(purpose)
                 writer.end_facility()
-
-            # Second, write household facilities
-            df_households = context.stage("synthesis.population.enriched")[[
-                "household_id", "home_x", "home_y"
-            ]].drop_duplicates("household_id")
-
-            for item in context.progress(df_households.itertuples(), total=len(df_households), label="Homes"):
-                writer.start_facility("home%s" % item[1], int(item[2]), int(item[3]))
-                writer.add_activity("home")
-                writer.end_facility()
-
-            if context.config("include_cross_border"):
-                cross_border_persons = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
-
-                cbs_hhl = cross_border_persons[["household_id", "home_x", "home_y"]]
-                cbs_hhl["home_x"] = cbs_hhl["home_x"].astype(int)
-                cbs_hhl["home_y"] = cbs_hhl["home_y"].astype(int)
-
-                for item in context.progress(cbs_hhl.itertuples(), total=len(cbs_hhl), label="Homes - crossborder"):
-                    writer.start_facility("home%s" % item[1], item[2], item[3])
-                    writer.add_activity("home")
-                    writer.end_facility()
-
-                # Border crossing points are now part of synthesis.population.destinations
-                # and are written in the main STATENT loop above.
-
-                # The destinations of the "Through" agents, abroad (data.cross_border.activities)
-                cross_border_activities = context.stage("data.cross_border.generate_cross_border_traffic")[1]
-                through_destinations = cross_border_activities[
-                    cross_border_activities["destination_id"].astype(str).str.startswith(THROUGH_DESTINATION_PREFIX)]
-
-                for destination_id, geometry in context.progress(zip(through_destinations["destination_id"], through_destinations["geometry"]),
-                                                                 total=len(through_destinations), label="Destinations - crossborder through"):
-                    writer.start_facility(destination_id, int(geometry.x), int(geometry.y))
-                    writer.add_activity("other")
-                    writer.end_facility()
-
-            if context.config("include_external_population"):
-                # Write one home facility per person directly from home_x/home_y,
-                # like the Swiss branch above - this covers every person regardless
-                # of how their activity chain labels the home/cross-perimeter purpose.
-                external_persons = context.stage("data.external_population.read_outputs")[0][[
-                    "household_id", "home_x", "home_y"
-                ]].drop_duplicates("household_id")
-                # matsim.scenario.population drops persons with no home coordinate
-                # before writing them - keep this in sync so we don't crash below.
-                external_persons = external_persons[external_persons["home_x"].notna() & external_persons["home_y"].notna()]
-
-                for item in context.progress(external_persons.itertuples(), total=len(external_persons), label="Homes - FR"):
-                    writer.start_facility("home%s" % item[1], int(item[2]), int(item[3]))
-                    writer.add_activity("home")
-                    writer.end_facility()
-
-                external_activities = context.stage("data.external_population.read_outputs")[1].copy()[["destination_id", "destination_x", "destination_y"]].drop_duplicates(subset = ["destination_id"], keep = "first")
-
-                for col in ["offers_work", "offers_education", "offers_leisure", "offers_shop", "offers_other"]:
-                    external_activities[col] = True
-
-                # Real destinations only: exclude home-labeled ids (written above)
-                # and the home-sentinel ("-1", e.g. cross-perimeter activities that
-                # stay at home without a "home" purpose label).
-                is_home_like = (external_activities["destination_id"].astype(str) == str(HOME_DESTINATION_ID)) \
-                    | external_activities["destination_id"].astype(str).str.startswith("home")
-                nonhomes = external_activities[~is_home_like]
-
-                # A French commuter's activity at a Swiss facility can now
-                # resolve to an id already written above - skip duplicates.
-                already_written = set(df_statent["destination_id"])
-                nonhomes = nonhomes[~nonhomes["destination_id"].isin(already_written)]
-
-                for item in context.progress(nonhomes.itertuples(), total=len(nonhomes), label="Destinations - FR"):
-                    writer.start_facility(item[1], int(item[2]), int(item[3]))
-                    if item[4]: writer.add_activity("work")
-                    if item[5]: writer.add_activity("education")
-                    if item[6]: writer.add_activity("other")
-                    if item[7]: writer.add_activity("leisure")
-                    if item[8]: writer.add_activity("shop")
-                    writer.end_facility()
-
             writer.end_facilities()
-
-    return "%s/facilities.xml.gz" % cache_path
+    return output

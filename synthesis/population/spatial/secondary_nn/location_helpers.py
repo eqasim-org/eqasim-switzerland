@@ -8,7 +8,7 @@ from numba import njit, prange
 from .h3 import H3_LEVEL_NAMES
 from .tools import base_activity_purpose, destination_offer_masks
 from .hierarchical_utils import SECONDARY_ACTIVITIES, PRIMARY_ACTIVITIES
-from matsim.scenario.population import HOME_DESTINATION_ID
+from synthesis.prepared.schema import HOME_DESTINATION_ID
 
 logger = logging.getLogger("synpp: location_helpers")
 
