@@ -66,8 +66,11 @@ allows visitors staying with friends or family.
 Zurich lacks an observed resident/visitor breakdown, so its Swiss probabilities
 mix the two Geneva profiles using Geneva's observed Swiss profile proportions.
 This mixture and the coefficients are transferred assumptions, not measured
-Zurich municipality shares. There is no airport-competition term in this first
-model; distance is the agreed simple proxy. A small long-distance tail remains.
+Zurich municipality shares. The gravity coefficients have no estimated airport-competition term. At OD
+allocation, [ratio-based catchments](catchments.md) permit the nearest airport and the
+farther one when farther/nearer distance is at most 1.3. Weights outside that
+pool are zero; the remaining weights are normalized within observed regional
+constraints. Saved coefficients and calibration diagnostics remain unchanged.
 
 ## Historical calibration, then latest update
 
@@ -127,7 +130,10 @@ allocation_model.probabilities("GVA", profile="outgoing")
 
 Municipalities and probability arrays use the same sorted row order. The stage
 returns the fitted object, not a filename. The airport stages call its
-`allocate(regional_trips, airport)` method to produce municipality rows.
+`allocate(regional_trips, airport, municipality_ids=pool)` method to produce
+municipality rows within that airport's assigned catchment. Raw `probabilities`
+vectors describe the unrestricted gravity weights; the OD stages apply the
+catchment and observed-region masks before normalizing them.
 
 The default model folder is `<data_path>/airports/models/`:
 

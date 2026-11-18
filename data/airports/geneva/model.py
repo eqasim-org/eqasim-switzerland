@@ -349,10 +349,12 @@ class AirportModel:
             mixture *= self.swiss_visitor_share
         return (1-mixture)*population + mixture*hotels
 
-    def allocate(self, regional, airport):
+    def allocate(self, regional, airport, municipality_ids=None):
         """Disaggregate Swiss rows; keep foreign counts explicit and unresolved."""
         output = []
         features = self.municipalities
+        candidates = (np.ones(len(features), dtype=bool) if municipality_ids is None
+                      else features.municipality_id.isin(municipality_ids).to_numpy())
         for _, row in regional.iterrows():
             if row.country != 'CH':
                 unresolved = row.to_frame().T
@@ -371,10 +373,11 @@ class AirportModel:
                 mask = np.ones(len(features), dtype=bool)
             else:
                 raise ValueError(f'Unknown Swiss airport region: {row.region_id}')
+            mask = mask & candidates
             weights = self.probabilities(airport, row.get('profile', None))
             weights = np.where(mask, weights, 0.)
             if weights.sum() <= 0:
-                raise ValueError(f'No municipal support for {row.region_id}')
+                raise ValueError(f'No municipal support for {airport} region {row.region_id} in its assigned catchment')
             weights /= weights.sum()
             selected = np.flatnonzero(weights > 0)
             allocation = weights[selected]

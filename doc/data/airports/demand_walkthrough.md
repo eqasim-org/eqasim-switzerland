@@ -54,7 +54,7 @@ Genève, Vaud, Valais and the rest of Switzerland. For Zurich, we apply the
 historical 88% Swiss benchmark to its current local passenger traffic. This
 Zurich share is an assumption transferred across years.
 
-## 4. Allocate the Swiss totals to municipalities
+## 4. Assign catchments and allocate Swiss totals to municipalities
 
 `data.airports.geneva.model` uses municipal population, accommodation establishment
 counts and Euclidean distance to the airport. Nearby municipalities receive
@@ -66,10 +66,16 @@ Three parameters are then updated against the latest Geneva regional shares.
 Saved parameters live in `<data_path>/airports/models/parameters.json`; they are
 re-estimated only when `airport_model_overwrite: true` is explicitly requested.
 
+`data.airports.catchments` always permits the nearest airport and also permits
+the farther airport when its distance is at most 1.3 times the nearer distance.
+Each airport distributes passengers only within its eligible pool. Municipalities
+in the overlap can serve both, with gravity weights rather than a fixed 50/50 split.
+See [ratio-based catchments](catchments.md).
+
 `data.airports.geneva.ods` preserves the latest observed Geneva regional totals
 and distributes them among municipalities within each group.
 `data.airports.zurich.ods` transfers the Geneva model to Zurich and distributes
-its Swiss total over municipalities.
+its Swiss total over its assigned municipalities.
 
 **The model distributes the published passenger demand; it does not predict a
 new airport total.** Zurich's municipal distribution is modelled, rather than

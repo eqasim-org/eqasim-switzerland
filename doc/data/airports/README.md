@@ -19,8 +19,9 @@ and add temporary visitor agents. See [population integration](population_integr
 flowchart TD
     Census[STATPOP municipal counts + STATENT hotels/dormitories + municipal polygons] --> Model[data.airports.geneva.model]
     Saved[airports/models/parameters.json] --> Model
-    Model --> Geneva[data.airports.geneva.ods]
-    Model --> Zurich[data.airports.zurich.ods]
+    Model --> Catchments[data.airports.catchments: distance ratio ≤ 1.3]
+    Catchments --> Geneva[data.airports.geneva.ods]
+    Catchments --> Zurich[data.airports.zurich.ods]
     GenevaSources[Geneva reviewed survey + public traffic totals] --> Geneva
     ZurichSources[Zurich reviewed monthly counts + catchment benchmark] --> Zurich
     Roster[synthesis.population.sampled: final pre-matching roster] --> Locations
@@ -38,6 +39,7 @@ flowchart TD
 | Stage/module | Contract | Detailed guide |
 | --- | --- | --- |
 | `data.airports.geneva.model` | Returns an `AirportModel` with fixed saved coefficients and current municipal features. Re-estimates only with explicit overwrite. | [Allocation and calibration](model.md) |
+| `data.airports.catchments` | Returns per-airport eligibility: both within a distance ratio of 1.3; otherwise nearest only. | [Ratio-based catchments](catchments.md) |
 | `data.airports.geneva.ods` | Returns a DataFrame of municipal passenger ODs by resident/visitor profile and direction, plus unresolved foreign regions. | [Geneva evidence and accounting](geneva.md) |
 | `data.airports.zurich.ods` | Returns a DataFrame of municipal passenger ODs by direction, plus unresolved foreign regions. No modes are assigned here. | [Zurich evidence and accounting](zurich.md) |
 | `data.airports.ods` | Returns combined Swiss-endpoint ODs scaled once by `input_downsampling`, with original counts retained. | [Scaling contract and rounding](ods.md) |
@@ -53,7 +55,7 @@ data/airports/
   geneva/   ods.py, model.py, times.py
   zurich/   ods.py, times.py, sources.py
   _shared/  common.py, accommodation.py, access.py
-  ods.py
+  ods.py, catchments.py
 synthesis/airports/
   trips.py, locations.py, modes.py, residents.py
 ```
@@ -71,6 +73,10 @@ The combined export folder is now `airports/ods`, configurable with
 Synpp rebuilds results under the new stage names without fitting coefficients
 when `airport_model_overwrite` is false.
 
+The [catchment stage](catchments.md) permits both airports when distances are within
+a ratio of 1.3; otherwise it permits the nearest only. Each OD stage uses its
+eligible pool for both residents and visitors.
+
 The model depends on census/spatial inputs, not the Geneva OD stage, so its
 calibration can use the survey without creating a dependency cycle. Census counts for OD allocation come from `data.statpop.municipality_counts`;
 resident selection uses `synthesis.population.sampled`. Upstream caches are read-only.
@@ -81,7 +87,8 @@ simulation vocabulary in `synthesis.airports.trips`; see the [trip guide](../../
 The [microcensus chain analysis](activity_chains.md) records the evidence behind
 this choice; the earlier stochastic extension is deferred.
 
-Inspect both airports in the [interactive trip map](../../analysis/airports/trips_html.md),
+Run `analysis.airports.run` to inspect both airports in the
+[interactive trip map](../../analysis/airports/trips_html.md),
 with filters for direction, mode, traveller profile and departure hour.
 
 ## Observations, assumptions and missing data

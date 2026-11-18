@@ -21,6 +21,7 @@ logger = logging.getLogger('synpp')
 def configure(context):
     context.config('data_path')
     context.stage('data.airports.geneva.model')
+    context.stage('data.airports.catchments')
     context.config('override_zurich_ods', default=False, volatile=True)
     context.config('zurich_airport_folder', default='airports/zurich')
     context.config('zurich_airport_month', default=None)
@@ -35,7 +36,9 @@ def execute(context):
     settings = demand_settings(context)
     inputs = load_inputs(root)
     allocation_model = context.stage('data.airports.geneva.model')
-    token = input_signature(root, settings, inputs['metadata'], allocation_model.signature)
+    catchments = context.stage('data.airports.catchments')
+    token = input_signature(root, settings, inputs['metadata'], allocation_model.signature,
+                            catchments.attrs['signature'])
     trips = None if context.config('override_zurich_ods') else load_processed_data(root, token)
     if trips is not None:
         logger.info('Zurich airport: reusing %s', root / 'zurich_ods.parquet')
@@ -43,7 +46,9 @@ def execute(context):
 
     # Build the coarsest supported regional demand without inferring passenger modes.
 
-    trips = allocation_model.allocate(build_trips(inputs['monthly'], inputs['regions'], **settings), 'ZRH')
+    candidates = catchments.loc[catchments.eligible_zrh, 'municipality_id']
+    trips = allocation_model.allocate(build_trips(inputs['monthly'], inputs['regions'], **settings), 'ZRH',
+                                      municipality_ids=candidates)
     timing = geneva_times.build_time_distribution(inputs['timing'])
     logger.warning('Zurich catchment uses a historical 88/12 Switzerland/abroad benchmark; no current canton OD is available.')
 
@@ -53,7 +58,8 @@ def execute(context):
     summary['municipal_allocation'] = {'model_signature': allocation_model.signature,
         'parameters': allocation_model.parameters, 'swiss_resolution': 'municipality',
         'foreign_resolution': 'unresolved outside-Switzerland group',
-        'visitor_share_transferred_from_geneva': allocation_model.swiss_visitor_share}
+        'visitor_share_transferred_from_geneva': allocation_model.swiss_visitor_share,
+        'catchment_signature': catchments.attrs['signature'], 'catchment': dict(catchments.attrs)}
     save_outputs(root, token, trips, timing, summary, inputs['monthly'])
     logger.info('Zurich airport: %.1f daily local passenger ground trips', trips.daily_trips.sum())
     return trips
@@ -89,12 +95,13 @@ def source_path(root, relative):
     return path
 
 
-def input_signature(root, settings, metadata, model_signature=None):
+def input_signature(root, settings, metadata, model_signature=None, catchment_signature=None):
     paths = [root / 'data_from_websites/zurich_airport.json', source_path(root, metadata['monthly_file']),
              source_path(root, metadata['regions_file']), root / 'data_from_websites/zurich_flight_times.json',
              Path(__file__), Path(common.__file__), Path(geneva_times.__file__)]
     paths.extend(source_path(root, source['local_file']) for source in metadata['sources'])
-    payload = {'version': MODEL_VERSION, 'settings': settings, 'digests': [file_digest(p) for p in paths], 'allocation_model': model_signature}
+    payload = {'version': MODEL_VERSION, 'settings': settings, 'digests': [file_digest(p) for p in paths],
+               'allocation_model': model_signature, 'catchments': catchment_signature}
     return hashlib.sha256(json.dumps(payload, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 

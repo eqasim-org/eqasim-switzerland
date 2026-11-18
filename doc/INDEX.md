@@ -20,10 +20,11 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Geneva airport regional passenger demand](data/airports/geneva.md)
 - [Zurich airport passenger demand and available evidence](data/airports/zurich.md)
 - [Calibrated airport municipality-allocation model](data/airports/model.md)
+- [Airport municipality catchments with distance-ratio overlap](data/airports/catchments.md)
 - [Airport OD scaling to the simulation sample](data/airports/ods.md)
 - [Airport activity-chain evidence and stochastic model proposal](data/airports/activity_chains.md)
 - [Sampled airport trips, endpoints, modes and departure times](synthesis/airports/trips.md)
-- [Interactive Geneva and Zurich airport trip map](analysis/airports/trips_html.md)
+- [Airport demand explorer: canton flows, municipality flows and individual trips](analysis/airports/trips_html.md)
 - [Airport population integration and microcensus evidence](data/airports/population_integration.md)
 - [Combined 2015/2021 microcensus airport activity chains](data/microcensus/airports.md)
 
