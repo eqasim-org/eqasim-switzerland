@@ -197,17 +197,53 @@ def adjust_pt_routing_parameters(config_path, parameters):
     write_config(tree, config_path)
 
 
+def add_airport_population(config_path):
+    """Keep sampled airport modes/times fixed and allow their minimal plans."""
+    from copy import deepcopy
+
+    tree = read_config(config_path)
+    replanning = get_module(tree, "replanning")
+    for item in list(replanning):
+        param = get_param("subpopulation", item)
+        if param is not None and param.get("value") == "airport":
+            replanning.remove(item)
+    for strategy, weight in [("ReRoute", 0.05), ("KeepLastSelected", 0.95)]:
+        item = get_parameter_set(replanning, "strategysettings", {
+            "subpopulation": "airport", "strategyName": strategy,
+        })
+        set_param("weight", weight, item)
+
+    # Inherit the normal mode parameters, but do not score fixed airport activities.
+    scoring = get_module(tree, "scoring")
+    default = None
+    for item in list(scoring.findall("parameterset[@type='scoringParameters']")):
+        param = get_param("subpopulation", item)
+        group = param.get("value") if param is not None else "null"
+        if group == "airport":
+            scoring.remove(item)
+        elif group == "null":
+            default = item
+    airport = deepcopy(default) if default is not None else etree.Element("parameterset", type="scoringParameters")
+    set_param("subpopulation", "airport", airport)
+    for purpose in ["home", "secondary_home", "airport"]:
+        get_parameter_set(airport, "activityParams", {"activityType": purpose})
+    for activity in airport.findall("parameterset[@type='activityParams']"):
+        set_param("scoringThisActivityAtAll", False, activity)
+    scoring.append(airport)
+    write_config(tree, config_path)
+
+
 def disable_population_inputs(config_path):
     change_params(config_path, {
         "facilities.inputFacilitiesFile": None, "households.inputFile": None,
         "plans.inputPlansFile": None, "vehicles.vehiclesFile": None,
         "DiscreteModeChoice.modeAvailability": "SwissModeAvailability",
     }, create=True)
-    # Routing-only consumers have no freight population.
+    # Routing-only consumers have no freight or airport population.
     tree = read_config(config_path)
     for module in tree.findall("module[@name='replanning']"):
         for item in list(module):
-            if (p := get_param("subpopulation", item)) is not None and p.get("value") == "freight":
+            if (p := get_param("subpopulation", item)) is not None and p.get("value") in {"freight", "airport"}:
                 module.remove(item)
     write_config(tree, config_path)
 

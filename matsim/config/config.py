@@ -17,6 +17,7 @@ def configure(context):
     context.config("random_seed")
     context.config("threads", volatile=True)
     context.config("use_freight", True)
+    context.config("use_airports", default=True)
     context.config("car_cost_model", dmc_constants.CAR_COST_MODEL)
     context.config("route_bike", True)
     context.config("useScheduleBasedTransport", False)
@@ -51,6 +52,8 @@ def execute(context):
     tools.add_ptZones_module(path)
     tools.change_params(path, {"eqasim.useScheduleBasedTransport": tools.parse_boolean(
         context.config("useScheduleBasedTransport"))}, create=True)
+    if context.config("use_airports"):
+        tools.add_airport_population(path)
     return path
 
 

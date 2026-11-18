@@ -1,14 +1,15 @@
 # Geneva airport regional passenger demand
 
 See the [airport workflow](README.md) for the package overview. To sample
-coordinates, modes and departure times, use [data.airports.trips](trips.md).
+coordinates, modes and departure times, use [synthesis.airports.trips](../../synthesis/airports/trips.md).
 
-`data.airports.geneva` returns a pandas DataFrame of passenger ground-access
+`data.airports.geneva.ods` returns a pandas DataFrame of passenger ground-access
 movements between GVA and Swiss municipalities, in both directions. Its nine
 observed regional groups remain constraints and audit outputs. Foreign groups
 remain explicit unresolved rows. See the [allocation model](model.md). It is a
-standalone input stage; it does not yet insert airport travellers into the
-synthetic population or MATSim plans. Counts represent the full population by
+standalone input stage; it does not itself insert airport travellers into the
+synthetic population or MATSim plans. That happens in the prepared stages after
+`synthesis.airports.trips`. Counts represent the full population by
 default, irrespective of the population sampling fraction elsewhere in the pipeline.
 
 ## Inputs and evidence
@@ -26,6 +27,35 @@ visitor/circuit catchments (pp. 8–9), combined catchments (pp. 11–12), and a
 modes (p. 15). Mode shares are retained as evidence; this stage does not fabricate
 a region-by-mode joint distribution from separate marginals.
 
+### Geographic variation in mode shares
+
+Physical page 23 of the supplied 2025 PDF gives detailed shares by place of
+residence/stay, including these Swiss groups (visually checked on 16 November
+2026). It does not give near/far distance thresholds or a kilometre-based mode
+curve. Page 22 gives the corresponding sustainable/non-sustainable aggregates.
+
+| Detailed access mode | Geneva | Vaud | Other Swiss cantons |
+| --- | ---: | ---: | ---: |
+| Drop-off | 20% | 23% | 16% |
+| Private car | 5% | 13% | 18% |
+| Rail | 11% | 48% | 49% |
+| Bus/tram/Aérobus | 35% | 8% | 8% |
+| Taxi | 9% | 2% | 3% |
+| Ride-hail/limousine | 10% | 2% | 2% |
+| Other | 10% | 4% | 6% |
+
+These are printed rounded labels; the other-cantons column sums to 102%, so it
+is normalized before fitting. Geography provides clear
+evidence for bus use nearby versus rail use from farther Swiss regions, but
+these groups are not measured distance bands. The reviewed values are stored in
+`geneva_regional_mode_shares.csv`, with a sibling JSON recording source-page,
+PDF/CSV checksums and limitations. [Trip generation](../../synthesis/airports/trips.md#distance-preferences-and-fixed-totals)
+fits one simple line per mode using each region's OD-weighted mean distance.
+The fitted preferences distribute fixed page-21 mode targets across municipalities;
+they do not replace passenger totals. Transfer to Zurich and the use of regional
+mean distances are explicit modelling assumptions. Bad-PT accommodation pools
+use car, with feasibility adjustments reported in the trip summary.
+
 Public data are saved in
 `<data_path>/airports/geneva/data_from_websites/geneva_airport.json`, including observation year,
 retrieval date, field provenance, source URLs and stable refresh-page URLs:
@@ -35,7 +65,7 @@ retrieval date, field provenance, source URLs and stable refresh-page URLs:
 - Refresh through the [statistics](https://www.gva.ch/fr/aeroport/publications/statistiques) and [reports](https://www.gva.ch/fr/aeroport/publications/rapports) pages.
 
 All Geneva datasets live under `<data_path>/airports/geneva/`, while the Python
-stage stays at `data.airports.geneva`. Other airports can have sibling folders.
+stage stays at `data.airports.geneva.ods`. Other airports can have sibling folders.
 Runtime execution is offline and never refreshes sources implicitly. There are
 no bundled dataset fallbacks in the source package.
 
@@ -112,7 +142,7 @@ Use a dedicated Synpp config to run just this stage:
 ```yaml
 working_directory: /path/to/airport_stage_cache
 run:
-  - data.airports.geneva
+  - data.airports.geneva.ods
 config:
   data_path: /path/to/input_data
   # geneva_airport_month: 2  # null by default: annual-average day
@@ -187,7 +217,7 @@ stores UTC schedules, source/endpoint/query, local timezone, statuses and all
 modelling assumptions. Refresh is explicit and offline runs never call the API:
 
 ```bash
-uv run -m data.airports.geneva_times --output /path/to/new_geneva_flight_times.json
+uv run -m data.airports.geneva.times --output /path/to/new_geneva_flight_times.json
 ```
 
 Select another snapshot with `geneva_airport_time_data` (absolute or relative to
@@ -246,7 +276,7 @@ selected direction/weekday, draws the corresponding buffer and returns ground
 **departure** times:
 
 ```python
-from data.airports.geneva_times import get_time_distribution, sample_departure_times
+from data.airports.geneva.times import get_time_distribution, sample_departure_times
 
 data_path = "/path/to/input_data"
 

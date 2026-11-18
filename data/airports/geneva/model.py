@@ -15,7 +15,10 @@ from pyproj import Transformer
 from scipy.optimize import least_squares
 from scipy.special import logsumexp
 
-from data.airports.common import apportion, atomic_write, export_signature, file_digest
+from data.airports._shared import common
+from data.airports._shared import accommodation
+from data.airports._shared.accommodation import select_accommodation
+from data.airports._shared.common import apportion, atomic_write, export_signature, file_digest
 
 AIRPORTS = {'GVA': {'longitude': 6.109444, 'latitude': 46.238333},
             'ZRH': {'longitude': 8.548056, 'latitude': 47.458056}}
@@ -145,7 +148,7 @@ def model_inputs(context):
 
 def model_signature(features, sources, options):
     digest = hashlib.sha256(json.dumps(options, sort_keys=True, allow_nan=False).encode())
-    for path in [*sources.values(), Path(__file__), Path(__file__).with_name("geneva.py"), Path(__file__).with_name("common.py")]:
+    for path in [*sources.values(), Path(__file__), Path(__file__).with_name("ods.py"), Path(common.__file__), Path(accommodation.__file__)]:
         digest.update(file_digest(path).encode())
     if features is not None:
         digest.update(pd.util.hash_pandas_object(features, index=False).to_numpy().tobytes())
@@ -181,8 +184,7 @@ def build_features(municipalities, cantons, population, statent):
     frame = frame.dissolve(by=['municipality_id', 'municipality_name'], as_index=False)
     frame = frame.merge(population, on='municipality_id', how='left', validate='one_to_one')
     frame['population'] = frame.population.fillna(0).astype(int)
-    codes = statent.noga.astype(str).str.replace(r'\.0$', '', regex=True)
-    hotels = statent.loc[codes.str.startswith('551'), ['enterprise_id', 'municipality_id']].drop_duplicates()
+    hotels = select_accommodation(statent, ['enterprise_id', 'municipality_id'])
     if hotels.enterprise_id.duplicated().any():
         raise ValueError('Hotel establishment assigned to multiple municipalities')
     counts = hotels.groupby('municipality_id').size().rename('hotels')
@@ -211,7 +213,7 @@ def build_features(municipalities, cantons, population, statent):
     if result.population.sum() != population.population.sum():
         raise ValueError('Population mass lost while joining Swiss municipalities')
     result.attrs = {'population': int(result.population.sum()), 'hotels': int(result.hotels.sum()),
-                    'municipalities': len(result), 'hotel_definition': 'Distinct STATENT NOGA 551 establishments; all 559 dormitories excluded',
+                    'municipalities': len(result), 'hotel_definition': 'Distinct STATENT NOGA 551 hotels and 559 accommodation/dormitories, including student residences',
                     'population_definition': population.attrs.get('definition', ''),
                     'population_centres_used': int(use_home.sum()), 'inactive_geometries_excluded': inactive,
                     'statent_years': sorted(pd.to_numeric(statent.statent_year, errors='coerce').dropna().astype(int).unique().tolist()) if 'statent_year' in statent else []}
@@ -221,7 +223,7 @@ def build_features(municipalities, cantons, population, statent):
 
 
 def read_calibration(sources):
-    from data.airports.geneva import process_pdf, build_ods
+    from data.airports.geneva.ods import process_pdf, build_ods
     old_meta = json.loads(sources['historical_metadata'].read_text())
     if file_digest(sources['historical_pdf']) != old_meta['pdf_sha256']:
         raise ValueError('Historical Geneva PDF changed: review calibration CSV and metadata')

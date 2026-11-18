@@ -10,8 +10,9 @@ import uuid
 import numpy as np
 import pandas as pd
 
-from data.airports import common, geneva_times
-from data.airports.common import apportion, atomic_write, export_signature, file_digest
+from data.airports._shared import common
+from data.airports.geneva import times as geneva_times
+from data.airports._shared.common import apportion, atomic_write, export_signature, file_digest
 
 MODEL_VERSION = 2
 logger = logging.getLogger('synpp')
@@ -19,7 +20,7 @@ logger = logging.getLogger('synpp')
 
 def configure(context):
     context.config('data_path')
-    context.stage('data.airports.model')
+    context.stage('data.airports.geneva.model')
     context.config('override_zurich_ods', default=False, volatile=True)
     context.config('zurich_airport_folder', default='airports/zurich')
     context.config('zurich_airport_month', default=None)
@@ -33,7 +34,7 @@ def execute(context):
     root = input_folder(context)
     settings = demand_settings(context)
     inputs = load_inputs(root)
-    allocation_model = context.stage('data.airports.model')
+    allocation_model = context.stage('data.airports.geneva.model')
     token = input_signature(root, settings, inputs['metadata'], allocation_model.signature)
     trips = None if context.config('override_zurich_ods') else load_processed_data(root, token)
     if trips is not None:

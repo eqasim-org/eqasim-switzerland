@@ -1,7 +1,7 @@
 """Named dataframe contracts for final synthetic scenario tables.
 
 Frames belong to their preparation-stage cache. Consumers must treat them as
-read-only. Optional freight tables are None when that demand is disabled.
+read-only. Optional demand tables are None when that demand is disabled.
 """
 
 from dataclasses import dataclass
@@ -34,7 +34,7 @@ class Vehicles:
 
 @dataclass(frozen=True)
 class Population:
-    """Sorted persons, activities and owned vehicles, plus optional freight demand."""
+    """Sorted persons, activities and owned vehicles, plus optional freight/LCV/airport demand."""
 
     persons: pd.DataFrame
     activities: pd.DataFrame
@@ -43,6 +43,8 @@ class Population:
     freight_vehicles: pd.DataFrame | None = None
     lcv_trips: pd.DataFrame | None = None
     lcv_vehicles: pd.DataFrame | None = None
+    airport_trips: pd.DataFrame | None = None
+    airport_vehicles: pd.DataFrame | None = None
 
 
 def implementation_token(stage_file, *helpers):

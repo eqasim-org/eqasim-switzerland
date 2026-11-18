@@ -1,9 +1,9 @@
 # Zurich airport passenger demand
 
 See the [airport workflow](README.md) for the package overview. To sample
-coordinates, modes and departure times, use [data.airports.trips](trips.md).
+coordinates, modes and departure times, use [synthesis.airports.trips](../../synthesis/airports/trips.md).
 
-`data.airports.zurich` builds passenger ground-access counts from the available
+`data.airports.zurich.ods` builds passenger ground-access counts from the available
 public evidence. All inputs, archived sources and outputs live under
 `<data_path>/airports/zurich/`. Runtime execution is offline. This standalone
 stage does not yet create people, assign coordinates or add MATSim plans.
@@ -64,7 +64,7 @@ settings elsewhere do not silently change this full-population input.
 
 ## Timing and coverage
 
-`zurich_times.py` uses the same tested probability and sampling engine as Geneva,
+`zurich/times.py` uses the same tested probability and sampling engine as Geneva,
 with Zurich-specific source data and paths. The normalized snapshot is
 `data_from_websites/zurich_flight_times.json`. The capture has five dates,
 13–17 November 2026, with 2,962 commercial flight records before status filtering.
@@ -99,7 +99,7 @@ target; it cannot be an origin departure distribution before travel time is supp
 Negative and next-day departure seconds are preserved, with explicit day offsets.
 
 ```python
-from data.airports.zurich_times import get_time_distribution, sample_departure_times
+from data.airports.zurich.times import get_time_distribution, sample_departure_times
 
 # data_path is your configured input-data root.
 weekend = get_time_distribution("weekend", direction="from_airport", data_path=data_path)
@@ -113,7 +113,7 @@ Capture other days/seasons explicitly over time. The refresh tool preserves
 reviewed timing assumptions and recomputes coverage from the new board:
 
 ```bash
-uv run -m data.airports.zurich_times --output <data_path>/airports/zurich/data_from_websites/zurich_flight_times.json
+uv run -m data.airports.zurich.times --output <data_path>/airports/zurich/data_from_websites/zurich_flight_times.json
 ```
 
 It updates the raw board archive and its source checksum. Newly available named
@@ -127,7 +127,7 @@ Use a dedicated Synpp config:
 ```yaml
 working_directory: /path/to/zurich_stage_cache
 run:
-  - data.airports.zurich
+  - data.airports.zurich.ods
 config:
   data_path: /path/to/input_data
   # zurich_airport_folder: airports/zurich
@@ -162,7 +162,7 @@ require OCR. Normal Synpp execution reads the verified CSV and needs no PDF
 package. To re-extract after reviewing the archived report and annual metadata:
 
 ```bash
-python -m data.airports.zurich_sources --folder <data_path>/airports/zurich
+python -m data.airports.zurich.sources --folder <data_path>/airports/zurich
 ```
 
 The helper needs `pypdf` installed in the selected Python environment. For a new

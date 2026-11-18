@@ -2,6 +2,7 @@
 
 import gzip
 import io
+import json
 import logging
 import shutil
 import subprocess
@@ -65,6 +66,8 @@ def execute(context):
                 _write_freight(
                     context, writer, data.lcv_trips, data.lcv_vehicles, is_lcv=True
                 )
+            if data.airport_trips is not None:
+                _write_airports(context, writer, data.airport_trips, data.airport_vehicles)
             writer.end_population()
 
     # Compress the completed XML when the parallel compression backend is selected.
@@ -113,6 +116,31 @@ def _write_freight(context, writer, trips, fleet, is_lcv=False):
         record = FreightWriter(trip, is_lcv=is_lcv)
         record.add_vehicles(_owned_vehicles(vehicles, trip.agent_id))
         record.write(writer, truck=not is_lcv)
+
+
+def _write_airports(context, writer, trips, fleet):
+    """Write fixed, one-leg airport plans without ordinary resident attributes."""
+    vehicles = backlog_iterator(iter(fleet.itertuples(index=False)))
+    for trip in context.progress(trips.itertuples(index=False), total=len(trips), label="Writing airports"):
+        writer.start_person(escape(trip.agent_id, {'"': '&quot;'}))
+        writer.start_attributes()
+        writer.add_attribute("isAirport", "java.lang.Boolean", "true")
+        writer.add_attribute("isVisitor", "java.lang.Boolean", writer.true_false(trip.is_visitor))
+        writer.add_attribute("subpopulation", "java.lang.String", "airport")
+        writer.add_attribute("airport", "java.lang.String", escape(trip.airport))
+        if not trip.is_visitor:
+            writer.add_attribute("age", "java.lang.Integer", int(trip.age))
+        resources = {v.mode: v.vehicle_id for v in _owned_vehicles(vehicles, trip.agent_id)}
+        writer.add_attribute("vehicles", "org.matsim.vehicles.PersonVehicles", escape(json.dumps(resources)))
+        writer.end_attributes()
+        writer.start_plan(selected=True)
+        origin = writer.location(trip.origin_x, trip.origin_y, escape(trip.origin_facility_id, {'"': '&quot;'}))
+        destination = writer.location(trip.destination_x, trip.destination_y, escape(trip.destination_facility_id, {'"': '&quot;'}))
+        writer.add_activity(trip.origin_purpose, origin, end_time=trip.departure_time)
+        writer.add_leg(trip.mode, trip.departure_time, trip.arrival_time - trip.departure_time)
+        writer.add_activity(trip.destination_purpose, destination, start_time=trip.arrival_time)
+        writer.end_plan()
+        writer.end_person()
 
 
 def _owned_vehicles(iterator, owner_id):

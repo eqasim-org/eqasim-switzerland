@@ -17,6 +17,9 @@ OPTIONS = {
 
 
 def configure(context):
+    context.config("use_airports", default=True)
+    if context.config("use_airports"):
+        context.stage("synthesis.prepared.population")
     context.stage("synthesis.population.destinations")
     context.stage("synthesis.population.enriched")
     context.config("include_cross_border", default=False)
@@ -78,6 +81,18 @@ def execute(context):
         for column in OPTIONS:
             external[column] = True
         frames.append(_destinations(external))
+
+    # Give airport activities explicit facilities at their sampled coordinates.
+
+    if context.config("use_airports"):
+        trips = context.stage("synthesis.prepared.population").airport_trips
+        for endpoint in ["origin", "destination"]:
+            frames.append(pd.DataFrame({
+                "facility_id": trips[endpoint + "_facility_id"],
+                "x": trips[endpoint + "_x"],
+                "y": trips[endpoint + "_y"],
+                "activity_options": trips[endpoint + "_purpose"].map(lambda purpose: (purpose,)),
+            }))
 
     # Enforce one unambiguous definition per serialized facility ID.
 

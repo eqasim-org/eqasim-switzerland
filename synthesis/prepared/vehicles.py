@@ -9,6 +9,9 @@ VEHICLE_FIELDS = ["vehicle_id", "type_id", "age", "euro"]
 
 def configure(context):
     context.stage("synthesis.vehicles.vehicles")
+    context.config("use_airports", default=True)
+    if context.config("use_airports"):
+        context.stage("synthesis.prepared.population")
     context.config("include_cross_border", default=False)
     if context.config("include_cross_border"):
         context.stage("data.cross_border.generate_cross_border_traffic")
@@ -23,6 +26,7 @@ def execute(context):
 
     types, cars, trucks, lcv = context.stage("synthesis.vehicles.vehicles")
     frames = [cars, trucks, lcv]
+    passenger_indices = [0]
 
     # Map imported loop modes onto the existing physical vehicle types.
 
@@ -31,6 +35,7 @@ def execute(context):
         external["type_id"] = "default_" + external["mode"].str.replace(
             "_loop$", "", regex=True
         )
+        passenger_indices.append(len(frames))
         frames.append(external)
     if context.config("include_cross_border"):
         crossing = context.stage("data.cross_border.generate_cross_border_traffic")[
@@ -38,7 +43,22 @@ def execute(context):
         ].copy()
         for mode in ("car", "car_passenger"):
             crossing.loc[crossing["mode"].eq(mode), "type_id"] = "default_" + mode
+        passenger_indices.append(len(frames))
         frames.append(crossing)
+
+    # Replace selected residents' passenger resources with the airport fleet.
+
+    if context.config("use_airports"):
+        population = context.stage("synthesis.prepared.population")
+        resident_ids = set(population.airport_trips.loc[
+            ~population.airport_trips.is_visitor, "agent_id"
+        ])
+        # Freight/LCV owner numbers belong to separate namespaces.
+        for index in passenger_indices:
+            frames[index] = frames[index].loc[
+                ~frames[index].owner_id.astype(str).isin(resident_ids)
+            ]
+        frames.append(population.airport_vehicles)
     vehicles = pd.concat(frames, ignore_index=True)
 
     # Validate type references and retain optional physical/emission descriptors.

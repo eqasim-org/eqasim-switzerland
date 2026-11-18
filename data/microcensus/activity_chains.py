@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from data.activity_purposes import format_activity_chain
 from tqdm import tqdm
 
 
@@ -31,11 +32,9 @@ def execute(context):
 
     act_df = act_df.fillna("stop")
 
-    act_df["activity_chain"] = act_df[activities_columns].agg("-".join, axis=1)
-    act_df["activity_chain"] = [ca.replace("-stop", "") for ca in act_df["activity_chain"]]
+    act_df["activity_chain"] = act_df[activities_columns].agg(format_activity_chain, axis=1)
 
-    act_df["mode_chain"] = act_df[trips_columns].agg("-".join, axis=1)
-    act_df["mode_chain"] = [ca.replace("-stop", "") for ca in act_df["mode_chain"]]
+    act_df["mode_chain"] = act_df[trips_columns].agg(format_activity_chain, axis=1)
     
     act_df = act_df[["person_id", "activity_chain", "mode_chain"]]
     

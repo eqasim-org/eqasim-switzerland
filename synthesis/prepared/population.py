@@ -47,6 +47,9 @@ def configure(context):
     context.stage("data.spatial.cantons")
     context.config("use_freight", default=True)
     context.config("use_lcv", default=True)
+    context.config("use_airports", default=True)
+    if context.config("use_airports"):
+        context.stage("synthesis.airports.trips")
     if context.config("use_freight"):
         context.stage("synthesis.freight.trips")
     if context.config("use_lcv"):
@@ -114,9 +117,9 @@ def execute(context):
         else None
     )
 
-    # Return dataframes only. Compression and XML formatting belong to the consumer.
+    # Assemble the population bundle, then replace airport residents' ordinary plans.
 
-    return Population(
+    population = Population(
         df_persons,
         df_activities,
         df_vehicles,
@@ -125,6 +128,17 @@ def execute(context):
         lcv,
         lcv_vehicles,
     )
+    if context.config("use_airports"):
+        from synthesis.airports.trips import inject_airport_trips_in_population
+
+        population = inject_airport_trips_in_population(
+            population, context.stage("synthesis.airports.trips"),
+            reserved_vehicle_ids=pd.concat(fleet[1:]).vehicle_id,
+        )
+
+    # Return dataframes only. Compression and XML formatting belong to the consumer.
+
+    return population
 
 
 def _prepare_residents(context, cst):
@@ -544,4 +558,9 @@ def validate(context):
     from .tables import implementation_token
     from inspect import getfile
 
-    return implementation_token(__file__, getfile(align_activities))
+    helpers = [getfile(align_activities)]
+    if context.config("use_airports"):
+        from synthesis.airports import trips
+
+        helpers.append(trips.__file__)
+    return implementation_token(__file__, *helpers)

@@ -53,6 +53,7 @@ config:
     npvm_freight_crossing_source: route # route (saved), network, or interview.
     npvm_freight_routing_overwrite: false # True reroutes and replaces the saved NPVM crossing assignments.
     use_lcv: true # Include light commercial vehicles.
+    use_airports: true # Replace selected residents' plans and add airport visitors.
     include_cross_border: false # Generate additional foreign-resident cross-border flows.
     generate_outbound_flows: false # Generate Swiss residents' outbound trips beyond the existing survey trips.
     include_external_population: true # Include the population exported by eqasim-france.

@@ -1,3 +1,4 @@
+from data.activity_purposes import microcensus_purpose_map
 import numpy as np
 import pandas as pd
 import pyproj
@@ -78,24 +79,7 @@ def execute(context):
     del df_mz_trips["is_car_passenger"]
 
     # Second, adjust the purposes
-    purpose_map = {
-        -99: "unknown",     # Pseudo stage
-        -98: "unknown",     # No answer
-        -97: "unknown",     # Don't know
-        1: "interaction",   # Transfer, change of mode, park car
-        2: "work",          # Work
-        3: "education",     # Education
-        4: "shop",          # Shopping
-        5: "other",         # Chores, use of public services
-        6: "work_secondary",          # Business activity
-        7: "work_secondary",          # Business trip
-        8: "leisure",       # Leisure
-        9: "other",         # Bring children
-        10: "other",        # Bring others (disabled, etc.)
-        11: "home",         # Return home
-        12: "other",      # Other
-        13: "border"        # Going out of country
-    }
+    purpose_map = microcensus_purpose_map(2021)
 
     df_mz_trips["purpose"] = df_mz_trips["wzweck1"].map(purpose_map)
 

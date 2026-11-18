@@ -48,10 +48,12 @@ class XmlWriter:
 
     def time(self, time):
         time = int(time)
+        sign = "-" if time < 0 else ""
+        time = abs(time)
         hours = time // 3600
         minutes = (time % 3600) // 60
         seconds = (time % 60)
-        return "%02d:%02d:%02d" % (hours, minutes, seconds)
+        return sign + "%02d:%02d:%02d" % (hours, minutes, seconds)
 
     def location(self, x, y, facility_id = None):
         try:

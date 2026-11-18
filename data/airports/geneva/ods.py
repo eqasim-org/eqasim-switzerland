@@ -10,8 +10,9 @@ import uuid
 import numpy as np
 import pandas as pd
 
-from data.airports import common, geneva_times
-from data.airports.common import apportion, atomic_write, export_signature, file_digest, normalized
+from data.airports._shared import common
+from data.airports.geneva import times as geneva_times
+from data.airports._shared.common import apportion, atomic_write, export_signature, file_digest, normalized
 
 logger = logging.getLogger("synpp")
 MODEL_VERSION = 4
@@ -19,7 +20,7 @@ MODEL_VERSION = 4
 
 def configure(context):
     context.config("data_path")
-    context.stage("data.airports.model")
+    context.stage("data.airports.geneva.model")
     context.config("override_geneva_ods", default=False, volatile=True)
     context.config("geneva_airport_pdf", default="airports/geneva/geneva_airport.pdf")
     context.config("geneva_airport_survey_csv", default=None)
@@ -37,7 +38,7 @@ def execute(context):
     pdf, survey, web, cache = input_paths(context)
     timing_path = time_data_path(context)
     settings = demand_settings(context)
-    allocation_model = context.stage("data.airports.model")
+    allocation_model = context.stage("data.airports.geneva.model")
     token = signature(pdf, survey, survey.with_suffix(".json"), web, timing_path,
                       Path(__file__), Path(common.__file__), Path(geneva_times.__file__),
                       settings={**settings, "allocation_model": allocation_model.signature})
