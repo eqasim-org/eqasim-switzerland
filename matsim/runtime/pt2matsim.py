@@ -1,5 +1,7 @@
 import os, os.path
 import shutil
+from pathlib import Path
+import re
 
 import matsim.runtime.git as git
 import matsim.runtime.java as java
@@ -14,6 +16,7 @@ def configure(context):
     context.config("pt2matsim_version", "26.6.1-SNAPSHOT")
     context.config("pt2matsim_branch", "dev/pt-integration")
     context.config("pt2matsim_path", "")
+    context.config("pt2matsim_commit", "")
 
 
 def run(context, command, arguments, vm_arguments):
@@ -33,6 +36,16 @@ def execute(context):
             "--single-branch", "pt2matsim",
             "--depth", "1"
         ])
+
+        repository = str(Path(context.path()) / "pt2matsim")
+        commit = context.config("pt2matsim_commit")
+        if commit:
+            if not re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+                raise ValueError("pt2matsim_commit must be a full Git commit SHA")
+            git.run(context, ["fetch", "--depth", "1", "origin", commit], cwd=repository)
+            git.run(context, ["checkout", "--detach", commit], cwd=repository)
+        revision = git.run(context, ["rev-parse", "HEAD"], cwd=repository, catch_output=True)
+        (Path(context.path()) / "pt2matsim_commit.txt").write_text(revision+"\n")
 
         # Build pt2matsim
         maven.run(context, ["package", "-Dskip.surefire.tests=true"], cwd = "%s/pt2matsim" % context.path())

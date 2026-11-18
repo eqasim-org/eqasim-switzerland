@@ -87,6 +87,7 @@ def execute(context):
 def validate(context):
     """Include imported network/geometry helpers in conversion cache validation."""
     digest = hashlib.sha256()
-    for name in ("network_handler.py", "link_geometry.py", "border_crossings.py"):
+    for name in ("network_handler.py", "link_geometry.py", "border_crossings.py",
+                 "network_cleaner.py", "cleaning_audit.py", "connectivity.py"):
         digest.update((Path(__file__).parent / "utils" / name).read_bytes())
     return digest.hexdigest()

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Network cleaning inspector</title>
+<link rel="stylesheet" href="assets/leaflet.css"><script src="assets/leaflet.js"></script>
+<style>
+:root{font:14px/1.45 system-ui,sans-serif;color:#18263a;background:#edf1f6}*{box-sizing:border-box}body{margin:0;display:flex;height:100vh}aside{width:330px;min-width:330px;background:#fff;overflow:auto;border-right:1px solid #d8e0ec;padding:18px}h1{font-size:21px;line-height:1.2;margin:0 0 9px}h2{font-size:14px;margin:16px 0 7px}p{margin:7px 0}.muted,small{color:#63738a}button,select,input[type=search]{font:inherit;border:1px solid #cbd5e1;border-radius:5px;background:#fff;padding:6px 9px}button{cursor:pointer}button:hover{background:#eef4fb}button.active{background:#193b66;color:#fff}button:disabled{opacity:.5;cursor:wait}input[type=checkbox]{accent-color:#244e7a}label{cursor:pointer}.grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px}#roads{max-height:225px;overflow:auto;padding:5px 0}.row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.pill{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px}.retained{background:#3565a5}.removed{background:#dc3545}.merged{background:#914ac4}.added{background:#099c8b}.legend{display:grid;gap:5px}#map{flex:1;min-width:0;background:#e4e9ef;cursor:crosshair}#status{position:absolute;left:350px;bottom:23px;z-index:800;background:#fffffff2;border-radius:6px;box-shadow:0 1px 6px #0002;padding:9px 13px;max-width:calc(100vw - 380px);pointer-events:none;font-size:12px}#details{position:absolute;right:12px;top:12px;bottom:38px;width:400px;max-width:calc(100vw - 365px);z-index:900;background:#fffffff5;padding:16px;border-radius:8px;overflow:auto;box-shadow:0 2px 16px #0003;display:none}#details h2{font-size:18px;margin:0 28px 4px 0}#close{position:absolute;right:10px;top:10px;border:0;font-size:20px}.attrs{width:100%;border-collapse:collapse;font-size:12px}.attrs td,.attrs th{text-align:left;border-bottom:1px solid #e5ebf2;padding:5px;vertical-align:top;overflow-wrap:anywhere}.attrs th{font-weight:550;max-width:170px}.attrs td{white-space:pre-wrap;max-width:220px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}.candidate{display:block;text-align:left;width:100%;margin:4px 0;font-size:12px}#search-results{max-height:170px;overflow:auto}.note{background:#f0f5fb;border-radius:5px;padding:9px;font-size:12px}.warning{color:#a14a08}#coords{font-variant-numeric:tabular-nums;font-size:11px;margin-top:8px}#summary{font-size:12px}#turn-info{font-size:12px}.turn-head{background:none;border:0;pointer-events:none}.toolbar{gap:4px;display:flex}#search{width:210px}.leaflet-tooltip{max-width:300px;white-space:normal}#fatal{color:#a42a26;font-size:13px}@media(max-width:850px){aside{width:270px;min-width:270px;padding:12px}#status{left:280px;max-width:calc(100vw - 295px)}#details{max-width:calc(100vw - 290px)}#search{width:170px}}
+</style></head><body>
+<aside>
+<h1>Network cleaning<br>inspector</h1>
+<p class="muted">Compare converted OSM links with the cleaned network. Click the map to inspect nearby links.</p>
+<div id="fatal"></div>
+<h2>Network view</h2>
+<div class="toolbar" id="views"><button data-view="compare" class="active">Compare</button><button data-view="before">Before</button><button data-view="after">After</button></div>
+<p><label><input id="originals" type="checkbox"> Original segments of merged links</label></p>
+<h2>Cleaning outcome</h2>
+<div id="statuses" class="legend">
+<label><input type="checkbox" value="retained" checked> <span class="pill retained"></span>Retained</label>
+<label><input type="checkbox" value="removed" checked> <span class="pill removed"></span>Removed: disconnected car links</label>
+<label><input type="checkbox" value="merged" checked> <span class="pill merged"></span>Merged</label>
+<label><input type="checkbox" value="added" checked> <span class="pill added"></span>Added after conversion</label>
+</div>
+<p><label><input id="highlight" type="checkbox"> Circle disconnected removals</label></p>
+<small>Red shows audited connectivity removals only. Loops, duplicates and border filtering are excluded.</small>
+<h2>Road categories</h2>
+<div class="row"><button id="major">Major roads only</button><button id="all-roads">All</button><button id="no-roads">None</button></div>
+<div id="roads" class="grid"></div>
+<h2>Find a link or OSM way</h2>
+<form id="search-form" class="row"><input id="search" type="search" placeholder="e.g. 61908233" aria-label="Link or OSM way ID"><button>Find</button></form>
+<div id="search-results"></div>
+<h2>Turn restrictions</h2>
+<label><input id="turns" type="checkbox"> Show arrows for the selected link</label>
+<div class="row"><label for="mode">Mode</label><select id="mode"><option>car</option></select></div>
+<p class="muted" style="font-size:12px">Green: allowed next move. Red: forbidden turn. Amber: forbidden only when a full multi-link sequence is completed. Arrows start at the selected link; no earlier route history is assumed.</p>
+<h2>Background</h2>
+<label>Opacity <input id="opacity" aria-label="Background opacity" type="range" min="0" max="1" step="0.05" value="0.65"></label>
+<small>© OpenStreetMap contributors<br>Background tiles are cached by the local server.</small>
+<div id="background-note" class="muted" style="font-size:11px"></div>
+<h2>National totals</h2><div id="summary"></div>
+<details><summary>Sources and interpretation</summary><div id="sources" style="font-size:11px;overflow-wrap:anywhere"></div>
+<p class="note">Removed means no surviving link ID or <code>old_link_id</code> provenance. Only audited car-connectivity removals are drawn in red. Loops, duplicates and border filtering remain recorded in the cleaning audit. Merged links are matched by original link IDs, not OSM IDs.</p></details>
+<div id="coords"></div>
+</aside>
+<div id="map"></div><div id="status">Loading inspector…</div>
+<section id="details"><button id="close" title="Close">×</button><div id="nearby"></div><div id="selected"></div><div id="turn-info"></div></section>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const majorRoads=new Set(['motorway','motorway_link','trunk','trunk_link','primary','primary_link']);
+let map,manifest,view='compare',networkLayer,selectionLayer,arrows,live,selected=null;
+let generation=0,selectionGeneration=0,turnGeneration=0,timer;
+function checked(id){return [...$(id).querySelectorAll('input:checked')].map(e=>e.value)}
+function filters(){return new URLSearchParams({view,roads:checked('roads').join(','),statuses:checked('statuses').join(','),originals:$('originals').checked?'1':'0',highlight:$('highlight').checked?'1':'0',v:manifest.display_revision})}
+async function api(path,params={},signal){
+  const query=params instanceof URLSearchParams?params:new URLSearchParams(params);
+  const response=await fetch('api/'+path+'?'+query,{signal});
+  const body=await response.json();if(!response.ok)throw Error(body.error||response.statusText);return body;
+}
+function status(text,warn=false){$('status').textContent=text;$('status').classList.toggle('warning',warn)}
+function schedule(){clearTimeout(timer);timer=setTimeout(refresh,180)}
+async function refresh(){
+  if(!map)return;
+  if(networkLayer)map.removeLayer(networkLayer);
+  const token=++generation;
+  networkLayer=L.tileLayer('tiles/network/{z}/{x}/{y}.png?'+filters(),{
+    pane:'network',maxZoom:20,minZoom:6,noWrap:true,keepBuffer:2,
+    updateWhenIdle:true,updateWhenZooming:false,opacity:0.9,
+    bounds:[[43,3],[51,17]]
+  });
+  let failed=false;
+  networkLayer.on('loading',()=>{failed=false;status('Loading visible network tiles…')});
+  networkLayer.on('tileerror',()=>{if(token===generation){failed=true;status('A network tile failed. Pan or zoom to retry.',true)}});
+  networkLayer.on('load',()=>{if(token===generation&&!failed)status('Visible network loaded · all matching links · click for full geometry and attributes')});
+  networkLayer.addTo(map);
+}
+function candidateButton(row,container){
+  const button=document.createElement('button');button.className='candidate';
+  button.innerHTML=`<span class="pill ${esc(row.status)}"></span>${esc(row.network)} · ${esc(row.id)} · ${esc(row.road||'')} · ${esc(row.status)}`;
+  button.onclick=()=>selectLink(row.k??row.key);container.appendChild(button);
+}
+async function chooseNear(event){
+  const token=++selectionGeneration;
+  const p=filters(),radius=Math.max(4,156543*Math.cos(event.latlng.lat*Math.PI/180)/Math.pow(2,map.getZoom())*9);
+  p.set('lat',event.latlng.lat);p.set('lon',event.latlng.lng);p.set('radius',radius);
+  $('coords').textContent=`Clicked ${event.latlng.lat.toFixed(6)}, ${event.latlng.lng.toFixed(6)}`;
+  try{
+    const rows=await api('pick',p);if(token!==selectionGeneration)return;
+    $('details').style.display='block';$('nearby').replaceChildren();
+    const title=document.createElement('p');title.textContent=rows.length?`${rows.length===20?'Closest 20':rows.length} nearby directed links (choose overlapping directions below)`:'No matching link nearby. Try another point or change the filters.';$('nearby').append(title);
+    rows.forEach(row=>candidateButton(row,$('nearby')));
+    if(rows.length)await selectLink(rows[0].k,false);else clearSelection(false);
+  }catch(error){status(error.message,true)}
+}
+function attributeTable(values){return '<table class="attrs">'+Object.entries(values).map(([key,val])=>
+  `<tr><th>${esc(key)}</th><td>${esc(typeof val==='object'?JSON.stringify(val):val)}${key==='freespeed'&&Number.isFinite(+val)?`<br><small>${(+val*3.6).toFixed(1)} km/h (XML value in m/s)</small>`:''}</td></tr>`).join('')+'</table>'}
+async function selectLink(key,pan=true){
+  const token=++selectionGeneration;++turnGeneration;
+  try{
+    const data=await api('link',{key});if(token!==selectionGeneration)return;selected=data;
+    $('details').style.display='block';$('turn-info').replaceChildren();arrows?.clearLayers();
+    if(selectionLayer)map.removeLayer(selectionLayer);
+    selectionLayer=L.polyline(data.display_coordinates||data.coordinates,{color:'#00a6d6',weight:8,opacity:0.9,interactive:false}).addTo(map);
+    if(pan)map.fitBounds(selectionLayer.getBounds().pad(0.8),{maxZoom:17});
+    const {attributes,...base}=data.record;
+    $('selected').innerHTML=`<hr><h2>${esc(data.network)} link ${esc(base.id)}</h2><p><span class="pill ${esc(data.status)}"></span>${esc(data.status)} · ${esc(data.road)}</p>`+
+      (data.removal?`<p class="note">Removal reason: ${esc(data.removal.reason)} · cleaning link ${esc(data.removal.operation_link)}</p>`:'')+
+      (data.display_offset_m?`<p class="muted">Shown ${data.display_offset_m} m to the right of travel to separate opposite directions.</p>`:'')+
+      attributeTable(base)+'<h2>Custom attributes</h2>'+attributeTable(Object.fromEntries(Object.entries(attributes).map(([k,v])=>[k,`${v.value}${v.class?' ['+v.class+']':''}`])))+
+      '<h2>Corresponding links</h2><div id="counterparts"></div>';
+    if(!data.counterparts.length)$('counterparts').textContent=data.network==='before'?'No surviving link or merge provenance.':'No matching original link provenance.';
+    data.counterparts.forEach(row=>candidateButton({...row,network:data.network==='before'?'after':'before'},$('counterparts')));
+    if(data.counterparts_limited)$('counterparts').append('Only the first 200 original segments are listed.');
+    const old=$('mode').value,modes=base.modes.split(',');$('mode').replaceChildren();
+    for(const mode of modes){const option=document.createElement('option');option.textContent=mode;$('mode').appendChild(option)}
+    $('mode').value=modes.includes(old)?old:modes.includes('car')?'car':modes[0];
+    await updateTurns();
+  }catch(error){status('Selection failed: '+error.message,true)}
+}
+function clearSelection(hide=true){++selectionGeneration;++turnGeneration;selected=null;
+  if(selectionLayer)map.removeLayer(selectionLayer);selectionLayer=null;arrows?.clearLayers();
+  $('selected').replaceChildren();$('turn-info').replaceChildren();if(hide)$('details').style.display='none';}
+function arrow(points,color,text,dashed=false){
+  const line=L.polyline(points,{color,weight:5,opacity:0.95,dashArray:dashed?'7 5':undefined}).addTo(arrows);
+  line.bindTooltip(text,{sticky:true});
+  if(points.length<2)return;
+  const end=map.latLngToLayerPoint(points.at(-1));let i=points.length-2,previous=map.latLngToLayerPoint(points[i]);
+  while(i>0&&end.distanceTo(previous)<3)previous=map.latLngToLayerPoint(points[--i]);
+  const angle=Math.atan2(end.y-previous.y,end.x-previous.x)*180/Math.PI;
+  L.marker(points.at(-1),{interactive:false,icon:L.divIcon({className:'turn-head',iconSize:[22,22],iconAnchor:[11,11],html:`<svg width="22" height="22" style="transform:rotate(${angle}deg)"><path d="M2 2 L21 11 L2 20 L7 11Z" fill="${color}" stroke="white" stroke-width="1.5"/></svg>`})}).addTo(arrows);
+}
+async function updateTurns(){
+  const token=++turnGeneration;arrows?.clearLayers();$('turn-info').replaceChildren();
+  if(!selected||!$('turns').checked)return;
+  try{
+    const data=await api('turns',{key:selected.key,mode:$('mode').value});if(token!==turnGeneration)return;
+    for(const turn of data.turns){const color={allowed:'#138a44',forbidden:'#e12837',conditional:'#df8e06'}[turn.state];
+      arrow(turn.coordinates,color,`${turn.state.toUpperCase()} next link ${turn.id} (${$('mode').value})`);}
+    for(const sequence of data.sequences)arrow(sequence.coordinates,'#df8e06','Forbidden complete sequence: '+sequence.ids.join(' → '),true);
+    $('turn-info').innerHTML='<h2>Next movements · '+esc($('mode').value)+'</h2>'+data.turns.map(t=>`<p>${esc(t.state)} → ${esc(t.id)}</p>`).join('')+
+      data.sequences.map(s=>'<p class="note">Forbidden complete sequence: '+esc(s.ids.join(' → '))+'<br>Entering its first link alone is not prohibited.</p>').join('')+
+      (data.warning?'<p class="warning">'+esc(data.warning)+'</p>':'');
+  }catch(error){$('turn-info').textContent=error.message}
+}
+async function boot(){
+  if(location.protocol==='file:'){
+    $('fatal').innerHTML='This large-network inspector uses a local spatial database. Start the server using the command in <b>OPEN_VIEWER.txt</b>, then open its HTTP address. No routing or simulation is involved.';status('Open through the local viewer server, not file://',true);return;
+  }
+  manifest=await api('manifest');
+  if(!manifest.audit_available)$('fatal').textContent='Cleaning audit unavailable: removed links are hidden until their removal reasons have been generated.';
+  map=L.map('map',{preferCanvas:true,zoomControl:false,minZoom:6,maxZoom:20}).setView(manifest.center,manifest.zoom);
+  map.createPane('network');map.getPane('network').style.zIndex=350;map.getPane('network').style.pointerEvents='none';
+  map._networkRenderer=L.canvas({padding:0.25});L.control.zoom({position:'bottomleft'}).addTo(map);
+  arrows=L.layerGroup().addTo(map);
+  live=L.tileLayer('tiles/osm/{z}/{x}/{y}.png',{maxZoom:20,maxNativeZoom:19,opacity:0.65,
+    updateWhenIdle:true,keepBuffer:2,attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'}).addTo(map);
+  live.on('tileerror',()=>{$('background-note').textContent='An OSM tile could not load. Network inspection remains available; pan or zoom to retry.'});
+  live.on('load',()=>{if(!Object.values(live._tiles).some(t=>t.el.classList.contains('leaflet-tile-loaded')===false))$('background-note').textContent='OpenStreetMap · follows pan and zoom · served through this server.'});
+  $('opacity').oninput=()=>live.setOpacity(+$('opacity').value);
+  const roadCounts=new Map();for(const r of manifest.summary.counts)roadCounts.set(r.road,(roadCounts.get(r.road)||0)+r.count);
+  const roads=[...roadCounts.keys()].sort((a,b)=>Number(majorRoads.has(b))-Number(majorRoads.has(a))||a.localeCompare(b));
+  for(const road of roads){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=road;input.checked=majorRoads.has(road);label.append(input,' '+road);$('roads').append(label)}
+  $('roads').onchange=schedule;$('statuses').onchange=schedule;$('originals').onchange=schedule;
+  $('highlight').onchange=schedule;
+  for(const [id,choose] of [['major',road=>majorRoads.has(road)],['all-roads',()=>true],['no-roads',()=>false]])$(id).onclick=()=>{for(const input of $('roads').querySelectorAll('input'))input.checked=choose(input.value);schedule()};
+  for(const button of $('views').children)button.onclick=()=>{view=button.dataset.view;for(const other of $('views').children)other.classList.toggle('active',other===button);schedule()};
+  $('turns').onchange=updateTurns;$('mode').onchange=updateTurns;$('close').onclick=()=>clearSelection();
+  document.addEventListener('keydown',event=>{if(event.key==='Escape')clearSelection()});
+  map.on('zoomend',()=>{if($('turns').checked)updateTurns()});map.on('click',chooseNear);
+  $('search-form').onsubmit=async event=>{event.preventDefault();$('search-results').textContent='Searching…';try{const rows=await api('search',{q:$('search').value});$('search-results').replaceChildren();rows.forEach(row=>candidateButton(row,$('search-results')));if(!rows.length)$('search-results').textContent='No exact link or OSM way ID found.';else if(rows.length===100)$('search-results').append('Showing the first 100 matches.')}catch(error){$('search-results').textContent=error.message}};
+  for(const network of ['before','after']){
+    const counts={};for(const r of manifest.summary.counts.filter(r=>r.network===network))counts[r.status]=(counts[r.status]||0)+r.count;
+    $('summary').insertAdjacentHTML('beforeend',`<p><b>${network}</b>: ${Object.entries(counts).map(([s,n])=>`${s==='removed'?'all removals':esc(s)} ${n.toLocaleString()}`).join(' · ')}</p>`);
+  }
+  if(manifest.audit)$('summary').insertAdjacentHTML('beforeend',`<p><b>Disconnected removals (red):</b> ${(manifest.audit.counts.disconnected_car||0).toLocaleString()} original links</p>`);
+  $('sources').textContent=JSON.stringify(manifest.sources,null,2);
+  await refresh();
+}
+boot().catch(error=>{$('fatal').textContent=error.message;status('Viewer failed to initialize: '+error.message,true)});
+</script></body></html>
