@@ -1,19 +1,16 @@
-"""Pipeline adapter for the reusable V2 whole-diary matcher; V1 is independent."""
+"""V2 donor selection within the shared population matching workflow."""
 
 import logging
 from pathlib import Path
 
 
-from synthesis.population.models.non_private import home_only_mask
-
-from .V2 import configuration
 from .V2.configuration import MatchingOptions
 from .V2.diagnostics import MatchingDiagnostics
 from .V2.inputs import prepare_inputs
 from .V2.provenance import implementation_token
 from .V2.wrappers import DiaryMatcher
 from .V2 import model as model_stage
-from . import opening_hours
+from . import workflow
 
 logger = logging.getLogger("synpp")
 
@@ -27,22 +24,14 @@ def execute(context):
 
     # Copy inputs, enforce source eligibility and harmonize shared features.
 
-    const = context.stage("data.constants")
-    source, population, trips = prepare_inputs(context, const)
-    source, population = opening_hours.add_regions(context, source, population)
-    eligible = (population["age"] >= const.MZ_AGE_THRESHOLD if const.census == "statpop"
-                else population["age_class"] > 0)
-    # Preserve home-only residents with no donor, exactly as in V1.
-    held_home = home_only_mask(population)
-    eligible &= ~held_home
-    logger.info("V2 held out %d home-only residents without donor trips", held_home.sum())
-    id_columns = ["person_id"] + (["household_id"] if const.census == "statpop" else [])
-    result = population[id_columns].copy()
-    result["mz_person_id"] = -1
+    prepared = workflow.preprocess(context, "v2")
+    source, population = prepared.source, prepared.population
+    eligible = prepared.eligible
+    result = workflow.initial_mapping(prepared)
     output = Path(context.path())
     output.mkdir(parents=True, exist_ok=True)
     if not eligible.any():
-        return result, set()
+        return workflow.postprocess(prepared, result, set())
     if source.empty:
         raise ValueError("No eligible domestic microcensus donors for the configured scenario day")
 
@@ -57,20 +46,17 @@ def execute(context):
     assigned = prediction.donor_ids
     matched = assigned >= 0
     result.loc[eligible, "mz_person_id"] = assigned
-    removed = prediction.unmatched_person_ids
+    result, removed = workflow.postprocess(prepared, result, prediction.unmatched_person_ids)
 
     # Export matching support, donor reuse and model feature availability for review.
 
-    report = MatchingDiagnostics.write(output, matcher, population, target, prediction)
+    report = MatchingDiagnostics.write(output, matcher, population, target, prediction, removed_ids=removed)
     if removed:
-        logger.warning("V2 removed %d eligible persons without donors satisfying employment/student constraints; see matching_diagnostics.csv", len(removed))
+        logger.warning("V2 removed %d residents after unmatched-recipient and collective-household processing; see matching_diagnostics.csv", len(removed))
     logger.info("V2 matched %d/%d eligible persons using %d donors", matched.sum(), len(target), report["used_donors"])
 
     # Preserve the downstream matching tuple and the original population order.
 
-    result = result.loc[~result["person_id"].isin(removed)].reset_index(drop=True)
-    if len(result) != len(population) - len(removed):
-        raise RuntimeError("V2 matching changed population row alignment")
     return result, removed
 
 

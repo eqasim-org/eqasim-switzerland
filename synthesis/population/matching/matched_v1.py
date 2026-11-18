@@ -2,7 +2,7 @@ import numba
 import numpy as np
 import pandas as pd
 import logging
-from synthesis.population.matching import opening_hours
+from synthesis.population.matching import opening_hours, workflow
 logger = logging.getLogger("synpp")
 
 """
@@ -33,12 +33,31 @@ def configure(context):
         context.stage("synthesis.population.spatial.primary.education.locations", alias="education_locations")
 
 
+def execute(context):
+
+    # Load the common recipient cohort and prepare V1's categorical attributes.
+
+    prepared = workflow.preprocess(context, "v1")
+
+    # Run the unchanged recursive hot-deck donor search.
+
+    if not prepared.eligible.any():
+        return workflow.postprocess(prepared, workflow.initial_mapping(prepared), set())
+    mapping, removed = _match_prepared(context, prepared)
+
+    # Restore bypasses, align output IDs and account for all removed residents.
+
+    return workflow.postprocess(prepared, mapping, removed)
+
+
 def validate(context):
     # Synpp hashes stage source but not imported commute-predictor helpers.
     import hashlib
     from pathlib import Path
     return hashlib.sha256(Path(__file__).with_name("commute.py").read_bytes() +
-                          Path(opening_hours.__file__).read_bytes()).hexdigest()
+                          Path(opening_hours.__file__).read_bytes() +
+                          Path(workflow.__file__).read_bytes() +
+                          Path(__file__).parent.parent.joinpath("models", "non_private.py").read_bytes()).hexdigest()
 
 
 def compare_feature_distribution(df_population_sub, df_source_sub, feature, weight_col="person_weight"):
@@ -362,22 +381,17 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
         unmatchable_household_selector = levels < 1
         umatchable_household_ids       = set(df_target.loc[unmatchable_household_selector, "household_id"].values)
 
-        unmatchable_person_selector    = df_population["household_id"].isin(umatchable_household_ids)
-        removed_person_ids             = set(df_population.loc[unmatchable_person_selector, "person_id"].values)
-
-        removed_household_ids = set() | umatchable_household_ids
-
-        df_target     = df_target.loc[~unmatchable_household_selector, :]
-        df_population = df_population.loc[~unmatchable_person_selector, :]
-
-        removed_households_count = sum(unmatchable_household_selector)
-        removed_persons_count    = sum(unmatchable_person_selector)
-
-        logger.info("V1 collective cohort: %d unmatched recipients triggered removal of %d households (%d residents)",
-                    int(np.count_nonzero(levels < 1)), len(removed_household_ids), removed_persons_count)
-
-        assert (len(df_target)     == initial_target_length     - removed_households_count)
-        assert (len(df_population) == initial_population_length - removed_persons_count)
+        # Return only the failed recipient IDs. Whole-household expansion is
+        # shared with V2/V3 in workflow.postprocess, after all searches finish.
+        removed_person_ids = set(df_target.loc[unmatchable_household_selector, "person_id"])
+        removed_household_ids = umatchable_household_ids
+        df_target = df_target.loc[~unmatchable_household_selector, :]
+        df_population = df_population.loc[~df_population.person_id.isin(removed_person_ids), :]
+        removed_persons_count = len(removed_person_ids)
+        logger.info("V1 collective cohort: %d unmatched recipients; household removal "
+                    "is deferred to shared postprocessing", removed_persons_count)
+        assert len(df_target) == initial_target_length - removed_persons_count
+        assert len(df_population) == initial_population_length - removed_persons_count
 
         return df_target, df_population, [removed_person_ids, removed_household_ids]
     
@@ -403,141 +417,20 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
 
     
 def get_mz_persons(context):
-    df_persons = context.stage("data.microcensus.persons")
-    df_trips   = context.stage("data.microcensus.trips")[0]
-    
-    # remove persons who are not employed, but have a work as one of the purposes in their activity chain
-    employed_persons = set(df_persons[df_persons["employed"] == True]["person_id"])
-    work_activities = ["work"] #,"work_secondary"]
-    persons_with_work_purpose = set(df_trips[(df_trips["origin_purpose"].isin(work_activities)) | 
-                                             (df_trips["purpose"].isin(work_activities))]["person_id"])
-    persons_to_remove = persons_with_work_purpose - employed_persons
-    logger.info("Donor eligibility: excluded %d non-employed survey respondents whose diary contains work activities",
-                len(persons_to_remove))
-
-    df_persons = df_persons[~df_persons["person_id"].isin(persons_to_remove)]
-    from synthesis.population.matching.commute import donor_commutes
-    return donor_commutes(df_persons, context.stage("data.microcensus.commute")["education"],
-                           seed=context.config("random_seed") + 1349)
+    """Compatibility entry point for shared survey cleaning and commute preparation."""
+    return workflow.load_survey(context)
 
 
-def execute(context):
-    df_mz        = get_mz_persons(context)
-    const        = context.stage("data.constants")
-    scenario_day = context.config("specific_day_scenario")
-
+def _match_prepared(context, prepared):
+    """Run the original recursive donor search on centrally prepared inputs."""
+    df_source, df_population = prepared.source, prepared.population
+    const = prepared.const
     diagnostics_enabled = context.config("matching_enable_diagnostics")
-
-    # Source are the MZ observations, for each STATPOP person, a sample is drawn from there
-    df_source = df_mz.copy()
-    if scenario_day == "workday":
-        df_source = df_mz[df_mz["workday"]]
-    elif scenario_day == "weekend":
-        df_source = df_mz[df_mz["weekend"]]
-    elif scenario_day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]:
-        df_source = df_mz[df_mz["day"] == scenario_day]
-    else:
-        raise ValueError(f"Unimplemented day for scenario: {scenario_day}")
-    
-    df_source = df_source[(~ df_source["is_crossing_the_border"])]
-
-    df_source              = df_source.rename(columns={"person_id": "mz_id"})
-    df_source["canton_id"] = df_source["canton_id"].astype(int)
-
-    df_population        = context.stage("synthesis.population.sampled").copy()
-    from synthesis.population.models.non_private import home_only_mask
-    held_out_home = df_population.loc[home_only_mask(df_population)].copy()
-    df_population = df_population.loc[~home_only_mask(df_population)].copy()
-    logger.info("V1 start: %d recipients, %d home-only bypasses, %d day/border-eligible donors; day=%s; "
-                "opening-hours region mask=%s", len(df_population) + len(held_out_home), len(held_out_home),
-                len(df_source), scenario_day, context.config("consider_opening_hours"))
-    df_source, df_population = opening_hours.add_regions(context, df_source, df_population)
-    df_population["sex"] = df_population["sex"].astype(int)
-    
-    # add commute distance and work location type
-    from synthesis.population.matching.commute import population_commutes, write_diagnostics
-    education = context.stage("education_locations") if const.census == "statpop" else None
-    df_population = population_commutes(df_population, context.stage("work_locations"), education)
-    write_diagnostics(df_source, df_population, context.path())
-    
-    assert df_population.loc[df_population.employed == const.EMPLOYED, "work_location_type"].notna().all(), "Some employed agents are missing commute distance"
-
-    df_population[ "commute_distance"]   = df_population["commute_distance"].fillna(-1)
-    df_population[ "work_location_type"] = df_population["work_location_type"].fillna("none")
-    
-    # transform work_location_type to int
-    DICT_WORK_LOCATION_TYPE = {"none": 0, "fixed": 1, "remote": 2, "moving": 3}
-
-    df_population["work_location_type"] = df_population["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
-    df_source["work_location_type"]     = df_source["work_location_type"].map(DICT_WORK_LOCATION_TYPE)
-
-    # add commute distance classes
-    COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 1, 3, 6, 9, 12, 15, 20, 50, 1000]) * 1e3 # convert km -> m
-
-    df_population["commute_distance_class"] = np.digitize(df_population["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
-    df_source["commute_distance_class"]     = np.digitize(df_source["commute_distance"], COMMUTE_DISTANCE_BOUNDS)
-    
-    BROAD_COMMUTE_DISTANCE_BOUNDS = np.array([-10, 0, 3, 8, 30, 1000]) * 1e3
-
-    df_population["broad_commute_distance_class"] = np.digitize(df_population["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
-    df_source["broad_commute_distance_class"]     = np.digitize(df_source["commute_distance"], BROAD_COMMUTE_DISTANCE_BOUNDS)
-
-    # this is now necessary to include, to make sure employement is well matched, otherwise we get errors in work location assignment
-    df_source["employed"]     = df_source["employed"].astype(int)
-    df_population["employed"] = (df_population["employed"] == const.EMPLOYED).astype(int)
-
-    # Model stages use string encodings for categorical features internally.
-    # Statistical matching compares values directly, so normalize both sides.
-    df_source["employment_status"] = pd.to_numeric(
-        df_source["employment_status"], errors="raise").astype("int64")
-    df_population["employment_status"] = pd.to_numeric(
-        df_population["employment_status"], errors="raise").astype("int64")
-
-    df_source["N_children_under_12"] = df_source["N_children_under_12"].ne(0)  # presence of children under 12
-
-    df_source["sex"] = df_source["sex"].astype(int)
-
-    var_raw = pd.to_numeric(df_source["car_availability"], errors="coerce")
-    df_source["car_availability"] = np.where(var_raw == const.CAR_AVAILABILITY_NEVER, 0, 1).astype("int64")
-
-    # checkig if any duplicates
-    assert df_population["person_id"].duplicated().sum()==0, "Duplicate person_id found in population dataframe. Please ensure person_id is unique for each individual in the population."
-    assert df_source["mz_id"].duplicated().sum()==0, "Duplicate mz_id found in source dataframe. Please ensure mz_id is unique for each individual in the source."
-
     if const.census == "statpop":
-        # Density is already a resident count within 2.5 km on both sides.
-        # Three bins: <300, 300–1500, >=1500 residents/km²; -1 is unknown.
-        density_bounds = np.asarray(context.config("matching_density_bounds"), dtype=float)
-        density_bounds = density_bounds * np.pi * (const.POPULATION_DENSITY_RADIUS / 1000.) ** 2
-        for frame in (df_source, df_population):
-            density = pd.to_numeric(frame["population_density"], errors="coerce")
-            frame["population_density_class"] = np.where(
-                np.isfinite(density) & density.ge(0), np.digitize(density, density_bounds), -1)
-
-        # age class
-        AGE_CLASS_UPPER_BOUNDS = [6, 15, 18, 24, 40, 51, 65, 80]
-        df_population["age_class"] = np.digitize(df_population["age"], AGE_CLASS_UPPER_BOUNDS)
-        df_source["age_class"]     = np.digitize(df_source["age"], AGE_CLASS_UPPER_BOUNDS)
-        
-        # income classes
-        df_population["income_class"] = df_population["income_class"].astype(int)
-        df_source["income_class"]     = df_source["income_class"].astype(int)
-        
-        INCOME_CLASSIFICATION = {0: 1, 1:1, 2:1, 3:2, 4:2, 5:2, 6:3, 7:3, 8:3} # map 6 income classes to 3 classes (low, medium, high)
-        
-        df_population["income_class"] = df_population["income_class"].map(INCOME_CLASSIFICATION)
-        df_source["income_class"]     = df_source["income_class"].map(INCOME_CLASSIFICATION)
-
-        # further cleaning
-        df_source["household_size_class"] = df_source["household_size_class"].clip(upper=2)
-        df_population["household_size"]   = df_population["household_size"].clip(upper=2)
-
         number_of_population_persons    = len(np.unique(df_population["person_id"]))
 
-        population_selector  = df_population["age"] >= const.MZ_AGE_THRESHOLD
+        population_selector = workflow.eligible_mask(df_population, const)
         
-        df_population["number_of_cars_class"] = df_population["number_of_cars_class"].clip(upper=3)
-        df_source["number_of_cars_class"]     = df_source["number_of_cars_class"].clip(upper=3)
 
         # HT and activity-chains are better with canton_id instead of municipality_type
         # TODO: 3 levels income class here
@@ -551,20 +444,6 @@ def execute(context):
             "age_class", "sex", "car_availability", "employed", "employment_status", "ovgk", "population_density_class",
             "N_children_under_12", "sp_region", "broad_commute_distance_class"
         ]
-
-        df_population["marital_status"]    = df_population["marital_status"].astype(int)
-        df_population["car_availability"]  = df_population["car_availability"].astype(int)
-        df_population["municipality_type"] = df_population["municipality_type"].astype(str)
-        df_population["urban"]             = (df_population["municipality_type"].isin(["urbancore"])).astype(int)
-        df_population["sp_region"]         = df_population["sp_region"].astype(int)
-        df_population["canton_id"]         = df_population["canton_id"].astype(int)
-        df_population["ovgk"]              = (df_population["ovgk"] != "None").astype(int)
-        
-        df_source["municipality_type"] = df_source["municipality_type"].astype(str)
-        df_source["urban"]             = (df_source["municipality_type"].isin(["urbancore"])).astype(int)
-        df_source["sp_region"]         = df_source["sp_region"].astype(int)
-        df_source["canton_id"]         = df_source["canton_id"].astype(int)
-        df_source["ovgk"]              = (df_source["ovgk"] != "None").astype(int)
 
         logger.info("V1 matching ordinary residents in separate age-band donor pools")
 
@@ -584,7 +463,7 @@ def execute(context):
         # Recovered residents use the same age bands and matching variables.
         for band_name, (age_min, age_max) in age_bands.items():
             # Selector for this band, respecting MZ_AGE_THRESHOLD and excluding collective housing
-            sel = (~df_population_work["collective_housing_resident"]) & (df_population_work["age"] >= const.MZ_AGE_THRESHOLD)
+            sel = (~df_population_work["collective_housing_resident"]) & workflow.eligible_mask(df_population_work, const)
             if age_min is not None:
                 sel &= (df_population_work["age"] >= age_min)
             if age_max is not None:
@@ -691,7 +570,7 @@ def execute(context):
         removed_ids_list_normal = [removed_person_ids_normal, None]
 
         # --- SECOND MATCHING - STATPOP PEOPLE WITH RESIDENCE AT MUNICIPALITY CENTER ---
-        population_selector = (df_population["age"] >= const.MZ_AGE_THRESHOLD) & (df_population["collective_housing_resident"])
+        population_selector = workflow.eligible_mask(df_population, const) & df_population["collective_housing_resident"]
 
         # with low population samples it can happen that we do not have these individuals
         if (population_selector.any()):
@@ -743,7 +622,7 @@ def execute(context):
     elif const.census == "are_synpop":
         number_of_population_persons    = len(np.unique(df_population["person_id"]))
 
-        population_selector = df_population["age_class"] > 0
+        population_selector = workflow.eligible_mask(df_population, const)
 
         columns_individual_matching           = [ "ovgk", "age_class", "sex", "employment_status", "number_of_cars_class", "N_children_under_18"]
         mandatory_columns_individual_matching = columns_individual_matching[:4]
@@ -771,35 +650,10 @@ def execute(context):
     df_matching["mz_person_id"] = df_matching["mz_id"]
     del df_matching["mz_id"]
 
-    assert (len(df_matching) == len(df_population))
+    # Shared postprocessing accounts for rows omitted by either search/merge.
 
-    # Check that all person who don't have a MZ id now are under age
-    if const.census == "statpop":
-        assert (np.all(df_population[
-            df_population["person_id"].isin(
-                df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
-            )
-        ]["age"] < const.MZ_AGE_THRESHOLD))
-
-    elif const.census == "are_synpop":
-        assert (np.all(df_population[
-            df_population["person_id"].isin(
-                df_matching.loc[df_matching["mz_person_id"] == -1]["person_id"]
-            )
-        ]["age_class"] == 0))
+    # The common postprocessor validates bypasses, IDs and retained recipients.
 
     removed_person_ids = removed_ids_list[0]
 
-    # Return
-    if not held_out_home.empty:
-        # These people have no donor: trips attach only real MZ IDs, and the
-        # existing missing-trip activity path creates their sole home activity.
-        home_mapping = held_out_home[["person_id", "household_id"]].copy()
-        home_mapping["mz_person_id"] = -1
-        df_matching = pd.concat([df_matching, home_mapping], ignore_index=True)
-    input_count = len(context.stage("synthesis.population.sampled"))
-    logger.info("V1 finished: %d input residents; retained %d with donors and %d without donors "
-                "(below-age/home-only bypasses); %d absent from the returned roster; reported removal IDs=%d",
-                input_count, int(df_matching.mz_person_id.ge(0).sum()), int(df_matching.mz_person_id.lt(0).sum()),
-                input_count - len(df_matching), len(removed_person_ids))
     return df_matching, removed_person_ids

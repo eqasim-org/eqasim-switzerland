@@ -12,7 +12,7 @@ class MatchingDiagnostics:
     """Write auditable copies without changing predictions or upstream inputs."""
 
     @staticmethod
-    def write(output, matcher, population, target, prediction):
+    def write(output, matcher, population, target, prediction, *, removed_ids=None):
         output = Path(output)
         embedding_dir = output / "mz_embeddings"
         embedding_dir.mkdir(parents=True, exist_ok=True)
@@ -24,6 +24,8 @@ class MatchingDiagnostics:
         matched = assigned >= 0
         details = prediction.diagnostics.copy()
         details["mz_person_id"] = assigned
+        removed = prediction.unmatched_person_ids if removed_ids is None else set(removed_ids)
+        details["removed"] = target.person_id.isin(removed).to_numpy()
         for column in ("age", "income_class", "employed", "is_student", "sex",
                        "employment_status", "car_availability", "sp_region"):
             details[column] = target[column].to_numpy()
@@ -35,7 +37,8 @@ class MatchingDiagnostics:
         feature_inventory(matcher.donors_, population).to_csv(output / "feature_inventory.csv", index=False)
         report = {
             "eligible_persons": len(target), "matched_persons": int(matched.sum()),
-            "removed_persons": len(prediction.unmatched_person_ids), "used_donors": len(reuse),
+            "removed_persons": len(removed),
+            "unmatched_persons": len(prediction.unmatched_person_ids), "used_donors": len(reuse),
             "maximum_donor_reuse": int(reuse.max()) if len(reuse) else 0,
             "household_counts_reconstructed_fraction": float(population.get(
                 "household_counts_reconstructed", pd.Series(False, index=population.index)).mean()),

@@ -13,7 +13,7 @@ import pandas as pd
 from data.utils import coerce_boolean_series
 from synthesis.population.models.non_private import home_only_mask
 from . import matched_v1
-from . import opening_hours
+from . import opening_hours, workflow
 from .V3 import donors as donor_tools, inputs
 
 logger = logging.getLogger("synpp")
@@ -29,16 +29,14 @@ def execute(context):
     # Prepare V1 categories while keeping the explicit home-only group outside matching.
 
     started = time.perf_counter()
-    const = context.stage("data.constants")
-    source, population, roster = inputs.prepare_inputs(context, const)
-    source, population = opening_hours.add_regions(context, source, population)
+    prepared = workflow.preprocess(context, "v3")
+    const = prepared.const
+    source, population, roster = prepared.source, prepared.population, prepared.roster
     threshold = int(context.config("matching_minimum_observations"))
     if threshold < 1:
         raise ValueError("matching_minimum_observations must be positive")
-    ids = ["person_id"] + (["household_id"] if "household_id" in roster else [])
-    result = roster[ids].copy()
-    result["mz_person_id"] = -1
-    eligible = population.age.ge(const.MZ_AGE_THRESHOLD) if const.census == "statpop" else population.age_class.gt(0)
+    result = workflow.initial_mapping(prepared)
+    eligible = prepared.eligible
     collective = coerce_boolean_series(population.get("collective_housing_resident",
         pd.Series(False, index=population.index)), name="collective_housing_resident")
     logger.info("V3 start: %d recipients, %d eligible for matching, %d home-only bypasses, "
@@ -97,14 +95,12 @@ def execute(context):
                 selector = result.person_id.isin(target.person_id)
                 result.loc[selector, "mz_person_id"] = result.loc[selector, "person_id"].map(mapping).to_numpy()
                 removed.update(target.loc[assigned < 0, "person_id"])
-                if is_collective and "household_id" in target:
-                    households = target.loc[assigned < 0, "household_id"]
-                    removed.update(population.loc[population.household_id.isin(households), "person_id"])
     finally:
         numba.set_num_threads(previous_threads)
 
     # Export search support and preserve the original mapping contract and recipient order.
 
+    result, removed = workflow.postprocess(prepared, result, removed)
     columns = ["person_id", "mz_person_id", "mandatory_mismatches", "optional_radius", "donor_pool_size", "below_threshold", "age_group", "collective"]
     details = pd.concat(diagnostics, ignore_index=True) if diagnostics else pd.DataFrame(columns=columns)
     details["removed"] = details.person_id.isin(removed)
@@ -114,7 +110,7 @@ def execute(context):
     report = {"algorithm": "V3", "threshold": threshold, "eligible_recipients": len(details),
         "matched": int((details.mz_person_id.ge(0) & ~details.removed).sum()), "removed": len(removed),
         "removed_eligible": int(details.removed.sum()), "retained_population": len(roster) - len(removed),
-        "held_home_only": int(home_only_mask(roster).sum()),
+        "held_home_only": int((home_only_mask(roster) & roster.person_id.isin(result.person_id)).sum()),
         "below_threshold": int(details.below_threshold.sum()),
         "mandatory_relaxed": int(details.mandatory_mismatches.gt(0).sum()),
         "unmatched_hard_masks": int(details.mz_person_id.lt(0).sum()),
@@ -130,7 +126,6 @@ def execute(context):
                 report["unmatched_hard_masks"], report["matched_but_removed_with_household"],
                 report["other_household_members_removed"], report["held_home_only"])
     logger.info("V3 diagnostics: %s; report: %s", output / "matching_diagnostics.csv", output / "matching_report.json")
-    result = result.loc[~result.person_id.isin(removed)].reset_index(drop=True)
     if not set(details.person_id) == set(population.loc[eligible, "person_id"]):
         raise RuntimeError("V3 segments did not cover every eligible recipient exactly once")
     return result, removed
@@ -153,6 +148,6 @@ def _segments(population, source, const):
 
 def validate(context):
     paths = [Path(donor_tools.__file__), Path(inputs.__file__), Path(matched_v1.__file__),
-             Path(opening_hours.__file__),
+             Path(opening_hours.__file__), Path(workflow.__file__),
              Path(__file__).with_name("commute.py"), Path(__file__).parent.parent / "models" / "non_private.py"]
     return hashlib.sha256(b"".join(p.read_bytes() for p in paths)).hexdigest()
