@@ -24,12 +24,12 @@ def configure(context):
     context.config("random_seed")
     context.stage("data.constants")
     context.stage("data.structural_survey.structural_survey")
-    context.stage("data.statpop.statpop")
+    context.stage("synthesis.population.scaled")
 
 def execute(context):
     from synthesis.population.models.non_private import execute_without_home_only
     c = context.stage("data.constants")
-    return execute_without_home_only(context, "data.statpop.statpop", _execute_model,
+    return execute_without_home_only(context, "synthesis.population.scaled", _execute_model,
                                      {"employed": c.INACTIVE, "job_position": 70})
 
 
@@ -56,7 +56,7 @@ def _execute_model(context):
     # 0. LOAD
     # -------------------------------------------------------------------
     survey_df = context.stage("data.structural_survey.structural_survey")
-    pop_df = context.stage("data.statpop.statpop").copy()
+    pop_df = context.stage("synthesis.population.scaled").copy()
 
     survey_df['employed']     = survey_df['employed'].astype('int32')
     survey_df['job_position'] = survey_df['job_position'].astype('int32')

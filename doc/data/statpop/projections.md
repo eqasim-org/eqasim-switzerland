@@ -55,6 +55,24 @@ The official sources are:
 
 ## Pipeline processing
 
+Scaling runs immediately after demographic STATPOP preparation, before the
+employment, income, education, cross-border, driving-licence and car models:
+
+```text
+data.statpop.statpop → synthesis.population.scaled → models.employment
+    → … → models.caravailability → data.census.selected → population.sampled
+```
+
+The IPU margins and household integerization are unchanged. Scaled household
+copies receive unique person/household IDs while retaining their original
+STATPOP identifiers. Attribute models and crossing assignment then run on the
+target-year population, so scaling itself does not require crossing assignment
+or the road network. `data.census.selected` still returns the fully modelled
+population required for balanced sampling. With scaling disabled, demographic
+STATPOP passes through scaling before those same models; the ARE-SynPop branch
+is unchanged. Model draws can differ from earlier runs, where replicated
+households inherited attributes predicted before scaling.
+
 With `enable_scaling: true`, both existing projection stages depend on
 `data.statpop.projections.raw`. This new offline stage:
 
