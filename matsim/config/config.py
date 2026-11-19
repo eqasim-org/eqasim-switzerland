@@ -1,5 +1,6 @@
 """Generate the shared MATSim config and adapt local routing/simulation copies."""
 from pathlib import Path
+import hashlib
 
 import matsim.runtime.eqasim as eqasim
 from dmc.constants import constants as dmc_constants
@@ -84,3 +85,8 @@ def adapt_for_simulation(context, config_path, *, local=False):
     tools.change_params(config_path, tools.simulation_parameters(context, local=local), create=True)
 
     return str(Path(config_path).resolve())
+
+
+def validate(context):
+    """Regenerate configs when shared XML editing and airport rules change."""
+    return hashlib.sha256(Path(tools.__file__).read_bytes()).hexdigest()
