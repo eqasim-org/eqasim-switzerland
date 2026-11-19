@@ -1195,7 +1195,7 @@ and tables without licence/car models or MATSim preparation. Its dependency grap
 adds only this joint stage to the previous early-analysis graph. The road graph
 is loaded once; routing scales with crossing choices, not with expanded people.
 
-### Rebuilding the G/H/I/M/N/O count reference
+### Rebuilding the F/G/H/I/M/N/O count reference
 
 Run the independent source stage with the same configuration and crossing
 release used by the assignment:
@@ -1220,15 +1220,41 @@ offline, first archive all eight downloaded source files in a stable directory,
 then set `cross_border_count_raw_path` to it. A relative path is resolved under
 `data_path`; the default is `null`, which downloads the sources.
 
-`count_reference_sources.json` records the reviewed link from each G/H/I/M/N/O
+`count_reference_sources.json` records the reviewed link from each F/G/H/I/M/N/O
 crossing FID to an official counter, year or campaign. Canonical FIDs and their
 aliases are listed together, so one physical crossing receives one count.
 The stage takes anchor
-coordinates from the selected crossing GeoPackage and fails if its G/H/I/M/N/O
+coordinates from the selected crossing GeoPackage and fails if its F/G/H/I/M/N/O
 road FIDs or group memberships differ from this mapping. It reads ASTRA weekday averages, Doubs
 annual all-day estimates and Vaud's two-direction weekday campaign counts.
 These are different measures and years; the existing count assignment uses
 their **relative shares**, not their sum as a calibrated group total.
+
+Group F uses seven reviewed publication values in the same count-share fit.
+They are stored in `count_reference_sources.json` with `source: published`,
+the source URL and table/page locator, `published_value`, and `divisor_days`.
+The builder divides the published value by this denominator and rounds once;
+these reviewed transcriptions do not require extra downloads. Updating a source
+requires reviewing its value and metadata in the mapping. The mapping itself
+is included in the builder cache fingerprint.
+
+| FID | Crossing | Relative-count reference | Basis |
+| --- | --- | ---: | --- |
+| 122 | Castasegna | 4,817 | 2025 all-days mean, ASTRA 098 |
+| 117 | Campocologno / Tirano | 4,605 | 2025 Brusio N inland proxy, ASTRA 138 |
+| 89 | Müstair / Taufers | 3,750 | 2024 SS41 Taufers corridor proxy, ASTAT 19 |
+| 90 | Munt la Schera | 1,026 | 374,559 passages in 2025 / 365 |
+| 70 | Forcola di Livigno | 1,370 | Approximate 500,000/year in 2014–2018 series / 365 |
+| 123 | Umbrail | 515 | Whole-year estimate in June 2024 regional plan; observation year unresolved |
+| 71 | Splügen | 1,015 | 2005 mean during the pass opening period |
+
+The resulting reference sum is 17,098. It normalizes relative shares and is
+**not a new Group F total-demand target**. There is no F entry in the working
+`cross_border_car_crossing_targets`. These accepted proxies mix years and day
+bases; particularly Splügen's open-season mean is not a calendar-year mean.
+The existing road-geography constraints, fixed transit exits and frozen
+unsupported trips still apply. No Group F-specific assignment algorithm is
+introduced.
 
 The reviewed Ticino mapping uses 17 counters from 2025, Gandria from 2023,
 Dirinella from 2021 and the actual Stabio-Gaggiolo border counter from 2024.
