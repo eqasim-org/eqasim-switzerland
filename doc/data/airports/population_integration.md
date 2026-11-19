@@ -41,8 +41,8 @@ Full survey attributes are not required for these fixed airport plans.
 
 `matsim.config.config` registers the airport subpopulation with `ReRoute` and
 `KeepLastSelected`. It does not run discrete mode choice or activity rescheduling
-on airport agents. Airport scoring inherits the ordinary mode parameters with
-activity scoring disabled. `secondary_home` and `airport` are registered explicitly.
+on airport agents. Airport travellers use the ordinary default scoring parameters;
+the pipeline removes any airport-specific scoring set left by older configs.
 
 Negative departure seconds and times after midnight retain their offsets.
 The initial activity has no start bound; the final activity has no end bound.
