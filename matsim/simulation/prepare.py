@@ -8,6 +8,7 @@ from matsim.config import config as shared_config
 from matsim.simulation.cross_border_links import patch_directional_border_links
 from matsim.simulation.border_endpoints import patch_border_endpoints
 from matsim.simulation.border_route_choice import repair_grouped_crossings
+from matsim.simulation import gotthard_transit
 
 import matsim.config.tools as config_tools
 from mode_choice.routing import options as routing_options
@@ -75,6 +76,12 @@ def configure(context):
             context.stage("data.cross_border.generate_cross_border_traffic")
             if context.config("cross_border_route_repair"):
                 context.stage("data.cross_border.sample")
+
+    if context.config("cross_border_gotthard_transit_target", None) is not None:
+        if not context.config("include_cross_border") or not context.config("cross_border_boundary_endpoints"):
+            raise ValueError("Gotthard transit calibration requires foreign cross-border demand and boundary endpoints")
+        context.stage("data.cross_border.interview_places")
+        context.config("cross_border_car_crossing_targets", None)
 
     # network calibration
     context.config("network_calibration.activate", default=True)
@@ -296,6 +303,21 @@ def execute(context):
     
     assert os.path.exists("%s/%spopulation.xml.gz" % (context.path(), context.config("output_prefix")))
 
+    # Balance the drivers whose actual routed plans traverse the Gotthard road tunnel.
+
+    if context.config("cross_border_gotthard_transit_target") is not None:
+        points = context.stage("data.cross_border.interview_places")
+        chiasso_points = points.loc[points.label.eq("road") & points.interview_place.eq(gotthard_transit.CHIASSO),
+                                     "border_crossing_point_id"]
+        chiasso_links = {str(border_links[facility]) for point in chiasso_points
+                         for facility in (point + "_entry", point + "_exit") if facility in border_links}
+        targets = context.config("cross_border_car_crossing_targets") or {}
+        gotthard_transit.calibrate(
+            context.path(), population_output_path, households_output_path, vehicles_output_path,
+            Path(context.path()) / network_output_path, chiasso_links,
+            context.config("cross_border_gotthard_transit_target"), targets.get(gotthard_transit.CHIASSO),
+            sample_size, context.config("random_seed"))
+
     # Validate the scenario
 
     eqasim.run(context, "org.eqasim.core.scenario.validation.RunScenarioValidator", [
@@ -316,9 +338,14 @@ def execute(context):
 def validate(context):
     # Synpp hashes this stage module, but imported helpers/source-launch Java are
     # separate files. Include them so a repair update cannot reuse stale plans.
+    sources = []
     if context.config("cross_border_route_repair"):
+        sources.extend(["border_route_choice.py", "BorderRouteQueries.java"])
+    if context.config("cross_border_gotthard_transit_target") is not None:
+        sources.append("gotthard_transit.py")
+    if sources:
         digest = hashlib.sha256()
-        for name in ["border_route_choice.py", "BorderRouteQueries.java"]:
+        for name in sources:
             digest.update(Path(__file__).with_name(name).read_bytes())
         return digest.hexdigest()
     return None

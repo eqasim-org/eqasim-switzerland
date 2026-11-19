@@ -221,6 +221,41 @@ set `cross_border_car_target_method: entry_group` to retain the previous method.
 Set `cross_border_car_target_method: journey` to enable it. The working
 `config_dib_10.yml` selects `entry_group`.
 
+### Gotthard road tunnel weekday transit target
+
+Set `cross_border_gotthard_transit_target: 5013` to calibrate foreign transit
+drivers in `matsim.simulation.prepare`, after initial routing. Omit the
+setting or set it to `null` to disable it. This option requires cross-border
+demand and directional boundary endpoints. It works with either upstream
+car crossing target method.
+
+The source is the 2015 A+GQPV Alpine road survey. Select
+`BEFRAGUNGSORT=Gotthardtunnel`, `VERKEHRSTRAEGER=1`, `UEBERGANGSART=2`,
+`VERKEHRSART=2`, and `TAGESTYP=Werktag`. Vehicle types 1 and 3 give 627
+passenger car and five motorcycle interviews. Their combined annual weight
+divided by 260 gives 5,012.57 vehicles per weekday across both directions.
+Cars alone give 4,964.02. The simulation represents both types as car drivers.
+
+Preparation identifies the two directed car links between OSM nodes
+`5066257662` and `6406319663` and counts passages in selected foreign
+transit plans. It adjusts complete journeys with a seeded sample. A change
+at one end requires a compensating visitor tour at the same physical gateway.
+Transit with an unsupported gateway stays fixed. The integer fit gives
+eligible transit origin–destination pairs a common proportional adjustment
+as far as the gateway constraints allow. Compensation uses complete foreign
+visitor plans, households and vehicles. It can therefore change visitor
+volumes and trip purposes inside Switzerland.
+
+The tunnel control is rounded to the nearest sampled passage. Each other
+gateway targets its original combined entry and exit count, except Chiasso
+Autostrada, which uses its configured crossing target when supplied. The fit
+minimizes integer rounding discrepancies and allows at most one sampled
+passage per gateway. Counts cover assigned survey-driver gateway events.
+The prepare cache contains `gotthard_transit.json`, the before/after table
+`gotthard_transit_gateways.csv`, and the donor IDs in
+`gotthard_transit_people.csv`. Simulation rerouting can change tunnel use
+in later iterations.
+
 ### Journey method
 
 Start with the usual 2015-calibrated vehicle weights, separately for Swiss and
