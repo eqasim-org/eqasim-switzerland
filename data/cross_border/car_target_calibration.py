@@ -14,6 +14,7 @@ def configure(context):
     context.config("data_path")
     context.config("specific_day_scenario", "workday")
     requested = context.config("cross_border_car_crossing_targets", None)
+    context.config("cross_border_car_target_method", "entry_group")
     context.stage("data.cross_border.car_targets")
     if requested:
         context.stage("data.cross_border.road_exit_points")
@@ -38,7 +39,13 @@ def execute(context):
     exits = context.stage("data.cross_border.road_exit_points")
     roads = context.stage("data.cross_border.road_candidates")
     exit_places = unique_exit_places(exits, roads)
-    controls, audit, contributions = joint_controls(reference, observations, targets, exit_places)
+    method = context.config("cross_border_car_target_method")
+    if method == "entry_group":
+        controls, audit, contributions = joint_controls(reference, observations, targets, exit_places)
+    elif method == "journey":
+        controls, audit, contributions = journey_controls(reference, observations, targets, exit_places)
+    else:
+        raise ValueError("cross_border_car_target_method must be 'entry_group' or 'journey'")
 
     # Record the coupled solution, including contributions from other entry groups.
 
@@ -155,4 +162,85 @@ def joint_controls(reference, observations, targets, exit_places):
 
 def validate(context):
     return file_versions([*survey_paths(context.config("data_path")),
-                          Path(__file__).with_name("survey_calibration.py")])
+                          Path(__file__).with_name("survey_calibration.py"),
+                          Path(__file__).with_name("journey_weights.py")])
+
+
+def journey_controls(reference, observations, targets, exit_places):
+    """Fit positive journey weights to all controlled entry-plus-exit totals.
+
+    Minimize relative entropy from the usual 2015-calibrated weights. One
+    journey gets one factor; both of its crossing contributions use that factor.
+    Uncontrolled crossings may change when they share a controlled journey.
+    """
+    from scipy.optimize import least_squares
+    from data.cross_border.journey_weights import crossing_events
+
+    keys = sorted(targets)
+    unit = {key: dict(value, override_factor=1.) for key, value in targets.items()}
+    frames = []
+    for swiss in (False, True):
+        old = reference.loc[reference.residence_country.eq("CH").eq(swiss)]
+        new = observations.loc[observations.residence_country.eq("CH").eq(swiss)]
+        calibrated, _ = calibrate_demand(old, new, unit)
+        frames.append(calibrated)
+    weighted = pd.concat(frames, ignore_index=True)
+    entry, exits, transit, exit_place = crossing_events(weighted, targets, exit_places)
+    events = entry + exits
+    wanted = np.array([targets[key]["target_both_directions"] for key in keys])
+    weights = weighted.weight.to_numpy()
+
+    # Aggregate identical event patterns before solving the small smooth system.
+
+    patterns, inverse = np.unique(events, axis=0, return_inverse=True)
+    masses = np.bincount(inverse, weights=weights, minlength=len(patterns))
+    supported = (masses > 0) & patterns.any(axis=1)
+    patterns, masses = patterns[supported], masses[supported]
+    if not len(patterns) or ((patterns.T @ masses) == 0).any():
+        raise ValueError("Journey crossing targets have no supported survey events")
+
+    def residual(log_factors):
+        adjusted = masses * np.exp(patterns @ log_factors)
+        return (patterns.T @ adjusted - wanted) / wanted
+
+    def jacobian(log_factors):
+        adjusted = masses * np.exp(patterns @ log_factors)
+        return (patterns.T @ (adjusted[:, None] * patterns)) / wanted[:, None]
+
+    fit = least_squares(residual, np.zeros(len(keys)), jac=jacobian, bounds=(-30., 30.),
+                        ftol=1e-13, xtol=1e-13, gtol=1e-13, max_nfev=1000)
+    multipliers = np.exp(events @ fit.x)
+    adjusted = weights * multipliers
+    expected = events.T @ adjusted
+    if not fit.success or not np.allclose(expected, wanted, rtol=0, atol=1e-5):
+        raise ValueError("Journey crossing targets are infeasible or did not converge: "
+                         + str(dict(zip(keys, expected - wanted))))
+
+    # Export event factors and complete contributions, including other entries.
+
+    controls, audit, records = {}, [], []
+    for column, key in enumerate(keys):
+        controls[key] = dict(targets[key], override_factor=1.,
+                             balanced_override_factor=targets[key]["override_factor"],
+                             calibration_basis="journey_entry_and_exit",
+                             log_event_factor=float(fit.x[column]),
+                             event_factor=float(np.exp(fit.x[column])),
+                             reported_exit_codes=sorted(int(code) for code, name in exit_places.items()
+                                                        if name == targets[key]["interview_place"]),
+                             expected_both_directions=float(expected[column]))
+        unresolved = transit & weighted.interview_place_id.eq(key).to_numpy() & exit_place.isna().to_numpy()
+        audit.append(dict(interview_place=targets[key]["interview_place"], target=wanted[column],
+                          expected=expected[column], event_factor=float(np.exp(fit.x[column])),
+                          unresolved_transit_exit_weight=float(adjusted[unresolved].sum())))
+        for name, coefficients in [("transit_entry", entry[:, column] * transit),
+                                   ("visit_entry_and_return", entry[:, column] * ~transit),
+                                   ("transit_exit", exits[:, column])]:
+            mask = coefficients > 0
+            part = pd.DataFrame(dict(interview_place_id=weighted.loc[mask, "interview_place_id"],
+                                     crossings=(weights * coefficients)[mask],
+                                     expected_crossings=(adjusted * coefficients)[mask]))
+            part = part.groupby("interview_place_id", as_index=False).sum()
+            part["target_id"], part["event"] = key, name
+            part["multiplier"] = part.expected_crossings / part.crossings
+            records.append(part)
+    return controls, pd.DataFrame(audit), pd.concat(records, ignore_index=True)

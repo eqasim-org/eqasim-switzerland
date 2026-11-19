@@ -213,6 +213,84 @@ controlled interview place, it counts:
   from other interview places. Canonical aliases count once; ambiguous or
   missing exit codes are not invented or attributed to the entry place.
 
+`cross_border_car_target_method` selects how journey weights respond to these
+totals. The default, `entry_group`, retains the existing method described below.
+The optional `journey` method also adjusts transit entering elsewhere and
+reporting an exit at a controlled crossing. This is opt-in: omit the option or
+set `cross_border_car_target_method: entry_group` to retain the previous method.
+Set `cross_border_car_target_method: journey` to enable it. The working
+`config_dib_10.yml` selects `entry_group`.
+
+### Gotthard road tunnel weekday transit target
+
+Set `cross_border_gotthard_transit_target: 5013` to calibrate foreign transit
+drivers in `matsim.simulation.prepare`, after initial routing. Omit the
+setting or set it to `null` to disable it. This option requires cross-border
+demand and directional boundary endpoints. It works with either upstream
+car crossing target method.
+
+The source is the 2015 A+GQPV Alpine road survey. Select
+`BEFRAGUNGSORT=Gotthardtunnel`, `VERKEHRSTRAEGER=1`, `UEBERGANGSART=2`,
+`VERKEHRSART=2`, and `TAGESTYP=Werktag`. Vehicle types 1 and 3 give 627
+passenger car and five motorcycle interviews. Their combined annual weight
+divided by 260 gives 5,012.57 vehicles per weekday across both directions.
+Cars alone give 4,964.02. The simulation represents both types as car drivers.
+
+Preparation identifies the two directed car links between OSM nodes
+`5066257662` and `6406319663` and counts passages in selected foreign
+transit plans. It adjusts complete journeys with a seeded sample. A change
+at one end requires a compensating visitor tour at the same physical gateway.
+Transit with an unsupported gateway stays fixed. The integer fit gives
+eligible transit origin–destination pairs a common proportional adjustment
+as far as the gateway constraints allow. Compensation uses complete foreign
+visitor plans, households and vehicles. It can therefore change visitor
+volumes and trip purposes inside Switzerland.
+
+The tunnel control is rounded to the nearest sampled passage. Each other
+gateway targets its original combined entry and exit count, except Chiasso
+Autostrada, which uses its configured crossing target when supplied. The fit
+minimizes integer rounding discrepancies and allows at most one sampled
+passage per gateway. Counts cover assigned survey-driver gateway events.
+The prepare cache contains `gotthard_transit.json`, the before/after table
+`gotthard_transit_gateways.csv`, and the donor IDs in
+`gotthard_transit_people.csv`. Simulation rerouting can change tunnel use
+in later iterations.
+
+### Journey method
+
+Start with the usual 2015-calibrated vehicle weights, separately for Swiss and
+foreign residents, and solve all configured crossing totals simultaneously.
+The fit minimizes relative entropy from those baseline journey weights subject
+to the expected event totals. This supplies one positive multiplier per journey:
+both the entry and the exit contributions of that journey get the same weight.
+Journeys with no event at any controlled crossing retain their baseline weight.
+
+For a crossing event factor `f`, a visit with two crossings at that location
+gets `f²`. A transit from A to B gets `f_A × f_B`, with factor 1 for an
+uncontrolled end. Thus reducing Chiasso's target can reduce Basel → Chiasso
+transit even if Basel has no manual target. Basel's resulting entry total then
+changes too; retaining an exact Basel total requires a separate explicit target.
+The fit can change the Swiss/foreign and transit/visitor proportions from their
+baseline values. It does not independently constrain those proportions or
+force equal entries and exits.
+
+Only uniquely mapped reported transit exits enter this early fit. Missing or
+unmapped exits receive no invented exit contribution; later network inference
+can still add passages at controlled crossings. The solver checks every target
+and fails if supported survey journeys cannot satisfy them. No full pipeline
+or simulation run is needed to fit these survey weights.
+
+`car_crossing_targets.csv` records `event_factor`, `log_event_factor` and the
+mapped `reported_exit_codes`; its `override_factor=1` deliberately retains the
+2015 baseline before applying per-journey factors in both OD readers.
+`target_contributions.csv` reports the actual adjusted contributions, including
+those originating in uncontrolled groups. The OD ledger reports actual
+`calibrated_entries` and their effective scaling factor; `target_entries` and
+`manual_override_factor` are blank because entry totals are not independently
+targeted. Per-observation `journey_target_factor` records the additional factor.
+
+### Entry-group method (default)
+
 Unsupported Swiss `Within CH`/through records do not contribute events to this
 equation. They remain in the survey ledger, as before. The resulting system is:
 
@@ -236,6 +314,8 @@ threshold (with a warning), but fail if a positive residence-group target has no
 their residual-pool factors. Original survey files and weights in the reference
 ledger are not overwritten.
 
+### Scope and validation of both methods
+
 Only the existing `car` category is controlled; it includes motorcycles. Driver
 weights determine vehicle demand. Their passenger population follows the existing
 occupancy expansion, so this does not freeze car-passenger numbers. Rail, coach
@@ -250,7 +330,7 @@ separately modelled external population. No automatic subtraction of that traffi
 from the manual target is performed. Validate the resulting prepared routes or
 simulation events after rebuilding through `matsim.simulation.prepare`.
 
-The raw target stage retains its balanced benchmark. The joint calibration
+The raw target stage retains its balanced benchmark. With `entry_group`, the joint calibration
 stage writes `car_crossing_targets.csv` with the requested count, solved
 multiplier, old balanced multiplier and expected total; `target_event_balance.csv`
 reports unresolved transit-exit weight and fixed contributions; and
@@ -1057,6 +1137,15 @@ Configuration (under `config`):
   20; setting 20 disables expansion and raises a conflict if exact shares cannot
   be met. This is a common ceiling, not a Group O-specific adjustment.
 
+- `cross_border_count_group_max_extra_minutes` can override the ceiling for
+  an individual survey group by its full interview-place name.
+- `cross_border_count_fid_targets` sets absolute, full-population daily
+  passages in both directions at measured crossing FIDs. Within a group,
+  these sites receive their specified targets and the remaining measured
+  crossings share the remaining demand in proportion to their references.
+  The original published counts remain available for comparison. Both
+  options default to `null`.
+
 A JSON record needs `fid`, LV95 reference-point `x`/`y`, and positive `low`;
 `high` is optional and defaults to `low`. Keep `name`, `period`, `day_type`,
 `vehicle_scope`, `source_url` and methodological notes for provenance. Coordinates
@@ -1150,7 +1239,7 @@ and tables without licence/car models or MATSim preparation. Its dependency grap
 adds only this joint stage to the previous early-analysis graph. The road graph
 is loaded once; routing scales with crossing choices, not with expanded people.
 
-### Rebuilding the G/H/I/M/N/O count reference
+### Rebuilding the F/G/H/I/M/N/O count reference
 
 Run the independent source stage with the same configuration and crossing
 release used by the assignment:
@@ -1175,15 +1264,41 @@ offline, first archive all eight downloaded source files in a stable directory,
 then set `cross_border_count_raw_path` to it. A relative path is resolved under
 `data_path`; the default is `null`, which downloads the sources.
 
-`count_reference_sources.json` records the reviewed link from each G/H/I/M/N/O
+`count_reference_sources.json` records the reviewed link from each F/G/H/I/M/N/O
 crossing FID to an official counter, year or campaign. Canonical FIDs and their
 aliases are listed together, so one physical crossing receives one count.
 The stage takes anchor
-coordinates from the selected crossing GeoPackage and fails if its G/H/I/M/N/O
+coordinates from the selected crossing GeoPackage and fails if its F/G/H/I/M/N/O
 road FIDs or group memberships differ from this mapping. It reads ASTRA weekday averages, Doubs
 annual all-day estimates and Vaud's two-direction weekday campaign counts.
 These are different measures and years; the existing count assignment uses
 their **relative shares**, not their sum as a calibrated group total.
+
+Group F uses seven reviewed publication values in the same count-share fit.
+They are stored in `count_reference_sources.json` with `source: published`,
+the source URL and table/page locator, `published_value`, and `divisor_days`.
+The builder divides the published value by this denominator and rounds once;
+these reviewed transcriptions do not require extra downloads. Updating a source
+requires reviewing its value and metadata in the mapping. The mapping itself
+is included in the builder cache fingerprint.
+
+| FID | Crossing | Relative-count reference | Basis |
+| --- | --- | ---: | --- |
+| 122 | Castasegna | 4,817 | 2025 all-days mean, ASTRA 098 |
+| 117 | Campocologno / Tirano | 4,605 | 2025 Brusio N inland proxy, ASTRA 138 |
+| 89 | Müstair / Taufers | 3,750 | 2024 SS41 Taufers corridor proxy, ASTAT 19 |
+| 90 | Munt la Schera | 1,026 | 374,559 passages in 2025 / 365 |
+| 70 | Forcola di Livigno | 1,370 | Approximate 500,000/year in 2014–2018 series / 365 |
+| 123 | Umbrail | 515 | Whole-year estimate in June 2024 regional plan; observation year unresolved |
+| 71 | Splügen | 1,015 | 2005 mean during the pass opening period |
+
+The resulting reference sum is 17,098. It normalizes relative shares and is
+**not a new Group F total-demand target**. There is no F entry in the working
+`cross_border_car_crossing_targets`. These accepted proxies mix years and day
+bases; particularly Splügen's open-season mean is not a calendar-year mean.
+The existing road-geography constraints, fixed transit exits and frozen
+unsupported trips still apply. No Group F-specific assignment algorithm is
+introduced.
 
 The reviewed Ticino mapping uses 17 counters from 2025, Gandria from 2023,
 Dirinella from 2021 and the actual Stabio-Gaggiolo border counter from 2024.

@@ -126,6 +126,27 @@ def calibrate_demand(reference, observations, car_targets=None):
         result.loc[mask, "calibration_source"] = "legacy_pt_person"
     result["weight"] *= result["scaling_factor"]
     result["group_weight"] *= result["scaling_factor"]
+    if any(value.get("calibration_basis") == "journey_entry_and_exit" for value in car_targets.values()):
+        from data.cross_border.journey_weights import journey_multipliers
+        result["journey_target_factor"] = journey_multipliers(result, car_targets)
+        result["weight"] *= result["journey_target_factor"]
+        result["group_weight"] *= result["journey_target_factor"]
+        result["scaling_factor"] *= result["journey_target_factor"]
+        car = result.trip_mode.eq("car")
+        controlled = result.interview_place_id.isin(car_targets)
+        changed = ~np.isclose(result.journey_target_factor, 1., rtol=0, atol=1e-12)
+        result.loc[car & (controlled | changed), "calibration_source"] = "manual_journey_vehicle"
+        # A single entry-group factor no longer describes all journeys. Keep
+        # actual calibrated entry mass and mark its effective factor explicitly.
+        for record in records:
+            group = result.loc[car & result.interview_place_id.eq(record["interview_place_id"])]
+            mass = float(group.weight.sum())
+            record["calibrated_entries"] = mass
+            record["scaling_factor"] = mass / record["entries_2021"] if record["entries_2021"] else np.nan
+            if group.calibration_source.eq("manual_journey_vehicle").any():
+                record["calibration_source"] = "manual_journey_vehicle"
+            record["target_entries"] = np.nan  # Only entry-plus-exit events are targeted.
+            record["manual_override_factor"] = np.nan
     if (~np.isfinite(result["weight"]) | result["weight"].lt(0)).any():
         raise ValueError("Cross-border calibration produced invalid weights.")
     return result, pd.DataFrame(records, columns = [
@@ -193,7 +214,7 @@ def write_survey_audit(context, reference, observations, ledger, swiss_residents
                "scaling_factor", "calibration_source", "reported_occupancy", "nb_passengers", "occupancy_source",
                "start_x", "start_y", "end_x", "end_y", "origin_place", "destination_place",
                "start_location_source", "end_location_source", "location_usable", "location_issue"]
-    columns += [key for key in ("survey_transport", "reported_group_size", "uncalibrated_group_weight")
+    columns += [key for key in ("survey_transport", "reported_group_size", "uncalibrated_group_weight", "journey_target_factor")
                 if key in observations]
     audit = observations[columns].copy()
     supported_categories = ["From CH", "To CH"] if swiss_residents else ["From CH", "To CH", "Through CH"]
@@ -208,9 +229,15 @@ def write_survey_audit(context, reference, observations, ledger, swiss_residents
     reference.loc[invalid, ["interview_id", "interview_place_id", "nb_passengers", "weight"]].to_csv(
         folder / "reference_occupancy_flags.csv", index = False)
     unusable = ~observations["location_usable"]
-    logger.info("Cross-border vehicle controls: %.1f target entries, %.1f calibrated; %d unresolved survey locations (%.1f car entries).",
-                ledger["target_entries"].sum(), ledger["calibrated_entries"].sum(), int(unusable.sum()),
-                observations.loc[unusable & observations["trip_mode"].eq("car"), "weight"].sum())
+    if "journey_target_factor" in observations:
+        logger.info("Journey vehicle controls: %.1f calibrated entries; entry-plus-exit targets are audited "
+                    "in car_target_calibration; %d unresolved survey locations (%.1f car entries).",
+                    ledger["calibrated_entries"].sum(), int(unusable.sum()),
+                    observations.loc[unusable & observations["trip_mode"].eq("car"), "weight"].sum())
+    else:
+        logger.info("Cross-border vehicle controls: %.1f target entries, %.1f calibrated; %d unresolved survey locations (%.1f car entries).",
+                    ledger["target_entries"].sum(), ledger["calibrated_entries"].sum(), int(unusable.sum()),
+                    observations.loc[unusable & observations["trip_mode"].eq("car"), "weight"].sum())
 
 
 def write_assignment_audit(context, before_exclusion, result):

@@ -7,6 +7,9 @@ import matsim.runtime.git as git
 import matsim.runtime.java as java
 import matsim.runtime.maven as maven
 
+DEFAULT_BRANCH = "dev/pt-integration"
+DEFAULT_COMMIT = "a7f88ee4a20fc90b141909dde417bedd3abefe79"
+
 
 def configure(context):
     context.stage("matsim.runtime.git")
@@ -14,34 +17,31 @@ def configure(context):
     context.stage("matsim.runtime.maven")
 
     context.config("pt2matsim_version", "26.6.1-SNAPSHOT")
-    context.config("pt2matsim_branch", "dev/pt-integration")
-    context.config("pt2matsim_path", "")
-    context.config("pt2matsim_commit", "")
-
-
-def run(context, command, arguments, vm_arguments):
-    jar_path = context.stage("matsim.runtime.pt2matsim")    
-    java.run(context, command, arguments, jar_path, vm_arguments)
+    branch = context.config("pt2matsim_branch", DEFAULT_BRANCH)
+    if not context.config("pt2matsim_path", ""):
+        context.config("pt2matsim_commit", DEFAULT_COMMIT if branch == DEFAULT_BRANCH else None)
 
 
 def execute(context):
+
+    # Select the source version or locally supplied JAR.
+
     version = context.config("pt2matsim_version")
     branch  = context.config("pt2matsim_branch")
     
     if context.config("pt2matsim_path") == "":
-        # Clone repository and checkout version
-        git.run(context, [
-            "clone", "https://github.com/matsim-org/pt2matsim.git",
-            "--branch", branch,
-            "--single-branch", "pt2matsim",
-            "--depth", "1"
-        ])
+        # Keep branch history for pinned builds so the commit survives branch advances.
 
-        repository = str(Path(context.path()) / "pt2matsim")
         commit = context.config("pt2matsim_commit")
+        if commit and not re.fullmatch(r"[0-9a-fA-F]{40}", commit):
+            raise ValueError("pt2matsim_commit must be a full Git commit SHA")
+        depth = [] if commit else ["--depth", "1"]
+        git.run(context, [
+            "clone", "--branch", branch, "--single-branch", *depth,
+            "https://github.com/matsim-org/pt2matsim.git", "pt2matsim"
+        ])
+        repository = str(Path(context.path()) / "pt2matsim")
         if commit:
-            if not re.fullmatch(r"[0-9a-fA-F]{40}", commit):
-                raise ValueError("pt2matsim_commit must be a full Git commit SHA")
             git.run(context, ["fetch", "--depth", "1", "origin", commit], cwd=repository)
             git.run(context, ["checkout", "--detach", commit], cwd=repository)
         revision = git.run(context, ["rev-parse", "HEAD"], cwd=repository, catch_output=True)
@@ -68,3 +68,8 @@ def execute(context):
         shutil.copy(context.config("pt2matsim_path"), jar_path)
         
     return jar_path
+
+
+def run(context, command, arguments, vm_arguments):
+    jar_path = context.stage("matsim.runtime.pt2matsim")
+    java.run(context, command, arguments, jar_path, vm_arguments)
