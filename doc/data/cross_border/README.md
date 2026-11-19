@@ -213,6 +213,49 @@ controlled interview place, it counts:
   from other interview places. Canonical aliases count once; ambiguous or
   missing exit codes are not invented or attributed to the entry place.
 
+`cross_border_car_target_method` selects how journey weights respond to these
+totals. The default, `entry_group`, retains the existing method described below.
+The optional `journey` method also adjusts transit entering elsewhere and
+reporting an exit at a controlled crossing. This is opt-in: omit the option or
+set `cross_border_car_target_method: entry_group` to retain the previous method.
+Set `cross_border_car_target_method: journey` to enable it. The working
+`config_dib_10.yml` selects `entry_group`.
+
+### Journey method
+
+Start with the usual 2015-calibrated vehicle weights, separately for Swiss and
+foreign residents, and solve all configured crossing totals simultaneously.
+The fit minimizes relative entropy from those baseline journey weights subject
+to the expected event totals. This supplies one positive multiplier per journey:
+both the entry and the exit contributions of that journey get the same weight.
+Journeys with no event at any controlled crossing retain their baseline weight.
+
+For a crossing event factor `f`, a visit with two crossings at that location
+gets `f²`. A transit from A to B gets `f_A × f_B`, with factor 1 for an
+uncontrolled end. Thus reducing Chiasso's target can reduce Basel → Chiasso
+transit even if Basel has no manual target. Basel's resulting entry total then
+changes too; retaining an exact Basel total requires a separate explicit target.
+The fit can change the Swiss/foreign and transit/visitor proportions from their
+baseline values. It does not independently constrain those proportions or
+force equal entries and exits.
+
+Only uniquely mapped reported transit exits enter this early fit. Missing or
+unmapped exits receive no invented exit contribution; later network inference
+can still add passages at controlled crossings. The solver checks every target
+and fails if supported survey journeys cannot satisfy them. No full pipeline
+or simulation run is needed to fit these survey weights.
+
+`car_crossing_targets.csv` records `event_factor`, `log_event_factor` and the
+mapped `reported_exit_codes`; its `override_factor=1` deliberately retains the
+2015 baseline before applying per-journey factors in both OD readers.
+`target_contributions.csv` reports the actual adjusted contributions, including
+those originating in uncontrolled groups. The OD ledger reports actual
+`calibrated_entries` and their effective scaling factor; `target_entries` and
+`manual_override_factor` are blank because entry totals are not independently
+targeted. Per-observation `journey_target_factor` records the additional factor.
+
+### Entry-group method (default)
+
 Unsupported Swiss `Within CH`/through records do not contribute events to this
 equation. They remain in the survey ledger, as before. The resulting system is:
 
@@ -236,6 +279,8 @@ threshold (with a warning), but fail if a positive residence-group target has no
 their residual-pool factors. Original survey files and weights in the reference
 ledger are not overwritten.
 
+### Scope and validation of both methods
+
 Only the existing `car` category is controlled; it includes motorcycles. Driver
 weights determine vehicle demand. Their passenger population follows the existing
 occupancy expansion, so this does not freeze car-passenger numbers. Rail, coach
@@ -250,7 +295,7 @@ separately modelled external population. No automatic subtraction of that traffi
 from the manual target is performed. Validate the resulting prepared routes or
 simulation events after rebuilding through `matsim.simulation.prepare`.
 
-The raw target stage retains its balanced benchmark. The joint calibration
+The raw target stage retains its balanced benchmark. With `entry_group`, the joint calibration
 stage writes `car_crossing_targets.csv` with the requested count, solved
 multiplier, old balanced multiplier and expected total; `target_event_balance.csv`
 reports unresolved transit-exit weight and fixed contributions; and
