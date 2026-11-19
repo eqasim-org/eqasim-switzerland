@@ -1102,6 +1102,15 @@ Configuration (under `config`):
   20; setting 20 disables expansion and raises a conflict if exact shares cannot
   be met. This is a common ceiling, not a Group O-specific adjustment.
 
+- `cross_border_count_group_max_extra_minutes` can override the ceiling for
+  an individual survey group by its full interview-place name.
+- `cross_border_count_fid_targets` sets absolute, full-population daily
+  passages in both directions at measured crossing FIDs. Within a group,
+  these sites receive their specified targets and the remaining measured
+  crossings share the remaining demand in proportion to their references.
+  The original published counts remain available for comparison. Both
+  options default to `null`.
+
 A JSON record needs `fid`, LV95 reference-point `x`/`y`, and positive `low`;
 `high` is optional and defaults to `low`. Keep `name`, `period`, `day_type`,
 `vehicle_scope`, `source_url` and methodological notes for provenance. Coordinates
