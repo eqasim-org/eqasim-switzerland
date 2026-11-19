@@ -350,6 +350,10 @@ def generate_trips(ods, homes, hotels, model, shares, settings, sources, distanc
     key = frame.airport + ':' + frame.airport_access_point
     frame['airport_x'] = key.map({k: xy[0] for k, xy in airport_xy.items()})
     frame['airport_y'] = key.map({k: xy[1] for k, xy in airport_xy.items()})
+    # Use the facilities' whole-metre convention before deriving either endpoint,
+    # distances or travel times. Both XML writers then receive identical points.
+    coordinates = ['airport_x', 'airport_y', 'endpoint_x', 'endpoint_y']
+    frame[coordinates] = np.trunc(frame[coordinates].to_numpy(dtype=float)).astype(np.int64)
     ax, ay = frame.airport_x.to_numpy(), frame.airport_y.to_numpy()
     to = frame.direction.eq('to_airport')
     # Visitors stay at temporary accommodation rather than resident households.
@@ -479,10 +483,13 @@ def inject_airport_trips_in_population(population, trips, *, reserved_vehicle_id
         raise ValueError('Unknown airport trip direction')
     if not frame['mode'].isin(['car', 'car_passenger', 'pt', 'walk', 'bike']).all():
         raise ValueError('Airport modes must use the five simulation modes')
-    numeric = frame[['origin_x', 'origin_y', 'destination_x', 'destination_y',
-                     'departure_time', 'arrival_time']].to_numpy(dtype=float)
+    coordinates = ['origin_x', 'origin_y', 'destination_x', 'destination_y']
+    numeric = frame[coordinates + ['departure_time', 'arrival_time']].to_numpy(dtype=float)
     if not np.isfinite(numeric).all() or (frame.arrival_time < frame.departure_time).any():
         raise ValueError('Airport coordinates/times must be finite and arrival cannot precede departure')
+    # Normalize older/imported trip tables too, before population and facilities
+    # share this prepared table; never alter the upstream input in place.
+    frame[coordinates] = np.trunc(frame[coordinates].to_numpy(dtype=float)).astype(np.int64)
     residents = frame.loc[~frame.is_visitor, 'person_id']
     if residents.isna().any() or residents.astype(str).duplicated().any():
         raise ValueError('Airport residents must have unique, non-missing person IDs')

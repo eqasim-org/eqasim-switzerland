@@ -39,6 +39,13 @@ The minimal airport XML includes `isAirport`, `isVisitor`, airport code,
 is retained because the Swiss Java configurator counts adults in households.
 Full survey attributes are not required for these fixed airport plans.
 
+Airport access and accommodation coordinates are truncated to whole metres
+before origin/destination coordinates, distances and travel times are derived.
+Injection applies the same convention to older or imported trip tables on a
+copy. Population activities and their facilities therefore receive identical
+coordinates, as required by the scenario validator. Existing trip/preparation
+cache signatures include the airport implementation and invalidate older data.
+
 `matsim.config.config` registers the airport subpopulation with `ReRoute` and
 `KeepLastSelected`. It does not run discrete mode choice or activity rescheduling
 on airport agents. Airport travellers use the ordinary default scoring parameters;
