@@ -283,21 +283,57 @@ def plot_border_crossing_loads(df, title, output_path):
     plt.close(fig)
 
 
-def plot_global_hourly_comparison(global_hourly_df, output_path, reference_name = "TPG"):
+def plot_global_hourly_comparison(global_hourly_df, output_path, reference_name = "TPG", year = None):
+    reference = f"{reference_name} {year}" if year else reference_name
     df = global_hourly_df.sort_values("hour")
 
     _, ax = plt.subplots(figsize = (12, 6))
 
-    ax.fill_between(df["hour"], df["tpg_lo"], df["tpg_hi"], color = "black", alpha = 0.15, label = f"{reference_name} 2024 (95% CI)")
-    ax.plot(df["hour"], df["tpg_mean"], "-s", color = "black", linewidth = 1.2, markersize = 4, label = f"{reference_name} 2024 (mean)")
+    ax.fill_between(df["hour"], df["tpg_lo"], df["tpg_hi"], color = "black", alpha = 0.15, label = f"{reference} (95% CI)")
+    ax.plot(df["hour"], df["tpg_mean"], "-s", color = "black", linewidth = 1.2, markersize = 4, label = f"{reference} (mean)")
     ax.plot(df["hour"], df["matsim_total"], "-o", color = "steelblue", linewidth = 1.5, markersize = 5, label = "MATSim (scaled)")
 
     ax.set_xticks(df["hour"])
     ax.set_xlabel("Hour of day")
     ax.set_ylabel("Total passenger events (boardings + alightings)")
-    ax.set_title(f"MATSim vs {reference_name} 2024: total passenger events by hour, perimeter-wide")
+    ax.set_title(f"MATSim vs {reference}: total passenger events by hour, perimeter-wide")
     ax.legend()
     ax.grid(True, alpha = 0.3)
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi = 150, bbox_inches = "tight")
+    plt.close()
+
+
+def plot_global_hourly_split_comparison(global_hourly_split_df, output_path, reference_name = "TPG", year = None):
+    """Same as plot_global_hourly_comparison, with one panel for the boardings and one for the alightings."""
+    events    = ["boardings", "alightings"]
+    reference = f"{reference_name} {year}" if year else reference_name
+
+    _, axes = plt.subplots(2, 1, figsize = (12, 10), sharex = True, sharey = True)
+
+    for ax, event in zip(axes, events):
+        df = global_hourly_split_df[global_hourly_split_df["event"] == event].sort_values("hour")
+
+        ax.fill_between(df["hour"], df["tpg_lo"], df["tpg_hi"], color = "black", alpha = 0.15, label = f"{reference} (95% CI)")
+        ax.plot(df["hour"], df["tpg_mean"], "-s", color = "black", linewidth = 1.2, markersize = 4, label = f"{reference} (mean)")
+        ax.plot(df["hour"], df["matsim_total"], "-o", color = "steelblue", linewidth = 1.5, markersize = 5, label = "MATSim (scaled)")
+
+        ax.set_xticks(df["hour"])
+        ax.set_ylabel(f"Total {event}")
+        ax.set_title(f"MATSim vs {reference}: {event} by hour, perimeter-wide")
+
+        tpg_total, matsim_total = df["tpg_mean"].sum(), df["matsim_total"].sum()
+        ax.text(
+            0.01, 0.97,
+            f"Daily {event}\n{reference}: {tpg_total:,.0f}\nMATSim: {matsim_total:,.0f} ({100 * matsim_total / tpg_total:.0f}%)",
+            transform = ax.transAxes, va = "top", ha = "left", fontsize = 10,
+            bbox = dict(boxstyle = "round", facecolor = "white", edgecolor = "0.7", alpha = 0.9),
+        )
+        ax.legend()
+        ax.grid(True, alpha = 0.3)
+
+    axes[-1].set_xlabel("Hour of day")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi = 150, bbox_inches = "tight")

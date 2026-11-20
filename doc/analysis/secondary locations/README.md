@@ -24,9 +24,9 @@ RDA configuration to retain its comparison panels:
 
 ```bash
 uv run python "analysis/secondary locations/run.py" --configs \
-  config_dib_10_rda.yml \
-  config_dib_10_nn_distance.yml \
-  config_dib_10_nn_no_distance.yml
+  config_rda.yml \
+  config_nn_distance.yml \
+  config_nn_no_distance.yml
 ```
 
 The same arguments work with `generate_report --slurm` to submit only the
@@ -190,7 +190,7 @@ against the completed **0.1** distance-enabled run:
 bash "analysis/secondary locations/submit_loss_sweep.sh"
 ```
 
-The default source is `config_dib_10_nn_distance.yml`. The submitter first pins
+The default source is `config_nn_distance.yml`. The submitter first pins
 its completed assignment, model checkpoints and upstream artifact identities.
 The original YAML, pipeline metadata, fitted 0.1 models and input caches remain
 read only. A private snapshot is written under the ignored results directory;
@@ -433,9 +433,9 @@ The ordinary `generate_report` command produces all of these additions.
 
 ## Focused secondary comparison jobs
 
-The current comparison configs are `config_dib_10_sNN.yml` (distance input),
-`config_dib_10_sNNnD.yml` (hierarchy-first without distance), and
-`config_dib_10.yml` (existing RDA result). Submit the NN stages and a dependent
+The current comparison configs are `config_sNN.yml` (distance input),
+`config_sNNnD.yml` (hierarchy-first without distance), and
+`config.yml` (existing RDA result). Submit the NN stages and a dependent
 report from the repository root:
 
 ```bash

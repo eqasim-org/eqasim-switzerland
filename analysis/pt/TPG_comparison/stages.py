@@ -324,7 +324,12 @@ def run_global_comparison(data, output_dir, year, border_crossing_df = None, sbb
     full_day_df      = comparison.build_full_day_table(stop_hour_df)
     global_hourly_df = comparison.build_global_hourly_table(stop_hour_df)
 
-    plotting.plot_global_hourly_comparison(global_hourly_df, f"{output_dir}/tpg_global_hourly_comparison.png")
+    plotting.plot_global_hourly_comparison(global_hourly_df, f"{output_dir}/tpg_global_hourly_comparison.png", year = year)
+
+    global_hourly_split_df = comparison.build_global_hourly_split_table(tpg_mofr, stops_in_ge)
+    plotting.plot_global_hourly_split_comparison(
+        global_hourly_split_df, f"{output_dir}/tpg_global_hourly_comparison_boardings_alightings.png", year = year,
+    )
 
     hour_range = (cfg.map_hour_start, cfg.map_hour_end)
     windowed_stop_hour_df = stop_hour_df[stop_hour_df["hour"].between(*hour_range)]

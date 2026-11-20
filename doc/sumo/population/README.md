@@ -78,7 +78,7 @@ modes still raise an error; source caches are left unchanged.
 From the repository root:
 
 ```bash
-uv run -m synpp config_dib_10.yml \
+uv run -m synpp config.yml \
     --run sumo.scenario.population.plans \
     --working-directory cache_sumo
 ```
@@ -91,7 +91,7 @@ register this stage and load its returned path with `context.stage(...)`.
 Export freight and delivery traffic separately:
 
 ```bash
-uv run -m synpp config_dib_10.yml \
+uv run -m synpp config.yml \
     --run sumo.scenario.population.trips \
     --working-directory cache_sumo
 ```

@@ -151,7 +151,7 @@ def write_html(payload, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="config_dib_10.yml")
+    parser.add_argument("--config", default="config.yml")
     parser.add_argument("--output", help="Override HTML destination")
     parser.add_argument("--max-persons", type=int, help="Optional deterministic person sample; 0 includes all")
     args = parser.parse_args()

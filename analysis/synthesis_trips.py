@@ -223,7 +223,7 @@ class CachedContext:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="config_dib_10.yml")
+    parser.add_argument("--config", default="config.yml")
     parser.add_argument("--cached-inputs", action="store_true", required=True,
                         help="Use existing unique input caches read-only, without rebuilding upstream stages")
     args = parser.parse_args()

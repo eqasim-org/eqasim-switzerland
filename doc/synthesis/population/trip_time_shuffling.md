@@ -73,7 +73,7 @@ For a focused comparison using existing inputs without rebuilding the
 population:
 
 ```bash
-uv run -m analysis.synthesis_trips --config config_dib_10.yml --cached-inputs
+uv run -m analysis.synthesis_trips --config config.yml --cached-inputs
 ```
 
 This explicitly reuses the existing upstream pickles in that configuration's

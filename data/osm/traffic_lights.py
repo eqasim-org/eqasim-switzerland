@@ -9,14 +9,13 @@ logger = logging.getLogger(__name__)
 
 
 def configure(context):
-    context.stage("data.spatial.swiss_border")
+    # get_region (data.osm.clean) reads the simulation region.
+    context.stage("data.spatial.simulation_region")
 
     context.config("data_path")
     context.config("osm_file", "switzerland-latest.osm.gz")
     context.config("border_offset", 50000)
     context.config("add_traffic_lights", True)
-    context.config("cross_border_exclude_shapefiles", default=None)
-    context.config("include_external_population", default = True)
 
 
 CAR_ROAD_TAGS = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary','unclassified', 'residential', 'motorway_link', 

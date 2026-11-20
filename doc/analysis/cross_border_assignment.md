@@ -5,7 +5,7 @@ Swiss cross-border modelling, without running the later licence/car models,
 population scaling/sampling or whole-population MATSim preparation:
 
 ```bash
-uv run -m synpp config_dib_10.yml --run analysis.cross_border.assignment
+uv run -m synpp config.yml --run analysis.cross_border.assignment
 ```
 
 `--run` replaces the configuration's requested end stages for this invocation.

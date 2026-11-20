@@ -74,7 +74,7 @@ parameters without estimation. It shades the flat zone.
 
 ## Current defaults: full dataset
 
-Refitted on 2026-11-12 using `config_dib_10.yml` paths and seed 518745.
+Refitted on 2026-11-12 using `config.yml` paths and seed 518745.
 All dates in MOBIS were included, without sampling. Quality filters retained
 791,900 legs from 4,567 participants. Training used
 709,772 legs/4,110 participants, and testing used

@@ -205,7 +205,7 @@ def build(configuration_path, network_crossings=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("configuration", nargs="?", default="config_dib_10.yml")
+    parser.add_argument("configuration", nargs="?", default="config.yml")
     parser.add_argument("--network-crossings", help="Existing network GeoParquet to use without rebuilding conversion")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)

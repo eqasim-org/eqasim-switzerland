@@ -2,7 +2,7 @@
 
 Convenient direct use (does not invoke Synpp or inspect training code)::
 
-    uv run -m analysis.matching.rebuild_reports config_dib_10.yml
+    uv run -m analysis.matching.rebuild_reports config.yml
 """
 
 import argparse

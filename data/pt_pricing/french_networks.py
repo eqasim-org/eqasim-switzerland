@@ -39,6 +39,9 @@ logger = logging.getLogger("synpp")
 
 # Two stops of two operators of a network with the same name closer than this are the same stop (Thonon: STAR'T, EVA'D)
 SHARED_STOP_M = 50
+# A stop in no commune outline but closer than this to one is in that commune: the stops on the border, whose
+# coordinates are a few metres off (TAC: Sous Bossey, 8 m from Bossey, on the Swiss side of the line)
+COMMUNE_SNAP_M = 100
 
 
 @dataclass(frozen = True)
@@ -156,6 +159,10 @@ def zone_rows(networks, stops, feed_path, communes_path, foreign_zones_path, col
     points = gpd.GeoDataFrame(stops[["stop_id", "stop_name"]].copy(), crs = 4326,
                               geometry = gpd.points_from_xy(stops["stop_lon"].astype(float), stops["stop_lat"].astype(float))).to_crs(2056)
     commune_of = gpd.sjoin(points, communes, predicate = "within").drop_duplicates("stop_id").set_index("stop_id")["insee"]
+    outside = points[~points["stop_id"].isin(commune_of.index)]
+    near = gpd.sjoin_nearest(outside, communes, max_distance = COMMUNE_SNAP_M, distance_col = "distance_m")
+    near = near.sort_values("distance_m").drop_duplicates("stop_id").set_index("stop_id")["insee"]
+    commune_of = pd.concat([commune_of, near])
     names = dict(zip(stops["stop_id"], stops["stop_name"]))
     foreign = _foreign_zones(foreign_zones_path)
 

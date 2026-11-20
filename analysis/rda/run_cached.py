@@ -42,7 +42,7 @@ def snapshot(settings):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="config_dib_10.yml")
+    parser.add_argument("--config", default="config.yml")
     parser.add_argument("--threads", type=int, default=24)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)

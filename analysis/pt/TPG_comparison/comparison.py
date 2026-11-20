@@ -100,6 +100,25 @@ def build_global_hourly_table(stop_hour_df):
     return grouped
 
 
+def build_global_hourly_split_table(tpg_mofr, stops_in_perimeter):
+    """Perimeter-wide hourly table with the boardings and the alightings kept apart: one row per hour and event."""
+    df = tpg_mofr[tpg_mofr["gtfs_code"].isin(stops_in_perimeter)]
+
+    tables = []
+    for event in ["boardings", "alightings"]:
+        grouped = df.assign(
+            tpg_mean     = df[f"{event}_raw_mean"],
+            tpg_var      = df[f"{event}_raw_std"] ** 2,
+            matsim_total = df[f"{event}_matsim"],
+        ).groupby("hour", as_index = False)[["tpg_mean", "tpg_var", "matsim_total"]].sum()
+
+        grouped = grouped.set_index("hour").reindex(range(24), fill_value = 0).reset_index()
+        grouped["event"] = event
+        tables.append(_add_confidence_interval(grouped))
+
+    return pd.concat(tables, ignore_index = True)
+
+
 def _split_line_direction(line_direction):
     s         = line_direction.astype(str)
     match     = s.str.extract(r"^(?P<line_base>.+)_(?P<direction_letter>[HR])$")

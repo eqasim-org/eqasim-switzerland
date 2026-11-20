@@ -74,15 +74,15 @@ def main():
     directory.mkdir(parents=True)
     sys.path.insert(0,str(ROOT/'analysis/secondary locations'))
     from cache_io import RunCache
-    rda=RunCache(ROOT/'config_dib_10.yml')
+    rda=RunCache(ROOT/'config.yml')
     if rda.kind!='rda':raise ValueError('The reference config must have completed RDA results')
     plans=[prepare(ROOT/name,directory,distance) for name,distance in
-           [('config_dib_10_sNN.yml',True),('config_dib_10_sNNnD.yml',False)]]
-    manifest=dict(created_utc=stamp,rda_config=str(ROOT/'config_dib_10.yml'),rda_root=rda.root,debug=True,runs=[])
+           [('config_sNN.yml',True),('config_sNNnD.yml',False)]]
+    manifest=dict(created_utc=stamp,rda_config=str(ROOT/'config.yml'),rda_root=rda.root,debug=True,runs=[])
     for path,settings,plan in plans:
         threads=int(settings['config']['threads'])
         record=dict(config=str(path),source_config=str(ROOT/path.name),plan=plan,threads=threads)
-        command=['sbatch','--parsable','--job-name='+path.stem.removeprefix('config_dib_')+'_secondary',
+        command=['sbatch','--parsable','--job-name='+path.stem.removeprefix('config_')+'_secondary',
             '--chdir='+str(ROOT),'--cpus-per-task='+str(threads),'--mem-per-cpu=5G',
             '--output='+str(ROOT/'logs/%x_%j.log'),'--error='+str(ROOT/'logs/%x_%j.log'),
             str(ROOT/'scripts/run_secondary_locations.sh'),str(ROOT),str(path)]
@@ -94,7 +94,7 @@ def main():
     if not args.dry_run:
         result=subprocess.check_output(['bash',str(ROOT/'analysis/secondary locations/generate_report'),'--slurm',
             '--after-job',':'.join(run['job_id'] for run in manifest['runs']),
-            '--configs',str(ROOT/'config_dib_10.yml'),*[str(path) for path,_,_ in plans]],text=True).strip()
+            '--configs',str(ROOT/'config.yml'),*[str(path) for path,_,_ in plans]],text=True).strip()
         manifest['report_submission']=result
         (directory/'submissions.json').write_text(json.dumps(manifest,indent=2))
         print(result,flush=True)

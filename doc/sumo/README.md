@@ -13,7 +13,7 @@ as inputs in those diagrams.
 From the repository root:
 
 ```bash
-uv run -m synpp config_dib_10.yml --run sumo.runtime.sumo \
+uv run -m synpp config.yml --run sumo.runtime.sumo \
     --working-directory cache_sumo
 ```
 
@@ -35,7 +35,7 @@ The stage returns a dictionary with `home`, `python`, and `version`.
 ## Build the road network
 
 ```bash
-uv run -m synpp config_dib_10.yml --run sumo.scenario.network.road_network \
+uv run -m synpp config.yml --run sumo.scenario.network.road_network \
     --working-directory cache_sumo
 ```
 
@@ -54,7 +54,7 @@ Existing direct paths do not require the `data_path/osm` directory to exist.
 To select a different single extract:
 
 ```bash
-uv run -m synpp config_dib_10.yml --run sumo.scenario.network.road_network \
+uv run -m synpp config.yml --run sumo.scenario.network.road_network \
     --working-directory cache_sumo \
     --config sumo_network_file switzerland-latest-2026.osm.pbf
 ```

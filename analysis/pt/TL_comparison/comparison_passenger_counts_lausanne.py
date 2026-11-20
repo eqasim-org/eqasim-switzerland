@@ -338,6 +338,7 @@ def run(gtfs_path, perimeter_shapefile, tl_processed_counts_path, matsim_output_
 
     plotting.plot_global_hourly_comparison(
         global_hourly_df, os.path.join(output_dir, "tl_global_hourly_comparison.png"), reference_name = reference_name,
+        year = 2024,  # tl2024_agg_workday_*.csv, see resolve_tl_stats_path
     )
     interactive_map.build_hourly_map(
         stop_hour_df, os.path.join(output_dir, "tl_stop_map_by_hour.html"),

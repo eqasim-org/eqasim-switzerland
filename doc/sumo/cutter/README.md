@@ -193,10 +193,10 @@ large region when those effects matter.
 Use the existing synthesis cache and working settings:
 
 ```bash
-uv run -m synpp config_dib_10.yml --run sumo.simulation.load_network \
+uv run -m synpp config.yml --run sumo.simulation.load_network \
     --config sumo_assignment_scale 1
 
-uv run -m synpp config_dib_10.yml --run sumo.cutter.scenario \
+uv run -m synpp config.yml --run sumo.cutter.scenario \
     --config sumo_assignment_scale 1 \
     --config sumo_region_geometry /path/to/zurich_region.gpkg
 ```

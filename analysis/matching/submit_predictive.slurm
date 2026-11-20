@@ -17,4 +17,4 @@ export OPENBLAS_NUM_THREADS=1
 export NUMBA_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 unset DISPLAY
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/../..}"
-uv run -m analysis.matching.run_predictive --config "${1:-config_dib_10.yml}" --debug --shared-model
+uv run -m analysis.matching.run_predictive --config "${1:-config.yml}" --debug --shared-model

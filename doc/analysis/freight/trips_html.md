@@ -3,10 +3,10 @@
 Generate a report using the existing caches selected by any pipeline configuration:
 
 ```bash
-uv run -m analysis.freight.trips_html config_dib_10.yml
+uv run -m analysis.freight.trips_html config.yml
 ```
 
-Replace `config_dib_10.yml` with the configuration you want. The standalone command
+Replace `config.yml` with the configuration you want. The standalone command
 resolves exact Synpp cache hashes from its `config` and reads its
 `working_directory`; it does not execute pipeline stages or alter upstream caches.
 It fails clearly if a matching source cache is missing. The report is written to

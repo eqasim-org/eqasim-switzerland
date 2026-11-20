@@ -11,16 +11,22 @@ def get_cost(df, context, pt_regional_radius_km):
     df = df.copy()
     # get the prices dataframe
     prices = estimate_cost_from_eqasim_java(df, context, pt_regional_radius_km)
-    prices = prices[["id","price"]]
-    prices[["person_id", "trip_id"]] = prices["id"].str.extract(r'([^_]+)_(.+)')
+    prices = prices[["id","price","total_travel_time_min"]].copy()
+    prices[["person_id", "trip_id"]] = prices["id"].astype(str).str.extract(r'([^_]+)_(.+)')
     prices["person_id"] = prices["person_id"].astype(df["person_id"].dtype)
     prices["trip_id"] = prices["trip_id"].astype(df["trip_id"].dtype)
     prices.rename(columns={"price":"pt_cost_CHF"}, inplace=True)
-    
+
+    # The MATSim PT router returns no route at all (every output, travel time included, is NaN) when walking is
+    # better, i.e. mostly for trips of a few hundred metres: no ticket is needed
+    no_route = prices["pt_cost_CHF"].isna() & prices["total_travel_time_min"].isna()
+    prices.loc[no_route, "pt_cost_CHF"] = 0.0
+    logger.info(f"{no_route.sum()} out of {len(prices)} trips have no PT route in MATSim (walking is better): PT cost 0.")
+
     # merge with the trips dataframe
     df = df.merge(prices[["person_id", "trip_id", "pt_cost_CHF"]], on = ["person_id", "trip_id"], how = "left")
-    
-    # fill nans with the simple model
+
+    # fill the remaining nans with the simple model
     f_nan = df["pt_cost_CHF"].isna()
     num_nans = f_nan.sum()
     if num_nans>0:

@@ -3,7 +3,7 @@
 Generate the standalone HTML using a pipeline configuration:
 
 ```bash
-uv run -m analysis.freight.border_crossings config_dib_10.yml
+uv run -m analysis.freight.border_crossings config.yml
 ```
 
 Output: `<analysis_path>/freight_border_crossings/index.html`, with aggregate CSVs

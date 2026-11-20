@@ -7,7 +7,7 @@ import os
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="config_dib_10.yml")
+    parser.add_argument("--config", default="config.yml")
     parser.add_argument("--debug", action="store_true", help="Reuse cached boundaries without normal validation")
     parser.add_argument("--reuse-matches", action="store_true", help="In debug mode, execute only the report stage")
     args = parser.parse_args()

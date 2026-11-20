@@ -3,7 +3,7 @@
 Generate the report using the chosen pipeline configuration:
 
 ```bash
-uv run -m analysis.freight.compare config_dib_10.yml
+uv run -m analysis.freight.compare config.yml
 ```
 
 Output: `<analysis_path>/freight_comparison/comparison.html`, accompanied by CSV

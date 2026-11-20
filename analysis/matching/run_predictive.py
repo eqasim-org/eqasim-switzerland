@@ -7,7 +7,7 @@ import os
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", default="config_dib_10.yml")
+    parser.add_argument("--config", default="config.yml")
     parser.add_argument("--debug", action="store_true", help="Reuse upstream caches without rebuilding the population")
     parser.add_argument("--shared-model", action="store_true", help="Train one V2 model; run 50 survey and 10 population repetitions")
     args = parser.parse_args()

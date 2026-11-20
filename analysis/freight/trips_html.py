@@ -240,7 +240,7 @@ def render(frames, configuration, sources, output=None, configuration_name="Synp
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("configuration", nargs="?", default="config_dib_10.yml")
+    parser.add_argument("configuration", nargs="?", default="config.yml")
     parser.add_argument("--output", type=Path, help="Override the configured analysis_path/freight_lcv_od.html")
     args = parser.parse_args()
     build(args.configuration, args.output)

@@ -197,7 +197,7 @@ mapped edges, rather than exact door-to-door distances.
 ## Running
 
 The ignored local `config_sumo_loaded.yml` copies the data/scenario settings and
-working cache from `config_dib_10.yml`, selects `sumo.router.assignment`, and sets
+working cache from `config.yml`, selects `sumo.router.assignment`, and sets
 the demand expansion to 10 for its current 10% sample:
 
 ```bash

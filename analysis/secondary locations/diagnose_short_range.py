@@ -60,7 +60,7 @@ def diagnose(cache, frame):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, default=REPOSITORY / 'config_dib_10_nn_distance.yml')
+    parser.add_argument('--config', type=Path, default=REPOSITORY / 'config_nn_distance.yml')
     results = Path(__file__).with_name('results') / 'loss_weight_sweep'
     parser.add_argument('--observed', type=Path, default=results / 'replay_observed.parquet')
     parser.add_argument('--output', type=Path, default=results / 'short_range_diagnosis.json')

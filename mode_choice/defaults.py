@@ -1,7 +1,7 @@
 """Single source for population mode-choice defaults and policy constants.
 
 Fitted coefficients/scales stay in the DMC parameter files; shared estimation
-constants stay in dmc.constants. Override runtime defaults in config_dib_10.yml.
+constants stay in dmc.constants. Override runtime defaults in your configuration (config.yml).
 """
 from dmc.constants import constants as DMC
 from matsim.config.tools import PT_PRICING_FILES, PT_PRICING_MODULE

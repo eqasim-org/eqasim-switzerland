@@ -441,7 +441,7 @@ testing the Java final-turn/length fixes as well, select the corrected JAR with
 To rebuild only the two OD outputs with the working configuration:
 
 ```bash
-uv run -m synpp config_dib_10.yml \
+uv run -m synpp config.yml \
   --run data.cross_border.generate_od \
   --run data.cross_border.swiss_residents_od
 ```
@@ -1156,7 +1156,7 @@ Run the independent source stage with the same configuration and crossing
 release used by the assignment:
 
 ```bash
-uv run -m synpp config_dib_10.yml --run data.cross_border.count_reference_build
+uv run -m synpp config.yml --run data.cross_border.count_reference_build
 ```
 
 The stage downloads the [ASTRA 2023 workbook](https://www.astra.admin.ch/en/annual-and-monthly-results),

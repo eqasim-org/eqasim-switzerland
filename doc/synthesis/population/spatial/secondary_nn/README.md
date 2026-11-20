@@ -5,7 +5,7 @@ primary locations. It uses `synthesis.population.destinations`, including French
 facilities when enabled. Its output remains `(locations, convergence)`, indexed
 by the following activity's `trip_index`.
 
-Configure scenarios in `config_dib_10.yml` and run from the repository root:
+Configure scenarios in `config.yml` and run from the repository root:
 
 ```yaml
 config:
@@ -14,7 +14,7 @@ config:
 ```
 
 ```sh
-uv run -m synpp config_dib_10.yml
+uv run -m synpp config.yml
 ```
 
 ## Distance-free hierarchy-first routing

@@ -17,7 +17,7 @@ LOG=logging.getLogger('secondary_loss_sweep')
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config',type=Path,default=REPOSITORY/'config_dib_10_nn_distance.yml')
+    parser.add_argument('--config',type=Path,default=REPOSITORY/'config_nn_distance.yml')
     parser.add_argument('--output',type=Path,default=Path(__file__).with_name('results')/'loss_weight_sweep')
     parser.add_argument('--weights',type=float,nargs='+',default=[.2,.3,.5])
     parser.add_argument('--threads',type=int,default=12)

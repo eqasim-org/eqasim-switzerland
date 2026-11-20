@@ -46,7 +46,7 @@ validate or build these freight-only stages.
 
 ## Configuration
 
-The working configuration `config_dib_10.yml` uses NPVM through the new default.
+The working configuration `config.yml` uses NPVM through the new default.
 To select explicitly:
 
 ```yaml

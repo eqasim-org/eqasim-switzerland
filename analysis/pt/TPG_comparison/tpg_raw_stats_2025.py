@@ -4,6 +4,7 @@ import os
 import sys
 
 import pandas as pd
+from pandas.api.types import union_categoricals
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -70,23 +71,21 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path,
     is "<line>_<station>" in the second table (used by the line comparison, analysis.pt.TPG_comparison.line_comparison)."""
 
     print(f"Reading raw TPG counts from {raw_counts_path} (this is large, ~4.85GB)...")
-    raw = pd.read_csv(
-        raw_counts_path,
-        usecols = ["IdCourse", "DExploitCourse", "Ligne", "RangArretAsc", "CodeLong", "NbMontees", "NbDescentes",
-                  "FlagOk", "DTEntreeFenetreArretReal"],
-        dtype = {
-            "Ligne": "category", "CodeLong": "category", "FlagOk": "category",
-            "NbMontees": "float32", "NbDescentes": "float32", "RangArretAsc": "int16",
-        },
-    )
+    raw = _read_raw_counts(raw_counts_path)
     print(f"  -> {len(raw)} rows")
 
     print("Direction of each run: the station of its last stop (all the rows of the run, before the FlagOk filter)...")
     last = raw.loc[raw.groupby(["DExploitCourse", "IdCourse"], observed = True)["RangArretAsc"].idxmax(),
                    ["DExploitCourse", "IdCourse", "CodeLong"]]
-    last["direction"] = last["CodeLong"].astype(str).str[:4]
-    raw = raw.merge(last[["DExploitCourse", "IdCourse", "direction"]], on = ["DExploitCourse", "IdCourse"], how = "left")
-    raw = raw.drop(columns = ["IdCourse", "RangArretAsc"])
+    last["direction"] = last["CodeLong"].astype(str).str[:4].astype("category")
+
+    print("Expansion of the counted runs to all the runs of their line, day and scheduled departure hour...")
+    expansion = _run_expansion_factors(raw)
+    runs = last[["DExploitCourse", "IdCourse", "direction"]].merge(expansion, on = ["DExploitCourse", "IdCourse"], how = "left")
+    del last, expansion
+
+    raw = raw.merge(runs, on = ["DExploitCourse", "IdCourse"], how = "left")
+    raw = raw.drop(columns = ["IdCourse", "RangArretAsc", "HDepartTheo"])
 
     print("Filtering to FlagOk == 'Y'...")
     flag_counts = raw["FlagOk"].value_counts()
@@ -94,10 +93,14 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path,
     raw = raw[raw["FlagOk"] == "Y"]
     print(f"  -> {len(raw)} rows with FlagOk == 'Y'")
 
-    print("Deriving hour from the actual arrival timestamp...")
-    arrival = pd.to_datetime(raw["DTEntreeFenetreArretReal"], errors = "coerce")
-    raw = raw[arrival.notna()]
-    raw["hour"] = arrival[arrival.notna()].dt.hour.astype("int16")
+    # the runs that are not FlagOk carry counts flagged as unreliable: the valid runs stand in for them
+    for column, _ in _COUNT_COLUMNS:
+        raw[column] = raw[column] * raw["expansion"].astype("float32")
+    raw = raw.drop(columns = ["expansion"])
+
+    print("Keeping the rows with a valid actual arrival timestamp (hour derived while reading)...")
+    raw = raw[raw["hour"].notna()]
+    raw["hour"] = raw["hour"].astype("int16")
     print(f"  -> {len(raw)} rows with a valid arrival timestamp")
 
     print("Classifying day type per date and restricting to the working days (Monday to Friday)...")
@@ -111,6 +114,13 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path,
     raw = raw[pd.Series(dates.map(day_type_by_date).values).isin(tpg_raw_stats_2024.WORKDAY_TYPES).values]
     print(f"  -> {len(raw)} rows on working days")
 
+    # Days each line was counted (any FlagOk row, before the stop crosswalk): a stop/line/hour without
+    # passengers on one of these days counts as a zero in the daily statistics, see _aggregate
+    line_days = raw[["Ligne", "DExploitCourse"]].drop_duplicates()
+    line_days = line_days.rename(columns = {"Ligne": "line", "DExploitCourse": "_date"})
+    line_days["line"] = line_days["line"].astype(str)
+    print(f"  {len(line_days)} line/day pairs with counts, {line_days['line'].nunique()} lines")
+
     print("Mapping stops to GTFS ids...")
     crosswalk = tpg_raw_stats_2024.load_stop_crosswalk(tpg_data_path)
     raw = raw.merge(crosswalk, left_on = "CodeLong", right_on = "stop_code", how = "inner")
@@ -118,12 +128,13 @@ def aggregate_workday_stats(raw_counts_path, tpg_data_path,
 
     raw = raw.rename(columns = {"Ligne": "line_direction"})  # bare line number, no direction - see docstring point 3
     raw["line_direction"] = raw["line_direction"].astype(str)
-    raw["line_with_direction"] = raw["line_direction"] + "_" + raw["direction"].fillna("")
+    raw["line_with_direction"] = raw["line_direction"] + "_" + raw["direction"].astype("object").fillna("").astype(str)
+    raw["line"] = raw["line_direction"]  # the bare line, to look up the days it was counted
 
-    return _aggregate(raw, "line_direction"), _aggregate(raw, "line_with_direction")
+    return _aggregate(raw, "line_direction", line_days), _aggregate(raw, "line_with_direction", line_days)
 
 
-def _aggregate(raw, line_column):
+def _aggregate(raw, line_column, line_days):
     raw = raw.drop(columns = [c for c in ("line_direction", "line_with_direction") if c != line_column])
     raw = raw.rename(columns = {line_column: "line_direction"})
 
@@ -131,8 +142,11 @@ def _aggregate(raw, line_column):
           "day can have several distinct bus/tram passes landing in the same hour - see docstring point 5b)...")
     count_columns = [c for c, _ in _COUNT_COLUMNS]
     raw["_date"] = raw["DExploitCourse"]
-    daily = raw.groupby(["gtfs_code", "line_direction", "hour", "_date"], observed = True)[count_columns].sum().reset_index()
+    keys  = ["gtfs_code", "line_direction", "hour"]
+    daily = raw.groupby(keys + ["line", "_date"], observed = True)[count_columns].sum().reset_index()
     print(f"  -> {len(daily)} stop/line/hour/day rows (from {len(raw)} individual stop-visit rows)")
+
+    daily = _fill_missing_line_days(daily, keys, line_days, count_columns)
 
     print("Aggregating (min/max/mean/std/q10/q20/q50/q80/q90) across days, per stop/line/hour...")
     quantile_labels = ["q10", "q20", "q50", "q80", "q90"]
@@ -163,8 +177,81 @@ def _aggregate(raw, line_column):
     return out
 
 
+def _read_raw_counts(raw_counts_path, chunksize = 5_000_000):
+    """Reads the raw counts in chunks to limit the memory: the arrival timestamp (one string per row) is reduced to
+    its hour (NaN if invalid) and the text columns are stored as categories."""
+    categorical = ["DExploitCourse", "Ligne", "CodeLong", "FlagOk", "HDepartTheo"]
+
+    chunks = []
+    reader = pd.read_csv(
+        raw_counts_path, chunksize = chunksize,
+        usecols = ["IdCourse", "RangArretAsc", "NbMontees", "NbDescentes", "DTEntreeFenetreArretReal"] + categorical,
+        dtype = {
+            **{column: "category" for column in categorical},
+            "NbMontees": "float32", "NbDescentes": "float32", "RangArretAsc": "int16",
+        },
+    )
+    for chunk in reader:
+        arrival = pd.to_datetime(chunk["DTEntreeFenetreArretReal"], errors = "coerce")
+        chunk["hour"] = arrival.dt.hour.astype("float32")
+        chunks.append(chunk.drop(columns = ["DTEntreeFenetreArretReal"]))
+        print(f"  {sum(len(c) for c in chunks)} rows read", flush = True)
+
+    # the categories differ between chunks: union them, a plain concat would turn the columns into strings
+    raw = pd.concat([c.drop(columns = categorical) for c in chunks], ignore_index = True)
+    for column in categorical:
+        raw[column] = union_categoricals([c[column] for c in chunks])
+        for c in chunks:
+            c.drop(columns = [column], inplace = True)
+
+    return raw
 
 
+def _run_expansion_factors(raw):
+    """Expansion factor of each FlagOk run: number of runs / number of FlagOk runs of its line, operating day and
+    scheduled departure hour (HDepartTheo, the departure of the run). FlagOk is set per run. The runs of a group
+    without any FlagOk run cannot be represented: their share is printed."""
+    runs = raw.drop_duplicates(["DExploitCourse", "IdCourse"])[["DExploitCourse", "IdCourse", "Ligne", "FlagOk", "HDepartTheo"]].copy()
+    runs["ok"]           = runs["FlagOk"] == "Y"
+    runs["depart_hour"]  = pd.to_numeric(runs["HDepartTheo"].astype(str).str.split(":").str[0], errors = "coerce").fillna(-1)
+
+    group = ["Ligne", "DExploitCourse", "depart_hour"]
+    per_group = runs.groupby(group, observed = True).agg(n_runs = ("ok", "size"), n_ok = ("ok", "sum")).reset_index()
+    per_group["expansion"] = per_group["n_runs"] / per_group["n_ok"].where(per_group["n_ok"] > 0)
+
+    runs = runs.merge(per_group[group + ["expansion"]], on = group, how = "left")
+
+    n_ok         = runs["ok"].sum()
+    uncovered    = per_group.loc[per_group["n_ok"] == 0, "n_runs"].sum()
+    print(f"  {len(runs)} runs, {n_ok} FlagOk ({100 * n_ok / len(runs):.1f}%); mean factor of the FlagOk runs "
+          f"{runs.loc[runs['ok'], 'expansion'].mean():.3f}")
+    print(f"  {uncovered} runs ({100 * uncovered / len(runs):.1f}%) are in a line/day/hour without any FlagOk run "
+          f"and are not represented")
+
+    return runs.loc[runs["ok"], ["DExploitCourse", "IdCourse", "expansion"]]
+
+
+def _fill_missing_line_days(daily, keys, line_days, count_columns):
+    """Adds a zero row for every day on which the line was counted but this stop/line(/direction)/hour has no
+    passengers, so that the statistics across days are per counted day of the line and not only per day on which
+    the stop/line/hour appears. Without it, rare patterns (short runs, diversions, late runs landing in another
+    hour) count as if they ran every day, which inflates the summed means."""
+    mean_before = daily.groupby(keys, observed = True)[count_columns].mean().sum()
+
+    combinations = daily[keys + ["line"]].drop_duplicates()
+    full         = combinations.merge(line_days, on = "line")
+
+    filled = full.merge(daily, on = keys + ["line", "_date"], how = "left")
+    filled[count_columns] = filled[count_columns].fillna(0).astype(daily[count_columns].dtypes)
+
+    mean_after = filled.groupby(keys, observed = True)[count_columns].mean().sum()
+
+    print(f"  -> {len(filled)} stop/line/hour/day rows after adding the zeros of the days the line was counted "
+          f"({len(filled) - len(daily)} added)")
+    for column in count_columns:
+        print(f"  {column}: sum of the daily means {mean_before[column]:,.0f} -> {mean_after[column]:,.0f}")
+
+    return filled
 
 
 def main():

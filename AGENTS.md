@@ -7,10 +7,12 @@ Run commands from the repository root unless a document explicitly says otherwis
 
 ## Configuration and execution
 
-- Inspect `config_dib_10.yml` before changing or running the pipeline. It is the
-  working source of truth for stages, inputs, outputs, resource settings and
-  scenario choices. Private configuration files are usually ignored by Git.
-- The standard command is `uv run -m synpp config_dib_10.yml`. Other local
+- Unless the user names a configuration, use the `config_XXX.yml` file at the
+  repository root that was modified most recently. Inspect it before changing or
+  running the pipeline: it is the working source of truth for stages, inputs,
+  outputs, resource settings and scenario choices. Private configuration files
+  are usually ignored by Git.
+- The standard command is `uv run -m synpp <that configuration>`. Other local
   configurations select different samples, analysis runs or secondary-location
   algorithms. Inspect the configuration actually named in the user's request.
 - `config.yml` is the short beginner template. Keep it focused on important

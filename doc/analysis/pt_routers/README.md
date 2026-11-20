@@ -15,7 +15,7 @@ mkdir -p logs
 sbatch run_test_pt.sh
 ```
 
-The test configuration copies `config_dib_sumo.yml` but selects only this analysis.
+The test configuration copies `config_sumo.yml` but selects only this analysis.
 It uses a private working directory, the completed source configuration's prepared
 trips and Java launch settings, and the existing fitted DMC parameter files.
 These source caches are read-only. Neither population synthesis nor model fitting

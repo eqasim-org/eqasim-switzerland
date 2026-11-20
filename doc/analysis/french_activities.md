@@ -3,7 +3,7 @@
 Run independently, without building a population or simulation:
 
 ```bash
-uv run -m analysis.french_activities --config config_dib_10.yml
+uv run -m analysis.french_activities --config config.yml
 ```
 
 Or add `analysis.french_activities` to the Synpp `run` list. Inputs come from

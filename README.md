@@ -30,8 +30,8 @@ uv sync
 In particular, the dependencies contain the [synpp](https://github.com/eqasim-org/synpp) package, which is the computational backbone of the pipeline.
 
 `pyproject.toml` and `uv.lock` pin Synpp to commit
-[`638adc5`](https://github.com/Dib-AEK/synpp/commit/638adc5ea847eef97a8637c8620ea636b436ae8a)
-of [Dib-AEK/synpp](https://github.com/Dib-AEK/synpp/tree/fix/shared-dependency-traversal),
+[`e7a1b44`](https://github.com/matsim-eth/synpp/commit/e7a1b44fee4c6c5f395244085b9a23f65d5fbb70)
+of [matsim-eth/synpp](https://github.com/matsim-eth/synpp),
 based on v1.7.3. The fork resolves shared dependencies once per stage, avoiding
 the repeated traversal that stalled mode-choice initialization. `uv sync` installs
 the corrected package directly; no local package patch is needed.
@@ -52,8 +52,8 @@ uv run -m synpp config.yml
 
 Fill in the template's paths and input filenames before running it. The selected
 `run` stages determine whether population synthesis, simulation, or analysis is
-executed. The working cluster configuration is run with
-`uv run -m synpp config_dib_10.yml`; private configurations are not included in Git.
+executed. Private configurations (`config_XXX.yml`) are not included in Git; they
+are run the same way, e.g. `uv run -m synpp config_XXX.yml`.
 On the cluster, Maven needs explicit proxy settings. The local launchers enable
 these with `MAVEN_USE_ENV_PROXY=true` after loading `eth_proxy`. Alternatively,
 set `eqasim_path` to an existing, valid eqasim JAR.

@@ -33,7 +33,7 @@ schedule compliance. Trip purposes and times are identical between variants.
 ## Focused Slurm run on existing population inputs
 
 ```bash
-sbatch run_rda_comparison.sh config_dib_10.yml
+sbatch run_rda_comparison.sh config.yml
 ```
 
 The script requests one task, 24 CPUs, four hours and 8GB per CPU. RDA uses

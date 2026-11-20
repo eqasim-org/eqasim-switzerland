@@ -353,7 +353,7 @@ def build(configuration_path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("configuration", nargs="?", default="config_dib_10.yml")
+    parser.add_argument("configuration", nargs="?", default="config.yml")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     print(build(args.configuration))

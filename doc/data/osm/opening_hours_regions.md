@@ -72,7 +72,7 @@ To rerun only this stage against existing dependency caches in Synpp debug mode:
 from synpp import Synpp
 
 pipeline = Synpp.build_from_yml(
-    "config_dib_10.yml", run=["data.spatial.opening_hours_regions"])
+    "config.yml", run=["data.spatial.opening_hours_regions"])
 pipeline.debug = True
 regions = pipeline.run_pipeline()[0]
 ```

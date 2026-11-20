@@ -9,10 +9,10 @@ distributions, top 15 chains, activity-count distributions, mean activities per
 resident, and shares both among non-home purposes and among all activities
 including home. A genuine non-travel survey day contributes one home activity.
 
-To explicitly rerun the three matchers and the report using config_dib_10.yml
+To explicitly rerun the three matchers and the report using config.yml
 in debug mode, without editing the configuration file:
 
-    uv run -m analysis.matching.run_comparison --config config_dib_10.yml --debug
+    uv run -m analysis.matching.run_comparison --config config.yml --debug
 
 Debug mode reuses completed upstream population, survey, anchor and geography
 caches without normal validation. It executes the three requested matching
@@ -24,7 +24,7 @@ their new results, as in Synpp debug mode; upstream input caches stay read-only.
 
 To execute only the analysis stage against existing matching caches:
 
-    uv run -m analysis.matching.run_comparison --config config_dib_10.yml --debug --reuse-matches
+    uv run -m analysis.matching.run_comparison --config config.yml --debug --reuse-matches
 
 The stage also works as a normal Synpp stage via --run
 analysis.matching.compare_algorithms, with normal cache validation. Once its
@@ -67,7 +67,7 @@ were verified during implementation; online availability is not guaranteed.
 
 Run or load both categorical matchers and compare their assigned diaries with:
 
-    uv run -m synpp config_dib_10.yml --run analysis.matching.compare_v1_v3
+    uv run -m synpp config.yml --run analysis.matching.compare_v1_v3
 
 The report is written to analysis_path/matching/v1_v3/report.html, alongside
 CSV tables and PNG/PDF figures. It shows 15 activity chains, activity counts,
@@ -168,7 +168,7 @@ Permutation diagnostics use that same estimator's prediction method.
 For an existing completed experiment, the simplest command is:
 
 ```bash
-uv run -m analysis.matching.rebuild_reports config_dib_10.yml
+uv run -m analysis.matching.rebuild_reports config.yml
 ```
 
 This reads the configuration for its cache/output paths and plotting settings.
@@ -187,7 +187,7 @@ If there are several experiments, select one explicitly; the newest is never
 chosen implicitly:
 
 ```bash
-uv run -m analysis.matching.rebuild_reports config_dib_10.yml \
+uv run -m analysis.matching.rebuild_reports config.yml \
     --source /path/to/analysis.matching.validation__HASH.cache
 ```
 
@@ -518,7 +518,7 @@ production fit/predict wrapper. It does not change any matching algorithm.
 
 Submit from the repository root:
 
-    sbatch analysis/matching/submit_predictive.slurm config_dib_10.yml
+    sbatch analysis/matching/submit_predictive.slurm config.yml
 
 The launcher uses Synpp debug mode to reuse the existing survey, population,
 anchor and geography inputs without rebuilding them. Defaults are 12,000 survey
@@ -580,7 +580,7 @@ neural training is invoked by the standalone report renderer.
 
 The current experiment is `analysis.matching.repeat_experiments`. Submit it with:
 
-    sbatch analysis/matching/submit_predictive.slurm config_dib_10.yml
+    sbatch analysis/matching/submit_predictive.slurm config.yml
 
 The launcher explicitly runs `synthesis.population.matching.V2.model` followed
 by the experiment in Synpp debug mode. Existing upstream inputs are reused;

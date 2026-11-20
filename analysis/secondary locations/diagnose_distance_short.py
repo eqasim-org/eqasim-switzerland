@@ -38,7 +38,7 @@ def summarize(frame, observed, label):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, default=DIRECTORY.parents[1]/'config_dib_10_nn_distance.yml')
+    parser.add_argument('--config', type=Path, default=DIRECTORY.parents[1]/'config_nn_distance.yml')
     parser.add_argument('--output', type=Path, default=DIRECTORY/'results/distance_short_investigation')
     args = parser.parse_args()
     output = args.output.resolve()

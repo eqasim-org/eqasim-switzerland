@@ -36,10 +36,10 @@ Renaming stages changes their Synpp cache identities. To reuse an existing fit
 without estimating it again, set both `dmc_mode_parameters_path` and
 `dmc_cost_parameters_path` to the existing exported files.
 
-Use `config_dib_10.yml` as the configuration source:
+Use `config.yml` as the configuration source:
 
 ```sh
-uv run -m synpp config_dib_10.yml
+uv run -m synpp config.yml
 ```
 
 Add `mode_choice.run` to its `run` list to generate population choices. Set
@@ -447,7 +447,7 @@ person-batch files, both sampling methods, cache reuse/invalidation, global and
 canton calibration replay, empty populations and server shutdown. Java requests
 are mocked in these stage tests; they do not execute the national pipeline.
 
-Dependency audit with the current `config_dib_10.yml`: 129 stages, 391 edges,
+Dependency audit with the current `config.yml`: 129 stages, 391 edges,
 no cycles or conflicting configuration values. The installed Synpp 1.7.3
 implementation revisits shared dependency paths during graph construction; this
 graph causes about 28 million visits per pass. The standard dry run was interrupted
@@ -545,4 +545,4 @@ Backend stages were renamed from `mode_choice.routing.java.*` to
 `mode_choice.routing.eqasim.*`, which creates new Synpp cache identities. A supplied
 `eqasim_path` overrides the pinned build: use an updated JAR containing RunServer,
 or set it to an empty string to build the pin. Old server JARs are rejected before
-loading network data. `config_dib_10.yml` now selects the pinned build.
+loading network data. `config.yml` now selects the pinned build.

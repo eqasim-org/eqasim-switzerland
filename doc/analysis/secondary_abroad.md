@@ -6,7 +6,7 @@ stages and treats the production caches as read-only.
 
 ```bash
 .venv/bin/python -m analysis.cross_border.secondary_abroad \
-  --config config_dib_10.yml \
+  --config config.yml \
   --output output/secondary_abroad_20261109
 ```
 

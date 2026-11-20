@@ -3,7 +3,7 @@
 Run the paired comparison with the working configuration:
 
 ```bash
-uv run -m analysis.freight.compare_crossing_sources config_dib_10.yml
+uv run -m analysis.freight.compare_crossing_sources config.yml
 ```
 
 By default, Network uses the saved OD-specific routed assignments beside the
@@ -11,7 +11,7 @@ NPVM matrices. To compare direct network-border assignment instead, supply an
 existing network GeoParquet explicitly, without rebuilding network conversion:
 
 ```bash
-uv run -m analysis.freight.compare_crossing_sources config_dib_10.yml \
+uv run -m analysis.freight.compare_crossing_sources config.yml \
   --network-crossings /path/to/border_crossing_links.parquet
 ```
 
