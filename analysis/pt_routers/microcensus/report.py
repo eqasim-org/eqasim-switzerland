@@ -11,6 +11,7 @@ import numpy as np
 import polars as pl
 
 from mode_choice.defaults import UNROUTABLE_TIME_MIN
+from analysis.pt_routers.microcensus import transfers
 
 METRICS = {'pt_total_travel_time_min': 'Total time (min)', 'pt_in_vehicle_time_min': 'In-vehicle time (min)',
            'pt_access_egress_time_min': 'Access + egress (min)', 'pt_transfer_time_min': 'Transfer time (min)',
@@ -129,6 +130,7 @@ def generate(trips, routes, timings, metadata, output):
     (output / 'timings.json').write_text(json.dumps(timings, indent=2) + '\n')
     (output / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
     figures(routes, timings, output)
+    transfer_section = transfers.generate(trips, routes, output)
     content = ["<!doctype html><html><head><meta charset='utf-8'><title>Microcensus PT routers</title>",
                '<style>body{font:15px system-ui;margin:2em;max-width:1500px}table{border-collapse:collapse;font-size:13px}td,th{padding:6px;border:1px solid #ddd;text-align:right}th{background:#eee}img{max-width:100%}.scroll{overflow:auto}p{max-width:1050px}</style></head><body>',
                '<h1>Microcensus public-transport router comparison</h1>',
@@ -140,6 +142,7 @@ def generate(trips, routes, timings, metadata, output):
                '<img src="reachability.png">', '<h2>Routing performance</h2>', timing_table(timings), '<img src="runtime.png">',
                '<p>Servers run sequentially with the same thread allocation. Eqasim startup includes Rust preprocessing or Raptor initialization. FLASH preprocessing is separate and shared with population routing. The first FLASH routing call includes native timetable loading; later calls reuse it. Backend timings include their Python adapter and file I/O, exclude fares, and are not isolated native-algorithm benchmarks. Original Google runtime is unavailable.</p>',
                '<h2>Journey distributions on each backend’s found PT journeys</h2>', table(distributions), '<img src="distributions.png">',
+               transfer_section,
                '<h2>Paired comparisons on jointly found PT journeys</h2>', table(pairs), '<img src="google_pairs.png">',
                '<p>Pairwise rows use identical trips with PT found in both backends and finite nonnegative values for each metric; denominators can differ by metric. Differences are right minus left. Google and survey journeys may have different query dates, departure choices or routing objectives. Total time may include waiting differently; compare the component sums alongside total time. Google total distance is not inferred from in-vehicle distance. FLASH distance follows stop geometry; eqasim distance follows the mapped network. Differences are diagnostic, not a ground-truth accuracy score.</p>',
                '<h2>Success by distance, border status, detailed survey mode and departure hour</h2>', table(segments),
