@@ -119,7 +119,7 @@ def overwrite_parameters(context):
 
 def runtime_inputs(context):
     root = Path(context.config('data_path'))
-    airports = context.config('airport_model_airports')
+    airports = common.config_mapping(context, 'airport_model_airports')
     for airport in ('GVA', 'ZRH'):
         longitude, latitude = airports[airport]['longitude'], airports[airport]['latitude']
         if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):

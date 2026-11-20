@@ -122,7 +122,7 @@ def output_paths(folder):
 def trip_settings(context):
     seed = context.config('random_seed')
     detour = context.config('airport_trips_detour_factor')
-    speeds = context.config('airport_trips_speeds_kmh')
+    speeds = common.config_mapping(context, 'airport_trips_speeds_kmh')
     fallback = context.config('airport_trips_missing_hotel')
     if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
         raise ValueError('random_seed must be a non-negative integer')
@@ -144,7 +144,7 @@ def source_paths(context):
     root = Path(context.config('data_path'))
     modes = resolve(root, context.config('airport_trips_mode_data'))
     regional = resolve(root, context.config('airport_trips_regional_mode_data'))
-    access_files = context.config('airport_trips_access_points')
+    access_files = common.config_mapping(context, 'airport_trips_access_points')
     if not isinstance(access_files, dict) or set(access_files) != {'GVA', 'ZRH'}:
         raise ValueError('airport_trips_access_points must give GVA and ZRH JSON paths')
     return {'modes': modes, 'mode_metadata': modes.with_suffix('.json'),
