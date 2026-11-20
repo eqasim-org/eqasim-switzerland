@@ -22,7 +22,7 @@ returns a new prepared `Population` without modifying its inputs. It:
 3. Supplies separate `airport_trips` and `airport_vehicles` tables, like the
    existing freight/LCV tables. Every movement has one plan, one ground leg and
    two activities. Resident purposes are `home` and `airport`; visitor purposes
-   are `secondary_home` and `airport`, ordered by direction. An arrival and
+   are `home_secondary` and `airport`, ordered by direction. An arrival and
    departure are independent passengers; no same-day return is invented.
 4. Creates only the vehicle required by each road/bike plan and retains the
    preassigned mode. Passenger fleet exports remove replaced residents' old

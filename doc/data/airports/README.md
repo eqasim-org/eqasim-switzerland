@@ -82,7 +82,7 @@ calibration can use the survey without creating a dependency cycle. Census count
 resident selection uses `synthesis.population.sampled`. Upstream caches are read-only.
 
 Trips use direct `home`/`airport` chains for residents and
-`secondary_home`/`airport` chains for visitors, in either direction. Detailed access modes are preserved and mapped to the
+`home_secondary`/`airport` chains for visitors, in either direction. Detailed access modes are preserved and mapped to the
 simulation vocabulary in `synthesis.airports.trips`; see the [trip guide](../../synthesis/airports/trips.md).
 The [microcensus chain analysis](activity_chains.md) records the evidence behind
 this choice; the earlier stochastic extension is deferred.

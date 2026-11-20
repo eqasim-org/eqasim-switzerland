@@ -176,7 +176,7 @@ under the **same IDs**. Visitors become additional agents with collision-checked
 IDs. Each plan contains one ground leg:
 
 - Residents: `home → airport` or `airport → home`.
-- Visitors: `secondary_home → airport` or `airport → secondary_home`.
+- Visitors: `home_secondary → airport` or `airport → home_secondary`.
 
 Prepared vehicle and facility stages supply the corresponding resources.
 MATSim writes the airport plans alongside freight and LCV. Airport agents use

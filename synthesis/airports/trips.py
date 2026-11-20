@@ -37,7 +37,7 @@ MODE_MAP = {
 }
 # All road categories use the same effective speed, including car passengers.
 SPEEDS = dict(zip(MODES, (60., 60., 70., 30., 60., 60., 60.)))
-VERSION = 11
+VERSION = 12
 
 
 def configure(context):
@@ -357,7 +357,7 @@ def generate_trips(ods, homes, hotels, model, shares, settings, sources, distanc
     ax, ay = frame.airport_x.to_numpy(), frame.airport_y.to_numpy()
     to = frame.direction.eq('to_airport')
     # Visitors stay at temporary accommodation rather than resident households.
-    lodging = np.where(frame.is_visitor, 'secondary_home', 'home')
+    lodging = np.where(frame.is_visitor, 'home_secondary', 'home')
     frame['origin_purpose'] = np.where(to, lodging, 'airport')
     frame['destination_purpose'] = np.where(to, 'airport', lodging)
     frame['activity_chain'] = frame.origin_purpose + '-' + frame.destination_purpose
@@ -398,7 +398,7 @@ def generate_trips(ods, homes, hotels, model, shares, settings, sources, distanc
                    'Municipal OD counts are fixed before visitor assignment; visitors are weighted by hotel+dormitory counts and capped by municipal trip capacity.',
                    'Geneva supplies the airport visitor share, transferred to Zurich; municipalities without usable hotels contain residents only.',
                    'Both airports target Geneva Swiss-endpoint mode totals (page 21), allocated using linear distance preferences fitted to three Geneva regional groups (page 23).',
-                   'Only direct home/airport chains for residents and secondary_home/airport chains for visitors. No intermediate activities or later outings.',
+                   'Only direct home/airport chains for residents and home_secondary/airport chains for visitors. No intermediate activities or later outings.',
                    'Dropoff, taxi and ridehail use car to represent their road traffic because separate taxi/ridehail simulation modes are unavailable; other uses car_passenger as an explicit fallback.',
                    'Residents are selected without replacement from synthesis.population.sampled in their fixed municipality, using pooled age/sex/employment preferences from the 2015/2021 airport microcensus. Their actual home coordinates and person IDs are retained.',
                    'Visitors use uniformly weighted NOGA 551 hotels and 559 accommodation/dormitories, including student residences; visitor person IDs stay null.',
@@ -526,7 +526,7 @@ def inject_airport_trips_in_population(population, trips, *, reserved_vehicle_id
         agent_ids.loc[index] = _reserve_airport_id('airport_visitor_' + str(frame.at[index, 'trip_id']), occupied)
     frame['agent_id'] = agent_ids.astype(str)
     to = frame.direction.eq('to_airport')
-    lodging = np.where(frame.is_visitor, 'secondary_home', 'home')
+    lodging = np.where(frame.is_visitor, 'home_secondary', 'home')
     frame['origin_purpose'] = np.where(to, lodging, 'airport')
     frame['destination_purpose'] = np.where(to, 'airport', lodging)
     # Explicit facilities keep the airport/station and accommodation coordinates
