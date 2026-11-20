@@ -14,7 +14,7 @@ def configure(context):
     context.stage("data.spatial.zones")
 
 
-def _build_matrix(df_od, df_zones, zone_ids, municipality_ids, quarter_ids):
+def _build_matrix(df_od, df_zones, zone_ids, municipality_ids, quarter_ids, aggregate=None):
     municipality_matrix = pd.crosstab(
         df_od["home_municipality_id"],
         df_od["work_zone_id"],
@@ -62,9 +62,11 @@ def _build_matrix(df_od, df_zones, zone_ids, municipality_ids, quarter_ids):
     f_origin = df_zones["zone_level"].isin(("municipality", "quarter"))
     f_zero = np.sum(matrix, axis=1) == 0.0
 
-    for index in np.where(f_origin & f_zero)[0]:
-        matrix[index, :] = 0.0
-        matrix[index, index] = 1.0
+    missing = np.flatnonzero(f_origin & f_zero)
+    if aggregate is None:
+        matrix[missing, missing] = 1.0
+    else:
+        matrix[missing] = aggregate[missing]
 
     matrix[~f_origin & f_zero] = 1.0
 
@@ -119,6 +121,7 @@ def execute(context):
                 zone_ids,
                 municipality_ids,
                 quarter_ids,
+                aggregate=pdf_matrix,
             )
             pdf_matrices[key] = seg_pdf
             cdf_matrices[key] = seg_cdf
@@ -129,15 +132,5 @@ def execute(context):
         len(pdf_matrices) - 1,
         fallback_segments,
     )
-
-    # A final note on the structure of these OD matrices:
-    # - The origin counts for municipalities contain all originating trips, also
-    #   those which are actually assigned to quarters within this zone
-    # - The destination counts target the assigned top-level zone. So arrivals
-    #   in a quarter are NOT included in the arrivals for the municipality. This
-    #   way, arrivals in municipalities with quarters can only happen if the
-    #   municipality is not covered 1:1 by the quarters, which is usually the case
-    #   in our zoning system. This way the municipality itself will only have little
-    #   arrivals, while the quarters will have more.
 
     return pdf_matrices, cdf_matrices

@@ -1,5 +1,5 @@
 import numpy as np
-import pandas as pd
+import shapely
 import logging
 from scipy.spatial import cKDTree
 
@@ -11,45 +11,6 @@ PT2_PREFERENCE_FACTOR   = 3.0
 OTHER_PREFERENCE_FACTOR = 0.5
 COMP_SATURATION_FACTOR  = 1.4
 
-
-# @numba.njit(cache=True)
-def multinomial_sample(n, probs):
-    """
-    Deterministic version of multinomial sampling.
-
-    Parameters
-    ----------
-    n : int
-        Total number of items to allocate.
-    probs : array-like
-        Probabilities for each category. Does not need to sum to 1.
-
-    Returns
-    -------
-    counts : np.ndarray
-        Integer counts per category, summing exactly to n.
-    """
-    probs      = np.array(probs, dtype=np.float64)
-    total_prob = probs.sum()
-
-    if total_prob <= 0.0:
-        return np.zeros(len(probs), dtype=np.int64)
-    
-    probs /= total_prob  # normalize just in case
-    
-    # Step 1: initial deterministic allocation
-    raw_counts = n * probs
-    counts     = np.floor(raw_counts).astype(np.int64)
-    
-    # Step 2: distribute leftover counts based on largest fractional parts
-    remainder = n - counts.sum()
-    if remainder > 0:
-        fractional = raw_counts - counts
-        # pick indices with largest fractional remainder
-        top_indices = np.argsort(fractional)[-remainder:]
-        counts[top_indices] += 1
-
-    return counts
 
 # @numba.njit(cache=True)
 def _apply_distance_reweighting(weights, distances):    
@@ -139,7 +100,7 @@ def correct_companies_number_of_employees(context, df_statent, df_fixed_location
         total_before = df_statent["number_employees"].sum()
         df_statent["number_employees"] = np.maximum( (df_statent["number_employees"] - df_statent["nb_employees_crossborder"] * capacity_decrement),
                                                       df_statent["number_employees"] * 0.01)
-        _log_capacity_change("cross-border commuters (%d real persons)" % nb_empl_cb["nb_employees_crossborder"].sum(),
+        _log_capacity_change("cross-border commuters (%d sampled records)" % nb_empl_cb["nb_employees_crossborder"].sum(),
                              total_before, df_statent["number_employees"].sum())
 
         del df_statent["nb_employees_crossborder"], destinations_cb, destinations_cb_commute, nb_empl_cb
@@ -149,25 +110,23 @@ def correct_companies_number_of_employees(context, df_statent, df_fixed_location
         logger.info("\t Adjusting company employee counts to account for French commuters...")
         commutes = context.stage("data.external_population.commutes")
 
-        # Commutes only carry a raw destination point (no enterprise_id), so
-        # snap each one to its nearest STATENT enterprise.
-        tree = cKDTree(df_statent[["x", "y"]].to_numpy(dtype=float))
-        _, nearest_idx = tree.query(commutes[["destination_x", "destination_y"]].to_numpy(dtype=float))
-
-        nb_empl_fr = pd.Series(df_statent["enterprise_id"].to_numpy()[nearest_idx]).value_counts()
-        nb_empl_fr = nb_empl_fr.rename_axis("enterprise_id").reset_index(name="nb_employees_french")
-
-        df_statent = df_statent.merge(nb_empl_fr, on = "enterprise_id", how="left")
-        df_statent["nb_employees_french"] = df_statent["nb_employees_french"].fillna(0).astype(int)
-
         total_before = df_statent["number_employees"].sum()
-        df_statent["number_employees"] = np.maximum( (df_statent["number_employees"] - df_statent["nb_employees_french"] * capacity_decrement),
-                                                      df_statent["number_employees"] * 0.01)
-        _log_capacity_change("French commuters (%d real persons)" % nb_empl_fr["nb_employees_french"].sum(),
+        border = context.stage("data.spatial.swiss_border").to_crs(2056).union_all()
+        xy = commutes[["destination_x", "destination_y"]].to_numpy(dtype=float)
+        inside = shapely.intersects_xy(border, xy[:, 0], xy[:, 1])
+        rate = context.config("fr_sample_rate")
+        if not 0 < rate <= 1:
+            raise ValueError("fr_sample_rate must be in (0, 1]")
+        jobs = df_statent["number_employees"].to_numpy()
+        sites, groups = np.unique(df_statent[["x", "y"]], axis=0, return_inverse=True)
+        groups = groups.ravel()
+        _, nearest = cKDTree(sites).query(xy[inside])
+        reservations = np.bincount(nearest, minlength=len(sites)) * COMP_SATURATION_FACTOR / rate
+        site_jobs = np.bincount(groups, weights=jobs)
+        fraction = np.divide(reservations, site_jobs, out=np.zeros_like(site_jobs), where=site_jobs > 0)
+        df_statent = df_statent.assign(number_employees=jobs * np.maximum(1 - fraction[groups], 0.01))
+        _log_capacity_change(f"French commuters ({inside.sum()} Swiss endpoints at source rate {rate})",
                              total_before, df_statent["number_employees"].sum())
-
-        del df_statent["nb_employees_french"], commutes, nb_empl_fr
-
 
     if df_fixed_locations is not None:
         logger.info("\t Adjusting company employee counts to account for agents with fixed work locations...")
