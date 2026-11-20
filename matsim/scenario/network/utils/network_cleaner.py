@@ -14,8 +14,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 class networkCleaner():
-    def __init__(self, network, context=None):
+    def __init__(self, network, context=None, audit=None):
         self.context = context
+        self.audit = audit
         self.links = network.links.copy()
         self.nodes = network.nodes.copy()        
         self.network = network
@@ -54,6 +55,8 @@ class networkCleaner():
         # Removing loops (restriction identities must remain valid).
         if remove_network_loops:
             sel = (df['from_node'] == df['to_node']) & ~df.link_id.isin(protected)
+            if self.audit:
+                self.audit.rows(df.loc[sel], "loops")
             stats["removed_loops"] = int(sel.sum())
             logger.info("There are %d loops in the network that are removed." % stats["removed_loops"] )
             df = df[~sel].reset_index(drop=True)
@@ -62,6 +65,8 @@ class networkCleaner():
         if remove_replicate_links:            
             len_df = len(df)
             duplicates = df.duplicated(subset=['length', 'modes', 'from_node', 'to_node', 'capacity'])
+            if self.audit:
+                self.audit.rows(df.loc[duplicates & ~df.link_id.isin(protected)], "duplicates")
             df = df.loc[~(duplicates & ~df.link_id.isin(protected))].reset_index(drop=True)
             stats["removed_link_duplicates"] = len_df-len(df)
             logger.info("There are %d link duplicates in the network that are removed." % stats["removed_link_duplicates"] )                
@@ -126,6 +131,8 @@ class networkCleaner():
             ends = nodes.loc[candidates.to_node, ["x", "y"]].to_numpy()
             geometries = linestrings(np.stack([starts, ends], axis=1))
         outside_ids = candidates.loc[~intersects(geometries, border), "link_id"]
+        if self.audit:
+            self.audit.rows(candidates.loc[candidates.link_id.isin(outside_ids)], "outside_region")
         return df.loc[~df.link_id.isin(outside_ids)].reset_index(drop=True)
 
     @staticmethod
@@ -154,6 +161,9 @@ class networkCleaner():
         logger.info("    Building sequence-aware connectivity graph for %s ...", mode)
         connected_ids = largest_connected_links(mode_links, mode)
         connected = df["link_id"].isin(connected_ids)
+        if self.audit:
+            self.audit.rows(df.loc[selected & ~connected], "disconnected_"+mode,
+                            action="mode_removed" if remove_mode_only else "removed", mode=mode)
         logger.info("    %s: keeping %d of %d links in the largest component.",
                     mode, len(connected_ids), len(mode_links))
         return self._apply_connectivity_filter(df, selected, connected, mode, remove_mode_only)
@@ -275,6 +285,9 @@ class networkCleaner():
             if street_names:
                 row["attributes"]["old_street_names"] = ";".join(dict.fromkeys(street_names))
             replacements.append(row)
+            if self.audit:
+                for index in chain:
+                    self.audit.record(ids[index], df.iloc[index].attributes, "merged", "merged", survivor=ids[first])
             removed.update(chain)
             stats["successful_merge"] += 1
 

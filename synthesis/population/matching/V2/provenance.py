@@ -9,7 +9,7 @@ def implementation_token():
     # Imported V1 preparation and the shared residence mask affect inputs too.
     matching = Path(__file__).parent.parent
     paths = [*Path(__file__).parent.glob("*.py"), matching / "commute.py", matching / "opening_hours.py",
-             matching / "matched_v1.py", matching.parent / "models" / "non_private.py"]
+             matching / "matched_v1.py", matching / "workflow.py", matching.parent / "models" / "non_private.py"]
     for path in sorted(paths):
         digest.update(path.name.encode())
         digest.update(path.read_bytes())

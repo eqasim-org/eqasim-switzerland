@@ -7,8 +7,8 @@ from pathlib import Path
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
-from data.airports import geneva_times as engine
-from data.airports.common import atomic_write, file_digest
+from data.airports.geneva import times as engine
+from data.airports._shared.common import atomic_write, file_digest
 
 ENDPOINT = 'https://flightdata.flughafen-zuerich.ch/flights'
 SNAPSHOT_RELATIVE_PATH = Path('airports/zurich/data_from_websites/zurich_flight_times.json')

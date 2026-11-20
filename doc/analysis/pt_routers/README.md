@@ -246,7 +246,29 @@ in `google_raw_routes.parquet`, excludes these measurements from component
 statistics, and still compares otherwise valid total travel times. Numeric
 comparisons use jointly found PT journeys with finite, nonnegative values for
 each metric, with the matched count shown explicitly. Weighted reachability uses
-survey person weights; other statistics are unweighted trip summaries.
+survey person weights; other statistics are unweighted trip summaries, except
+the optional person-weighted transfer comparisons.
+
+The transfer section compares the three routers and saved Google results: overall means, means by Euclidean
+O–D distance band and means by departure hour. Its controls select either the
+identical trips with valid transfers in all four sources or each source's own available trips,
+and either unweighted or person-weighted means. Only found PT journeys with valid
+transfer counts enter these statistics; walk-only and unroutable results are not
+treated as zero transfers. Distance uses projected endpoint coordinates. Hours
+24+ remain distinct from hours 0+. The CSV reports trip counts and valid-weight
+counts for each group; empty groups are gaps in the figures.
+
+Regenerate the Microcensus HTML and figures directly from existing exported files,
+without executing routing stages or calling Google:
+
+```bash
+uv run python -m analysis.pt_routers.microcensus.regenerate /path/to/pt_microcensus
+```
+
+This reads `requests.parquet`, the four classified `*_routes.parquet` files,
+`timings.json` and `metadata.json`. It updates `index.html`, aggregate tables and
+figures; raw router results remain unchanged. New transfer artifacts are
+`transfers_by_distance_hour.csv` and `transfers_{common,available}_{mean,weighted_mean}.png`.
 
 The selected modern scenario day is used for all three routers, preserving survey
 time of day, including after-midnight times. Historical Google query dates and

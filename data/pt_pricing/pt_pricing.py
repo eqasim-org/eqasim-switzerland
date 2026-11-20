@@ -39,7 +39,7 @@ import pandas as pd
 from data.pt_pricing import french_networks
 from utils.gtfs_router.lemanpass import NETWORK as LEMANPASS_NETWORK, LemanPass, fare_table_path, write_java_tables
 from utils.gtfs_router.pricing import LOCATION_COLUMN, Pricing, java_station_id, station_id
-from utils.gtfs_router.zones import foreign_communes
+from utils.gtfs_router.zones import FOREIGN_NETWORK, foreign_communes
 
 logger = logging.getLogger("synpp")
 
@@ -156,13 +156,19 @@ def execute(context):
     else:
         logger.warning(f"French networks: not priced without {communes_path}")
 
-    # Locate the feed stops: whether each one is in the area of the Swiss fares, where the half-fare card holds (the Swiss
-    # border, with Liechtenstein and the enclaves of Büsingen and Campione), rather than guessing it from its id.
+    # Locate the feed stops: whether each one is in the area of the Swiss fares, where the GA and the half-fare card hold
+    # (the Swiss border, with Liechtenstein and the enclaves of Büsingen and Campione, and the stops abroad in a zone of a
+    # Swiss network), rather than guessing it from its id.
 
     area = swiss_fare_area(context.stage("data.spatial.swiss_border"), data_path)
-    located = locate_stops(zones_path, stops, area)
-    logger.info(f"Feed stops in the area of the Swiss fares: {located['swiss']} of {located['stops']}, "
-                f"{located['added']} added to gtfs_zones.csv without zones")
+    zones = pd.read_csv(zones_path, dtype = str, keep_default_na = False)
+    foreign = foreign_zones(listed_path) if os.path.exists(listed_path) else set()
+    if not foreign:
+        logger.warning(f"Stops abroad: no Unireso zones abroad without {listed_path}, all its zones count as Swiss")
+    swiss_zoned = swiss_zone_stops(zones, stops, {n.name for n in french_networks.FRENCH_NETWORKS}, foreign)
+    located = locate_stops(zones_path, stops, area, swiss_zoned)
+    logger.info(f"Feed stops in the area of the Swiss fares: {located['swiss']} of {located['stops']} "
+                f"({located['zoned']} abroad in a zone of a Swiss network), {located['added']} added to gtfs_zones.csv without zones")
 
     # Write the Léman Pass fares as flat tables for eqasim-java.
 
@@ -225,14 +231,46 @@ def swiss_fare_area(swiss_border, data_path):
     return area
 
 
-def locate_stops(path, stops, area):
-    """Writes whether each feed stop is in area to the LOCATION_COLUMN of gtfs_zones.csv (true / false): on the rows of
-    the stop, or on a row of its own without zones for a stop that has none. The other rows (stations by DiDok number)
-    are left empty. Returns the counts {"stops", "swiss", "added"}.
+def foreign_zones(path):
+    """The zones abroad of the list of the communes abroad (insee, zone, optionally network, else Unireso), as
+    {(network, zone)}: the Unireso zones in France, where the GA and the half-fare card do not hold."""
+    listed = pd.read_csv(path, dtype = str).apply(lambda s: s.str.strip())
+    network = listed["network"] if "network" in listed else pd.Series(FOREIGN_NETWORK, index = listed.index)
+    return set(zip(network, listed["zone"]))
+
+
+def swiss_zone_stops(zones, stops, foreign_networks, foreign):
+    """The feed stops in a zone of a Swiss network, as a set of stop ids: the stops with a zone in gtfs_zones.csv (by their
+    id or their station, as eqasim-java looks them up) and none of a foreign network (foreign_networks: the French local
+    networks) or of a zone abroad (foreign: {(network, zone)}, the Unireso zones in France). The GA and the half-fare card
+    hold in these zones, also abroad (TNW 14: Basel EuroAirport); a stop that also has a zone abroad (Saint-Julien,
+    douane: Unireso 10 and 230) is not one of them."""
+    zones_of = {}
+    for key, text in zip(zones["stop_id"].str.strip(), zones["zones"]):
+        for entry in text.split(","):
+            parts = [p.strip() for p in entry.split(":")]
+            if len(parts) == 2 and parts[0] and parts[1]:
+                zones_of.setdefault(key, set()).add((parts[0], parts[1]))
+
+    result = set()
+    for stop_id in stops["stop_id"]:
+        entries = zones_of.get(stop_id, set()) | zones_of.get(java_station_id(stop_id), set())
+        if entries and not any(n in foreign_networks or (n, z) in foreign for n, z in entries):
+            result.add(stop_id)
+    return result
+
+
+def locate_stops(path, stops, area, swiss_zoned = frozenset()):
+    """Writes whether each feed stop is in the area of the Swiss fares to the LOCATION_COLUMN of gtfs_zones.csv (true /
+    false): in area, or in swiss_zoned (the stops in a zone of a Swiss network, swiss_zone_stops). It is written on the
+    rows of the stop, or on a row of its own without zones for a stop that has none. The other rows (stations by DiDok
+    number) are left empty. Returns the counts {"stops", "swiss", "zoned" (the stops outside area in swiss_zoned), "added"}.
 
     stops: the feed stops (stop_id, stop_name, stop_lat, stop_lon)."""
     points = gpd.GeoSeries(gpd.points_from_xy(stops["stop_lon"].astype(float), stops["stop_lat"].astype(float)), crs = 4326).to_crs(2056)
-    inside = dict(zip(stops["stop_id"], points.within(area).to_numpy()))
+    within = dict(zip(stops["stop_id"], points.within(area).to_numpy()))
+    inside = {s: bool(w) or s in swiss_zoned for s, w in within.items()}
+    zoned = sum(1 for s, w in within.items() if not w and s in swiss_zoned)
     names = dict(zip(stops["stop_id"], stops["stop_name"]))
 
     with open(path, encoding = "utf-8", newline = "") as f:
@@ -262,7 +300,7 @@ def locate_stops(path, stops, area):
         writer = csv.writer(f, lineterminator = "\n")
         writer.writerow(header)
         writer.writerows(rows + added)
-    return {"stops": len(inside), "swiss": int(sum(inside.values())), "added": len(added)}
+    return {"stops": len(inside), "swiss": int(sum(inside.values())), "zoned": zoned, "added": len(added)}
 
 
 def check_stop_ids(zones, stops):

@@ -1,5 +1,6 @@
 """Generate the shared MATSim config and adapt local routing/simulation copies."""
 from pathlib import Path
+import hashlib
 
 import matsim.runtime.eqasim as eqasim
 from dmc.constants import constants as dmc_constants
@@ -17,6 +18,7 @@ def configure(context):
     context.config("random_seed")
     context.config("threads", volatile=True)
     context.config("use_freight", True)
+    context.config("use_airports", default=True)
     context.config("car_cost_model", dmc_constants.CAR_COST_MODEL)
     context.config("route_bike", True)
     context.config("useScheduleBasedTransport", False)
@@ -51,6 +53,8 @@ def execute(context):
     tools.add_pt_pricing_module(path)
     tools.change_params(path, {"eqasim.useScheduleBasedTransport": tools.parse_boolean(
         context.config("useScheduleBasedTransport"))}, create=True)
+    if context.config("use_airports"):
+        tools.add_airport_population(path)
     return path
 
 
@@ -81,3 +85,8 @@ def adapt_for_simulation(context, config_path, *, local=False):
     tools.change_params(config_path, tools.simulation_parameters(context, local=local), create=True)
 
     return str(Path(config_path).resolve())
+
+
+def validate(context):
+    """Regenerate configs when shared XML editing and airport rules change."""
+    return hashlib.sha256(Path(tools.__file__).read_bytes()).hexdigest()

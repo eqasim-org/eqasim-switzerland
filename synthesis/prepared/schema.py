@@ -1,0 +1,85 @@
+"""Shared synthetic scenario fields and the household-home location sentinel."""
+
+HOME_DESTINATION_ID = -1
+
+VEHICLE_FIELDS = ["mode", "vehicle_id", "owner_id"]
+PERSON_FIELDS = [
+    "person_id",
+    "age",
+    "car_availability",
+    "employed",
+    "driving_license",
+    "sex",
+    "home_x",
+    "home_y",
+    "pt_subscription",
+    "household_id",
+    "is_car_passenger",
+    "has_walk_loop_trip",
+    "has_car_loop_trip",
+    "has_car_passenger_loop_trip",
+    "has_pt_loop_trip",
+    "has_bike_loop_trip",
+    "income_class",
+    "person_type",
+    "cross_border_od",
+    "bike_availability",
+]
+ACTIVITY_FIELDS = [
+    "person_id",
+    "activity_index",
+    "start_time",
+    "end_time",
+    "duration",
+    "purpose",
+    "is_last",
+    "geometry",
+    "destination_id",
+    "following_mode",
+    "municipality_type",
+    "municipality_id",
+    "employee_density",
+    "companies_density",
+    "population_density",
+    "ovgk",
+]
+PERSONS_DTYPES = {
+    "person_id": int,
+    "age": int,
+    "car_availability": int,
+    "bike_availability": int,
+    "employed": bool,
+    "driving_license": bool,
+    "sex": int,
+    "home_x": float,
+    "home_y": float,
+    "pt_subscription": int,
+    "household_id": int,
+    "is_car_passenger": bool,
+    "has_walk_loop_trip": bool,
+    "has_car_loop_trip": bool,
+    "has_car_passenger_loop_trip": bool,
+    "has_pt_loop_trip": bool,
+    "has_bike_loop_trip": bool,
+    "income_class": int,
+    "person_type": str,
+}
+BOOLEAN_PERSON_COLUMNS = [
+    "employed",
+    "driving_license",
+    "is_car_passenger",
+    "has_walk_loop_trip",
+    "has_car_loop_trip",
+    "has_car_passenger_loop_trip",
+    "has_pt_loop_trip",
+    "has_bike_loop_trip",
+]
+
+ACTIVITY_ATTRIBUTE_FIELDS = [
+    "municipality_type",
+    "municipality_id",
+    "employee_density",
+    "companies_density",
+    "population_density",
+    "ovgk",
+]

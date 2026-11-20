@@ -1,3 +1,4 @@
+from data.activity_purposes import microcensus_purpose_map
 import numpy as np
 import pandas as pd
 import pyproj
@@ -80,24 +81,7 @@ def execute(context):
     del df_mz_trips["is_car_passenger"]
 
     # Second, adjust the purposes
-    purpose_map = {
-        -99: "unknown",     # Pseudo stage
-        -98: "unknown",     # No answer
-        -97: "unknown",     # Don't know
-        1: "interaction",   # Transfer, change of mode, park car
-        2: "work",          # Work
-        3: "education",     # Education
-        4: SHOP,            # Shopping
-        5: "other",         # Chores, use of public services
-        6: "work_secondary",          # Business activity
-        7: "work_secondary",          # Business trip
-        8: LEISURE,         # Leisure
-        9: "other",         # Bring children
-        10: "other",        # Bring others (disabled, etc.)
-        11: "home",         # Return home
-        12: "unknown",      # Other
-        13: "border"        # Going out of country
-    }
+    purpose_map = microcensus_purpose_map(2015)
 
     df_mz_trips["purpose"] = df_mz_trips["wzweck1"].map(purpose_map)
 
@@ -787,6 +771,11 @@ def execute(context):
                 base_index = loops_multistage[loops_multistage["person_trip_id"]==person_trip_id].index
 
                 new_row = loops_multistage.loc[base_index].copy()
+
+                # Allocate the original loop distance equally between its two legs.
+
+                loops_multistage.loc[base_index, "w_rdist"] *= 0.5
+                new_row["w_rdist"] *= 0.5
 
                 loops_multistage.loc[base_index, "destination_x"] = int(x)
                 loops_multistage.loc[base_index, "destination_y"] = int(y)

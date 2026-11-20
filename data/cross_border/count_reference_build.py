@@ -1,4 +1,4 @@
-"""Rebuild reviewed G/H/I/M/N/O traffic-count references from public raw data."""
+"""Rebuild reviewed F/G/H/I/M/N/O traffic-count references from public sources."""
 
 import csv
 import hashlib
@@ -102,6 +102,9 @@ def execute(context):
     for item in mapping:
         fid = item["fid"]
         point = crossings.loc[fid].geometry
+        if item["source"] == "published":
+            references.append(published_reference(item, point))
+            continue
         if item["source"] == "unmeasured":
             references.append(dict(fid=fid, name=item["name"], x=point.x, y=point.y,
                                    keep_assignment=True, note=item["note"]))
@@ -144,7 +147,7 @@ def execute(context):
     path = output / "traffic_count_references.json"
     path.write_text(json.dumps(references, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (output / "raw_sources.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    logger.info("Rebuilt %d G/H/I/M/N/O count-reference records at %s", len(references), path)
+    logger.info("Rebuilt %d F/G/H/I/M/N/O count-reference records at %s", len(references), path)
     return str(path)
 
 
@@ -202,9 +205,30 @@ def validate_mapping(crossings, mapping):
     if len(set(covered)) != len(covered) or len(set(counters)) != len(counters):
         raise ValueError("Duplicate crossing alias or official counter in count mapping")
     selected = crossings.label.eq("road") & crossings.interview_place.str.startswith(
-        tuple("Gruppe " + group + ":" for group in ("G", "H", "I", "M", "N", "O")))
+        tuple("Gruppe " + group + ":" for group in ("F", "G", "H", "I", "M", "N", "O")))
     if set(crossings.index[selected]) != set(covered):
-        raise ValueError("G/H/I/M/N/O road FIDs differ from reviewed count mapping; update count_reference_sources.json")
+        raise ValueError("F/G/H/I/M/N/O road FIDs differ from reviewed count mapping; update count_reference_sources.json")
+
+
+def published_reference(item, point):
+    """Preserve reviewed published values when no stable raw-data reader exists.
+
+    Values and provenance live in the versioned mapping, not in this helper.
+    Annual totals are divided by their explicit calendar-day denominator before
+    rounding, using the same integer count convention as the other sources.
+    """
+    value = float(item["published_value"])
+    days = float(item["divisor_days"])
+    if not math.isfinite(value) or not math.isfinite(days) or value <= 0 or days <= 0:
+        raise ValueError("Invalid published count or day denominator for FID %s" % item["fid"])
+    count = rounded_count(value / days)
+    if count <= 0 or not item["source_url"].startswith("https://"):
+        raise ValueError("Invalid published daily count or source URL for FID %s" % item["fid"])
+    return dict(fid=item["fid"], name=item["name"], x=point.x, y=point.y,
+                low=count, high=count, period=item["period"], day_type=item["day_type"],
+                vehicle_scope="all_motor_vehicles", source_url=item["source_url"],
+                note=item["note"], published_value=value, divisor_days=days,
+                source_method="reviewed_publication", source_locator=item["source_locator"])
 
 
 def geneva_weekday_counts(path, mapping):

@@ -1,117 +1,73 @@
-import io, gzip
+"""Write cached vehicle types and vehicles as MATSim vehicles.xml.gz."""
 
-import numpy as np
+import gzip
+import io
 import pandas as pd
-
 import matsim.writers as writers
+from synthesis.prepared.vehicles import TYPE_FIELDS, VEHICLE_FIELDS
 
 
 def configure(context):
-    context.stage("synthesis.vehicles.vehicles")
-
-    context.config("include_cross_border", default = False)
-    if context.config("include_cross_border"):
-        context.stage("data.cross_border.generate_cross_border_traffic")
-        context.stage("synthesis.population.enriched")
-
-    context.config("include_external_population", default = True)
-    if context.config("include_external_population"):
-        context.stage("data.external_population.read_outputs")
-
-
-TYPE_FIELDS = ["type_id", "nb_seats", "length", "width", "pce", "mode"]
-VEHICLE_FIELDS = ["vehicle_id", "type_id", "age", "euro"]
+    context.stage("synthesis.prepared.vehicles")
 
 
 def execute(context):
-    output_path = "%s/vehicles.xml.gz" % context.path()
 
-    df_vehicle_types, df_vehicles, df_trucks, df_lcv = context.stage("synthesis.vehicles.vehicles")
-    df_vehicles = pd.concat([df_vehicles, df_trucks, df_lcv])
+    # Read the complete fleet with resolved type references and export attributes.
 
-    if context.config("include_external_population"):
-        external_vehicles   = context.stage("data.external_population.read_outputs")[2].copy()
+    data = context.stage("synthesis.prepared.vehicles")
+    output = "%s/vehicles.xml.gz" % context.path()
 
-        # The external fleet holds one vehicle per mode, including the "_loop"
-        # variants of car and car_passenger. Those are the same physical vehicles
-        # as far as MATSim is concerned, and the synthetic fleet (synthesis.vehicles.*)
-        # defines no "_loop" type at all, so they take the type of their base mode.
-        # Without this they ask for "default_car_loop", which no vehicle type
-        # declares, and MATSim aborts while reading vehicles.xml.gz.
-        base_mode = external_vehicles["mode"].str.replace("_loop$", "", regex = True)
+    # Serialize type definitions first, then vehicles referencing those types.
 
-        external_vehicles["type_id"] = "default_" + base_mode
-
-        df_vehicles = pd.concat([df_vehicles, external_vehicles])
-
-    if context.config("include_cross_border"):
-        cross_border_vehicles = context.stage("data.cross_border.generate_cross_border_traffic")[2].copy()
-        cross_border_persons  = context.stage("data.cross_border.generate_cross_border_traffic")[0].copy()
-        #id_person_max         = np.max(context.stage("synthesis.population.enriched").copy()["person_id"].values)
-        #N                     = id_person_max + 1
-
-        #cross_border_persons["new_person_id"]    = range(N, N + len(cross_border_persons), 1)
-
-        #id_map = cross_border_persons.set_index("person_id")["new_person_id"]
-        #cross_border_vehicles["person_id"]  = cross_border_vehicles["vehicle_id"].str.split(":").str[0]
-        #cross_border_vehicles["type_id"]    = cross_border_vehicles["vehicle_id"].str.split(":").str[1]
-        #cross_border_vehicles["person_id"]  = cross_border_vehicles["person_id"].map(id_map).fillna(cross_border_vehicles["person_id"])
-        #cross_border_vehicles["vehicle_id"] = cross_border_vehicles["person_id"].astype(str) + ":" + cross_border_vehicles["type_id"]
-
-        cross_border_vehicles.loc[cross_border_vehicles["mode"] == "car", "type_id"] = "default_car"
-        cross_border_vehicles.loc[cross_border_vehicles["mode"] == "car_passenger", "type_id"] = "default_car_passenger"
-
-        #del cross_border_vehicles["person_id"]
-
-        df_vehicles = pd.concat([df_vehicles, cross_border_vehicles])
-
-    # Fail here rather than in MATSim, which only reports "VehicleType <id> does
-    # not exist" followed by a null pointer while parsing vehicles.xml.gz.
-    unknown_types = sorted(set(df_vehicles["type_id"].unique()) - set(df_vehicle_types["type_id"].unique()))
-
-    assert len(unknown_types) == 0, (
-        "%d vehicles refer to types that are not defined in vehicles.xml.gz: %s" % (
-            int(df_vehicles["type_id"].isin(unknown_types).sum()), unknown_types)
-    )
-
-    with gzip.open(output_path, 'wb+') as writer:
-        with io.BufferedWriter(writer, buffer_size = 2 * 1024**3) as writer:
-            writer = writers.VehiclesWriter(writer)
+    with gzip.open(output, "wb") as stream:
+        with io.BufferedWriter(stream, buffer_size=2 * 1024**3) as buffered:
+            writer = writers.VehiclesWriter(buffered)
             writer.start_vehicles()
-
-            with context.progress(total = len(df_vehicle_types), label = "Writing vehicles types ...") as progress:
-                for type in df_vehicle_types.to_dict(orient="records"):
-                    writer.add_type(
-                        type["type_id"],
-                        length=type["length"],
-                        width=type["width"],
-                        pce = type["pce"], #this wasn't here before, but it is supported by the writer, so I added it here
-                        nb_seats = type["nb_seats"],
-                        mode = type["mode"], #this wasn't here before, but it is supported by the writer, so I added it here
-                        maximum_velocity = type["maxVelocity"] if ("maxVelocity" in type) and (type["maxVelocity"] is not None) else None,
-                        flow_efficiency_factor = type["flowEfficiencyFactor"] if ("flowEfficiencyFactor" in type) and (type["flowEfficiencyFactor"] is not None) else None,
-                        engine_attributes = {
-                            "HbefaVehicleCategory": type["hbefa_cat"],
-                            "HbefaTechnology": type["hbefa_tech"],
-                            "HbefaSizeClass": type["hbefa_size"],
-                            "HbefaEmissionsConcept": type["hbefa_emission"]
-                        } if not pd.isna(type.get("hbefa_cat",np.nan)) else {},
-                    ) 
-                    progress.update()
-
-            with context.progress(total = len(df_vehicles), label = "Writing vehicles ...") as progress:
-                for vehicle in df_vehicles.to_dict(orient="records"):
-
-                    writer.add_vehicle(
-                        vehicle["vehicle_id"],
-                        vehicle["type_id"],
-                        attributes = {
-                            "age": vehicle["age"],
-                            "euro": vehicle["euro"]
-                        } if (("age" in vehicle) and (vehicle["age"] is not None)) else {}
-                    )
-                    progress.update()
-
+            for row in context.progress(
+                data.types.itertuples(index=False),
+                total=len(data.types),
+                label="Vehicle types",
+            ):
+                writer.add_type(
+                    row.type_id,
+                    length=row.length,
+                    width=row.width,
+                    pce=row.pce,
+                    nb_seats=row.nb_seats,
+                    mode=row.mode,
+                    maximum_velocity=_optional(row.maximum_velocity),
+                    flow_efficiency_factor=_optional(row.flow_efficiency_factor),
+                    engine_attributes=_engine_attributes(row),
+                )
+            for row in context.progress(
+                data.vehicles.itertuples(index=False),
+                total=len(data.vehicles),
+                label="Vehicles",
+            ):
+                writer.add_vehicle(
+                    row.vehicle_id, row.type_id, attributes=_vehicle_attributes(row)
+                )
             writer.end_vehicles()
+    return output
 
-    return output_path
+
+def _optional(value):
+    """Represent an absent optional XML field without serializing NaN."""
+    return None if pd.isna(value) else value
+
+
+def _engine_attributes(row):
+    """Translate emission descriptors into MATSim/HBEFA XML attribute names."""
+    if pd.isna(row.hbefa_cat):
+        return {}
+    return {
+        "HbefaVehicleCategory": row.hbefa_cat,
+        "HbefaTechnology": row.hbefa_tech,
+        "HbefaSizeClass": row.hbefa_size,
+        "HbefaEmissionsConcept": row.hbefa_emission,
+    }
+
+
+def _vehicle_attributes(row):
+    return {} if row.age is None else {"age": row.age, "euro": row.euro}

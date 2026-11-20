@@ -74,7 +74,7 @@ class RunCache:
                 if history_path.is_file():
                     history = json.loads(history_path.read_text())
                     fields = ['distance_loss_kind', 'distance_loss_weight', 'auxiliary_relative_distance_loss_weight',
-                              'relative_distance_underestimation_factor', 'validation_mode', 'validation_folds',
+                              'relative_distance_underestimation_factor', 'individual_radius_loss_weight', 'individual_radius_tolerance_m', 'validation_mode', 'validation_folds',
                               'early_stopping_min_epochs', 'best_epoch', 'refit_epochs']
                     settings = {key: history.get(key) for key in fields}
                     settings['relative_distance_underestimation_factor'] = history.get('relative_distance_underestimation_factor', 1.)

@@ -44,6 +44,14 @@ def decorate(frame, source):
             frame[column] = frame[column].astype('string')
     frame['distance_km'] = np.hypot(frame.destination_x - frame.origin_x,
                                      frame.destination_y - frame.origin_y) / 1000
+    frame['coordinate_distance_km'] = frame.distance_km
+    if source == 'survey':
+        from synthesis.population.spatial.secondary_nn.trip_distances import distance_observations
+        observations = distance_observations(frame)
+        for column in observations:
+            frame[column] = observations[column]
+        frame['distance_km'] = observations.reference_distance_m/1000
+        frame = frame.loc[frame.distance_km.notna()].copy()
     frame['home_distance_km'] = np.hypot(frame.destination_x - frame.home_x,
                                           frame.destination_y - frame.home_y) / 1000
     frame['car_group'] = np.where(frame.car_available, 'Car access', 'No car access')

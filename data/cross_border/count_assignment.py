@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import softmax
 
+from data.cross_border.car_targets import restore_place_names
 from data.cross_border.count_assignment_inputs import FOREIGN, SWISS, REFERENCE
 from data.cross_border.count_balancing import allocate, exact_support, CountAssignmentConflict
 from data.cross_border.count_references import counts_path, check_reference, build_sites
@@ -26,6 +27,8 @@ def configure(context):
     context.config("cross_border_assignment_counts_file", None)
     context.config("random_seed")
     context.config("cross_border_count_max_extra_minutes", 30.)
+    context.config("cross_border_count_group_max_extra_minutes", None)
+    context.config("cross_border_count_fid_targets", None)
     for stage in (FOREIGN, SWISS, REFERENCE, "data.cross_border.interview_places",
                   "data.cross_border.road_candidates", "data.cross_border.road_exit_points",
                   "data.spatial.swiss_border", "matsim.scenario.network.pt"):
@@ -51,6 +54,14 @@ def execute(context):
     exits = context.stage("data.cross_border.road_exit_points")
     sites, canonical = build_sites(source, points, context.stage("data.cross_border.road_candidates"), exits)
     groups, audit = reference_groups(sites, json.loads(path.read_text()))
+    group_limits = restore_place_names(context.config("cross_border_count_group_max_extra_minutes") or {})
+    fid_targets = {int(fid): value for fid, value in
+                   (context.config("cross_border_count_fid_targets") or {}).items()}
+    if unknown := set(group_limits) - groups.keys():
+        raise ValueError(f"Extra-time limits reference inactive count groups: {sorted(unknown)}")
+    active_fids = {fid for choices in groups.values() for fid in choices.fid}
+    if unknown := fid_targets.keys() - active_fids:
+        raise ValueError(f"Crossing targets reference inactive count FIDs: {sorted(unknown)}")
     output = Path(context.path())
     empty["groups"] = audit
     if not groups:
@@ -85,15 +96,18 @@ def execute(context):
         if persons.empty:
             audit.append(dict(interview_place=place, status="no_assigned_road_people"))
             continue
+        maximum = group_limits.get(place, context.config("cross_border_count_max_extra_minutes"))
+        if fid_targets:
+            choices = choices.assign(daily_target=choices.fid.map(fid_targets))
         try:
             changed, summary, details, offsets = assign_group(persons, choices, fixed, exit_geometry, router, rng,
-                maximum=context.config("cross_border_count_max_extra_minutes"))
+                maximum=maximum)
         except (ValueError, RuntimeError) as error:
             # A complete count-controlled group must not silently revert to the
             # old draw or soft shares. Record the conflict before stopping, so
             # downstream analyses cannot present a successful but unfitted run.
             audit.append(dict(interview_place=place, status="count_assignment_conflict", reason=str(error),
-                              max_extra_minutes=context.config("cross_border_count_max_extra_minutes")))
+                              max_extra_minutes=maximum))
             pd.DataFrame(audit).to_csv(output / "groups.csv", index=False)
             raise CountAssignmentConflict("%s: %s. See %s" % (place, error, output / "groups.csv")) from error
         if summary["extra_minutes_limit"] > 20:
@@ -238,6 +252,26 @@ def collect_demand(context, groups, canonical, code_points):
     return combined
 
 
+def crossing_targets(sites, total):
+    """Reserve explicit daily passages and distribute the remainder by count share."""
+    target = total * sites.reference.to_numpy() / sites.reference.sum()
+    if "daily_target" not in sites or not sites.daily_target.notna().any():
+        return target
+    reserved = sites.daily_target.notna().to_numpy()
+    daily = sites.daily_target[reserved].to_numpy(dtype=float)
+    remainder = total - daily.sum()
+    if not np.isfinite(daily).all() or (daily < 0).any() or remainder < 0:
+        raise ValueError("FID targets must be finite, nonnegative and fit within the group total")
+    target[reserved] = daily
+    if reserved.all():
+        if not np.isclose(remainder, 0.):
+            raise ValueError("Targets for all FIDs must add up to the group total")
+    else:
+        references = sites.reference.to_numpy()[~reserved]
+        target[~reserved] = remainder * references / references.sum()
+    return target
+
+
 def assign_group(persons, sites, fixed, exits, router, rng, maximum=30.):
     """Solve on unique ODs, then draw whole people/tours with a seeded RNG."""
     persons = persons.copy()
@@ -259,7 +293,7 @@ def assign_group(persons, sites, fixed, exits, router, rng, maximum=30.):
     variable = supported & rows.mass.gt(0).to_numpy()
     fixed_exits = fixed.reindex(site_index, fill_value=0).to_numpy(float)
     total = persons.mass.sum() + fixed_exits.sum()
-    target = total * sites.reference.to_numpy() / sites.reference.sum()
+    target = crossing_targets(sites, total)
     frozen = ~variable[persons.od_id.to_numpy()]
     fixed_entries = np.bincount(old[frozen], weights=persons.loc[frozen, "mass"], minlength=len(sites))
     residual = target - fixed_exits - fixed_entries

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Geneva &amp; Zurich · Airport trips</title>
+<style>__LEAFLET_CSS__</style>
+<style>
+*{box-sizing:border-box}body{margin:0;font:14px system-ui,-apple-system,sans-serif;color:#163047;background:#f2f5f8}header{padding:20px 26px;background:#142d43;color:white;display:flex;align-items:center;justify-content:space-between;gap:20px}h1{font-size:24px;margin:0 0 5px;font-weight:650}header p{margin:0;color:#c2d5e2}.badge{padding:8px 12px;background:#ffffff15;border:1px solid #ffffff35;border-radius:20px;white-space:nowrap}.layout{display:grid;grid-template-columns:315px 1fr;height:690px;height:calc(100vh - 106px);min-height:600px}aside{background:white;padding:20px;overflow:auto;border-right:1px solid #d8e3eb}#map{height:100%;background:#e8eff3}.filter{margin:0 0 13px}label{display:block;font-weight:600;font-size:12px;margin-bottom:5px;color:#476073}select,button{font:inherit;border:1px solid #bccedb;border-radius:6px;padding:8px;background:#fff;color:#163047}select{width:100%}button{cursor:pointer}button:hover{background:#e9f4f9}input[type=range]{width:100%;accent-color:#137e88}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.number{font-size:34px;line-height:1.15;letter-spacing:-1px;font-variant-numeric:tabular-nums;margin-top:9px}.muted{color:#60798c;font-size:12px;line-height:1.55}.rule{border-top:1px solid #e0e8ee;margin:15px 0}.counts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.count{background:#f2f6f9;padding:10px;border-radius:7px}.count strong{font-size:19px;display:block;margin-top:3px;font-variant-numeric:tabular-nums}.to{color:#00877f}.from{color:#c05c22}.dot{display:inline-block;border-radius:50%;width:9px;height:9px;margin-right:5px;background:currentColor}.legend{display:flex;gap:16px;font-size:12px;margin:10px 0}.controls-footer{display:flex;gap:7px;margin-top:10px}.controls-footer button{flex:1;font-size:12px}.hour-chart{height:65px;display:flex;align-items:flex-end;gap:2px;border-bottom:1px solid #cad9e2;margin:8px 0 3px}.bar{flex:1;min-width:1px;background:#368698;border:0;border-radius:2px 2px 0 0;padding:0}.bar:hover{background:#143f57}.axis{display:flex;justify-content:space-between;font-size:10px;color:#60798c}#tileStatus{color:#92511b;font-size:12px;line-height:1.4;margin-top:8px}.airport-label{font-size:13px;color:#102c44;font-weight:700;background:white;border:2px solid #173952;border-radius:20px;padding:5px 9px;white-space:nowrap;box-shadow:0 2px 7px #0002;display:inline-block}.airport-anchor{background:transparent;border:0}.leaflet-tooltip{font:12px system-ui,sans-serif}.leaflet-control-attribution{font-size:10px}.details{padding:20px 26px}.table-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}h2{font-size:18px;margin:0}.table-scroll{overflow:auto;max-height:490px;border:1px solid #d8e3eb;border-radius:8px}table{border-collapse:collapse;width:100%;font-size:13px;background:white}th,td{padding:10px 12px;border-bottom:1px solid #e0e8ee;text-align:left;white-space:nowrap}th{position:sticky;top:0;background:#eaf0f5;font-weight:600}td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}tbody tr:hover{background:#eff7fa;cursor:pointer}.empty{padding:22px;text-align:center;color:#60798c}.table-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px}.provenance{margin-top:22px;border-top:1px solid #d8e3eb;padding-top:14px;line-height:1.7}.mode-row{display:flex;justify-content:space-between;gap:8px;font-size:12px;margin:5px 0}.mode-track{height:4px;background:#eaf0f5;border-radius:5px;margin-bottom:6px}.mode-fill{height:100%;background:#398aa0;border-radius:5px}#emptyMap{position:absolute;top:20px;left:50%;transform:translateX(-50%);z-index:800;background:white;padding:9px 15px;border-radius:7px;box-shadow:0 2px 12px #0002;display:none}#mapWrap{position:relative;min-width:0}details>summary{cursor:pointer;color:#39596f;font-weight:600}#sourceText{white-space:pre-wrap;overflow-wrap:anywhere;font:12px system-ui,sans-serif;color:#60798c}a{color:#146e8e}.chart-caption{display:flex;justify-content:space-between;margin-top:6px}.subheading{font-size:12px;font-weight:600;color:#476073;margin:0 0 6px}.table-search{min-width:230px;padding:8px;font:inherit;border:1px solid #bccedb;border-radius:6px}.tool-help{max-width:230px;line-height:1.7}.airport-stat{padding:9px 0;border-bottom:1px solid #e0e8ee}.volume-ramp{display:inline-block;width:65px;height:9px;background:linear-gradient(to right,#85c3e0,#143c75);border-radius:4px}#flowLegend{font-size:12px;line-height:1.8;margin:8px 0}
+@media(max-width:850px){header{padding:16px;align-items:flex-start}.badge{font-size:12px}h1{font-size:20px}.layout{grid-template-columns:250px 1fr}.details{padding:16px}aside{padding:14px}}@media(max-width:580px){.layout{display:flex;flex-direction:column;height:auto;min-height:0}aside{display:grid;grid-template-columns:1fr 1fr;gap:10px;overflow:visible}aside>.filter{margin:0}.wide{grid-column:1/-1}#mapWrap{height:520px}header{flex-direction:column;gap:8px}.table-heading{flex-wrap:wrap}.table-search{width:100%;min-width:0}}
+</style></head><body>
+<header><div><h1>Airport trips · Geneva &amp; Zurich</h1><p>Origins and destinations within Switzerland · home, hotel or dormitory ↔ airport</p></div><div class="badge" id="sampleBadge"></div></header>
+<div class="layout"><aside>
+<div class="filter"><label for="airport">Airport</label><select id="airport"><option value="all">Geneva + Zurich</option><option value="GVA">Geneva (GVA)</option><option value="ZRH">Zurich (ZRH)</option></select></div>
+<div class="filter"><label for="canton">Swiss canton</label><select id="canton"><option value="all">All cantons</option></select></div>
+<div class="filter"><label for="direction">Direction</label><select id="direction"><option value="all">To + from airport</option><option value="0">To airport</option><option value="1">From airport</option></select></div>
+<div class="filter"><label for="mode">Travel mode</label><select id="mode"><option value="all">All modes</option></select></div>
+<div class="filter"><label for="profile">Traveller</label><select id="profile"><option value="all">Residents + visitors</option><option value="0">Resident · home</option><option value="1">Visitor · accommodation</option></select></div>
+<div class="filter"><label for="hour">Ground-trip departure</label><select id="hour"><option value="all">All hours, including adjacent days</option><option value="outside">Previous / next day</option></select></div>
+<div class="filter"><label for="display">Map display</label><select id="display"><option value="cantons">Canton flow lines</option><option value="flows">Municipality flow lines</option><option value="trips">Actual origin–destination lines</option><option value="points">Individual home / hotel endpoints</option></select></div>
+<div class="filter"><label for="color">Line colour</label><select id="color"><option value="volume">Passenger count</option><option value="direction">Direction</option></select></div>
+<div class="wide"><div class="number" id="count">0</div><div class="muted">sampled passenger movements matching filters</div><div class="counts"><div class="count to">To airport<strong id="toCount">0</strong></div><div class="count from">From airport<strong id="fromCount">0</strong></div></div><div id="airportCounts" class="muted"></div><div id="profileCounts" class="muted"></div>
+<div class="rule"></div><p class="subheading">Departure time · ground trip</p><div id="hours" class="hour-chart" aria-label="Departure counts by hour"></div><div class="axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div><div id="outsideCount" class="muted"></div>
+<div class="rule"></div><p class="subheading">Simulated mode shares · selected trips</p><div id="simulationModeCounts"></div>
+<div class="rule"></div><p class="subheading">Detailed mode shares · selected trips</p><div id="modeCounts"></div>
+<div class="rule"></div><label for="opacity">Basemap opacity <span id="opacityLabel">55%</span></label><input id="opacity" type="range" min="0" max="100" value="55"><div id="flowLegend"></div><div class="muted" id="mapHelp"></div><div id="tileStatus" role="status"></div><div class="controls-footer"><button id="fit">Fit selection</button><button id="reset">Reset filters</button></div></div>
+</aside><div id="mapWrap"><div id="map" aria-label="Airport trip origin and destination map"></div><div id="emptyMap">No trips match these filters.</div></div></div>
+<section class="details"><div class="table-heading"><div><h2 id="tableTitle">Canton origins and destinations</h2><div class="muted" id="municipalityCount"></div></div><input id="search" class="table-search" placeholder="Find municipality…" aria-label="Find municipality"><button id="download">Download filtered table</button></div><div class="table-scroll"><table id="municipalityTable"><thead><tr><th id="regionHeading">Canton</th><th>Airport</th><th class="num">To airport</th><th class="num">From airport</th><th class="num">Total</th><th class="num">PT share</th><th class="num">Visitors</th><th class="num">Mean distance</th></tr></thead><tbody id="rows"></tbody></table></div><div class="table-foot"><span id="tableCount" class="muted"></span><button id="showMore">Show all municipalities</button></div>
+<div class="provenance"><details><summary>Data and modelling notes</summary><p class="muted">Passenger movements, not vehicle counts. Residents are selected from the pre-matching synthetic population using pooled microcensus age/sex/employment preferences and keep their actual homes and IDs; visitors use sampled hotels or dormitories. Only Swiss ground endpoints are modelled. Trip totals are already scaled to the population sample. To-airport and from-airport movements are independent; they do not imply a same-day return. Airport endpoints are the PT interchange for public transport and the parking access point for road modes. The saved trip model uses Geneva mode evidence and distance preferences for both airports. PT quotas use OVGK A/B/C first, then D if necessary; remaining shortfalls use car or car passenger. Airport-wide mode targets are preserved where feasible; any shortfall is reported below. Taxi, ride-hail and drop-off use the simulation mode car. Distances shown are Euclidean. Departure hours refer to the ground leg, not the flight. Adjacent-day departures retain their original time offsets. All trip data and map code are embedded; only the optional swisstopo tiles require internet access.</p><pre id="sourceText"></pre></details></div>
+</section>
+<script>__LEAFLET_JS__</script>
+<script id="airport-data" type="application/json">__DATA__</script>
+<script>
+'use strict';
+const DATA = JSON.parse(document.getElementById('airport-data').textContent);
+const F = Object.fromEntries(DATA.fields.map((key, index) => [key, index]));
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n).toLocaleString('en-CH');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c]));
+const LABELS = {dropoff:'Drop-off / pick-up', private_car:'Private car', rail:'Rail', bus_tram_aerobus:'Bus / tram / Aérobus', taxi:'Taxi', ridehail:'Ride-hail', other:'Other', car:'Car', pt:'Public transport', bike:'Bicycle', walk:'Walking', car_passenger:'Car passenger'};
+const COLORS = ['#00877f', '#c05c22'];
+const airportName = a => a === 'GVA' ? 'Geneva' : 'Zurich';
+const municipalityName = m => DATA.municipalities[String(m)] || String(m);
+const areaLevel = () => $('display').value === 'cantons' ? 'canton' : 'municipality';
+const regionName = (region, level=areaLevel()) => level === 'canton' ? (DATA.cantons[String(region)]?.name || 'Unassigned canton') : municipalityName(region);
+for (const [title, items, prefix] of [['Simulated modes', DATA.simulation_modes, 's'], ['Detailed access modes', DATA.access_modes, 'd']]) {
+    const group = document.createElement('optgroup'); group.label = title;
+    items.forEach((mode, i) => { const option = document.createElement('option'); option.value = prefix+i; option.textContent = LABELS[mode] || mode; group.appendChild(option); });
+    $('mode').appendChild(group);
+}
+for (const [id, canton] of Object.entries(DATA.cantons).sort((a,b) => a[1].name.localeCompare(b[1].name))) {
+    const option = document.createElement('option'); option.value = id; option.textContent = canton.name; $('canton').appendChild(option);
+}
+for (let h=0; h<24; h++) {
+    const option = document.createElement('option'); option.value = String(h);
+    option.textContent = String(h).padStart(2,'0')+':00–'+String(h+1).padStart(2,'0')+':00'; $('hour').appendChild(option);
+}
+const sampleRates = [...new Set(DATA.trips.map(r => r[F.weight] > 0 ? 1/r[F.weight] : 0))];
+$('sampleBadge').textContent = sampleRates.length === 1 ? ((sampleRates[0]*100).toFixed(0)+'% population sample') : 'Sampled airport movements';
+const map = L.map('map', {preferCanvas:true}).setView([46.9,8.1],8);
+const renderer = L.canvas({padding:.25});
+const flows = L.layerGroup().addTo(map), points = L.layerGroup().addTo(map), airportsLayer = L.layerGroup().addTo(map);
+L.geoJSON(DATA.outline, {interactive:false, style:{color:'#8196a7', weight:1, fillColor:'#f5f8fa', fillOpacity:.22}}).addTo(map);
+const tiles = L.tileLayer(DATA.tile_url, {opacity:.55, minZoom:5, maxZoom:19, maxNativeZoom:18, noWrap:true, attribution:'© <a href="https://www.swisstopo.admin.ch/">swisstopo</a> / geo.admin.ch'}).addTo(map);
+let loaded = 0;
+tiles.on('tileerror', () => { $('tileStatus').textContent = 'Some background tiles are unavailable. Embedded boundaries, flows, endpoints and tables remain usable.'; });
+tiles.on('tileload', () => { loaded++; if (loaded>3) $('tileStatus').textContent = ''; });
+L.control.scale({imperial:false}).addTo(map);
+let selected=[], groups=[], tableRows=[], showAll=false, lastBounds=null;
+function formatTime(seconds) {
+    const day = Math.floor(seconds/86400), sec = ((seconds%86400)+86400)%86400;
+    return `${String(Math.floor(sec/3600)).padStart(2,'0')}:${String(Math.floor(sec%3600/60)).padStart(2,'0')}${day ? ` (${day>0?'+':''}${day} day)` : ''}`;
+}
+function passes(row) {
+    const a=$('airport').value, d=$('direction').value, p=$('profile').value, m=$('mode').value, h=$('hour').value, c=$('canton').value;
+    return (a==='all'||row[F.airport]===a) && (d==='all'||row[F.direction]===Number(d)) &&
+        (p==='all'||row[F.visitor]===Number(p)) && (c==='all'||row[F.canton]===Number(c)) &&
+        (m==='all'||row[m[0]==='s'?F.mode:F.access]===Number(m.slice(1))) &&
+        (h==='all'||(h==='outside' ? (row[F.departure]<0||row[F.departure]>=86400) : Math.floor(row[F.departure]/3600)===Number(h)));
+}
+function aggregate(rows) {
+    const buckets = new Map(), level = areaLevel();
+    for (const r of rows) {
+        const region = r[level==='canton'?F.canton:F.municipality];
+        const key = [r[F.airport], r[F.direction], region, r[F.airport_access]].join(':');
+        if (!buckets.has(key)) buckets.set(key, {airport:r[F.airport], direction:r[F.direction], region, level, access:r[F.airport_access], n:0, lat:0, lon:0, pt:0, visitor:0, km:0});
+        const g = buckets.get(key); g.n++; g.lat+=r[F.lat]; g.lon+=r[F.lon];
+        g.pt+=DATA.simulation_modes[r[F.mode]]==='pt'?1:0; g.visitor+=r[F.visitor]; g.km+=r[F.distance_km];
+    }
+    // A canton can straddle the airport boundary: place each flow at its own
+    // selected origins, rather than a whole-canton centre in the other catchment.
+    return [...buckets.values()].map(g => ({...g, lat:g.lat/g.n, lon:g.lon/g.n}));
+}
+function popup(g) {
+    return `<div class="tool-help"><strong>${esc(regionName(g.region,g.level))}</strong><br>${g.direction===0?'→ '+airportName(g.airport)+' airport':airportName(g.airport)+' airport →'}<br>Airport access: ${g.access==='pt'?'PT interchange':'parking / road'}<br><strong>${fmt(g.n)}</strong> sampled movements<br>Residents: ${fmt(g.n-g.visitor)} · Visitors: ${fmt(g.visitor)}<br>Public transport: ${(g.pt/g.n*100).toFixed(1)}%<br>Mean distance: ${(g.km/g.n).toFixed(1)} km</div>`;
+}
+function tripPopup(r) {
+    return `<div class="tool-help"><strong>${esc(municipalityName(r[F.municipality]))}</strong><br>${esc(regionName(r[F.canton],'canton'))}<br>${r[F.direction]===0?'To airport':'From airport'}: ${r[F.airport]}<br>${r[F.visitor]?'Visitor · '+esc(r[F.location_source]):'Resident · home'}${r[F.person_id]!==null?`<br>Person ID: ${esc(r[F.person_id])}<br>Age: ${r[F.age]} · ${r[F.sex]===0?'male':r[F.sex]===1?'female':'unknown'}<br>Employed: ${r[F.employed]===null?'unknown':r[F.employed]?'yes':'no'}`:''}<br>Airport access: ${r[F.airport_access]==='pt'?'PT interchange':'parking / road'}<br>${esc(LABELS[DATA.access_modes[r[F.access]]])}<br>Simulation: ${esc(LABELS[DATA.simulation_modes[r[F.mode]]])}<br>Departure: ${formatTime(r[F.departure])}<br>Distance: ${r[F.distance_km].toFixed(1)} km<br>OVGK: ${esc(r[F.ovgk])}</div>`;
+}
+function volumeColor(value, maximum) {
+    const t=Math.sqrt(value/Math.max(1,maximum)), light=[133,195,224], dark=[20,60,117];
+    return '#'+light.map((n,i)=>Math.round(n+(dark[i]-n)*t).toString(16).padStart(2,'0')).join('');
+}
+function drawMap() {
+    flows.clearLayers(); points.clearLayers(); airportsLayer.clearLayers();
+    const bounds=[], display=$('display').value, grouped=display==='flows'||display==='cantons';
+    const maximum=Math.max(1,...groups.map(g=>g.n));
+    for (const [code,kinds] of Object.entries(DATA.airport_points)) {
+        if ($('airport').value!=='all'&&$('airport').value!==code) continue;
+        const coord=kinds.road;
+        if (!coord) continue;
+        const ll=[coord.latitude,coord.longitude]; bounds.push(ll);
+        L.marker(ll, {icon:L.divIcon({className:'airport-anchor', html:`<span class="airport-label">${code}</span>`, iconSize:[65,32], iconAnchor:[32,16]})})
+            .addTo(airportsLayer).bindTooltip(airportName(code)+' airport');
+    }
+    if (grouped) {
+        for (const g of groups) {
+            const a=DATA.airport_points[g.airport][g.access], airport=[a.latitude,a.longitude], endpoint=[g.lat,g.lon];
+            const start=g.direction===0?endpoint:airport, end=g.direction===0?airport:endpoint;
+            const color=$('color').value==='volume'?volumeColor(g.n,maximum):COLORS[g.direction];
+            bounds.push(endpoint);
+            L.polyline([start,end], {renderer,color,weight:1+8*Math.sqrt(g.n/maximum),opacity:.68,dashArray:g.direction===1?'7 5':null})
+                .bindTooltip(`${esc(regionName(g.region,g.level))} ${g.direction===0?'→':'←'} ${g.airport} · ${fmt(g.n)}`)
+                .bindPopup(popup(g)).addTo(flows);
+            L.circleMarker(endpoint, {renderer,radius:Math.min(13,2+10*Math.sqrt(g.n/maximum)),color,weight:1,fillColor:color,fillOpacity:.6}).bindPopup(popup(g)).addTo(points);
+        }
+    } else {
+        for (const r of selected) {
+            const endpoint=[r[F.lat],r[F.lon]], color=COLORS[r[F.direction]], content=tripPopup(r);
+            bounds.push(endpoint);
+            if (display==='trips') {
+                const origin=[r[F.origin_lat],r[F.origin_lon]], destination=[r[F.destination_lat],r[F.destination_lon]];
+                L.polyline([origin,destination], {renderer,color,weight:1,opacity:.2}).bindPopup(content).addTo(flows);
+            }
+            L.circleMarker(endpoint, {renderer,radius:3,color,weight:.6,fillOpacity:.5}).bindPopup(content).addTo(points);
+        }
+    }
+    $('flowLegend').innerHTML = grouped&&$('color').value==='volume'
+        ? `<span class="volume-ramp"></span> Darker / wider: more movements · max ${fmt(maximum)} per line<br>Solid: to airport · Dashed: from airport`
+        : '<span class="to">● To airport</span> · <span class="from">● From airport</span><br>Wider lines: more movements';
+    $('mapHelp').textContent = grouped
+        ? 'Lines show passenger OD counts by region, airport access point and direction. They are display links, not road routes.'
+        : 'Each line joins one actual generated origin and destination. These are straight OD links, not routed journeys.';
+    if (display==='points') $('mapHelp').textContent='Each marker is one generated home, hotel or dormitory endpoint.';
+    lastBounds=bounds.length?L.latLngBounds(bounds):null;
+    $('emptyMap').style.display=selected.length?'none':'block';
+}
+function modeStats(items,field,n) {
+    return items.map((mode,i)=>{
+        const count=selected.filter(r=>r[field]===i).length, pct=n?100*count/n:0;
+        return `<div class="mode-row"><span>${esc(LABELS[mode])}</span><span>${pct.toFixed(1)}% · ${fmt(count)}</span></div><div class="mode-track"><div class="mode-fill" style="width:${pct}%"></div></div>`;
+    }).join('');
+}
+function stats() {
+    const n=selected.length, to=selected.filter(r=>r[F.direction]===0).length, visitors=selected.reduce((s,r)=>s+r[F.visitor],0);
+    $('count').textContent=fmt(n); $('toCount').textContent=fmt(to); $('fromCount').textContent=fmt(n-to);
+    $('airportCounts').innerHTML=['GVA','ZRH'].map(a=>{
+        const rows=selected.filter(r=>r[F.airport]===a), v=rows.reduce((s,r)=>s+r[F.visitor],0), outbound=rows.filter(r=>r[F.direction]===0).length;
+        return `<div class="airport-stat"><strong>${airportName(a)} · ${fmt(rows.length)}</strong><br>Residents ${fmt(rows.length-v)} · Visitors ${fmt(v)}<br>To ${fmt(outbound)} · From ${fmt(rows.length-outbound)}</div>`;
+    }).join('');
+    $('profileCounts').textContent=`Residents: ${fmt(n-visitors)} · Visitors: ${fmt(visitors)}`;
+    const hours=Array(24).fill(0); let outside=0;
+    for (const r of selected) {const h=Math.floor(r[F.departure]/3600);if(h>=0&&h<24)hours[h]++;else outside++;}
+    const maximum=Math.max(1,...hours); $('hours').replaceChildren();
+    hours.forEach((v,h)=>{
+        const button=document.createElement('button'); button.className='bar'; button.style.height=(v?Math.max(3,100*v/maximum):1)+'%';
+        button.title=`${String(h).padStart(2,'0')}:00 · ${fmt(v)} trips`; button.setAttribute('aria-label',button.title);
+        button.onclick=()=>{$('hour').value=String(h);update();}; $('hours').appendChild(button);
+    });
+    $('outsideCount').textContent=`Adjacent-day departures: ${fmt(outside)}`;
+    $('simulationModeCounts').innerHTML=modeStats(DATA.simulation_modes,F.mode,n);
+    $('modeCounts').innerHTML=modeStats(DATA.access_modes,F.access,n);
+}
+function buildTable() {
+    const combined=new Map();
+    for (const g of groups) {
+        const key=g.airport+':'+g.region;
+        if (!combined.has(key)) combined.set(key,{airport:g.airport,region:g.region,level:g.level,to:0,from:0,total:0,pt:0,visitor:0,km:0,lat:0,lon:0});
+        const row=combined.get(key); row[g.direction===0?'to':'from']+=g.n; row.total+=g.n; row.pt+=g.pt; row.visitor+=g.visitor; row.km+=g.km; row.lat+=g.lat*g.n; row.lon+=g.lon*g.n;
+    }
+    tableRows=[...combined.values()].map(r=>({...r,lat:r.lat/r.total,lon:r.lon/r.total}))
+        .sort((a,b)=>b.total-a.total||regionName(a.region).localeCompare(regionName(b.region)));
+    const label=areaLevel()==='canton'?'Canton':'Municipality';
+    $('tableTitle').textContent=label+' origins and destinations'; $('regionHeading').textContent=label;
+    $('search').placeholder='Find '+label.toLowerCase()+'…'; $('search').setAttribute('aria-label',$('search').placeholder);
+    $('showMore').textContent='Show all '+(areaLevel()==='canton'?'cantons':'municipalities');
+    drawTable();
+}
+function searchedRows() {
+    const q=$('search').value.trim().toLocaleLowerCase();
+    return tableRows.filter(r=>!q||regionName(r.region).toLocaleLowerCase().includes(q)||String(r.region).includes(q));
+}
+function drawTable() {
+    const rows=searchedRows(), visible=showAll?rows:rows.slice(0,100); $('rows').replaceChildren();
+    for (const r of visible) {
+        const row=document.createElement('tr');
+        const cells=[regionName(r.region)+' ('+r.region+')',r.airport,fmt(r.to),fmt(r.from),fmt(r.total),(100*r.pt/r.total).toFixed(1)+'%',(100*r.visitor/r.total).toFixed(1)+'%',(r.km/r.total).toFixed(1)+' km'];
+        cells.forEach((text,i)=>{const td=document.createElement('td');td.textContent=text;if(i>1)td.className='num';row.appendChild(td);});
+        row.onclick=()=>{map.setView([r.lat,r.lon],r.level==='canton'?9:11);L.popup().setLatLng([r.lat,r.lon]).setContent(`<strong>${esc(regionName(r.region))}</strong><br>${r.airport} · ${fmt(r.total)} movements`).openOn(map);};
+        $('rows').appendChild(row);
+    }
+    if (!rows.length) {const row=document.createElement('tr'),td=document.createElement('td');td.colSpan=8;td.className='empty';td.textContent='No matching regions';row.appendChild(td);$('rows').appendChild(row);}
+    $('municipalityCount').textContent=`${fmt(tableRows.length)} ${areaLevel()}–airport pairs · sorted by passenger count`;
+    $('tableCount').textContent=`Showing ${fmt(visible.length)} of ${fmt(rows.length)} matching pairs`;
+    $('showMore').style.display=rows.length>100&&!showAll?'block':'none';
+}
+function update() {selected=DATA.trips.filter(passes);groups=aggregate(selected);stats();drawMap();buildTable();}
+for (const id of ['airport','direction','mode','profile','hour','canton']) $(id).onchange=()=>{showAll=false;update();if(id==='airport'||id==='canton')fit();};
+$('display').onchange=()=>{showAll=false;update();fit();}; $('color').onchange=drawMap; $('search').oninput=drawTable;
+$('showMore').onclick=()=>{showAll=true;drawTable();};
+$('opacity').oninput=()=>{tiles.setOpacity(Number($('opacity').value)/100);$('opacityLabel').textContent=$('opacity').value+'%';};
+function fit() {if(lastBounds)map.fitBounds(lastBounds.pad(.12),{maxZoom:12});}
+$('fit').onclick=fit;
+$('reset').onclick=()=>{for(const id of ['airport','direction','mode','profile','hour','canton'])$(id).value='all';$('search').value='';showAll=false;update();fit();};
+$('download').onclick=()=>{
+    const quote=s=>'"'+String(s).replace(/"/g,'""')+'"';
+    const header=[areaLevel()+'_id',areaLevel(),'airport','to_airport','from_airport','total_sampled_movements','pt_share','visitor_share','mean_euclidean_distance_km'];
+    const lines=[header,...searchedRows().map(r=>[r.region,regionName(r.region),r.airport,r.to,r.from,r.total,r.pt/r.total,r.visitor/r.total,r.km/r.total])];
+    const blob=new Blob(['\uFEFF'+lines.map(row=>row.map(quote).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download='airport-'+areaLevel()+'-flows.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+$('sourceText').textContent=JSON.stringify({created_utc:DATA.created_utc,source:DATA.source,trip_model_version:DATA.summary.settings?.version,airport_access_points:DATA.summary.airport_access_points,resident_sampling:DATA.summary.resident_sampling,sampling_rate:sampleRates.length===1?sampleRates[0]:sampleRates,day:DATA.summary.settings?.day,mode_assignment:Object.fromEntries(Object.entries(DATA.summary.by_airport||{}).map(([a,s])=>[a,s.mode_assignment])),unresolved_trips:DATA.summary.unresolved_trips,mode_distance_model:DATA.summary.mode_distance_model},null,2);
+update();fit();
+window.airportExplorer={data:DATA,get selected(){return selected;},get groups(){return groups;},get tableRows(){return tableRows;},map,update};
+
+</script></body></html>

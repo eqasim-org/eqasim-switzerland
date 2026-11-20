@@ -2,7 +2,10 @@ from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter, GEH
 from ..matching.results import save_count_results
-from ..run_utils import IDS_TO_DROP
+from ..run_utils import manual_exclusion_mask
+from ..cantons.ch_overrides import STATION_OSM_OVERRIDES
+from pathlib import Path
+import hashlib
 import os
 from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
 import geopandas as gpd
@@ -44,7 +47,16 @@ def execute(context):
                             counts=counts,
                             mode="bidirectional",
                             search_radius=80,
-                            prioritize_road_types=True)
+                            prioritize_road_types=True,
+                            station_overrides=STATION_OSM_OVERRIDES)
+
+    # Save resolved current link IDs and the OSM references used for overrides.
+
+    audit_columns = [name for name in ("id", "measurement_group", "reference_osm_id", "link_id",
+                     "distance", "angle_difference", "override_match_method") if name in matched]
+    if "is_station_override" in matched:
+        matched.loc[matched.is_station_override.fillna(False), audit_columns].to_csv(
+            os.path.join(context.path(), "station_osm_overrides.csv"), index=False)
 
     if not matches_found(matched, city):
         return None
@@ -55,8 +67,18 @@ def execute(context):
                                             sample_size = sample_size, 
                                             get_average=False, 
                                             flow_col = 'flow_w' if context.config("only_weekday") else 'flow')
-    # drop complex intersections
-    flows = flows[~flows['id'].astype(str).isin(IDS_TO_DROP)].reset_index(drop=True)
+    # Reinstate only complete sensor footprints approved in the shared selection.
+
+    manually_excluded = manual_exclusion_mask(flows, city="ch")
+    low_volume = (flows.simulated_flow < 200 * 24) | (flows.flow < 200 * 24)
+    flow_discrepancy = (abs(flows.flow - flows.simulated_flow) > 25000) | ~flows.pdiff.between(-70, 200)
+    audit = flows.copy()
+    audit["manual_exclusion"] = manually_excluded
+    audit["low_volume"] = low_volume
+    audit["flow_discrepancy"] = flow_discrepancy
+    audit["kept_in_swiss_results"] = ~(manually_excluded | low_volume | flow_discrepancy)
+    audit.to_csv(os.path.join(context.path(), "station_filter_audit.csv"), index=False)
+    flows = flows[~manually_excluded].reset_index(drop=True)
     
     if not matches_found(flows, city, source="simulation flow results"):
         return None
@@ -135,3 +157,13 @@ def execute(context):
                     path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}_unfiltered.html"))
     
     return path_to_results
+
+
+def validate(context):
+    root = Path(__file__).parent.parent
+    digest = hashlib.sha256()
+    for name in ("cantons/ch_overrides.py", "matching/station_overrides.py",
+                 "matching/matcher.py", "matching/road_matching.py",
+                 "matching/compare.py", "matching/plots.py", "matching/results.py", "run_utils.py"):
+        digest.update((root / name).read_bytes())
+    return digest.hexdigest()

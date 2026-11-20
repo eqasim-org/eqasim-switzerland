@@ -47,7 +47,7 @@ def _build_problem(df, household_controls, population_controls):
     return FittingProblem(df, group_filters, "household_id", individual_filters, "person_id")
 
 def configure(context):
-    context.stage("synthesis.population.models.caravailability")
+    context.stage("data.statpop.statpop")
     context.stage("data.statpop.projections.households")
     context.stage("data.statpop.projections.population")
     context.stage("data.constants")
@@ -60,7 +60,7 @@ def configure(context):
     
 
 def execute(context):
-    df_statpop = context.stage("synthesis.population.models.caravailability").copy()
+    df_statpop = context.stage("data.statpop.statpop").copy()
     
     if context.config("enable_scaling"):
 

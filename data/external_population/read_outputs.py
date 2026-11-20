@@ -7,7 +7,7 @@ from shapely.geometry import Point
 from data.utils import coerce_boolean_series
 import matplotlib.pyplot as plt
 from matplotlib.ticker import PercentFormatter
-from matsim.scenario.population import HOME_DESTINATION_ID
+from synthesis.prepared.schema import HOME_DESTINATION_ID
 import logging
 
 logger = logging.getLogger("synpp")

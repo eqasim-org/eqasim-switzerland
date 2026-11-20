@@ -1,6 +1,8 @@
 import os
 import logging
 import pandas as pd
+import hashlib
+from pathlib import Path
 
 from .matching.network import RoadNetwork
 from .matching.counts import Counts
@@ -8,6 +10,7 @@ from .matching.matcher import TrafficDataMatcher
 from .run_utils import filter_data, save_as_target
 from .runs.transcality import aggregate_counts_by_link
 from .construction_sites import configure_filter, filter_counts
+from .cantons.ch_overrides import STATION_OSM_OVERRIDES
 
 logger = logging.getLogger("synpp")
 
@@ -35,6 +38,46 @@ def configure(context):
     context.config("include_external_population", default = True)
 
 
+def execute(context):
+    logger.info("Preparing calibration target from authority counts before simulation...")
+
+    network = context.stage("analysis.counts.matching.network_from_prepare")
+
+    # Get prepared count data
+    city_order = ["aargau", "bern", "ch", "geneva", "luzern", "saint_gallen", "vaud", "zurich"]
+    weights = {"aargau": 1, "bern": 1, "ch": 1, "geneva": 1.2, "luzern": 1, "saint_gallen": 1,
+               "vaud": 0.3, "zurich": 1.2, "annemasse":0.3}
+
+    # if context.config("include_external_population"):
+    #     city_order.append("annemasse")
+
+    dfs = []
+    for city in city_order:
+        city_df = _load_counts_and_match(context, network, city)
+        if city_df is None or city_df.empty:
+            logger.info(f"\t - {city}: No usable records, skipping.")
+            continue
+        logger.info(f"\t - {city}: {len(city_df)} matched stations")
+        city_df["weight"] = weights.get(city, 1)
+        dfs.append(city_df)
+    if not dfs:
+        raise RuntimeError("No counts could be matched to the prepared network.")
+
+    df = pd.concat(dfs, ignore_index=True)
+    logger.info(f"Combined matched dataset for calibration: {len(df)} records")
+
+    # This would filter the data and remove the outliers and not correctly matched stations/complex intersections, this last part is done manually, only for ch data.
+    df = filter_data(df, network, require_simulated=False)
+    if df is None or df.empty:
+        raise RuntimeError("No records left after filtering pre-simulation matched counts.")
+
+    save_as_target(network, df, context.path())
+
+    target_file = os.path.join(context.path(), "target_flow.csv")
+    assert os.path.exists(target_file), f"Target file was not created at {target_file}"
+    return target_file
+
+
 def _load_counts_and_match(context, network, city):
     if city in ("geneva", "transcality"):
         file_path = context.stage("geneva_counts")
@@ -60,7 +103,7 @@ def _load_counts_and_match(context, network, city):
             id_column="objectid",
             columns_to_keep={'flow':"flow", "flow_w":"flow_w"},
             context=context,
-        )    
+        )
         match_kwargs = dict(
             mode="bidirectional",
             search_radius=15,
@@ -79,9 +122,10 @@ def _load_counts_and_match(context, network, city):
             mode="bidirectional",
             search_radius=80,
             prioritize_road_types=True,
+            station_overrides=STATION_OSM_OVERRIDES,
         )
     elif city == "geneva":
-        counts = Counts(file_path=file_path,  
+        counts = Counts(file_path=file_path,
                         id_column="OBJECTID",
                         columns_to_keep={'mean_flow_2025':"flow", "median_flow_2025":"median_flow",
                                          "osm_id":"osm_id", "angle":"angle"},
@@ -175,50 +219,23 @@ def _load_counts_and_match(context, network, city):
     flow_col = "flow_w" if context.config("only_weekday") and "flow_w" in counts.counts.columns else "flow"
     station_flows = counts.counts[["id", flow_col]].rename(columns={flow_col: "flow"})
 
-    grouped = matched.groupby("id", as_index=False).agg({
+    aggregation = {
         "link_id": list,
         "distance": list,
-    })
+    }
+    if "is_station_override" in matched:
+        aggregation["is_station_override"] = "max"
+    grouped = matched.groupby("id", as_index=False).agg(aggregation)
     grouped["city"] = city
 
     return station_flows.merge(grouped, on="id", how="inner")
 
 
-def execute(context):
-    logger.info("Preparing calibration target from authority counts before simulation...")
-    
-    network = context.stage("analysis.counts.matching.network_from_prepare")
-
-    # Get prepared count data
-    city_order = ["aargau", "bern", "ch", "geneva", "luzern", "saint_gallen", "vaud", "zurich"]
-    weights = {"aargau": 1, "bern": 1, "ch": 1, "geneva": 1.2, "luzern": 1, "saint_gallen": 1, 
-               "vaud": 0.3, "zurich": 1.2, "annemasse":0.3}
-
-    # if context.config("include_external_population"):
-    #     city_order.append("annemasse")
-
-    dfs = []
-    for city in city_order:
-        city_df = _load_counts_and_match(context, network, city)
-        if city_df is None or city_df.empty:
-            logger.info(f"\t - {city}: No usable records, skipping.")
-            continue
-        logger.info(f"\t - {city}: {len(city_df)} matched stations")
-        city_df["weight"] = weights.get(city, 1)
-        dfs.append(city_df)
-    if not dfs:
-        raise RuntimeError("No counts could be matched to the prepared network.")
-
-    df = pd.concat(dfs, ignore_index=True)
-    logger.info(f"Combined matched dataset for calibration: {len(df)} records")
-
-    # This would filter the data and remove the outliers and not correctly matched stations/complex intersections, this last part is done manually, only for ch data.
-    df = filter_data(df, network, require_simulated=False)
-    if df is None or df.empty:
-        raise RuntimeError("No records left after filtering pre-simulation matched counts.")
-
-    save_as_target(network, df, context.path())
-
-    target_file = os.path.join(context.path(), "target_flow.csv")
-    assert os.path.exists(target_file), f"Target file was not created at {target_file}"
-    return target_file
+def validate(context):
+    root = Path(__file__).parent
+    digest = hashlib.sha256()
+    for name in ("cantons/ch_overrides.py", "run_utils.py", "matching/matcher.py",
+                 "matching/station_overrides.py", "matching/road_matching.py",
+                 "matching/counts.py"):
+        digest.update((root / name).read_bytes())
+    return digest.hexdigest()

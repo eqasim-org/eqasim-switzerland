@@ -11,11 +11,14 @@ from pyproj import Transformer
 from .h3 import H3_LEVEL_NAMES
 from .hierarchical_utils import SECONDARY_ACTIVITIES, build_level2_children_by_level1, build_level2_candidate_attributes_by_level1, sanitize_work_coordinates, build_hierarchical_candidate_batch_numba
 from .feature_encoding import CANDIDATE_FEATURES, N_CANDIDATE_DYNAMIC, ACTIVITY_CHAIN_N, fit_candidate_tensor, fit_person_trip_matrix, add_detour_factor_feature
+from .feature_encoding import OSM_CANDIDATE_INDICES
+from .tools import CompactOriginSupply
 from .choice_model import NeuralChoiceModel, train_choice_model
 from .model_wrappers import LocalChoiceWrapper
 
 from .tools import model_validation_options, training_mobility, enrich_candidate_tensor, attach_candidate_features
 from .training_split import expert_persons
+from .trip_distances import spatial_training_trips
 
 logger = logging.getLogger("synpp: local_model")
 
@@ -27,6 +30,8 @@ COUNT_ZOOM_AREAS = {
 
 
 def configure(context):
+    context.config("secondary_nn_feature_version", 3)
+    context.config("secondary_nn_compress_osm_features", True)
     context.config("secondary_nn_no_distance_routing", "hierarchy")
     context.config("secondary_nn_model_validation_rotation_epochs", 3)
     context.config("secondary_nn_model_validation_holdout_fraction", 0.1)
@@ -59,7 +64,7 @@ def configure(context):
     # training params
     context.config("overwrite_local_model_if_exists", True)
     context.config("local_model_batch_size", 256)
-    context.config("local_model_epochs", 50)
+    context.config("local_model_epochs", 120)
     context.config("local_model_learning_rate", 4e-3)
     context.config("local_model_dropout_rate", 0.30)
     context.config("local_model_weight_decay", 1e-2)
@@ -92,7 +97,7 @@ def execute(context):
     mz_persons["car_availability"] = (mz_persons["car_availability"] != constants.CAR_AVAILABILITY_NEVER)
 
     # Preserve nonstudent education recoding in the filtered NN training pool.
-    mz_trips = context.stage("data.microcensus.secondary_trips")
+    mz_trips = spatial_training_trips(context.stage("data.microcensus.secondary_trips"))
     mz_trips = mz_trips.loc[mz_trips.person_id.isin(mz_persons.person_id)].copy()
     mz_trips = mz_trips[["person_id", "trip_id", "origin_x", "origin_y", "destination_x", "destination_y", "purpose", "origin_purpose"]]
     mz_chain_trips = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[[
@@ -277,6 +282,7 @@ def execute(context):
     ########### Building tensors and fitting scalers ###########
     purpose_categories = [str(purpose) for purpose in SECONDARY_ACTIVITIES]
     person_trip_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, person_trip_cols = fit_person_trip_matrix(
+        origin_context=CompactOriginSupply.from_context(context).matrix(df.origin_x, df.origin_y),
         mobility_matrix=training_mobility(context, df),
         age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class,
         daily_longest=daily_longest, daily_total=daily_total, daily_longest_work=daily_longest_work,
@@ -316,6 +322,7 @@ def execute(context):
     model = NeuralChoiceModel(
         person_input_dim=person_trip_matrix.shape[1],
         candidate_input_dim=candidate_tensor.shape[2],
+        osm_feature_indices=OSM_CANDIDATE_INDICES if context.config("secondary_nn_compress_osm_features") else None,
         person_hidden_dim=32,
         hidden_dim=32,
         dropout_rate=float(context.config("local_model_dropout_rate")),

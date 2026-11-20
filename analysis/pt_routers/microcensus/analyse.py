@@ -49,6 +49,7 @@ def execute(context):
 
 def validate(context):
     import hashlib
-    helper = hashlib.sha256(Path(report.__file__).read_bytes()).hexdigest()
+    helper = hashlib.sha256(Path(report.__file__).read_bytes() +
+                            Path(report.transfers.__file__).read_bytes()).hexdigest()
     target = Path(context.config('output_path')) / context.config('pt_microcensus_output_folder') / 'index.html'
     return [helper, [target.stat().st_mtime_ns, target.stat().st_size] if target.is_file() else None]

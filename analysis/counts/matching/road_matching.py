@@ -36,6 +36,20 @@ def angular_difference(first, second):
     return np.abs((first - second + 180) % 360 - 180)
 
 
+def local_geometry_angle(geometry, reference, span=10.0):
+    """Directed tangent near a detector, in degrees counter-clockwise from east."""
+    if geometry is None or geometry.is_empty:
+        return np.nan
+    if isinstance(geometry, MultiLineString):
+        geometry = min(geometry.geoms, key=reference.distance)
+    position = geometry.project(reference)
+    start = geometry.interpolate(max(0, position-span))
+    end = geometry.interpolate(min(geometry.length, position+span))
+    if start.equals(end):
+        return np.nan
+    return np.degrees(np.arctan2(end.y-start.y, end.x-start.x))
+
+
 def lines_are_opposite(first_angle, second_angle, tolerance=15.0) -> bool:
     return angular_difference(first_angle, second_angle) >= 180.0 - tolerance
 

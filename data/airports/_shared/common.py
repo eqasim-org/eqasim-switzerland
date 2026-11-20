@@ -9,6 +9,19 @@ import tempfile
 import numpy as np
 
 
+def config_mapping(context, option):
+    """Read nested settings in both Synpp execution and cache validation.
+
+    Synpp flattens configured dictionaries into dotted keys. ExecuteContext
+    reconstructs them, but ValidateContext only accepts exact keys.
+    """
+    from synpp.pipeline import ValidateContext, get_config_value, has_config_value
+
+    if isinstance(context, ValidateContext) and has_config_value(option, context.required_config):
+        return get_config_value(option, context.required_config)
+    return context.config(option)
+
+
 def file_digest(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:

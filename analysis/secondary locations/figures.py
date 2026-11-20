@@ -223,12 +223,16 @@ def maps(datasets, observed, predictions, regions, purposes, basemap, directory)
     if predictions.empty:
         return []
     outputs = []
+    if 'coordinate_valid' in observed:
+        observed = observed.loc[observed.coordinate_valid]
+        keys = observed[['person_id', 'trip_id']]
+        predictions = predictions.merge(keys, on=['person_id', 'trip_id'], validate='many_to_one')
     for city, region in regions.items():
         for purpose in purposes:
             frames = [observed, predictions.loc[predictions.dataset == 'rda'], predictions.loc[predictions.dataset == 'nn_distance'], predictions.loc[predictions.dataset == 'nn_no_distance'],
                       datasets.get('survey', pd.DataFrame()), datasets.get('rda', pd.DataFrame()), datasets.get('nn_distance', pd.DataFrame()), datasets.get('nn_no_distance', pd.DataFrame())]
             if any(f.empty for f in frames): continue
-            frames = [f.loc[f.purpose == purpose] for f in frames]
+            frames = [f.loc[(f.purpose == purpose) & (f.coordinate_valid if i == 4 and 'coordinate_valid' in f else True)] for i, f in enumerate(frames)]
             grids = [density_grid(f, region['bounds']) for f in frames]
             vmax = max(float(g[0].max()) for g in grids)
             if vmax <= 0: continue
@@ -270,8 +274,8 @@ def maps(datasets, observed, predictions, regions, purposes, basemap, directory)
 
 
 def selector_figure(trips, directory):
-    bins = [.01,.25,.5,1,1.5,3,5,10,20,1000]
-    labels = ['.01–.25','.25–.5','.5–1','1–1.5','1.5–3','3–5','5–10','10–20','>20']
+    bins = [.001,.25,.5,1,1.5,3,5,10,20,1000]
+    labels = ['.001–.25','.25–.5','.5–1','1–1.5','1.5–3','3–5','5–10','10–20','>20']
     fig,axes=plt.subplots(1,2,figsize=(7.3,3),sharey=True)
     for ax,car in zip(axes,['No car access','Car access']):
         for name,frame in trips.loc[trips.car_group==car].groupby('dataset',observed=True):

@@ -10,8 +10,9 @@ import uuid
 import numpy as np
 import pandas as pd
 
-from data.airports import common, geneva_times
-from data.airports.common import apportion, atomic_write, export_signature, file_digest, normalized
+from data.airports._shared import common
+from data.airports.geneva import times as geneva_times
+from data.airports._shared.common import apportion, atomic_write, export_signature, file_digest, normalized
 
 logger = logging.getLogger("synpp")
 MODEL_VERSION = 4
@@ -19,7 +20,8 @@ MODEL_VERSION = 4
 
 def configure(context):
     context.config("data_path")
-    context.stage("data.airports.model")
+    context.stage("data.airports.geneva.model")
+    context.stage("data.airports.catchments")
     context.config("override_geneva_ods", default=False, volatile=True)
     context.config("geneva_airport_pdf", default="airports/geneva/geneva_airport.pdf")
     context.config("geneva_airport_survey_csv", default=None)
@@ -37,10 +39,12 @@ def execute(context):
     pdf, survey, web, cache = input_paths(context)
     timing_path = time_data_path(context)
     settings = demand_settings(context)
-    allocation_model = context.stage("data.airports.model")
+    allocation_model = context.stage("data.airports.geneva.model")
+    catchments = context.stage("data.airports.catchments")
     token = signature(pdf, survey, survey.with_suffix(".json"), web, timing_path,
                       Path(__file__), Path(common.__file__), Path(geneva_times.__file__),
-                      settings={**settings, "allocation_model": allocation_model.signature})
+                      settings={**settings, "allocation_model": allocation_model.signature,
+                                "catchments": catchments.attrs['signature']})
     trips = None if context.config("override_geneva_ods") else load_processed_data(token, cache)
     if trips is not None:
         logger.info("Geneva airport: reusing %s", cache)
@@ -51,7 +55,8 @@ def execute(context):
     observations = process_pdf(pdf, survey)
     traffic = process_json(web)
     ods = build_ods(observations)
-    trips = allocation_model.allocate(build_trips(ods, traffic, **settings), "GVA")
+    candidates = catchments.loc[catchments.eligible_gva, 'municipality_id']
+    trips = allocation_model.allocate(build_trips(ods, traffic, **settings), "GVA", municipality_ids=candidates)
 
     # Persist auditable probabilities, trips and assumptions alongside the cache.
 
@@ -61,7 +66,8 @@ def execute(context):
     summary["municipal_allocation"] = {"model_signature": allocation_model.signature,
         "parameters": allocation_model.parameters, "swiss_resolution": "municipality",
         "foreign_resolution": "original regional groups; no foreign census/hotel inputs",
-        "observed_regional_totals_preserved": True}
+        "observed_regional_totals_preserved": True,
+        "catchment_signature": catchments.attrs['signature'], "catchment": dict(catchments.attrs)}
     summary["timing"] = {key: value for key, value in timing.items() if key not in ("flights", "query")}
     summary["timing"]["flight_count"] = len(geneva_times.flight_frame(timing))
     summary["timing"]["snapshot_path"] = str(timing_path)

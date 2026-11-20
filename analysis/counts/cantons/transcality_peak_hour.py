@@ -2,6 +2,8 @@
 
 import json
 import os
+import hashlib
+from pathlib import Path
 
 import numpy as np
 
@@ -48,7 +50,8 @@ def select_peak_counts(counts, start, end):
 def execute(context):
     start, end = get_peak_hours(context)
     counts = transcality.prepare_transcality_counts(
-        os.path.join(context.config("counts_path"), "Transcality")
+        os.path.join(context.config("counts_path"), "Transcality"),
+        correct_transcality_counts=context.config("correct_transcality_counts"),
     )
     counts = select_peak_counts(counts, start, end)
     output = os.path.join(context.path(), "processed_data.gpkg")
@@ -57,3 +60,9 @@ def execute(context):
         os.path.join(context.path(), "processed_peak_counts.csv"), index=False
     )
     return output
+
+
+def validate(context):
+    digest = hashlib.sha256(Path(transcality.__file__).read_bytes())
+    digest.update(transcality.validate(context).encode())
+    return digest.hexdigest()

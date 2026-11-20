@@ -577,3 +577,57 @@ RAM for computation; the training log records the allocated geometry size.
 The geometry cache preserves the loss and its gradients. Speedups of the score calculation do not imply the
 same speedup for the complete neural training pipeline. New feature dimensions
 require retraining all experts and the distance-free selector.
+
+## Short-radius audit and distance fidelity
+
+The November audit retained the 10–1500 m training range, origin-centred 1800 m
+choice sets with 200 m expansion, 32-unit hidden layer, dropout 0.35 and weight
+decay 0.01. The changed validation schedule and training people mean the fitted
+weights need not reproduce older results even though these controls match.
+The distance-enabled survey replay has roughly 40–60 m short-trip radius errors,
+but population assignment still underrepresents trips below 250 m.
+
+For the distance-enabled short expert only,
+`secondary_nn_short_radius_loss_weight` (default 0.5) adds the expected penalty
+of *individual* candidate-radius errors to cross-entropy and the existing mean
+radius/home losses. For candidate radius r and observed radius d, its contribution
+is the weighted sum of Huber(max(abs(r-d)-75,0)/(d+100)); underestimation uses the
+existing asymmetric multiplier. `secondary_nn_short_radius_tolerance_m` controls
+the 75 m allowance for the H3 representative point. Unlike a loss on E[r], this
+term cannot cancel too-short and too-long alternatives. It uses the same scoring
+function for training and validation, is cached once, and is zero for models
+without distance input. Set its weight to zero for historical-loss experiments.
+
+For hierarchy-first no-distance inference, predicted distance is used only to
+trigger the short expert. The short expert then chooses freely within its
+origin-centred neighbourhood; no proposed radius or direction is passed through.
+
+The catalogue still cannot represent every stationary/residential activity at
+its exact origin. These changes address two mechanisms; they do not establish
+perfect prediction or replace independent validation. Before/after report
+artifacts are preserved under `results/before_radius_guard_20261113/`.
+
+## Separate OSM embedding
+
+All four experts default to `secondary_nn_compress_osm_features: true`.
+The twelve scaled OSM features pass through linear layers of 8 and 4 units,
+with SiLU activations, to form a learned four-dimensional context embedding.
+That embedding joins the existing person representation and the remaining
+candidate attributes in the utility network. ÖVGK, facility offers, employment
+counts, mobility attributes and geometric distances bypass this compression.
+Existing purpose masks and soft accessibility weights are retained.
+
+For shared candidate catalogues, the encoder runs before minibatch broadcasting,
+so identical static cells are encoded once per forward pass. Model checkpoints
+record encoder indices and dimensions; all four wrapper loaders reconstruct them.
+Older checkpoints without encoder metadata still load their original architecture.
+Set the option to false for a controlled uncompressed comparison. All four experts
+must be retrained when enabling it; use the full comparison submitter rather than
+`--short-only` for the first compressed run.
+
+See the [November training and inference improvements](improvements_20261115.md)
+for the shared test partition, origin supply inputs, graded accessibility and
+1 m stationary policy.
+
+The current [loop and distance policy](trip_distances.md) supersedes the earlier
+one-meter shortcut and probabilistic stay model described in historical notes.

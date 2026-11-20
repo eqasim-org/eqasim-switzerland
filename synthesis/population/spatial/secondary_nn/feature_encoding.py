@@ -29,6 +29,7 @@ STATIC_CANDIDATE_FEATURES = CANDIDATE_STATIC_SCALED_FEATURES + CANDIDATE_STATIC_
 N_CANDIDATE_STATIC_SCALED = len(CANDIDATE_STATIC_SCALED_FEATURES)   # Scaled environmental quantities precede fractions
 DYNAMIC_CANDIDATE_FEATURES = ["dist_home", "dist_work", "dist_last", "detour_factor"]
 CANDIDATE_FEATURES = DYNAMIC_CANDIDATE_FEATURES + STATIC_CANDIDATE_FEATURES
+OSM_CANDIDATE_INDICES = [CANDIDATE_FEATURES.index(name) for name in OSM_FEATURES]
 N_CANDIDATE_DYNAMIC = len(DYNAMIC_CANDIDATE_FEATURES)  # = 4; split index: candidate_vector[:N_CANDIDATE_DYNAMIC] is dynamic
 
 
@@ -79,7 +80,7 @@ def _make_quantile_transformer(n_rows, random_state=None):
 
 def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_matrix,
                            consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_series, origin_purpose_series, purpose_categories,
-                           person_static_scaler=None, person_dynamic_scaler=None, use_target_distance=True, random_state=None, mobility_matrix=None, chain_state_matrix=None):
+                           person_static_scaler=None, person_dynamic_scaler=None, use_target_distance=True, random_state=None, mobility_matrix=None, chain_state_matrix=None, origin_context=None):
     age = np.asarray(age, dtype=np.float64); income_class = np.asarray(income_class, dtype=np.float64)
     daily_longest = np.asarray(daily_longest, dtype=np.float64); daily_total = np.asarray(daily_total, dtype=np.float64)
     daily_longest_work = np.asarray(daily_longest_work, dtype=np.float64)
@@ -118,6 +119,12 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
         dynamic_scaled = person_dynamic_scaler.transform(dynamic_numeric).astype(np.float32)
     if chain_state_matrix is not None:
         dynamic_scaled = np.column_stack([dynamic_scaled, state[:, -1]])
+    if origin_context is not None:
+        origin_context = np.asarray(origin_context, dtype=np.float32)
+        if origin_context.shape != (len(age), 4) or not np.isfinite(origin_context).all():
+            raise ValueError("Invalid origin supply features")
+        dynamic_scaled = np.column_stack([dynamic_scaled, origin_context])
+    person_dynamic_scaler.origin_context_features = origin_context is not None
     person_dynamic_scaler.use_target_distance = use_target_distance
     person_dynamic_scaler.chain_state_features = chain_state_matrix is not None
 
@@ -138,7 +145,7 @@ def fit_person_trip_matrix(age, sex, employed, car_availability, income_class, d
     static_matrix  = np.concatenate([static_scaled, binary, mobility],                                          axis=1).astype(np.float32)
     dynamic_matrix = np.concatenate([dynamic_scaled, purpose_one_hot, origin_purpose_one_hot],         axis=1).astype(np.float32)  # [N, 5+2P]
     full_matrix    = np.concatenate([static_matrix,  dynamic_matrix],                                  axis=1).astype(np.float32)
-    feature_names  = PERSON_STATIC_FEATURES + [name for name in PERSON_DYNAMIC_FEATURES if use_target_distance or name != "target_distance"] + (CHAIN_STATE_FEATURES if person_dynamic_scaler.chain_state_features else []) + [f"purpose_{p}" for p in purpose_categories] + [f"origin_purpose_{p}" for p in purpose_categories]
+    feature_names  = PERSON_STATIC_FEATURES + [name for name in PERSON_DYNAMIC_FEATURES if use_target_distance or name != "target_distance"] + (CHAIN_STATE_FEATURES if person_dynamic_scaler.chain_state_features else []) + (["origin_supply_shop", "origin_supply_leisure", "origin_supply_osm", "origin_supply_all"] if origin_context is not None else []) + [f"purpose_{p}" for p in purpose_categories] + [f"origin_purpose_{p}" for p in purpose_categories]
     return full_matrix, static_matrix, dynamic_matrix, person_static_scaler, person_dynamic_scaler, feature_names
 
 
@@ -151,7 +158,7 @@ def transform_person_static_vector(age, income_class, daily_longest, daily_total
     mobility = np.zeros((1, len(MOBILITY_FEATURES)), dtype=np.float32) if mobility_vector is None else np.asarray(mobility_vector, dtype=np.float32).reshape(1, len(MOBILITY_FEATURES))
     return np.concatenate([numeric_scaled, binary, mobility], axis=1).astype(np.float32)
 
-def transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler, chain_state_vector=None):
+def transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler, chain_state_vector=None, origin_context=None):
     """Encode trip state with the same optional distance and plan fields as fitting."""
     numeric = np.array([[consumed_before, trip_position, departure_time, activity_duration_h, target_distance]], dtype=np.float64)
     if not getattr(dynamic_scaler, "use_target_distance", True):
@@ -166,12 +173,16 @@ def transform_person_dynamic_vector(consumed_before, trip_position, departure_ti
     numeric_scaled = dynamic_scaler.transform(numeric).astype(np.float32)
     if getattr(dynamic_scaler, "chain_state_features", False):
         numeric_scaled = np.column_stack([numeric_scaled, state[:, -1]])
+    if getattr(dynamic_scaler, "origin_context_features", False):
+        if origin_context is None:
+            raise ValueError("Origin context required by this checkpoint")
+        numeric_scaled = np.column_stack([numeric_scaled, np.asarray(origin_context).reshape(1, 4)])
     return np.concatenate([numeric_scaled, [purpose_hot], [origin_purpose_hot]], axis=1).astype(np.float32)  # [1, 5+2P]
 
-def transform_person_trip_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, static_scaler, dynamic_scaler, chain_state_vector=None, mobility_vector=None):
+def transform_person_trip_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, static_scaler, dynamic_scaler, chain_state_vector=None, mobility_vector=None, origin_x=None, origin_y=None):
     """Combined convenience wrapper used by standalone predict_levelX analysis methods."""
     p_static  = transform_person_static_vector(age, income_class, daily_longest, daily_total, daily_longest_work, activity_chain_vector, sex, employed, car_availability, static_scaler, mobility_vector=mobility_vector)
-    p_dynamic = transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler, chain_state_vector=chain_state_vector)  # [1, 5+2P]
+    p_dynamic = transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, dynamic_scaler, chain_state_vector=chain_state_vector, origin_context=dynamic_scaler.origin_supply.at(origin_x, origin_y) if getattr(dynamic_scaler, "origin_context_features", False) else None)  # [1, 5+2P]
     return np.concatenate([p_static, p_dynamic], axis=1).astype(np.float32)  # [1, 19+2P]
 
 

@@ -7,6 +7,11 @@ import pandas as pd
 
 SHOP = "shop"
 LEISURE = "leisure"
+MICROCENSUS_PURPOSES = {
+    -99: 'unknown', -98: 'unknown', -97: 'unknown',
+    1: 'interaction', 2: 'work', 3: 'education', 4: SHOP, 5: 'other',
+    6: 'work_secondary', 7: 'work_secondary', 8: LEISURE,
+    9: 'other', 10: 'other', 11: 'home', 12: 'unknown', 13: 'border'}
 # Retail, gastronomy, arts, museums/heritage, botanical/zoological gardens,
 # gambling, sport/recreation and cinemas. Libraries and accommodation are other.
 LEISURE_NOGA_PREFIXES = ("56", "90", "9102", "9103", "9104", "92", "93", "5914")
@@ -76,6 +81,19 @@ NOGA_TYPES = {
     "92": "gambling", "9313": "fitness", "931": "sport", "932": "recreation",
 }
 NOGA_TYPE_PREFIXES = tuple(sorted(NOGA_TYPES, key=len, reverse=True))
+
+
+def microcensus_purpose_map(year=2015):
+    """Shared trip-purpose codes, preserving the 2021 reader's treatment of code 12."""
+    result = MICROCENSUS_PURPOSES.copy()
+    if year == 2021:
+        result[12] = 'other'
+    return result
+
+
+def format_activity_chain(values):
+    """Use the microcensus chain encoding, including removal of padding activities."""
+    return '-'.join(values).replace('-stop', '')
 
 
 def normalize_noga(value):

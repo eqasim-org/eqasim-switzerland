@@ -111,13 +111,7 @@ class RegionalChoiceWrapper:
         torch.save(
             {
                 "model_state": self.model.state_dict(),
-                "model_config": {
-                    "person_input_dim": self.model.person_input_dim,
-                    "candidate_input_dim": self.model.candidate_input_dim,
-                    "person_hidden_dim": self.model.person_hidden_dim,
-                    "hidden_dim": self.model.hidden_dim,
-                    "dropout_rate": self.model.dropout_rate,
-                },
+                "model_config": self.model.architecture_config(),
                 "person_static_scaler":    self.person_static_scaler,
                 "person_dynamic_scaler":   self.person_dynamic_scaler,
                 "candidate_static_scaler":  self.candidate_static_scaler,
@@ -143,6 +137,9 @@ class RegionalChoiceWrapper:
             person_hidden_dim=cfg["person_hidden_dim"],
             hidden_dim=cfg["hidden_dim"],
             dropout_rate=cfg["dropout_rate"],
+            osm_feature_indices=cfg.get("osm_feature_indices"),
+            osm_hidden_dim=cfg.get("osm_hidden_dim",8),
+            osm_embedding_dim=cfg.get("osm_embedding_dim",4),
         )
         model.load_state_dict(state["model_state"])
         model.eval()
@@ -182,7 +179,7 @@ class RegionalChoiceWrapper:
     def predict_level0(self, home_x, home_y, work_x, work_y, origin_x, origin_y, age, sex, employed, car_availability, income_class,
                        daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work,
                        crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, target_distance, activity_chain_vector, purpose, origin_purpose,
-                       candidate_mask=None, rng=None, chain_state_vector=None, mobility_vector=None):
+                       candidate_mask=None, rng=None, chain_state_vector=None, mobility_vector=None, activity_duration_h=0.):
         safe_daily_longest = float(daily_longest_distance_from_home) if np.isfinite(daily_longest_distance_from_home) and float(daily_longest_distance_from_home) >= 0.0 else 0.0
         safe_daily_total = float(daily_crowfly_total) if np.isfinite(daily_crowfly_total) and float(daily_crowfly_total) >= 0.0 else 0.0
         safe_daily_longest_work = float(daily_longest_distance_from_work) if np.isfinite(daily_longest_distance_from_work) and float(daily_longest_distance_from_work) >= 0.0 else 0.0
@@ -199,10 +196,10 @@ class RegionalChoiceWrapper:
         person = transform_person_trip_vector(age=age, income_class=income_class, daily_longest=safe_daily_longest, daily_total=safe_daily_total,
             daily_longest_work=safe_daily_longest_work, activity_chain_vector=activity_chain_vector,
             sex=sex, employed=employed, car_availability=car_availability,
-            consumed_before=safe_consumed, trip_position=safe_trip_position, departure_time=safe_departure_time, target_distance=safe_target_distance,
+            consumed_before=safe_consumed, trip_position=safe_trip_position, departure_time=safe_departure_time, activity_duration_h=activity_duration_h, target_distance=safe_target_distance,
             purpose_hot=purpose_hot, origin_purpose_hot=origin_purpose_hot,
             static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler,
-            chain_state_vector=chain_state_vector, mobility_vector=mobility_vector)
+            chain_state_vector=chain_state_vector, mobility_vector=mobility_vector, origin_x=origin_x, origin_y=origin_y)
         has_work = np.isfinite(work_x) and np.isfinite(work_y)
         candidate_dynamic        = self._build_candidate_dynamic(home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
         candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.candidate_dynamic_scaler)[None, :, :]
@@ -256,13 +253,7 @@ class DistrictChoiceWrapper:
         torch.save(
             {
                 "model_state": self.model.state_dict(),
-                "model_config": {
-                    "person_input_dim": self.model.person_input_dim,
-                    "candidate_input_dim": self.model.candidate_input_dim,
-                    "person_hidden_dim": self.model.person_hidden_dim,
-                    "hidden_dim": self.model.hidden_dim,
-                    "dropout_rate": self.model.dropout_rate,
-                },
+                "model_config": self.model.architecture_config(),
                 "person_static_scaler":    self.person_static_scaler,
                 "person_dynamic_scaler":   self.person_dynamic_scaler,
                 "candidate_static_scaler":  self.candidate_static_scaler,
@@ -286,6 +277,9 @@ class DistrictChoiceWrapper:
             person_hidden_dim=cfg["person_hidden_dim"],
             hidden_dim=cfg["hidden_dim"],
             dropout_rate=cfg["dropout_rate"],
+            osm_feature_indices=cfg.get("osm_feature_indices"),
+            osm_hidden_dim=cfg.get("osm_hidden_dim",8),
+            osm_embedding_dim=cfg.get("osm_embedding_dim",4),
         )
         model.load_state_dict(state["model_state"])
         model.eval()
@@ -368,13 +362,7 @@ class LocalChoiceWrapper:
         torch.save(
             {
                 "model_state": self.model.state_dict(),
-                "model_config": {
-                    "person_input_dim": self.model.person_input_dim,
-                    "candidate_input_dim": self.model.candidate_input_dim,
-                    "person_hidden_dim": self.model.person_hidden_dim,
-                    "hidden_dim": self.model.hidden_dim,
-                    "dropout_rate": self.model.dropout_rate,
-                },
+                "model_config": self.model.architecture_config(),
                 "person_static_scaler":    self.person_static_scaler,
                 "person_dynamic_scaler":   self.person_dynamic_scaler,
                 "candidate_static_scaler":  self.candidate_static_scaler,
@@ -398,6 +386,9 @@ class LocalChoiceWrapper:
             person_hidden_dim=cfg["person_hidden_dim"],
             hidden_dim=cfg["hidden_dim"],
             dropout_rate=cfg["dropout_rate"],
+            osm_feature_indices=cfg.get("osm_feature_indices"),
+            osm_hidden_dim=cfg.get("osm_hidden_dim",8),
+            osm_embedding_dim=cfg.get("osm_embedding_dim",4),
         )
         model.load_state_dict(state["model_state"])
         model.eval()
@@ -464,10 +455,10 @@ class LocalChoiceWrapper:
         person = transform_person_trip_vector(age=age, income_class=income_class, daily_longest=safe_daily_longest, daily_total=safe_daily_total,
             daily_longest_work=safe_daily_longest_work, activity_chain_vector=activity_chain_vector,
             sex=sex, employed=employed, car_availability=car_availability,
-            consumed_before=safe_consumed, trip_position=safe_trip_position, departure_time=safe_departure_time, target_distance=safe_target_distance,
+            consumed_before=safe_consumed, trip_position=safe_trip_position, departure_time=safe_departure_time, activity_duration_h=kwargs.get("activity_duration_h", 0.), target_distance=safe_target_distance,
             purpose_hot=purpose_hot, origin_purpose_hot=origin_purpose_hot,
             static_scaler=self.person_static_scaler, dynamic_scaler=self.person_dynamic_scaler,
-            chain_state_vector=kwargs.get("chain_state_vector"), mobility_vector=kwargs.get("mobility_vector"))
+            chain_state_vector=kwargs.get("chain_state_vector"), mobility_vector=kwargs.get("mobility_vector"), origin_x=origin_x, origin_y=origin_y)
         has_work = np.isfinite(work_x) and np.isfinite(work_y)
         candidate_dynamic        = self._build_candidate_dynamic(attrs, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
         candidate_dynamic_scaled = transform_candidate_dynamic_matrix(candidate_dynamic, self.candidate_dynamic_scaler)[None, :, :]
@@ -538,13 +529,7 @@ class ShortRangeChoiceWrapper:
         torch.save(
             {
                 "model_state": self.model.state_dict(),
-                "model_config": {
-                    "person_input_dim": self.model.person_input_dim,
-                    "candidate_input_dim": self.model.candidate_input_dim,
-                    "person_hidden_dim": self.model.person_hidden_dim,
-                    "hidden_dim": self.model.hidden_dim,
-                    "dropout_rate": self.model.dropout_rate,
-                },
+                "model_config": self.model.architecture_config(),
                 "person_static_scaler": self.person_static_scaler,
                 "person_dynamic_scaler": self.person_dynamic_scaler,
                 "candidate_static_scaler": self.candidate_static_scaler,
@@ -570,6 +555,9 @@ class ShortRangeChoiceWrapper:
             person_hidden_dim=cfg["person_hidden_dim"],
             hidden_dim=cfg["hidden_dim"],
             dropout_rate=cfg["dropout_rate"],
+            osm_feature_indices=cfg.get("osm_feature_indices"),
+            osm_hidden_dim=cfg.get("osm_hidden_dim",8),
+            osm_embedding_dim=cfg.get("osm_embedding_dim",4),
         )
         model.load_state_dict(state["model_state"])
         model.eval()
@@ -941,6 +929,10 @@ class HierarchicalLocationChoiceModel:
 
     def _build_pt_soft_weights(self, tree, h3_data, destinations):
         roots, middle, leaves = pt_destination_support(h3_data, destinations, tree, self._purpose_categories)
+        from .tools import encode_ovgk
+        quality = encode_ovgk(destinations.ovgk)
+        scores = self.accessibility_weight+(1-self.accessibility_weight)*(np.exp(-.65*quality)-np.exp(-.65*4))/(1-np.exp(-.65*4))
+        self._pt_facility_weights = dict(zip(destinations.destination_id, scores))
         self._pt_accessible_ids = set(destinations.loc[destinations.ovgk.isin(["A", "B", "C", "D"]), "destination_id"])
         weight = self.accessibility_weight
         self._pt_soft_weights = dict(
@@ -968,13 +960,15 @@ class HierarchicalLocationChoiceModel:
         licence = (mobility_vector is not None and
                    np.asarray(mobility_vector).reshape(-1)[MOBILITY_FEATURES.index("driving_license")] > .5)
         self._current_can_drive = bool(car_available) and (bool(licence) if policy else True)
-        self._apply_pt_weights = policy and not self._current_can_drive
+        subscription = mobility_vector is not None and np.asarray(mobility_vector).reshape(-1)[0] < .5
+        self._pt_strength = .15 if self._current_can_drive else (1.25 if subscription else 1.)
+        self._apply_pt_weights = policy
 
     def _pt_weights(self, level, purpose, key=None):
         if not getattr(self, "_apply_pt_weights", False):
             return None
         weights = self._pt_soft_weights[level]
-        return require_purpose_mask(weights if key is None else weights[key], purpose)
+        return require_purpose_mask(weights if key is None else weights[key], purpose)**getattr(self, "_pt_strength", 1.)
 
     @classmethod
     def log(cls, message, level=logging.INFO):
@@ -1139,7 +1133,7 @@ class HierarchicalLocationChoiceModel:
         else:
             # Match training-time behavior for unknown origin purpose: all-zero one-hot.
             origin_purpose_hot = np.zeros(len(self._purpose_categories), dtype=np.float32)
-        return transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, self.c.person_dynamic_scaler, chain_state_vector=chain_state_vector)
+        return transform_person_dynamic_vector(consumed_before, trip_position, departure_time, activity_duration_h, target_distance, purpose_hot, origin_purpose_hot, self.c.person_dynamic_scaler, chain_state_vector=chain_state_vector, origin_context=getattr(self, "_current_origin_context", None))
 
     def _predict_level0_from_person(self, person_matrix, home_x, home_y, work_x, work_y, origin_x, origin_y, has_work, rng, purpose):
         candidate_dynamic = self.c._build_candidate_dynamic(home_x, home_y, work_x, work_y, origin_x, origin_y, has_work)
@@ -1235,15 +1229,16 @@ class HierarchicalLocationChoiceModel:
         sampler = self._short_distance_samplers[base]
         facility_weights = None
         if getattr(self, "_apply_pt_weights", False):
-            if base not in self._short_distance_pt_weights:
-                self._short_distance_pt_weights[base] = np.asarray([
-                    1. if facility[0] in self._pt_accessible_ids else self.accessibility_weight
+            weight_key = (base, getattr(self, "_pt_strength", 1.))
+            if weight_key not in self._short_distance_pt_weights:
+                self._short_distance_pt_weights[weight_key] = np.asarray([
+                    self._pt_facility_weights[facility[0]]**getattr(self, "_pt_strength", 1.)
                     for facility in sampler.facilities], dtype=np.float32)
-            facility_weights = self._short_distance_pt_weights[base]
+            facility_weights = self._short_distance_pt_weights[weight_key]
         return self._short_distance_samplers[base].sample(
             cells, origin_x, origin_y, target_distance, rng,
             facility_weights=facility_weights,
-            sigma_fraction=self.short_distance_sigma_fraction, sigma_min_m=self.short_distance_sigma_min_m)
+            sigma_fraction=self.short_distance_sigma_fraction, sigma_min_m=min(self.short_distance_sigma_min_m, max(1., .1*target_distance)))
 
     ##################### Main prediction method that runs the full three-level prediction process #####################
 
@@ -1251,6 +1246,8 @@ class HierarchicalLocationChoiceModel:
             crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, target_distance, activity_chain_vector, sex, employed, car_availability, income_class, purpose, origin_purpose,
                 has_work, has_education, rng, mobility_vector=None, force_expert=None, chain_state_vector=None):
         chain_state_vector = self._with_origin_accessibility(chain_state_vector, origin_x, origin_y)
+        self._current_origin_context = (self.c.person_dynamic_scaler.origin_supply.at(origin_x, origin_y)
+            if getattr(self.c.person_dynamic_scaler, 'origin_context_features', False) else None)
         self._set_accessibility_person(car_availability, mobility_vector)
         person_static  = self._get_cached_person_static(person_id, age, income_class, daily_longest_distance_from_home, daily_crowfly_total, daily_longest_distance_from_work, activity_chain_vector, sex, employed, car_availability, mobility_vector)
         person_dynamic = self._build_person_dynamic(crowfly_consumed_before_trip, trip_position_class, departure_time_normalized, activity_duration_h, target_distance, purpose, origin_purpose, chain_state_vector=chain_state_vector)
@@ -1366,6 +1363,8 @@ class HierarchicalLocationChoiceModel:
         inputs = dict(inputs)
         inputs['chain_state_vector'] = self._with_origin_accessibility(
             inputs['chain_state_vector'], inputs['origin_x'], inputs['origin_y'])
+        self._current_origin_context = (self.c.person_dynamic_scaler.origin_supply.at(inputs['origin_x'], inputs['origin_y'])
+            if getattr(self.c.person_dynamic_scaler, 'origin_context_features', False) else None)
         self._set_accessibility_person(inputs['car_availability'], inputs['mobility_vector'])
         static = self._get_cached_person_static(
             inputs['person_id'], inputs['age'], inputs['income_class'],
@@ -1437,19 +1436,18 @@ class HierarchicalLocationChoiceModel:
         This gives more tolerance for longer trips (relative error) while setting a floor
         of sigma_min metres for very short trips.
 
-        If the reweighted distribution collapses (all weights < 1e-12), falls back to
-        base_prob unchanged so the caller always gets a valid distribution.
+        Log-space normalization preserves radial preferences in sparse pools.
         """
         dx = xy[:, 0] - origin_x
         dy = xy[:, 1] - origin_y
         distances = np.sqrt(dx * dx + dy * dy)
-        sigma = max(sigma_min, sigma_fraction * float(target_distance))
-        dist_weight = np.exp(-0.5 * ((distances - target_distance) / sigma) ** 2)
-        combined = base_prob * dist_weight
+        fraction = .1 if float(target_distance) <= 1500. else sigma_fraction
+        sigma = max(1., min(sigma_min, .1*float(target_distance)), fraction*float(target_distance))
+        log_weights = np.log(np.maximum(base_prob, np.finfo(float).tiny))-.5*((distances-target_distance)/sigma)**2
+        combined = np.exp(log_weights-log_weights.max())
+        combined[np.asarray(base_prob) <= 0] = 0.
         total = combined.sum()
-        if total > 1e-12:
-            return combined / total
-        return base_prob  # fallback: reweighting collapsed all probabilities
+        return combined/total if total > 0 else base_prob
 
     def sample_company_in_l2(self, purpose, level1_h3, level2_h3, rng,
                               car_availability=None, home_x=None, home_y=None,
@@ -1460,7 +1458,7 @@ class HierarchicalLocationChoiceModel:
         probabilities are re-weighted by a Gaussian kernel centred on that distance
         that chosen companies are spatially closer to the intended trip length.
         """
-        probabilities = self.car_available_probabilities if car_availability else self.no_car_available_probabilities
+        probabilities = self.car_available_probabilities
 
         use_distance = (
             origin_x is not None and origin_y is not None
@@ -1469,6 +1467,9 @@ class HierarchicalLocationChoiceModel:
         )
 
         def _pick(pool, prob, xy_lookup, key):
+            if getattr(self, '_apply_pt_weights', False):
+                prob = prob*np.asarray([self._pt_facility_weights[item[0]]**self._pt_strength for item in pool])
+                prob /= prob.sum()
             if use_distance and xy_lookup is not None:
                 xy = xy_lookup.get(key)
                 if xy is not None:

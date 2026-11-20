@@ -15,11 +15,18 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 
 ## Implementation guides
 
+- [Airport demand in simple steps](data/airports/demand_walkthrough.md)
 - [Airport demand: workflow, evidence, configuration and refresh](data/airports/README.md)
 - [Geneva airport regional passenger demand](data/airports/geneva.md)
 - [Zurich airport passenger demand and available evidence](data/airports/zurich.md)
 - [Calibrated airport municipality-allocation model](data/airports/model.md)
-- [Sampled airport trips, endpoints, modes and departure times](data/airports/trips.md)
+- [Airport municipality catchments with distance-ratio overlap](data/airports/catchments.md)
+- [Airport OD scaling to the simulation sample](data/airports/ods.md)
+- [Airport activity-chain evidence and stochastic model proposal](data/airports/activity_chains.md)
+- [Sampled airport trips, endpoints, modes and departure times](synthesis/airports/trips.md)
+- [Airport demand explorer: canton flows, municipality flows and individual trips](analysis/airports/trips_html.md)
+- [Airport population integration and microcensus evidence](data/airports/population_integration.md)
+- [Combined 2015/2021 microcensus airport activity chains](data/microcensus/airports.md)
 
 - [MOBIS walking-speed and terrain-slope calibration](calibration/walking_speed.md)
 
@@ -30,6 +37,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [RDA opening-hours comparison and Slurm run](analysis/rda.md)
 - [Cross-border activity timing](data/cross_border/README.md)
 - [Shared MATSim configuration](matsim/config/README.md)
+- [Final synthetic scenario dataframes and MATSim export](synthesis/prepared/README.md)
 - [Official raw BFS projection inputs and scaling](data/statpop/projections.md)
 - [SUMO overview and stage flowcharts](sumo/WORKFLOW.md)
 - [SUMO runtime and road network](sumo/README.md)
@@ -39,16 +47,19 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [SUMO simulation presets and loaded assignment](sumo/config/README.md)
 - [SUMO network loading and regional cutter](sumo/cutter/README.md)
 - [Native network reader and binary cache](matsim/native/README.md)
+- [Interactive network-cleaning inspector](analysis/network/cleaning_process.md)
 - [Population mode choice](mode_choice/README.md)
 - [Experimental FLASH-TB routing and benchmarks](mode_choice/routing/flash/README.md)
 - [Java / FLASH population PT router comparison](analysis/pt_routers/README.md)
 - [Microcensus diary matching: learned V2 inputs and masks](synthesis/population/matching/README.md)
+- [Shared matching preprocessing, eligibility and postprocessing](synthesis/population/matching/workflow.md)
 - [Default V3 categorical matching and V1–V3 comparison](synthesis/population/matching/V3.md)
 - [Matching predictive validation and embedding analysis](analysis/matching/README.md)
 - [RDA secondary destination calibration](synthesis/population/spatial/secondary/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
 - [Zones of the regional PT subscriptions](synthesis/population/models/subscription_zones.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
+- [Municipality arrival mode shares in Geneva and Vaud](analysis/mode_shares/municipality_arrivals.md)
 - [Shared cross-border event analysis](analysis/counts/cross_border_events.md)
 - [TL and TPG public-transport comparisons](analysis/pt/comparisons.md)
 - [GTFS transfer time map](analysis/pt/transfer_times.md)
@@ -104,3 +115,5 @@ Tests remain in the local `tests/` directory and are intentionally excluded from
 - [Households](data/statpop/households.md)
 - [Secondary](synthesis/population/spatial/primary/education/secondary.md)
 - [Secondary distances](synthesis/population/spatial/primary/education/secondary_distances.md)
+
+- [PT transfer-distance experiment](analysis/dmc/transfer_distance.md)

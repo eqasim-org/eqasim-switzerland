@@ -21,5 +21,6 @@ CAPACITY_SEGMENTS = [
    Segments(street_name="Quai Ernest-Ansermet", maximum_capacity_veh_h_lane=500.0, maximum_speed_km_h=30.0),
    Segments(street_name="Rue du Stand", maximum_capacity_veh_h_lane=500.0, maximum_speed_km_h=30.0),
    Segments(street_name="Rue du Mont-Blanc", maximum_capacity_veh_h_lane=800.0, maximum_speed_km_h=30.0),
-
+   Segments(street_name="Passage Cabriol", maximum_capacity_veh_h_lane=50.0, maximum_speed_km_h=10.0),
+   Segments(street_name="Rue de Saint-Jean", maximum_capacity_veh_h_lane=400.0, maximum_speed_km_h=30.0)
 ]

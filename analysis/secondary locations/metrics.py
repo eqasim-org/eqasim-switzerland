@@ -42,7 +42,7 @@ def summaries(datasets):
                              short_share=np.average(f.distance_km <= 1.5, weights=f.weight),
                              local_share_5km=np.average(f.distance_km <= 5, weights=f.weight),
                              long_share_20km=np.average(f.distance_km > 20, weights=f.weight),
-                             stationary_share=np.average(f.distance_km < .01, weights=f.weight),
+                             stationary_share=np.average(f.distance_km == 0., weights=f.weight),
                              mean_home_distance_km=np.average(f.home_distance_km, weights=f.weight)))
     return pd.DataFrame(rows)
 
@@ -152,7 +152,7 @@ def selector_diagnostics(observed, predictions, threshold_km=1.5):
     base = observed[['person_id', 'trip_id', 'crowfly_distance']].copy()
     base['observed_km'] = base.crowfly_distance / 1000
     # Stationary trips bypass selection; do not credit a classifier for them.
-    base = base.loc[base.observed_km >= .01]
+    base = base.loc[base.observed_km > 0.]
     probability_column = 'short_probability' if 'short_probability' in predictions else 'selected_short'
     trips = predictions.groupby(['dataset', 'person_id', 'trip_id'], observed=True).agg(
         selected_short=(probability_column, 'mean'), weight=('weight', 'sum'),

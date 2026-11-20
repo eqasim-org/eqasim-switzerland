@@ -89,3 +89,17 @@ CuttingBoundries
 
 /doc/mode_choice/routing/flash/benchmark_results.json
 submit_jobs*
+
+# Source assets and launchers for the network-cleaning inspector.
+!analysis/network/cleaning_viewer.html
+!scripts/run_network_revision.sh
+
+# Generated network-viewer caches and local investigation scripts.
+analysis.network.run.cache/
+/scripts/diagnose_motorway_connectivity.py
+/scripts/diagnose_motorway_link_loss.py
+/scripts/embed_network_basemap.py
+
+
+doc/presentations
+analysis/dmc

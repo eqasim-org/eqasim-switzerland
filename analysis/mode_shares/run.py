@@ -190,7 +190,8 @@ def execute(context):
 
     ax.set_ylabel("Mode Share",  fontsize = 13)
     ax.set_xlabel("Age [years]", fontsize = 13)
-    ax.set_xticklabels(["0", *age_labels], rotation = 0, fontsize = 12)
+    ax.set_xticks(ages)
+    ax.set_xticklabels(age_labels, rotation = 0, fontsize = 12)
     _ = plt.yticks(rotation = 0, fontsize = 12)
     plt.legend(loc = "upper center", bbox_to_anchor = (0.5, 1.2), ncol = 5, fontsize = 10)
     plt.tight_layout()

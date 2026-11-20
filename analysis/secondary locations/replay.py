@@ -67,7 +67,6 @@ def prepare_inputs(source, cohort):
 def replay(cache, cohort, inputs, draws, seed, threads, shared_detour=None):
     from synthesis.population.spatial.secondary_nn.model_wrappers import HierarchicalLocationChoiceModel
     from synthesis.population.spatial.secondary_nn.tools import MOBILITY_FEATURES
-    from synthesis.population.spatial.secondary_nn.locations import DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION
 
     # Retain dependency objects only for this model's reconstruction.
     class Context:
@@ -99,7 +98,7 @@ def replay(cache, cohort, inputs, draws, seed, threads, shared_detour=None):
                 # Stable common seeds across NN variants, independent of ordering.
                 rng = np.random.RandomState(np.random.SeedSequence([seed, int(row.person_id), int(row.trip_id), draw]).generate_state(1)[0])
                 distance = float(row.target_distance)
-                stationary = (wrapper.use_target_distance or wrapper.no_distance_routing == "learned_selector") and distance < DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION
+                stationary = bool(row.loop_at_origin)
                 if stationary:
                     x, y = row.origin_x, row.origin_y
                     short = True

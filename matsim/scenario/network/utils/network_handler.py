@@ -11,6 +11,7 @@ from matsim.scenario.network.utils.network_attribute_assigner import NetworkAttr
 from matsim.scenario.network.utils.capacity_corrector import CapacityCorrector
 from matsim.scenario.network.utils.elevation_estimator import ElevationEstimator
 from matsim.scenario.network.utils.network_cleaner import networkCleaner
+from matsim.scenario.network.utils.cleaning_audit import CleaningAudit
 from matsim.scenario.network.utils.pt_stop_reader import read_stop_coordinates
 from matsim.scenario.network.utils.speed_corrector import SpeedCorrector
 from matsim.scenario.network.utils.traffic_light_matcher import TrafficLightsMatcher
@@ -123,15 +124,17 @@ class NetworkHandler:
         logger.info("Simplifying Network...")
         protected_nodes = self._compute_pt_stop_protected_nodes() if simplify else set()
 
-        self.net, stats = networkCleaner(self.net, self.context).run(
-            remove_network_loops=simplify and self.context.config("remove_network_loops"),
-            remove_replicate_links=simplify and self.context.config("remove_replicate_links"),
-            remove_nodes_with_no_intersection=simplify and self.context.config("remove_nodes_with_no_intersection"),
-            correct_speeds=simplify and self.context.config("correct_speed"),
-            ensure_network_connectivity=simplify and self.context.config("ensure_network_connectivity"),
-            only_important_roads_outside_border=filter_roads,
-            protected_nodes=protected_nodes,
-        )
+        with CleaningAudit(Path(self.context.path()) / "cleaning_events.jsonl.gz") as audit:
+            self.net, stats = networkCleaner(self.net, self.context, audit=audit).run(
+                remove_network_loops=simplify and self.context.config("remove_network_loops"),
+                remove_replicate_links=simplify and self.context.config("remove_replicate_links"),
+                remove_nodes_with_no_intersection=simplify and self.context.config("remove_nodes_with_no_intersection"),
+                correct_speeds=simplify and self.context.config("correct_speed"),
+                ensure_network_connectivity=simplify and self.context.config("ensure_network_connectivity"),
+                only_important_roads_outside_border=filter_roads,
+                protected_nodes=protected_nodes,
+            )
+            stats["audit"] = audit.summary()
 
         with open("%s/statistics_of_cleaning_network.json" % self.context.path(), "w") as f:
             json.dump(stats, f, indent=4)

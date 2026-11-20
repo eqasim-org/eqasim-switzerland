@@ -3,8 +3,8 @@
 See the [airport workflow](README.md) for the stage graph, source inventory,
 trip generation and source-refresh procedure.
 
-`data.airports.model` returns an `AirportModel`, calibrated on Geneva evidence.
-`data.airports.geneva` and `data.airports.zurich` depend on that stage and use it
+`data.airports.geneva.model` returns an `AirportModel`, calibrated on Geneva evidence.
+`data.airports.geneva.ods` and `data.airports.zurich.ods` depend on that stage and use it
 to disaggregate their **existing Swiss passenger totals**. The model supplies
 spatial probabilities, not additional airport demand. Every original regional,
 profile and directional total is preserved, including its integer allocation.
@@ -19,13 +19,17 @@ profile and directional total is preserved, including its integer allocation.
   synthetic persons, household-size restrictions or recovered-household filters.
 - `data.statent.statent`: already located establishments with municipality IDs and
   detailed local NOGA codes. Hotels are distinct establishments with NOGA `551*`.
-  The combined `559*` category cannot distinguish student dormitories reliably,
-  so **all dormitories are excluded**, as agreed. No employment or capacity
-  weighting is applied to hotels.
+  The `559*` category is now also included, covering other accommodation and
+  dormitories, including student residences. Each establishment has equal weight;
+  employment, rooms and beds are not used. The legacy `hotels` feature name now
+  denotes the combined hotel/dormitory count.
 - `data.spatial.cantons`: canton assignment for municipal representative points.
 
-For the current data, these yield **8,962,258 residents**, **3,722 hotels** and
-**2,136 municipalities**. Population is from the pipeline's 2023 STATPOP source;
+The earlier hotel-only calibration used **8,962,258 residents**, **3,722 hotels**
+and **2,136 municipalities**. Current municipal features additionally include
+NOGA 559 accommodation. This updates allocation weights without automatically
+re-estimating the saved coefficients; the calibration report retains its original
+training provenance. Inspect `diagnostics.current_input_summary` for current counts. Population is from the pipeline's 2023 STATPOP source;
 STATENT establishments are from 2022. Twenty-six water/uninhabited polygons with
 neither residents nor hotels are excluded from the probability support.
 
@@ -62,8 +66,11 @@ allows visitors staying with friends or family.
 Zurich lacks an observed resident/visitor breakdown, so its Swiss probabilities
 mix the two Geneva profiles using Geneva's observed Swiss profile proportions.
 This mixture and the coefficients are transferred assumptions, not measured
-Zurich municipality shares. There is no airport-competition term in this first
-model; distance is the agreed simple proxy. A small long-distance tail remains.
+Zurich municipality shares. The gravity coefficients have no estimated airport-competition term. At OD
+allocation, [ratio-based catchments](catchments.md) permit the nearest airport and the
+farther one when farther/nearer distance is at most 1.3. Weights outside that
+pool are zero; the remaining weights are normalized within observed regional
+constraints. Saved coefficients and calibration diagnostics remain unchanged.
 
 ## Historical calibration, then latest update
 
@@ -114,7 +121,7 @@ population or accommodation inventory.
 ## Returned model and caching
 
 ```python
-allocation_model = context.stage("data.airports.model")
+allocation_model = context.stage("data.airports.geneva.model")
 allocation_model.parameters
 allocation_model.municipalities
 allocation_model.probabilities("ZRH")  # normalized Swiss municipal probabilities
@@ -123,7 +130,10 @@ allocation_model.probabilities("GVA", profile="outgoing")
 
 Municipalities and probability arrays use the same sorted row order. The stage
 returns the fitted object, not a filename. The airport stages call its
-`allocate(regional_trips, airport)` method to produce municipality rows.
+`allocate(regional_trips, airport, municipality_ids=pool)` method to produce
+municipality rows within that airport's assigned catchment. Raw `probabilities`
+vectors describe the unrestricted gravity weights; the OD stages apply the
+catchment and observed-region masks before normalizing them.
 
 The default model folder is `<data_path>/airports/models/`:
 
@@ -207,7 +217,7 @@ without inventing foreign municipal origins or dropping their demand.
 
 ## Validation
 
-Focused tests cover source-population filtering/remapping, hotel-only counts,
+Focused tests cover source-population filtering/remapping, hotel/dormitory counts,
 distance response, normalization, historical fit/latest partial update, exact
 regional/profile/directional and integer conservation, foreign residuals,
 parameter-dependent allocation and cache invalidation. The real-data execution

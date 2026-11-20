@@ -11,7 +11,6 @@ import torch
 from .location_helpers import (_prepare_primary_locations, _prepare_person_attributes, _euclidean, SECONDARY_SET, _get_first_location)
 from .model_wrappers import HierarchicalLocationChoiceModel
 from .short_range_model import SHORT_RANGE_MODEL_THRESHOLD
-from .hierarchical_utils import DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION
 from .tools import MOBILITY_FEATURES, mobility_features
 from .chain_state import chain_state_vector
 
@@ -129,7 +128,7 @@ def execute(context):
     mz_chains = context.stage("synthesis.population.spatial.secondary_nn.mz_chains")[["person_id", "trip_id", "daily_longest_distance_from_home",
                                     "daily_crowfly_total", "crowfly_consumed_before_trip", "trip_position_class",
                                     "departure_time_normalized", "daily_longest_distance_from_work",
-                                    "activity_duration_h", "target_distance", "trip_origin_distance_from_home", "activity_chain"]].rename(columns={"person_id": "mz_person_id"})
+                                    "activity_duration_h", "target_distance", "trip_origin_distance_from_home", "activity_chain", "loop_at_origin"]].rename(columns={"person_id": "mz_person_id"})
 
     df_trips = df_trips.merge(mz_chains, how="left", on=["mz_person_id", "trip_id"], validate="many_to_one", indicator=True)
     missing = df_trips["_merge"] != "both"
@@ -420,6 +419,7 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
         preceding_purpose_arr = grp["preceding_purpose"].to_numpy()
         activity_duration_arr = grp["activity_duration_h"].to_numpy()
         target_distance_arr = grp["target_distance"].to_numpy()
+        loop_at_origin_arr = grp["loop_at_origin"].fillna(False).to_numpy(dtype=bool)
         
         chain_daily_longest = grp["daily_longest_distance_from_home"].iloc[0]  # static per person; same value for all trips
         chain_daily_total = grp["daily_crowfly_total"].iloc[0]  # static per person; same value for all trips
@@ -449,7 +449,7 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
 
             elif following_purpose in SECONDARY_SET:
                 target_distance = target_distance_arr[local_idx]
-                if (wrapper.use_target_distance or wrapper.no_distance_routing == "learned_selector") and target_distance<DISTANCE_THRESHOLD_FOR_STAYING_AT_PREVIOUS_LOCATION:# less than 10 meters, it doesn't move from current location
+                if loop_at_origin_arr[local_idx]:
                     next_x, next_y = current_x, current_y                    
                     geom = Point(next_x, next_y)
                     locations_records.append((person_id, trip_index, destination_id, geom))
@@ -459,6 +459,7 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
                     origin_purpose = preceding_purpose_arr[local_idx]
                     activity_duration_h = activity_duration_arr[local_idx]                
                     # Predict first level coarse H3 cell
+                    previous_destination_id = destination_id
                     destination_id, geom = wrapper.predict(person_id=person_id, home_x=home_x, home_y=home_y, work_x=work_x, work_y=work_y, origin_x=current_x, origin_y=current_y, 
                                                         age=age, sex=sex, employed=employed, car_availability=car_availability, income_class=income_class, 
                                                         daily_longest_distance_from_home=chain_daily_longest, daily_crowfly_total=chain_daily_total,
@@ -481,6 +482,8 @@ def _assign_person_chunk(df_trips_chunk, df_meta_chunk, seed):
                     # sample a destination point within the predicted level 2 cell                 
 
                     # get coords and append to the list
+                    if destination_id is None:
+                        destination_id = previous_destination_id
                     next_x, next_y = float(geom.x), float(geom.y)
                     locations_records.append((person_id, trip_index, destination_id, geom))
                     convergence_records.append((True, 1))

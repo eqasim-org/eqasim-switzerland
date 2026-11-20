@@ -15,7 +15,10 @@ from pyproj import Transformer
 from scipy.optimize import least_squares
 from scipy.special import logsumexp
 
-from data.airports.common import apportion, atomic_write, export_signature, file_digest
+from data.airports._shared import common
+from data.airports._shared import accommodation
+from data.airports._shared.accommodation import select_accommodation
+from data.airports._shared.common import apportion, atomic_write, export_signature, file_digest
 
 AIRPORTS = {'GVA': {'longitude': 6.109444, 'latitude': 46.238333},
             'ZRH': {'longitude': 8.548056, 'latitude': 47.458056}}
@@ -116,7 +119,7 @@ def overwrite_parameters(context):
 
 def runtime_inputs(context):
     root = Path(context.config('data_path'))
-    airports = context.config('airport_model_airports')
+    airports = common.config_mapping(context, 'airport_model_airports')
     for airport in ('GVA', 'ZRH'):
         longitude, latitude = airports[airport]['longitude'], airports[airport]['latitude']
         if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
@@ -145,7 +148,7 @@ def model_inputs(context):
 
 def model_signature(features, sources, options):
     digest = hashlib.sha256(json.dumps(options, sort_keys=True, allow_nan=False).encode())
-    for path in [*sources.values(), Path(__file__), Path(__file__).with_name("geneva.py"), Path(__file__).with_name("common.py")]:
+    for path in [*sources.values(), Path(__file__), Path(__file__).with_name("ods.py"), Path(common.__file__), Path(accommodation.__file__)]:
         digest.update(file_digest(path).encode())
     if features is not None:
         digest.update(pd.util.hash_pandas_object(features, index=False).to_numpy().tobytes())
@@ -181,8 +184,7 @@ def build_features(municipalities, cantons, population, statent):
     frame = frame.dissolve(by=['municipality_id', 'municipality_name'], as_index=False)
     frame = frame.merge(population, on='municipality_id', how='left', validate='one_to_one')
     frame['population'] = frame.population.fillna(0).astype(int)
-    codes = statent.noga.astype(str).str.replace(r'\.0$', '', regex=True)
-    hotels = statent.loc[codes.str.startswith('551'), ['enterprise_id', 'municipality_id']].drop_duplicates()
+    hotels = select_accommodation(statent, ['enterprise_id', 'municipality_id'])
     if hotels.enterprise_id.duplicated().any():
         raise ValueError('Hotel establishment assigned to multiple municipalities')
     counts = hotels.groupby('municipality_id').size().rename('hotels')
@@ -211,7 +213,7 @@ def build_features(municipalities, cantons, population, statent):
     if result.population.sum() != population.population.sum():
         raise ValueError('Population mass lost while joining Swiss municipalities')
     result.attrs = {'population': int(result.population.sum()), 'hotels': int(result.hotels.sum()),
-                    'municipalities': len(result), 'hotel_definition': 'Distinct STATENT NOGA 551 establishments; all 559 dormitories excluded',
+                    'municipalities': len(result), 'hotel_definition': 'Distinct STATENT NOGA 551 hotels and 559 accommodation/dormitories, including student residences',
                     'population_definition': population.attrs.get('definition', ''),
                     'population_centres_used': int(use_home.sum()), 'inactive_geometries_excluded': inactive,
                     'statent_years': sorted(pd.to_numeric(statent.statent_year, errors='coerce').dropna().astype(int).unique().tolist()) if 'statent_year' in statent else []}
@@ -221,7 +223,7 @@ def build_features(municipalities, cantons, population, statent):
 
 
 def read_calibration(sources):
-    from data.airports.geneva import process_pdf, build_ods
+    from data.airports.geneva.ods import process_pdf, build_ods
     old_meta = json.loads(sources['historical_metadata'].read_text())
     if file_digest(sources['historical_pdf']) != old_meta['pdf_sha256']:
         raise ValueError('Historical Geneva PDF changed: review calibration CSV and metadata')
@@ -347,10 +349,12 @@ class AirportModel:
             mixture *= self.swiss_visitor_share
         return (1-mixture)*population + mixture*hotels
 
-    def allocate(self, regional, airport):
+    def allocate(self, regional, airport, municipality_ids=None):
         """Disaggregate Swiss rows; keep foreign counts explicit and unresolved."""
         output = []
         features = self.municipalities
+        candidates = (np.ones(len(features), dtype=bool) if municipality_ids is None
+                      else features.municipality_id.isin(municipality_ids).to_numpy())
         for _, row in regional.iterrows():
             if row.country != 'CH':
                 unresolved = row.to_frame().T
@@ -369,10 +373,11 @@ class AirportModel:
                 mask = np.ones(len(features), dtype=bool)
             else:
                 raise ValueError(f'Unknown Swiss airport region: {row.region_id}')
+            mask = mask & candidates
             weights = self.probabilities(airport, row.get('profile', None))
             weights = np.where(mask, weights, 0.)
             if weights.sum() <= 0:
-                raise ValueError(f'No municipal support for {row.region_id}')
+                raise ValueError(f'No municipal support for {airport} region {row.region_id} in its assigned catchment')
             weights /= weights.sum()
             selected = np.flatnonzero(weights > 0)
             allocation = weights[selected]

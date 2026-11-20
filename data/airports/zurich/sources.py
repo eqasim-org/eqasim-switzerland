@@ -6,7 +6,7 @@ import io
 import json
 from pathlib import Path
 
-from data.airports.common import atomic_write, file_digest
+from data.airports._shared.common import atomic_write, file_digest
 
 MONTHS = ('JAN', 'FEB', 'MRZ', 'APR', 'MAI', 'JUN', 'JUL', 'AUG', 'SEPT', 'OKT', 'NOV', 'DEZ')
 

@@ -1,7 +1,7 @@
 """Join trips to the exact prepared facility coordinates and endpoint links."""
 from numbers import Real
 import polars as pl
-from matsim.scenario.population import HOME_DESTINATION_ID
+from synthesis.prepared.schema import HOME_DESTINATION_ID
 from matsim.config.tools import read_config
 
 
