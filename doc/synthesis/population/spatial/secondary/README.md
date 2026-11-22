@@ -1,5 +1,66 @@
 # RDA secondary destination calibration
 
+## Optional French force-model chain solver
+
+The default remains the existing Swiss RDA gravity solver. To use the
+force-field chain relaxation from eqasim-france instead, set:
+
+```yaml
+locations_algorithm: rda
+secondary_activities.chain_solver: force_model  # default: default
+```
+
+`secondary_activities.chain_solver: default` restores the original solver and
+does not register or calculate force-field dependencies. The neural secondary
+location algorithm is unaffected. The stage still returns the same locations
+and convergence tables, including destination IDs and trip indices.
+
+The implementation is adapted from
+[eqasim-france commit 7d219a0](https://github.com/eqasim-org/eqasim-france/tree/7d219a070917919625c795e5b9fd0071184f6b67/synthesis/population/spatial/secondary/force_model)
+under GPL-2.0. It uses the upstream settings:
+
+| Setting | Default |
+| --- | --- |
+| `secondary_activities.force_model.attractors` | `uniform` (currently the supported option) |
+| `secondary_activities.force_model.cell_size` | 250 m |
+| `secondary_activities.force_model.grid_margin` | 2,000 m |
+| Spring relaxation coefficient | 0.3 |
+| Mean / maximum field displacement per update | 30 / 60 m |
+| Maximum chain-relaxation iterations | 1,000 |
+| Movement convergence tolerance / history | 250 m / 50 iterations |
+
+The optional stage
+`synthesis.population.spatial.secondary.force_model.force_field` constructs
+purpose-specific fields from `synthesis.population.destinations`, covering its
+Swiss and foreign facilities in EPSG:2056. Each facility contributes one unit
+of attraction for every offered `shop`, `leisure` or `other` purpose. Other
+purposes receive spring relaxation without a purpose field, as upstream.
+Employee weights are still applied during final destination selection.
+
+The force is the sum of `weight * delta / distance**3`, with the upstream
+125 m regularization for distances below 1 m. Every attractor contributes;
+there is no radius cutoff or grid approximation of attractor coordinates.
+Serial Numba kernels process grid-row batches in Synpp workers (up to 24),
+avoiding a separate full grid and temporary coordinate arrays per worker.
+The first field computation can still be expensive: its work scales with
+grid-cell count times attractor count. Synpp caches and reuses the fields.
+
+Only the continuous solver for chains with both primary anchors changes.
+Single-anchor tails and anchor-free chains retain the current solvers. Sampled
+distance distributions, their Swiss resampling, ÖV quality filtering for people
+without cars, candidate employee weights, opening-hours checks, detour factors,
+country proposal acceptance and optional fallback repair remain in use. Field
+attraction is static guidance from the whole catalogue; eligibility by person
+and activity time remains enforced by final candidate selection. The existing
+Swiss physical objective and 200-attempt outer limit are retained; continuous
+force-model convergence alone does not imply a valid destination assignment.
+
+Two numerical details differ from upstream: a zero field stays zero rather
+than producing NaNs during normalization, and bilinear interpolation uses
+standard corner weights so a grid node returns its own force. All random
+directions use the existing worker's seeded generator. With the option off,
+the gravity solver parameters and random draws remain unchanged.
+
 RDA's `CandidateIndex` normally queries the 20 closest eligible facilities to each
 continuous relaxation point, then samples among them with attractiveness
 `number_employees ** 0.8`. Multiplying all French attractiveness weights by the

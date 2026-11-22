@@ -47,7 +47,8 @@ def replay_rda(cache, cohort, inputs, draws, seed):
             primary['home'] = primary.geometry
             primary['work'] = primary.geometry
             primary['education'] = primary.geometry
-            data = dict(distance_distributions=distributions,detour_factor=detour,
+            # A single observed-origin leg is a tail, so it uses no chain field.
+            data = dict(distance_distributions=distributions,detour_factor=detour,force_field_data=None,
                         france_repair_attempts=country_config['secondary_rda_france_repair_attempts'])
             context = SimpleNamespace(data=lambda name:copy.deepcopy(destinations) if name=='destinations' else data[name],
                                       progress=SimpleNamespace(update=lambda:None))

@@ -28,6 +28,11 @@ def configure(context):
     context.stage("synthesis.population.spatial.primary.locations")
 
     context.stage("synthesis.population.spatial.secondary.distance_distributions")
+    chain_solver = context.config("secondary_activities.chain_solver", default="default")
+    if chain_solver not in ("default", "force_model"):
+        raise ValueError("secondary_activities.chain_solver must be 'default' or 'force_model'")
+    if chain_solver == "force_model":
+        context.stage("synthesis.population.spatial.secondary.force_model.force_field")
     context.config("consider_opening_hours", default=True)
     tolerance = context.config("opening_hours_tolerance_minutes", default=10.)
     if not np.isfinite(tolerance) or tolerance < 0:
@@ -96,6 +101,13 @@ def execute(context):
     distance_distributions = copy.deepcopy(context.stage("synthesis.population.spatial.secondary.distance_distributions"))
     destinations = prepare_destinations(context)
 
+    # Optionally guide continuous chains with destination attraction fields.
+
+    force_field_data = None
+    if context.config("secondary_activities.chain_solver") == "force_model":
+        force_field_data = context.stage("synthesis.population.spatial.secondary.force_model.force_field")
+    logger.info("Secondary chain solver: %s", context.config("secondary_activities.chain_solver"))
+
     # Resampling for calibration
 
     resample_distributions(distance_distributions, dict(
@@ -147,6 +159,7 @@ def execute(context):
                 distance_distributions = distance_distributions,
                 destinations = destinations,
                 france_repair_attempts = france_repair_attempts(context.config("secondary_rda_france_repair_attempts")),
+                force_field_data = force_field_data,
                 detour_factor = detour_factor
                 )) as parallel:
             df_locations, df_convergence = [], []
@@ -265,6 +278,15 @@ def resample_distributions(distributions, factors):
             distribution["cdf"] = resample_cdf(distribution["cdf"], factors[mode])
 
 
+def make_chain_solver(random, force_field_data=None):
+    """Switch only relaxation; keep all Swiss sampling and feasibility checks."""
+    if force_field_data is None:
+        return GravityChainSolver(random=random, eps=75., lateral_deviation=10., alpha=.1)
+    from synthesis.population.spatial.secondary.force_model.solver import ForceFieldChainSolver
+    grid, fields = force_field_data
+    return ForceFieldChainSolver(grid, fields, random=random)
+
+
 def process(context, arguments):
     df_trips, df_primary, random_seed, crs, car_availability = arguments
 
@@ -297,10 +319,8 @@ def process(context, arguments):
         random=rng,
         distributions=distance_distributions)
 
-    # Set up relaxation solver; currently, we do not consider tail problems.
-    chain_solver = GravityChainSolver(
-        random=rng, eps=75.0, lateral_deviation=10.0, alpha=0.1
-    )
+    # Select chain relaxation while retaining the existing tail and free solvers.
+    chain_solver = make_chain_solver(rng, context.data("force_field_data"))
 
     tail_solver = AngularTailSolver(random = rng)
     free_solver = CustomFreeChainSolver(rng, candidate_index)
@@ -420,4 +440,5 @@ def validate(context):
     from pathlib import Path
     root = Path(__file__).parent
     return hashlib.sha256(b"".join((root / name).read_bytes() for name in
-        ("opening_hours.py", "components.py", "problems.py", "rda.py"))).hexdigest()
+        ("opening_hours.py", "components.py", "problems.py", "rda.py",
+         "force_model/solver.py"))).hexdigest()
