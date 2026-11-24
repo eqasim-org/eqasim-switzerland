@@ -48,6 +48,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [SUMO network loading and regional cutter](sumo/cutter/README.md)
 - [Native network reader and binary cache](matsim/native/README.md)
 - [Interactive network-cleaning inspector](analysis/network/cleaning_process.md)
+- [Interactive selected-link Spyder viewer](analysis/spyder/README.md)
 - [Population mode choice](mode_choice/README.md)
 - [Experimental FLASH-TB routing and benchmarks](mode_choice/routing/flash/README.md)
 - [Java / FLASH population PT router comparison](analysis/pt_routers/README.md)

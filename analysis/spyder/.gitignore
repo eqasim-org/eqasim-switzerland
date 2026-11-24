@@ -1,0 +1,5 @@
+# The HTML viewer is source code, overriding the repository-wide HTML rule.
+!/viewer.html
+
+# Local Rust builds are generated artifacts.
+/native/target/
