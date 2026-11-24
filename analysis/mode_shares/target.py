@@ -50,6 +50,7 @@ def execute(context):
     mode_shares["age_labels"]                   = mode_shares_analyzer.get_age_labels()
     mode_shares["distance_by_mode"]             = mode_shares_analyzer.compute_distance_by_mode()
     mode_shares["distance_by_mode_and_purpose"] = mode_shares_analyzer.compute_distance_by_mode_and_purpose()
+    mode_shares["spatial_trips"] = mode_shares_analyzer.spatial_trips()
     
     if context.config("include_external_population"):
         fr_trips       = context.stage("data.external_population.hts_trips.trips")
@@ -68,3 +69,10 @@ def execute(context):
         mode_shares["canton"].index.name = "canton_id"
 
     return mode_shares
+
+
+def validate(context):
+    from hashlib import sha256
+    from pathlib import Path
+    from . import utils
+    return sha256(Path(utils.__file__).read_bytes()).hexdigest()

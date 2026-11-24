@@ -50,6 +50,12 @@ class ModeShareAnalyzer:
     def load_microcensus_data(self, context):
         trips = load_clean_trips(context)
 
+        # Preserve residence for the interactive resident-based spatial selector.
+
+        homes = context.stage("data.microcensus.persons")[["person_id", "home_x", "home_y"]].copy()
+        if not {"home_x", "home_y"}.issubset(trips):
+            trips = trips.merge(homes, on="person_id", how="left", validate="many_to_one")
+
         # Ensure correct data types
         trips["canton_id"]             = trips["canton_id"].astype(int)
         trips["income_class"]          = trips["income_class"].astype(int)
@@ -178,16 +184,44 @@ class ModeShareAnalyzer:
         trips_file, persons_file, households_file = self.get_paths_matsim(context)
         
         # Load trips and persons data
-        persons = pd.read_csv(persons_file, dtype = {0: str}, sep = ";", engine = "python",
-                              usecols = ["person", "subpopulation", "age", "sex", "cantonId", "cantonName"])
+        person_columns = ["person", "subpopulation", "age", "sex", "cantonId", "cantonName",
+                          "home_coordinate_x", "home_coordinate_y", "home_x", "home_y",
+                          "first_act_x", "first_act_y", "first_act_type"]
+        # Resolve optional columns explicitly. Pandas' chunked C parser can fail
+        # with callable usecols when MATSim attributes mix strings and numbers.
+        available = pd.read_csv(persons_file, sep=";", nrows=0).columns
+        persons = pd.read_csv(persons_file, dtype={"person": str}, sep=";", low_memory=False,
+                              usecols=[column for column in person_columns if column in available])
         persons = persons.astype({"person": str})
+
+        # Prefer explicit residential coordinates; only home first activities are a fallback.
+
+        for axis in ("x", "y"):
+            home = pd.Series(np.nan, index=persons.index)
+            for column in ("home_coordinate_" + axis, "home_" + axis):
+                if column in persons:
+                    value = pd.to_numeric(persons[column], errors="coerce")
+                    home = home.fillna(value.where(np.isfinite(value)))
+            if "first_act_" + axis in persons and "first_act_type" in persons:
+                value = pd.to_numeric(persons["first_act_" + axis], errors="coerce")
+                home = home.fillna(value.where(persons.first_act_type.eq("home") & np.isfinite(value)))
+            persons["home_" + axis] = home
 
         external_persons = persons.subpopulation.isin(["crossborder", "freight"])
         logger.info("Excluding %d external persons over %d persons from MATSIM data." %(external_persons.sum(), len(persons)))
         persons = persons[~external_persons]
 
-        trips = pd.read_csv(trips_file, sep = ";", dtype = {0: str, 1: str}, usecols = ["trip_id", "person", "main_mode", "euclidean_distance","end_activity_type"])
+        trips = pd.read_csv(trips_file, sep=";", dtype={"person": str, "trip_id": str},
+                            usecols=["trip_id", "person", "main_mode", "euclidean_distance",
+                                     "start_activity_type", "end_activity_type", "start_x", "start_y", "end_x", "end_y"])
         trips = trips.astype({"person": str})
+
+        # Airport activities are outside this comparison, at either trip endpoint.
+
+        airport = (trips.start_activity_type.astype("string").str.strip().str.lower().eq("airport")
+                   | trips.end_activity_type.astype("string").str.strip().str.lower().eq("airport")).fillna(False)
+        logger.info("Excluding %d MATSim trips with an airport origin or destination", int(airport.sum()))
+        trips = trips.loc[~airport].copy()
         trips = trips[trips.person.isin(persons.person)]
         trips = trips[trips.main_mode.isin(["car","car_passenger","pt","bike","walk"])]
 
@@ -213,7 +247,8 @@ class ModeShareAnalyzer:
 
         # Define age bins for mode shares distributions        
         persons["age_class"] = self.get_age_bins(persons)                
-        trips = trips.merge(persons[["person", "age_class", "sex", "cantonId", "cantonName"]], on = "person", how = "left")
+        trips = trips.merge(persons[["person", "age_class", "sex", "cantonId", "cantonName", "home_x", "home_y"]],
+                            on="person", how="left", validate="many_to_one")
         
         # purposes
         trips            = trips.rename(columns = {"end_activity_type": "purpose"})
@@ -230,13 +265,34 @@ class ModeShareAnalyzer:
         trips = trips.rename(columns={"main_mode":  "mode",
                                       "cantonId":   "canton_id",
                                       "cantonName": "canton_name"})
+        trips = trips.rename(columns={"start_x": "origin_x", "start_y": "origin_y",
+                                      "end_x": "destination_x", "end_y": "destination_y"})
         sex_dict = {"m": 0, "f": 1}
         trips["sex"] = trips["sex"].str.lower().apply(lambda x: sex_dict.get(x, x))
         trips = trips[["trip_id", "person", "mode", "euclidean_distance_km",
                        "distance_bin", "canton_id", "canton_name", "purpose",
-                       "income_class", "age_class", "sex", "person_weight"]]
+                       "income_class", "age_class", "sex", "person_weight",
+                       "origin_x", "origin_y", "destination_x", "destination_y", "home_x", "home_y"]]
 
         self.trips = trips
+
+
+    def spatial_trips(self, consider_external_population=False):
+        """Return the same filtered, weighted cohort used for global mode shares.
+
+        One row is one retained trip. Residence is only a spatial selector: the
+        denominator remains trips, with a respondent's person_weight repeated
+        for each of their survey trips. Cached inputs are never modified.
+        """
+        frame = self.trips
+        if not consider_external_population:
+            frame = frame.loc[frame.canton_id != self.ex_cst.canton_id]
+        person_column = "person" if self.from_matsim else "person_id"
+        columns = [person_column, "trip_id", "mode", "person_weight", "origin_x", "origin_y",
+                   "destination_x", "destination_y", "home_x", "home_y"]
+        result = frame[columns].rename(columns={person_column: "person_id", "person_weight": "weight"}).copy()
+        result["person_id"] = result["person_id"].astype(str)
+        return result.reset_index(drop=True)
 
 
     def compute_mode_shares(self, consider_external_population: bool = True):

@@ -60,7 +60,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
 - [Zones of the regional PT subscriptions](synthesis/population/models/subscription_zones.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
-- [Municipality arrival mode shares in Geneva and Vaud](analysis/mode_shares/municipality_arrivals.md)
+- [Interactive spatial mode-share comparisons](analysis/mode_shares/README.md)
 - [Shared cross-border event analysis](analysis/counts/cross_border_events.md)
 - [TL and TPG public-transport comparisons](analysis/pt/comparisons.md)
 - [GTFS transfer time map](analysis/pt/transfer_times.md)

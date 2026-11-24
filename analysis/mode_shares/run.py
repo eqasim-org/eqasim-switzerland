@@ -32,6 +32,7 @@ def configure(context):
     context.stage("analysis.mode_shares.target")
     context.stage("analysis.mode_shares.simulated")
     context.stage("data.spatial.cantons")
+    context.stage("data.spatial.municipalities")
 
     context.config("group_income_classes_in_analysis", default=False)
     context.config("analysis.counts.simulation_path", default="")
@@ -41,6 +42,9 @@ def configure(context):
 
 
 def execute(context):
+
+    # Prepare the output folder and load both analyzers' filtered results.
+
     figures_dir = os.path.join(get_simulation_path(context), "mode_shares")
     os.makedirs(figures_dir, exist_ok = True)
 
@@ -418,4 +422,20 @@ def execute(context):
     plt.savefig(os.path.join(figures_dir, "distance_distribution_by_mode_and_purpose.png"), bbox_inches = "tight", dpi = 300)
     plt.close()
 
-    return dict(done = True, path = figures_dir)
+    # Build the interactive comparison from the same filtered trip cohorts.
+
+    from .spatial import write_report
+    municipalities, _ = context.stage("data.spatial.municipalities")
+    report = write_report(figures_dir, target_mode_shares["spatial_trips"],
+                          simulated_mode_shares["spatial_trips"], municipalities,
+                          context.stage("data.spatial.cantons"))
+    logger.info("Interactive spatial mode shares: %s", report)
+
+    # Return the existing output contract with the HTML path added.
+
+    return dict(done=True, path=figures_dir, report=report)
+
+
+def validate(context):
+    from .spatial import implementation_token
+    return implementation_token()
