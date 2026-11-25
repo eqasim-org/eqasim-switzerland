@@ -6,18 +6,21 @@ import geopandas as gpd
 from data.activity_purposes import SHOP, LEISURE
 
 import logging
+from pathlib import Path
 
 logger = logging.getLogger("synpp")
 
 
 def configure(context):
     context.config("data_path")
+    context.config("mz_correct_diary_cleaning", False)
     context.stage("data.constants")
     context.stage("data.spatial.swiss_border")
 
 
 def execute(context):
     data_path = context.config("data_path")
+    keep_open_days = context.config("mz_correct_diary_cleaning")
     c         = context.stage("data.constants")
 
     df_mz_trips   = pd.read_csv("%s/microcensus/wege.csv" % data_path, encoding = "latin1")
@@ -82,6 +85,8 @@ def execute(context):
 
     # Second, adjust the purposes
     purpose_map = microcensus_purpose_map(2015)
+    if keep_open_days:
+        purpose_map[12] = "other"  # Anderes is a reported purpose.
 
     df_mz_trips["purpose"] = df_mz_trips["wzweck1"].map(purpose_map)
 
@@ -110,21 +115,23 @@ def execute(context):
         (df_mz_trips["origin_y"] - df_mz_trips["destination_y"])**2)
 
     # Filter persons for which we do not have sufficient information
-    unknown_ids = set(df_mz_trips[
-        (df_mz_trips["mode"] == "unknown") | (df_mz_trips["purpose"] == "unknown")
-    ]["person_id"])
+    reported = df_mz_trips.groupby("person_id").trip_id.nunique()
+    unknown = df_mz_trips[["mode", "purpose"]].fillna("unknown").eq("unknown").any(axis=1)
+    unknown_ids = set(df_mz_trips.loc[unknown, "person_id"])
+    reasons = dict.fromkeys(unknown_ids, "unknown_mode_or_purpose")
 
     logger.info("  Removed %d persons with trips with unknown mode or unknown purpose" % len(unknown_ids))
     df_mz_trips = df_mz_trips[~df_mz_trips["person_id"].isin(unknown_ids)]
-
-    filterout_ids = unknown_ids
 
     # Fixing the initial purpose (origin purpose of trip with trip_id = 1)
     df_start = df_mz_trips[df_mz_trips["trip_id"]==1]
 
     df_start.loc[(df_start["origin_x"] == df_start["home_x"]) & (df_start["origin_y"] == df_start["home_y"]), "origin_purpose"] = "home"
     df_start.loc[(df_start["origin_x"] == df_start["work_x"]) & (df_start["origin_y"] == df_start["work_y"]), "origin_purpose"] = "work" # Should have classified it as "work_main" but this creates issues later
-    df_start.loc[(df_start["origin_x"] == df_start["education_x"]) & (df_start["origin_y"] == df_start["education_x"]), "origin_purpose"] = "education" # Same
+    if keep_open_days:
+        school = (df_start["AU_X_CH1903"] > 0) & (df_start["AU_Y_CH1903"] > 0)
+        school &= df_start["origin_x"].eq(df_start["education_x"]) & df_start["origin_y"].eq(df_start["education_y"])
+        df_start.loc[school & df_start["origin_purpose"].isna(), "origin_purpose"] = "education"
 
     start_from_home        = df_start[df_start["origin_purpose"]=="home"]
     start_from_work        = df_start[df_start["origin_purpose"]=="work"]
@@ -135,6 +142,7 @@ def execute(context):
     logger.info(f"  Assigned origin_purpose of initial trip to education to {len(start_from_education)} persons")
     logger.info(f"  Number of agents with missing initial purpose: {len(missing_origin_purpose)}")
 
+    df_start_purpose = df_start
     if len(missing_origin_purpose) > 0:
         logger.info(f"   Investigating stages for these {len(missing_origin_purpose)} agents.")
         del missing_origin_purpose["origin_purpose"]
@@ -209,6 +217,10 @@ def execute(context):
     del df_mz_trips["trip_id_"]
     df_mz_trips.loc[df_mz_trips["origin_purpose"].isna(), "origin_purpose"] = df_mz_trips[df_mz_trips["origin_purpose"].isna()]["origin_purpose_start"]
     del df_mz_trips["origin_purpose_start"]
+
+    missing_origin = df_mz_trips.loc[df_mz_trips.origin_purpose.isna(), "person_id"].unique()
+    reasons.update(dict.fromkeys(missing_origin, "unresolved_trip_origin"))
+    df_mz_trips = df_mz_trips.loc[~df_mz_trips.person_id.isin(missing_origin)]
 
     # Now fix the activity durations
     df_durations = pd.merge(
@@ -410,11 +422,16 @@ def execute(context):
         has_home_match=("is_reported_home", "any")
     ).reset_index()
 
-    df_new_list = []
+    # Home-coordinate normalization applies only to respondents with a home stop.
+    no_home = df_mz_trips.loc[~df_mz_trips.person_id.isin(person_summary.person_id)]
+    no_home_ids = no_home.person_id.unique()
+    df_new_list = [no_home] if keep_open_days else []
+    if not keep_open_days:
+        reasons.update(dict.fromkeys(no_home_ids, "no_home_stop_excluded_by_configuration"))
 
     # 1st case: one home location found, corresponds to reported home
     cond1  = (person_summary["home_location_count"] == 1) & (person_summary["has_home_match"])
-    share1 = cond1.sum() / len(person_summary) * 100
+    share1 = 100 * cond1.sum() / max(1, len(person_summary))
     logger.info(f"  INFO for {round(share1, 2)}% of the agents, only one home location was found and it corresponds to the reported home location.")
     logger.info(f"    Nothing to do for them!")
 
@@ -424,7 +441,7 @@ def execute(context):
 
     # 2nd case: one home location found, does not correspond to the reported home
     cond2  = (person_summary["home_location_count"] == 1) & (~person_summary["has_home_match"])
-    share2 = cond2.sum() / len(person_summary) * 100
+    share2 = 100 * cond2.sum() / max(1, len(person_summary))
     logger.info(f"  INFO for {round(share2, 2)}% of the agents, only one home location was found and it does not correspond to the reported home location.")
     logger.info(f"    Check the origin_purpose of the initial trip and adjust the purpose to home if needed.")
 
@@ -446,7 +463,7 @@ def execute(context):
 
     # 3rd case: multiple home locations found, one corresponds to the reported home.
     cond3  = (person_summary["home_location_count"] > 1) & (person_summary["has_home_match"])
-    share3 = cond3.sum() / len(person_summary) * 100
+    share3 = 100 * cond3.sum() / max(1, len(person_summary))
     logger.info(f"  INFO for {round(share3, 2)}% of the agents, multiple home locations were found. One corresponds to the reported home location.")
     logger.info(f"    For these agents, create home_secondary activities.")
 
@@ -487,7 +504,7 @@ def execute(context):
     # 4th case: multiple home locations found, none corresponds to the reported home.
     # 0.09% of the cases
     cond4  = (person_summary["home_location_count"] > 1) & (~person_summary["has_home_match"])
-    share4 = cond4.sum() / len(person_summary) * 100
+    share4 = 100 * cond4.sum() / max(1, len(person_summary))
     logger.info(f"  INFO for {round(share4, 2)}% of the agents, multiple home locations were found. None of them corresponds to the reported home location.")
     logger.info(f"    For these agents, create home_secondary activities after identifying the main home location.")
 
@@ -617,7 +634,7 @@ def execute(context):
                 coord_map[(person_id, row.x, row.y)] = (person_id, rep_x, rep_y)
                 label_map[(person_id, row.x, row.y)] = rep_label
 
-        merged_df = pd.concat(merged_rows, ignore_index=True)
+        merged_df = pd.concat(merged_rows, ignore_index=True) if merged_rows else df.copy()
         return merged_df, coord_map, label_map
 
     single_homes   = df_home_coordinates[df_home_coordinates["home_location_count"]==1]
@@ -861,6 +878,10 @@ def execute(context):
     persons_crossing_border             = df_mz_trips.groupby("person_id")["trip_crossing_border"].any()
     persons_crossing_the_border         = persons_crossing_border[persons_crossing_border].index
 
+    audit = diary_audit(reported, df_mz_trips, reasons, no_home_ids)
+    audit.to_csv(Path(context.path()) / "diary_cleaning_audit.csv")
+    filterout_ids = set(reasons)
+
     return df_mz_trips[[
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "origin_purpose", "purpose", 
         "origin_x", "origin_y", "destination_x", "destination_y", 
@@ -868,3 +889,19 @@ def execute(context):
         "mode_detailed",
         "trip_outside_ch", "origin_in_ch", "destination_in_ch", "trip_crossing_border", "weight_person",
     ]], filterout_ids, persons_outside_ch, persons_crossing_the_border
+
+
+def diary_audit(reported, trips, exclusions, no_home_ids):
+    """Every respondent who travelled has either cleaned trips or a named exclusion."""
+    audit = reported.rename("reported_trips").to_frame()
+    counts = trips.groupby("person_id").size()
+    unexpected = counts.index.union(pd.Index(list(exclusions))).difference(audit.index)
+    if len(unexpected):
+        raise ValueError(f"Unknown MZ respondents in cleaning results: {unexpected.tolist()[:10]}")
+    audit["retained_trips"] = counts.reindex(audit.index, fill_value=0)
+    audit["no_home_stop"] = audit.index.isin(no_home_ids)
+    audit["exclusion_reason"] = audit.index.map(exclusions).fillna("")
+    inconsistent = audit.retained_trips.eq(0) != audit.exclusion_reason.ne("")
+    if inconsistent.any():
+        raise ValueError(f"MZ travellers with inconsistent diary status: {audit.index[inconsistent].tolist()[:10]}")
+    return audit

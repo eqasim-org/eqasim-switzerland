@@ -4,6 +4,17 @@
 or `matching_algorithm: v2` to select an earlier algorithm. V1's code is unchanged
 by this revision.
 
+## MZ 2015 travel days
+
+Set `mz_correct_diary_cleaning: true` to retain travel days without a home stop
+and classify reported purpose 12 (Anderes) as `other`. The cleaner uses the
+reported school coordinates when identifying a first departure from school.
+The default is false. With either setting, the trips stage records every
+respondent who reported travel in `diary_cleaning_audit.csv` in its stage
+directory. A traveller who loses their whole diary must have an exclusion
+reason and is removed from the survey donor pool. Respondents with zero
+reported trips stay eligible under the usual day and household rules.
+
 V1 uses an ordered, survey-weighted recursive hot deck with age bands and
 progressive relaxation of categorical matching cells. V2 has a different goal:
 learn which shared characteristics predict behaviour, allowing nearby ages,
