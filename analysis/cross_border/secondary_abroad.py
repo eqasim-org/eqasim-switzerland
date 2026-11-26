@@ -82,7 +82,7 @@ def read_plans(snapshot, output, label):
     ids = set(population.person_id)
     filename = snapshot.folder / (snapshot.config["output_prefix"] + "population.xml.gz")
     stat = filename.stat()
-    signature = [str(filename), stat.st_size, stat.st_mtime_ns]
+    signature = [str(filename), stat.st_size, stat.st_mtime_ns, "with_background_crossings_v1"]
     cache = output / (label + "_extraction.pkl")
     if cache.exists():
         with cache.open("rb") as stream:
@@ -93,8 +93,9 @@ def read_plans(snapshot, output, label):
     with gzip.open(filename, "rb") as stream:
         for _, person in etree.iterparse(stream, events=["end"], tag="person"):
             pid = person.get("id")
-            if pid in ids:
-                present.append(pid)
+            if pid in ids or pid.startswith("background_ch_"):
+                if pid in ids:
+                    present.append(pid)
                 plans = person.findall("plan")
                 plan = next((p for p in plans if p.get("selected") == "yes"), plans[0])
                 modes, idx = [], 0
@@ -203,7 +204,11 @@ def main():
         print(f"Reading {label} prepared plans", flush=True)
         p, a, present, signature = read_plans(snapshot, output, label)
         p["weight"] = 1 / snapshot.config["input_downsampling"]
-        p["explicit_resident"] = p.is_crossing_the_border.eq(1)
+        # Separate simulated background movements from the resident population denominator.
+        background = a.loc[a.person_id.str.startswith("background_ch_")].copy()
+        a = a.loc[~a.person_id.str.startswith("background_ch_")].copy()
+        trips_config = snapshot.index[snapshot.stage_key("synthesis.population.trips")]["config"]
+        p["explicit_resident"] = False if trips_config.get("swiss_cross_border_background_traffic") else p.is_crossing_the_border.eq(1)
         p = p.loc[p.person_id.isin(present)].copy()
         home_points = shapely.points(p.home_x, p.home_y)
         home_distance = shapely.distance(home_points, border.simplify(100).boundary)
@@ -255,7 +260,17 @@ def main():
         # Compare explicit prepared events with the actual retained survey controls.
         audit = pd.read_csv(snapshot.directory("synthesis.population.models.cross_border") / "crossing_event_assignment.csv")
         audit = audit.groupby(["trip_mode", "crossing_direction"])[["target_events", "assigned_events", "shortfall_events"]].sum().reset_index()
-        actual = t.loc[t.explicit].groupby(["border_crossing_trip_mode", "direction"]).weight.sum().rename("prepared_explicit_events").reset_index().rename(columns={"border_crossing_trip_mode":"mode"})
+        explicit = t.loc[t.explicit, ["border_crossing_trip_mode", "direction", "weight"]]
+        if not background.empty:
+            legs = transitions(locate(background, border))
+            legs = legs.loc[legs.explicit].copy()
+            legs["source_resident_id"] = legs.person_id.str.removeprefix("background_ch_")
+            legs = legs.merge(p[["person_id", "border_crossing_trip_mode", "weight"]],
+                              left_on="source_resident_id", right_on="person_id", validate="one_to_one")
+            if len(legs) != background.person_id.nunique():
+                raise ValueError("Background crossing plans must resolve to one event per source resident")
+            explicit = pd.concat([explicit, legs[explicit.columns]], ignore_index=True)
+        actual = explicit.groupby(["border_crossing_trip_mode", "direction"]).weight.sum().rename("prepared_explicit_events").reset_index().rename(columns={"border_crossing_trip_mode":"mode"})
         audit = audit.merge(actual, left_on=["trip_mode", "crossing_direction"], right_on=["mode", "direction"], how="outer").fillna(0)
         audit["source"] = label
         survey_tables.append(audit)

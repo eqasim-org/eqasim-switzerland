@@ -165,6 +165,20 @@ same vehicle type and, when supported, purpose, using the configured seed and
 original 2021 vehicle weights. This only repairs passenger expansion. It never
 changes a vehicle weight or removes its driver.
 
+### Keep Swiss-resident diaries and export dedicated crossings as background traffic
+
+Set `swiss_cross_border_background_traffic: true` to keep the source resident's
+ordinary diary, including a home-only day. Each eligible Swiss survey event
+then produces one additional MATSim agent with ID `background_ch_<resident ID>`,
+`backgroundTraffic=true`, and `sourceResidentId`. The agent belongs to the
+`crossborder` subpopulation and uses the assigned mode, direction, border
+facility and sampled time. Its Swiss endpoint uses the source home facility.
+Only the original resident belongs to the household. Count the background agent
+in transport demand and exclude it from resident person and diary statistics.
+The setting applies nationwide, after survey mix calibration, overlap filtering
+and truck/outside exclusions. The default `false` replaces the selected
+resident's diary with the dedicated crossing.
+
 ### Optional manual car targets
 
 `cross_border_car_crossing_targets` defaults to `null` (no overrides); an empty

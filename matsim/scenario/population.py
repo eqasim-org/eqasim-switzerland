@@ -58,6 +58,8 @@ def execute(context):
             writer = matsim.writers.PopulationWriter(buffered)
             writer.start_population()
             _write_persons(context, writer, data)
+            if data.background_crossings is not None:
+                _write_background_crossings(writer, data.persons, data.background_crossings)
             if data.freight_trips is not None:
                 _write_freight(
                     context, writer, data.freight_trips, data.freight_vehicles
@@ -103,6 +105,39 @@ def _write_persons(context, writer, data):
         )
     if written_activities != len(data.activities):
         raise ValueError("Prepared activities were not all written")
+
+
+def _write_background_crossings(writer, residents, trips):
+    """Copy the source person's travel attributes and reference their physical home facility."""
+    if trips.empty:
+        return
+    copies = trips.merge(residents, on="person_id", how="left", validate="one_to_one", indicator=True)
+    if not copies["_merge"].eq("both").all():
+        raise ValueError("A Swiss background crossing is missing its resident in the prepared population")
+    copies["source_resident_id"] = copies.person_id
+    copies["person_id"] = copies.agent_id
+    copies["person_type"] = "crossborder"
+    copies["cross_border_od"] = "CH-" + copies.destination_country_raw
+    copies["is_car_passenger"] = copies["mode"].eq("car_passenger")
+    for column in ("has_walk_loop_trip", "has_car_loop_trip", "has_car_passenger_loop_trip",
+                   "has_pt_loop_trip", "has_bike_loop_trip"):
+        copies[column] = False
+
+    for trip in copies.itertuples(index=False):
+        record = PersonWriter(trip)
+        if pd.notna(trip.vehicle_id):
+            record.add_vehicles([trip])
+        record.start_person(writer)
+        writer.start_plan(selected=True)
+        home = writer.location(int(trip.home_x), int(trip.home_y), f"home{trip.household_id}")
+        point = trip.border_crossing_point
+        border = writer.location(int(point.x), int(point.y), trip.border_facility)
+        origin, destination = (home, border) if trip.following_purpose == "border" else (border, home)
+        writer.add_activity(trip.preceding_purpose, origin, end_time=trip.departure_time)
+        writer.add_leg(trip.mode, trip.departure_time, trip.arrival_time - trip.departure_time)
+        writer.add_activity(trip.following_purpose, destination, start_time=trip.arrival_time)
+        writer.end_plan()
+        writer.end_person()
 
 
 def _write_freight(context, writer, trips, fleet, is_lcv=False):
@@ -220,13 +255,23 @@ class PersonWriter:
             activity.purpose, location, start_time, end_time, attributes=attributes
         )
 
-    def write(self, writer, first_activity=None, activity_iterator=None):
+    def start_person(self, writer):
         p = self.person
 
         writer.start_person(str(p.person_id))
 
         # Attributes
         writer.start_attributes()
+        if hasattr(p, "source_resident_id"):
+            writer.add_attribute("backgroundTraffic", "java.lang.Boolean", "true")
+            writer.add_attribute("sourceResidentId", "java.lang.String", str(p.source_resident_id))
+            writer.add_attribute("spRegion", "java.lang.Integer", int(p.sp_region))
+            writer.add_attribute("numberOfCars", "java.lang.String", p.number_of_cars)
+            writer.add_attribute("cantonId", "java.lang.Double", float(p.canton_id))
+            writer.add_attribute("incomePerCapita", "java.lang.Double", float(p.income_per_capita))
+            writer.add_attribute("cantonName", "java.lang.String", p.canton_name)
+            writer.add_attribute("ovgk", "java.lang.String", p.ovgk)
+            writer.add_attribute("carOwnershipRatio", "java.lang.Double", float(p.car_ownership_ratio))
         writer.add_attribute("age", "java.lang.Integer", str(int(p.age)))
         writer.add_attribute(
             "employed", "java.lang.Boolean", writer.true_false(p.employed)
@@ -345,7 +390,9 @@ class PersonWriter:
         )
         writer.end_attributes()
 
-        # Plan
+    def write(self, writer, first_activity=None, activity_iterator=None):
+        p = self.person
+        self.start_person(writer)
         writer.start_plan(selected=True)
 
         home_location = writer.location(

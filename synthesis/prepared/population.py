@@ -57,6 +57,8 @@ def configure(context):
     context.stage("data.constants")
 
     context.stage("synthesis.vehicles.vehicles")
+    if context.config("swiss_cross_border_background_traffic", default=False):
+        context.stage("synthesis.prepared.background_crossings")
 
     context.config("include_cross_border", default=False)
     if context.config("include_cross_border"):
@@ -127,6 +129,8 @@ def execute(context):
         freight_vehicles,
         lcv,
         lcv_vehicles,
+        background_crossings=(context.stage("synthesis.prepared.background_crossings")[0]
+                              if context.config("swiss_cross_border_background_traffic") else None),
     )
     if context.config("use_airports"):
         from synthesis.airports.trips import inject_airport_trips_in_population
@@ -203,23 +207,12 @@ def _prepare_residents(context, cst):
     df_vehicles = df_vehicles.sort_values(by=["owner_id"])
 
     df_persons["person_type"] = "normal"
-    is_crossing_the_border = coerce_boolean_series(
-        df_persons["is_crossing_the_border"],
-        name="is_crossing_the_border",
-    )
-    df_persons.loc[is_crossing_the_border, "person_type"] = "crossborder"
-
-    # For Swiss residents crossing the border, destination_country_raw was already
-    # assigned in synthesis.population.models.cross_border (matched to a specific
-    # data.cross_border.swiss_residents_od record) and carried through
-    # synthesis.population.models.subscriptions -- the same record
-    # synthesis.population.spatial.locations used for the border activity's
-    # location, so label and point stay consistent.
     df_persons["cross_border_od"] = None
-    has_raw_od = df_persons["destination_country_raw"].notna()
-    df_persons.loc[has_raw_od, "cross_border_od"] = (
-        "CH-" + df_persons.loc[has_raw_od, "destination_country_raw"]
-    )
+    if not context.config("swiss_cross_border_background_traffic"):
+        crossing = coerce_boolean_series(df_persons["is_crossing_the_border"], name="is_crossing_the_border")
+        df_persons.loc[crossing, "person_type"] = "crossborder"
+        has_od = df_persons["destination_country_raw"].notna()
+        df_persons.loc[has_od, "cross_border_od"] = "CH-" + df_persons.loc[has_od, "destination_country_raw"]
 
     df_persons = df_persons.drop(columns=["destination_country_raw"])
 
