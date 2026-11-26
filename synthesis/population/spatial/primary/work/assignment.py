@@ -47,10 +47,12 @@ def assignment_version():
     return digest.hexdigest()
 
 
-def assign(context, kind):
+def assign(context, kind, *, exclude_apprentices=False):
     persons = context.stage("synthesis.population.sampled")
     moving = context.stage(WORK + "work_at_different_locations").person_id
     mask = persons.employed.eq(context.stage("data.constants").EMPLOYED)
+    if exclude_apprentices:
+        mask &= persons.job_position.ne(50)
     if kind == "fixed":
         mask &= ~persons.person_id.isin(moving) & ~persons.person_id.isin(context.stage(WORK + "work_remotly").person_id)
     else:
@@ -102,6 +104,8 @@ def assign(context, kind):
     factors = None
     if cities:
         reference = survey.loc[survey.survey_year.eq(context.config("workplace_reference_year"))]
+        if exclude_apprentices:
+            reference = reference.loc[reference.job_position.ne(50)]
         municipality = reference.work_zone_id.map(pd.Series(parents, index=ids))
         target = reference.groupby(municipality).weight.sum().reindex(cities, fill_value=0)
         target = target.to_numpy() * context.config("input_downsampling")
