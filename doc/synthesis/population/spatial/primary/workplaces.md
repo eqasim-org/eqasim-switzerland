@@ -46,3 +46,22 @@ The comparison holds the 266,847 sampled residents fixed and reruns survey prepa
 Errors are the sum of absolute area errors divided by the sum of survey workplace weights for those areas. The quarter check places model points in the 2024 BFS polygons. Other municipality and neighbouring municipality rows overlap. The last column uses the scenario seed 518745. Two additional assignment seeds gave three-city errors of 0.19% and 0.31%, and quarter errors of 8.96% and 8.84%. The city fit improved each pilot city's internal-versus-inbound commuter split at the scenario seed. Basel and St. Gallen quarter errors increased. Luzern retained an error near 30% despite a close municipal total.
 
 The national fixed-workplace mean and median crow-fly distances in the survey-comparable population moved from 10.59 / 5.71 km to 11.63 / 6.16 km. The weighted 2023 Structural Survey gives 11.44 / 7.02 km. The model's 95th percentile rose from 33.12 to 38.38 km against a survey value of 35.78 km. The home-based classification changed from 8,576 to 7,542 sampled workers.
+
+## Apprentice workplace projection
+
+The production Structural Survey repair uses the configured `vocational_apprentice_repair_fraction` (default 0.65). Within each survey year it reclassifies that fraction of the weighted eligible pool as employed apprentices. Eligible people are students aged 15 or older in vocational programme 6 who report unemployment or inactivity with the corresponding job-position code. The seed determines the selection. The fraction was chosen using the national stock comparison. The register counts training places by employer and the Structural Survey counts residents, so their totals can differ.
+
+To reproduce the workplace pilot, download the three pinned Federal Statistical Office releases once on a machine with Internet access. Use the same `data_path` as the pipeline.
+
+```sh
+uv run -m data.structural_survey.apprentice_references --data-path /path/to/pipeline/data
+uv run -m synpp config_dib_10.yml --run analysis.apprentices.workplaces
+```
+
+The first command archives the original PX and Excel files under `apprentices/fso/` in the data folder. Both the downloader and the analysis verify their SHA-256 digests. The analysis runs offline with these files and the 2021–2024 Structural Survey person files in `structural_survey/`. If the 2024 survey is elsewhere, set `workplace_validation_survey_file` to its path.
+
+`national_apprentice_benchmark.csv` compares the weighted explicit and repaired survey totals with dual-training places for each production survey year. Its `implied_fraction` is the difference between register and explicit survey counts divided by the eligible survey weight. This is a sensitivity check on the configured rate.
+
+The pilot retains reported apprentice statuses and redistributes the national weight of the survey's vocational-student repair across eligible respondents. Weighted training commutes from 2021–2022 supply possible destinations. The repair uses employer-canton shares, distance and inter-canton commuting, with a half-strength regional residence adjustment and a national under-25 margin. Residence controls come from the 2023 Swiss Labour Force Survey. [FSO regional series](https://statistik.admin.ch/de/asset/36890545) · [FSO age series](https://statistik.admin.ch/de/asset/36890553)
+
+For a separate employer-side scenario, the model's survey-eligible apprentice cohort supplies the residential geography and the register supplies the 2023 total and all 26 employer-canton totals. The register counts training places, including those occupied by inbound commuters. Projecting the full stock onto resident homes is therefore a scenario assumption. `employer_cantons.csv` checks the imposed totals. `heldout_workplaces.csv` and `heldout_commutes.csv` compare the projections with explicit 2024 survey reports. `workplace_reference.csv` gives the reported and imputed municipal stocks separately. Its approximate intervals condition on the fitted imputation and omit model and survey-design uncertainty. The stage produces aggregate estimates and leaves simulated persons and establishments as configured by the production pipeline. [FSO vocational training by employer canton](https://statistik.admin.ch/de/asset/35887278)
