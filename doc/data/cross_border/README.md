@@ -157,13 +157,42 @@ explicitly reported: pooling cannot manufacture its geographic support. A new
 as such; it is not interpreted as an observed zero. In the configured weekday
 inputs, all 29 road groups meet the checks for both residence populations.
 
-Within each supported group, 2021 relative weights and journey patterns remain
+By default, within each supported group, 2021 relative weights and journey patterns remain
 unchanged. Rail and coach retain the former person-based national OD/purpose
 calibration method. Invalid 2021 car occupancies (noninteger, less than one, or
 above nine; above two for motorcycles) are sampled from valid 2021 peers of the
 same vehicle type and, when supported, purpose, using the configured seed and
 original 2021 vehicle weights. This only repairs passenger expansion. It never
 changes a vehicle weight or removes its driver.
+
+### Select the 2015 road-vehicle mix by interview group
+
+The working Geneva configuration selects the following survey interview-place IDs
+(`BEFRAGUNGSORTID`). Edit this list to select other groups. The default is `[]`.
+
+```yaml
+config:
+    cross_border_car_2015_mix_groups:
+        - 103  # Bardonnex
+        - 105  # Thônex-Vallard
+        - 125  # Groupe M, Genève–Haute-Savoie
+        - 126  # Groupe N, Genève/Vaud–Ain
+```
+
+For each selected group, the 2015 vehicle weights set the shares of Swiss-resident
+international visits, foreign-resident visits and foreign-resident transit among
+eligible entries. Swiss-to-Swiss journeys are excluded from these shares.
+The initial residence calibration supplies the combined eligible entry volume.
+The pipeline redistributes that volume using one factor per class, preserving
+the 2021 OD, purpose, occupancy and reported-exit distributions within each class.
+Optional two-way targets then refit the group volume. In journey mode eligible
+records in each selected group share a common multiplier to preserve the mix.
+The option also works without manual targets. A positive 2015 class requires
+positive calibrated 2021 vehicle weight in the same group and class.
+
+The `car_2015_mix.csv` audit in `data.cross_border.car_target_calibration`
+gives 2015 shares, baseline vehicle entries before manual target multipliers,
+and fitted entries before location and population overlap filters.
 
 ### Keep Swiss-resident diaries and export dedicated crossings as background traffic
 

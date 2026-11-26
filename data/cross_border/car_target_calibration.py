@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 
 from data.cross_border.car_targets import survey_paths
+from data.cross_border.journey_weights import road_journey_class
 from data.cross_border.reference_files import file_versions
 from data.cross_border.survey_calibration import calibrate_demand
 
@@ -13,6 +14,7 @@ from data.cross_border.survey_calibration import calibrate_demand
 def configure(context):
     context.config("data_path")
     context.config("specific_day_scenario", "workday")
+    context.config("cross_border_car_2015_mix_groups", [])
     requested = context.config("cross_border_car_crossing_targets", None)
     context.config("cross_border_car_target_method", "entry_group")
     context.stage("data.cross_border.car_targets")
@@ -26,7 +28,10 @@ def execute(context):
     # Retain the existing name/day validation and original survey benchmark.
 
     targets = context.stage("data.cross_border.car_targets")
-    if not targets:
+    groups = context.config("cross_border_car_2015_mix_groups")
+    if not isinstance(groups, list) or any(type(group) is not int for group in groups):
+        raise ValueError("cross_border_car_2015_mix_groups must be a list of integer interview-place IDs")
+    if not targets and not groups:
         return {}
     old_path, new_path = survey_paths(context.config("data_path"))
     old = pd.read_csv(old_path, encoding="latin1", low_memory=False)
@@ -34,25 +39,36 @@ def execute(context):
     reference = road_observations(old, 2015, context.config("specific_day_scenario"))
     observations = road_observations(new, 2021, context.config("specific_day_scenario"))
 
-    # Use exactly the unique physical exit-code matches used by early assignment.
+    # Fit the optional mix using both residence populations before coupling crossing targets.
 
-    exits = context.stage("data.cross_border.road_exit_points")
-    roads = context.stage("data.cross_border.road_candidates")
-    exit_places = unique_exit_places(exits, roads)
-    method = context.config("cross_border_car_target_method")
-    if method == "entry_group":
-        controls, audit, contributions = joint_controls(reference, observations, targets, exit_places)
-    elif method == "journey":
-        controls, audit, contributions = journey_controls(reference, observations, targets, exit_places)
-    else:
-        raise ValueError("cross_border_car_target_method must be 'entry_group' or 'journey'")
-
-    # Record the coupled solution, including contributions from other entry groups.
-
+    weighted = residence_calibrated_weights(reference, observations, targets)
+    mix, mix_audit = fit_road_mix(reference, weighted, groups)
     output = Path(context.path())
-    pd.DataFrame(controls.values()).to_csv(output / "car_crossing_targets.csv", index=False)
-    audit.to_csv(output / "target_event_balance.csv", index=False)
-    contributions.to_csv(output / "target_contributions.csv", index=False)
+    controls = {}
+    if targets:
+        exits = context.stage("data.cross_border.road_exit_points")
+        roads = context.stage("data.cross_border.road_candidates")
+        exit_places = unique_exit_places(exits, roads)
+        method = context.config("cross_border_car_target_method")
+        if method == "entry_group":
+            controls, audit, contributions = fit_entry_targets(weighted, targets, exit_places)
+        elif method == "journey":
+            controls, audit, contributions = fit_journey_targets(weighted, targets, exit_places, mix)
+        else:
+            raise ValueError("cross_border_car_target_method must be 'entry_group' or 'journey'")
+        pd.DataFrame([controls[k] for k in targets]).to_csv(output / "car_crossing_targets.csv", index=False)
+        audit.to_csv(output / "target_event_balance.csv", index=False)
+        contributions.to_csv(output / "target_contributions.csv", index=False)
+
+    # Publish factors to both OD stages and the full-population class totals for review.
+
+    for key, factors in mix.items():
+        controls.setdefault(key, {})["mix_factors"] = factors
+    if mix:
+        group_scale = {k: v.get("mix_journey_factor", v.get("override_factor", 1.))
+                       for k, v in controls.items()}
+        mix_audit["fitted_vehicles"] = mix_audit.mix_vehicles * mix_audit.interview_place_id.map(group_scale)
+        mix_audit.to_csv(output / "car_2015_mix.csv", index=False)
     return controls
 
 
@@ -94,7 +110,54 @@ def unique_exit_places(exits, roads):
     return result
 
 
+def residence_calibrated_weights(reference, observations, targets):
+    """Compute the two OD stages' baseline, before any manual total multiplier."""
+    unit = {key: dict(value, override_factor=1.) for key, value in targets.items()}
+    frames = []
+    for swiss in (False, True):
+        old = reference.loc[reference.residence_country.eq("CH").eq(swiss)]
+        new = observations.loc[observations.residence_country.eq("CH").eq(swiss)]
+        calibrated, _ = calibrate_demand(old, new, unit)
+        frames.append(calibrated)
+    return pd.concat(frames, ignore_index=True)
+
+
+def fit_road_mix(reference, weighted, groups):
+    """Reweight eligible entries in place and return factors for the two residence stages."""
+    mix, audit = {}, []
+    if not groups:
+        return mix, pd.DataFrame()
+    classes = ["swiss", "foreign_visit", "foreign_transit"]
+    reference_classes = road_journey_class(reference)
+    observed_classes = road_journey_class(weighted)
+    for group in sorted(set(groups)):
+        old = reference.loc[reference.interview_place_id.eq(group)]
+        new = weighted.loc[weighted.interview_place_id.eq(group)]
+        old_mass = old.weight.groupby(reference_classes.loc[old.index]).sum().reindex(classes, fill_value=0.)
+        new_mass = new.weight.groupby(observed_classes.loc[new.index]).sum().reindex(classes, fill_value=0.)
+        if old_mass.sum() <= 0 or new_mass.sum() <= 0:
+            raise ValueError(f"Mix group {group} needs eligible road vehicles in both survey years")
+        shares = old_mass / old_mass.sum()
+        mix[group] = {}
+        for name in classes:
+            desired = shares[name] * new_mass.sum()
+            if desired > 0 and new_mass[name] <= 0:
+                raise ValueError(f"Mix group {group} has 2015 {name} demand without calibrated 2021 support")
+            factor = float(desired / new_mass[name]) if new_mass[name] > 0 else 1.
+            mix[group][name] = factor
+            mask = weighted.interview_place_id.eq(group) & observed_classes.eq(name)
+            weighted.loc[mask, ["weight", "group_weight"]] *= factor
+            audit.append(dict(interview_place_id=group, journey_class=name, vehicles_2015=old_mass[name],
+                              share_2015=shares[name], baseline_vehicles=new_mass[name], mix_factor=factor,
+                              mix_vehicles=desired))
+    return mix, pd.DataFrame(audit)
+
+
 def joint_controls(reference, observations, targets, exit_places):
+    return fit_entry_targets(residence_calibrated_weights(reference, observations, targets), targets, exit_places)
+
+
+def fit_entry_targets(weighted, targets, exit_places):
     """Solve all manual controls together; leave other entry groups unchanged.
 
     Columns are entry-group multipliers. A transit contributes to its entry
@@ -103,24 +166,13 @@ def joint_controls(reference, observations, targets, exit_places):
     """
     keys = sorted(targets)
     names = {value["interview_place"]: key for key, value in targets.items()}
-    unit = {key: dict(value, override_factor=1.) for key, value in targets.items()}
-    frames = []
-    for swiss in (False, True):
-        old = reference.loc[reference.residence_country.eq("CH").eq(swiss)]
-        new = observations.loc[observations.residence_country.eq("CH").eq(swiss)]
-        calibrated, _ = calibrate_demand(old, new, unit)
-        frames.append(calibrated)
-    weighted = pd.concat(frames, ignore_index=True)
-    swiss = weighted.residence_country.eq("CH")
-    visit = weighted.travel_cat.isin([3, 4])
-    # The Swiss generator supports only journeys with a Swiss endpoint.
-    visit &= ~swiss | weighted.origin_country.eq("CH") | weighted.destination_country.eq("CH")
-    transit = ~swiss & weighted.travel_cat.eq(2)
+    classes = road_journey_class(weighted)
+    transit = classes.eq("foreign_transit")
     records = []
-    local = weighted.loc[visit | transit].copy()
+    local = weighted.loc[classes.ne("")].copy()
     local["target_id"] = local.interview_place_id
-    local["event"] = np.where(local.travel_cat.eq(2), "transit_entry", "visit_entry_and_return")
-    local["crossings"] = local.weight * np.where(local.travel_cat.eq(2), 1., 2.)
+    local["event"] = np.where(transit.loc[local.index], "transit_entry", "visit_entry_and_return")
+    local["crossings"] = local.weight * np.where(transit.loc[local.index], 1., 2.)
     records.append(local)
     through = weighted.loc[transit].copy()
     through["exit_place"] = through.survey_exit_code.map(exit_places)
@@ -167,6 +219,10 @@ def validate(context):
 
 
 def journey_controls(reference, observations, targets, exit_places):
+    return fit_journey_targets(residence_calibrated_weights(reference, observations, targets), targets, exit_places, {})
+
+
+def fit_journey_targets(weighted, targets, exit_places, mix):
     """Fit positive journey weights to all controlled entry-plus-exit totals.
 
     Minimize relative entropy from the usual 2015-calibrated weights. One
@@ -177,14 +233,6 @@ def journey_controls(reference, observations, targets, exit_places):
     from data.cross_border.journey_weights import crossing_events
 
     keys = sorted(targets)
-    unit = {key: dict(value, override_factor=1.) for key, value in targets.items()}
-    frames = []
-    for swiss in (False, True):
-        old = reference.loc[reference.residence_country.eq("CH").eq(swiss)]
-        new = observations.loc[observations.residence_country.eq("CH").eq(swiss)]
-        calibrated, _ = calibrate_demand(old, new, unit)
-        frames.append(calibrated)
-    weighted = pd.concat(frames, ignore_index=True)
     entry, exits, transit, exit_place = crossing_events(weighted, targets, exit_places)
     events = entry + exits
     wanted = np.array([targets[key]["target_both_directions"] for key in keys])
@@ -192,7 +240,16 @@ def journey_controls(reference, observations, targets, exit_places):
 
     # Aggregate identical event patterns before solving the small smooth system.
 
-    patterns, inverse = np.unique(events, axis=0, return_inverse=True)
+    # Fit one multiplier per selected group so its class shares and conditional ODs stay fixed.
+    design = events.copy()
+    group_patterns = {}
+    if mix:
+        eligible = road_journey_class(weighted).ne("")
+        for group in mix:
+            mask = (eligible & weighted.interview_place_id.eq(group)).to_numpy()
+            group_patterns[group] = np.average(events[mask], axis=0, weights=weights[mask])
+            design[mask] = group_patterns[group]
+    patterns, inverse = np.unique(design, axis=0, return_inverse=True)
     masses = np.bincount(inverse, weights=weights, minlength=len(patterns))
     supported = (masses > 0) & patterns.any(axis=1)
     patterns, masses = patterns[supported], masses[supported]
@@ -209,7 +266,7 @@ def journey_controls(reference, observations, targets, exit_places):
 
     fit = least_squares(residual, np.zeros(len(keys)), jac=jacobian, bounds=(-30., 30.),
                         ftol=1e-13, xtol=1e-13, gtol=1e-13, max_nfev=1000)
-    multipliers = np.exp(events @ fit.x)
+    multipliers = np.exp(design @ fit.x)
     adjusted = weights * multipliers
     expected = events.T @ adjusted
     if not fit.success or not np.allclose(expected, wanted, rtol=0, atol=1e-5):
@@ -243,4 +300,6 @@ def journey_controls(reference, observations, targets, exit_places):
             part["target_id"], part["event"] = key, name
             part["multiplier"] = part.expected_crossings / part.crossings
             records.append(part)
+    for group, pattern in group_patterns.items():
+        controls.setdefault(group, {})["mix_journey_factor"] = float(np.exp(pattern @ fit.x))
     return controls, pd.DataFrame(audit), pd.concat(records, ignore_index=True)
