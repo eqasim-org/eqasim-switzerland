@@ -113,8 +113,13 @@ def prepare_features(source, population, const):
                   ["commute_distance", "commute_distance_log"]] = np.nan
         for column in ("canton_id", "sp_region", "number_of_cars_class", "marital_status", "job_position"):
             frame[column] = numeric(frame, column).fillna(-1).astype(int)
-        if is_source:
+        # The crosswalk maps Structural Survey positions to MZ's BSTELL categories.
+        # Several owner categories collapse together, so its inverse is ambiguous.
+        if not is_source:
             frame["job_position"] = frame["job_position"].map(const.MAP_JOB_POSITIONS_MZ_TO_SURVEY).fillna(-1).astype(int)
+        else:
+            frame["job_position"] = frame["job_position"].where(
+                frame["job_position"].isin(const.MAP_JOB_POSITIONS_MZ_TO_SURVEY.values()), -1)
         # Job status is undefined for non-workers on both sides. Predicted
         # population job codes must not become an artificial domain identifier.
         frame.loc[frame["employed"].ne(1), "job_position"] = -1

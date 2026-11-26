@@ -120,7 +120,7 @@ sampled population and their producer code:
 | Household composition | `household_size`, `N_children_under_3`, `N_children_under_6`, `N_children_under_12`, `N_children_under_18`, `N_adults` | Numeric counts, not presence flags; no household-size clipping |
 | Residential density | `population_density` | `log1p` of residents within 2.5 km of home, computed by the same density pipeline on both sides; it is not residents/km² |
 | Residential context | `ovgk`, `municipality_type`, `canton_id`, `sp_region` | Original PT-quality categories A/B/C/D/none and categorical spatial inputs |
-| Work context | `employed`, `is_student`, `employment_status`, `work_location_type`, `commute_distance`, `job_position` | Categorical status/location type/job; log commute distance; survey job codes mapped using the repository's common classification; job is unknown for non-workers on both sides |
+| Work context | `employed`, `is_student`, `employment_status`, `work_location_type`, `commute_distance`, `job_position` | Categorical employment and workplace attributes with log commute distance. Synthetic job positions use the MZ BSTELL categories after conversion (e.g. Structural Survey 43 becomes MZ 33). Job position is unknown for non-workers. |
 | Mobility resources | `driving_license`, `car_availability`, `number_of_cars_class` | Harmonized categorical inputs, with no inference mask |
 | Personal context | `sex`, `marital_status`, `is_swiss` | Shared categorical definitions; no sex mask |
 | Border proximity | `dist_home_to_border` | `log1p` distance, retaining an explicit missing indicator |
