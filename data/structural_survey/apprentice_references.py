@@ -83,21 +83,21 @@ def employer_stock(path):
     return cantons
 
 
-def residence_controls(folder):
-    """Read 2023 annual-average SLFS estimates for the permanent resident population."""
+def residence_controls(folder, year=2023):
+    """Read annual-average SLFS estimates for the permanent resident population."""
     region = pd.read_excel(folder / REGION, sheet_name="Jahreswerte", header=4, nrows=38)
     age = pd.read_excel(folder / AGE, sheet_name="Alter-Jahreswerte", header=4, nrows=12)
     # Use the apprentice block of the regional table and the 15–24 block of the age table.
     region_labels = region.iloc[:, 0].str.strip()
     start = region_labels[region_labels.eq("Lehrlinge")].index.item() + 1
     block = region.iloc[start:start + 8].set_index(region_labels.iloc[start:start + 8])
-    stocks = block.loc[REGION_NAMES, 2023].astype(float).to_numpy() * 1000
-    national = float(block.loc["Schweiz", 2023])
+    stocks = block.loc[REGION_NAMES, year].astype(float).to_numpy() * 1000
+    national = float(block.loc["Schweiz", year])
     age_labels = age.iloc[:, 0].str.strip()
     start = age_labels[age_labels.eq("15-24 Jahre")].index.item()
-    young = age.iloc[start:].set_index(age_labels.iloc[start:]).loc["Lehrlinge", 2023]
+    young = age.iloc[start:].set_index(age_labels.iloc[start:]).loc["Lehrlinge", year]
     if not np.isclose(stocks.sum(), national * 1000) or not 0 < young < national:
-        raise ValueError("Inconsistent apprentice totals in the 2023 SLFS tables")
+        raise ValueError(f"Inconsistent apprentice totals in the {year} SLFS tables")
     return stocks, float(young / national)
 
 

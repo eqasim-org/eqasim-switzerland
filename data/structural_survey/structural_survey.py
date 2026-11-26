@@ -81,6 +81,8 @@ def configure(context):
 
     context.config("random_seed")
     context.config("vocational_apprentice_repair_fraction", DEFAULT_REPAIR_FRACTION)
+    if context.config("apprentice_geographic_trial", default=False):
+        context.stage("data.structural_survey.apprentice_targets")
 
 
 def prepare_education_departure(df, df_municipality_mapping, df_quarters, df_zones):
@@ -418,8 +420,11 @@ def execute(context):
     # weighted subset of ambiguous records, retaining explicit apprentices and
     # other reported jobs. Both sequential models consume these same labels;
     # student participation itself is never changed by this correction.
+    rates = None
+    if context.config("apprentice_geographic_trial"):
+        rates = context.stage("data.structural_survey.apprentice_targets")[0]
     df_se, apprentice_diagnostics = repair_vocational_apprentices(
-        df_se, context.config("vocational_apprentice_repair_fraction"), random_seed)
+        df_se, context.config("vocational_apprentice_repair_fraction"), random_seed, rates)
     apprentice_diagnostics.to_csv(Path(context.path()) / "apprentice_repair.csv", index=False)
     logger.info("National SS apprentice repair (each survey year separately):\n%s",
                 apprentice_diagnostics.to_string(index=False))

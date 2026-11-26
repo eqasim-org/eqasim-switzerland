@@ -4,8 +4,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from analysis.apprentices import projection
+from data.structural_survey import apprentice_projection as projection
 from data.structural_survey import apprentice_references
+from data.structural_survey.apprentice_projection import municipality_cantons
 from data.structural_survey.apprenticeship import DEFAULT_REPAIR_FRACTION
 from data.structural_survey.structural_survey import resolve_work_start
 
@@ -160,23 +161,6 @@ def read_survey(path, year, mapping, quarters):
     frame["eligible"] = (frame.edu.eq(6) & frame.student.eq(1) & frame.employed.isin([2, 3])
                          & frame.job.isin([60, 70]) & frame.age.ge(15))
     return frame
-
-
-def municipality_cantons(firms):
-    # Use the canton attached to the establishment municipality in STATENT.
-    names = ("Zürich|Bern|Luzern|Uri|Schwyz|Obwalden|Nidwalden|Glarus|Zug|Fribourg|Solothurn|"
-             "Basel-Stadt|Basel-Landschaft|Schaffhausen|Appenzell Ausserrhoden|Appenzell Innerrhoden|"
-             "St. Gallen|Graubünden|Aargau|Thurgau|Ticino|Vaud|Valais|Neuchâtel|Genève|Jura").split("|")
-    codes = {name: i for i, name in enumerate(names, start=1)}
-    # Older STATENT files store UTF-8 canton names read with Latin-1 encoding.
-    codes.update({name.encode().decode("latin1"): value for name, value in list(codes.items())})
-    # A few establishments near canton boundaries carry a neighbouring canton.
-    pairs = firms.groupby(["municipality_id", "canton_name"], observed=True).size()
-    majority = pairs.sort_values(ascending=False, kind="stable").reset_index()
-    result = majority.drop_duplicates("municipality_id").set_index("municipality_id").canton_name.map(codes)
-    if result.isna().any():
-        raise ValueError("Unknown STATENT canton name")
-    return result
 
 
 def projected_weights(apprentices, reference, total):

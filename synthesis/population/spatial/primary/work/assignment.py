@@ -31,6 +31,8 @@ def configure_assignment(context, kind):
         context.stage("data.external_population.commutes")
         context.stage("data.spatial.swiss_border")
         context.config("fr_sample_rate", default=1.0)
+    if context.config("apprentice_geographic_trial", default=False):
+        context.stage(WORK + "apprentice_municipalities")
     context.config("workplace_unbiased_rounding", default=False)
     context.config("random_seed")
     context.config("input_downsampling")
@@ -58,7 +60,8 @@ def assign(context, kind):
     # Construct the destination support and remaining establishment capacity.
 
     zones = context.stage("data.spatial.zones")
-    companies = context.stage("data.statent.statent")[["enterprise_id", "x", "y", "zone_id", "number_employees"]]
+    statent = context.stage("data.statent.statent")
+    companies = statent[["enterprise_id", "x", "y", "zone_id", "number_employees"]]
     companies = companies.dropna().loc[lambda d: d.zone_id.isin(zones.zone_id) & d.number_employees.gt(0)]
     destinations = context.stage("synthesis.population.destinations")[["destination_id", "ovgk"]]
     companies = companies.merge(destinations, left_on="enterprise_id", right_on="destination_id",
@@ -89,7 +92,15 @@ def assign(context, kind):
 
     # Round OD quotas independently of the establishment draws.
 
-    counts = Counter(keys)
+    training = pd.Series(np.nan, index=workers.index)
+    by_municipality = {}
+    if context.config("apprentice_geographic_trial"):
+        training = workers.person_id.map(context.stage(WORK + "apprentice_municipalities"))
+        municipality = companies.enterprise_id.map(statent.set_index("enterprise_id").municipality_id)
+        by_municipality = companies.groupby(municipality, observed=True).indices
+    training = training.to_numpy()
+    ordinary = pd.isna(training)
+    counts = Counter(key for key, use in zip(keys, ordinary) if use)
     seed = context.config("random_seed")
     rounding = np.random.default_rng(np.random.SeedSequence([seed, int(kind == "moving"), 1]))
     if not context.config("workplace_unbiased_rounding"):
@@ -118,18 +129,22 @@ def assign(context, kind):
     missing = 0
     with context.progress(total=len(keys), label=f"Assigning {kind} workplaces") as progress:
         for i, key in enumerate(keys):
-            if key in quotas:
-                remaining = quotas[key]
-                candidates = np.concatenate([by_zone[z] for z in remaining])
+            if not ordinary[i] or key in quotas:
+                if ordinary[i]:
+                    remaining = quotas[key]
+                    candidates = np.concatenate([by_zone[z] for z in remaining])
+                else:
+                    candidates = by_municipality[training[i]]
                 distances = None
                 if kind == "fixed":
                     distances = np.hypot(xy[candidates, 0] - home[i, 0], xy[candidates, 1] - home[i, 1])
                 weights = calculate_company_weights(candidates, cars[i], jobs, good_pt, other_pt, distances)
                 chosen = rng.choice(candidates, p=weights)
-                zone = company_zones[chosen]
-                remaining[zone] -= 1
-                if remaining[zone] == 0:
-                    del remaining[zone]
+                if ordinary[i]:
+                    zone = company_zones[chosen]
+                    remaining[zone] -= 1
+                    if remaining[zone] == 0:
+                        del remaining[zone]
             else:
                 if tree is None:
                     tree = cKDTree(xy)
