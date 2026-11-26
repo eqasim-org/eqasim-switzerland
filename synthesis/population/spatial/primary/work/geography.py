@@ -2,7 +2,6 @@ import logging
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import least_squares
 from scipy.sparse import csr_matrix
 from scipy.spatial import cKDTree
 
@@ -72,30 +71,3 @@ def round_workers(n, probabilities, rng):
         picks = np.searchsorted(cumulative, np.arange(remaining) + rng.random(), side="right")
         np.add.at(counts, picks, 1)
     return dict(zip(indices[counts > 0], counts[counts > 0]))
-
-
-def municipal_factors(cities, parents, rows, targets):
-    """Fit municipality margins in expectation, preserving each origin's OD support."""
-    if len(set(cities)) != len(cities) or not set(cities).issubset(parents):
-        raise ValueError("Specify distinct, existing BFS municipality IDs for workplace calibration")
-    groups = np.zeros(len(parents), dtype=int)
-    for index, city in enumerate(cities, start=1):
-        groups[parents == city] = index
-    totals, probs = [], []
-    for count, row in rows:
-        totals.append(count)
-        probs.append(np.bincount(groups, weights=row, minlength=len(cities) + 1))
-    if not totals or np.any(targets <= 0):
-        raise ValueError(f"Insufficient survey or resident support for workplace calibration {cities}")
-    probs = np.array(probs)
-
-    def residual(beta):
-        weighted = probs * np.r_[1., np.exp(beta)]
-        fitted = totals @ (weighted / weighted.sum(axis=1)[:, None])
-        return (fitted[1:] - targets) / targets
-
-    fit = least_squares(residual, np.zeros(len(cities)), bounds=(-25, 25), gtol=1e-12)
-    if np.max(np.abs(residual(fit.x))) > 1e-5:
-        raise ValueError(f"Infeasible municipal workplace targets for {cities}: {targets}")
-    logger.info("Municipal workplace odds multipliers: %s", dict(zip(cities, np.exp(fit.x))))
-    return np.r_[1., np.exp(fit.x)][groups]

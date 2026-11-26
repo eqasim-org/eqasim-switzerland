@@ -15,7 +15,7 @@ def execute(context):
     persons = context.stage("synthesis.population.sampled")
     cols = ["person_id", "statpop_person_id", "home_municipality_id", "is_synthetic_household"]
     if not set(cols).issubset(persons.columns):
-        raise ValueError("Municipal workplace calibration requires a STATPOP population")
+        raise ValueError("Workplace survey comparisons require a STATPOP population")
     sample = persons[cols].copy()
     sample["home_municipality_id"] = pd.to_numeric(sample["home_municipality_id"])
     ids = pd.Index(sample["statpop_person_id"].unique())
@@ -33,7 +33,7 @@ def execute(context):
     register = pd.concat(matches, ignore_index=True)
     joined = sample.merge(register, left_on="statpop_person_id", right_on="personPseudoID", how="left")
     if joined.TYPEOFRESIDENCE.isna().any():
-        raise ValueError("Missing STATPOP residence record for municipal workplace calibration")
+        raise ValueError("Missing STATPOP residence record for workplace survey comparison")
     joined["municipality_match"] = joined.REPORTINGMUNICIPALITYID.eq(joined.home_municipality_id)
     joined["main"] = joined.TYPEOFRESIDENCE.eq(1)
     joined = joined.sort_values(["municipality_match", "main"], ascending=False, kind="stable")

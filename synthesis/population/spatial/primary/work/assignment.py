@@ -9,7 +9,7 @@ from scipy.spatial import cKDTree
 
 from data.od.matrix import DEFAULT_SEGMENT_KEY
 from data.structural_survey.structural_survey import get_filtered_data
-from .geography import destination_geography, municipal_factors, round_workers
+from .geography import destination_geography, round_workers
 from .wla_tools import COMP_SATURATION_FACTOR, calculate_company_weights, correct_companies_number_of_employees
 from .work_locations import get_segment_key
 
@@ -31,9 +31,6 @@ def configure_assignment(context, kind):
         context.stage("data.external_population.commutes")
         context.stage("data.spatial.swiss_border")
         context.config("fr_sample_rate", default=1.0)
-    if context.config("workplace_calibration_municipalities", default=[]):
-        context.stage(WORK + "survey_scope")
-        context.config("workplace_reference_year", default=2023)
     context.config("workplace_unbiased_rounding", default=False)
     context.config("random_seed")
     context.config("input_downsampling")
@@ -47,12 +44,10 @@ def assignment_version():
     return digest.hexdigest()
 
 
-def assign(context, kind, *, exclude_apprentices=False):
+def assign(context, kind):
     persons = context.stage("synthesis.population.sampled")
     moving = context.stage(WORK + "work_at_different_locations").person_id
     mask = persons.employed.eq(context.stage("data.constants").EMPLOYED)
-    if exclude_apprentices:
-        mask &= persons.job_position.ne(50)
     if kind == "fixed":
         mask &= ~persons.person_id.isin(moving) & ~persons.person_id.isin(context.stage(WORK + "work_remotly").person_id)
     else:
@@ -70,24 +65,18 @@ def assign(context, kind, *, exclude_apprentices=False):
                                 how="left", validate="many_to_one")
     companies = correct_companies_number_of_employees(context, companies, fixed)
     survey = get_filtered_data(context, kind)
-    mapping, parents = destination_geography(
+    mapping, _ = destination_geography(
         zones, context.stage("data.spatial.quarters"), context.stage("data.spatial.municipalities")[1],
         context.stage("data.spatial.zone_shapes"), companies, survey)
     ids = pd.Index(zones.zone_id)
     origins = ids.get_indexer(workers.home_zone_id)
     segments = [get_segment_key(sex, age) for sex, age in zip(workers.sex, workers.age)]
-    cities = context.config("workplace_calibration_municipalities")
-    eligible = np.zeros(len(workers), dtype=bool)
-    if cities:
-        eligible = workers.person_id.map(context.stage(WORK + "survey_scope"))
-        if eligible.isna().any():
-            raise ValueError("Missing workplace survey eligibility for sampled workers")
-    keys = list(zip(segments, origins, eligible))
+    keys = list(zip(segments, origins))
     matrix, _ = context.stage(MATRIX[kind])
     fallback = matrix[DEFAULT_SEGMENT_KEY]
 
     def probabilities(key):
-        segment, origin, _ = key
+        segment, origin = key
         if origin < 0:
             return None
         row = matrix.get(segment, fallback)[origin]
@@ -101,16 +90,6 @@ def assign(context, kind, *, exclude_apprentices=False):
     # Round OD quotas independently of the establishment draws.
 
     counts = Counter(keys)
-    factors = None
-    if cities:
-        reference = survey.loc[survey.survey_year.eq(context.config("workplace_reference_year"))]
-        if exclude_apprentices:
-            reference = reference.loc[reference.job_position.ne(50)]
-        municipality = reference.work_zone_id.map(pd.Series(parents, index=ids))
-        target = reference.groupby(municipality).weight.sum().reindex(cities, fill_value=0)
-        target = target.to_numpy() * context.config("input_downsampling")
-        rows = ((n, probabilities(k)) for k, n in counts.items() if k[2])
-        factors = municipal_factors(cities, parents, ((n, p) for n, p in rows if p is not None), target)
     seed = context.config("random_seed")
     rounding = np.random.default_rng(np.random.SeedSequence([seed, int(kind == "moving"), 1]))
     if not context.config("workplace_unbiased_rounding"):
@@ -119,8 +98,6 @@ def assign(context, kind, *, exclude_apprentices=False):
     for key, n in counts.items():
         row = probabilities(key)
         if row is not None:
-            if factors is not None and key[2]:
-                row *= factors
             quotas[key] = round_workers(n, row, rounding)
 
     # Draw establishments using remaining capacity, accessibility and fixed-worker distance.

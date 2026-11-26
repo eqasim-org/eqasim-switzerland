@@ -10,17 +10,14 @@ For French external workers, only commute endpoints in Switzerland reserve emplo
 
 ## Scenario settings
 
-The following settings enable the three-city scenario tested on the 3% population. Values go under `config` in the scenario YAML.
+The 3% scenario uses these workplace settings under `config` in the scenario YAML.
 
 ```yaml
 workplace_reference_year: 2023
 workplace_unbiased_rounding: true
-workplace_calibration_municipalities: [261, 6621, 5586]
 ```
 
-The reference year defaults to 2023 and selects the home-based-work training year and optional municipal calibration totals. Unbiased rounding defaults to false. Enabling it preserves every origin/segment worker total while allowing low-probability destinations to retain their expected shares over repeated seeds.
-
-The municipality list defaults to empty. Entries are BFS municipality IDs. Fixed and mobile workers are calibrated separately to weighted domestic workplace totals for the reference year, scaled by the Swiss population sample fraction. The fitted multipliers preserve each origin total and its supported destinations. Integer rounding and home-based workers can leave a difference in the final city stock. The calibration applies to a survey-coverage proxy drawn from STATPOP main-residence private households, excluding residents with permits 11 or 12. Other employed residents still receive workplaces. Calibration targets are absolute stocks for the selected year, including when applied to a population projection.
+The reference year defaults to 2023 and selects the survey year for home-based work and workplace stock comparisons. Fixed and mobile workers use the pooled commute shares from each origin. Municipal totals follow from these shares and the resident workforce. Unbiased rounding defaults to false. Enabling it preserves every origin/segment worker total while allowing low-probability destinations to retain their expected shares over repeated seeds.
 
 ## Repeat the validation
 
@@ -28,7 +25,7 @@ The municipality list defaults to empty. Entries are BFS municipality IDs. Fixed
 uv run -m synpp config_dib_10.yml --run analysis.workplace_stock
 ```
 
-The analysis stage writes municipal and quarter CSVs in its cache, counting each survey-eligible employed resident once. `model` and `survey` are expanded worker stocks. `*_records` are unexpanded counts, and `*_local` counts residents who live and work in the same municipality. Quarter rows include the observed survey weight and an estimate that allocates municipality-only answers in proportion to the reported quarters. The coverage column gives the fraction of municipal weight with a known quarter.
+The analysis stage writes municipal and quarter CSVs in its cache, counting each survey-eligible employed resident once. The survey-coverage proxy uses STATPOP main-residence private households and excludes residents with permits 11 or 12. `model` and `survey` are expanded worker stocks. `*_records` are unexpanded counts, and `*_local` counts residents who live and work in the same municipality. Quarter rows include the observed survey weight and an estimate that allocates municipality-only answers in proportion to the reported quarters. The coverage column gives the fraction of municipal weight with a known quarter.
 
 To check an independent year, set `workplace_validation_survey_file` to the single-year Structural Survey person CSV. Optionally set `workplace_validation_quarter_file` to the matching BFS polygon file (e.g. the extracted `quart24.geojson`). The audit then locates model coordinates directly in those polygons. When a city has survey quarter codes absent from the supplied geography, the independent-year audit suppresses its survey quarter estimates and keeps its municipal result. The 2024 boundary release includes 11 cities. [BFS 2024 statistical quarters](https://statistik.admin.ch/de/asset/30487002)
 
@@ -36,7 +33,9 @@ To check an independent year, set `workplace_validation_survey_file` to the sing
 
 The comparison holds the 266,847 sampled residents fixed and reruns survey preparation, worker classification, OD construction and workplace assignment. All 139,391 employed agents received one workplace, including 138,097 in the survey-comparable population. Counts expand by 1 / 0.03. Fixed, mobile and home-based workers are included. The baseline is the workplace assignment in the existing prepared scenario. The independent Structural Survey is the 2024 release. It does not supply any calibration margin.
 
-| Absolute error as a share of survey stock in 2024 | Baseline | Branch defaults | Unbiased rounding | Rounding plus city calibration |
+The current working configuration corresponds to the unbiased rounding column. The last column records the retired experiment with 2023 municipal targets.
+
+| Absolute error as a share of survey stock in 2024 | Baseline | Branch defaults | Unbiased rounding | Former three-city calibration |
 |---|---:|---:|---:|---:|
 | Zürich, Genève and Lausanne municipalities | 3.56% | 2.91% | 2.22% | 0.37% |
 | Other 293 municipalities with at least 100 reported workers | 6.85% | 6.76% | 5.87% | 5.91% |
@@ -66,4 +65,4 @@ The pilot retains reported apprentice statuses and redistributes the national we
 
 For a separate employer-side scenario, the model's survey-eligible apprentice cohort supplies the residential geography and the register supplies the 2023 total and all 26 employer-canton totals. The register counts training places, including those occupied by inbound commuters. Projecting the full stock onto resident homes is therefore a scenario assumption. `employer_cantons.csv` checks the imposed totals. `heldout_workplaces.csv` and `heldout_commutes.csv` compare the projections with explicit 2024 survey reports. `workplace_reference.csv` gives the reported and imputed municipal stocks separately. Its approximate intervals condition on the fitted imputation and omit model and survey-design uncertainty. The stage produces aggregate estimates and leaves simulated persons and establishments as configured by the production pipeline. [FSO vocational training by employer canton](https://statistik.admin.ch/de/asset/35887278)
 
-Run `uv run -m synpp config_dib_10.yml --run analysis.apprentices.calibration` to compare municipal workplace controls after this correction. The stage replays ordinary-worker assignment with no city controls, controls for Genève and Lausanne, and controls for all three cities including Zürich. The first two variants also run with the next random seed. Each replay uses the same 2023 apprentice projection and home-based workers. Its fixed-worker establishments reserve capacity before the moving-worker draw. The ordinary-worker controls exclude apprentices from both the assigned cohort and the survey target. The output `municipal_workplace_comparison.csv` gives expanded stocks and survey references for both years.
+The earlier municipal calibration replay and its documentation are available on the `feat/resident-workplace-assignment` branch.
