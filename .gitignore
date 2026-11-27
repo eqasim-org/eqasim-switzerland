@@ -84,6 +84,13 @@ CuttingBoundries
 /sumo/native/compile_commands.json
 /sumo/native/write_trips
 /sumo/native/route_kernel
+/sumo/functions/native/build/
+/sumo/functions/native/CMakeFiles/
+/sumo/functions/native/CMakeCache.txt
+/sumo/functions/native/compile_commands.json
+/sumo/functions/native/write_trips
+/sumo/functions/native/route_kernel
+/sumo/functions/native/process_routes
 /sumo/native/marouter
 /sumo/**/_sumo_networks/
 
@@ -106,3 +113,9 @@ analysis/dmc
 
 # Generated selected-link viewer data and native build caches.
 /analysis_spyder/
+
+# SUMO helper sources relocated out of stage packages.
+!/sumo/functions/output_tools.py
+!/sumo/functions/routing/
+!/sumo/functions/routing/*.py
+!/sumo/functions/scenario/network/cache.py

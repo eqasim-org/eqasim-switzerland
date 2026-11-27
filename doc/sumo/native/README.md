@@ -1,21 +1,21 @@
 # Polars tables, IPC caches and native XML
 
-SUMO tabular processing uses Polars. `sumo.tables.as_polars` is the shared
+SUMO tabular processing uses Polars. `sumo.functions.tables.as_polars` is the shared
 boundary for pandas/GeoPandas tables from other pipeline packages, Polars
 tables, Arrow tables and cached file paths. Geometries are stored as WKB binary;
 Python Object columns are excluded from table caches. Source tables are not edited.
 Networks remain graph structures and geometry operations use Shapely/GEOS.
 
-`sumo.tables.write_table` writes uncompressed Arrow IPC (`.arrow`).
+`sumo.functions.tables.write_table` writes uncompressed Arrow IPC (`.arrow`).
 `read_table` uses memory-mapped Polars IPC reads. This favors read speed and
 avoids Python-object deserialization, at the cost of larger files than
 compressed Parquet. Existing external Parquet inputs can still be read.
 
 ## Stage contracts
 
-- `sumo.scenario.population.population` returns a dictionary of absolute paths:
-  `persons`, `activities`, and mode-filtered `vehicle_trips`.
-- `sumo.scenario.demand` returns departure-sorted XML in `queries`, the sorted
+- `sumo.macro_scenario.population` returns a dictionary of absolute paths:
+  `persons`, `activities`, mode-filtered `vehicle_trips`, and `commercial_trips`.
+- `sumo.macro_scenario.demand` returns departure-sorted XML in `queries`, the sorted
   IPC file in `table`, and counts and departure bounds.
 - Loading and standalone assignment return `trip_metrics.arrow` through their
   existing `metrics` field.
@@ -28,7 +28,7 @@ speed over minimizing RAM.
 
 ## Native vehicle XML
 
-`sumo.native.runtime` compiles `sumo/native/write_trips.cpp` into its own stage
+`sumo.native.runtime` compiles `sumo/functions/native/write_trips.cpp` into its own stage
 cache. It uses the compiler and the Arrow headers/library already supplied by
 PyArrow, plus system zlib. The SUMO launcher loads GCC and sets
 `POLARS_MAX_THREADS` from the Slurm CPU allocation unless explicitly overridden.
@@ -38,8 +38,8 @@ With default `sumo_native_xml: true`, the C++ writer reads the sorted IPC file
 directly and writes buffered gzip/plain SUMO XML. Population trips require no
 Python record dictionaries or XML elements. Existing vehicle-trip XML is parsed
 with C-backed lxml and retained as serialized elements, preserving arbitrary
-attributes and parameters when mixed with population trips. Other SUMO XML
-readers continue to use lxml's binary streaming parser.
+attributes and parameters when mixed with population trips. The Python reference XML
+readers use binary lxml streams; the default macro indexer uses native SAX.
 
 The writer escapes attribute values, preserves Unicode and whitespace, rejects
 invalid XML characters, and reports progress each million trips. Its build cache
@@ -56,7 +56,7 @@ their definitions and routes every cell with the default passenger vehicle.
 This rejects legal delivery-only endpoints and can assign freight to roads
 that exclude it.
 
-The patch in `sumo/native/marouter.patch` loads type definitions and uses the
+The patch in `sumo/functions/native/marouter.patch` loads type definitions and uses the
 cell's actual type for path search, costs and route probabilities. Bulk search
 reuse includes both origin and type. Car, truck and delivery flows still share
 the same link costs and congestion calculation. No permissions are relaxed and
@@ -68,7 +68,7 @@ use SUMO's native loop search during assignment, so their return paths also
 contribute to congestion. Forward trips on that edge retain their direct path.
 Loop search disables bulk-tree reuse while testing different successor edges.
 
-Both `sumo.simulation.load_network` and `sumo.router.assignment` use this binary.
+Both `sumo.macro_scenario` and `sumo.router.assignment` use this binary.
 The stage verifies the pinned source archive checksum, compiles only marouter,
 and returns its cached executable path. Patch changes invalidate the build.
 Build logs remain under its `build/` directory. The first run downloads and
@@ -95,3 +95,45 @@ These are small, cache-hot benchmarks, not estimates for national runs.
 The next pipeline run rebuilds affected SUMO caches for these new contracts.
 Running processes keep their previously imported Python code and must be
 restarted to benefit. Do not run two jobs against the same writable cache.
+
+## Native regional route filter and single-pass realization
+
+`sumo.native.routes` also builds an immutable C++ set of retained edge IDs.
+The regional parser tests the raw route edge string against it before creating
+Python edge lists or timing/metadata objects. Matching uses complete tokens,
+including Unicode IDs. The set is built once per stage; calls release the GIL.
+Outside routes therefore avoid most Python allocation. Setting
+`sumo_native_routes: false` retains the equivalent Python fallback.
+
+Default macro realization writes source parameters, validated routes and bounded
+Arrow metric batches in the same pass. Source coverage is checked with one byte
+per source trip. The scenario manifest reuses those files without reparsing,
+sorting or copying national XML a second time. The optional DUA path retains its
+separate publication checks. Regional validation streams one vehicle at a time.
+
+## Batched native realization and regional export
+
+`sumo.native.processing` builds task-specific executables from
+`sumo/functions/native/processing/`. `io.hpp` provides checked IPC/XML streams and JSON
+metadata handling; `index.hpp` parses assignment inputs; `network.hpp` prepares
+integer road/permission indexes; `routes.hpp` realizes and times batches;
+`cut.hpp` reuses the existing fractional route kernel; `export.hpp` writes
+regional XML with ordered parallel gzip compression.
+
+Compilation uses C++17, the existing PyArrow headers/library, system Expat
+headers/library and zlib. No SUMO installation or project uv dependency is added.
+The native processes avoid the Python GIL. Shared network/cost arrays are
+immutable during each parallel batch. Failed indexing, realization, cutting and
+XML export use temporary outputs before publishing completed files.
+
+The default stages are `macro_scenario.indexed`, `macro_scenario.allocation`,
+`macro_scenario.routes`, `micro_scenario.routes`, and `micro_scenario.demand`.
+National routes are IPC files with integer edge sequences, float64 exit times,
+JSON string attributes/parameters and a separate edge dictionary. Clocks retain
+float64 precision until final XML serialization. Cached files
+remain read-only for downstream stages. XML is generated after regional cutting;
+standalone configs explicitly using national IPC routes generate their own XML
+copy. The Python/XML reference path remains available with
+`sumo_native_routes: false`. DUA keeps its experienced XML path.
+
+See [batch controls and benchmarks](../performance.md#batch-and-io-controls).

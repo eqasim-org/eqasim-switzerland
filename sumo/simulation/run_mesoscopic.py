@@ -1,16 +1,23 @@
 """Run the cut scenario with the urban mesoscopic SUMO preset."""
 
-from sumo.config import mesoscopic
-from sumo.simulation.tools import configure_regional, run_regional, validate_regional
+from sumo.functions.config import mesoscopic
+from sumo.functions.monitoring.runtime import monitored
+from sumo.functions.simulation.tools import (
+    configure_regional,
+    run_regional,
+    validate_regional,
+)
 
 
 def configure(context):
     configure_regional(context, mesoscopic)
 
 
+@monitored
 def execute(context):
 
     # Generate the local mesoscopic config and run the cached regional scenario.
+
     return run_regional(context, mesoscopic, "mesoscopic")
 
 

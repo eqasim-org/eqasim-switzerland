@@ -2,19 +2,22 @@
 
 import hashlib
 import json
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 from lxml import etree
 
-from sumo import output_tools
+from sumo.functions import output_tools
+from sumo.functions.monitoring.runtime import export_monitor, monitored
 
 
 def configure(context):
     context.stage("sumo.run")
+    context.stage("sumo.monitoring")
     context.config("output_path")
 
 
+@monitored
 def execute(context):
 
     # Resolve the completed simulation and protect every upstream cache from writes.
@@ -23,15 +26,21 @@ def execute(context):
     destination = Path(context.config("output_path")).expanduser().resolve() / "sumo"
     for key in ("config", "network", "input_routes"):
         if destination.is_relative_to(Path(result[key]).resolve().parent):
-            raise ValueError("SUMO output_path must be outside the input and simulation caches")
+            raise ValueError(
+                "SUMO output_path must be outside the input and simulation caches"
+            )
     destination.mkdir(parents=True, exist_ok=True)
     for name in ("results", "replay", "additional"):
         (destination / name).mkdir(exist_ok=True)
 
     # Export the network, assigned demand and all locally generated diagnostics/results.
 
-    output_tools.copy_compressed_xml(result["network"], destination / "network.net.xml.gz")
-    output_tools.copy_compressed_xml(result["input_routes"], destination / "demand.rou.xml.gz")
+    output_tools.copy_compressed_xml(
+        result["network"], destination / "network.net.xml.gz"
+    )
+    output_tools.copy_compressed_xml(
+        result["input_routes"], destination / "demand.rou.xml.gz"
+    )
     simulation = Path(result["config"]).resolve().parent
     for source in simulation.iterdir():
         if source.is_file():
@@ -40,7 +49,9 @@ def execute(context):
     tree.find("input/net-file").set("value", "network.net.xml.gz")
     tree.find("input/route-files").set("value", "demand.rou.xml.gz")
     files = []
-    for index, name in enumerate(tree.find("input/additional-files").get("value", "").split(",")):
+    for index, name in enumerate(
+        tree.find("input/additional-files").get("value", "").split(",")
+    ):
         if name:
             source = Path(name)
             if not source.is_absolute():
@@ -53,7 +64,9 @@ def execute(context):
 
     # Supply a GUI copy that works without a local Swiss projection database.
 
-    output_tools.cartesian_copy(destination / "network.net.xml.gz", destination / "network.gui.net.xml.gz")
+    output_tools.cartesian_copy(
+        destination / "network.net.xml.gz", destination / "network.gui.net.xml.gz"
+    )
     tree.find("input/net-file").set("value", "network.gui.net.xml.gz")
     gui = destination / "gui.sumocfg"
     tree.write(str(gui), encoding="utf-8", xml_declaration=True, pretty_print=True)
@@ -62,10 +75,26 @@ def execute(context):
         "This locally reruns the exported scenario. Server results remain in results/;\n"
         "local simulation outputs go to replay/. Scale is already 100%: keep Scale Traffic at 1.\n"
         "The GUI network preserves Cartesian road geometry but omits geographic conversion;\n"
-        "use network.net.xml.gz for georeferenced analysis.\n")
-    manifest = {"directory": str(destination), "model": result["model"], "count": result["count"],
-                "config": str(config), "gui_config": str(gui), "results": str(destination / "results")}
-    (destination / "export.json").write_text(json.dumps(manifest, indent=2)+"\n")
+        "use network.net.xml.gz for georeferenced analysis.\n"
+    )
+    manifest = {
+        "directory": str(destination),
+        "model": result["model"],
+        "count": result["count"],
+        "config": str(config),
+        "gui_config": str(gui),
+        "results": str(destination / "results"),
+    }
+    (destination / "export.json").write_text(json.dumps(manifest, indent=2) + "\n")
+
+    # Copy quality diagnostics and let the sampler export its final stage measurements.
+
+    quality = context.stage("sumo.monitoring")
+    shutil.copytree(quality["directory"], destination / "quality", dirs_exist_ok=True)
+    export_monitor(context, destination / "monitoring")
+    manifest["quality_report"] = str(destination / "quality" / "index.html")
+    manifest["performance"] = str(destination / "monitoring" / "performance.png")
+    (destination / "export.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     # Return a small export manifest; source simulation files remain cached and reusable.
 
@@ -74,6 +103,18 @@ def execute(context):
 
 def validate(context):
     folder = Path(context.config("output_path")).expanduser().resolve() / "sumo"
-    available = all((folder / name).is_file() for name in
-                    ("network.net.xml.gz", "network.gui.net.xml.gz", "demand.rou.xml.gz", "gui.sumocfg", "export.json"))
-    return {"helpers": hashlib.sha256(Path(output_tools.__file__).read_bytes()).hexdigest(), "available": available}
+    available = all(
+        (folder / name).is_file()
+        for name in (
+            "network.net.xml.gz",
+            "network.gui.net.xml.gz",
+            "demand.rou.xml.gz",
+            "gui.sumocfg",
+            "export.json",
+            "quality/index.html",
+        )
+    )
+    return {
+        "helpers": hashlib.sha256(Path(output_tools.__file__).read_bytes()).hexdigest(),
+        "available": available,
+    }

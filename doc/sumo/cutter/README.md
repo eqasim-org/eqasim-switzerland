@@ -1,6 +1,6 @@
 # Loaded network and regional scenarios
 
-`sumo.simulation.load_network` loads the full scenario before cutting it. The
+`sumo.macro_scenario` loads the full scenario before cutting it. The
 default method is native `marouter` **incremental macroscopic assignment**.
 Demand is loaded in increments and route choice responds to flow-dependent
 edge costs. A seeded, balanced integer realization retains its assigned route
@@ -33,14 +33,15 @@ The routed regional cutter below still follows assigned roads and loaded times.
 
 | Stage | Result |
 | --- | --- |
-| `sumo.scenario.demand` | Selected individual vehicle loading trips and optional car-network queries |
-| `sumo.scenario.network.routing` | Cached Arrow road geometry and per-class origin/destination reachability on the full assignment network |
-| `sumo.simulation.load_network` | Full network, explicit routes with edge exit times, edge weights, `trip_metrics.arrow` and `loading_report.json` |
-| `sumo.cutter.geometry` | Polygon union in the network CRS and local offset, preserving holes |
-| `sumo.cutter.split_network` | Full network split at polygon boundaries, before loading |
-| `sumo.cutter.network` | Region-only directed network and `edge_mapping.json` |
-| `sumo.cutter.trips` | Every inside visit with adjusted departure and endpoint positions, plus `cut_report.json` |
-| `sumo.cutter.scenario` | Copied regional network/routes, mapping, report and runnable `microscopic.sumocfg` |
+| `sumo.macro_scenario.demand` | Selected individual vehicle loading trips and optional car-network queries |
+| `sumo.macro_scenario.connected_network` | Cached Arrow road geometry and per-class origin/destination reachability on the full assignment network |
+| `sumo.macro_scenario` | Full network, structured `routes.arrow` with edge exit times, edge weights, `trip_metrics.arrow` and `loading_report.json` |
+| `sumo.micro_scenario.region` | Polygon union in the network CRS and local offset, preserving holes |
+| `sumo.macro_scenario.split_network` | Full network split at polygon boundaries, before loading |
+| `sumo.micro_scenario.network` | Region-only directed network and `edge_mapping.json` |
+| `sumo.micro_scenario.routes` | Native IPC batches containing every inside visit |
+| `sumo.micro_scenario.demand` | Sorted regional XML for every inside visit with adjusted departure and endpoint positions, plus `cut_report.json` |
+| `sumo.micro_scenario` | Read-only regional network/route paths, reports and local `microscopic.sumocfg`; portable copies belong to `sumo.output` |
 | `sumo.simulation.run_microscopic` | Microscopic execution of the cut scenario, with outputs in its own cache |
 | `sumo.simulation.run_mesoscopic` | Mesoscopic execution of the cut scenario, with outputs in its own cache |
 | `sumo.run` | Selects one regional run stage using `sumo_simulation_model` |
@@ -62,7 +63,7 @@ edges need the additional mapping used here.
 
 ## Reachable trip endpoints
 
-Before assignment, `sumo.scenario.network.routing` indexes the exact full
+Before assignment, `sumo.macro_scenario.connected_network` indexes the exact full
 network, including any regional boundary splits. Its `routing_edges.arrow`
 contains road shapes and separate origin/destination masks for each simulated
 vehicle class. The graph uses permitted lane-to-lane turns, rather than only
@@ -125,6 +126,12 @@ largest such component and reports discarded edges. `error` fails on disconnecte
 geometry; `all` explicitly retains every component. Routes never bridge a removed
 component or a forbidden turn. `sumo_cutter_min_edge_length` defaults to 0.01 m.
 
+By default, native realization and regional cutting exchange structured IPC,
+not national route XML. The cutter scans integer edge arrays in C++, processes
+retained routes in parallel batches, and preserves metadata and entry clocks.
+Only the regional export writes route XML, in buffered gzip blocks. See
+[batch and I/O controls](../performance.md#batch-and-io-controls).
+
 The trip report counts omitted trips, repeated visits and visits requiring
 within-edge time interpolation. The standard boundary-split loading workflow
 has no such interpolation; the low-level cutter also supports unsplit routes
@@ -137,6 +144,7 @@ and labels interpolated times explicitly.
 | `sumo_loading_method` | `incremental` | Native macro `incremental` or `SUE`; simulation-based `dua` is opt-in |
 | `sumo_loading_mesoscopic` | `true` | For `dua` only: mesoscopic loading; false uses microscopic loading |
 | `sumo_loading_route_choice` | `msa` | `msa`, `gawron` or `logit`, for DUA |
+| `sumo_assignment_routing_algorithm` | `CCH` | Default native path-search algorithm |
 | `sumo_assignment_iterations` | `20` | Maximum DUA iterations or native macro increments/iterations |
 | `sumo_assignment_interval` | `3600` s | Aggregation of loaded edge costs |
 | `sumo_assignment_scale` | `1` | Demand expansion; use 10 only for representative 10% demand |
@@ -171,11 +179,10 @@ slice, with partial endpoint positions accounted for. They do not model queue
 propagation between slices or demonstrate user equilibrium. The realization
 report records this approximation. See [macroscopic cost assumptions](../config/README.md).
 
-SUMO 1.28.0 `marouter` searches with its default vehicle class, even for typed
-truck/LCV input. All exported routes are checked against their actual vehicle
-class and permitted turns. An invalid native assignment fails explicitly;
-use `sumo_loading_method: dua` when class restrictions require class-aware
-assignment. The exporter does not reroute or silently modify assigned flows.
+The private `sumo.native.marouter` build uses each demand cell's actual vehicle
+class and supports CCH. Cars, trucks and LCV share congestion while retaining
+access and turn restrictions. Exported routes are validated for those permissions;
+there is no preliminary or subsequent duarouter pass in the default workflow.
 
 `trip_metrics.arrow` contains source IDs, original travel-time references,
 loaded travel time and distance. DUA time measures actual departure to arrival;
@@ -193,10 +200,10 @@ large region when those effects matter.
 Use the existing synthesis cache and working settings:
 
 ```bash
-uv run -m synpp config_dib_10.yml --run sumo.simulation.load_network \
+uv run -m synpp config_dib_10.yml --run sumo.macro_scenario \
     --config sumo_assignment_scale 1
 
-uv run -m synpp config_dib_10.yml --run sumo.cutter.scenario \
+uv run -m synpp config_dib_10.yml --run sumo.micro_scenario \
     --config sumo_assignment_scale 1 \
     --config sumo_region_geometry /path/to/zurich_region.gpkg
 ```
@@ -215,7 +222,7 @@ to disable teleporting. Review teleport warnings when interpreting travel times.
 ## Run the cut scenario
 
 Set `sumo_simulation_model` to `microscopic` (default) or `mesoscopic` and run
-`sumo.run`. Both choices consume `sumo.cutter.scenario` and generate a fresh local
+`sumo.run`. Both choices consume `sumo.micro_scenario` and generate a fresh local
 config using the corresponding shared preset. The microscopic preset uses
 `sumo_micro_*` settings; the mesoscopic preset uses `sumo_meso_*` settings.
 `sumo_loading_mesoscopic` controls only explicitly selected full-network DUA
@@ -254,9 +261,9 @@ The older `sumo.simulation.run` remains the runner for separately generated
 `sumo.config.microscopic` / `sumo.config.mesoscopic` configs and explicit inputs;
 use `sumo.run` for the complete cutter-to-simulation workflow.
 
-Reusable scenario readers/writers live in `sumo.scenario.tools`,
-`sumo.scenario.network.tools` and `sumo.scenario.population.writer`.
-Spatial and temporal cutting helpers live in `sumo.cutter.tools`. Upstream
+Reusable scenario readers/writers live in `sumo.functions.scenario.tools`,
+`sumo.functions.scenario.network.tools` and `sumo.functions.scenario.population.writer`.
+Spatial and temporal cutting helpers live in `sumo.functions.cutter.tools`. Upstream
 network, demand and loading caches are never edited.
 
 References: [SUMO dynamic user assignment](https://sumo.dlr.de/docs/Demand/Dynamic_User_Assignment.html),

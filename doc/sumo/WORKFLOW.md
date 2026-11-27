@@ -1,322 +1,148 @@
-# SUMO workflow and stage structure
+# SUMO workflow
 
-The `sumo/` package prepares networks and demand, loads traffic, cuts a regional
-scenario, and runs microscopic or mesoscopic simulations. Synpp resolves each
-stage's dependencies and caches its result. The flowcharts below show only
-`sumo.*` stages; the rest of the Switzerland pipeline appears as input data.
+The main entry points are deliberately short:
 
-Start with `sumo.run` for a loaded regional scenario. For setup and file-format
-details, see [runtime and networks](README.md). Detailed guides cover
-[population export](population/README.md), [simulation and assignment
-presets](config/README.md), and [network loading and cutting](cutter/README.md).
+```mermaid
+flowchart LR
+    INPUT[/"synthesis.prepared + road network"/] --> MACRO["sumo.macro_scenario\nNational loaded routes"]
+    MACRO --> MICRO["sumo.micro_scenario\nRegional network and demand"]
+    REGION[/"Region polygon"/] --> MICRO
+    MICRO --> RUN["sumo.run\nMicro or mesoscopic simulation"]
+    RUN --> QUALITY["sumo.monitoring\nSimulation quality report"]
+    QUALITY --> OUT["sumo.output\nPortable output directory"]
+    RUN --> OUT
+```
 
-## Regional loading, cutting and simulation
+`micro_scenario` means the regional, detailed scenario. Both microscopic and
+mesoscopic simulations use it. External pipeline stages are inputs; their
+internal dependencies are not expanded in these diagrams.
 
-Solid arrows show results passed from a producer to a consumer. Dashed arrows
-show conditional branches. Both final simulation branches are shown, but
-`sumo.run` requires only the branch selected by `sumo_simulation_model`.
-The diagram assumes `sumo_region_geometry` is set.
+## Independently cached tasks
 
 ```mermaid
 flowchart TB
-    subgraph INPUTS["Inputs: files and the rest of the pipeline"]
-        PEOPLE[/"Persons, activities, locations<br/>and final modes and departures"/]
-        COMMERCIAL[/"Freight and LCV trips"/]
-        NETWORK[/"OSM XML or PBF,<br/>or prepared SUMO network"/]
-        REGION[/"Region polygon: SHP, GPKG or GeoJSON"/]
-        VEHICLES[/"Optional existing vehicle-trip files"/]
-        SWISS[/"Swiss border polygon"/]
-        HOMES[/"STATPOP homes and eligible activity destinations"/]
-        MC[/"Mode-choice road link sequences and extended MATSim network"/]
-    end
-
-    subgraph SUMO["SUMO stages"]
-        POP["sumo.scenario.population.population"]
-        TRIPS["sumo.scenario.population.trips"]
-        RAW["sumo.scenario.unrouted_demand"]
-        SELECTED["sumo.scenario.selected"]
-        PATHS["sumo.routing.paths"]
-        ROADSHAPES["sumo.routing.network"]
-        CLIPPED["sumo.scenario.clipped"]
-        SCALED["sumo.scenario.scaled"]
-        DEMAND["sumo.scenario.demand"]
-        BORDER["sumo.scenario.border"]
-        RUNTIME["sumo.runtime.sumo"]
-        NATIVE["sumo.native.runtime"]
-        MAROUTER["sumo.native.marouter"]
-        NET["sumo.scenario.network.road_network"]
-        GEO["sumo.cutter.geometry"]
-        SPLIT["sumo.cutter.split_network"]
-        INDEX["sumo.scenario.network.routing"]
-        PREP["sumo.simulation.prepare_loading"]
-        ASSIGN["sumo.simulation.assign_network"]
-        REALIZE["sumo.simulation.realize_routes"]
-        LOAD["sumo.simulation.load_network"]
-        CUTNET["sumo.cutter.network"]
-        PARTS["sumo.cutter.route_parts"]
-        CUTTRIPS["sumo.cutter.trips"]
-        SCENARIO["sumo.cutter.scenario"]
-        MICRO["sumo.simulation.run_microscopic"]
-        MESO["sumo.simulation.run_mesoscopic"]
-        RUN["sumo.run"]
-        OUTPUT["sumo.output"]
-    end
-
-    PEOPLE --> POP
-    COMMERCIAL --> TRIPS
-    SWISS --> BORDER
-    BORDER --> SELECTED
-    BORDER --> ROADSHAPES
-    BORDER --> CLIPPED
-    POP --> RAW
-    TRIPS --> RAW
-    RAW --> SELECTED
-    SELECTED --> PATHS
-    SELECTED --> CLIPPED
-    MC --> PATHS
-    MC --> ROADSHAPES
-    ROADSHAPES --> PATHS
-    ROADSHAPES --> CLIPPED
-    PATHS --> CLIPPED
-    CLIPPED --> SCALED
-    HOMES --> SCALED
-    SCALED --> DEMAND
-    NATIVE -. "default bulk XML writer" .-> DEMAND
-    VEHICLES -. "sumo_assignment_trip_files replaces population inputs" .-> RAW
-    NETWORK --> NET
-    RUNTIME -. "OSM conversion only" .-> NET
-    REGION --> GEO
-    NET --> GEO
-    NET --> SPLIT
-    GEO --> SPLIT
-    DEMAND --> PREP
-    PREP --> ASSIGN
-    ASSIGN --> REALIZE
-    REALIZE --> LOAD
-    SPLIT --> PREP
-    SPLIT --> INDEX
-    INDEX --> PREP
-    RUNTIME --> ASSIGN
-    MAROUTER -. "class-aware macroscopic assignment" .-> ASSIGN
-    LOAD --> CUTNET
+    PREP[/"synthesis.prepared.population"/] --> POP["macro_scenario.population\nAdapt final plans to IPC"]
+    POP --> VEH["macro_scenario.vehicles\nFreight and LCV XML"]
+    POP --> TRIPS["macro_scenario.trips\nOriginal vehicle trips"]
+    VEH --> TRIPS
+    TRIPS --> SELECT["macro_scenario.selected\nSwiss endpoint selection"]
+    SELECT --> CLIP["macro_scenario.clipped\nClip crossing originals"]
+    PATHS["routing.paths\nReuse or complete road paths"] --> CLIP
+    SELECT --> PATHS
+    JAVA[/"Mode-choice road router and saved paths"/] --> PATHS
+    SWISS[/"Swiss boundary"/] --> SELECT
+    SWISS --> CLIP
+    CLIP --> SCALE["macro_scenario.scaled\nExpand to full demand"]
+    FAC[/"synthesis.prepared.facilities"/] --> SCALE
+    SCALE --> DEMAND["macro_scenario.demand\nSorted SUMO trip XML"]
+    NETIN[/"OSM or prepared SUMO network"/] --> NET["macro_scenario.network"]
+    NET --> SPLIT["macro_scenario.split_network\nSplit region crossings; keep full network"]
+    GEO["micro_scenario.region\nProject region polygon"] --> SPLIT
+    REGION[/"Region geometry"/] --> GEO
+    SPLIT --> CONNECT["macro_scenario.connected_network\nPer-class reachability index"]
+    CONNECT --> MAP["macro_scenario.mapped\nMap endpoints"]
+    DEMAND --> MAP
+    MAP --> ASSIGN["macro_scenario.assignment\nmarouter: CCH, 20 increments"]
+    ASSIGN --> INDEX["macro_scenario.indexed\nNative XML to IPC batches"]
+    INDEX --> ALLOC["macro_scenario.allocation\nSeeded integer route shares"]
+    ALLOC --> ROUTES["macro_scenario.routes\nNative validation, clocks and IPC metrics"]
+    ROUTES --> MACRO["sumo.macro_scenario\nPublish national manifest"]
+    MACRO --> CUTNET["micro_scenario.network\nRetain regional roads and turns"]
     GEO --> CUTNET
-    LOAD --> PARTS
-    CUTNET --> PARTS
-    PARTS --> CUTTRIPS
-    CUTNET --> SCENARIO
-    CUTTRIPS --> SCENARIO
-    SCENARIO --> MICRO
-    SCENARIO --> MESO
-    MICRO -. "microscopic" .-> RUN
-    MESO -. "mesoscopic" .-> RUN
+    MACRO --> CUTROUTES["micro_scenario.routes\nCut IPC batches in C++"]
+    CUTNET --> CUTROUTES
+    CUTROUTES --> EXPORT["micro_scenario.demand\nSort IPC; write regional XML"]
+    EXPORT --> MICRO["sumo.micro_scenario\nRegional manifest and convenience config"]
+    CUTNET --> MICRO
+    MICRO --> RUN["sumo.run"]
+    RUN --> QUALITY["sumo.monitoring\nStream simulation diagnostics"]
+    QUALITY --> OUTPUT["sumo.output"]
     RUN --> OUTPUT
-
-    classDef input fill:#f3f4f6,stroke:#9ca3af,color:#374151;
-    classDef entry fill:#dcfce7,stroke:#16a34a,color:#14532d;
-    class PEOPLE,COMMERCIAL,NETWORK,REGION,VEHICLES,SWISS,MC,HOMES input;
-    class RUN entry;
 ```
 
-This is a data-flow overview, with repeated dependency arrows omitted for
-readability. The runtime is also required by native network splitting,
-network cutting and simulation. The original network remains a dependency of
-loading even when loading uses its boundary-split version.
+Stage labels without the `sumo.` prefix belong to SUMO. The diagram omits
+runtime/compiler dependencies and repeated input arrows. Without a region,
+assignment uses the unsplit network. Explicit trip files replace the population
+adapter; setting `clip_trips_to_border_in_sumo: false` skips Swiss clipping.
 
-The stages perform the following steps:
+The prepared population already contains corrected plans and optional external,
+cross-border, freight, LCV and airport demand. SUMO does not assemble those
+sources again. Airport replacement plans are exported once. The independent
+`exlude_external_population_in_sumo` switch still defaults to true; mode filtering
+uses `sumo_modes: [car, truck]`, with truck including LCV.
 
-1. **Prepare the full network and selected demand.**
-   `road_network` detects the input format: a prepared SUMO network is returned
-   directly, while OSM is converted with `netconvert`. Population tables become
-   individual car trips, and commercial demand supplies truck/LCV trips.
-   `sumo_modes`, defaulting to `[car, truck]`, selects exported demand; `truck`
-   also includes LCV. External people are excluded by default through
-   `exlude_external_population_in_sumo: true`; cross-border people remain selected
-   by `include_cross_border`. Supplied vehicle-trip files bypass population preparation.
-   `enable_mode_choice: true` is required. Set `prepare_sumo: true` so the normal
-   mode-choice routing pass saves paths. `unrouted_demand` caches selected trips;
-   `selected` checks original origins/destinations in vectors. Domestic trips pass
-   through; outside-to-outside trips (including transit) are dropped. Only
-   inbound/outbound originals reuse or complete extended MATSim road paths in
-   `sumo.routing.paths`. `sumo.routing.network` indexes directed link/border
-   intersections once. `clipped` retains their domestic visits, then `scaled`
-   expands the retained demand to 100%. Border endpoints remain fixed and moved
-   activity endpoints stay in Switzerland. `demand` only sorts and writes queries.
-   Border entry clocks are estimated from routed total times and per-link
-   free-flow proportions. See [route reuse and border timing](population/README.md#road-route-reuse-and-swiss-border-demand-clipping).
-2. **Insert region boundaries before loading.**
-   `geometry` transforms the polygon into the network coordinate frame.
-   `split_network` splits crossing edges but retains the full inside and outside
-   network. This gives loading an edge boundary at each regional entry/exit.
-3. **Load and route traffic on the full network.**
-   `load_network` defaults to native macroscopic `incremental` assignment;
-   `SUE` is another macro option. Assigned route distributions are realized
-   reproducibly as individual routes. Mapped endpoints feed `marouter` directly;
-   there is no preliminary or subsequent `duarouter` search in this workflow.
-   Entry times accumulate loaded departure-slice edge costs. Full-network
-   iterative routing/simulation requires explicit `sumo_loading_method: dua`.
-   The stage records routes, estimated or experienced exit times, weights and metrics.
-   Without a configured region, this stage uses the original unsplit network.
-4. **Keep every inside visit.**
-   `cutter.network` retains regional edge pieces and applies the configured
-   connectivity policy. `cutter.trips` keeps the corresponding route pieces and
-   sets departures to loaded entry times. A trip can cross the region with both
-   endpoints outside; leaving and re-entering produces separate visits.
-5. **Package and simulate the region.**
-   `cutter.scenario` copies the regional network, routes and edge mapping into
-   a bundle. The selected final run stage generates its own local config from
-   those inputs and executes SUMO with regional GPS rerouting enabled by default
-   (`sumo_rerouting_probability: 1`); gridlock recovery defaults to 600 seconds.
-   `sumo.run` returns cached paths; `sumo.output` exports a portable copy.
+Swiss clipping processes originals before expansion. Both endpoints inside:
+keep; both outside: drop; one outside: use the routed border crossing. Regional
+cutting instead follows the national assigned route, retaining through-trips
+and separate visits after re-entry, with departures adjusted to loaded entry
+times. Splitting regional crossings before assignment supplies explicit entry
+edges while retaining the full national assignment network.
 
-The final run stages reuse config-writing helpers directly. They do not depend
-on the standalone `sumo.config.*` stages shown in the next diagram. The bundle
-contains a microscopic config for convenience; a mesoscopic final run writes
-its own mesoscopic config.
+CCH accelerates path searches inside marouter; incremental assignment still
+updates congestion costs over 20 increments. Realization uses seeded, balanced
+integer allocation of marouter's route shares, with estimated edge exit clocks.
+Native parsing is cached in `indexed`; `allocation` retains the established Python
+random stream and writes compact selections. C++ realization stores integer edge
+sequences and exit-time arrays in national IPC batches. The native cutter reads
+those batches directly. XML is written after regional sorting, with ordered
+parallel gzip compression. `sumo_native_routes: false` retains the Python/XML
+reference path; explicit DUA loading also retains XML publication.
+There is no second path search or national mesoscopic run in this default flow.
+`sumo_loading_method: dua` explicitly selects simulation-based loading instead.
 
-`sumo_loading_mesoscopic` controls the full-network DUA loading model.
-`sumo_simulation_model` independently selects the final regional simulation.
-For example, mesoscopic loading can feed a microscopic city simulation.
+## Package tree
 
-## Population plans, standalone configs and macroscopic assignment
-
-This second workflow exposes person-plan export and the standalone config and
-assignment stages. The four SUMO producers at the top are shared with the first
-diagram. Their upstream data remain inputs; their non-SUMO dependencies are not
-expanded here.
-
-```mermaid
-flowchart TB
-    subgraph INPUTS["Optional file inputs"]
-        ROUTES[/"Existing route files"/]
-    end
-
-    subgraph SUMO["SUMO stages"]
-        POP["sumo.scenario.population.population"]
-        TRIPS["sumo.scenario.population.trips"]
-        NET["sumo.scenario.network.road_network"]
-        DEMAND["sumo.scenario.demand"]
-        PLANS["sumo.scenario.population.plans"]
-        ALIAS["sumo.router.demand"]
-        MAPPED["sumo.router.mapped"]
-        MICROCFG["sumo.config.microscopic"]
-        MESOCFG["sumo.config.mesoscopic"]
-        MACROCFG["sumo.config.macroscopic"]
-        LOADEDCFG["sumo.config.loaded"]
-        CONFIGS["sumo.config.config"]
-        ASSIGN["sumo.router.assignment"]
-        SIM["sumo.simulation.run"]
-    end
-
-    POP --> PLANS
-    PLANS --> MICROCFG
-    PLANS --> MESOCFG
-    TRIPS --> MICROCFG
-    TRIPS --> MESOCFG
-    ROUTES -. "sumo_route_files replaces plans and commercial trips" .-> MICROCFG
-    ROUTES -. "sumo_route_files replaces plans and commercial trips" .-> MESOCFG
-    NET --> MICROCFG
-    NET --> MESOCFG
-    NET --> MAPPED
-    DEMAND --> ALIAS
-    ALIAS --> MAPPED
-    MAPPED --> MACROCFG
-    MAPPED --> LOADEDCFG
-    MACROCFG --> LOADEDCFG
-    LOADEDCFG --> ASSIGN
-    MICROCFG --> CONFIGS
-    MESOCFG --> CONFIGS
-    MACROCFG --> CONFIGS
-    LOADEDCFG --> CONFIGS
-    CONFIGS --> SIM
-
-    classDef input fill:#f3f4f6,stroke:#9ca3af,color:#374151;
-    classDef entry fill:#dcfce7,stroke:#16a34a,color:#14532d;
-    class ROUTES input;
-    class ASSIGN,SIM entry;
+```text
+sumo/
+  macro_scenario/  national demand, network, assignment and realized routes
+  micro_scenario/ regional geometry, network, route visits and scenario
+  simulation/     run_microscopic, run_mesoscopic and execution helpers
+  scenario/       shared tables, writers, metrics and demand helpers
+  cutter/         shared spatial and route-cutting functions
+  routing/        reuse/completion of mode-choice road paths for Swiss clipping
+  native/         C++ XML writer, route clocks/cutting/filter, CCH marouter build
+  config/         shared simulation/assignment configuration writers
+  runtime/        private SUMO installation and executable launcher
+  router/         optional standalone loaded-skims workflow
+  tables.py       Polars conversion and IPC I/O
+  run.py          choose microscopic or mesoscopic regional execution
+  output.py       copy results into a portable export
 ```
 
-`population.plans` writes people and their activity/movement chains together in
-native SUMO XML. The regional vehicle-loading workflow constructs individual
-trips from the population tables instead of consuming this person-plan file.
-`router.demand` is a compatibility alias for `scenario.demand`.
+Each expensive task has its own cache. For example, changing the regional writer
+or route realization does not require rerunning assignment when its cache is
+valid. Stage results contain paths and small manifests, not population DataFrames.
+Upstream caches are read-only; portable copies are made by `sumo.output`.
 
-`router.mapped` resolves vehicle endpoints on the network. `config.macroscopic`
-writes the native assignment recipe; `config.loaded` adds a routing recipe
-using the resulting loaded edge weights. `router.assignment` executes both and
-exports per-query metrics. Config generation itself does not execute assignment
-or simulation, although mapping can run `duarouter` as an upstream dependency.
+## Running and migration
 
-`config.config` collects **all four** config products. In the current code,
-`simulation.run` depends on this bundle and executes its microscopic or
-mesoscopic config according to `sumo_simulation_model`. Requesting that runner
-therefore also prepares the macro/loaded config dependencies. Use `sumo.run`
-for the regional cutter workflow.
-
-The macro option inside `simulation.load_network` calls the shared assignment
-and config helpers directly; it does not execute the standalone
-`router.assignment` stage. The two workflows share implementation tools but
-have different stage dependencies and returned results.
-
-## Package responsibilities and stage results
-
-| Package | Responsibility | Main results |
-| --- | --- | --- |
-| `sumo.runtime` | Private SUMO installation and native tool execution | Runtime paths and version |
-| `sumo.scenario.network` | Format detection and OSM conversion or prepared-network reuse | Full SUMO network path |
-| `sumo.scenario.population` | Polars person/activity preparation, plans and commercial trips | IPC table paths and SUMO demand XML |
-| `sumo.native` | Compiled Arrow-to-XML writer | Cached C++ executable |
-| `sumo.scenario.demand` | Individual vehicle queries, shared mode filtering and source metadata | Query XML and loading/query counts |
-| `sumo.config` | Native XML recipes and the config bundle | Config paths; generated additional files |
-| `sumo.router` | Endpoint mapping and standalone macroscopic assignment | Loaded routes, weights and trip metrics |
-| `sumo.cutter` | Polygon preparation, boundary splitting and regional extraction | Regional network/routes, mappings and reports |
-| `sumo.simulation` | Full-network loading and final simulation execution | Loaded full scenario or final simulation outputs |
-| `sumo.run` | Select the regional execution stage | The selected run stage's result dictionary |
-
-Modules such as `tools.py`, `modes.py`, `writer.py` and `simulation/loading.py`
-provide shared functions or classes. They are not independent Synpp stages and
-are intentionally absent from the graphs.
-
-Stage results are filenames or small dictionaries; tabular results are IPC file
-paths, not DataFrames. See [Polars and native XML](native/README.md). Consumers use the
-producer's return value; a stage's cache directory alone does not identify its
-result. The regional execution result includes `config`, `network`,
-`input_routes`, `tripinfo`, `edge_data`, `summary` and simulated `routes` paths.
-`simulation_report.json` records the paths in the run stage's cache.
-Loading and cutting have their own reports described in the
-[cutter guide](cutter/README.md).
-
-## Run or inspect one part of the workflow
-
-Run commands from the repository root. Use a complete local config with valid
-input paths; the portable [regional run example](cutter/run.example.yml) shows
-the required SUMO options.
+With a complete local configuration:
 
 ```bash
-# Run the regional simulation selected in the local SUMO configuration.
+uv run -m synpp config_sumo.yml --run sumo.macro_scenario
+uv run -m synpp config_sumo.yml --run sumo.micro_scenario
 uv run -m synpp config_sumo.yml --run sumo.run
-
-# Override the final model for this run.
-uv run -m synpp config_sumo.yml --run sumo.run \
-    --config sumo_simulation_model microscopic
-
-# Stop after full-network loading or after packaging the regional scenario.
-uv run -m synpp config_sumo.yml --run sumo.simulation.load_network
-uv run -m synpp config_sumo.yml --run sumo.cutter.scenario
-
-# Generate only a standalone config or export person plans.
-uv run -m synpp config_sumo.yml --run sumo.config.mesoscopic
-uv run -m synpp config_sumo.yml --run sumo.scenario.population.plans
+uv run -m synpp config_sumo.yml --run sumo.output
 ```
 
-`--run` selects the requested target, but its missing dependencies still run.
-Explicitly requested targets are rerun by Synpp; valid upstream caches can be
-reused. Source inputs and upstream caches remain read-only, and run outputs
-stay in the consuming stage's cache.
+`sumo_simulation_model` selects `microscopic` (default) or `mesoscopic`.
+`--run` requests a target and all missing dependencies. Do not request the
+assignment stage explicitly when you only intend to reuse its valid cache.
 
-The diagrams show the union of supported branches. The configured dependency
-graph varies with input files, mode selection, optional external populations,
-the region and selected model. A prepared network skips OSM conversion;
-external trip/route files can skip synthesis exports; only the selected final
-regional run stage is required by `sumo.run`.
+The former `sumo.scenario.*` construction stages now live under
+`sumo.macro_scenario`; `sumo.simulation.load_network` becomes
+`sumo.macro_scenario`, and `sumo.cutter.scenario` becomes `sumo.micro_scenario`.
+The three loading tasks are now `mapped`, `assignment`, and `routes` under
+`macro_scenario`. Old regional `route_parts` and `trips` become
+`micro_scenario.routes` and `micro_scenario.demand`.
 
-For cache boundaries, native fallbacks and thread budgets, see [performance](performance.md).
+Renamed stages and the prepared-source contract require new caches on the first
+run. Keep Synpp `debug: false` to validate dependencies normally; old caches are
+left untouched. No new national performance measurement is implied by the
+small-fixture validation. See [performance](performance.md),
+[population](population/README.md), [cutting](cutter/README.md) and
+[configuration](config/README.md) for details.
+
+All Python stage helpers and C++ sources live under `sumo.functions`; only stage
+modules remain outside it. Every stage uses `@monitored` to request background
+runtime and memory updates. See [monitoring and quality reports](monitoring.md).

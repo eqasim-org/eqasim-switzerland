@@ -1,7 +1,7 @@
 # Replace all input paths with existing files. Run from the repository root.
 working_directory: cache_sumo_cut
 run:
-  - sumo.cutter.scenario
+  - sumo.micro_scenario
 config:
   random_seed: 518745
   threads: 24

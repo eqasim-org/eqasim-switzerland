@@ -1,14 +1,15 @@
-"""Compatibility stage: scenario demand is prepared under sumo.scenario."""
+"""Compatibility stage: scenario demand is prepared under sumo.macro_scenario."""
 
-from sumo.scenario.unrouted_demand import _population_trips
+from sumo.functions.monitoring.runtime import monitored
 
 
 def configure(context):
-    context.stage("sumo.scenario.demand")
+    context.stage("sumo.macro_scenario.demand")
 
 
+@monitored
 def execute(context):
 
     # Reuse the canonical scenario demand and its shared mode filtering.
 
-    return context.stage("sumo.scenario.demand")
+    return context.stage("sumo.macro_scenario.demand")

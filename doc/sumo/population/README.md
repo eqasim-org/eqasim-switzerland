@@ -9,23 +9,25 @@ native demographic file that a plan references by person ID.
 
 | Stage | Cached result |
 | --- | --- |
-| `sumo.scenario.population.population` | Paths to `persons.arrow`, `activities.arrow` and `vehicle_trips.arrow` |
-| `sumo.scenario.population.plans` | Absolute path to `population.rou.xml.gz`, containing people and their plans |
-| `sumo.scenario.population.trips` | Absolute path to `vehicles.trips.xml.gz`, containing freight and commercial vehicle trips |
+| `sumo.macro_scenario.population` | Paths to `persons.arrow`, `activities.arrow`, `vehicle_trips.arrow` and `commercial.arrow` |
+| `sumo.macro_scenario.plans` | Absolute path to `population.rou.xml.gz`, containing people and their plans |
+| `sumo.macro_scenario.vehicles` | Absolute path to `vehicles.trips.xml.gz`, containing freight and commercial vehicle trips |
 
-The preparation stage uses `synthesis.population.models.subscriptions`,
-`synthesis.population.activities`, and `synthesis.population.spatial.locations`.
-Like `matsim.scenario.population`, it chooses `mode_choice.run` when
-`enable_mode_choice` is enabled, otherwise `synthesis.population.trips_with_departures`.
-Final modes and corrected departures are joined by `person_id` and `trip_index`;
-sampled arrival times remain unchanged. Upstream DataFrames are never modified.
+The preparation stage reads only `synthesis.prepared.population`. That bundle
+already contains final modes, aligned activity times and locations, optional
+external/cross-border people, prepared freight/LCV tables and airport replacement
+plans. SUMO converts it once to Polars and IPC; it does not repeat those joins
+or source-population assembly. `enable_mode_choice: true` is required.
+Airport residents' ordinary plans have already been replaced upstream; the
+adapter includes their airport plans once, alongside airport visitors.
+Upstream DataFrames are never modified.
 
 `exlude_external_population_in_sumo: true` (the spelling is intentional) excludes
 the external population from SUMO by default, independently of MATSim. Set it to
 `false` together with `include_external_population: true` to include that source.
 `include_cross_border` still selects the separate cross-border population stage. Source person IDs, scalar person attributes, activity
 indices and trip IDs are retained. The `population_source` parameter records
-`resident`, `external` or `crossborder`. Attribute names and category codes remain
+`resident`, `external`, `crossborder` or `airport`. Attribute names and category codes remain
 those of the source tables; no MATSim Java attribute classes are written.
 Cross-border chains use the shared [timing correction](../../data/cross_border/README.md)
 to fit inbound travel after day start while preserving activity durations.
@@ -33,7 +35,7 @@ to fit inbound travel after day start while preserving activity durations.
 ## Vehicle-demand performance
 
 Population preparation converts external tables once through
-`sumo.tables.as_polars`, performs joins and validation with Polars, and writes
+`sumo.functions.tables.as_polars`, performs joins and validation with Polars, and writes
 `persons.arrow`, `activities.arrow` and `vehicle_trips.arrow` in its cache.
 It returns only their paths. The full population is no longer serialized into
 Synpp's pickle, and consumers use memory-mapped Arrow IPC files.
@@ -66,12 +68,9 @@ arrival times, and arrivals before departure, leave that reference unset while
 retaining the trip and its departure. SUMO computes the loaded travel time;
 simulation departure times must still be finite and nonnegative.
 
-External exports can repeat an activity after joining trip modes, including
-both `car` and `car_loop` for the same activity key. Before combining populations,
-the SUMO stage collapses those rows only when all other activity data agree and
-the modes have the same base type. It retains the first source row and its
-original mode, matching MATSim's ordering. Different times, locations or base
-modes still raise an error; source caches are left unchanged.
+External activity coalescing and cross-border timing correction belong to the
+prepared producer. SUMO validates the resulting identifiers, chains and selected
+trip coordinates rather than rebuilding those inputs.
 
 ## Export
 
@@ -79,7 +78,7 @@ From the repository root:
 
 ```bash
 uv run -m synpp config_dib_10.yml \
-    --run sumo.scenario.population.plans \
+    --run sumo.macro_scenario.plans \
     --working-directory cache_sumo
 ```
 
@@ -92,17 +91,16 @@ Export freight and delivery traffic separately:
 
 ```bash
 uv run -m synpp config_dib_10.yml \
-    --run sumo.scenario.population.trips \
+    --run sumo.macro_scenario.vehicles \
     --working-directory cache_sumo
 ```
 
-This stage conditionally reads `synthesis.freight.trips` with `use_freight` and
-`synthesis.lcv.trips` with `use_lcv`, also respecting `sumo_modes`. The identifiers are `freight_<agent_id>` and
-`lcv_<trip_id>`; the source identifier is also stored as a parameter. It declares
-SUMO vehicle types with `vClass="truck"` and `vClass="delivery"` respectively.
-Original freight vehicle classifications remain parameters; detailed vehicle
-dimensions, emissions and fleet calibration are not inferred. It writes trips
-in departure order and does not invent freight passengers or arrival times.
+The stage reads the compact commercial IPC file produced by the prepared
+adapter. `use_freight` and `use_lcv` control inclusion upstream; `sumo_modes`
+selects exports. IDs are `freight_<agent_id>` and `lcv_<agent_id>`, where prepared
+LCV IDs have already been normalized. Source identifiers remain parameters.
+Vehicle classes are `truck` and `delivery`; no freight passengers are invented.
+Airport access trips use the population adapter instead of being exported twice.
 
 ## Plan representation
 
@@ -201,19 +199,19 @@ The preparation stages are:
 
 | Stage | Result |
 | --- | --- |
-| `sumo.scenario.unrouted_demand` | Sorted selected demand in `demand.arrow`, plus vehicle-type definitions; no XML trip export yet |
+| `sumo.macro_scenario.trips` | Sorted selected demand in `demand.arrow`, plus vehicle-type definitions; no XML trip export yet |
 | `sumo.routing.network` | Directed MATSim road shapes, modes, lengths and speeds in `road_links.arrow` |
 | `sumo.routing.paths` | Reused/completed itineraries in `road_routes.arrow`, plus `routing_report.json` |
-| `sumo.scenario.border` | Swiss polygon in LV95 WKB |
-| `sumo.scenario.selected` | Original domestic and crossing partitions; outside-to-outside trips removed |
-| `sumo.scenario.clipped` | Clipped originals, fixed border anchors and `border_clipping.json` |
-| `sumo.scenario.scaled` | Retained demand expanded to 100%, before SUMO assignment |
-| `sumo.scenario.demand` | Sorted expanded vehicle trips in Arrow and SUMO XML |
+| `sumo.macro_scenario.border` | Swiss polygon in LV95 WKB |
+| `sumo.macro_scenario.selected` | Original domestic and crossing partitions; outside-to-outside trips removed |
+| `sumo.macro_scenario.clipped` | Clipped originals, fixed border anchors and `border_clipping.json` |
+| `sumo.macro_scenario.scaled` | Retained demand expanded to 100%, before SUMO assignment |
+| `sumo.macro_scenario.demand` | Sorted expanded vehicle trips in Arrow and SUMO XML |
 
-`sumo.scenario.selected` uses vectorized endpoint containment on the original
+`sumo.macro_scenario.selected` uses vectorized endpoint containment on the original
 sample: domestic trips pass through, outside-to-outside trips are dropped
 (including transit), and only inbound/outbound trips need road-path clipping.
-`sumo.scenario.clipped` clips these originals before `sumo.scenario.scaled`
+`sumo.macro_scenario.clipped` clips these originals before `sumo.macro_scenario.scaled`
 expands the retained demand. Boundary anchors stay fixed during expansion.
 
 Mode-choice paths are matched by person ID, trip index, car/truck mode and

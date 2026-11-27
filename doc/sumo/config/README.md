@@ -15,16 +15,16 @@ vehicle composition and actual signal plans to calibrate a city scenario.
 | `sumo.config.config` | Dictionary collecting micro, meso, macro and loaded configs | Config generation only |
 | `sumo.simulation.run` | Simulation output paths; selects micro/meso with `sumo_simulation_model` | Runs `sumo` |
 | `sumo.router.assignment` | Loaded weights, assigned flows, query routes and `trip_metrics.arrow` | Runs both assignment and routing |
-| `sumo.simulation.load_network` | Full assigned routes with edge exit times, metrics and loading report | Native macro assignment by default; simulation-based DUA opt-in |
-| `sumo.simulation.run_microscopic` | Microscopic execution using `sumo.cutter.scenario` | Runs `sumo` |
-| `sumo.simulation.run_mesoscopic` | Mesoscopic execution using `sumo.cutter.scenario` | Runs `sumo --mesosim` |
+| `sumo.macro_scenario` | Full assigned routes with edge exit times, metrics and loading report | Native macro assignment by default; simulation-based DUA opt-in |
+| `sumo.simulation.run_microscopic` | Microscopic execution using `sumo.micro_scenario` | Runs `sumo` |
+| `sumo.simulation.run_mesoscopic` | Mesoscopic execution using `sumo.micro_scenario` | Runs `sumo --mesosim` |
 | `sumo.run` | Selects one of the two regional run stages through `sumo_simulation_model` | Delegates to selected stage |
 
 The first three config stages return an absolute config filename. The loaded
 config stage returns `assignment_config`, `routing_config`, `weights`, `routes`
 and expected query `count`. Config stages do not launch simulations or loaded
-assignment. The macroscopic stages first map demand endpoints and validate
-connectivity using `duarouter`.
+assignment. The macroscopic config consumes `sumo.macro_scenario.mapped`, whose
+endpoint mapping uses the per-class connectivity index without `duarouter`.
 
 The current `sumo.simulation.run` obtains its selected config from
 `sumo.config.config`, which prepares all four products. For the distinction
@@ -51,14 +51,18 @@ retains unfinished and undeparted trips in tripinfo. By default,
 `sumo_end: null` leaves the end time unset, so SUMO runs until all demand has
 finished. A positive value sets an explicit simulation cutoff. An unfinished
 trip is not a completed travel-time observation.
-Tripinfo contains simulated travel time and route length; summary, vehicle-route
-and 15-minute edge statistics are also written.
+Tripinfo contains simulated travel time and route length; summary, vehicle-route,
+aggregate simulation statistics and 15-minute edge statistics are also written.
 [Tripinfo output](https://sumo.dlr.de/docs/Simulation/Output/TripInfo.html).
 
 Both simulation presets equip all vehicles with GPS rerouting by default
 (`sumo_rerouting_probability: 1`). Routes are reconsidered every 60 seconds
 using observations updated every 10 seconds over six observations. Set
 `sumo_rerouting_probability: 0` to retain assigned paths throughout simulation.
+For pipeline-generated regional demand, `sumo_initial_route_retention: 0.8`
+preserves approximately 80% of assigned routes before departure, while keeping
+en-route rerouting enabled for equipped vehicles. See the
+[departure-route policy and quality report](../monitoring.md).
 Gridlock teleportation is a recovery mechanism and can distort travel-time
 measurements; inspect teleport warnings when evaluating results. Online
 adaptation does not establish user equilibrium.
@@ -88,7 +92,7 @@ are unavailable. [SUMO mesoscopic model and limitations](https://sumo.dlr.de/doc
 
 ## Macroscopic congestion and per-trip metrics
 
-The default regional workflow (`sumo.run`) uses `sumo.simulation.load_network`:
+The default regional workflow (`sumo.run`) uses `sumo.macro_scenario`:
 map endpoints, assign traffic with `marouter`, realize its assigned route
 distributions, cut those paths using loaded entry-time estimates, and run the
 regional micro/mesoscopic simulation. There is no route search after `marouter`
@@ -111,7 +115,8 @@ selected with `sumo.config.loaded`) performs these steps:
 
 Assignment execution uses the cached [class-aware marouter build](../native/README.md#class-aware-macroscopic-assignment).
 Cars, trucks and vans retain their access restrictions while contributing to
-shared congestion costs. Native assignment routing uses A* with `threads` workers. Interval and iteration
+shared congestion costs. Native assignment routing uses CCH with `threads` workers by default
+(`sumo_assignment_routing_algorithm: CCH`). Interval and iteration
 progress is written to the job log and `assignment.log`. Override native
 settings through `sumo_assignment_options` if needed.
 

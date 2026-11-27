@@ -1,12 +1,56 @@
 # SUMO scenario
 
-The SUMO stages are independent of the MATSim network pipeline. They read one
-OSM extract and do not merge the configured MATSim `osm_file` list.
+SUMO consumes the final `synthesis.prepared` population and facilities. The
+national network is built from one OSM extract or an existing SUMO network;
+Swiss border clipping reuses the extended MATSim road paths from mode choice.
+
+The main flow is `synthesis.prepared → sumo.macro_scenario →
+sumo.micro_scenario → sumo.run → sumo.output`. The national scenario uses
+marouter with **CCH by default**, then the regional scenario cuts assigned paths
+for either mesoscopic or microscopic simulation. Each task has a separate cache.
+The default native path keeps national routes in Arrow IPC and writes route XML
+after regional cutting, using bounded batches and buffered I/O.
 
 Start with the [workflow and stage flowcharts](WORKFLOW.md) for the complete
 SUMO structure, including network loading, regional cutting, simulation and
 the standalone config/assignment branches. Other pipeline stages are grouped
 as inputs in those diagrams.
+
+## Stages and shared functions
+
+Every Python module outside `sumo.functions` is a Synpp stage. The main stages
+keep their existing names and separate caches:
+
+```text
+sumo/
+├── macro_scenario/     national demand, assignment and route realization
+├── micro_scenario/     regional network, routed visits and final demand
+├── config/             standalone configuration stages
+├── native/             cached native build stages
+├── routing/            reuse/completion of mode-choice road paths
+├── runtime/            isolated SUMO installation stage
+├── simulation/         microscopic and mesoscopic execution stages
+├── monitoring.py       simulation quality report stage
+├── run.py              simulation model selection stage
+├── output.py           portable scenario and report export stage
+└── functions/          all reusable Python functions and native sources
+    ├── scenario/       tables, selection, scaling, routes and XML writers
+    ├── cutter/         boundary geometry and routed-visit clipping
+    ├── macro_scenario/ stage-specific preparation helpers
+    ├── micro_scenario/ stage-specific regional helpers
+    ├── config/         shared config writers and presets
+    ├── native/         build helpers, C++ sources and the marouter patch
+    ├── routing/        extended-network path helpers
+    ├── runtime/        tool execution and environment helpers
+    ├── simulation/     assignment and execution helpers
+    ├── monitoring/     sampling, figures and quality-report readers
+    ├── tables.py       external-data conversion and IPC persistence
+    └── output_tools.py portable export helpers
+```
+
+The optional `router/` stages retain the separate loaded-skims workflow.
+Stages use `@monitored` on `execute(context)`. See
+[monitoring, quality reports and departure-route retention](monitoring.md).
 
 ## Install the runtime
 
@@ -35,7 +79,7 @@ The stage returns a dictionary with `home`, `python`, and `version`.
 ## Build the road network
 
 ```bash
-uv run -m synpp config_dib_10.yml --run sumo.scenario.network.road_network \
+uv run -m synpp config_dib_10.yml --run sumo.macro_scenario.network \
     --working-directory cache_sumo
 ```
 
@@ -54,13 +98,13 @@ Existing direct paths do not require the `data_path/osm` directory to exist.
 To select a different single extract:
 
 ```bash
-uv run -m synpp config_dib_10.yml --run sumo.scenario.network.road_network \
+uv run -m synpp config_dib_10.yml --run sumo.macro_scenario.network \
     --working-directory cache_sumo \
     --config sumo_network_file switzerland-latest-2026.osm.pbf
 ```
 
 This single option accepts a prepared SUMO network, OSM XML (including gzip),
-or OSM PBF. `detect_network_format()` in `sumo.scenario.network.tools` reads at
+or OSM PBF. `detect_network_format()` in `sumo.functions.scenario.network.tools` reads at
 most 64 KiB of the header and returns `sumo`, `osm` or `osm_pbf`. It recognizes
 gzip by its magic bytes, XML by its root element (`<net>` or `<osm>`) after any
 declaration/comments, and PBF by its first OSM header. Names and suffixes do not
@@ -106,20 +150,20 @@ A downstream stage declares and loads it with:
 
 ```python
 def configure(context):
-    context.stage("sumo.scenario.network.road_network")
+    context.stage("sumo.macro_scenario.network")
 
 
 def execute(context):
 
     # Load the cached SUMO network.
 
-    return context.stage("sumo.scenario.network.road_network")
+    return context.stage("sumo.macro_scenario.network")
 ```
 
 ## Run SUMO tools from another stage
 
 ```python
-from sumo.runtime import sumo
+from sumo.functions.runtime import sumo
 
 
 def configure(context):
@@ -157,7 +201,7 @@ per-trip travel times and distances.
 macroscopic assignment, shared `sumo_modes`, polygon clipping, estimated
 crossing-trip entry times and runnable regional bundles. Its default passes
 `marouter`'s assigned paths directly to the cutter and preserves them in the
-regional run; simulation-based full-network DUA is an explicit option.
+regional input; simulation-based full-network DUA is an explicit option.
 Vehicle demand defaults to excluding the external population and clipping completed
 road paths to Switzerland before assignment. See [route reuse and Swiss-border timing](population/README.md#road-route-reuse-and-swiss-border-demand-clipping).
 `sumo.run` executes that cut scenario; `sumo_simulation_model` selects

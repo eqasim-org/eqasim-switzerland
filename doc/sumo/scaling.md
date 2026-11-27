@@ -1,6 +1,6 @@
 # Demand upsampling and portable exports
 
-`sumo.scenario.scaled` expands the trips selected by `sumo_modes` to a full
+`sumo.macro_scenario.scaled` expands the trips selected by `sumo_modes` to a full
 sample **after original-trip Swiss-border filtering and clipping**, and before
 macroscopic assignment and regional cutting. For `input_downsampling: 0.1`, it produces ten
 copies in total, including the original; for `0.01`, it produces one hundred.
@@ -9,15 +9,15 @@ expanding that demand again.
 
 ```mermaid
 flowchart LR
-    RAW[sumo.scenario.unrouted_demand] --> SELECTED[sumo.scenario.selected]
+    RAW[sumo.macro_scenario.trips] --> SELECTED[sumo.macro_scenario.selected]
     SELECTED --> PATHS[sumo.routing.paths]
-    SELECTED --> CLIPPED[sumo.scenario.clipped]
+    SELECTED --> CLIPPED[sumo.macro_scenario.clipped]
     PATHS --> CLIPPED
-    CLIPPED --> SCALED[sumo.scenario.scaled]
+    CLIPPED --> SCALED[sumo.macro_scenario.scaled]
     HOMES[/STATPOP home locations/] --> SCALED
     DEST[/Eligible activity destinations/] --> SCALED
-    SCALED --> DEMAND[sumo.scenario.demand]
-    DEMAND --> LOAD[sumo.simulation.load_network]
+    SCALED --> DEMAND[sumo.macro_scenario.demand]
+    DEMAND --> LOAD[sumo.macro_scenario]
     LOAD --> CUT[sumo.cutter stages]
     CUT --> RUN[sumo.run]
     RUN --> EXPORT[sumo.output]

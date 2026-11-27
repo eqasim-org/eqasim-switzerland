@@ -44,7 +44,7 @@ def execute(context):
     jar = str((Path(context.path("matsim.runtime.eqasim")) / context.stage("matsim.runtime.eqasim")).resolve())
     validate_runtime(jar)
     if context.config("prepare_sumo"):
-        from sumo.routing.runtime import validate_sumo_runtime
+        from sumo.functions.routing.runtime import validate_sumo_runtime
         validate_sumo_runtime(jar)
     directory = Path(context.path()).resolve()
     temporary = directory / "java_tmp"

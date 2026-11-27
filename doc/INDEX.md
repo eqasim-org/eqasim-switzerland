@@ -81,6 +81,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Secondary-location behavior comparison](<analysis/secondary locations/README.md>)
 
 - [SUMO performance and stage caches](sumo/performance.md)
+- [SUMO monitoring and simulation quality](sumo/monitoring.md)
 
 ## Changelogs
 
