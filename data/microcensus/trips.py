@@ -1,4 +1,4 @@
-from data.activity_purposes import microcensus_purpose_map
+from data.activity_purposes import MZ2015_OTHER_SUBTYPES, microcensus_purpose_map
 import numpy as np
 import pandas as pd
 import pyproj
@@ -82,6 +82,11 @@ def execute(context):
     df_mz_trips.loc[df_mz_trips["is_car_passenger"] > 0, "mode_detailed"] = "car_passenger"
     df_mz_trips.loc[df_mz_trips["is_car_passenger"] > 0, "mode"]          = "car_passenger"
     del df_mz_trips["is_car_passenger"]
+
+    # Preserve the reported destination subtype before loops are split and trips renumbered.
+
+    df_mz_trips["other_subtype_code"] = df_mz_trips["wzweck1"].where(
+        df_mz_trips["wzweck2"].eq(1) & df_mz_trips["wzweck1"].isin(MZ2015_OTHER_SUBTYPES), 0).astype("int8")
 
     # Second, adjust the purposes
     purpose_map = microcensus_purpose_map(2015)
@@ -740,6 +745,8 @@ def execute(context):
             -97: "unknown"
         }
 
+        multi_stages["other_subtype_code"] = multi_stages["purpose"].where(
+            multi_stages["purpose"].isin(MZ2015_OTHER_SUBTYPES), 0)
         multi_stages.replace({"purpose": purpose_map, "origin_purpose": purpose_map, "mode": mode_map}, inplace=True)
 
         for attribute in ["origin", "destination"]:
@@ -798,6 +805,8 @@ def execute(context):
                 loops_multistage.loc[base_index, "destination_y"] = int(y)
                 loops_multistage.loc[base_index, "arrival_time"]  = int(arrival)
                 loops_multistage.loc[base_index, "purpose"]       = purpose
+
+                loops_multistage.loc[base_index, "other_subtype_code"] = group.at[idx_longest_time, "other_subtype_code"]
 
                 new_row["origin_x"]       = int(x)
                 new_row["origin_y"]       = int(y)
@@ -886,7 +895,7 @@ def execute(context):
         "person_id", "trip_id", "departure_time", "arrival_time", "mode", "origin_purpose", "purpose", 
         "origin_x", "origin_y", "destination_x", "destination_y", 
         "activity_duration", "crowfly_distance", "parking_cost", "network_distance",
-        "mode_detailed",
+        "mode_detailed", "other_subtype_code",
         "trip_outside_ch", "origin_in_ch", "destination_in_ch", "trip_crossing_border", "weight_person",
     ]], filterout_ids, persons_outside_ch, persons_crossing_the_border
 
@@ -905,3 +914,12 @@ def diary_audit(reported, trips, exclusions, no_home_ids):
     if inconsistent.any():
         raise ValueError(f"MZ travellers with inconsistent diary status: {audit.index[inconsistent].tolist()[:10]}")
     return audit
+
+
+def validate(context):
+    folder = Path(context.config("data_path")) / "microcensus"
+    result = {}
+    for name in ("wege.csv", "etappen.csv", "zielpersonen.csv"):
+        stat = (folder / name).stat()
+        result[name] = [stat.st_size, stat.st_mtime_ns]
+    return result

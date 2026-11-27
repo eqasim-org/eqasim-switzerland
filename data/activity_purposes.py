@@ -7,6 +7,7 @@ import pandas as pd
 
 SHOP = "shop"
 LEISURE = "leisure"
+MZ2015_OTHER_SUBTYPES = {5: "other_services", 9: "other_escort_child", 10: "other_escort_person"}
 MICROCENSUS_PURPOSES = {
     -99: 'unknown', -98: 'unknown', -97: 'unknown',
     1: 'interaction', 2: 'work', 3: 'education', 4: SHOP, 5: 'other',
