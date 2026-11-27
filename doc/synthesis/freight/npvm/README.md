@@ -77,7 +77,7 @@ Advanced defaults, all relative to `data_path` unless absolute paths are supplie
 | `npvm_freight_demand_factor` | `1.0` |
 | `npvm_freight_use_border_crossings` | `true` |
 | `npvm_freight_crossing_source` | `null` (defaults to `route`; explicit choices: `route`, `network`, `interview`) |
-| `npvm_freight_routing_overwrite` | `false` (read saved routed crossings; `true` reroutes and replaces them) |
+| `npvm_freight_routing_overwrite` | `false` (reuse saved crossings and route missing OD pairs; `true` reroutes and replaces them) |
 | `npvm_freight_routed_crossings_file` | `null` (`freight_routed_crossings.parquet` beside the configured LW matrix) |
 | `npvm_freight_route_border_crossings` | `true` (compatibility option when crossing source is not explicit) |
 | `npvm_freight_use_interview_places` | `false` (compatibility option when crossing source is not explicit) |
@@ -106,13 +106,18 @@ npvm_freight_routing_overwrite: false
 
 - `route`: read the saved OD-specific entry/exit candidates from
   `freight_routed_crossings.parquet`, beside `npvm_freight_lw_file` in the input
-  data directory. This does **not** load the network or route anything.
+  data directory. Complete coverage is reused without loading the routing network
+  in this stage. Missing OD pairs, or a missing saved file, trigger a warning
+  and automatic routing of those pairs. New candidates are added to the saved
+  file while preserving existing assignments, including ODs outside the current sample.
+  The network-access dependency is registered for this fallback and may be built
+  by Synpp even when coverage is complete.
 - `network`: use the exported border links and choose directional candidates by
   foreign region, hierarchy and distance.
 - `interview`: use `data.cross_border.interview_places` through its existing
   directional road matcher and importance scores.
 
-To create or refresh the routed file, set `npvm_freight_routing_overwrite: true`
+To explicitly rebuild all requested crossings, set `npvm_freight_routing_overwrite: true`
 for a freight run, then set it back to `false`. Explicit overwrite reroutes on
 subsequent runs even if a Synpp result is cached. A complete, validated result is
 written to a temporary file and replaces the saved file only after success.
@@ -299,7 +304,8 @@ used; the default production configuration is not switched automatically.
 ## OD-specific routing from external road access points (default network source)
 
 `npvm_freight_crossing_source: route` reuses the saved routing table by default.
-The following steps run only with `npvm_freight_routing_overwrite: true`.
+The following routing steps run for missing OD pairs automatically (with a log
+warning), or for all requested foreign ODs with `npvm_freight_routing_overwrite: true`.
 Select `network` for foreign-zone-only pools, or `interview` for interview places.
 
 1. `synthesis.freight.npvm.network_access` reads **`network.pkl` from

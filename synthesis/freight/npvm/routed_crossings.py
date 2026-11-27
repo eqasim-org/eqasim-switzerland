@@ -18,11 +18,11 @@ def configure(context):
     context.config("random_seed")
     context.config("npvm_freight_lw_file", default="npvm/LW_NPVM_2023.mtx")
     context.config("npvm_freight_routed_crossings_file", default=None)
-    overwrite = context.config("npvm_freight_routing_overwrite", default=False)
+    context.config("npvm_freight_routing_overwrite", default=False)
     context.stage("synthesis.freight.npvm.od")
     context.stage("synthesis.freight.npvm.zone_locations")
-    if overwrite:
-        context.stage("synthesis.freight.npvm.network_access")
+    # Register the fallback network; execute loads it only when routing is needed.
+    context.stage("synthesis.freight.npvm.network_access")
 
 
 def execute(context):
@@ -36,38 +36,57 @@ def execute(context):
     if not foreign.any():
         return pd.DataFrame(columns=["origin_zone", "destination_zone", "origin_x", "origin_y",
                                      "destination_x", "destination_y", "entry_link_id", "exit_link_id", "probability"])
-    if not context.config("npvm_freight_routing_overwrite"):
-        if not path.is_file():
-            raise FileNotFoundError(f"Saved NPVM crossings not found: {path}. "
-                                    "Set npvm_freight_routing_overwrite: true once to create them.")
-        result = pd.read_parquet(path)
-        # A saved larger sample can serve a smaller one without changing its file.
-        columns = ["origin_zone", "destination_zone"]
-        if set(columns).issubset(result):
-            requested = pd.MultiIndex.from_frame(od[columns].drop_duplicates())
-            result = result.loc[pd.MultiIndex.from_frame(result[columns]).isin(requested)].reset_index(drop=True)
-        validate_saved_crossings(result, od, locations["points"])
-        logger.info("Reused %d saved NPVM crossing candidates from %s; no routing", len(result), path)
-        return result
+    # Reuse all existing candidates and identify only missing foreign OD pairs.
 
-    # Sample foreign road access and route each OD once using the converted network pickle.
+    columns = ["origin_zone", "destination_zone"]
+    wanted = od.loc[foreign, columns].drop_duplicates()
+    pairs = wanted
+    previous = None
+    if not context.config("npvm_freight_routing_overwrite"):
+        if path.is_file():
+            previous = pd.read_parquet(path)
+            if not set(columns).issubset(previous):
+                validate_saved_crossings(previous, od, locations["points"])
+            requested = pd.MultiIndex.from_frame(wanted)
+            selected = previous.loc[pd.MultiIndex.from_frame(previous[columns]).isin(requested)].reset_index(drop=True)
+            known = pd.MultiIndex.from_frame(selected[columns])
+            pairs = wanted.loc[~requested.isin(known)]
+            covered = od.loc[pd.MultiIndex.from_frame(od[columns]).isin(known)]
+            validate_saved_crossings(selected, covered, locations["points"])
+            if pairs.empty:
+                validate_saved_crossings(selected, od, locations["points"])
+                logger.info("Reused %d saved NPVM crossing candidates from %s; no routing", len(selected), path)
+                return selected
+            logger.warning("Saved NPVM crossings lack %d requested OD pairs; automatically routing only these pairs and extending %s",
+                           len(pairs), path)
+        else:
+            logger.warning("Saved NPVM crossings not found at %s; automatically routing %d foreign OD pairs",
+                           path, len(pairs))
+
+    # Route gaps with the same seeded access-point sampling as a complete rebuild.
 
     from synthesis.freight.npvm.network_access import sample_access_points
     network = context.stage("synthesis.freight.npvm.network_access")
-    foreign = locations["zones"].loc[lambda frame: ~frame.is_swiss]
-    access = sample_access_points(foreign, network["roads"],
+    foreign_zones = locations["zones"].loc[lambda frame: ~frame.is_swiss]
+    access = sample_access_points(foreign_zones, network["roads"],
                                   np.random.default_rng(context.config("random_seed")))
-    pairs = od[["origin_zone", "destination_zone"]].drop_duplicates()
-    result = route_zone_pairs(pairs, locations["points"], access, network)
+    additions = route_zone_pairs(pairs, locations["points"], access, network)
+    combined = (additions if previous is None else
+                pd.concat([previous, additions], ignore_index=True))
+    requested = pd.MultiIndex.from_frame(wanted)
+    result = combined.loc[pd.MultiIndex.from_frame(combined[columns]).isin(requested)].reset_index(drop=True)
     validate_saved_crossings(result, od, locations["points"])
 
-    # Replace the saved assignments only after the complete routing result is valid.
+    # Publish only after every requested crossing validates; retain other saved ODs.
 
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp.parquet")
-    result.to_parquet(temporary, index=False, compression="zstd")
-    temporary.replace(path)
-    logger.info("Saved %d routed NPVM crossing candidates to %s", len(result), path)
+    try:
+        combined.to_parquet(temporary, index=False, compression="zstd")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    logger.info("Saved %d NPVM crossing candidates (%d newly routed) to %s", len(combined), len(additions), path)
     return result
 
 
