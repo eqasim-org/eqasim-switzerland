@@ -368,6 +368,7 @@ def _normalise_tables(df_persons, df_activities, df_vehicles):
     df_persons = df_persons[
         PERSON_FIELDS
         + ["subscription_zones"]
+        + [field for field in ("has_ga", "has_junior") if field in df_persons]
         + residence_flags
         + ["non_private_model_status"]
     ]

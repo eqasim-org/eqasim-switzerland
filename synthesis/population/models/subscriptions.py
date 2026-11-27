@@ -5,6 +5,7 @@ from catboost import CatBoostClassifier
 import logging
 
 from data.utils import binary_code_series, coerce_boolean_series
+from synthesis.population.models import ga_ownership
 
 logger = logging.getLogger("synpp")
 
@@ -140,6 +141,8 @@ def commute_from_location_df(pop_loc_df, pop_df, how="min"):
 
 def configure(context):
     context.config("random_seed")
+    if context.config(ga_ownership.OPTION, default=False):
+        context.stage(ga_ownership.STAGE)
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.household_persons")
     context.stage("synthesis.population.spatial.primary.locations")
@@ -149,8 +152,10 @@ def configure(context):
 
 def execute(context):
     from synthesis.population.models.non_private import execute_without_home_only
-    result = execute_without_home_only(context, "synthesis.population.enriched", _execute_model,
-                                     {"pt_subscription": 0})
+    defaults = {"pt_subscription": 0}
+    if context.config(ga_ownership.OPTION):
+        defaults.update(has_ga=False, has_junior=False)
+    result = execute_without_home_only(context, "synthesis.population.enriched", _execute_model, defaults)
     result["car_availability"] = binary_code_series(result["car_availability"])
     return result
 
@@ -689,6 +694,17 @@ def _execute_model(context):
 
     # adult predictions
     proba_a = pt_model_adult.predict_proba(Xp_a_np)
+    if context.config(ga_ownership.OPTION):
+        survey_ranks, population_ranks, product_mix = context.stage(ga_ownership.STAGE)
+        train_rank = survey_df.loc[train_mask_adult, "person_id"].map(survey_ranks).to_numpy(dtype=float)
+        pop_rank = pop_df.loc[pop_mask_adult, "person_id"].map(population_ranks).to_numpy(dtype=float)
+        expected = proba_a[:, 1].sum()
+        proba_a = ga_ownership.ranked_probabilities(
+            build_pt_model(PT_MODEL), Xs_a_np, Xp_a_np, y_a, w_a, train_rank, pop_rank, proba_a)
+        logger.info("SBB GA rank covers %d/%d adult survey respondents and %d/%d model residents. "
+                    "Expected adult GA holders before and after: %.6f and %.6f",
+                    np.isfinite(train_rank).sum(), len(train_rank), np.isfinite(pop_rank).sum(), len(pop_rank),
+                    expected, proba_a[:, 1].sum())
     draw_a = draw_multinomial_from_proba(proba_a, classes, seed=SEED_PT).astype("int64")
     hat_a  = classes[proba_a.argmax(axis=1)].astype("int64")
 
@@ -704,6 +720,8 @@ def _execute_model(context):
 
     # For ages < MIN_AGE keep 0
     pop_df.loc[pop_df["age"] < MIN_AGE, ["PT_SUB_hat", "PT_SUB_draw"]] = 0
+    if context.config(ga_ownership.OPTION):
+        ga_ownership.assign_ownership(pop_df, product_mix, random_seed)
 
     # -------------------------------------------------------------------
     # 9. DIAGNOSTICS (survey weighted vs pop modeled, person-level)
@@ -948,6 +966,8 @@ def _execute_model(context):
        'driving_license', 'number_of_cars_class', 'car_availability', 'bike_availability', 'PT_SUB_draw', 'mz_person_id', 'is_car_passenger',
        'income_class', 'is_crossing_the_border', 'destination_country_raw']
     keep_columns += [name for name in pop_df if name.startswith("non_private_") or name == "is_synthetic_household"]
+    if context.config(ga_ownership.OPTION):
+        keep_columns.extend(["has_ga", "has_junior"])
     pop_df = pop_df[keep_columns]
     pop_df = pop_df.rename(columns={"PT_SUB_draw": "pt_subscription"})
 

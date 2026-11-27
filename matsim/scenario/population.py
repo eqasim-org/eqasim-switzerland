@@ -289,6 +289,10 @@ class PersonWriter:
         writer.add_attribute(
             "subscriptions", "java.lang.String", SUBSCRIPTIONS[int(p.pt_subscription)]
         )
+        for field in ("has_ga", "has_junior"):
+            value = getattr(p, field, None)
+            if pd.notna(value):
+                writer.add_attribute(field, "java.lang.Boolean", writer.true_false(value))
         # the zones of the regional subscription, per fare network (see format_regional_products)
         regional_products = format_regional_products(p.subscription_zones)
         if regional_products:

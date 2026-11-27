@@ -27,6 +27,7 @@ config:
     enable_scaling: false # Scale population totals to a target year.
     scaling_year: 2025 # Target population year when scaling is enabled.
     census: statpop # Population source; statpop uses Swiss population-register data.
+    use_sbb_ga_rank_and_junior_split: false # Use SBB postcode ranks for adult GA and distinguish children's GA and Junior cards.
     # Education references: data_path/education_enrolment; residence candidates: data_path/gwr.
     specific_day_scenario: workday # Day to model: workday, weekend, or a weekday name.
 

@@ -58,6 +58,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Matching predictive validation and embedding analysis](analysis/matching/README.md)
 - [RDA secondary destination calibration](synthesis/population/spatial/secondary/README.md)
 - [Secondary-location neural models](synthesis/population/spatial/secondary_nn/README.md)
+- [GA ownership by postcode and Junior travelcards](synthesis/population/models/ga_ownership.md)
 - [Zones of the regional PT subscriptions](synthesis/population/models/subscription_zones.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
 - [Municipality arrival mode shares in Geneva and Vaud](analysis/mode_shares/municipality_arrivals.md)
