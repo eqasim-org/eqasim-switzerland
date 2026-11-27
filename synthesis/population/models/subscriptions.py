@@ -141,7 +141,7 @@ def commute_from_location_df(pop_loc_df, pop_df, how="min"):
 
 def configure(context):
     context.config("random_seed")
-    if context.config(ga_ownership.OPTION, default=False):
+    if context.config(ga_ownership.OPTION, default=True):
         context.stage(ga_ownership.STAGE)
     context.stage("data.microcensus.persons")
     context.stage("data.microcensus.household_persons")

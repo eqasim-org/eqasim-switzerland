@@ -1,9 +1,9 @@
 # GA ownership by postcode and Junior travelcards
 
-To enable both changes, add this setting under the existing `config` block. Its default is `false`.
+The subscription model uses SBB postcode ranks for adult GA ownership and distinguishes children's GA and Junior cards by default. To use the previous model, add this setting under the existing `config` block.
 
 ```yaml
-    use_sbb_ga_rank_and_junior_split: true
+    use_sbb_ga_rank_and_junior_split: false
 ```
 
 Run `synthesis.population.models.subscriptions` to inspect the assigned products or `matsim.simulation.prepare` to use them in a prepared scenario.
