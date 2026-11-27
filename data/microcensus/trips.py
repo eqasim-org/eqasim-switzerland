@@ -13,7 +13,7 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
     context.config("data_path")
-    context.config("mz_correct_diary_cleaning", False)
+    context.config("mz_correct_diary_cleaning", default=True)
     context.stage("data.constants")
     context.stage("data.spatial.swiss_border")
 
