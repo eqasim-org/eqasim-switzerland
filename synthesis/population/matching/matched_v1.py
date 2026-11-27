@@ -2,7 +2,7 @@ import numba
 import numpy as np
 import pandas as pd
 import logging
-from synthesis.population.matching import opening_hours, workflow
+from synthesis.population.matching import opening_hours, spatial_feature, workflow
 logger = logging.getLogger("synpp")
 
 """
@@ -14,6 +14,7 @@ It progressively decreases the minimum number of observations to ensure the most
 
 def configure(context):
     opening_hours.configure(context)
+    spatial_feature.configure(context)
     context.config("hot_deck_matching_runners", 1)
     context.config("random_seed")
     context.config("matching_minimum_observations", 10)
@@ -57,6 +58,7 @@ def validate(context):
     return hashlib.sha256(Path(__file__).with_name("commute.py").read_bytes() +
                           Path(opening_hours.__file__).read_bytes() +
                           Path(workflow.__file__).read_bytes() +
+                          Path(spatial_feature.__file__).read_bytes() +
                           Path(__file__).parent.parent.joinpath("models", "non_private.py").read_bytes()).hexdigest()
 
 
@@ -333,6 +335,8 @@ def run_statistical_matching_extended(context, df_source, source_identifier, wei
                                       minimum_observations=0, population_selector=None,
                                       option = "person"):
     
+    columns = spatial_feature.columns(columns, df_source, df_population)
+    mandatory_columns = spatial_feature.columns(mandatory_columns, df_source, df_population)
     df_target = df_population.copy()
     
     if population_selector is not None:

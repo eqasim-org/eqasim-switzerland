@@ -196,6 +196,10 @@ def _permutation_scores(target, matcher, source,
                          train, test, scaled, base, seed, draws, repeat, fold, count):
     records = []
     for group_number, (name, columns) in enumerate(FEATURE_GROUPS.items()):
+        # Density-only controls omit the optional activity-zone input.
+        columns = [column for column in columns if column in target]
+        if not columns:
+            continue
         for permutation in range(count):
             altered = shuffle_group(target, columns, np.random.RandomState(seed + group_number * 97 + permutation * 7919))
             local = matcher.predict(altered, random_seed=seed, n_draws=draws).donor_rows

@@ -41,4 +41,13 @@ def execute(context):
     df_persons = pd.merge(df_persons, act_df, on = "person_id", how = "left")
     df_persons = df_persons.fillna({"activity_chain": "home", "mode_chain": "no trip"})
     
-    return df_persons[["person_id", "person_weight", "weekend", "workday", "day", "activity_chain", "mode_chain"]]
+    # A missing processed diary must not become an observed zero-trip day.
+    # Keep this audit with the prepared chains for zoning and comparisons.
+    if df_persons.reported_trip_count.isna().any():
+        raise ValueError("Missing reported Microcensus trip counts")
+    df_persons["valid_diary"] = ~(
+        df_persons.activity_chain.eq("home") & df_persons.reported_trip_count.gt(0)
+    )
+
+    return df_persons[["person_id", "person_weight", "weekend", "workday", "day",
+                       "activity_chain", "mode_chain", "valid_diary"]]

@@ -27,6 +27,9 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Airport demand explorer: canton flows, municipality flows and individual trips](analysis/airports/trips_html.md)
 - [Airport population integration and microcensus evidence](data/airports/population_integration.md)
 - [Combined 2015/2021 microcensus airport activity chains](data/microcensus/airports.md)
+- [Spatial daily-trip groups and analysis](data/microcensus/activity_chains_clusters.md)
+- [Daily-trip zones versus density in V1/V2/V3 matching](analysis/matching/activity_chain_zones.md)
+- [Spatial smoothing chosen for matching fit](analysis/matching/activity_smoothing.md)
 
 - [MOBIS walking-speed and terrain-slope calibration](calibration/walking_speed.md)
 

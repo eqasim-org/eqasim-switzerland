@@ -13,7 +13,7 @@ import pandas as pd
 from data.utils import coerce_boolean_series
 from synthesis.population.models.non_private import home_only_mask
 from . import matched_v1
-from . import opening_hours, workflow
+from . import opening_hours, spatial_feature, workflow
 from .V3 import donors as donor_tools, inputs
 
 logger = logging.getLogger("synpp")
@@ -68,7 +68,8 @@ def execute(context):
                                    group, "collective" if is_collective else "ordinary", (~valid).sum(), weight)
                     donors = donors.loc[valid].copy()
                 hard = list(inputs.HARD[group])
-                matching_columns = list(columns)
+                matching_columns = spatial_feature.columns(columns, donors, target)
+                mandatory_columns = spatial_feature.columns(mandatory, donors, target)
                 if context.config("consider_opening_hours"):
                     hard.append(opening_hours.REGION)
                     matching_columns.append(opening_hours.REGION)
@@ -76,7 +77,7 @@ def execute(context):
                 logger.info("V3 %s: %d recipients, %d eligible donors before hard masks; hard=[%s]; "
                             "sex remains a relaxable preference",
                             label, len(target), len(donors), ", ".join(hard))
-                assigned, details = donor_tools.select_donors(donors, target, matching_columns, mandatory, hard,
+                assigned, details = donor_tools.select_donors(donors, target, matching_columns, mandatory_columns, hard,
                     seed=int(context.config("random_seed")) + segment * 2 + int(is_collective),
                     threshold=threshold, weight=weight)
                 details["age_group"], details["collective"] = group, is_collective
@@ -148,6 +149,6 @@ def _segments(population, source, const):
 
 def validate(context):
     paths = [Path(donor_tools.__file__), Path(inputs.__file__), Path(matched_v1.__file__),
-             Path(opening_hours.__file__), Path(workflow.__file__),
+             Path(opening_hours.__file__), Path(spatial_feature.__file__), Path(workflow.__file__),
              Path(__file__).with_name("commute.py"), Path(__file__).parent.parent / "models" / "non_private.py"]
     return hashlib.sha256(b"".join(p.read_bytes() for p in paths)).hexdigest()

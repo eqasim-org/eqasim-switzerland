@@ -17,7 +17,7 @@ import pandas as pd
 
 from data.utils import coerce_boolean_series
 from synthesis.population.models.non_private import home_only_mask
-from . import opening_hours
+from . import opening_hours, spatial_feature
 from .commute import population_commutes, write_diagnostics
 
 logger = logging.getLogger("synpp")
@@ -79,6 +79,9 @@ def preprocess(context, algorithm, const=None, *, include_regions=True):
     if algorithm not in adapters:
         raise ValueError(f"Unknown matching algorithm: {algorithm}")
     source, population, trips = adapters[algorithm](context, const, roster)
+    if const.census != "statpop" and context.config(spatial_feature.OPTION) == "activity_chain_cluster":
+        raise ValueError("Daily-trip zones currently require STATPOP matching")
+    source, population = spatial_feature.add_regions(context, source, population)
     _validate_ids(population, "person_id", "Prepared population")
     _validate_ids(source, "mz_id", "Survey donors")
 

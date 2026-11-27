@@ -1,8 +1,8 @@
 # Microcensus diary matching
 
 `synthesis.population.matched` selects V3 by default; set `matching_algorithm: v1`
-or `matching_algorithm: v2` to select an earlier algorithm. V1's code is unchanged
-by this revision.
+or `matching_algorithm: v2` to select an earlier algorithm. All three share the home activity zones
+described below.
 
 V1 uses an ordered, survey-weighted recursive hot deck with age bands and
 progressive relaxation of categorical matching cells. V2 has a different goal:
@@ -17,7 +17,7 @@ V2 implementation lives in `synthesis/population/matching/V2/`. The uppercase
 `V2` is part of the Python package name. `matched_v2.py` registers the pipeline
 dependencies, prepares inputs, calls the estimator, exports diagnostics and
 preserves the existing `(mapping, removed_ids)` downstream contract. V1 does
-not import this package and remains unchanged.
+not import the neural package; its donor search remains independent.
 
 | Module | Responsibility |
 | --- | --- |
@@ -78,7 +78,7 @@ estimator. There is one model implementation and one matching path.
 The reorganization preserves the network, objective weights, targets, scaling,
 hard masks and stochastic sampler. A seeded CPU fixture checks exact fitted
 tensor equality against the pre-refactor implementation. Model artifact schema
-4 fingerprints the separated training modules; older model artifacts cannot be
+5 fingerprints the separated training modules; older model artifacts cannot be
 verified using the new fingerprint and are retrained when a new matching run is
 requested. Existing saved evaluation CSV/NumPy evidence remains readable by the
 lightweight report stages without loading or retraining those models.
@@ -108,7 +108,7 @@ sampled population and their producer code:
 | Age and resources | `age`, `income_class` | Continuous age and original 0–8 income codes; training-only standardization, no recoding into broader groups |
 | Household composition | `household_size`, `N_children_under_3`, `N_children_under_6`, `N_children_under_12`, `N_children_under_18`, `N_adults` | Numeric counts, not presence flags; no household-size clipping |
 | Residential density | `population_density` | `log1p` of residents within 2.5 km of home, computed by the same density pipeline on both sides; it is not residents/km² |
-| Residential context | `ovgk`, `municipality_type`, `canton_id`, `sp_region` | Original PT-quality categories A/B/C/D/none and categorical spatial inputs |
+| Residential context | `ovgk`, `municipality_type`, `canton_id`, `sp_region`, `activity_chain_cluster` | Original PT-quality categories A/B/C/D/none and categorical spatial inputs |
 | Work context | `employed`, `is_student`, `employment_status`, `work_location_type`, `commute_distance`, `job_position` | Categorical status/location type/job; log commute distance; survey job codes mapped using the repository's common classification; job is unknown for non-workers on both sides |
 | Mobility resources | `driving_license`, `car_availability`, `number_of_cars_class` | Harmonized categorical inputs, with no inference mask |
 | Personal context | `sex`, `marital_status`, `is_swiss` | Shared categorical definitions; no sex mask |
@@ -198,7 +198,7 @@ contract; neither mask is relaxed.
 
 ## Caches, diagnostics and evaluation
 
-The schema-3 model lives in the V2 stage cache. The older global working-folder
+The schema-5 model lives in the V2 stage cache. The older global working-folder
 artifact is neither reused nor changed. With
 `overwrite_matching_embedding_model: false`, reuse requires a matching hash of
 features, weights, trips, training settings, split rows and implementation.
@@ -235,26 +235,24 @@ survey donors, following V1's separate collective-resident branch; V2 also
 retains its employment/student constraints. If no such donor satisfies both
 status constraints, the usual unmatched-recipient handling applies.
 
-V2 calls V1's `get_mz_persons(context)` directly for survey cleaning and donor
-commute imputation, before applying the scenario-day/border filters. Both stages
+The shared `workflow` prepares survey cleaning and donor commute imputation
+before applying the scenario-day/border filters for all three matchers. They
 use `models.non_private.home_only_mask` and `matching.commute.population_commutes`.
 The explicit home-only group bypasses commute preparation as well as prediction.
 V2 restores the complete roster before household-count reconstruction and keeps
 recipient row order. Stage cache validation includes these shared helper sources.
-V1 itself is unchanged; exact-age/income features, training and latent-space
+Exact-age/income features, training and latent-space
 retrieval remain specific to V2, including its employment/student safeguards.
 
-### V1 residential-density bins (STATPOP)
+### Residential-density control
 
-V1 uses the existing upstream `population_density` field, a resident count
-within 2.5 km of home, for both survey donors and synthetic residents. The count
-is binned at values equivalent to 300 and 1,500 residents/km² over that circle:
-classes 0 (<300), 1 (300–<1,500), and 2 (>=1,500). Invalid/missing values use -1.
-`population_density_class` is the first mandatory attribute in all STATPOP age
-branches and the collective-resident branch. Thus even the existing last-resort
-prefix relaxation retains density; recipients with no donor in that density
-class follow the existing unmatched-recipient removal. ARE matching is unchanged.
-No upstream density calculation or matching algorithm is changed.
+With `matching_spatial_feature: density`, V1/V3 bin the existing resident count
+within 2.5 km of home. `matching_density_bounds` gives residents/km² thresholds
+(default 400, 950 and 1800), converted to counts over that circle. Missing or
+invalid values use -1. Density is a relaxable preference at its existing priority;
+opening-hours region masks remain hard. The default zone feature replaces this
+same preference in place. V2 retains its continuous log-density inputs in both
+variants.
 
 ## Shared model stage
 
@@ -272,3 +270,26 @@ donor_ids=ids, n_draws=50, random_seed=...)` offers the same restriction directl
 Donor row indices refer to the restricted pool in the supplied ID order. Neither
 operation fits or changes the original matcher. This supports donor-exclusion
 experiments while retaining one trained model.
+
+
+## Default home activity zones
+
+All three matchers receive the four whole-municipality activity groups from
+`data.microcensus.activity_chains_clusters`. The stage consumes prepared survey
+persons, chains and trips, plus STATPOP homes and geography; it does not read raw
+Microcensus files. Defaults use 400 adaptive neighbours, a 2 km minimum kernel
+radius, no additional Gaussian smoothing and a 16% high-activity target.
+
+V1/V3 replace their density preference with `activity_chain_cluster`, retaining
+its priority and relaxation rules. V2 adds this categorical input to geography
+and retains its existing population-density input. The shared workflow
+attaches the zone to private copies of donor and recipient frames. Zone labels
+are learned as categories, not numeric intensity ranks or hard donor masks.
+
+Use `matching_spatial_feature: density` for a controlled baseline: V1/V3 restore
+the density preference and V2 omits the zone input. V2 model artifacts include
+the actual feature schema, input zone values and implementation fingerprint;
+models fitted with different inputs are never reused across variants.
+
+See [zoning details](../../../data/microcensus/activity_chains_clusters.md) and
+[the paired six-variant comparison](../../../analysis/matching/activity_chain_zones.md).

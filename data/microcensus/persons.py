@@ -59,9 +59,13 @@ def execute(context):
     df_mz_persons["person_weight"] = df_mz_persons["WP"]
     df_mz_persons["date"] = df_mz_persons["USTag"]
 
+    # Retain the reported count so downstream stages can identify missing
+    # processed diaries without reopening the raw survey file.
+    df_mz_persons["reported_trip_count"] = pd.to_numeric(df_mz_persons["T_WEGE"], errors="raise")
+
     df_mz_persons["is_swiss"] = (df_mz_persons["nation"] == 8100)
 
-    columns = ["person_id", "person_weight", "age", "sex", "date", "is_swiss"]
+    columns = ["person_id", "person_weight", "age", "sex", "date", "is_swiss", "reported_trip_count"]
 
     # Marital status
     df_mz_persons.loc[df_mz_persons["zivil"] == 1, "marital_status"] = c.MARITAL_STATUS_SINGLE
