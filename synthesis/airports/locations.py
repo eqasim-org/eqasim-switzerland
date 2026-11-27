@@ -13,20 +13,24 @@ from synthesis.airports import residents
 
 
 def configure(context):
-    context.stage('synthesis.population.sampled')
+    context.stage('synthesis.population.enriched')
+    context.stage('synthesis.population.activities')
     context.stage('data.microcensus.airports')
     context.stage('data.statent.statent')
     context.stage('data.spatial.municipalities')
     context.stage('data.spatial.ovgk')
     context.config('airport_resident_demographic_prior_strength', default=20.)
+    context.config('airport_resident_max_nonhome_activities', default=1)
 
 
 def execute(context):
 
-    # Load the final pre-matching roster and observed airport traveller attributes.
+    # Read post-matching residents and classify their actual assigned activity plans.
 
     municipalities, mapping = context.stage('data.spatial.municipalities')
-    homes, hotels = prepare_locations(context.stage('synthesis.population.sampled'),
+    population = residents.activity_preferences(context.stage('synthesis.population.enriched'),
+        context.stage('synthesis.population.activities'), context.config('airport_resident_max_nonhome_activities'))
+    homes, hotels = prepare_locations(population,
         context.stage('data.statent.statent'), municipalities, mapping)
 
     # Check accessibility at each person's actual home and each accommodation point.
@@ -53,18 +57,20 @@ def prepare_locations(population, statent, municipalities, mapping):
     """Keep synthetic identities, valid Swiss homes and uniformly weighted accommodation."""
     required = {'person_id', 'age', 'sex', 'employed', 'home_x', 'home_y', 'home_municipality_id'}
     if not required.issubset(population):
-        raise ValueError(f'Pre-matching population lacks airport attributes: {sorted(required-set(population))}')
+        raise ValueError(f'Post-matching population lacks airport attributes: {sorted(required-set(population))}')
     if population.person_id.isna().any() or population.person_id.duplicated().any():
         raise ValueError('Synthetic resident person IDs must be complete and unique')
     selected = pd.Series(True, index=population.index)
     excluded = {}
-    for flag in ('non_private_home_only_households', 'is_crossing_the_border'):
+    for flag in ('non_private_home_only_households', 'is_crossing_the_border',
+                 'is_truck_driver', 'is_outside_of_switzerland'):
         if flag in population:
             mask = coerce_boolean_series(population[flag], name=flag)
             excluded[flag] = int(mask.sum())
             selected &= ~mask
     columns = [c for c in residents.ATTRIBUTES if c in population and c != 'resident_employment_code']
-    homes = population.loc[selected, columns + ['home_x', 'home_y', 'home_municipality_id']].copy()
+    pool_columns = [c for c in ('airport_preferred', 'has_home_activity') if c in population]
+    homes = population.loc[selected, columns + pool_columns + ['home_x', 'home_y', 'home_municipality_id']].copy()
     homes = homes.rename(columns={'home_x':'x', 'home_y':'y', 'home_municipality_id':'municipality_id'})
     homes['resident_employment_code'] = homes.employed
     # Synthetic employment uses 1=employed, 2=unemployed, 3=inactive; never cast these to bool.
@@ -94,8 +100,12 @@ def prepare_locations(population, statent, municipalities, mapping):
         frame = frame.sort_values('person_id' if 'person_id' in frame else 'enterprise_id',kind='stable').reset_index(drop=True)
         frame.attrs['excluded_invalid_or_outside_municipality_locations'] = before-len(frame)
         if 'person_id' in frame:
-            frame.attrs.update(population_stage='synthesis.population.sampled', source_persons=len(population),
-                               eligible_residents=len(frame), excluded_flags=excluded)
+            preferred = frame.get('airport_preferred', pd.Series(True, index=frame.index))
+            frame.attrs.update(population_stage='synthesis.population.enriched', source_persons=len(population),
+                               activity_stage='synthesis.population.activities', eligible_residents=len(frame),
+                               preferred_residents=int(preferred.sum()), reserve_residents=int((~preferred).sum()),
+                               max_nonhome_activities=population.attrs.get('airport_max_nonhome_activities'),
+                               excluded_flags=excluded)
         output.append(frame)
     return tuple(output)
 

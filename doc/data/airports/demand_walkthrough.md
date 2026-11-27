@@ -110,11 +110,21 @@ Foreign nationals living in Switzerland can be residents in this model.
 ## 7. Select people and accommodation
 
 `synthesis.airports.locations` prepares the location pools.
-`synthesis.airports.trips` selects residents from `synthesis.population.sampled`,
-the final roster before matching, in the assigned municipality. Selection uses
+`synthesis.airports.trips` selects residents from `synthesis.population.enriched`,
+after matching, using actual plans from `synthesis.population.activities`. The
+preferred pool has a home activity and at most one non-home activity (for example
+`home`, `home-other-home` or `home-leisure-home`). Count visits, not distinct
+purpose types. `airport_resident_max_nonhome_activities` changes this limit.
+Selection stays inside the assigned municipality and uses
 smoothed pooled microcensus age, sex and employment preferences. Each resident
 is selected at most once across both airports and directions. Their real person
 ID, household ID and home coordinates are retained.
+
+If selected homes cannot support the PT target, first try unused PT-accessible
+people from the preferred pool in that municipality, A/B/C before D. Only a
+remaining PT shortage permits selecting a more active resident. Those extensions
+must use PT. Road-demand shortages do not trigger a general fallback to active
+people. `resident_nonhome_activities` and `resident_selection_pool` audit this.
 
 Visitors receive a sampled hotel or dormitory location in the assigned
 municipality. Establishments have equal weight; room counts are unavailable.

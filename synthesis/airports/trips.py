@@ -37,7 +37,7 @@ MODE_MAP = {
 }
 # All road categories use the same effective speed, including car passengers.
 SPEEDS = dict(zip(MODES, (60., 60., 70., 30., 60., 60., 60.)))
-VERSION = 12
+VERSION = 13
 
 
 def configure(context):
@@ -331,13 +331,19 @@ def generate_trips(ods, homes, hotels, model, shares, settings, sources, distanc
     streams = np.random.SeedSequence(settings['seed']).spawn(4)
     frame = expand_demand(ods, model, settings, np.random.default_rng(streams[0]), hotels)
     visitor_assignment = frame.attrs['visitor_assignment']
-    # Select unique resident agents using pooled survey demographic preferences.
+    # Select simple post-matching plans; expand beyond them only for PT capacity.
     location_streams = streams[1].spawn(2)
-    frame, resident_summary = residents.select_residents(frame, homes, np.random.default_rng(location_streams[0]))
+    resident_rng = np.random.default_rng(location_streams[0])
+    frame, _ = residents.select_residents(frame, homes, resident_rng)
+    frame, pt_expansion = residents.ensure_pt_capacity(frame, homes, hotels, shares, MODES, MODE_MAP, resident_rng)
+    resident_summary = residents.selection_report(frame, homes)
+    resident_summary['pt_pool_expansion'] = pt_expansion
 
     # Allocate mode totals using each selected resident's actual home accessibility.
     frame, mode_diagnostics = mode_allocation.assign_modes(frame, homes, hotels, model, shares,
         MODES, MODE_MAP, np.random.default_rng(streams[2]), distance_model)
+    if not frame.loc[frame.resident_selection_pool.eq('pt_extension'), 'mode'].eq('pt').all():
+        raise ValueError('Extended resident candidates may only be used for PT airport trips')
     frame = sample_endpoints(frame, homes, hotels, np.random.default_rng(location_streams[1]))
     rejected = frame.loc[frame.unresolved_reason.ne('')].copy()
     keys = ['airport', 'direction', 'region_id', 'country', 'municipality_id', 'profile', 'traveller_type', 'is_visitor', 'access_mode', 'mode', 'unresolved_reason']
@@ -400,7 +406,8 @@ def generate_trips(ods, homes, hotels, model, shares, settings, sources, distanc
                    'Both airports target Geneva Swiss-endpoint mode totals (page 21), allocated using linear distance preferences fitted to three Geneva regional groups (page 23).',
                    'Only direct home/airport chains for residents and home_secondary/airport chains for visitors. No intermediate activities or later outings.',
                    'Dropoff, taxi and ridehail use car to represent their road traffic because separate taxi/ridehail simulation modes are unavailable; other uses car_passenger as an explicit fallback.',
-                   'Residents are selected without replacement from synthesis.population.sampled in their fixed municipality, using pooled age/sex/employment preferences from the 2015/2021 airport microcensus. Their actual home coordinates and person IDs are retained.',
+                   'Residents are selected without replacement from synthesis.population.enriched after matching, preferring home-only plans and plans with at most the configured number of non-home activities. Pooled 2015/2021 airport-survey age/sex/employment preferences, actual homes and person IDs are retained.',
+                   'Only PT shortages extend selection beyond the preferred activity pool, in the same municipality; unused preferred ABC/D homes are tried first. Every extended resident is assigned PT.',
                    'Visitors use uniformly weighted NOGA 551 hotels and 559 accommodation/dormitories, including student residences; visitor person IDs stay null.',
                    'Resident demographic selection precedes mode allocation; PT support is evaluated at selected agents homes. Missing resident capacity remains unresolved rather than reusing or relocating agents.',
                    'Residents use homes and visitors use hotels/dormitories; missing accommodation remains unresolved in the same municipality.',

@@ -2,11 +2,39 @@
 
 import numpy as np
 import pandas as pd
+from data.airports._shared.common import apportion, normalized
 
 AGE_BINS = (0, 18, 35, 55, 75, np.inf)
 AGE_LABELS = ('0-17', '18-34', '35-54', '55-74', '75+')
 ATTRIBUTES = ('person_id', 'household_id', 'age', 'sex', 'employed', 'resident_employment_code',
-              'is_student', 'driving_license', 'car_availability', 'statpop_person_id')
+              'is_student', 'driving_license', 'car_availability', 'statpop_person_id',
+              'resident_nonhome_activities')
+
+
+def activity_preferences(population, activities, maximum=1):
+    """Prefer home-only plans and plans with few visits away from home, not purpose types."""
+    if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum < 0:
+        raise ValueError('airport_resident_max_nonhome_activities must be a non-negative integer')
+    required = {'person_id', 'activity_index', 'purpose'}
+    if not required.issubset(activities):
+        raise ValueError(f'Airport resident activity input missing: {sorted(required-set(activities))}')
+    if activities[['person_id', 'activity_index', 'purpose']].isna().any().any():
+        raise ValueError('Airport resident activity identifiers/purposes must be complete')
+    if activities.duplicated(['person_id', 'activity_index']).any():
+        raise ValueError('Airport residents require unique person/activity indices')
+    if not population.person_id.isin(activities.person_id).all():
+        raise ValueError('Post-matching airport residents are missing assigned activity plans')
+    result = population.copy()
+    purpose = activities.purpose.astype(str)
+    transfers = purpose.eq('interaction') | purpose.str.endswith(' interaction')
+    outside = ~purpose.eq('home') & ~transfers
+    counts = outside.groupby(activities.person_id).sum()
+    home = purpose.eq('home').groupby(activities.person_id).any()
+    result['resident_nonhome_activities'] = result.person_id.map(counts).astype(int)
+    result['has_home_activity'] = result.person_id.map(home).astype(bool)
+    result['airport_preferred'] = result.has_home_activity & result.resident_nonhome_activities.le(maximum)
+    result.attrs['airport_max_nonhome_activities'] = maximum
+    return result
 
 
 def demographic_labels(frame):
@@ -118,11 +146,12 @@ def select_residents(frame, population, rng):
     result['endpoint_ovgk'] = pd.Series('None', index=result.index, dtype='str')
     result['location_source'] = pd.Series('', index=result.index, dtype='str')
     result['unresolved_reason'] = pd.Series('', index=result.index, dtype='str')
+    result['resident_selection_pool'] = pd.Series('', index=result.index, dtype='str')
     residents = result.loc[~result.is_visitor]
     pools = {int(k): g for k,g in population.groupby('municipality_id', sort=False)}
-    shortages = []
     for municipality, rows in residents.groupby('municipality_id', sort=True):
         pool = pools.get(int(municipality), population.iloc[:0])
+        pool = pool.loc[pool.get('airport_preferred', pd.Series(True, index=pool.index))]
         n = min(len(rows), len(pool))
         # Randomize trip slots so scarce agents do not preferentially serve one airport/direction.
         slots = rng.permutation(rows.index.to_numpy())
@@ -138,17 +167,85 @@ def select_residents(frame, population, rng):
             result.loc[chosen,'endpoint_ovgk'] = selected.ovgk.astype(str).to_numpy()
             result.loc[chosen,'resident_selection_weight'] = selected.weight.to_numpy()
             result.loc[chosen,'location_source'] = 'home'
+            result.loc[chosen,'resident_selection_pool'] = 'preferred'
         if n < len(rows):
-            result.loc[slots[n:],'unresolved_reason'] = 'insufficient_synthetic_residents_in_municipality'
-            shortages.append({'municipality_id': int(municipality), 'requested': len(rows),
-                              'available': len(pool), 'unassigned': len(rows)-n})
+            result.loc[slots[n:],'unresolved_reason'] = 'insufficient_preferred_residents_in_municipality'
+    return result, selection_report(result, population)
+
+
+def selection_report(result, population):
+    """Recompute diagnostics after any PT-only expansion, including filled shortages."""
     chosen = result.loc[result.person_id.notna()]
     if chosen.person_id.duplicated().any():
         raise ValueError('Airport resident selection reused a synthetic person')
     labels = demographic_labels(chosen) if len(chosen) else pd.DataFrame(columns=['age_group','sex','employed'])
-    report = {'population_stage': 'synthesis.population.sampled', 'without_replacement': True,
+    residents = result.loc[~result.is_visitor]
+    shortages = []
+    for municipality, rows in residents.groupby('municipality_id', sort=True):
+        missing = int(rows.person_id.isna().sum())
+        if missing:
+            shortages.append({'municipality_id': int(municipality), 'requested': len(rows),
+                              'available': len(rows)-missing, 'unassigned': missing})
+    report = {'population_stage': population.attrs.get('population_stage', 'synthesis.population.enriched'),
+        'activity_stage': 'synthesis.population.activities', 'without_replacement': True,
         'requested_resident_trips': len(residents), 'assigned_resident_trips': len(chosen),
         'unassigned_resident_trips': len(residents)-len(chosen), 'municipal_shortages': shortages,
         'realized_demographics': {f: {str(k): int(v) for k,v in labels[f].value_counts().items()} for f in labels},
+        'selection_pools': chosen.resident_selection_pool.value_counts().to_dict(),
+        'selected_nonhome_activity_counts': {str(k): int(v) for k, v in chosen.resident_nonhome_activities.value_counts().items()},
         'preference_model': population.attrs.get('demographic_model', {})}
-    return result, report
+    return report
+
+
+def ensure_pt_capacity(frame, population, hotels, shares, modes, mode_map, rng):
+    """Swap within municipalities; extend beyond simple plans only for a PT shortfall."""
+    result = frame.copy()
+    pt = np.array([mode_map[mode] == 'pt' for mode in modes])
+    hotel_support = set(hotels.loc[hotels.ovgk.isin(['A', 'B', 'C', 'D']), 'municipality_id'])
+    used = set(result.person_id.dropna())
+    pools = {int(m): g for m, g in population.groupby('municipality_id', sort=False)}
+    preferred = population.get('airport_preferred', pd.Series(True, index=population.index))
+    diagnostics = {}
+    # Try the entire preferred pool before using anybody with a more active plan.
+    for expand in (False, True):
+        for airport in rng.permutation(['GVA', 'ZRH']):
+            rows = result.loc[result.airport.eq(airport)]
+            target = int(apportion(len(rows) * normalized(shares))[pt].sum())
+            supported = (rows.is_visitor & rows.municipality_id.isin(hotel_support)) | (
+                ~rows.is_visitor & rows.person_id.notna() & rows.endpoint_ovgk.isin(['A', 'B', 'C', 'D']))
+            missing = max(0, target-int(supported.sum()))
+            details = diagnostics.setdefault(airport, {'requested_pt': target, 'preferred_pt_replacements': 0,
+                                                        'extended_pt_selections': 0})
+            slots = rows.index[~rows.is_visitor & ~supported]
+            # Within each pool, exhaust ABC before taking D as the accessibility fallback.
+            for qualities in (['A', 'B', 'C'], ['D']):
+                ordered = sorted(rng.permutation(slots), key=lambda i: pd.notna(result.at[i, 'person_id']))
+                for index in ordered:
+                    if missing == 0:
+                        break
+                    if result.at[index, 'endpoint_ovgk'] in ('A', 'B', 'C', 'D'):
+                        continue
+                    pool = pools.get(int(result.at[index, 'municipality_id']), population.iloc[:0])
+                    pool = pool.loc[(~preferred.loc[pool.index] if expand else preferred.loc[pool.index])
+                                    & pool.ovgk.isin(qualities) & ~pool.person_id.isin(used)]
+                    if pool.empty:
+                        continue
+                    selected = pool.iloc[rng.choice(len(pool), p=normalized(pool.weight.to_numpy(float)))]
+                    old = result.at[index, 'person_id']
+                    if pd.notna(old):
+                        used.remove(old)
+                    used.add(selected.person_id)
+                    for column in ATTRIBUTES:
+                        if column in selected:
+                            result.at[index, column] = selected[column]
+                    for column, value in [('endpoint_x', selected.x), ('endpoint_y', selected.y),
+                        ('endpoint_ovgk', selected.ovgk), ('resident_selection_weight', selected.weight),
+                        ('location_source', 'home'), ('unresolved_reason', ''),
+                        ('resident_selection_pool', 'pt_extension' if expand else 'preferred')]:
+                        result.at[index, column] = value
+                    details['extended_pt_selections' if expand else 'preferred_pt_replacements'] += 1
+                    missing -= 1
+            details['pt_shortfall_after_expansion'] = missing
+    if result.person_id.dropna().duplicated().any():
+        raise ValueError('Airport PT expansion reused a synthetic person')
+    return result, diagnostics

@@ -9,7 +9,7 @@ web automatically.
 
 **The airport passenger totals determine demand.** The gravity model only
 allocates that demand geographically. Counts include both ground directions;
-do not multiply the outputs by two. Resident trip synthesis selects existing pre-matching people and retains their IDs.
+do not multiply the outputs by two. Resident trip synthesis selects existing post-matching people with simple activity plans and retains their IDs.
 With `use_airports: true`, prepared stages replace those residents' ordinary plans
 and add temporary visitor agents. See [population integration](population_integration.md).
 
@@ -24,7 +24,8 @@ flowchart TD
     Catchments --> Zurich[data.airports.zurich.ods]
     GenevaSources[Geneva reviewed survey + public traffic totals] --> Geneva
     ZurichSources[Zurich reviewed monthly counts + catchment benchmark] --> Zurich
-    Roster[synthesis.population.sampled: final pre-matching roster] --> Locations
+    Roster[synthesis.population.enriched: post-matching people] --> Locations
+    Activities[synthesis.population.activities: actual assigned plans] --> Locations
     Survey[data.microcensus.airports: pooled demographics] --> Locations
     Locations[synthesis.airports.locations: residents and accommodation] --> Trips[synthesis.airports.trips]
     Geneva --> Scaled[data.airports.ods: input_downsampling]
@@ -79,7 +80,8 @@ eligible pool for both residents and visitors.
 
 The model depends on census/spatial inputs, not the Geneva OD stage, so its
 calibration can use the survey without creating a dependency cycle. Census counts for OD allocation come from `data.statpop.municipality_counts`;
-resident selection uses `synthesis.population.sampled`. Upstream caches are read-only.
+resident selection uses `synthesis.population.enriched` and the assigned
+`synthesis.population.activities`, preferring home-only and one-out-of-home-activity plans. Upstream caches are read-only.
 
 Trips use direct `home`/`airport` chains for residents and
 `home_secondary`/`airport` chains for visitors, in either direction. Detailed access modes are preserved and mapped to the
@@ -270,4 +272,4 @@ historical Geneva observations. Its transfer to Zurich has no local validation
 or airport-competition term. Municipal detail is modelled detail, not measured
 municipal OD precision. Keep those limitations with any downstream results.
 
-Use `synthesis.airports.trips` in configurations previously selecting `data.airports.trips`. Resident outputs carry real pre-matching person IDs; visitor IDs stay null.
+Use `synthesis.airports.trips` in configurations previously selecting `data.airports.trips`. Resident outputs carry real post-matching person IDs; visitor IDs stay null.

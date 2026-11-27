@@ -19,7 +19,7 @@ residents' ordinary plans and add visitors as new agents.
 | `data.airports.ods` | Combined Geneva/Zurich municipal counts, already scaled by the population's `input_downsampling`; see [scaling](../../data/airports/ods.md) |
 | `data.airports.geneva.model` | Airport coordinates and the transferred Zurich resident/visitor mixture |
 | `synthesis.airports.locations` | Eligible synthetic resident and accommodation pools, cached separately from trip settings |
-| `synthesis.population.sampled` | Final pre-matching synthetic roster, including IDs, attributes and actual homes; already at the simulation sampling rate |
+| `synthesis.population.enriched` | Post-matching synthetic roster, including IDs, attributes and actual homes; already at the simulation sampling rate |
 | `data.microcensus.airports` | Pooled 2015/2021 airport respondent attributes for coarse resident-selection preferences |
 | `data.spatial.municipalities` | Historical ID mapping and polygons; sampled points must lie in their assigned municipality |
 | `data.spatial.ovgk` | Current accessibility polygons used to classify home/hotel locations |
@@ -186,7 +186,7 @@ target/assigned visitor counts and any unfilled target. If municipalities with
 hotels cannot accommodate the requested visitor count within their fixed OD
 counts, the attainable visitor count is used and the remainder is resident.
 
-Residents are selected from **`synthesis.population.sampled`**, the roster consumed
+Residents are selected from **`synthesis.population.enriched`**, the roster consumed
 immediately by every matching algorithm. It already includes population scaling,
 sampling, age, sex, employment, household ID, licence and car availability. The
 airport branch does not depend on matching or change its input. Swiss residence
@@ -257,7 +257,7 @@ DataFrame normally and writes no separate survey exports.
 
 `synthesis.airports.locations` returns these two pools as `(homes, hotels)`. Both have
 `municipality_id`, `x`, `y`, `weight` and `ovgk`. The resident pool additionally
-contains unique person IDs and pre-matching attributes; weights are demographic
+contains unique person IDs and post-matching attributes; weights are demographic
 selection preferences. The visitor pool has `enterprise_id` and
 `accommodation_type`, with weight one per establishment. Pool attributes record
 source/excluded counts and demographic model provenance.
@@ -356,7 +356,9 @@ config:
 
 The airport stages retain their existing model and evidence prerequisites. Add
 these options to your usual pipeline configuration rather than replacing its
-required spatial settings with this abbreviated example.
+required spatial settings with this abbreviated example. Resident trip synthesis
+now also requires matching, enriched people and assigned activities. ODs remain
+independent of synthetic-population generation.
 
 | Option | Default |
 | --- | --- |
@@ -450,3 +452,34 @@ Java household adult counts; detailed ordinary agent attributes are unnecessary.
 
 See [population integration](../../data/airports/population_integration.md) for
 IDs, households, resource handling and timing limits.
+
+
+## Selecting residents with simple plans
+
+Residents come from `synthesis.population.enriched` after donor matching, and
+`synthesis.population.activities` supplies their actual planned activity visits.
+The preferred pool has at least one home activity and no more than
+`airport_resident_max_nonhome_activities` visits away from home (default **1**).
+Repeated visits with the same purpose count separately; transfer interactions
+do not count as activities away from home. Missing activity plans are errors,
+not evidence of staying home. Structural home-only residents, committed
+cross-border travellers, truck drivers and outside-Switzerland diaries remain
+excluded from the candidate pool.
+
+The pooled demographic weighting method is unchanged. Draw distinct people
+within each fixed municipality from the preferred pool. If selected residents
+and visitor accommodation cannot meet an airport's PT target, try unselected
+preferred residents with A/B/C homes first, then D. Only if PT is still short
+extend into people with more active plans, again A/B/C then D and in the same
+municipality. Such extensions must receive PT. Fill unresolved slots before
+replacing selected preferred residents. There is no general extension for road
+demand; shortages remain audited as unresolved demand.
+
+`resident_nonhome_activities` records the number of original non-home visits.
+`resident_selection_pool` is `preferred` or `pt_extension` for selected residents
+and empty for visitors. `summary.resident_sampling` reports the final pool
+counts, original activity counts, remaining municipal shortages and per-airport
+PT replacement/extension diagnostics.
+
+This change affects airport selection and final prepared plans. It does not
+change ordinary matching or mutate the cached enriched population/activities.

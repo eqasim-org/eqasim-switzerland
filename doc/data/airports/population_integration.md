@@ -13,8 +13,10 @@ returns a new prepared `Population` without modifying its inputs. It:
 
 1. Removes each selected resident's ordinary person, activity and owned-vehicle
    rows, then provides an airport agent with the **same person ID**. Residents
-   were selected once, without replacement, from `synthesis.population.sampled`
-   before matching. Selected residents missing from the final ordinary plans
+   were selected once, without replacement, from `synthesis.population.enriched`
+   after matching, prioritizing home-only plans or at most one non-home activity.
+   More active residents are eligible only as a PT-capacity fallback in the same
+   municipality, and those selected extensions must use PT. Selected residents missing from the final ordinary plans
    are restored as airport travellers; the number is logged.
 2. Adds visitor agents with deterministic `airport_visitor_<trip_id>` IDs.
    IDs are checked against normal agents, selected residents and serialized
