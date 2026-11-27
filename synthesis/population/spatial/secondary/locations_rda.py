@@ -11,6 +11,7 @@ import logging
 import copy
 from collections.abc import Mapping
 from synthesis.population.spatial.secondary.fallback_repair import SwissFallbackRepair
+from synthesis.population.spatial.secondary.force_model import calibration, errand_centres, school_proximity, subtypes
 
 logger = logging.getLogger("synpp")
 
@@ -19,6 +20,13 @@ ALPHA_PROBABILITIES = 0.8
 FRANCE_PURPOSES = ("shop", "leisure", "other")
 
 def configure(context):
+    chain_solver = context.config("secondary_activities.chain_solver", default="default")
+    if chain_solver not in ("default", "force_model"):
+        raise ValueError("secondary_activities.chain_solver must be 'default' or 'force_model'")
+    mode = calibration.mode_name(context.config(calibration.MODE, default="manual"))
+    if mode == "auto":
+        context.stage(calibration.STAGE)
+        return
     context.stage("data.constants")
     context.stage("synthesis.population.trips")
     context.stage("synthesis.population.enriched")
@@ -28,11 +36,26 @@ def configure(context):
     context.stage("synthesis.population.spatial.primary.locations")
 
     context.stage("synthesis.population.spatial.secondary.distance_distributions")
-    chain_solver = context.config("secondary_activities.chain_solver", default="default")
-    if chain_solver not in ("default", "force_model"):
-        raise ValueError("secondary_activities.chain_solver must be 'default' or 'force_model'")
     if chain_solver == "force_model":
         context.stage("synthesis.population.spatial.secondary.force_model.force_field")
+    selected = subtypes.selected_purposes(context.config(subtypes.OPTION, default=False))
+    for purpose, key in errand_centres.CENTRE_KEYS.items():
+        option = errand_centres.PREFIX + key
+        centres = errand_centres.validate_centres(context.config(option, default=[]), option)
+        if mode != "off" and centres and chain_solver != "force_model":
+            raise ValueError(f"{option} requires the force_model chain solver")
+        if mode == "manual" and centres and selected and purpose == "other_services" and purpose not in selected:
+            raise ValueError("Errand centre calibration requires split_other to include code 5")
+    multiplier = school_proximity.multipliers(context.config(school_proximity.OPTION, default=1.))
+    if mode == "manual" and selected and multiplier != (1., 1.) and "other_escort_child" not in selected:
+        raise ValueError("School preference requires split_other to include code 9")
+    if mode != "off" and "other_escort_child" in selected and multiplier != (1., 1.):
+        context.stage(school_proximity.STAGE)
+    if selected:
+        if chain_solver != "force_model":
+            raise ValueError("Splitting other activities requires the force_model chain solver")
+        context.stage(subtypes.STAGE)
+        context.stage("data.microcensus.trips")
     context.config("consider_opening_hours", default=True)
     tolerance = context.config("opening_hours_tolerance_minutes", default=10.)
     if not np.isfinite(tolerance) or tolerance < 0:
@@ -62,6 +85,12 @@ def configure(context):
 
 def execute(context):
 
+    # Reuse the winner of the survey calibration when requested.
+
+    mode = calibration.mode_name(context.config(calibration.MODE))
+    if mode == "auto":
+        return context.stage(calibration.STAGE)
+
     # Load coordinate constants.
 
     c    = context.stage("data.constants")
@@ -86,6 +115,10 @@ def execute(context):
     cb_person_ids = set(df_trips.loc[is_cb_trip, "person_id"])
     df_trips     = df_trips[~df_trips["person_id"].isin(cb_person_ids)]
 
+    selected = subtypes.selected_purposes(context.config(subtypes.OPTION))
+    if selected:
+        df_trips = subtypes.assignment_purposes(df_trips, context.stage("data.microcensus.trips")[0], selected)
+
     df_trips                = pd.merge(df_trips, df_car_availability[["person_id","car_availability"]], how="left", on="person_id")
     df_trips["travel_time"] = df_trips["arrival_time"] - df_trips["departure_time"]
 
@@ -99,13 +132,20 @@ def execute(context):
     # Prepare data
 
     distance_distributions = copy.deepcopy(context.stage("synthesis.population.spatial.secondary.distance_distributions"))
-    destinations = prepare_destinations(context)
+    scores = context.stage(subtypes.STAGE)[list(selected)] if selected else None
+    multiplier = school_proximity.multipliers(context.config(school_proximity.OPTION))
+    if mode != "off" and "other_escort_child" in selected and multiplier != (1., 1.):
+        scores = school_proximity.adjusted_scores(scores, context.stage(school_proximity.STAGE), multiplier)
+    destinations = prepare_destinations(context, scores)
 
     # Optionally guide continuous chains with destination attraction fields.
 
     force_field_data = None
     if context.config("secondary_activities.chain_solver") == "force_model":
-        force_field_data = context.stage("synthesis.population.spatial.secondary.force_model.force_field")
+        grid, fields = context.stage("synthesis.population.spatial.secondary.force_model.force_field")
+        centres = calibration.get_centres(context, selected) if mode != "off" else {}
+        centres = {errand_centres.CENTRE_KEYS[purpose]: areas for purpose, areas in centres.items()}
+        force_field_data = dict(grid, **centres), fields
     logger.info("Secondary chain solver: %s", context.config("secondary_activities.chain_solver"))
 
     # Resampling for calibration
@@ -223,7 +263,7 @@ def prepare_locations(context):
     return df_locations[["person_id", "home", "work", "education"]].sort_values(by="person_id")
 
 
-def prepare_destinations(context):
+def prepare_destinations(context, scores=None):
     df_destinations = context.stage("secondary_destinations")
     acceptance = france_acceptance(context.config("secondary_rda_france_acceptance"))
     french_ids = set()
@@ -259,6 +299,12 @@ def prepare_destinations(context):
         if repair_swiss is not None:
             data[purpose]["repair_swiss"] = repair_swiss[f]
 
+    if scores is not None:
+        weights = subtypes.align_weights(scores, data["other"]["locations"])
+        for name in weights:
+            data[name] = dict(data["other"], facility_multiplier=weights[name].to_numpy(), base_purpose="other")
+        if school_proximity.MULTI_CHILD in weights:
+            data["other_escort_child"]["multi_stop_purpose"] = school_proximity.MULTI_CHILD
     return data
 
 
@@ -287,10 +333,7 @@ def make_chain_solver(random, force_field_data=None):
     return ForceFieldChainSolver(grid, fields, random=random)
 
 
-def process(context, arguments):
-    df_trips, df_primary, random_seed, crs, car_availability = arguments
-
-    # Set up RNG
+def build_assignment_solver(context, random_seed, car_availability):
     rng = np.random.RandomState(random_seed)
 
     # get destinations candidates
@@ -349,7 +392,7 @@ def process(context, arguments):
         fallback_repair = SwissFallbackRepair(
             destinations, assignment_objective, random_seed, context.data("france_repair_attempts"),
             number_candidates=NUMBER_CANDIDATES, alpha_probabilities=ALPHA_PROBABILITIES)
-    assignment_solver = AssignmentSolver(
+    return AssignmentSolver(
         distance_sampler=distance_sampler,
         relaxation_solver=relaxation_solver,
         discretization_solver=discretization_solver,
@@ -358,6 +401,11 @@ def process(context, arguments):
         proposal_acceptance=proposal_acceptance,
         fallback_repair=fallback_repair
     )
+
+
+def process(context, arguments):
+    df_trips, df_primary, random_seed, crs, car_availability = arguments
+    assignment_solver = build_assignment_solver(context, random_seed, car_availability)
 
     person_ids = []
     trip_indices = []
@@ -368,7 +416,7 @@ def process(context, arguments):
 
     last_person_id = None
 
-    problem_trips = (df_trips if any("opening_schedule" in values for values in destinations.values())
+    problem_trips = (df_trips if any("opening_schedule" in values for values in context.data("destinations").values())
                      else df_trips.drop(columns=["arrival_time", "departure_time"]))
     for problem in find_assignment_problems(problem_trips, df_primary):
         result = assignment_solver.solve(problem)
@@ -441,4 +489,4 @@ def validate(context):
     root = Path(__file__).parent
     return hashlib.sha256(b"".join((root / name).read_bytes() for name in
         ("opening_hours.py", "components.py", "problems.py", "rda.py",
-         "force_model/solver.py"))).hexdigest()
+         "force_model/solver.py", "force_model/errand_centres.py", "force_model/calibration.py"))).hexdigest()
