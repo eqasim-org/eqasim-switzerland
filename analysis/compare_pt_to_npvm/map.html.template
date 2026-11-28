@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PT and car demand · NPVM comparison</title><style>__LEAFLET_CSS__</style>
+<style>
+:root{font:14px system-ui,sans-serif;color:#22364a;background:#edf2f6;--npvm:#16759e;--sim:#d75e36}*{box-sizing:border-box}body{margin:0}header{height:74px;padding:14px 24px;background:#172e40;color:white;display:flex;align-items:center;justify-content:space-between}h1{margin:0;font-size:22px;letter-spacing:-.3px}header p{margin:5px 0 0;color:#bdd0dd;font-size:12px}.badge{border:1px solid #638092;border-radius:20px;padding:8px 14px;font-size:12px}main{display:grid;grid-template-columns:360px 1fr;height:calc(100vh - 74px)}aside{overflow:auto;padding:20px;background:#fff;border-right:1px solid #dbe3eb}h2{font-size:17px;margin:0 0 10px}h3{font-size:13px;margin:16px 0 9px}label{display:block;font-weight:600;font-size:12px;margin:13px 0 6px}input,select,button{font:inherit;color:inherit;border:1px solid #cbd6df;border-radius:7px;padding:8px;background:white;max-width:100%}button{cursor:pointer}button:hover{background:#edf5fa}button:disabled{opacity:.45;cursor:default}input[type=search],select{width:100%}input[type=checkbox]{accent-color:#19769e}.hint{font-size:12px;color:#64788a;line-height:1.6}.row{display:flex;gap:8px;align-items:center}.row label{margin:0;font-weight:400}.section{border-top:1px solid #e3e9ef;padding-top:16px;margin-top:18px}.cards{display:grid;grid-template-columns:1fr 1fr;gap:8px}.card{padding:10px;background:#eef6fb;border-radius:8px;font-size:11px;color:#567}.card.sim{background:#fff1eb}.card b{display:block;font-size:20px;color:#1d3b51;margin-top:5px}#difference{font-size:17px;font-weight:700;margin:10px 0}.selection{padding:13px;border-left:3px solid #e6ad27;border-radius:5px;background:#f8f6ed}.selection p{margin:5px 0;font-size:12px}.segmented{display:flex;gap:0;margin-top:9px}.segmented button{flex:1;border-radius:0;padding:10px 4px;font-size:12px;font-weight:600}.segmented button:first-child{border-radius:7px 0 0 7px}.segmented button:last-child{border-radius:0 7px 7px 0}.segmented button+button{border-left:0}.segmented button.active{background:#213f55;color:white}.segmented button.npvm.active{background:var(--npvm)}.segmented button.sim.active{background:var(--sim)}#mapPanel{position:relative;min-width:0}#map{height:100%;width:100%;background:#e8edf1}.map-title{position:absolute;top:14px;left:56px;right:16px;z-index:500;background:#ffffffed;box-shadow:0 2px 15px #26415b16;border-radius:9px;padding:12px 16px;pointer-events:none}.map-title strong{display:block;font-size:17px}.map-title small{display:block;margin-top:4px;color:#61768a}.legend{position:absolute;bottom:29px;right:18px;width:330px;max-width:calc(100% - 36px);background:#fffffff2;z-index:500;border-radius:9px;padding:12px;font-size:11px;box-shadow:0 2px 14px #26415b16}.ramp{height:10px;border-radius:3px;margin:8px 0 4px;background:linear-gradient(90deg,#2374b5,#fafaf6,#c62d39)}.ends{display:flex;justify-content:space-between}.swatch{display:inline-block;width:9px;height:9px;background:#bfc9d2;margin-right:4px}.leaflet-tooltip{font:12px system-ui,sans-serif;line-height:1.6;min-width:255px}.leaflet-tooltip table{font-size:11px;margin-top:5px}.leaflet-popup-content{font:13px system-ui,sans-serif;line-height:1.5}.leaflet-popup-content button{margin:5px 4px 0 0}table{border-collapse:collapse;width:100%;font-size:11px}th,td{padding:6px 3px;text-align:right;border-bottom:1px solid #e5ebf0}th:first-child,td:first-child{text-align:left}tbody tr:hover{background:#eef5fa;cursor:pointer}td:first-child{max-width:130px;overflow-wrap:anywhere}details summary{font-size:12px;cursor:pointer;font-weight:600}details p{font-size:12px;line-height:1.6;overflow-wrap:anywhere}#status{position:absolute;z-index:600;bottom:30px;left:16px;background:#fffef2;border:1px solid #e8dcae;border-radius:7px;padding:8px 12px;font-size:12px;max-width:calc(100% - 390px)}#error{color:#a22;white-space:pre-wrap}.popup-choice{display:flex}.popup-choice button{flex:1}#lineKey{margin-top:8px;font-size:11px}.keyline{display:inline-block;width:25px;height:3px;margin:0 5px 3px 0}.popup-stat{font-weight:600;color:#1d506d}@media(max-width:1000px){main{grid-template-columns:310px 1fr}aside{padding:14px}.map-title{font-size:12px}.badge{display:none}#status{max-width:70%;bottom:135px}}@media(max-width:650px){header{height:70px;padding:10px 14px}h1{font-size:19px}main{height:auto;display:block}aside{max-height:45vh}#mapPanel{height:85vh}.legend{width:285px}.map-title{left:50px;padding:9px}#status{bottom:140px}}
+.leaflet-control-layers-toggle{background-image:none!important;display:flex!important;align-items:center;justify-content:center;color:#324a5e!important;font-size:11px;font-weight:600;text-decoration:none!important}.leaflet-control-layers-toggle:after{content:"Map"}
+</style></head><body>
+<header><div><h1>Transport demand · NPVM comparison</h1><p id="headerCaption">PT and passenger cars · LCV and freight excluded</p></div><span class="badge">NPVM 2023 × MATSim</span></header>
+<main><aside>
+<label>Transport mode</label><div class="segmented" style="margin-bottom:16px"><button id="mode-pt" class="active" disabled>Public transport</button><button id="mode-car" disabled>Passenger cars</button></div><p id="modeDescription" class="hint"></p>
+<label>Geographic level</label><div class="segmented" style="margin-bottom:18px"><button id="zoning-zones" disabled>NPVM zones</button><button id="zoning-municipalities" class="active" disabled>Municipalities</button></div>
+<h2 id="comparisonTitle">Zone demand comparison</h2><p class="hint">Colour shows the percentage difference between simulated and NPVM demand. Hover for totals; click an area to choose its OD demand source.</p>
+<label id="searchLabel" for="search">Find an NPVM zone</label><input id="search" type="search" list="zoneNames" placeholder="Zone ID or municipality name"><datalist id="zoneNames"></datalist>
+<div class="row" style="margin-top:14px"><input id="crossborder" type="checkbox" checked><label for="crossborder">Include cross-border trips</label></div><p id="crossborderHint" class="hint"></p>
+<div class="row" style="margin-top:12px"><input id="hideForeign" type="checkbox" checked><label for="hideForeign">Hide foreign-region polygons</label></div><p class="hint">Hides their shapes and colours only. Cross-border demand and OD lines stay included.</p>
+<label>Compare totals / OD direction</label><div class="segmented"><button id="destinations" class="active">Destinations →<br><small>trips leaving each area</small></button><button id="origins">← Origins<br><small>trips arriving in each area</small></button></div>
+<label for="lower">Percentage colour limits</label><div class="row"><div style="flex:1"><label for="lower" style="margin-top:0;font-weight:400">Lower (%)</label><input id="lower" type="number" value="-100" style="width:100%"></div><div style="flex:1"><label for="upper" style="margin-top:0;font-weight:400">Upper (%)</label><input id="upper" type="number" value="100" style="width:100%"></div></div>
+<p class="hint">Blue: lower simulated demand. Red: higher. Values beyond the limits keep the limit colour.</p>
+<div class="row"><input id="intra" type="checkbox" checked><label for="intra">Include journeys within the same area</label></div>
+<h3 id="totalsTitle">All mapped zones</h3><div class="cards"><div class="card"><span id="npvmLabel">NPVM · all PT</span><b id="nTotal">—</b></div><div class="card sim">Simulated · expanded<b id="sTotal">—</b></div></div><div id="difference"></div>
+<div class="section selection"><h2 id="selectedTitle">Select a zone</h2><p id="selectedHint">Click an area, then choose NPVM or simulated OD demand.</p><div class="segmented"><button id="source-npvm" class="npvm" disabled>Show NPVM ODs</button><button id="source-simulated" class="sim" disabled>Show simulated ODs</button></div><div class="row" style="margin-top:12px"><button id="clear" disabled>Clear selection</button><button id="overview">Swiss overview</button></div></div>
+<div class="section"><div class="row"><input id="lines" type="checkbox" checked><label for="lines">Show chosen OD flows</label></div><label for="top">Maximum OD lines</label><input id="top" type="number" min="0" max="1000" value="50" style="width:90px"><label for="minimum">Minimum journeys for an OD line</label><input id="minimum" type="number" min="0" step="any" value="1" style="width:90px"><div id="lineKey" class="hint">Choose an area and a demand source.</div><p class="hint">Line width represents the chosen source's demand. Area colours always show aggregate percentage differences. Line limits do not change totals.</p></div>
+<div class="section"><h2 id="tableTitle">Largest originating zones</h2><p id="tableHint" class="hint"></p><table><thead><tr><th id="tableAreaTitle">Zone</th><th>NPVM</th><th>Sim.</th><th>Δ %</th></tr></thead><tbody id="table"></tbody></table></div>
+<div class="section"><label for="opacity">Background opacity</label><input id="opacity" type="range" min="0" max="1" step="0.05" value="0.4" style="width:100%"><details style="margin-top:15px"><summary>Scope, sources and exclusions</summary><div id="provenance"></div></details><details id="odFilesHelp" style="margin-top:15px"><summary>OD files / Jupyter preview</summary><p>OD details load from the assets folder beside this report. If a notebook preview blocks them, open the downloaded report in your browser with its assets folder, or select that folder below. No data is uploaded.</p><label for="odFiles">Select the downloaded assets folder</label><input id="odFiles" type="file" webkitdirectory multiple><p id="odFilesStatus" class="hint"></p></details><p id="error" role="alert"></p></div>
+</aside><section id="mapPanel"><div class="map-title"><strong id="mapTitle">Percentage difference · originating PT journeys</strong><small id="mapSubtitle">(Simulated − NPVM) / NPVM × 100 · all PT modes</small></div><div id="map"></div><div id="status">Loading regions and totals… If this stays visible, open index.html directly in a browser; embedded file previews may block scripts.</div><div class="legend"><b>Simulated − NPVM · percentage difference</b><div class="ramp"></div><div class="ends"><span id="legendLower">−100%</span><span>0%</span><span id="legendUpper">+100%</span></div><div style="margin-top:7px"><span class="swatch"></span>No NPVM reference · hover for both counts</div></div></section></main>
+<script>__LEAFLET_JS__</script><script>
+'use strict';
+const packedPayload='__PAYLOAD__',$=id=>document.getElementById(id);
+let payload,meta,mode='pt',zoning='municipalities',geo,props=[];
+const escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=n=>new Intl.NumberFormat('en-CH',{maximumFractionDigits:Math.abs(n)>0&&Math.abs(n)<10?2:0}).format(n);
+const pct=(s,n)=>n>0?100*(s-n)/n:null,pctText=(s,n)=>n>0?`${pct(s,n).toFixed(1)}%`:(s>0?'no reference':'—');
+let map,background,zoneLayer,lineLayer,selected=null,source=null,direction='destinations',matrices=null,odRequest=0,ready=false,odValues=null,aggregateValues=[],zoneLayers=[];
+const localODFiles=new Map(),odCache=new Map(),pendingOD=new Map();window.npvmODChunks=Object.create(null);
+function areaLabel(i=null){return i!==null&&!props[i].is_domestic?'Foreign NPVM zone':zoning==='zones'?'NPVM zone':'Municipality'}
+function domesticBounds(){const bounds=L.latLngBounds([]);zoneLayer.eachLayer(layer=>{if(layer.feature.properties.is_domestic)bounds.extend(layer.getBounds())});return bounds}
+function setCrossborder(){
+ if(selected!==null&&!$('crossborder').checked&&!props[selected].is_domestic){selected=null;source=null;odValues=null;++odRequest;$('status').style.display='none';map.closePopup()}
+ if(source!==null)computeOD();rebuildAreas();$('provenance').innerHTML=provenance();update();
+}
+function areaPlural(){return zoning==='zones'?'zones':'municipalities'}
+function rebuildAreas(){
+ if(zoneLayer)map.removeLayer(zoneLayer);zoneLayers=[];
+ zoneLayer=L.geoJSON(geo,{filter:f=>$('crossborder').checked||f.properties.is_domestic,onEachFeature:(f,l)=>{zoneLayers[f.properties.position]=l;l.on('click',()=>select(f.properties.position));l.bindTooltip(()=>tooltip(f.properties.position),{sticky:true})}}).addTo(map);
+ $('zoneNames').replaceChildren(...props.filter(p=>$('crossborder').checked||p.is_domestic).map(p=>{const option=document.createElement('option');option.value=p.name;return option}));
+}
+function setZoning(level){
+ if(level===zoning||!ready)return;map.closePopup();lineLayer.clearLayers();selected=null;source=null;odValues=null;++odRequest;$('status').style.display='none';
+ zoning=level;geo=payload.levels[level];props=geo.features.map(f=>f.properties);matrices=null;rebuildAreas();
+ for(const key of ['zones','municipalities'])$(`zoning-${key}`).classList.toggle('active',key===zoning);
+ $('search').value='';update();
+}
+function modeLabel(){return mode==='pt'?'PT':'Car'}
+function unitLabel(){return meta.modes[mode].unit.toLowerCase()}
+function setMode(value){
+ if(value===mode||!ready)return;mode=value;matrices=null;map.closePopup();
+ if(source!==null)computeOD();$('provenance').innerHTML=provenance();update();
+}
+function totals(i){const p=props[i],subtract=$('intra').checked?0:1,scope=$('crossborder').checked?'':'domestic_',value=(model,key)=>p[`${mode}_${model}_${scope}${key}`];return {no:value('npvm','origins')-subtract*value('npvm','intrazonal'),so:value('simulated','origins')-subtract*value('simulated','intrazonal'),ni:value('npvm','destinations')-subtract*value('npvm','intrazonal'),si:value('simulated','destinations')-subtract*value('simulated','intrazonal')}}
+function activeTotals(i){const t=totals(i);return direction==='destinations'?{n:t.no,s:t.so}:{n:t.ni,s:t.si}}
+function blend(a,b,t){return 'rgb('+a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(',')+')'}
+function colour(s,n){const v=pct(s,n);if(v===null)return '#bfc9d2';const low=Number($('lower').value),high=Number($('upper').value);return blend([250,250,246],v<0?[35,116,181]:[198,45,57],Math.min(1,v<0?v/low:v/high))}
+function comparisonTable(t){return `<table><thead><tr><th>${meta.modes[mode].unit} / weekday</th><th>NPVM</th><th>Simulated</th><th>Δ %</th></tr></thead><tbody><tr><td>Originating here</td><td>${fmt(t.no)}</td><td>${fmt(t.so)}</td><td>${pctText(t.so,t.no)}</td></tr><tr><td>Ending here</td><td>${fmt(t.ni)}</td><td>${fmt(t.si)}</td><td>${pctText(t.si,t.ni)}</td></tr></tbody></table>`}
+function tooltip(i){const p=props[i],t=totals(i);let text=`<b>${areaLabel(i)} ${p.id}</b> · ${escape(p.municipality_name)}${comparisonTable(t)}<small>${mode==='pt'?'All PT modes':'Passenger-car vehicles only'} · simulated demand expanded ×${meta.simulation_expansion}</small>`;if(selected!==null&&source!==null&&odValues){const v=odValues[i];text+=`<hr><b>${props[selected].id} ${direction==='destinations'?'→':'←'} ${p.id}</b><br>NPVM ${fmt(v.n)} · simulated ${fmt(v.s)}<br>OD difference ${pctText(v.s,v.n)}`}return text}
+function popup(i){const root=document.createElement('div');root.innerHTML=`<b>${areaLabel(i)} ${props[i].id}</b><br>${escape(props[i].municipality_name)}${comparisonTable(totals(i))}<p style="margin:10px 0 4px">Show this area's OD demand:</p>`;const choices=document.createElement('div');choices.className='popup-choice';for(const model of ['npvm','simulated']){const b=document.createElement('button');b.textContent=model==='npvm'?'NPVM':'Simulated';b.onclick=()=>showODs(model);choices.append(b)}root.append(choices);return root}
+function select(i,openPopup=true){if(!$('crossborder').checked&&!props[i].is_domestic)return;++odRequest;$('status').style.display='none';selected=i;source=null;odValues=null;update();if(openPopup)L.popup({maxWidth:420}).setLatLng([props[i].lat,props[i].lon]).setContent(popup(i)).openOn(map)}
+function setDirection(value){direction=value;$('destinations').classList.toggle('active',value==='destinations');$('origins').classList.toggle('active',value==='origins');if(source!==null)computeOD();update()}
+function showODs(model){if(selected===null||!ready)return;source=model;$('lines').checked=true;map.closePopup();computeOD();update()}
+function vector(matrix,index){
+ const result=new Float64Array(props.length),row=index%payload.od_block_rows;
+ for(let k=matrix.rows[row];k<matrix.rows[row+1];k++)result[matrix.columns[k]]=matrix.values[k];
+ if(!$('crossborder').checked)for(let i=0;i<props.length;i++)if(!props[i].is_domestic)result[i]=0;
+ return result;
+}
+async function loadODBlock(currentMode,level,flow,index){
+ const block=Math.floor(index/payload.od_block_rows),key=`${currentMode}_${level}_${flow}_${block}`;
+ if(odCache.has(key))return odCache.get(key);
+ if(!pendingOD.has(key))pendingOD.set(key,(async()=>{
+  let encoded;
+  if(localODFiles.has(key)){
+   const text=await localODFiles.get(key).text();
+   const prefix=`window.npvmODChunks[${JSON.stringify(key)}]=`;
+   if(!text.startsWith(prefix))throw new Error('The selected OD file does not match this report.');
+   encoded=JSON.parse(text.slice(prefix.length).trim().replace(/;$/, ''));
+  }else{
+   await new Promise((resolve,reject)=>{
+    const script=document.createElement('script');script.src=`assets/od/${key}.js?v=${payload.asset_version}`;
+    const timeout=setTimeout(()=>{script.remove();reject(new Error('Reading OD details timed out. The data folder or its storage may be slow. The map and totals are still available; try selecting the area again.'))},30000);
+    script.onload=()=>{clearTimeout(timeout);script.remove();resolve()};
+    script.onerror=()=>{clearTimeout(timeout);script.remove();reject(new Error('Could not load OD details. Jupyter previews can block companion files. Open index.html directly in your browser with its assets folder, or select the downloaded assets folder under OD files / Jupyter preview.'))};
+    document.head.append(script);
+   });
+   encoded=window.npvmODChunks[key];delete window.npvmODChunks[key];
+  }
+  if(!encoded)throw new Error('Missing OD details in the selected data file.');
+  const rows=Math.min(payload.od_block_rows,payload.levels[level].features.length-block*payload.od_block_rows);
+  const data={npvm:await unpack(encoded.npvm,rows),simulated:await unpack(encoded.simulated,rows)};
+  odCache.set(key,data);return data;
+ })());
+ try{return await pendingOD.get(key)}finally{pendingOD.delete(key)}
+}
+async function computeOD(){
+ const ticket=++odRequest,index=selected,currentMode=mode,level=zoning,flow=direction;
+ odValues=null;$('error').textContent='';$('status').style.display='block';$('status').textContent='Loading selected area’s OD details…';
+ try{
+  const data=await loadODBlock(currentMode,level,flow,index);
+  if(ticket!==odRequest)return;
+  matrices=data;const n=vector(data.npvm,index),s=vector(data.simulated,index);
+  odValues=props.map((p,i)=>({i,n:n[i],s:s[i]}));$('status').style.display='none';update();
+ }catch(error){if(ticket===odRequest)showError(error)}
+}
+function update(){
+ aggregateValues=props.map((p,i)=>activeTotals(i));
+ const out=direction==='destinations',include=$('intra').checked;
+ for(const key of ['pt','car'])$(`mode-${key}`).classList.toggle('active',key===mode);
+ $('headerCaption').textContent=mode==='pt'?'All PT modes · linked person journeys per weekday':'Passenger-car vehicle trips per weekday · no LCV or freight';
+ $('modeDescription').textContent=mode==='pt'?'Train, bus, tram, metro and other PT; transfers count once.':'Passenger-car drivers only. No car passengers, vans/LCV or freight.';
+ $('npvmLabel').textContent=mode==='pt'?'NPVM · all PT':'NPVM · passenger cars';
+ $('tableAreaTitle').textContent=zoning==='zones'?'Zone':'Municipality';
+ $('crossborderHint').textContent=$('crossborder').checked?(zoning==='zones'?'Domestic + incoming/outgoing cross-border demand. Foreign-to-foreign trips excluded.':'Domestic municipalities + foreign NPVM regions. Foreign-to-foreign trips excluded.'):'Only trips with both endpoints in the domestic NPVM area.';
+ $('mapSubtitle').textContent=`(Simulated − NPVM) / NPVM × 100 · ${modeLabel()} · ${areaPlural()} · ${$('crossborder').checked?'cross-border included':'domestic only'}`;
+ $('comparisonTitle').textContent=zoning==='zones'?'Zone demand comparison':'Municipality demand comparison';
+ $('searchLabel').textContent=`Find ${zoning==='zones'?'an NPVM zone':'a municipality'}`;
+ $('search').placeholder=zoning==='zones'?'Zone ID or municipality name':'Municipality name or ID';
+ zoneLayer.eachLayer(l=>{
+  const i=l.feature.properties.position,v=aggregateValues[i],hidden=$('hideForeign').checked&&!l.feature.properties.is_domestic;
+  l.options.interactive=!hidden;
+  l.setStyle({fillColor:colour(v.s,v.n),fillOpacity:hidden?0:.78,opacity:hidden?0:1,color:i===selected?'#e5ad16':'#65798b',weight:hidden?0:i===selected?3:.45});
+  if(hidden)l.closeTooltip();
+  else{if(i===selected)l.bringToFront();if(l.isTooltipOpen())l.setTooltipContent(()=>tooltip(i))}
+ });
+ $('mapTitle').textContent=`Percentage difference · ${out?'originating':'arriving'} ${modeLabel()} trips`;
+ $('legendLower').textContent=`${$('lower').value}%`;$('legendUpper').textContent=`+${$('upper').value}%`;
+ const total=selected===null?aggregateValues.reduce((a,v)=>({n:a.n+v.n,s:a.s+v.s}),{n:0,s:0}):aggregateValues[selected];
+ $('totalsTitle').textContent=selected===null?`All mapped ${areaPlural()}`:`${areaLabel(selected)} ${props[selected].id} · ${out?'outgoing':'incoming'}`;
+ $('nTotal').textContent=fmt(total.n);$('sTotal').textContent=fmt(total.s);$('difference').textContent=`${fmt(total.s-total.n)} ${unitLabel()} · ${pctText(total.s,total.n)}`;
+ $('selectedTitle').textContent=selected===null?`Select ${zoning==='zones'?'a zone':'a municipality'}`:`${areaLabel(selected)} ${props[selected].id}`;
+ $('selectedHint').textContent=selected===null?'Click an area, then choose NPVM or simulated OD demand.':`${props[selected].municipality_name} · ${source===null?'choose a demand source below':`${source==='npvm'?'NPVM':'Simulated'} ${out?'destinations':'origins'}`}`;
+ for(const model of ['npvm','simulated']){$(`source-${model}`).disabled=selected===null||!ready;$(`source-${model}`).classList.toggle('active',source===model)}$('clear').disabled=selected===null;
+ const data=source!==null?(odValues?odValues.filter(v=>include||v.i!==selected):[]):aggregateValues.map((v,i)=>({...v,i}));
+ const ranked=data.filter(v=>v.n>0||v.s>0).sort((a,b)=>source===null?Math.max(b.n,b.s)-Math.max(a.n,a.s):(source==='npvm'?b.n-a.n:b.s-a.s));
+ $('tableTitle').textContent=source===null?`Largest ${out?'originating':'arriving'} ${areaPlural()}`:`${source==='npvm'?'NPVM':'Simulated'} ${out?'destinations':'origins'}`;
+ $('tableHint').textContent=`Top 30 of ${ranked.length} ${areaPlural()} · ${source===null?'ranked by larger model total':'ranked by chosen OD demand'}`;
+ $('table').replaceChildren(...ranked.slice(0,30).map(v=>{const tr=document.createElement('tr'),p=props[v.i];tr.innerHTML=`<td title="${escape(p.name)}">${p.id}<br><span class="hint">${escape(p.municipality_name)}</span></td><td>${fmt(v.n)}</td><td>${fmt(v.s)}</td><td>${pctText(v.s,v.n)}</td>`;tr.onclick=()=>{if(source===null)select(v.i);map.fitBounds(zoneLayers[v.i].getBounds().pad(1))};return tr}));
+ drawLines(ranked);
+}
+function drawLines(ranked){
+ lineLayer.clearLayers();if(selected===null||source===null){$('lineKey').textContent='Choose an area and a demand source.';return}
+ const color=source==='npvm'?'#16759e':'#d75e36',out=direction==='destinations',key=source==='npvm'?'n':'s',top=Math.min(1000,Math.max(0,Number($('top').value)||0)),minimum=Math.max(0,Number($('minimum').value)||0);
+ const candidates=ranked.filter(v=>v.i!==selected&&v[key]>0&&v[key]>=minimum).slice(0,top),max=candidates.length?candidates[0][key]:1;
+ $('lineKey').innerHTML=`<span class="keyline" style="background:${color}"></span>${source==='npvm'?'NPVM':'Simulated'} · ${candidates.length} ${out?'outgoing':'incoming'} OD lines${$('lines').checked?'':' (hidden)'}`;
+ if(!$('lines').checked)return;
+ candidates.forEach(v=>{const a=out?props[selected]:props[v.i],b=out?props[v.i]:props[selected],start=[a.lat,a.lon],end=[b.lat,b.lon];
+  lineLayer.addLayer(L.polyline([start,end],{color,weight:.7+5*Math.sqrt(v[key]/max),opacity:.62}).bindTooltip(`<b>${a.id} → ${b.id}</b><br>${escape(a.municipality_name)} → ${escape(b.municipality_name)}<br>NPVM: ${fmt(v.n)}<br>Simulated: ${fmt(v.s)}<br>Difference: ${pctText(v.s,v.n)}`,{sticky:true}));
+  const mid=[start[0]*.3+end[0]*.7,start[1]*.3+end[1]*.7],p1=map.project(start),p2=map.project(end),angle=Math.atan2(p2.y-p1.y,p2.x-p1.x)*180/Math.PI;
+  lineLayer.addLayer(L.marker(mid,{interactive:false,icon:L.divIcon({className:'',html:`<span style="display:block;color:${color};font-size:15px;transform:rotate(${angle}deg)">➤</span>`,iconSize:[16,16],iconAnchor:[8,8]})}));
+ });
+ lineLayer.addLayer(L.circleMarker([props[selected].lat,props[selected].lon],{radius:5,weight:2,color:'#fff',fillColor:'#e7ae22',fillOpacity:1,interactive:false}));
+}
+async function inflate(text){
+ if(typeof DecompressionStream==='undefined')throw new Error('This browser cannot read the report data. Please use a current Chrome, Edge or Firefox browser.');
+ const length=text.length,bytes=new Uint8Array(length*3/4-(text.endsWith('==')?2:text.endsWith('=')?1:0));
+ let offset=0;for(let i=0;i<length;i+=1048576){const block=atob(text.slice(i,i+1048576));for(let j=0;j<block.length;j++)bytes[offset++]=block.charCodeAt(j)}
+ return await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+}
+async function unpack(text,expectedSize){
+ const buffer=await inflate(text),header=new Uint32Array(buffer,0,4),[version,size,nnz,width]=header;
+ if(version!==1||size!==expectedSize||width!==2)throw new Error('Unsupported OD data schema');
+ const rows=new Uint32Array(buffer,16,size+1),columnOffset=16+4*(size+1),columns=new Uint16Array(buffer,columnOffset,nnz),valueOffset=Math.ceil((columnOffset+2*nnz)/4)*4,values=new Float32Array(buffer,valueOffset,nnz);
+ return {rows,columns,values};
+}
+function provenance(){const detail=meta.modes[mode];return `<p>${escape(detail.definition)}</p><p><a href="${meta.reference_url}" target="_blank" rel="noopener">ARE NPVM 2023</a> · full-day average weekday (DWV), original NPVM zones or municipality aggregation. ${escape(meta.scope)} ${escape(meta.municipality_basis)}</p><p>Simulation sample ${100*meta.input_downsampling}%, expanded ×${meta.simulation_expansion}. All nationalities included. Units: ${escape(detail.unit)} per weekday.</p><p>Current scope: ${$('crossborder').checked?'domestic + cross-border':'domestic only'}. NPVM domestic trips: ${fmt(detail.npvm.domestic_journeys)}; cross-border: ${fmt(detail.npvm.crossborder_journeys)}. Foreign-to-foreign excluded: ${fmt(detail.npvm.foreign_to_foreign_excluded_journeys)}.</p><p>${escape(meta.unmapped_note)}</p><p>NPVM in the selected scope ${fmt(detail.npvm.domestic_journeys+($('crossborder').checked?detail.npvm.crossborder_journeys:0))} / ${fmt(detail.npvm.all_matrix_journeys)} trips. Unmapped endpoint exclusions: ${fmt(detail.npvm.excluded_external_or_unmapped_journeys)}.</p><p>Simulated ${modeLabel()} sample ${fmt(detail.simulation[mode+'_trips_sample'])}; freight/LCV exclusions among this mode ${fmt(detail.simulation.excluded_lcv_or_freight_sample)}; unmapped endpoint exclusions ${fmt(detail.simulation.excluded_external_or_unmapped_sample)} before expansion.</p><p>${escape(meta.notes)}</p><p>Input: ${escape(meta.trips_file)}</p>`}
+async function boot(){
+ payload=JSON.parse(new TextDecoder().decode(await inflate(packedPayload)));meta=payload.metadata;
+ geo=payload.levels[zoning];props=geo.features.map(f=>f.properties);
+ Object.values(payload.levels).forEach(collection=>collection.features.forEach((f,i)=>f.properties.position=i));
+ map=L.map('map',{preferCanvas:true}).setView([46.82,8.22],8);
+ background=L.tileLayer('https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg',{attribution:'© <a href="https://www.swisstopo.admin.ch/">swisstopo</a>',maxZoom:18,opacity:.4}).addTo(map);
+ rebuildAreas();lineLayer=L.layerGroup().addTo(map);map.fitBounds(domesticBounds(),{padding:[40,40]});
+ const globalBackground=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',{attribution:'Tiles © Esri',maxZoom:19,opacity:.4});
+ L.control.layers({'Swisstopo':background,'Esri global topography':globalBackground},null,{position:'topright'}).addTo(map);
+ map.on('baselayerchange',event=>{background=event.layer;background.setOpacity(Number($('opacity').value))});
+ $('provenance').innerHTML=provenance();
+ for(const value of ['pt','car'])$(`mode-${value}`).onclick=()=>setMode(value);
+ for(const level of ['zones','municipalities'])$(`zoning-${level}`).onclick=()=>setZoning(level);
+ $('crossborder').onchange=setCrossborder;
+ $('odFiles').onchange=()=>{
+  localODFiles.clear();
+  for(const file of $('odFiles').files)if(/^(pt|car)_(zones|municipalities)_(origins|destinations)_\d+\.js$/.test(file.name))localODFiles.set(file.name.slice(0,-3),file);
+  $('odFilesStatus').textContent=`${localODFiles.size} OD files available locally.`;
+  if(source!==null)computeOD();
+ };
+ $('destinations').onclick=()=>setDirection('destinations');$('origins').onclick=()=>setDirection('origins');
+ for(const model of ['npvm','simulated'])$(`source-${model}`).onclick=()=>showODs(model);
+ $('clear').onclick=()=>{selected=null;source=null;odValues=null;++odRequest;$('status').style.display='none';map.closePopup();update()};$('overview').onclick=()=>map.fitBounds(domesticBounds(),{padding:[40,40]});
+ $('opacity').oninput=()=>background.setOpacity(Number($('opacity').value));
+ for(const id of ['lower','upper'])$(id).onchange=()=>{if(Number($('lower').value)>=0)$('lower').value=-100;if(Number($('upper').value)<=0)$('upper').value=100;update()};
+ for(const id of ['intra','lines','top','minimum','hideForeign'])$(id).onchange=update;
+ $('search').onchange=()=>{const text=$('search').value.trim().toLowerCase();let i=props.findIndex(p=>($('crossborder').checked||p.is_domestic)&&(String(p.id)===text||p.name.toLowerCase()===text));if(i<0)i=props.findIndex(p=>($('crossborder').checked||p.is_domestic)&&p.municipality_name.toLowerCase().includes(text));if(i>=0&&text){select(i);map.fitBounds(zoneLayers[i].getBounds().pad(2));$('search').value=''}};
+ ready=true;for(const level of ['zones','municipalities'])$(`zoning-${level}`).disabled=false;for(const value of ['pt','car'])$(`mode-${value}`).disabled=false;update();$('status').style.display='none';
+ window.ptComparison={get includeCrossborder(){return $('crossborder').checked},get mode(){return mode},get zoning(){return zoning},get selected(){return selected},get source(){return source},get direction(){return direction},get values(){return aggregateValues},get odValues(){return odValues},get lineCount(){return lineLayer.getLayers().length},get zoneCount(){return props.length},get loadedODBlocks(){return odCache.size},get nnz(){return matrices?matrices.npvm.values.length:0},select,showODs,setDirection,setZoning,setMode,setCrossborder,map,get zoneLayers(){return zoneLayers},tooltip};
+}
+function showError(error){$('status').style.display='block';$('odFilesHelp').open=true;$('status').textContent='Could not load OD demand: '+error.message;$('error').textContent=error.message;console.error(error)}
+</script>
