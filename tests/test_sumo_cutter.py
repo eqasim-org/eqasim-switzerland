@@ -6,18 +6,29 @@ from pathlib import Path
 import geopandas as gpd
 import pytest
 from lxml import etree
-from shapely.geometry import box, LineString
+from shapely.geometry import box
+from shapely.geometry import LineString
 
-from test_sumo_config import Context, runtime, network, trip_file, validate_schema
+from test_sumo_config import Context
+from test_sumo_config import runtime
+from test_sumo_config import network
+from test_sumo_config import trip_file
+from test_sumo_config import validate_schema
 from sumo import run as selected_run
 from sumo.runtime import sumo
-from sumo.scenario import demand, modes
-from sumo.scenario.tools import elements, read_routes
-from sumo.scenario.network.tools import read_network, validate_routes
-from sumo.simulation import load_network
-from sumo.simulation import run_microscopic, run_mesoscopic
-from sumo.cutter import geometry, split_network, network as cut_network, trips, scenario
-from sumo.cutter.tools import inside_intervals, cut_vehicle
+from sumo.macro_scenario import demand
+from sumo.functions.scenario import modes
+from sumo.functions.scenario.tools import elements, read_routes
+from sumo.functions.scenario.network.tools import read_network, validate_routes
+import sumo.macro_scenario as load_network
+from sumo.simulation import run_microscopic
+from sumo.simulation import run_mesoscopic
+from sumo.micro_scenario import region as geometry
+from sumo.macro_scenario import split_network
+from sumo.micro_scenario import network as cut_network
+from sumo.micro_scenario import demand as trips
+import sumo.micro_scenario as scenario
+from sumo.functions.cutter.tools import inside_intervals, cut_vehicle
 
 
 @pytest.mark.parametrize('method', ['dua', 'incremental', 'SUE'])
@@ -28,21 +39,24 @@ def test_crossing_trip_loaded_cut_and_simulated(tmp_path, runtime, network, meth
               'sumo_network_crs': 'EPSG:2056', 'random_seed': 42, 'sumo_end': 1000,
               'sumo_assignment_iterations': 3, 'sumo_loading_convergence_window': 2,
               'sumo_loading_convergence_tolerance': 0.5, 'sumo_loading_method': method}
+    if method != 'dua':
+        # Exercise actual SUMO input with multiple gzip members and tiny IPC batches.
+        config.update({'sumo_route_batch_size': 1, 'sumo_route_batch_bytes': 128})
     stages = {'sumo.runtime.sumo': runtime}
-    stages['sumo.cutter.geometry'] = geometry.execute(Context(geometry, tmp_path / 'geometry', config, stages))
-    stages['sumo.cutter.split_network'] = split_network.execute(Context(split_network, tmp_path / 'split', config, stages))
+    stages['sumo.micro_scenario.region'] = geometry.execute(Context(geometry, tmp_path / 'geometry', config, stages))
+    stages['sumo.macro_scenario.split_network'] = split_network.execute(Context(split_network, tmp_path / 'split', config, stages))
     source = trip_file(tmp_path, count=6)
-    stages['sumo.scenario.demand'] = demand.execute(Context(demand, tmp_path / 'demand',
+    stages['sumo.macro_scenario.demand'] = demand.execute(Context(demand, tmp_path / 'demand',
         {'sumo_assignment_trip_files': [str(source)]}))
-    stages['sumo.simulation.load_network'] = load_network.execute(Context(load_network, tmp_path / 'load', config, stages))
-    loaded = stages['sumo.simulation.load_network']
+    stages['sumo.macro_scenario'] = load_network.execute(Context(load_network, tmp_path / 'load', config, stages))
+    loaded = stages['sumo.macro_scenario']
     assert loaded['source_count'] == loaded['count'] == 6
     assert loaded['boundary_split']
     if method == 'dua':
         assert loaded['convergence']['iterations'] >= 2
-    stages['sumo.cutter.network'] = cut_network.execute(Context(cut_network, tmp_path / 'cutnet', config, stages))
-    stages['sumo.cutter.trips'] = trips.execute(Context(trips, tmp_path / 'cuttrips', config, stages))
-    result = stages['sumo.cutter.trips']
+    stages['sumo.micro_scenario.network'] = cut_network.execute(Context(cut_network, tmp_path / 'cutnet', config, stages))
+    stages['sumo.micro_scenario.demand'] = trips.execute(Context(trips, tmp_path / 'cuttrips', config, stages))
+    result = stages['sumo.micro_scenario.demand']
     assert result['count'] == 6
     assert result['interpolated_visits'] == 0
     net = read_network(result['network'])
@@ -58,7 +72,7 @@ def test_crossing_trip_loaded_cut_and_simulated(tmp_path, runtime, network, meth
     sumo.run(Context(sumo, tmp_path / 'run', stages=stages), ['-c', bundle['config'], '--no-step-log', 'true'])
     assert Path(bundle['config']).is_file()
     if method == 'dua':
-        stages['sumo.cutter.scenario'] = bundle
+        stages['sumo.micro_scenario'] = bundle
         before = {path.name: path.read_bytes() for path in Path(bundle['config']).parent.iterdir()}
         for model, module in [('microscopic', run_microscopic), ('mesoscopic', run_mesoscopic)]:
             execution_config = {**config, 'sumo_micro_step_length': 0.25,
@@ -112,7 +126,7 @@ def test_regional_dispatch_dependencies_and_invalid_model():
     for module in (run_microscopic, run_mesoscopic):
         context = ConfigurationContext({"enable_mode_choice": True, 'threads': 2, 'random_seed': 42})
         module.configure(context)
-        assert {stage['descriptor'] for stage in context.required_stages} == {'sumo.cutter.scenario', 'sumo.runtime.sumo'}
+        assert {stage['descriptor'] for stage in context.required_stages} == {'sumo.micro_scenario', 'sumo.runtime.sumo'}
 
 
 @pytest.mark.parametrize('method,scale,expected', [('dua', 2, 6), ('incremental', 2, 6), ('SUE', 1, 3)])
@@ -123,7 +137,7 @@ def test_loading_methods_and_scale(tmp_path, runtime, network, method, scale, ex
         'sumo_network_file': str(network), 'sumo_loading_method': method,
         'sumo_assignment_scale': scale, 'random_seed': 42, 'sumo_end': 1000,
         'sumo_assignment_iterations': 3, 'sumo_loading_convergence_window': 2},
-        {'sumo.runtime.sumo': runtime, 'sumo.scenario.demand': selected}))
+        {'sumo.runtime.sumo': runtime, 'sumo.macro_scenario.demand': selected}))
     assert result['source_count'] == 3
     assert result['count'] == expected
     _, vehicles = read_routes(result['routes'])
@@ -132,7 +146,7 @@ def test_loading_methods_and_scale(tmp_path, runtime, network, method, scale, ex
 
 def test_mode_filter_vehicle_classes_and_conditional_dependencies(tmp_path, runtime, network):
     from synpp.pipeline import ConfigurationContext
-    from sumo.scenario.population import trips as commercial
+    from sumo.macro_scenario import vehicles as commercial
     source = tmp_path / 'modes.xml'
     source.write_text('<routes>' + ''.join(f'<vType id="{c}" vClass="{c}"/>' for c in ('passenger', 'truck', 'delivery', 'bicycle'))
         + ''.join(f'<trip id="{c}" type="{c}" depart="0" from="in" to="out"/>' for c in ('passenger', 'truck', 'delivery', 'bicycle')) + '</routes>')
@@ -141,15 +155,15 @@ def test_mode_filter_vehicle_classes_and_conditional_dependencies(tmp_path, runt
     loaded = load_network.execute(Context(load_network, tmp_path / 'load', {
         'sumo_network_file': str(network), 'random_seed': 42, 'sumo_end': 1000,
         'sumo_assignment_iterations': 2, 'sumo_loading_convergence_window': 2},
-        {'sumo.runtime.sumo': runtime, 'sumo.scenario.demand': result}))
+        {'sumo.runtime.sumo': runtime, 'sumo.macro_scenario.demand': result}))
     assert loaded['count'] == 3
     assert {vehicle['attributes']['type'] for vehicle in read_routes(loaded['routes'])[1]} == {'passenger', 'truck', 'delivery'}
     context = ConfigurationContext({"enable_mode_choice": True, 'sumo_modes': ['car']})
     commercial.configure(context)
-    assert not context.required_stages
+    assert [stage['descriptor'] for stage in context.required_stages] == ['sumo.macro_scenario.population']
     context = ConfigurationContext({"enable_mode_choice": True, 'sumo_modes': ['lcv']})
     commercial.configure(context)
-    assert [stage['descriptor'] for stage in context.required_stages] == ['synthesis.lcv.trips']
+    assert [stage['descriptor'] for stage in context.required_stages] == ['sumo.macro_scenario.population']
 
 
 def test_reentry_keeps_separate_visits_and_positions():
@@ -172,7 +186,7 @@ def test_reentry_keeps_separate_visits_and_positions():
 
 @pytest.mark.parametrize('policy', ['largest', 'all', 'error'])
 def test_disconnected_components(tmp_path, runtime, network, policy):
-    from sumo.cutter.tools import build_network
+    from sumo.functions.cutter.tools import build_network
     polygon = box(0, -10, 40, 10).union(box(260, -10, 300, 10))
     context = Context(cut_network, tmp_path / 'cut', {'sumo_cutter_components': policy}, {'sumo.runtime.sumo': runtime})
     if policy == 'error':
@@ -186,7 +200,7 @@ def test_disconnected_components(tmp_path, runtime, network, policy):
 
 
 def test_geometry_crs_offset_and_holes(tmp_path):
-    from sumo.cutter.tools import load_region
+    from sumo.functions.cutter.tools import load_region
     from pyproj import Transformer
     source = tmp_path / 'region.geojson'
     poly = box(8, 47, 8.002, 47.002).difference(box(8.0005, 47.0005, 8.0015, 47.0015))
@@ -198,7 +212,7 @@ def test_geometry_crs_offset_and_holes(tmp_path):
 
 
 def test_native_turns_signals_lanes_and_curves_survive(tmp_path, runtime):
-    from sumo.cutter.tools import build_network
+    from sumo.functions.cutter.tools import build_network
     nodes = tmp_path / 'nodes.xml'
     nodes.write_text('<nodes><node id="a" x="-100" y="0"/><node id="b" x="0" y="0" type="traffic_light"/>'
         '<node id="c" x="100" y="0"/><node id="d" x="0" y="100"/><node id="e" x="200" y="0"/></nodes>')
@@ -239,7 +253,7 @@ def test_nonconvergence_and_incomplete_horizon_are_explicit(tmp_path, runtime, n
     settings = {'sumo_network_file': str(network), 'random_seed': 42, 'sumo_end': 1000,
                 'sumo_assignment_iterations': 1, 'sumo_loading_require_convergence': True,
                 'sumo_loading_method': 'dua'}
-    stages = {'sumo.runtime.sumo': runtime, 'sumo.scenario.demand': selected}
+    stages = {'sumo.runtime.sumo': runtime, 'sumo.macro_scenario.demand': selected}
     with pytest.raises(RuntimeError, match='stability'):
         load_network.execute(Context(load_network, tmp_path / 'unstable', settings, stages))
     settings.update(sumo_loading_require_convergence=False, sumo_end=1)
@@ -249,8 +263,8 @@ def test_nonconvergence_and_incomplete_horizon_are_explicit(tmp_path, runtime, n
 
 def test_projected_native_network_retains_coordinate_frame(tmp_path, runtime):
     from test_sumo_population import OSM
-    from sumo.scenario.network import road_network
-    from sumo.cutter.tools import build_network
+    from sumo.macro_scenario import network as road_network
+    from sumo.functions.cutter.tools import build_network
     folder = tmp_path / 'osm'
     folder.mkdir()
     source = folder / 'input.osm'
@@ -292,7 +306,7 @@ def test_dua_updates_route_choices_using_loaded_costs(tmp_path, runtime):
         '--output-file', net, '--no-internal-links', 'true'], binary='netconvert')
     source = trip_file(tmp_path, count=150)
     source.write_text(source.read_text().replace(' depart=', ' departLane="free" depart='))
-    stages['sumo.scenario.demand'] = demand.execute(Context(demand, tmp_path / 'demand',
+    stages['sumo.macro_scenario.demand'] = demand.execute(Context(demand, tmp_path / 'demand',
         {'sumo_assignment_trip_files': [str(source)]}))
     loaded = load_network.execute(Context(load_network, tmp_path / 'load', {
         'sumo_network_file': str(net), 'random_seed': 42, 'sumo_end': 2000,
@@ -325,14 +339,14 @@ def test_default_macro_keeps_assignment_distribution_without_postrouting(tmp_pat
     if restricted:
         source.write_text(source.read_text().replace('<routes>', '<routes><vType id="truck" vClass="truck"/>')
                           .replace(' depart=', ' type="truck" depart='))
-    stages['sumo.scenario.demand'] = demand.execute(Context(demand, tmp_path / 'demand',
+    stages['sumo.macro_scenario.demand'] = demand.execute(Context(demand, tmp_path / 'demand',
         {'sumo_assignment_trip_files': [str(source)]}))
     native_run = sumo.run
     calls = []
     def record(*args, **kwargs):
         calls.append(kwargs.get('binary', 'sumo'))
         return native_run(*args, **kwargs)
-    monkeypatch.setattr(sumo, 'run', record)
+    monkeypatch.setattr('sumo.functions.runtime.sumo.run', record)
     settings = {'sumo_network_file': str(network), 'random_seed': 42,
                 'sumo_end': 3600, 'sumo_assignment_scale': 10}
     context = Context(load_network, tmp_path / 'load', settings, stages)
@@ -365,7 +379,7 @@ def test_default_macro_keeps_assignment_distribution_without_postrouting(tmp_pat
 
 
 def test_macro_clock_uses_departure_slice_and_partial_endpoints(tmp_path):
-    from sumo.scenario.assignment import materialize_assignment
+    from sumo.functions.scenario.assignment import materialize_assignment
     from lxml import etree
     # All edges appear in an explicitly timed route; never fall back to free flow.
     network = tmp_path / 'network.xml'
@@ -393,7 +407,7 @@ def test_macro_clock_uses_departure_slice_and_partial_endpoints(tmp_path):
 
 
 def test_component_filter_honours_connection_permissions():
-    from sumo.cutter.tools import connected_edges
+    from sumo.functions.cutter.tools import connected_edges
     edges={name:etree.fromstring(f'<edge id="{name}"><lane index="0" allow="passenger delivery"/></edge>')
            for name in ['a','b']}
     connections=[etree.fromstring('<connection from="a" to="b" fromLane="0" toLane="0" allow="delivery"/>')]

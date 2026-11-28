@@ -109,7 +109,7 @@ class PopulationScalingTest(unittest.TestCase):
             def config(self, key):
                 return {'enable_scaling':True,'scaling_year':2025,'random_seed':42,'threads':2}[key]
             def stage(self, key):
-                return {'synthesis.population.models.caravailability':source,
+                return {'data.statpop.statpop':source,
                     'data.statpop.projections.households':(h,2025),
                     'data.statpop.projections.population':(p,2025)}[key]
             def parallel(self, processes):

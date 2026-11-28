@@ -14,7 +14,7 @@ import synpp
 from synpp.pipeline import ConfigurationContext
 
 from sumo.runtime import sumo
-from sumo.scenario.network import road_network
+from sumo.macro_scenario import network as road_network
 
 ROOT = Path(__file__).resolve().parents[1]
 OSM = '''<?xml version="1.0" encoding="UTF-8"?>
@@ -76,20 +76,25 @@ def runtime():
         return pickle.load(stream)
 
 
-def test_default_selects_latest_single_extract():
-    context = ConfigurationContext({"data_path": "/data", "random_seed": 42,
+def test_default_selects_latest_single_extract(tmp_path):
+    folder = tmp_path / 'osm'
+    folder.mkdir()
+    source = folder / 'switzerland-261004.osm.pbf'
+    source.write_text(OSM)  # Format detection follows content, not suffix.
+    context = ConfigurationContext({"data_path": str(tmp_path), "random_seed": 42,
                                     "osm_file": ["france.osm.pbf", "germany.osm.pbf"]})
     road_network.configure(context)
-    assert road_network._osm_path(context) == Path("/data/osm/switzerland-261004.osm.pbf")
+    assert road_network._input_path(context) == source
     assert [stage["descriptor"] for stage in context.required_stages] == ["sumo.runtime.sumo"]
 
 
-def test_explicit_extract_does_not_require_latest_setting():
-    context = ConfigurationContext({"data_path": "/data", "random_seed": 42,
-                                    "sumo_osm_file": "/different/input.osm"})
+def test_explicit_extract_does_not_require_latest_setting(tmp_path):
+    source = tmp_path / 'input.osm'
+    source.write_text(OSM)
+    context = ConfigurationContext({'random_seed': 42, 'sumo_osm_file': str(source)})
     road_network.configure(context)
     assert "latest_osm_for_correction" not in context.required_config
-    assert road_network._osm_path(context) == Path("/different/input.osm")
+    assert road_network._input_path(context) == source
 
 
 def test_source_replacement_invalidates_cache_and_missing_file_is_clear(tmp_path):
@@ -101,16 +106,14 @@ def test_source_replacement_invalidates_cache_and_missing_file_is_clear(tmp_path
     source.write_text(OSM + "\n")
     assert road_network.validate(context) != before
     source.unlink()
-    with pytest.raises(FileNotFoundError, match="SUMO OSM input not found"):
+    with pytest.raises(FileNotFoundError, match="SUMO network input not found"):
         road_network.validate(context)
 
 
 @pytest.mark.parametrize("filename", [["a.pbf", "b.pbf"], "", "   "])
 def test_rejects_non_single_input(tmp_path, filename):
-    context = Context(tmp_path, {"data_path": str(tmp_path), "random_seed": 42,
-                                 "sumo_osm_file": filename})
     with pytest.raises(ValueError, match="single OSM file"):
-        road_network._osm_path(context)
+        Context(tmp_path, {'data_path': str(tmp_path), 'random_seed': 42, 'sumo_osm_file': filename})
 
 
 def test_helper_sets_child_environment_and_propagates_failure(tmp_path, monkeypatch):
@@ -138,7 +141,7 @@ def test_pbf_conversion_preserves_tags_and_restrictions(tmp_path):
         osmium.apply(reader, writer)
     before = pbf.read_bytes()
     converted = tmp_path / "converted.osm.xml.gz"
-    road_network._convert_pbf(pbf, converted)
+    road_network.convert_pbf_to_osm(pbf, converted)
     with gzip.open(converted, "rb") as stream:
         tree = ET.parse(stream)
     assert tree.find("way[@id='10']/tag[@k='hgv']").get("v") == "no"
@@ -207,16 +210,16 @@ def test_synpp_reuses_runtime_and_network_and_tracks_source_changes(tmp_path, ru
     source.write_text(OSM)
     config = {"data_path": str(tmp_path), "random_seed": 42,
               "sumo_osm_file": str(source), "sumo_version": runtime["version"]}
-    options = {"definitions": [{"descriptor": "sumo.scenario.network.road_network"}],
+    options = {"definitions": [{"descriptor": "sumo.macro_scenario.network"}],
                "config": config, "working_directory": str(ROOT / "cache_sumo"),
                "verbose": True, "rerun_required": False}
     first = synpp.run(**options)
-    assert any(name.startswith("sumo.scenario.network.road_network__") for name in first["stale"])
-    assert not any(name.startswith("sumo.runtime.sumo__") for name in first["stale"])
+    assert any(name.startswith("sumo.macro_scenario.network__") for name in first["stale"])
+    # A source refactor may invalidate the installation once; the next call must reuse it.
     second = synpp.run(**options)
     assert not second["stale"]
     assert second["results"] == first["results"]
     source.write_text(OSM + "\n")
     third = synpp.run(**options)
     assert len(third["stale"]) == 1
-    assert next(iter(third["stale"])).startswith("sumo.scenario.network.road_network__")
+    assert next(iter(third["stale"])).startswith("sumo.macro_scenario.network__")

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import pickle
 import subprocess
+from types import SimpleNamespace
 
 from lxml import etree
 import numpy as np
@@ -16,11 +17,14 @@ from shapely.geometry import Point
 from synpp.pipeline import ConfigurationContext
 
 from sumo.runtime import sumo
-from sumo.tables import as_polars
+from sumo.functions.tables import as_polars
 from shapely import from_wkb
-from sumo.scenario.network import road_network
-from sumo.scenario.population import plans, population, tools, trips
-from sumo.scenario.population.writer import PopulationWriter
+from sumo.macro_scenario import network as road_network
+from sumo.macro_scenario import plans
+from sumo.macro_scenario import population
+from sumo.functions.scenario.population import tools
+from sumo.macro_scenario import vehicles as trips
+from sumo.functions.scenario.population.writer import PopulationWriter
 
 ROOT = Path(__file__).resolve().parents[1]
 OSM = '''<osm version="0.6">
@@ -123,7 +127,7 @@ def test_final_modes_departures_and_nontravellers_are_preserved(fixture_populati
     assert activity.end_time == 10
     assert activity.arrival_time == 90
     assert activity.geometry.equals(fixture_population[2].query("person_id == 11 and activity_index == 0").iloc[0].geometry)
-    context = Context(plans, tmp_path, stages={"sumo.scenario.population.population": result})
+    context = Context(plans, tmp_path, stages={"sumo.macro_scenario.population": result})
     root = read_xml(plans.execute(context)).getroot()
     assert [person.get("id") for person in root.findall("person")] == ["11", "12"]
     traveller = root.find("person[@id='11']")
@@ -144,7 +148,7 @@ def test_final_modes_departures_and_nontravellers_are_preserved(fixture_populati
 def test_mode_mapping_preserves_original_mode(fixture_population, tmp_path, mode, tag, selected):
     source = prepared(fixture_population)
     source["activities"].loc[source["activities"]["activity_index"] == 0, "following_mode"] = mode
-    context = Context(plans, tmp_path, stages={"sumo.scenario.population.population": source})
+    context = Context(plans, tmp_path, stages={"sumo.macro_scenario.population": source})
     tree = read_xml(plans.execute(context))
     stage = tree.find(f"person[@id='11']/{tag}")
     assert stage is not None
@@ -158,39 +162,42 @@ def test_passenger_vehicle_reference_and_explicit_taxi_option(fixture_population
     source = prepared(fixture_population)
     source["activities"].loc[source["activities"]["activity_index"] == 0, "following_mode"] = "car_passenger"
     source["activities"]["passenger_vehicle_id"] = "assigned_car"
-    context = Context(plans, tmp_path, stages={"sumo.scenario.population.population": source})
+    context = Context(plans, tmp_path, stages={"sumo.macro_scenario.population": source})
     assert read_xml(plans.execute(context)).find("person/ride").get("lines") == "assigned_car"
     context.values["sumo_car_passenger_mode"] = "taxi"
     assert read_xml(plans.execute(context)).find("person/personTrip").get("modes") == "taxi"
 
 
-@pytest.mark.parametrize("chosen", [True, False])
-def test_conditional_population_dependencies(chosen):
-    context = ConfigurationContext({"enable_mode_choice": chosen, "include_external_population": chosen,
-                                    "include_cross_border": chosen, "exlude_external_population_in_sumo": False})
+def prepared_bundle(fixture_population, extra=()):
+    persons, activities, locations, final_trips = fixture_population
+    acts = tools.prepare_activities(activities, locations, final_trips).to_pandas()
+    people = persons.assign(person_type='normal')
+    for person, activity, kind in extra:
+        people = pd.concat([people, person.assign(person_type=kind)], ignore_index=True)
+        acts = pd.concat([acts, activity], ignore_index=True)
+    return SimpleNamespace(persons=people, activities=acts, freight_trips=None, lcv_trips=None, airport_trips=None)
+
+
+def test_prepared_population_dependencies_and_mode_choice_requirement():
+    context = ConfigurationContext({'enable_mode_choice': True})
     population.configure(context)
-    stages = [stage["descriptor"] for stage in context.required_stages]
-    assert ("mode_choice.run" in stages) == chosen
-    assert ("synthesis.population.trips_with_departures" in stages) != chosen
-    assert ("data.external_population.read_outputs" in stages) == chosen
-    assert ("data.cross_border.generate_cross_border_traffic" in stages) == chosen
-    assert not any(stage.startswith("matsim.") for stage in stages)
+    assert [stage['descriptor'] for stage in context.required_stages] == ['synthesis.prepared.population']
+    with pytest.raises(ValueError, match='mode_choice'):
+        population.configure(ConfigurationContext({'enable_mode_choice': False}))
 
 
 def test_population_stage_includes_external_and_crossborder(fixture_population, tmp_path):
-    persons, activities, locations, final_trips = fixture_population
+    persons, activities, _, _ = fixture_population
     external = persons.iloc[:1].copy().assign(person_id=30)
     crossing = persons.iloc[:1].copy().assign(person_id=40)
     nontraveller = activities.iloc[-1:].copy()
-    stages = {"synthesis.population.models.subscriptions": persons,
-              "synthesis.population.activities": activities,
-              "synthesis.population.spatial.locations": locations, "population_trips": final_trips,
-              "data.external_population.read_outputs": (external, nontraveller.assign(person_id=30), None),
-              "data.cross_border.generate_cross_border_traffic": (crossing, nontraveller.assign(person_id=40), None)}
-    context = Context(population, tmp_path, {"include_cross_border": True, "exlude_external_population_in_sumo": False}, stages)
+    bundle = prepared_bundle(fixture_population, [(external, nontraveller.assign(person_id=30), 'FR'),
+                                               (crossing, nontraveller.assign(person_id=40), 'crossborder')])
+    context = Context(population, tmp_path, {'exlude_external_population_in_sumo': False},
+                      {'synthesis.prepared.population': bundle})
     result = pandas_population(population.execute(context))
-    assert set(result["persons"]["person_id"]) == {"11", "12", "30", "40"}
-    assert set(result["persons"]["population_source"]) == {"resident", "external", "crossborder"}
+    assert set(result['persons']['person_id']) == {'11', '12', '30', '40'}
+    assert set(result['persons']['population_source']) == {'resident', 'external', 'crossborder'}
 
 
 def test_invalid_keys_and_chronology_fail(fixture_population, tmp_path):
@@ -201,7 +208,7 @@ def test_invalid_keys_and_chronology_fail(fixture_population, tmp_path):
         tools.combine_populations([(persons, pd.concat([activities, activities.iloc[:1]]), "resident")])
     result = prepared(fixture_population)
     result["activities"].loc[result["activities"]["activity_index"] == 1, "start_time"] = 1
-    context = Context(plans, tmp_path, stages={"sumo.scenario.population.population": result})
+    context = Context(plans, tmp_path, stages={"sumo.macro_scenario.population": result})
     with pytest.raises(ValueError, match="Inconsistent activity/trip times"):
         plans.execute(context)
 
@@ -212,10 +219,9 @@ def test_equivalent_external_activity_rows_preserve_first_mode_and_source(fixtur
     activity = activities.iloc[:1].copy().assign(person_id=30, following_mode='car_loop')
     repeated = pd.concat([activity, activity.assign(following_mode='car'), activity, activity.assign(following_mode='car')])
     original = repeated.copy(deep=True)
-    stages = {'synthesis.population.models.subscriptions': persons,
-              'synthesis.population.activities': activities,
-              'synthesis.population.spatial.locations': locations, 'population_trips': final_trips,
-              'data.external_population.read_outputs': (external_person, repeated, None)}
+    coalesced = tools.coalesce_external_activities(repeated).to_pandas()
+    bundle = prepared_bundle(fixture_population, [(external_person, coalesced, 'FR')])
+    stages = {'synthesis.prepared.population': bundle}
     result = pandas_population(population.execute(Context(population, tmp_path, {"exlude_external_population_in_sumo": False}, stages=stages)))
     external = result['activities'].query("person_id == '30'")
     assert len(external) == 1
@@ -282,15 +288,19 @@ def test_freight_lcv_sorted_and_separate_from_persons(tmp_path):
     freight = pd.DataFrame({"agent_id": [7, 8], "origin_x": [2600000] * 2, "origin_y": [1200000] * 2,
                             "destination_x": [2600100] * 2, "destination_y": [1200010] * 2,
                             "departure_time": [20, 5], "vehicle_type": ["truck", "truck"]})
-    lcv = freight.iloc[:1].rename(columns={"agent_id": "trip_id"}).assign(departure_time=10)
+    lcv = freight.iloc[:1].assign(departure_time=10)
     before = freight.copy()
-    context = Context(trips, tmp_path, stages={"synthesis.freight.trips": freight, "synthesis.lcv.trips": lcv})
+    from sumo.functions.scenario.prepared import vehicles
+    from sumo.functions.tables import write_table
+    commercial = write_table(vehicles(SimpleNamespace(freight_trips=freight, lcv_trips=lcv), {'truck', 'lcv'}), tmp_path / 'commercial.arrow')
+    context = Context(trips, tmp_path, stages={'sumo.macro_scenario.population': {'commercial_trips': commercial}})
     tree = read_xml(trips.execute(context))
     assert [trip.get("id") for trip in tree.findall("trip")] == ["freight_8", "lcv_7", "freight_7"]
     assert [trip.get("type") for trip in tree.findall("trip")] == ["sumo_truck", "sumo_delivery", "sumo_truck"]
     assert tree.find("person") is None
     assert_frame_equal(freight, before)
-    context = Context(trips, tmp_path / "disabled", {"use_freight": False, "use_lcv": False})
+    empty = write_table(vehicles(SimpleNamespace(freight_trips=None, lcv_trips=None), None), tmp_path / 'empty.arrow')
+    context = Context(trips, tmp_path / 'disabled', stages={'sumo.macro_scenario.population': {'commercial_trips': empty}})
     assert not read_xml(trips.execute(context)).findall("trip")
 
 
@@ -314,7 +324,7 @@ def test_native_schema_routing_and_simulation(fixture_population, tmp_path, runt
     network_context = Context(road_network, tmp_path / "network", {"data_path": str(tmp_path),
         "random_seed": 42, "sumo_osm_file": str(source)}, {"sumo.runtime.sumo": runtime})
     network = road_network.execute(network_context)
-    context = Context(plans, tmp_path / "population", stages={"sumo.scenario.population.population": prepared(fixture_population)})
+    context = Context(plans, tmp_path / "population", stages={"sumo.macro_scenario.population": prepared(fixture_population)})
     routes = plans.execute(context)
     schema = etree.XMLSchema(etree.parse(str(Path(runtime["home"]) / "data/xsd/routes_file.xsd")))
     schema.assertValid(read_xml(routes))
@@ -347,13 +357,10 @@ def test_writer_all_supported_plan_elements_validate(tmp_path, runtime):
 
 
 def test_sumo_excludes_external_population_by_default(fixture_population, tmp_path):
-    persons, activities, locations, final_trips = fixture_population
-    stages = {"synthesis.population.models.subscriptions": persons,
-              "synthesis.population.activities": activities,
-              "synthesis.population.spatial.locations": locations, "population_trips": final_trips}
-    configured = ConfigurationContext({"include_external_population": True})
+    stages = {'synthesis.prepared.population': prepared_bundle(fixture_population)}
+    configured = ConfigurationContext({'enable_mode_choice': True})
     population.configure(configured)
-    assert configured.required_config["exlude_external_population_in_sumo"] is True
-    assert "data.external_population.read_outputs" not in [s["descriptor"] for s in configured.required_stages]
+    assert configured.required_config['exlude_external_population_in_sumo'] is True
+    assert [s['descriptor'] for s in configured.required_stages] == ['synthesis.prepared.population']
     result = pandas_population(population.execute(Context(population, tmp_path, stages=stages)))
     assert set(result["persons"]["population_source"]) == {"resident"}

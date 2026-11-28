@@ -10,10 +10,15 @@ import pytest
 from synpp.pipeline import ConfigurationContext
 from shapely.geometry import Point
 
-from sumo.config import loaded, macroscopic, mesoscopic, microscopic
-from sumo.router import assignment, mapped
-from sumo.scenario import demand, unrouted_demand
-from sumo.scenario.network.tools import detect_network_format, resolve_input_path
+from sumo.config import loaded
+from sumo.config import macroscopic
+from sumo.config import mesoscopic
+from sumo.config import microscopic
+from sumo.router import assignment
+from sumo.router import mapped
+from sumo.macro_scenario import demand
+from sumo.macro_scenario import trips as unrouted_demand
+from sumo.functions.scenario.network.tools import detect_network_format, resolve_input_path
 from sumo.runtime import sumo
 from sumo.simulation import run
 
@@ -22,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class Context:
     def __init__(self, module, path, config=None, stages=None):
-        self.base = {"input_downsampling": 1., "threads": 2, "sumo_assignment_all_as_car": False, "sumo_population_crs": "EPSG:2056", "enable_mode_choice": True, "sumo_native_xml": False, "clip_trips_to_border_in_sumo": False, **(config or {})}
+        self.base = {"random_seed": 42, "sumo_initial_route_retention": 0.0, "input_downsampling": 1., "threads": 2, "sumo_assignment_all_as_car": False, "sumo_population_crs": "EPSG:2056", "enable_mode_choice": True, "sumo_native_xml": False, "clip_trips_to_border_in_sumo": False, **(config or {})}
         context = ConfigurationContext(self.base)
         module.configure(context)
         self.config_values = {**self.base, **context.required_config}
@@ -31,7 +36,7 @@ class Context:
         self.stages = dict(stages or {})
         network = (config or {}).get('sumo_network_file')
         if network and Path(network).is_file() and detect_network_format(network) == 'sumo':
-            self.stages.setdefault('sumo.scenario.network.road_network', str(Path(network).resolve()))
+            self.stages.setdefault('sumo.macro_scenario.network', str(Path(network).resolve()))
 
     def config(self, option):
         return self.config_values[option]
@@ -44,10 +49,19 @@ class Context:
         return str(self.cache)
 
     def stage(self, name):
-        if name in ("sumo.native.routes", "sumo.cutter.route_parts", "sumo.simulation.prepare_loading", "sumo.simulation.assign_network", "sumo.simulation.realize_routes") and name not in self.stages:
+        if name in ("sumo.native.routes", "sumo.micro_scenario.routes", "sumo.macro_scenario.mapped", "sumo.macro_scenario.assignment", "sumo.macro_scenario.routes", "sumo.macro_scenario.indexed", "sumo.macro_scenario.allocation") and name not in self.stages:
             import importlib
             module = importlib.import_module(name)
             self.stages[name] = module.execute(Context(module, self.cache / name.split(".")[-1], self.base, self.stages))
+        if name == "sumo.native.processing" and name not in self.stages:
+            import os
+            binary = os.environ.get("SUMO_TEST_PROCESSOR")
+            if binary is None:
+                from sumo.native.processing import build
+                import tempfile
+                binary = build(Path(tempfile.mkdtemp(prefix='sumo-processing-test-')) / 'process_routes')
+                os.environ['SUMO_TEST_PROCESSOR'] = binary
+            self.stages[name] = binary
         if name == "sumo.native.marouter" and name not in self.stages:
             import os
             binary = os.environ.get("SUMO_TEST_MAROUTER")
@@ -57,17 +71,18 @@ class Context:
                     pytest.skip("Build sumo.native.marouter or set SUMO_TEST_MAROUTER first")
                 binary = pickle.loads(manifests[0].read_bytes())
             self.stages[name] = binary
-        if name == "sumo.scenario.scaled" and name not in self.stages:
-            from sumo.scenario import scaled
+        if name == "sumo.macro_scenario.scaled" and name not in self.stages:
+            from sumo.macro_scenario import scaled
             self.stages[name] = scaled.execute(Context(scaled, self.cache / "scaled", self.base, self.stages))
-        if name in ("sumo.scenario.selected", "sumo.scenario.clipped") and name not in self.stages:
-            from sumo.scenario import selected, clipped
+        if name in ("sumo.macro_scenario.selected", "sumo.macro_scenario.clipped") and name not in self.stages:
+            from sumo.macro_scenario import selected
+            from sumo.macro_scenario import clipped
             module = selected if name.endswith("selected") else clipped
             self.stages[name] = module.execute(Context(module, self.cache / name.split(".")[-1], self.base, self.stages))
-        if name == "sumo.scenario.unrouted_demand" and name not in self.stages:
+        if name == "sumo.macro_scenario.trips" and name not in self.stages:
             self.stages[name] = unrouted_demand.execute(Context(unrouted_demand, self.cache / "raw", self.base, self.stages))
-        if name == "sumo.scenario.network.routing" and name not in self.stages:
-            from sumo.scenario.network import routing
+        if name == "sumo.macro_scenario.connected_network" and name not in self.stages:
+            from sumo.macro_scenario import connected_network as routing
             self.stages[name] = routing.execute(Context(routing, self.cache / "routing", self.base, self.stages))
         return self.stages[name]
 
@@ -135,10 +150,10 @@ def test_simulation_configs_validate_run_and_keep_producers_readonly(tmp_path, r
 def test_external_files_avoid_synthesis_dependencies(tmp_path):
     context = ConfigurationContext({"threads": 2, "sumo_network_file": "/network.xml", "sumo_route_files": ["/trips.xml"], "random_seed": 42})
     microscopic.configure(context)
-    assert [stage['descriptor'] for stage in context.required_stages] == ['sumo.scenario.network.road_network']
+    assert [stage['descriptor'] for stage in context.required_stages] == ['sumo.macro_scenario.network']
     context = ConfigurationContext({"enable_mode_choice": True, "sumo_assignment_trip_files": ["/trips.xml"], "sumo_native_xml": False, "clip_trips_to_border_in_sumo": False})
     demand.configure(context)
-    assert [s["descriptor"] for s in context.required_stages] == ["sumo.scenario.scaled"]
+    assert [s["descriptor"] for s in context.required_stages] == ["sumo.macro_scenario.scaled"]
 
 
 def prepare_workflow(tmp_path, runtime, network, scale=1):
@@ -149,10 +164,10 @@ def prepare_workflow(tmp_path, runtime, network, scale=1):
         {"sumo.runtime.sumo": runtime, "sumo.router.demand": inputs}))
     macro = macroscopic.execute(Context(macroscopic, tmp_path / "macro", {
         "random_seed": 42, "sumo_end": 3600, "sumo_assignment_iterations": 10, "sumo_assignment_scale": scale},
-        {"sumo.router.mapped": mapping}))
+        {"sumo.macro_scenario.mapped": mapping}))
     validate_schema(macro, runtime, "marouter")
     workflow = loaded.execute(Context(loaded, tmp_path / "loaded", {"random_seed": 42},
-        {"sumo.router.mapped": mapping, "sumo.config.macroscopic": macro}))
+        {"sumo.macro_scenario.mapped": mapping, "sumo.config.macroscopic": macro}))
     validate_schema(workflow["routing_config"], runtime, "duarouter")
     assert routes.read_bytes() == original
     return workflow
@@ -167,7 +182,7 @@ def test_loaded_assignment_reports_every_trip_and_responds_to_flow(tmp_path, run
         before = {path: Path(path).read_bytes() for path in (config["assignment_config"], config["routing_config"])}
         result = assignment.execute(Context(assignment, root / "execution", stages={
             "sumo.runtime.sumo": runtime, "sumo.config.loaded": config}))
-        from sumo.tables import read_table
+        from sumo.functions.tables import read_table
         metrics = read_table(result["metrics"]).to_pandas()
         assert len(metrics) == 200
         assert metrics["trip_id"].is_unique
@@ -214,7 +229,7 @@ def test_flow_changes_assignment_paths(tmp_path, runtime):
 def test_native_ue_and_invalid_steps_rejected(tmp_path, network):
     with pytest.raises(ValueError, match="native UE"):
         macroscopic.execute(Context(macroscopic, tmp_path / "macro", {"random_seed": 42, "sumo_assignment_method": "UE"},
-                                    {"sumo.router.mapped": {}}))
+                                    {"sumo.macro_scenario.mapped": {}}))
     source = trip_file(tmp_path)
     context = Context(microscopic, tmp_path / "micro", {"sumo_network_file": str(network),
         "sumo_route_files": [str(source)], "random_seed": 42, "sumo_micro_step_length": .3})
@@ -253,7 +268,7 @@ def test_demand_reads_coordinates_only_for_selected_trip_endpoints(tmp_path):
     ])
     original = activities.copy(deep=True)
     context = Context(demand, tmp_path, {'sumo_modes': ['car']},
-        {'sumo.scenario.population.population': {'persons': persons, 'activities': activities}})
+        {'sumo.macro_scenario.population': {'persons': persons, 'activities': activities}})
     trips = list(unrouted_demand._population_trips(context))
     assert len(trips) == 1
     assert trips[0]['attributes']['id'] == 'person_p_0'
@@ -274,7 +289,7 @@ def test_invalid_reference_arrival_does_not_remove_or_retime_trip(tmp_path, arri
          'geometry': Point(2600100, 1200000)},
     ])
     context = Context(demand, tmp_path, {'sumo_modes': ['car']},
-        {'sumo.scenario.population.population': {'persons': persons, 'activities': activities}})
+        {'sumo.macro_scenario.population': {'persons': persons, 'activities': activities}})
     trips = list(unrouted_demand._population_trips(context))
     assert len(trips) == 1
     assert trips[0]['attributes']['id'] == 'person_p_0'
@@ -298,8 +313,8 @@ def test_all_person_trips_are_queries_but_passengers_do_not_add_cars(tmp_path, a
         for index, mode in enumerate(("car", "car_passenger", "pt", None))
     ])
     context = Context(demand, tmp_path / "demand", {"sumo_assignment_all_as_car": all_as_car, "sumo_modes": None}, {
-        "sumo.scenario.population.population": {"persons": persons, "activities": activities},
-        "sumo.scenario.population.trips": str(commercial)})
+        "sumo.macro_scenario.population": {"persons": persons, "activities": activities},
+        "sumo.macro_scenario.vehicles": str(commercial)})
     result = demand.execute(context)
     assert result["count"] == 3
     assert result["loading_count"] == expected_load

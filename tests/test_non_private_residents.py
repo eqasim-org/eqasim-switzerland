@@ -140,6 +140,7 @@ class NonPrivateResidentsTest(unittest.TestCase):
         trips=pd.DataFrame(columns=['person_id','trip_index','departure_time','arrival_time','preceding_purpose','following_purpose','mode'])
         class Context:
             def stage(self,name):return persons if name=='synthesis.population.enriched' else trips
+            def config(self,name):return 'half_hour'
         activities=build_activities(Context())
         home=activities.loc[activities.person_id.eq(10)]
         self.assertEqual(len(home),1)
@@ -159,7 +160,7 @@ class NonPrivateResidentsTest(unittest.TestCase):
             def __getattr__(self, name): return lambda *args, **kwargs: None
         person = SimpleNamespace(person_id=8, age=80, employed=0,
             driving_license=0, sex=0, home_x=2500000, home_y=1100000,
-            car_availability=0, pt_subscription=0, bike_availability=0,
+            car_availability=0, pt_subscription=0, bike_availability=0, subscription_zones='',
             non_private_dorm_candidate_households=False,
             non_private_home_only_households=True, is_synthetic_household=True,
             non_private_model_status='home_only_not_modelled')

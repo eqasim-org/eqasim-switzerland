@@ -11,11 +11,12 @@ from lxml import etree
 from synpp.pipeline import ConfigurationContext
 from shapely.geometry import box
 
-from test_sumo_population import OSM, runtime
+from test_sumo_population import OSM
+from test_sumo_population import runtime
 from sumo.runtime import sumo
-from sumo.scenario.network import road_network
-from sumo.scenario.network.tools import detect_network_format, resolve_input_path
-from sumo.scenario.tools import elements
+from sumo.macro_scenario import network as road_network
+from sumo.functions.scenario.network.tools import detect_network_format, resolve_input_path
+from sumo.functions.scenario.tools import elements
 
 
 @pytest.mark.parametrize('root,expected', [('net', 'sumo'), ('osm', 'osm')])
@@ -90,7 +91,7 @@ def test_prepared_network_skips_runtime_and_tracks_source(tmp_path, monkeypatch)
     before = road_network.validate(context)
     prepared.write_text('<net>\n</net>')
     assert road_network.validate(context) != before
-    result = synpp.run([{'descriptor': 'sumo.scenario.network.road_network'}],
+    result = synpp.run([{'descriptor': 'sumo.macro_scenario.network'}],
         config={'sumo_network_file': str(prepared)}, working_directory=str(tmp_path / 'cache'),
         ensure_working_directory=True)
     assert result == [str(prepared)]
@@ -126,16 +127,16 @@ def test_actual_synpp_cut_and_run_with_unified_osm_input(tmp_path, runtime, monk
     monkeypatch.setattr(swiss_border, 'execute', lambda context:
         gpd.GeoSeries([box(8.0003, 46.999, 8.0017, 47.002)], crs=4326))
     from sumo.routing import paths as routing
-    from sumo.scenario.network.tools import read_network
+    from sumo.functions.scenario.network.tools import read_network
     import json
     import numpy as np
     import polars as pl
     import shapely
     def configure_routes(context):
-        context.stage('sumo.scenario.selected')
-        context.stage('sumo.scenario.network.road_network')
+        context.stage('sumo.macro_scenario.selected')
+        context.stage('sumo.macro_scenario.network')
     def complete_routes(context):
-        data=read_network(context.stage('sumo.scenario.network.road_network'))
+        data=read_network(context.stage('sumo.macro_scenario.network'))
         offset=np.asarray([float(x) for x in data['location']['netOffset'].split(',')])
         rows=[]
         for key,edge in data['edges'].items():
@@ -147,7 +148,7 @@ def test_actual_synpp_cut_and_run_with_unified_osm_input(tmp_path, runtime, monk
         keys=[key for key in data['edges'] if not key.startswith('-') and key.startswith(('10','11'))]
         keys.sort()
         assert len(keys)==2
-        ids=pl.read_ipc(context.stage('sumo.scenario.selected')['crossing_table'],columns=['id'])['id'].to_list()
+        ids=pl.read_ipc(context.stage('sumo.macro_scenario.selected')['crossing_table'],columns=['id'])['id'].to_list()
         pl.DataFrame({'id':ids,'travel_time':[20.]*len(ids),'travel_distance':[200.]*len(ids),
             'route':[json.dumps({'version':1,'mode':'car','parts':[{'kind':'leg','mode':'car',
                 'route':{'type':'links','links':keys}}]})]*len(ids)}).write_ipc(paths)
