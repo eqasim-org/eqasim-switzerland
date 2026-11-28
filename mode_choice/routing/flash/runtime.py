@@ -2,6 +2,7 @@
 from pathlib import Path
 import shutil
 import subprocess
+from scripts.monitoring import monitored
 
 COMMIT = '23963f5ff14e5f761c16a25ab4694da7900e64ba'
 REPOSITORY = 'https://github.com/TransitRouting/FLASH-TB.git'
@@ -13,6 +14,7 @@ def configure(context):
     context.config('flash_tb_numa_include', '')
 
 
+@monitored
 def execute(context):
 
     # Build in the stage cache and leave any user-supplied checkout untouched.

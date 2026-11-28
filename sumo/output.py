@@ -8,7 +8,7 @@ from pathlib import Path
 from lxml import etree
 
 from sumo.functions import output_tools
-from sumo.functions.monitoring.runtime import export_monitor, monitored
+from scripts.monitoring import export_monitor, monitored
 
 
 def configure(context):

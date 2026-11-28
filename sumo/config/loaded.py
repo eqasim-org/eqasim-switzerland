@@ -1,7 +1,7 @@
 """Prepare assignment followed by per-trip routing on final loaded edge weights."""
 
 from sumo.functions.config.loaded import write
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.source import source_digest
 
 

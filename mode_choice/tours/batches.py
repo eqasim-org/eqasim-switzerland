@@ -5,6 +5,7 @@ from mode_choice.defaults import RUN_DEFAULTS, TOUR_BATCH_FILENAME, TOUR_BATCH_C
 from dmc.parameters import Parameters
 from mode_choice.model.utilities import expressions
 from mode_choice.tours.batching import person_batches
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -15,6 +16,7 @@ def configure(context):
         context.config(name, RUN_DEFAULTS[name])
 
 
+@monitored
 def execute(context):
 
     # Load the population inputs and the fitted DMC parameters once.

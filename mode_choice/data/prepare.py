@@ -13,6 +13,7 @@ from dmc.pt_quality import pt_quality_expression
 from mode_choice.routing.eqasim.server import ensure_server_started
 from mode_choice.routing.eqasim.client import RoutingServer
 from mode_choice.model.utilities import validate_for_population
+from scripts.monitoring import monitored
 
 def configure(context):
     context.stage("mode_choice.routing.eqasim.server")
@@ -24,6 +25,7 @@ def configure(context):
         context.stage(stage)
     context.config("threads", volatile=True)
 
+@monitored
 def execute(context):
     ensure_server_started(context)
     try:

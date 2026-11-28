@@ -549,7 +549,7 @@ Renamed Synpp stages use new cache directories; routing/downstream stages can be
 The fitted DMC parameter stages were not renamed by this reorganization.
 
 
-### Iterative MARouter and Rust PT server
+### Iterative MARouter and PT server
 
 The pinned runtime is `0c32bdb3230cffeae0ddef0909ac9366619cf95a`; its entry point is
 `org.eqasim.switzerland.ch_cmdp.utils.routing.multimodalRouter.RunServer`.
@@ -557,12 +557,12 @@ The default car/truck and PT backends share this process. Configuration options:
 
 ```yaml
 mode_choice_marouter_iterations: 3
-mode_choice_use_rust_pt_router: true  # false selects Java RAPTOR within RunServer
+mode_choice_use_rust_pt_router: false  # default: Java RAPTOR; true opts into Rust PT
 ```
 
 Each road pass is incremental; later passes average replacement flows using
 1/iteration. Trip weights and population capacity sampling remain independent.
-The server uses `swissRustRouting` from the MATSim config for native-library and
+When Rust is explicitly enabled, the server uses `swissRustRouting` from the MATSim config for native-library and
 installation settings. Relative library/source/installation paths are resolved
 before copying the config. Native initialization failures are reported; Python
 does not silently switch to a different PT backend.
@@ -572,3 +572,11 @@ Backend stages were renamed from `mode_choice.routing.java.*` to
 `eqasim_path` overrides the pinned build: use an updated JAR containing RunServer,
 or set it to an empty string to build the pin. Old server JARs are rejected before
 loading network data. `config_dib_10.yml` now selects the pinned build.
+
+
+### Performance monitoring
+
+Mode-choice stages use `@monitored` from `scripts.monitoring`. Runtime, process-tree
+memory and restart checkpoints are stored separately from SUMO in
+`<working_directory>/mode_choice_monitoring/` (`performance.png`, `performance.json`
+and `state.json`). See [shared stage monitoring](../scripts/monitoring.md).

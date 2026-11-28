@@ -12,7 +12,7 @@ import tarfile
 from pathlib import Path
 from urllib.request import urlopen
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.native.marouter import (
     PATCH,
     SOURCE_SHA256,

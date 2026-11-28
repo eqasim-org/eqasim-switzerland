@@ -5,7 +5,7 @@ from pathlib import Path
 from lxml import etree
 
 from sumo.functions.config.tools import positive
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.scenario import modes
 from sumo.functions.scenario.demand_tools import TripSpool
 from sumo.functions.scenario.population.vehicle_tools import BATCH_SIZE

@@ -1,7 +1,7 @@
 """Run the cut scenario with the urban microscopic SUMO preset."""
 
 from sumo.functions.config import microscopic
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.simulation.tools import (
     configure_regional,
     run_regional,

@@ -8,7 +8,7 @@ from pathlib import Path
 
 logger = logging.getLogger("synpp")
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.runtime.sumo import _binary_path, _environment
 from sumo.functions.runtime.sumo import run as run
 from sumo.functions.runtime.sumo import run_python as run_python

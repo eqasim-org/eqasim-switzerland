@@ -1,5 +1,6 @@
 """Freight and LCV requests with the identifiers used by the population writer."""
 import polars as pl
+from scripts.monitoring import monitored
 
 REQUEST_SCHEMA = {
     "identifier": pl.String, "person_id": pl.String, "trip_index": pl.Int64,
@@ -17,6 +18,7 @@ def configure(context):
             context.stage(f"synthesis.{kind}.trips")
 
 
+@monitored
 def execute(context):
 
     # Read enabled vehicle populations and preserve their MATSim person IDs.

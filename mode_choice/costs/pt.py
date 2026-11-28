@@ -1,5 +1,6 @@
 """Read subscription-aware fares produced during PT routing."""
 from mode_choice.costs.artifacts import read_costs
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -7,5 +8,6 @@ def configure(context):
     context.stage("mode_choice.defaults")
 
 
+@monitored
 def execute(context):
     return read_costs(context, "pt")

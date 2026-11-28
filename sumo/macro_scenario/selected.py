@@ -9,7 +9,7 @@ from sumo.functions.tables import read_table, write_table
 
 logger = logging.getLogger("synpp")
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 
 
 def configure(context):

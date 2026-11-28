@@ -34,7 +34,7 @@ DEFAULT_NETCONVERT_OPTIONS = [
 
 from sumo.functions.macro_scenario.network import _configured_filename, _input_path
 from sumo.functions.macro_scenario.network import _osm_path as _osm_path
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.source import source_digest
 
 

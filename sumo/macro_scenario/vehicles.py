@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.scenario.population.tools import lonlat_transformer
 from sumo.functions.scenario.population.writer import PopulationWriter
 from sumo.functions.tables import read_table

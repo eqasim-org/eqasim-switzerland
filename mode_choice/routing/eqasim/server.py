@@ -10,6 +10,7 @@ from mode_choice.routing.eqasim.client import RoutingServer
 from mode_choice.routing.options import input_path
 from mode_choice.routing import options
 from mode_choice.routing.eqasim.runtime import validate_runtime
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -27,11 +28,12 @@ def configure(context):
     context.config("random_seed")
     context.config("input_downsampling")
     context.config("mode_choice_marouter_iterations", 3)
-    context.config("mode_choice_use_rust_pt_router", True)
+    context.config("mode_choice_use_rust_pt_router", False)
     if context.config("route_population_once"):
         context.stage("mode_choice.routing.eqasim.preparation")
 
 
+@monitored
 def execute(context):
 
     # Resolve the runtime and create the server's private working directory.

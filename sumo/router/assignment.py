@@ -6,7 +6,7 @@ from pathlib import Path
 from lxml import etree
 
 from sumo.functions.config import tools
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.runtime import sumo
 from sumo.functions.scenario.metrics import write_trip_metrics
 

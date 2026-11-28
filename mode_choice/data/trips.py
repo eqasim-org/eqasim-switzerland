@@ -2,12 +2,14 @@
 import polars as pl
 from mode_choice.defaults import SOURCE_TRIP_ID
 from mode_choice.routing.eqasim.server import ensure_server_started
+from scripts.monitoring import monitored
 
 def configure(context):
     context.stage("mode_choice.routing.eqasim.server")
     context.stage("synthesis.population.trips_with_departures")
 
 
+@monitored
 def execute(context):
     # We make sure the server is starting
     ensure_server_started(context)

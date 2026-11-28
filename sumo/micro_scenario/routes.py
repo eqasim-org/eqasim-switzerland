@@ -21,7 +21,7 @@ SCHEMA = {"id": pl.String, "depart": pl.Float64, "xml": pl.Binary}
 logger = logging.getLogger("synpp")
 
 from sumo.functions.micro_scenario.routes import _native_parts, _process
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.source import source_digest
 
 

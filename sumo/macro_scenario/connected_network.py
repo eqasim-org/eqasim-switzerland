@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 
 from sumo.functions.config import tools
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.scenario import modes
 from sumo.functions.scenario.network import mapping
 

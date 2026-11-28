@@ -2,7 +2,7 @@
 
 from sumo.functions.config import tools as config_tools
 from sumo.functions.cutter.tools import build_network, read_region
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.scenario import modes
 
 

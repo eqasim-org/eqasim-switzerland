@@ -4,6 +4,7 @@ import polars as pl
 
 from mode_choice.routing.flash.router import Router
 from mode_choice.routing import options
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -23,6 +24,7 @@ def configure(context):
         raise ValueError('FLASH-TB cannot yet export MATSim/SUMO itineraries; disable route_population_once and prepare_sumo')
 
 
+@monitored
 def execute(context):
 
     # Route all alternatives with FLASH-TB and retain the native legs for inspection.

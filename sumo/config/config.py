@@ -1,4 +1,4 @@
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 
 
 def configure(context):

@@ -1,6 +1,6 @@
 """Select microscopic or mesoscopic execution of the cut SUMO scenario."""
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.scenario.modes import require_mode_choice
 
 

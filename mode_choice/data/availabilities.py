@@ -2,6 +2,7 @@
 import polars as pl
 from mode_choice import defaults as D
 from mode_choice.data.frames import join_variables
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -14,6 +15,7 @@ def configure(context):
     context.stage("mode_choice.costs.pt")
 
 
+@monitored
 def execute(context):
     # Read only the person and tour attributes needed for mode availability.
     trips = context.stage("mode_choice.data.prepare").select(

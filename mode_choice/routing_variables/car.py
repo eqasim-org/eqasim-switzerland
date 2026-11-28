@@ -5,6 +5,7 @@ from mode_choice.costs.car import calculate_driving_costs
 from dmc.parameters import Parameters
 from mode_choice.defaults import RUN_DEFAULTS
 from mode_choice.routing.results import complete_routes
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -15,6 +16,7 @@ def configure(context):
         context.config("car_cost_model", RUN_DEFAULTS["car_cost_model"])
 
 
+@monitored
 def execute(context):
 
     # If the backend is Java, we use the Java routing.

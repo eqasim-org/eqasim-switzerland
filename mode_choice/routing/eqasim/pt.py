@@ -6,6 +6,7 @@ from mode_choice.routing.results import complete_routes
 from mode_choice.data.frames import join_variables
 from mode_choice.defaults import PT_ROUTING_COLUMNS
 from mode_choice.routing.options import pt_price_backend
+from scripts.monitoring import monitored
 
 COMPONENTS = {
     "in_vehicle_time_total_min": "pt_in_vehicle_time_min",
@@ -20,6 +21,7 @@ def configure(context):
     configure_mode(context, "pt")
 
 
+@monitored
 def execute(context):
 
     # Request totals, utility components and optional fares in one routing pass.

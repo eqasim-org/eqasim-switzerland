@@ -1,7 +1,11 @@
 # SUMO monitoring and simulation quality
 
+Performance monitoring is shared with mode choice; see the
+[reusable stage monitor](../scripts/monitoring.md). SUMO simulation-quality
+readers live under `scripts.monitoring.quality.sumo`.
+
 All SUMO stages decorate `execute(context)` with `@monitored`, imported from
-`sumo.functions.monitoring.runtime`. A single background worker samples Linux
+`scripts.monitoring`. A single background worker samples Linux
 process counters every two seconds. It includes the pipeline's Python process
 and descendant SUMO, Java and native helper processes. Stage boundaries also
 trigger samples. On a restart, earlier stage measurements are restored from a

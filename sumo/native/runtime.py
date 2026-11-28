@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pyarrow as pa
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.native.runtime import build_writer
 from sumo.functions.source import source_digest
 

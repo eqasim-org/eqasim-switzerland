@@ -6,7 +6,7 @@ import shapely
 from pyproj import Transformer
 from shapely.ops import transform
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.tables import as_polars
 
 

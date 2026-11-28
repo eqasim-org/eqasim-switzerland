@@ -2,6 +2,7 @@
 from pathlib import Path
 import polars as pl
 from mode_choice.routing import options
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -14,6 +15,7 @@ def configure(context):
         context.stage("mode_choice.routing.eqasim.preparation")
 
 
+@monitored
 def execute(context):
 
     # Use prepared freight coordinates when routes will be reused in MATSim.

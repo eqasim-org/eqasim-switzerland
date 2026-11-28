@@ -19,7 +19,7 @@ ROUTE_SCHEMA = {
     "travel_distance": pl.Float64,
 }
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.routing.paths import (
     completed_routes,
     reusable_routes,

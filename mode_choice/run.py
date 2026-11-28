@@ -9,6 +9,7 @@ from mode_choice.selection.mode_choice import ModeChoice
 from mode_choice.selection.sampler import TourSampler
 from mode_choice.selection.cache import TopologyCache
 from mode_choice.routing.eqasim.client import RoutingServer
+from scripts.monitoring import monitored
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ def configure(context):
         context.stage("data.microcensus.shares")
 
 
+@monitored
 def execute(context):
     try:
         return run_mode_choice(context)

@@ -2,6 +2,7 @@
 import polars as pl
 from mode_choice.selection.sampler import TourSampler
 from mode_choice.defaults import TOUR_HOME_PURPOSE
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -9,6 +10,7 @@ def configure(context):
     context.stage("mode_choice.defaults")
 
 
+@monitored
 def execute(context):
     # Assign tours before routing; secondary homes are ordinary stops in the tour.
     trips = assign_tours(context.stage("mode_choice.data.trips"))

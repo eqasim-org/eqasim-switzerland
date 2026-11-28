@@ -11,7 +11,7 @@ from matsim.scenario.network.utils.link_geometry import (
     GEOMETRY_COLUMN,
     attach_link_geometries,
 )
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.routing.java import SERVER_STAGE
 from sumo.functions.routing.network import (
     attach_road_endpoints as attach_road_endpoints,

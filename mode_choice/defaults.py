@@ -4,6 +4,7 @@ Fitted coefficients/scales stay in the DMC parameter files; shared estimation
 constants stay in dmc.constants. Override runtime defaults in config_dib_10.yml.
 """
 from dmc.constants import constants as DMC
+from scripts.monitoring import monitored
 
 MODES = ("car", "pt", "bike", "walk", "car_passenger")
 VEHICLE_MODES = {MODES.index("car"): 0, MODES.index("bike"): 1}
@@ -115,6 +116,7 @@ PARKING_FREE_HOURS = 1.0
 PARKING_MAX_COST_CHF = 40.0
 
 
+@monitored
 def execute(context):
     """Synpp dependency: changing defaults invalidates mode-choice stages."""
     return {**RUN_DEFAULTS, **CALIBRATION_DEFAULTS}

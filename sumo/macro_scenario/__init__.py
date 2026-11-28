@@ -11,7 +11,7 @@ from sumo.functions.scenario.metrics import write_trip_metrics
 
 logger = logging.getLogger("synpp")
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 
 
 def configure(context):

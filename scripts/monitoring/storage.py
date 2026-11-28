@@ -30,7 +30,9 @@ class MonitorStore:
         except FileNotFoundError:
             return {}
         except (OSError, ValueError, TypeError, AttributeError) as error:
-            logger.warning("Cannot read SUMO monitoring cache %s: %s", self.path, error)
+            logger.warning(
+                "Cannot read pipeline monitoring cache %s: %s", self.path, error
+            )
             return {}
 
     def save(self, record):
@@ -107,7 +109,7 @@ class MonitorStore:
                     records[row["cache"]] = row
             except (OSError, ValueError, TypeError, KeyError) as error:
                 logger.warning(
-                    "Cannot import SUMO monitoring report %s: %s", path, error
+                    "Cannot import pipeline monitoring report %s: %s", path, error
                 )
         if records:
             self._update(records)

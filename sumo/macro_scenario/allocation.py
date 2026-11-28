@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from sumo.functions.config.tools import positive
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.native import processing
 from sumo.functions.scenario import assignment_spool, route_io
 

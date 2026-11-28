@@ -6,7 +6,7 @@ from shapely import to_wkb
 
 from sumo.functions.config import tools as config_tools
 from sumo.functions.cutter.tools import geometry_token, load_region
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.scenario.network.tools import read_network
 
 

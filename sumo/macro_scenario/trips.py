@@ -15,7 +15,7 @@ logger = logging.getLogger("synpp")
 from sumo.functions.macro_scenario.trips import _population_batches, _read_vehicle_trips
 from sumo.functions.macro_scenario.trips import _population_trips as _population_trips
 from sumo.functions.macro_scenario.trips import _type_definition as _type_definition
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.source import source_digest
 
 

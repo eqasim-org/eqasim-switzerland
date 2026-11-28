@@ -14,6 +14,7 @@ import pyarrow.parquet as pq
 import matsim.runtime.eqasim as eqasim
 from matsim.writers import PopulationWriter
 from mode_choice.routing.eqasim.freight import REQUEST_SCHEMA
+from scripts.monitoring import monitored
 
 FACILITY_SCHEMA = {"facility_id": pl.String, "x": pl.Float64, "y": pl.Float64, "link_id": pl.String}
 FREIGHT_SCHEMA = {**REQUEST_SCHEMA, "origin_link_id": pl.String, "destination_link_id": pl.String}
@@ -30,6 +31,7 @@ def configure(context):
     context.config("java_memory", "50G", volatile=True)
 
 
+@monitored
 def execute(context):
 
     # Write freight endpoints for Java's normal facility assignment.

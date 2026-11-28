@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from sumo.functions.macro_scenario.routes import _native_routes
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.native import processing
 from sumo.functions.scenario.assignment import materialize_assignment
 from sumo.functions.source import source_digest

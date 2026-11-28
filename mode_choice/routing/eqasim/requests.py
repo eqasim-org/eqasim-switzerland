@@ -4,6 +4,7 @@ import polars as pl
 from mode_choice.defaults import PT_GA, PT_HALBTAX, PT_VERBUND, PT_SUBSCRIPTIONS
 from mode_choice.routing import options
 from mode_choice.routing.eqasim import endpoints
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -17,6 +18,7 @@ def configure(context):
         context.stage("synthesis.population.models.subscriptions")
 
 
+@monitored
 def execute(context):
 
     # Load trips and align reusable routes with MATSim's prepared endpoints.

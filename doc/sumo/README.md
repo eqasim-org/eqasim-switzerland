@@ -43,13 +43,12 @@ sumo/
     ├── routing/        extended-network path helpers
     ├── runtime/        tool execution and environment helpers
     ├── simulation/     assignment and execution helpers
-    ├── monitoring/     sampling, figures and quality-report readers
     ├── tables.py       external-data conversion and IPC persistence
     └── output_tools.py portable export helpers
 ```
 
 The optional `router/` stages retain the separate loaded-skims workflow.
-Stages use `@monitored` on `execute(context)`. See
+Stages import `@monitored` from `scripts.monitoring` for `execute(context)`. See
 [monitoring, quality reports and departure-route retention](monitoring.md).
 
 ## Install the runtime

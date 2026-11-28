@@ -23,7 +23,7 @@ SUMO_MODES = {
 }
 
 from sumo.functions.macro_scenario.plans import _write_person
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.source import source_digest
 
 

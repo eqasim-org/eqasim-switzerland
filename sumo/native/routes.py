@@ -4,7 +4,7 @@ import hashlib
 import platform
 from pathlib import Path
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.native.routes import build
 from sumo.functions.source import source_digest
 

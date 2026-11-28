@@ -85,6 +85,7 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 
 - [SUMO performance and stage caches](sumo/performance.md)
 - [SUMO monitoring and simulation quality](sumo/monitoring.md)
+- [Shared stage performance monitoring](scripts/monitoring.md)
 
 ## Changelogs
 

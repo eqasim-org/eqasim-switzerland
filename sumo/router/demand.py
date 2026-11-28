@@ -1,6 +1,6 @@
 """Compatibility stage: scenario demand is prepared under sumo.macro_scenario."""
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 
 
 def configure(context):

@@ -4,6 +4,7 @@ import datetime
 
 from data.gtfs.sources import source_signatures
 from mode_choice.routing.flash import cache
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -19,6 +20,7 @@ def configure(context):
     context.config('flash_tb_partition_cells', 32)
 
 
+@monitored
 def execute(context):
 
     # Resolve the extracted feed and the source archives that identify its contents.

@@ -8,7 +8,7 @@ import polars as pl
 from lxml import etree
 
 from sumo.functions.micro_scenario.demand import _native_export
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.native import processing
 from sumo.functions.scenario.network.tools import read_network, validate_routes
 from sumo.functions.scenario.rerouting import (

@@ -3,6 +3,7 @@ import polars as pl
 from mode_choice import defaults as D
 from dmc.parameters import Parameters
 from mode_choice.data.frames import join_variables
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -12,6 +13,7 @@ def configure(context):
     context.stage("dmc.parameter_files")
 
 
+@monitored
 def execute(context):
     trips = context.stage("mode_choice.data.prepare")
     if trips.is_empty():

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from sumo.functions.config import microscopic, simulation
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 
 
 def configure(context):

@@ -10,7 +10,7 @@ from pathlib import Path
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
-from sumo.functions.monitoring.plots import serialized_plot
+from scripts.monitoring.plots import serialized_plot
 from sumo.functions.scenario.tools import elements
 
 

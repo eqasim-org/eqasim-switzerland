@@ -2,7 +2,7 @@
 
 from sumo.functions.config import simulation
 from sumo.functions.config.mesoscopic import configure_profile, write
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.source import source_digest
 
 

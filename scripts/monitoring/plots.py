@@ -36,8 +36,9 @@ def performance_figure(data, path):
     duration = fig.add_subplot(grid[0, 0])
     memory = fig.add_subplot(grid[0, 1])
     timeline = fig.add_subplot(grid[1, :])
+    module = data.get("module", "sumo")
     labels = [
-        row["stage"].removeprefix("sumo.")
+        row["stage"].removeprefix(module + ".")
         + (" [retained]" if not row.get("current_run", True) else "")
         for row in stages
     ]
@@ -108,7 +109,11 @@ def performance_figure(data, path):
         axis.spines[["top", "right"]].set_visible(False)
         axis.tick_params(labelsize=9)
     fig.suptitle(
-        "SUMO | Runtime & memory", fontsize=21, weight="bold", x=0.02, ha="left"
+        f"{module.replace('_', ' ').upper()} | Runtime & memory",
+        fontsize=21,
+        weight="bold",
+        x=0.02,
+        ha="left",
     )
     job = data.get("slurm_job_id") or "local"
     threads = data.get("allocated_threads") or "not reported"

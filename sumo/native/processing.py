@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pyarrow as pa
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.native.processing import build, source_token
 from sumo.functions.native.processing import configure_options as configure_options
 from sumo.functions.native.processing import configure_stage as configure_stage

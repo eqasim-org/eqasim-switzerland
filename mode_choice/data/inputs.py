@@ -1,6 +1,7 @@
 """Assemble trip-keyed routing and cost outputs into the model input table."""
 from mode_choice.defaults import ROUTING_VARIABLE_STAGES, COST_STAGES, PERSON_AVAILABILITY_COLUMNS
 from mode_choice.data.frames import join_variables
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -11,6 +12,7 @@ def configure(context):
         context.stage(stage)
 
 
+@monitored
 def execute(context):
     # we get the trips from the prepare stage, which is the last stage that modifies the trips table
     trips = context.stage("mode_choice.data.prepare")

@@ -3,6 +3,7 @@ from pathlib import Path
 from matsim.config.tools import copy_config
 
 from mode_choice.defaults import ROUTER_CONFIG_INPUTS
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -11,6 +12,7 @@ def configure(context):
     context.stage("dmc.parameter_files")
 
 
+@monitored
 def execute(context):
     source = Path(context.stage("matsim.config.pt")).resolve()
     _, cost_parameters = context.stage("dmc.parameter_files")

@@ -5,6 +5,7 @@ import polars as pl
 
 from mode_choice.calibration.shares import load_canton_targets
 from mode_choice.defaults import MODES
+from scripts.monitoring import monitored
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,7 @@ def configure(context):
     context.stage("data.microcensus.shares")
 
 
+@monitored
 def execute(context):
 
     # Count every eligible trip, including people who cannot drive.

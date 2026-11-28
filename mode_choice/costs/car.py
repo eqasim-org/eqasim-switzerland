@@ -3,6 +3,7 @@ import polars as pl
 from dmc.cost.car import car_cost_simple, car_cost_weiss
 from mode_choice.costs.artifacts import read_costs
 from mode_choice.data.frames import join_variables
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -11,6 +12,7 @@ def configure(context):
     context.stage("mode_choice.defaults")
 
 
+@monitored
 def execute(context):
     # Read driving costs cached by either router, then attach parking variables.
     return join_variables(read_costs(context, "car"), context.stage("mode_choice.costs.parking"))

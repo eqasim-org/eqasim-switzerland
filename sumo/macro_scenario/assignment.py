@@ -1,6 +1,6 @@
 """Run the routing engine, keeping its outputs separate from route realization."""
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.simulation.loading import (
     configure_loading,
     run_iterations,

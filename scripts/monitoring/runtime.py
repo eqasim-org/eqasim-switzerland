@@ -1,4 +1,4 @@
-"""Low-frequency process-tree sampling shared by SUMO stage decorators."""
+"""Low-frequency process-tree sampling shared by pipeline stage decorators."""
 
 import atexit
 import json
@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 
-from sumo.functions.monitoring.storage import MonitorStore
+from scripts.monitoring.storage import MonitorStore
 
 logger = logging.getLogger("synpp")
 _sessions = {}
@@ -62,12 +62,15 @@ def process_tree():
 class RunMonitor:
     """One sampler/renderer thread per pipeline execution."""
 
-    def __init__(self, working_directory, pipeline_token=None):
+    def __init__(self, working_directory, pipeline_token=None, module="sumo"):
+        if not module.isidentifier():
+            raise ValueError("Monitoring module must be a Python package name")
+        self.module = module
         self.started = time.monotonic()
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
         self.run_id = f"{stamp}_{os.getpid()}"
         self.pipeline_token = pipeline_token
-        self.store = MonitorStore(Path(working_directory) / "sumo_monitoring")
+        self.store = MonitorStore(Path(working_directory) / f"{module}_monitoring")
         self.directory = self.store.directory / self.run_id
         self.directory.mkdir(parents=True, exist_ok=True)
         restored = (
@@ -93,11 +96,11 @@ class RunMonitor:
         self.stopping = threading.Event()
         self.dirty = True
         self.thread = threading.Thread(
-            target=self._work, name="sumo-monitor", daemon=True
+            target=self._work, name=f"{module}-monitor", daemon=True
         )
         self.thread.start()
         atexit.register(self.close)
-        logger.info("SUMO monitoring: %s", self.directory)
+        logger.info("%s monitoring: %s", module, self.directory)
 
     def begin(self, name, cache):
         record = dict(
@@ -147,7 +150,7 @@ class RunMonitor:
             self._save(record)
             self.dirty = True
         logger.info(
-            "SUMO stage %s: %s; %.1fs; peak sampled process-tree RSS %.2f GiB",
+            "Pipeline stage %s: %s; %.1fs; peak sampled process-tree RSS %.2f GiB",
             record["stage"],
             status,
             record["seconds"],
@@ -162,6 +165,8 @@ class RunMonitor:
         self.changed.set()
 
     def _sample(self):
+        if not self.active:
+            return
         counters = process_tree()
         rss = sum(value[0] for value in counters.values()) / 1024**3
         for record in self.active:
@@ -198,7 +203,9 @@ class RunMonitor:
             result["samples"] = list(record["_samples"])
             self.store.save(result)
         except Exception:
-            logger.exception("SUMO monitoring could not checkpoint %s", record["stage"])
+            logger.exception(
+                "Pipeline monitoring could not checkpoint %s", record["stage"]
+            )
 
     def _checkpoint(self):
         with self.lock:
@@ -226,6 +233,7 @@ class RunMonitor:
             return dict(
                 stages=records,
                 samples=samples,
+                module=self.module,
                 run_id=self.run_id,
                 pid=os.getpid(),
                 slurm_job_id=os.environ.get("SLURM_JOB_ID"),
@@ -237,7 +245,7 @@ class RunMonitor:
             )
 
     def _publish(self):
-        from sumo.functions.monitoring.plots import performance_figure
+        from scripts.monitoring.plots import performance_figure
 
         data = self.snapshot()
         if not data["stages"]:
@@ -275,12 +283,14 @@ class RunMonitor:
                     self._publish()
                     last_plot = time.monotonic()
             except Exception:
-                logger.exception("SUMO monitoring could not update its diagnostics")
+                logger.exception("Pipeline monitoring could not update its diagnostics")
         try:
             self._checkpoint()
             self._publish()
         except Exception:
-            logger.exception("SUMO monitoring could not write its final diagnostics")
+            logger.exception(
+                "Pipeline monitoring could not write its final diagnostics"
+            )
 
     def close(self):
         atexit.unregister(self.close)
@@ -290,11 +300,13 @@ class RunMonitor:
             self.thread.join(timeout=20)
 
 
-def session(context):
+def session(context, module=None):
     working = getattr(context, "working_directory", None)
     if working is None:
         return None  # Standalone fixtures/calls need no persistent pipeline monitor.
-    key = str(Path(working).resolve())
+    cache_name = Path(context.path()).name if hasattr(context, "path") else ""
+    module = module or (cache_name.split(".", 1)[0] if "__" in cache_name else "sumo")
+    key = (str(Path(working).resolve()), module)
     # Normal Synpp execution shares cache across stage contexts; debug execution
     # instead shares cache_hashes. This also detects notebook reruns in one PID.
     token = getattr(context, "cache_hashes", getattr(context, "cache", None))
@@ -307,7 +319,9 @@ def session(context):
             manager.close()
             manager = None
         if manager is None:
-            manager = _sessions[key] = RunMonitor(key, pipeline_token=token)
+            manager = _sessions[key] = RunMonitor(
+                key[0], pipeline_token=token, module=module
+            )
         return manager
 
 
@@ -317,13 +331,12 @@ def monitor(context, name=None):
     manager = None
     record = None
     try:
-        manager = session(context)
+        name = name or Path(context.path()).name.split("__")[0]
+        manager = session(context, name.split(".", 1)[0])
         if manager is not None:
-            record = manager.begin(
-                name or Path(context.path()).name.split("__")[0], context.path()
-            )
+            record = manager.begin(name, context.path())
     except Exception:
-        logger.exception("SUMO monitoring could not start")
+        logger.exception("Pipeline monitoring could not start")
     status = "failed"
     try:
         yield manager
@@ -333,7 +346,7 @@ def monitor(context, name=None):
             try:
                 manager.finish(record, status)
             except Exception:
-                logger.exception("SUMO monitoring could not finish")
+                logger.exception("Pipeline monitoring could not finish")
 
 
 def monitored(execute):
@@ -341,16 +354,30 @@ def monitored(execute):
 
     @wraps(execute)
     def wrapped(context):
+        # Backend adapters may be called inside another stage with its context.
+        # Only measure the actual stage, avoiding duplicate/nested cache records.
+        try:
+            cache = (
+                Path(context.path()).name
+                if getattr(context, "working_directory", None)
+                else ""
+            )
+        except Exception:
+            cache = ""
+        if "__" in cache and cache.split("__", 1)[0] != execute.__module__:
+            return execute(context)
         with monitor(context, execute.__module__):
             return execute(context)
 
     return wrapped
 
 
-def export_monitor(context, destination):
+def export_monitor(context, destination, module=None):
     try:
-        manager = session(context)
+        manager = session(context, module)
         if manager is not None:
             manager.export(destination)
     except Exception:
-        logger.exception("SUMO monitoring could not register its export destination")
+        logger.exception(
+            "Pipeline monitoring could not register its export destination"
+        )

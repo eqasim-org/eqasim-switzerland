@@ -4,6 +4,7 @@ from mode_choice.routing.eqasim.client import RoutingServer
 from mode_choice.routing.eqasim.router import save_costs
 from mode_choice.routing.results import complete_routes
 from mode_choice.data.frames import join_variables
+from scripts.monitoring import monitored
 
 
 def configure(context):
@@ -21,6 +22,7 @@ def configure(context):
         prices.configure(context)
 
 
+@monitored
 def execute(context):
 
     # Route alternatives using the selected implementation.

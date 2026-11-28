@@ -3,7 +3,7 @@
 from sumo.functions.config import tools
 from sumo.functions.config.macroscopic import configure_profile, write
 from sumo.functions.config.macroscopic import time_bounds as time_bounds
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.source import source_digest
 
 

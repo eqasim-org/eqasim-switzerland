@@ -3,7 +3,7 @@
 import hashlib
 from pathlib import Path
 
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.scenario import modes, prepared
 from sumo.functions.scenario.population.vehicle_tools import (
     CACHE_FILENAME,

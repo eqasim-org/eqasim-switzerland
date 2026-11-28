@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from sumo.functions.config import tools
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored
 from sumo.functions.scenario.network.mapping import map_trips
 from sumo.functions.scenario.tools import filter_loading_trips
 

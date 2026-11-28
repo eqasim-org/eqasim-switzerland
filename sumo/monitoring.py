@@ -3,9 +3,9 @@
 import hashlib
 from pathlib import Path
 
-from sumo.functions.monitoring import plots, quality
-from sumo.functions.monitoring.quality import generate_quality
-from sumo.functions.monitoring.runtime import monitored
+from scripts.monitoring import monitored, plots
+from scripts.monitoring.quality import sumo as quality
+from scripts.monitoring.quality.sumo import generate_quality
 
 
 def configure(context):
