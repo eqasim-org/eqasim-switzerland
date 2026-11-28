@@ -4,7 +4,6 @@ import atexit
 import json
 import logging
 import os
-import shutil
 import threading
 import time
 from contextlib import contextmanager
@@ -62,7 +61,13 @@ def process_tree():
 class RunMonitor:
     """One sampler/renderer thread per pipeline execution."""
 
-    def __init__(self, working_directory, pipeline_token=None, module="sumo"):
+    def __init__(
+        self,
+        working_directory,
+        pipeline_token=None,
+        module="sumo",
+        figure_directory=None,
+    ):
         if not module.isidentifier():
             raise ValueError("Monitoring module must be a Python package name")
         self.module = module
@@ -89,7 +94,9 @@ class RunMonitor:
                     (point["seconds"] for point in record["_samples"]), default=0.0
                 )
             self.records.append(record)
-        self.exports = set()
+        self.figure_directory = (
+            Path(figure_directory) if figure_directory is not None else None
+        )
         self.active = []
         self.lock = threading.RLock()
         self.changed = threading.Event()
@@ -156,12 +163,6 @@ class RunMonitor:
             record["seconds"],
             record["peak_rss_gib"],
         )
-        self.changed.set()
-
-    def export(self, destination):
-        with self.lock:
-            self.exports.add(Path(destination))
-            self.dirty = True
         self.changed.set()
 
     def _sample(self):
@@ -253,16 +254,13 @@ class RunMonitor:
         temporary = self.directory / "performance.json.tmp"
         temporary.write_text(json.dumps(data, indent=2) + "\n")
         temporary.replace(self.directory / "performance.json")
-        performance_figure(data, self.directory / "performance.png")
-        with self.lock:
-            exports = list(self.exports)
-        for folder in [self.store.directory, *exports]:
-            folder.mkdir(parents=True, exist_ok=True)
-            for name in ("performance.json", "performance.png"):
-                source = self.directory / name
-                pending = folder / (name + f".{self.run_id}.tmp")
-                shutil.copy2(source, pending)
-                pending.replace(folder / name)
+        latest = self.store.directory / "performance.json"
+        temporary = latest.with_name(f"performance.{self.run_id}.tmp")
+        temporary.write_text(json.dumps(data, indent=2) + "\n")
+        temporary.replace(latest)
+        if self.figure_directory is not None:
+            self.figure_directory.mkdir(parents=True, exist_ok=True)
+            performance_figure(data, self.figure_directory / f"{self.module}.png")
 
     def _work(self):
         last_plot = -float("inf")
@@ -320,7 +318,10 @@ def session(context, module=None):
             manager = None
         if manager is None:
             manager = _sessions[key] = RunMonitor(
-                key[0], pipeline_token=token, module=module
+                key[0],
+                pipeline_token=token,
+                module=module,
+                figure_directory=_figure_directory(context),
             )
         return manager
 
@@ -372,12 +373,19 @@ def monitored(execute):
     return wrapped
 
 
-def export_monitor(context, destination, module=None):
-    try:
-        manager = session(context, module)
-        if manager is not None:
-            manager.export(destination)
-    except Exception:
-        logger.exception(
-            "Pipeline monitoring could not register its export destination"
-        )
+def _figure_directory(context):
+    # Output placement is run metadata, read from Synpp's global config so a
+    # reporting destination does not become an input to every computational stage.
+    config = getattr(context, "pipeline_config", {})
+    if not config.get("output_path"):
+        return None
+    return (
+        Path(config["output_path"]).expanduser().resolve()
+        / str(config.get("output_id") or "")
+        / "monitoring"
+    )
+
+
+def figure_path(context, module):
+    directory = _figure_directory(context)
+    return str(directory / f"{module}.png") if directory is not None else None

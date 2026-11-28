@@ -578,5 +578,5 @@ loading network data. `config_dib_10.yml` now selects the pinned build.
 
 Mode-choice stages use `@monitored` from `scripts.monitoring`. Runtime, process-tree
 memory and restart checkpoints are stored separately from SUMO in
-`<working_directory>/mode_choice_monitoring/` (`performance.png`, `performance.json`
-and `state.json`). See [shared stage monitoring](../scripts/monitoring.md).
+`<working_directory>/mode_choice_monitoring/` (`performance.json` and `state.json`).
+Its figure is written directly to `<output_path>/<output_id>/monitoring/mode_choice.png`. See [shared stage monitoring](../scripts/monitoring.md).

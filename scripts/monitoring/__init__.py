@@ -1,5 +1,5 @@
 """Reusable, persistent performance monitoring for Synpp stage modules."""
 
-from scripts.monitoring.runtime import export_monitor, monitor, monitored
+from scripts.monitoring.runtime import figure_path, monitor, monitored
 
-__all__ = ["monitored", "monitor", "export_monitor"]
+__all__ = ["monitored", "monitor", "figure_path"]

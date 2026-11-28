@@ -30,8 +30,12 @@ The top-level stage package selects a separate monitor, persistent state and fig
 | `mode_choice.` | `mode_choice_monitoring/` |
 | Any other opted-in package | `<package>_monitoring/` |
 
-Each directory contains `state.json`, `performance.json` and `performance.png`,
-plus timestamped run archives. Existing SUMO monitoring records remain usable
+Each working directory contains `state.json` and `performance.json`,
+plus timestamped JSON run archives. Images are written directly to
+`<output_path>/<output_id>/monitoring/sumo.png` and
+`<output_path>/<output_id>/monitoring/mode_choice.png` (or `<package>.png`).
+The output location comes from Synpp’s global run configuration; when no
+`output_path` is configured, JSON monitoring continues without writing figures. Existing SUMO monitoring records remain usable
 at their previous paths. Reports contain the module name, original run/job IDs,
 stage wall time, sampled peak process-tree RSS, sampled CPU time and disk I/O.
 A separate background worker per active package samples every two seconds.
@@ -46,10 +50,8 @@ timeline excludes downtime and superseded attempts. Measurements include child
 processes, and shared RSS pages can be counted more than once.
 
 `monitor(context)` also supports a manually scoped operation; pass `name=` to
-choose its full stage name explicitly. `export_monitor(context, destination)`
-registers an export of the current package's reports. Its optional `module=`
-selects a package explicitly. SUMO's existing output stage exports SUMO performance
-figures as before; mode-choice figures stay in the working directory above.
+choose its full stage name explicitly. No export stage or callback is required.
+`figure_path(context, module)` returns the configured image path for manifests.
 
 SUMO-specific trip, teleport and bottleneck reporting remains in
 `scripts.monitoring.quality.sumo`, separate from the generic performance sampler.

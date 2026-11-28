@@ -7,8 +7,8 @@ from pathlib import Path
 
 from lxml import etree
 
+from scripts.monitoring import figure_path, monitored
 from sumo.functions import output_tools
-from scripts.monitoring import export_monitor, monitored
 
 
 def configure(context):
@@ -87,13 +87,12 @@ def execute(context):
     }
     (destination / "export.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
-    # Copy quality diagnostics and let the sampler export its final stage measurements.
+    # Copy SUMO quality diagnostics; performance figures are written directly by the monitor.
 
     quality = context.stage("sumo.monitoring")
     shutil.copytree(quality["directory"], destination / "quality", dirs_exist_ok=True)
-    export_monitor(context, destination / "monitoring")
     manifest["quality_report"] = str(destination / "quality" / "index.html")
-    manifest["performance"] = str(destination / "monitoring" / "performance.png")
+    manifest["performance"] = figure_path(context, "sumo")
     (destination / "export.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
     # Return a small export manifest; source simulation files remain cached and reusable.

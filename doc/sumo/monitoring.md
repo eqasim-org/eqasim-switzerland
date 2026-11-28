@@ -58,18 +58,18 @@ A figure update is requested at stage boundaries and coalesced to at most one
 update every five seconds. The latest combined report is available at:
 
 ```text
-<working_directory>/sumo_monitoring/performance.png
+<output_path>/<output_id>/monitoring/sumo.png
 <working_directory>/sumo_monitoring/performance.json
 ```
 
-Each execution also writes an archive under
+JSON stays in the working directory; the figure is written directly to the output
+folder without an export step. Each execution also writes a JSON archive under
 `sumo_monitoring/<timestamp>_<pid>/`. Normal interpreter shutdown finalizes the
 last update. An abrupt termination leaves the latest complete checkpoint and
 figure. Monitoring failures are logged without replacing stage exceptions.
 
-`sumo.output` exports the combined report to `<output_path>/sumo/monitoring/`,
-including its own final measurement. The exported figure is refreshed
-asynchronously and finalized at normal process exit.
+The figure includes `sumo.output` itself and is finalized asynchronously at normal
+process exit. SUMO’s simulation-quality reports are still handled by that stage.
 
 ## Quality report
 
