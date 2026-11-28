@@ -1,8 +1,18 @@
 """Run the selected Java cutter; scenario assembly lives in scenario.py."""
 import os.path
+from pathlib import Path
 import matsim.runtime.eqasim as eqasim
 from matsim.config.tools import change_params, resolve_output_file
-from .file_paths import simulation_root
+from .file_paths import FilePaths, simulation_root
+
+
+SUPPORTING_INPUTS = {
+    "eqasim.modeParametersPath": "dmc_parameters.yml",
+    "eqasim.costParametersPath": "cost_parameters.yml",
+    "ptZones.ptZonesFilePath": "gtfs_zones.csv",
+    "ptZones.sbbDistancesPath": "SBB_all_distances.csv",
+    "ptZones.pricingDescriptionPath": "pricingDescription.xml",
+}
 
 
 def configure(context):
@@ -22,7 +32,9 @@ def configure(context):
     
     # If this path is provided, we just use it to get the parent model and cut it
     if not context.config("cutter.scenario_path"):
-        context.stage("matsim.simulation.run")    
+        context.stage("matsim.simulation.run")
+        context.stage("matsim.simulation.prepare")
+        context.stage("data.pt_pricing.pt_pricing")
 
 
 def execute(context):
@@ -55,6 +67,16 @@ def execute(context):
             "vehicles.vehiclesFile": "output_vehicles.xml",
         }.items()
     }
+
+    # The Java cutter builds the mode-choice/pricing injector before scenario assembly.
+
+    files = FilePaths(context)
+    for parameter, name in SUPPORTING_INPUTS.items():
+        source = Path(files.get(name)).resolve()
+        if not source.is_file():
+            raise FileNotFoundError(f"Missing cutter supporting input {parameter}: {source}")
+        simulation_inputs[parameter] = str(source)
+
     change_params(config_path = config_path,
                   output_path = cutter_config_path,
                   params = [*simulation_inputs.items(),

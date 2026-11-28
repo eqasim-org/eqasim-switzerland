@@ -85,6 +85,20 @@ paths matching those copied files, so exported configs remain portable with
 gzip, Zstandard or mixed inputs. Simulation completion checks use the same
 resolver.
 
+The cutter also resolves the mode/cost parameter YAML and three PT-pricing
+inputs to absolute source paths **before** Java starts. Its injector reads these
+files during cutting, even though calibration is disabled. Files copied later
+by `matsim.cutter.scenario` cannot satisfy this earlier initialization. The
+source config stays unchanged; only the consuming cutter's local config is
+rewritten. Missing supporting files fail before the large simulation/events
+inputs are read. Scenario assembly still copies the supporting files into the
+regional scenario and restores portable, relative paths for the regional run.
+
+Regional non-VDF simulations explicitly select QSim by default. Setting
+`use_dsim: true` selects DSim instead; both the Java launch option and the
+controller's simulation engine are set consistently, overriding any inherited
+engine choice in the source configuration.
+
 ## Portable prepared scenarios
 
 When `only_french_tolls` is enabled, `NetworkHandler` excludes toll candidates
