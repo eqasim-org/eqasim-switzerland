@@ -94,10 +94,10 @@ rewritten. Missing supporting files fail before the large simulation/events
 inputs are read. Scenario assembly still copies the supporting files into the
 regional scenario and restores portable, relative paths for the regional run.
 
-Regional non-VDF simulations explicitly select QSim by default. Setting
-`use_dsim: true` selects DSim instead; both the Java launch option and the
-controller's simulation engine are set consistently, overriding any inherited
-engine choice in the source configuration.
+The cutter and regional non-VDF simulations always select QSim, overriding any
+inherited DSim engine choice. `use_dsim` controls the parent simulation only;
+the cutter and its downstream stages do not read this option. The regional
+launcher explicitly passes `--use-dsim false` and selects `controller.mobsim=qsim`.
 
 ## Portable prepared scenarios
 
