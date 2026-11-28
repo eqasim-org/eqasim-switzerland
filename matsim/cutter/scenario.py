@@ -150,7 +150,7 @@ def execute(context):
     change_params(config_path = config_file,
                   output_path = config_file,
                   create = True, # If these parameters don't exist, create them
-                  params = [*scenario_input_parameters(output_path, context.config("extent_prefix")).items(),
+                  params = [*scenario_input_parameters(output_path, context.config("extent_prefix")).items(),                        
                         ("eqasim:networkCalibration.activate","true"),  # this will not calibrate, but just activate the module to use penalties and speed factors
                         ("eqasim:networkCalibration.objective", config_tools.get_network_calibration_objectives(context)),
                         ("eqasim:networkCalibration.calibrate", config_tools.get_network_calibration_calibrate(context, ignore=("penalty","freespeed"))), # we do not calibrate penalty and freespeed here

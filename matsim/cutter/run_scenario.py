@@ -3,7 +3,7 @@ import logging
 import shutil
 from pathlib import Path
 import matsim.runtime.eqasim as eqasim
-from matsim.config.tools import parse_boolean, resolve_output_file
+from matsim.config.tools import resolve_output_file
 
 logger = logging.getLogger("synpp:    Regional Model\t")
 
@@ -13,7 +13,6 @@ def configure(context):
     context.stage("matsim.cutter.scenario")
     
     context.config("use_vdf", default=False)
-    context.config("use_dsim", default=False)
     context.config("extent_path", default="")
     context.config("extent_prefix", default="")
     context.config("last_iteration", default = 140)
@@ -59,11 +58,10 @@ def execute(context):
     simulation_path = os.path.join(regional_scenario, "simulation_output")
     last_iteration = int(context.config("regional_model_last_iteration"))
     if not context.config("use_vdf"):
-        use_dsim = parse_boolean(context.config("use_dsim"))
         eqasim.run(context, "org.eqasim.switzerland.ch_cmdp.RunSimulation", [
             "--config-path", config_file,
-            "--use-dsim", str(use_dsim).lower(),
-            "--config:controller.mobsim", "dsim" if use_dsim else "qsim",
+            "--use-dsim", "false",
+            "--config:controller.mobsim", "qsim",
             "--config:controler.lastIteration", str(last_iteration),
             "--config:controler.outputDirectory", simulation_path,
             ], cwd = regional_scenario)

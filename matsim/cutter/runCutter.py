@@ -80,6 +80,7 @@ def execute(context):
     change_params(config_path = config_path,
                   output_path = cutter_config_path,
                   params = [*simulation_inputs.items(),
+                            ("controller.mobsim", "qsim"),
                             # Second: turn off calibration config
                             ("eqasim:calibration.activate", "false"),
                             ("eqasim:calibration.runCalibration","false"),
