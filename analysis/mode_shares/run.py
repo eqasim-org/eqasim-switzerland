@@ -1,9 +1,16 @@
+import json
 import logging
 import os
+from pathlib import Path
+
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.ticker import PercentFormatter
 import numpy as np
 import pandas as pd
+
 from analysis.counts.paths import get_simulation_path
+from .utils import FRENCH_COHORTS, MODE_LABELS
 
 logger = logging.getLogger("synpp")
 
@@ -34,6 +41,7 @@ def configure(context):
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.municipalities")
 
+    context.config("include_external_population", default=True)
     context.config("group_income_classes_in_analysis", default=False)
     context.config("analysis.counts.simulation_path", default="")
     context.config("output_path")
@@ -422,6 +430,12 @@ def execute(context):
     plt.savefig(os.path.join(figures_dir, "distance_distribution_by_mode_and_purpose.png"), bbox_inches = "tight", dpi = 300)
     plt.close()
 
+    # Plot the French survey and simulation when external residents are included.
+
+    if context.config("include_external_population"):
+        plot_french_comparison(target_mode_shares["french"], simulated_mode_shares["french"],
+                               Path(figures_dir) / "french")
+
     # Build the interactive comparison from the same filtered trip cohorts.
 
     from .spatial import write_report
@@ -439,3 +453,84 @@ def execute(context):
 def validate(context):
     from .spatial import implementation_token
     return implementation_token()
+
+
+def plot_distance_panel(axes, data, labels, title):
+    """Show shares and their sample support; leave empty bins undefined."""
+    positions = np.arange(len(labels))
+    for source, style, marker, offset, colour in [("simulation", "--", "o", -.19, "#7b8c9c"),
+                                                ("survey", "-", "s", .19, "#c78f4a")]:
+        selected = data.loc[data.source.eq(source)]
+        shares = selected.pivot(index="distance_bin_km", columns="mode", values="share").reindex(labels)
+        totals = selected.drop_duplicates("distance_bin_km").set_index("distance_bin_km").bin_sample_trips.reindex(labels)
+        for mode, mode_colour in zip(MODE_ORDER, MODE_COLORS):
+            axes[0].plot(positions, shares[mode], color=mode_colour, marker=marker, markersize=4,
+                         linestyle=style, linewidth=1.8)
+        axes[1].bar(positions + offset, totals, color=colour, width=.36, label=source.title())
+    axes[0].set_title(title, fontsize=13, pad=12)
+    axes[0].set_ylim(0, 1)
+    axes[0].set_ylabel("Share of trips")
+    axes[0].yaxis.set_major_formatter(PercentFormatter(1))
+    axes[0].grid(axis="y", alpha=.25)
+    handles = [Line2D([], [], color=colour, label=MODE_LABELS[mode])
+               for mode, colour in zip(MODE_ORDER, MODE_COLORS)]
+    handles += [Line2D([], [], color="#333", linestyle=style, marker=marker, label=label)
+                for style, marker, label in [("--", "o", "Simulation"), ("-", "s", "Survey target")]]
+    axes[0].legend(handles=handles, ncol=3, fontsize=9, loc="upper right")
+    axes[1].legend(fontsize=8, loc="upper right")
+    axes[1].set_ylabel("Sample\ntrips", fontsize=9)
+    axes[1].set_xticks(positions, labels, rotation=35, ha="right", fontsize=9)
+    axes[1].set_xlabel("Euclidean trip distance (km; common distance bins)")
+    for axis in axes:
+        axis.spines[["top", "right"]].set_visible(False)
+
+
+def plot_overall_shares(data, path):
+    figure, axes = plt.subplots(1, 2, figsize=(16, 5), sharey=True, constrained_layout=True)
+    positions = np.arange(len(MODE_ORDER))
+    for axis, cohort in zip(axes, FRENCH_COHORTS):
+        for source, offset, colour in [("simulation", -.2, "#4c78a8"), ("survey", .2, "#e0a04b")]:
+            selected = data.loc[data.cohort.eq(cohort) & data.source.eq(source)].set_index("mode").reindex(MODE_ORDER)
+            bars = axis.bar(positions + offset, selected.share, width=.38, color=colour,
+                            label="Simulation" if source == "simulation" else "Survey target")
+            axis.bar_label(bars, labels=[f"{value:.1%}" for value in selected.share], fontsize=8, padding=3)
+        axis.set_xticks(positions, [MODE_LABELS[mode] for mode in MODE_ORDER], rotation=20, ha="right")
+        axis.set_title(FRENCH_COHORTS[cohort])
+        axis.yaxis.set_major_formatter(PercentFormatter(1))
+        axis.set_ylim(0, .85)
+        axis.grid(axis="y", alpha=.2)
+        axis.set_axisbelow(True)
+        axis.legend()
+    axes[0].set_ylabel("Share of trips")
+    figure.savefig(path, dpi=180)
+    plt.close(figure)
+
+
+def plot_french_comparison(target, simulated, output):
+    """Write optional French figures from the target and simulated stage summaries."""
+    output.mkdir(parents=True, exist_ok=True)
+    labels = target["distance_labels"]
+    if labels != simulated["distance_labels"]:
+        raise ValueError("French target and simulation must use the same distance bins.")
+    overall = pd.concat([simulated["overall"], target["overall"]], ignore_index=True)
+    binned = pd.concat([simulated["distance"], target["distance"]], ignore_index=True)
+    overall.to_csv(output / "mode_shares_overall.csv", index=False)
+    binned.to_csv(output / "mode_shares_by_distance.csv", index=False)
+    for cohort, title in FRENCH_COHORTS.items():
+        figure, axes = plt.subplots(2, 1, figsize=(12, 6.8), sharex=True,
+                                   gridspec_kw={"height_ratios": [4, 1]}, constrained_layout=True)
+        plot_distance_panel(axes, binned.loc[binned.cohort.eq(cohort)], labels, title)
+        figure.savefig(output / f"{cohort}_by_distance.png", dpi=180)
+        plt.close(figure)
+    figure, axes = plt.subplots(2, 2, figsize=(19, 7), sharex=True,
+                               gridspec_kw={"height_ratios": [4, 1]}, constrained_layout=True)
+    for column, (cohort, title) in enumerate(FRENCH_COHORTS.items()):
+        plot_distance_panel(axes[:, column], binned.loc[binned.cohort.eq(cohort)], labels, title)
+    figure.savefig(output / "french_mode_shares_by_distance.png", dpi=180)
+    plt.close(figure)
+    plot_overall_shares(overall, output / "french_mode_shares_overall.png")
+    manifest = {"simulation": simulated["metadata"], "survey_target": target["metadata"],
+                "switzerland_involved": "Origin OR destination in Switzerland, including trips within Switzerland; each trip counted once.",
+                "denominator": "Weighted trips within each cohort or distance bin; empty bins have undefined shares."}
+    (output / "analysis_sources.json").write_text(json.dumps(manifest, indent=2))
+    logger.info("French mode-share figures: %s", output)

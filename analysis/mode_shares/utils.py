@@ -1,4 +1,6 @@
 import pandas as pd
+import geopandas as gpd
+import shapely
 from data.microcensus.shares import load_clean_trips
 import os
 import numpy as np
@@ -13,6 +15,15 @@ logger = logging.getLogger("synpp")
 # Optional grouping used locally by synthesis/population/matching/matched_v1.py.
 # Survey and exported Swiss population incomes otherwise retain classes 0-8.
 INCOME_CLASSIFICATION = {0: 1, 1: 1, 2: 1, 3: 2, 4: 2, 5: 2, 6: 3, 7: 3, 8: 3}
+
+
+FRENCH_MODES = ["car", "pt", "walk", "bike", "car_passenger"]
+FRENCH_COHORTS = {
+    "all_fr_resident_trips": "French residents: all trips",
+    "switzerland_involved": "French residents: origin or destination in Switzerland",
+}
+MODE_LABELS = {"car": "Car driver", "car_passenger": "Car passenger", "pt": "Public transport",
+               "walk": "Walking", "bike": "Cycling"}
 
 
 class ModeShareAnalyzer:
@@ -386,3 +397,114 @@ class ModeShareAnalyzer:
             distance_distribution[purpose] = self.compute_distance_by_mode(df[df["purpose"] == purpose], consider_external_population = consider_external_population)
 
         return distance_distribution
+
+
+def load_french_target(context):
+    """Reuse the survey underlying data.microcensus.shares without modifying its cache."""
+    raw = context.stage("data.external_population.hts_trips.trips")
+    target = raw.rename(columns={"person_id": "person", "mode": "main_mode"}).copy()
+    valid = (target.main_mode.isin(FRENCH_MODES) & target.DOIB.gt(1)
+             & np.isfinite(target.trip_weight) & target.trip_weight.gt(0))
+    target = target.loc[valid].copy()
+    target["distance_km"] = target.DOIB / 1000
+
+    # External zones explicitly distinguish Switzerland from France. Internal survey sectors are French.
+
+    folder = Path(context.config("data_path")) / "hts_annemasse_2017_tpg" / "TPG" / "Doc" / "SIG"
+    fine = gpd.read_file(folder / "EDGTFVG2016_ZF.TAB", ignore_geometry=True)
+    external = gpd.read_file(folder / "EDGTFVG2016_ZonesExternes.TAB", ignore_geometry=True)
+    external = external.loc[external.Num_ZF.astype("string").str.strip().ne("").fillna(False)]
+    country = external.set_index("Num_ZF").NOM_D10.eq("Suisse").map({True: "CH", False: "FR"})
+    if country.groupby(level=0).nunique().gt(1).any():
+        raise ValueError("Conflicting countries for a survey external zone.")
+    country = country.groupby(level=0).first()
+    sectors = set(fine.ZoneFine.astype(str).str[:3])
+    countries = []
+    for column in ["LIEU_DEPART_FR", "LIEU_ARRIVEE_FR"]:
+        zone = target[column].astype(str)
+        mapped = zone.map(country)
+        mapped = mapped.mask(zone.str[:3].isin(sectors) & mapped.isna(), "FR")
+        countries.append(mapped)
+    target["switzerland_involved"] = countries[0].eq("CH") | countries[1].eq("CH")
+    metadata = {
+        "stage": "data.external_population.hts_trips.trips",
+        "file": str(folder.parent.parent / "deplacements_emd_full_OCT.csv"),
+        "distance": "DOIB, crow-fly distance in metres; DIST is not used.",
+        "weight": "trip_weight, derived from survey POND_PERS",
+        "coverage": "Annemasse/French Geneva-region survey, as used by data.microcensus.shares; not the whole French simulated region.",
+        "switzerland_selection": "Origin OR destination labelled Suisse in survey external zones; includes trips entirely within Switzerland. An unknown endpoint does not exclude a trip if its other endpoint is known to be Swiss.",
+        "excluded_invalid_mode_distance_or_weight": int((~valid).sum()),
+        "unknown_endpoint_country_sample_trips": int((countries[0].isna() | countries[1].isna()).sum()),
+        "sample_trips": len(target),
+        "switzerland_involved_sample_trips": int(target.switzerland_involved.sum()),
+        "both_endpoints_in_switzerland_sample_trips": int((countries[0].eq("CH") & countries[1].eq("CH")).sum()),
+    }
+    return target, metadata
+
+
+def summarize_shares(trips, source, edges, labels):
+    trips = trips.copy()
+    trips["distance_bin"] = pd.cut(trips.distance_km, edges, labels=labels, include_lowest=True)
+    if trips.distance_bin.isna().any():
+        raise ValueError("Distance bins do not cover all retained trips.")
+    overall, binned = [], []
+    for cohort in FRENCH_COHORTS:
+        selected = trips if cohort == "all_fr_resident_trips" else trips.loc[trips.switzerland_involved]
+        total_weight = selected.trip_weight.sum()
+        counts = selected.main_mode.value_counts().reindex(FRENCH_MODES, fill_value=0)
+        weights = selected.groupby("main_mode").trip_weight.sum().reindex(FRENCH_MODES, fill_value=0)
+        for mode in FRENCH_MODES:
+            overall.append({"source": source, "cohort": cohort, "mode": mode,
+                            "sample_trips": int(counts[mode]), "cohort_sample_trips": len(selected),
+                            "sample_persons_with_trips": selected.person.nunique(),
+                            "weighted_trips": weights[mode], "cohort_weighted_trips": total_weight,
+                            "share": weights[mode] / total_weight if total_weight else np.nan})
+        for label in labels:
+            group = selected.loc[selected.distance_bin.eq(label)]
+            denominator = group.trip_weight.sum()
+            counts = group.main_mode.value_counts().reindex(FRENCH_MODES, fill_value=0)
+            weights = group.groupby("main_mode").trip_weight.sum().reindex(FRENCH_MODES, fill_value=0)
+            for mode in FRENCH_MODES:
+                binned.append({"source": source, "cohort": cohort, "distance_bin_km": label, "mode": mode,
+                               "sample_trips": int(counts[mode]), "bin_sample_trips": len(group),
+                               "weighted_trips": weights[mode], "bin_weighted_trips": denominator,
+                               "share": weights[mode] / denominator if denominator else np.nan})
+    return pd.DataFrame(overall), pd.DataFrame(binned)
+
+
+def endpoint_in_switzerland(x, y, swiss):
+    """Test each endpoint independently so a missing opposite endpoint does not hide a trip."""
+    return np.isfinite(x) & np.isfinite(y) & shapely.intersects_xy(swiss, x, y)
+
+
+def french_mode_shares(trips, source, metadata):
+    """Summarize the two French-resident cohorts without retaining raw trip tables."""
+    edges = np.asarray(ModeShareAnalyzer.distance_bins, dtype=float) / 1000
+    edges[-1] = np.inf
+    labels = [f"{left:g}–{right:g}" if np.isfinite(right) else f"≥{left:g}"
+              for left, right in zip(edges[:-1], edges[1:])]
+    overall, distance = summarize_shares(trips, source, edges, labels)
+    return {"overall": overall, "distance": distance, "distance_labels": labels,
+            "metadata": metadata}
+
+
+def simulated_french_mode_shares(analyzer, context):
+    """Reuse the simulation analyzer's filtered trips, selecting residence rather than nationality."""
+    trips = analyzer.trips.loc[analyzer.trips.canton_id.eq(analyzer.ex_cst.canton_id)].copy()
+    trips = trips.rename(columns={"mode": "main_mode", "euclidean_distance_km": "distance_km",
+                                  "person_weight": "trip_weight"})
+    swiss = context.stage("data.spatial.swiss_border").to_crs(2056).geometry.union_all()
+    shapely.prepare(swiss)
+    origin = endpoint_in_switzerland(trips.origin_x, trips.origin_y, swiss)
+    destination = endpoint_in_switzerland(trips.destination_x, trips.destination_y, swiss)
+    trips["switzerland_involved"] = origin | destination
+    metadata = {
+        "simulation": str(get_simulation_path(context)),
+        "population": "French residents (canton FR), excluding freight and crossborder subpopulations.",
+        "sample_trips": len(trips),
+        "switzerland_involved_sample_trips": int((origin | destination).sum()),
+        "both_endpoints_in_switzerland_sample_trips": int((origin & destination).sum()),
+        "distance": "MATSim Euclidean distance in kilometres; trips greater than one metre.",
+        "weight": "One per simulated trip.",
+    }
+    return french_mode_shares(trips, "simulation", metadata)

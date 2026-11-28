@@ -54,3 +54,23 @@ All four stages are requested explicitly so debug mode rebuilds the changed
 analyzers as well as the final report. This does not rebuild the population or
 run MATSim. Simulation selection follows `analysis.counts.simulation_path`, or
 `output_path/output_id/simulation_directory` when that override is empty.
+
+## French residents
+
+When `include_external_population` is true (the existing default), `target` and
+`simulated` also return compact French mode-share summaries. `run` writes four
+figures, two CSV tables and `analysis_sources.json` into
+`<simulation directory>/mode_shares/french/`. When false, the French survey
+is not loaded and these additional summaries and figures are not generated.
+Existing files from earlier runs are left untouched.
+
+The comparison covers all French residents' trips and, separately, trips with
+origin **or** destination in Switzerland (including both directions and trips
+entirely within Switzerland). Residence is identified by canton FR, not
+citizenship. The simulation reuses the main analyzer's trip filters and tables.
+The target is the same Annemasse/French Geneva-region survey used by
+`data.microcensus.shares`; it does not cover the entire simulated French region.
+Survey shares use `trip_weight` and crow-fly `DOIB` distance, with Swiss endpoints
+identified from survey zone country labels. Simulation shares use equal trip
+weights and Euclidean distance. Both use the same distance bins; empty bins
+remain undefined. Survey curves are solid and simulation curves dashed.

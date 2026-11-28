@@ -1,4 +1,4 @@
-from .utils import ModeShareAnalyzer
+from .utils import ModeShareAnalyzer, simulated_french_mode_shares
 import logging
 
 logger = logging.getLogger("synpp")
@@ -10,6 +10,7 @@ def configure(context):
     context.stage("data.spatial.swiss_border")
     context.stage("data.external_population.constants")
 
+    context.config("include_external_population", default=True)
     context.config("group_income_classes_in_analysis", default=False)
     context.config("analysis.counts.simulation_path", default="")
     context.config("output_path")
@@ -19,8 +20,8 @@ def configure(context):
 
 
 def execute(context):
-    # ensure dependency
-    # _ = context.stage("matsim.output")
+
+    # Load and filter the simulation exports once for all mode-share summaries.
 
     mode_shares_analyzer = ModeShareAnalyzer(
         context, from_matsim=True,
@@ -52,6 +53,11 @@ def execute(context):
     mode_shares["distance_by_mode_and_purpose"] = mode_shares_analyzer.compute_distance_by_mode_and_purpose()
     mode_shares["spatial_trips"] = mode_shares_analyzer.spatial_trips()
     
+    # Reuse the filtered simulation trips for optional French-resident comparisons.
+
+    if context.config("include_external_population"):
+        mode_shares["french"] = simulated_french_mode_shares(mode_shares_analyzer, context)
+
     return mode_shares
 
 

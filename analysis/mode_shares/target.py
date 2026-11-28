@@ -1,5 +1,5 @@
 import pandas as pd
-from .utils import ModeShareAnalyzer
+from .utils import ModeShareAnalyzer, load_french_target, french_mode_shares
 import logging
 
 logger = logging.getLogger("synpp")
@@ -14,6 +14,7 @@ def configure(context):
     context.config("include_external_population", default = True)
     if context.config("include_external_population"):
         context.stage("data.external_population.hts_trips.trips")
+        context.config("data_path")
 
     context.config("group_income_classes_in_analysis", default=False)
     context.config("output_path")
@@ -22,6 +23,9 @@ def configure(context):
 
 
 def execute(context):
+
+    # Load the filtered, weighted Swiss survey trips.
+
     mode_shares_analyzer = ModeShareAnalyzer(
         context,
         group_income_classes=context.config("group_income_classes_in_analysis"),
@@ -52,6 +56,8 @@ def execute(context):
     mode_shares["distance_by_mode_and_purpose"] = mode_shares_analyzer.compute_distance_by_mode_and_purpose()
     mode_shares["spatial_trips"] = mode_shares_analyzer.spatial_trips()
     
+    # Add the French canton target and detailed survey summaries when enabled.
+
     if context.config("include_external_population"):
         fr_trips       = context.stage("data.external_population.hts_trips.trips")
         ex_constants   = context.stage("data.external_population.constants")
@@ -67,6 +73,9 @@ def execute(context):
 
         mode_shares["canton"] = pd.concat([mode_shares["canton"], mode_shares_fr])
         mode_shares["canton"].index.name = "canton_id"
+
+        trips, metadata = load_french_target(context)
+        mode_shares["french"] = french_mode_shares(trips, "survey", metadata)
 
     return mode_shares
 
