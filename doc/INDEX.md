@@ -64,7 +64,6 @@ The root [AGENTS.md](../AGENTS.md) contains guidance for coding agents.
 - [Zones of the regional PT subscriptions](synthesis/population/models/subscription_zones.md)
 - [Traffic-count matching](analysis/counts/matching/README.md)
 - [Interactive spatial mode-share comparisons](analysis/mode_shares/README.md)
-- [Microcensus filtering comparison](analysis/microcensus/filter_comparison.md)
 - [PT and car demand versus NPVM zones and municipalities](analysis/compare_pt_to_npvm.md)
 - [Shared cross-border event analysis](analysis/counts/cross_border_events.md)
 - [TL and TPG public-transport comparisons](analysis/pt/comparisons.md)
