@@ -50,6 +50,10 @@ def pack_trips(frame):
     append('mode', mode, 'u1')
     append('person', people, '<u4')
     append('weight', weights, '<f8')
+    # Use the analyzer's recorded Euclidean distances, not geographic endpoint distances.
+    distances = pd.to_numeric(frame['distance_km'], errors='coerce').to_numpy(dtype=float)
+    valid_distance = np.isfinite(distances) & (distances >= 0)
+    append('distance_km', np.where(valid_distance, distances, np.nan), '<f8')
     transform = Transformer.from_crs(2056, 4326, always_xy=True)
     missing = {}
     for anchor in ('origin', 'destination', 'home'):
@@ -64,6 +68,7 @@ def pack_trips(frame):
             encoded[valid] = np.rint(values[valid]*1e6).astype(np.int32)
             append(anchor+'_'+suffix, encoded, '<i4')
     metadata = dict(rows=len(frame), people=len(unique), columns=columns, missing_locations=missing,
+                    invalid_distances=int((~valid_distance).sum()),
                     raw_counts=np.bincount(mode, minlength=len(MODES)).tolist(),
                     weighted_counts=np.bincount(mode, weights=weights, minlength=len(MODES)).tolist())
     return gzip.compress(b''.join(blocks), compresslevel=6, mtime=0), metadata
@@ -127,6 +132,10 @@ def write_report(output, target, simulated, municipalities, cantons=None, *, dat
                 for name,dataset in payload['datasets'].items()}
     (output/'spatial_mode_shares_manifest.json').write_text(json.dumps(dict(datasets=manifest,
         coordinate_crs='EPSG:4326', coordinate_precision='Integer microdegrees; about 0.1 m',
+        distance_units='km; analyzer Euclidean distances',
+        distance_statistics='Weighted means and inverse weighted empirical CDF quantiles. '
+                            'Boxes: p25-p75; median line; p10-p90 whiskers; mean diamond. '
+                            'Nonfinite/negative distances excluded from distance summaries only.',
         selection=f'Same domestic-resident trip cohort as global mode shares; survey person_weight per trip, {dataset_label} weight 1.',
         airport_filter=f'{dataset_label} trips with airport origin OR destination excluded before all analyzer summaries.',
         query_modes=['arrivals','departures','either','both','residents'], municipalities=len(geography),

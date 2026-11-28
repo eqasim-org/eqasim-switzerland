@@ -314,8 +314,9 @@ class ModeShareAnalyzer:
             frame = frame.loc[frame.canton_id != self.ex_cst.canton_id]
         person_column = "person" if self.from_matsim else "person_id"
         columns = [person_column, "trip_id", "mode", "person_weight", "origin_x", "origin_y",
-                   "destination_x", "destination_y", "home_x", "home_y"]
-        result = frame[columns].rename(columns={person_column: "person_id", "person_weight": "weight"}).copy()
+                   "destination_x", "destination_y", "home_x", "home_y", "euclidean_distance_km"]
+        result = frame[columns].rename(columns={person_column: "person_id", "person_weight": "weight",
+                                                "euclidean_distance_km": "distance_km"}).copy()
         result["person_id"] = result["person_id"].astype(str)
         return result.reset_index(drop=True)
 

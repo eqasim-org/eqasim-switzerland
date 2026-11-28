@@ -26,7 +26,8 @@ Both `analysis.mode_shares.simulated` and `analysis.mode_shares.target` return
 `spatial_trips`, a dataframe produced by `ModeShareAnalyzer.spatial_trips()`.
 This contains the **same filtered domestic-resident trips as the global
 mode-share summaries**, with person/trip identifiers, mode, weight, origin,
-destination and residential coordinates. Spatial export does not resample trips.
+destination and residential coordinates, and the analyzer’s recorded Euclidean
+distance in kilometres (`distance_km`). Spatial export does not resample trips.
 MATSim trips with `airport` as either origin or destination activity are removed
 inside the analyzer, before computing any mode shares. Existing mode, distance,
 person/subpopulation and destination-purpose filters remain in place.
@@ -41,7 +42,10 @@ The HTML supports:
 - Selecting arrivals, departures, either endpoint, both endpoints, or residents.
 - Comparing weighted survey shares with unweighted simulated shares, plus raw
   trip counts and distinct people represented by those trips.
-- Downloading the selected statistics as CSV.
+- Switching between mode shares and Euclidean distance summaries without
+  changing the selected area or trip-direction filter.
+- Weighted mean distances and percentile boxes for all trips pooled and each mode.
+- Downloading the selected view’s statistics as CSV.
 
 “Residents” selects trips whose **home** is inside, including trips outside the
 area. This is still a trip-based mode share; non-travellers do not contribute.
@@ -72,6 +76,31 @@ All four stages are requested explicitly so debug mode rebuilds the changed
 analyzers as well as the final report. This does not rebuild the population or
 run MATSim. Simulation selection follows `analysis.counts.simulation_path`, or
 `output_path/output_id/simulation_directory` when that override is empty.
+
+## Distance statistics
+
+The distance panel uses the same selected trips as mode shares. Microcensus
+means and quantiles use the existing `person_weight`; MATSim trips have weight
+one. The all-modes row pools the trips directly, rather than averaging modal
+means. Distances come from `ModeShareAnalyzer` (`crowfly_distance / 1000` for
+the survey and MATSim’s `euclidean_distance / 1000`), not from rounded map
+coordinates. They describe complete trip distances even when only one endpoint
+is inside the selected area.
+
+Boxes span P25–P75, lines show medians, whiskers span P10–P90, and diamonds show
+means. Quantiles are the inverse weighted empirical CDF: the first observed
+distance reaching the requested cumulative-weight fraction. They are not
+interpolated quantiles or Tukey 1.5-IQR whiskers. Invalid/nonfinite or negative
+distances are excluded from distance statistics only, with valid-trip counts
+shown; they do not change the mode-share denominator. The distance CSV includes
+means, P10/P25/median/P75/P90, minima, maxima and distance sample weights/counts.
+
+The worker sorts valid distances once at initialisation and reuses that order
+for spatial selections. Both views are calculated for the same selection, so
+switching the panel does not rerun the spatial query. After updating this schema,
+rebuild `analysis.mode_shares.target` and `analysis.mode_shares.simulated` together
+with `analysis.mode_shares.run`; older cached trip tables lack `distance_km`.
+
 
 ## French residents
 

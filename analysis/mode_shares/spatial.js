@@ -6,6 +6,7 @@ const $=id=>document.getElementById(id);
 const modeNames=['Car driver','Public transport','Walk','Bike','Car passenger'];
 const fmt=new Intl.NumberFormat('en-CH');
 let ready=false, sequence=0, latest=null, shape=null, shapeName='All filtered trips', pendingCentre=false;
+let resultView='shares';
 let activeDraw=null, activeLayer=null, selectionMode='all';
 const regions={
   municipality:{title:'Municipality',key:'municipalities',id:'municipality_id',name:'municipality_name',features:[],layer:null},
@@ -49,6 +50,8 @@ $('applyCircle').onclick=()=>{
 $('radius').onchange=()=>{if(shape?.type==='circle' && Number($('radius').value)>0)circle(activeLayer.getLatLng(),Number($('radius').value));};
 $('national').onclick=()=>activateMode('all');
 $('direction').onchange=query;
+$('modeShareView').onclick=()=>setResultView('shares');
+$('distanceView').onclick=()=>setResultView('distances');
 $('opacity').oninput=()=>tiles.setOpacity(Number($('opacity').value));
 function query() {
   if(!ready)return;
@@ -75,23 +78,89 @@ $('locationCoverage').textContent=coverage+' Missing coordinates cannot meet a s
 // Release compressed trip strings in the main window after the worker receives them.
 for(const dataset of Object.values(payload.datasets))delete dataset.data;
 function share(value){return value===null?'—':(100*value).toFixed(1)+'%';}
-function render(result) {
-  const survey=result.Microcensus,sim=result.MATSim;
-  $('surveyTrips').textContent=fmt.format(survey.trips);$('simTrips').textContent=fmt.format(sim.trips);
-  $('surveyPeople').textContent=fmt.format(survey.people)+' distinct respondents';$('simPeople').textContent=fmt.format(sim.people)+' distinct simulated people';
-  $('surveyWeight').textContent=fmt.format(Math.round(survey.total*10)/10)+' weighted trips';
-  const tbody=$('numbers');tbody.replaceChildren();
-  for(let m=0;m<5;m++) {
-    const tr=document.createElement('tr');
-    const delta=survey.shares[m]===null||sim.shares[m]===null?'—':((sim.shares[m]-survey.shares[m])*100).toFixed(1)+' pp';
-    for(const text of [modeNames[m],share(survey.shares[m]),share(sim.shares[m]),delta,fmt.format(survey.counts[m]),fmt.format(sim.counts[m])]) {const td=document.createElement('td');td.textContent=text;tr.append(td);}
-    tbody.append(tr);
+function setResultView(view) {
+  resultView=view;
+  for(const [id,value] of [['modeShareView','shares'],['distanceView','distances']]) {
+    $(id).classList.toggle('primary',view===value);$(id).setAttribute('aria-pressed',String(view===value));
   }
+  if(latest)render(latest);
+}
+function km(value) {return value===null?'—':value.toFixed(2);}
+function table(headers,rows,titles=[]) {
+  const head=$('numberHeaders'),body=$('numbers');head.replaceChildren();body.replaceChildren();
+  for(const label of headers) {const th=document.createElement('th');th.textContent=label;head.append(th);}
+  rows.forEach((values,index)=>{
+    const row=document.createElement('tr');if(titles[index])row.title=titles[index];
+    for(const text of values) {const cell=document.createElement('td');cell.textContent=text;row.append(cell);}
+    if(index===0&&resultView==='distances')row.style.fontWeight='700';
+    body.append(row);
+  });
+}
+function render(result) {
+  const survey=result.Microcensus,sim=result.MATSim,distances=resultView==='distances';
+  $('surveyMetricLabel').textContent=distances?'Microcensus · mean distance':'Microcensus observations';
+  $('simMetricLabel').textContent=distances?'MATSim · mean distance':'MATSim simulated trips';
+  $('surveyTrips').textContent=distances?(survey.distances[0].mean===null?'—':km(survey.distances[0].mean)+' km'):fmt.format(survey.trips);
+  $('simTrips').textContent=distances?(sim.distances[0].mean===null?'—':km(sim.distances[0].mean)+' km'):fmt.format(sim.trips);
+  $('surveySample').textContent=distances?fmt.format(survey.distances[0].n)+' trips with valid distance':'';
+  $('simSample').textContent=distances?fmt.format(sim.distances[0].n)+' trips with valid distance':'';
+  $('surveyPeople').textContent=fmt.format(survey.people)+' distinct respondents';
+  $('simPeople').textContent=fmt.format(sim.people)+' distinct simulated people';
+  $('surveyWeight').textContent=fmt.format(Math.round(survey.total*10)/10)+' weighted selected trips';
   const notes=[];
-  if(survey.people<30)notes.push('Small Microcensus sample: fewer than 30 distinct respondents. Interpret these shares cautiously.');
-  if(!survey.trips||!sim.trips)notes.push('One dataset has no retained trips in this selection; its shares are undefined.');
+  if(survey.people<30)notes.push('Small Microcensus sample: fewer than 30 distinct respondents. Interpret these results cautiously.');
+  if(!survey.trips||!sim.trips)notes.push('One dataset has no retained trips in this selection; its statistics are undefined.');
+  if(distances) {
+    $('viewExplanation').textContent='Euclidean distance in km · boxes: 25th–75th percentiles; line: median; whiskers: 10th–90th percentiles; diamond: mean. Microcensus statistics use person weights.';
+    const rows=[],titles=[],labels=['All modes',...modeNames];
+    for(let m=0;m<6;m++) {
+      const a=survey.distances[m],b=sim.distances[m];
+      const delta=a.mean===null||b.mean===null?'—':(b.mean-a.mean).toFixed(2);
+      rows.push([labels[m],km(a.mean),km(b.mean),delta,km(a.median),km(b.median),fmt.format(a.n),fmt.format(b.n)]);
+      titles.push(['Microcensus: '+distanceDescription(a),'MATSim: '+distanceDescription(b)].join(' | '));
+    }
+    table(['Mode','Mz mean km','Sim. mean km','Δ km','Mz median','Sim. median','Mz valid trips','Sim. valid trips'],rows,titles);
+    distanceChart(survey.distances,sim.distances);
+    if(survey.distances[0].n<survey.trips||sim.distances[0].n<sim.trips)notes.push('Some selected trips have invalid distances and are excluded from distance statistics only.');
+  } else {
+    $('viewExplanation').textContent='Weighted survey trip shares compared with simulated trip shares.';
+    const rows=[];
+    for(let m=0;m<5;m++) {
+      const delta=survey.shares[m]===null||sim.shares[m]===null?'—':((sim.shares[m]-survey.shares[m])*100).toFixed(1)+' pp';
+      rows.push([modeNames[m],share(survey.shares[m]),share(sim.shares[m]),delta,fmt.format(survey.counts[m]),fmt.format(sim.counts[m])]);
+    }
+    table(['Mode','Mz share','MATSim share','Difference','Mz trips','Sim. trips'],rows);
+    chart(survey.shares,sim.shares);
+  }
   $('smallSample').className=notes.length?'warning':'';$('smallSample').textContent=notes.join(' ');
-  chart(survey.shares,sim.shares);
+}
+function distanceDescription(s) {
+  return `n=${s.n}, mean=${km(s.mean)} km, P10=${km(s.p10)}, P25=${km(s.p25)}, median=${km(s.median)}, P75=${km(s.p75)}, P90=${km(s.p90)}`;
+}
+function distanceChart(survey,sim) {
+  const width=730,height=500,left=122,right=25,top=25,bottom=45,plotW=width-left-right;
+  const maximum=Math.max(.1,...[...survey,...sim].filter(s=>s.n).map(s=>Math.max(s.p90,s.mean)));
+  const step=10**Math.floor(Math.log10(maximum/4));
+  const tick=Math.ceil(maximum/4/step)*step,limit=tick*4;
+  const scale=value=>left+plotW*value/limit;
+  let svg=`<svg role="img" aria-label="Weighted Euclidean distance distributions in kilometres" viewBox="0 0 ${width} ${height}" style="width:100%">`;
+  svg+=`<rect x="0" y="${top}" width="${width}" height="65" rx="6" fill="#f0f5fa"/>`;
+  for(let i=0;i<=4;i++) {
+    const value=i*tick,x=scale(value);
+    svg+=`<line x1="${x}" y1="${top}" x2="${x}" y2="${height-bottom}" stroke="#e0e8f0"/><text x="${x}" y="${height-25}" text-anchor="middle" font-size="11" fill="#53677e">${value<1?value.toFixed(2):value.toFixed(1)}</text>`;
+  }
+  const labels=['All modes',...modeNames];
+  for(let m=0;m<6;m++) {
+    const center=top+35+m*67;
+    svg+=`<text x="${left-12}" y="${center+4}" text-anchor="end" font-size="12" font-weight="${m===0?'700':'400'}" fill="#182b45">${labels[m]}</text>`;
+    for(const [j,stats,color] of [[0,survey,'#176b94'],[1,sim,'#dc5675']]) {
+      const s=stats[m];if(!s.n)continue;
+      const y=center+(j===0?-11:11),lo=scale(s.p10),hi=scale(s.p90),q1=scale(s.p25),q3=scale(s.p75),median=scale(s.median),mean=scale(s.mean);
+      svg+=`<g><title>${j?'MATSim':'Microcensus'} ${labels[m]}: ${distanceDescription(s)}</title><line x1="${lo}" y1="${y}" x2="${hi}" y2="${y}" stroke="${color}" stroke-width="2"/><line x1="${lo}" y1="${y-5}" x2="${lo}" y2="${y+5}" stroke="${color}"/><line x1="${hi}" y1="${y-5}" x2="${hi}" y2="${y+5}" stroke="${color}"/><rect x="${q1}" y="${y-7}" width="${Math.max(1,q3-q1)}" height="14" fill="${color}" fill-opacity=".2" stroke="${color}"/><line x1="${median}" y1="${y-7}" x2="${median}" y2="${y+7}" stroke="${color}" stroke-width="2"/><path d="M ${mean} ${y-5} l 5 5 l -5 5 l -5 -5 Z" fill="${color}"/></g>`;
+    }
+  }
+  svg+=`<text x="${left+plotW/2}" y="${height-5}" text-anchor="middle" font-size="12" fill="#182b45">Euclidean distance (km)</text>`;
+  $('chart').innerHTML=svg+'</svg>';
 }
 function chart(survey,sim) {
   const width=600,height=280,left=45,bottom=45,top=20,plotH=height-bottom-top,plotW=width-left-10;
@@ -180,10 +249,21 @@ for(const [kind,region] of Object.entries(regions))$(kind).onchange=()=>{
 };
 $('download').onclick=()=>{
   if(!latest)return;
-  const rows=[['dataset','mode','share_percent','raw_trips','weighted_trips','selected_trips','selected_people','selection','direction']];
-  for(const [name,data] of Object.entries(latest))for(let m=0;m<5;m++)rows.push([name,payload.modes[m],data.shares[m]===null?'':100*data.shares[m],data.counts[m],data.weighted[m],data.trips,data.people,shapeName,$('direction').value]);
-  const csv=rows.map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\n');
-  const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));link.download='selected_mode_shares.csv';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+  const distanceView=resultView==='distances';
+  const rows=[distanceView
+    ?['dataset','mode','mean_km','p10_km','p25_km','median_km','p75_km','p90_km','minimum_km','maximum_km','valid_distance_trips','weighted_distance_trips','selected_trips','selected_people','selection','direction']
+    :['dataset','mode','share_percent','raw_trips','weighted_trips','selected_trips','selected_people','selection','direction']];
+  for(const [name,data] of Object.entries(latest)) {
+    if(distanceView) {
+      for(let m=0;m<6;m++) {
+        const s=data.distances[m];
+        rows.push([name,m===0?'all_modes':payload.modes[m-1],s.mean,s.p10,s.p25,s.median,s.p75,s.p90,s.min,s.max,s.n,s.weight,data.trips,data.people,shapeName,$('direction').value]);
+      }
+    } else for(let m=0;m<5;m++)rows.push([name,payload.modes[m],data.shares[m]===null?'':100*data.shares[m],data.counts[m],data.weighted[m],data.trips,data.people,shapeName,$('direction').value]);
+  }
+  const csv=rows.map(row=>row.map(v=>'"'+(v===null?'':String(v)).replaceAll('"','""')+'"').join(',')).join('\n');
+  const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  link.download=distanceView?'selected_distances.csv':'selected_mode_shares.csv';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
 };
 loadRegions('municipality');
 loadRegions('canton');

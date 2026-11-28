@@ -68,6 +68,7 @@ function selector(shape) {
 function summarize(data, shape, direction) {
   const contains=selector(shape), weights=Array(5).fill(0), counts=Array(5).fill(0);
   const people=new Uint8Array(data.people);
+  const selected=new Uint8Array(data.rows);
   let n=0, persons=0;
   for(let i=0;i<data.rows;i++) {
     let keep;
@@ -81,11 +82,55 @@ function summarize(data, shape, direction) {
       keep=direction==='both'?(a&&b):(a||b);
     }
     if(!keep) continue;
+    selected[i]=1;
     n++; const id=data.person[i]; if(!people[id]) {people[id]=1;persons++;}
     counts[data.mode[i]]++;weights[data.mode[i]]+=data.weight[i];
   }
   const total=weights.reduce((a,b)=>a+b,0);
-  return {trips:n,people:persons,total,counts,weighted:weights,shares:weights.map(v=>total?v/total:null)};
+  return {trips:n,people:persons,total,counts,weighted:weights,shares:weights.map(v=>total?v/total:null),
+          distances:distanceStatistics(data,selected)};
+}
+
+function prepareDistanceOrder(data) {
+  // Sort once per dataset. Every later spatial selection reuses the exact order.
+  const order=new Uint32Array(data.rows);
+  let n=0;
+  for(let i=0;i<data.rows;i++)if(Number.isFinite(data.distance_km[i])&&data.distance_km[i]>=0)order[n++]=i;
+  data.distanceOrder=order.subarray(0,n).sort((a,b)=>data.distance_km[a]-data.distance_km[b]);
+}
+
+function distanceStatistics(data,selected) {
+  // Group zero pools trips across all modes; the next five groups are per mode.
+  const statistics=Array.from({length:6},()=>({n:0,weight:0,sum:0,mean:null,min:null,
+      p10:null,p25:null,median:null,p75:null,p90:null,max:null}));
+  for(let i=0;i<data.rows;i++) {
+    const value=data.distance_km[i];
+    if(!selected[i]||!Number.isFinite(value)||value<0)continue;
+    const weight=data.weight[i];
+    for(let pass=0;pass<2;pass++) {
+      const group=pass?data.mode[i]+1:0;
+      const s=statistics[group];
+      s.min=s.n?Math.min(s.min,value):value;s.max=s.n?Math.max(s.max,value):value;
+      s.n++;s.weight+=weight;s.sum+=weight*value;
+    }
+  }
+  if(!data.distanceOrder)prepareDistanceOrder(data);
+  const cumulative=new Float64Array(6),position=new Uint8Array(6);
+  const probabilities=[.1,.25,.5,.75,.9],keys=['p10','p25','median','p75','p90'];
+  for(const row of data.distanceOrder) {
+    if(!selected[row])continue;
+    for(let pass=0;pass<2;pass++) {
+      const group=pass?data.mode[row]+1:0;
+      cumulative[group]+=data.weight[row];
+      const s=statistics[group];
+      // Inverse empirical CDF: first value whose cumulative weight reaches q.
+      while(position[group]<5 && cumulative[group]>=probabilities[position[group]]*s.weight) {
+        s[keys[position[group]]]=data.distance_km[row];position[group]++;
+      }
+    }
+  }
+  for(const s of statistics) {if(s.weight>0)s.mean=s.sum/s.weight;delete s.sum;}
+  return statistics;
 }
 onmessage=async(event)=>{
   const message=event.data;
@@ -97,6 +142,7 @@ onmessage=async(event)=>{
           const Type=col.dtype==='|u1'?Uint8Array:col.dtype==='<u4'?Uint32Array:col.dtype==='<f8'?Float64Array:Int32Array;
           data[key]=new Type(buffer,col.offset,meta.rows);
         }
+        prepareDistanceOrder(data);
         datasets[name]=data;
       }
       postMessage({type:'ready'});
