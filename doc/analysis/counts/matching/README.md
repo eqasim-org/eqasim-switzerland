@@ -189,17 +189,40 @@ thresholds. Comparisons always use profiles before the additional SITG
 corrections, making repeated selection runs stable. Rebuild the counts stages
 after updating the selected file.
 
-Daily and peak-hour Transcality maps optionally read
-`output_detailed_link_statistics.csv.gz` from the configured count-analysis
-simulation directory (`analysis.counts.simulation_path`, or its usual output
-directory fallback). Only matched current simulation link IDs are retained.
-Multiple detectors matched to one link do not multiply its simulated traffic.
+The shared `analysis.counts.matching.detailed_statistics` stage reads the optional
+`output_detailed_link_statistics.csv.gz` (or `.zst`/uncompressed variant) from
+the configured count-analysis simulation directory. It caches one indexed
+link/hour table for the full output. Both daily and peak-hour comparison stages
+expose this result through `comparison.get_detailed_statistics()`. CH, Zurich
+and Transcality maps reuse it; plotting stages never reread the compressed file.
+The loader cache refreshes when the source file appears, disappears or changes.
+A missing file yields an empty table and omits the vehicle breakdowns without
+interrupting the comparison. A missing link also remains unavailable, rather
+than being shown with zero traffic. Multiple detectors matched to one link do
+not multiply its simulated traffic. Data validation still rejects corrupt
+counts or duplicate link/hour rows in a file that is present.
 
 Click a count point to open its full statistics and daily chart in a right-side
 panel, replacing the settings panel. Hover shows only station/link IDs, observed
 and simulated flow, GEH and differences. The settings panel can be collapsed;
 filter parameters expand only when filtering is enabled. Returning from station
 details preserves all settings.
+
+CH (ASTRA) and Zurich maps use the same click-details panel and vehicle-category
+bars. Each station sums its distinct matched current links; every required link
+must have detailed statistics, otherwise the breakdown is omitted. These maps
+do not show an observed hourly profile because their counts provide daily totals.
+Zurich's scatter includes hourly directional GEH statistics (limits 3, 5, 7, 10).
+
+All count-comparison maps have a collapsible **Cumulative GEH** panel in the
+lower right. Its step curve shows the number of displayed stations with
+`GEH <= threshold`. Hover over it or enter any non-negative threshold to see
+the count and percentage. The denominator includes visible, finite-GEH points
+after count filtering and construction visibility; accuracy-center overlays
+are not counted again. Switching between original and closest-bound counts
+also updates the curve. Threshold queries retain full GEH precision, while
+tooltips display two decimals. These are map-display summaries, with no change
+to scatter filtering or calibration targets.
 
 Transcality settings include an initially disabled matched-link connector checkbox.
 Red connectors run to the nearest point on each matched link's real geometry;

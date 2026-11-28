@@ -1,0 +1,21 @@
+<details id="counts-geh-curve">
+  <summary>Cumulative GEH</summary>
+  <div class="counts-geh-body">
+    <svg id="counts-geh-plot" viewBox="0 0 340 205" role="img"
+         aria-label="Cumulative number of visible count points by GEH"></svg>
+    <label>GEH threshold <input id="counts-geh-threshold" type="number" min="0" step="any" value="5"></label>
+    <output id="counts-geh-readout" aria-live="polite"></output>
+    <div>Visible count points with finite GEH; includes the selected count mode and filters.</div>
+  </div>
+</details>
+<style>
+#counts-geh-curve { position:absolute; z-index:21; right:12px; bottom:26px;
+  width:min(360px,calc(100vw - 24px)); box-sizing:border-box; padding:10px;
+  background:rgba(255,255,255,.96); border-radius:7px; box-shadow:0 2px 10px #0004;
+  font:12px/1.4 Arial,sans-serif; color:#222; max-height:55vh; overflow:auto; }
+#counts-geh-curve summary { cursor:pointer; font-weight:bold; }
+#counts-geh-plot { display:block; width:100%; touch-action:pan-y; }
+#counts-geh-threshold { width:90px; margin:5px; }
+#counts-geh-readout { display:block; margin:5px 0; font-weight:bold; }
+.counts-geh-body > div { color:#555; }
+</style>

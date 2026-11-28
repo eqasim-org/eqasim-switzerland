@@ -100,16 +100,16 @@ def GEH(x_d, y_d, return_vector=False, directions_represented=2, period_hours=24
     geh_values = np.sqrt(2 * (x - y) ** 2 / (x + y + 1e-6))
     if return_vector:
         return geh_values
+    geh_within_3 = int(np.sum(geh_values <= 3))
     geh_within_5 = int(np.sum(geh_values <= 5))
+    geh_within_7 = int(np.sum(geh_values <= 7))
     geh_within_10 = int(np.sum(geh_values <= 10))
-    geh_within_15 = int(np.sum(geh_values <= 15))
-    geh_within_25 = int(np.sum(geh_values <= 25))
     n_points = len(geh_values)
+    geh_within_3_pct = (geh_within_3 / n_points) * 100
     geh_within_5_pct = (geh_within_5 / n_points) * 100
+    geh_within_7_pct = (geh_within_7 / n_points) * 100
     geh_within_10_pct = (geh_within_10 / n_points) * 100
-    geh_within_15_pct = (geh_within_15 / n_points) * 100
-    geh_within_25_pct = (geh_within_25 / n_points) * 100
-    return geh_within_5_pct, geh_within_10_pct, geh_within_15_pct, geh_within_25_pct
+    return geh_within_3_pct, geh_within_5_pct, geh_within_7_pct, geh_within_10_pct
 
 def SGV(x_d,y_d):
     f = 10_000
@@ -175,7 +175,7 @@ class Plotter:
             return_vector=True,
             directions_represented=directions_represented,
             period_hours=result["period_hours"],
-        ).round(2)
+        )
         return gpd.GeoDataFrame(result, geometry="geometry", crs=points.crs)
 
     def plot_flow(self, flows, counts:Counts=None, output_file:str=None, 
@@ -273,7 +273,7 @@ class Plotter:
                 directions = directions_represented
             geh = GEH(x, y, directions_represented=directions, period_hours=period_hours)
             plt.text( 0.7 * max_val, 0.02 * max_val, 
-                    f"GEH ≤ 5: {geh[0]:.1f}%\nGEH ≤ 10: {geh[1]:.1f}%\nGEH ≤ 15: {geh[2]:.1f}%\nGEH ≤ 25: {geh[3]:.1f}%" ,  # text
+                    f"GEH ≤ 3: {geh[0]:.1f}%\nGEH ≤ 5: {geh[1]:.1f}%\nGEH ≤ 7: {geh[2]:.1f}%\nGEH ≤ 10: {geh[3]:.1f}%" ,  # text
                     fontsize=14,
                     color='steelblue',
                     bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3')  # white box
@@ -593,7 +593,9 @@ class Plotter:
                         + "</td></tr>"
                     )
                 continue
-            value = Plotter._tooltip_value(row[field])
+            value = Plotter._tooltip_value(
+                round(float(row[field]), 2) if field == "geh" and pd.notna(row[field]) else row[field]
+            )
             if field == SWISS_RATIO and value is None:
                 value = "Undefined (zero French + cross-border, or missing statistics)"
             if field == FOREIGN_SHARE and value is None:
@@ -923,6 +925,8 @@ class Plotter:
             + '> Show construction-affected counts</label>'
             '<div>Map display only; does not change calibration targets or saved statistics.</div>'
         ) if has_construction else "")
+        if "geh" in metric_settings:
+            controls += Path(__file__).with_name("geh_curve.html.template").read_text(encoding="utf-8")
         style = """
 <style>
 #counts-map-controls, #counts-point-details {
@@ -1087,6 +1091,7 @@ class Plotter:
   const greenUnit = document.getElementById("counts-green-unit");
   const goldUnit = document.getElementById("counts-gold-unit");
   const deck = typeof deckInstance === "undefined" ? null : deckInstance;
+  __GEH_CURVE_SCRIPT__
   const bounds = JSON.parse(JSON.stringify(metricSettings));
   const qualityBounds = JSON.parse(JSON.stringify(metricSettings));
   const resizeHandle = document.getElementById("counts-details-resize");
@@ -1326,6 +1331,7 @@ class Plotter:
           ? layer.clone({visible: constructionToggle.checked}) : layer;
       })});
       updateMatchOverlays();
+      updateGehCurve();
     });
   }
 
@@ -1358,6 +1364,7 @@ class Plotter:
       recolor();
       updateQualityMarkers();
       updateMatchOverlays();
+      updateGehCurve();
   }
   if (countMode) countMode.addEventListener("change", updatePointData);
   filterEnabled.addEventListener("change", updatePointData);
@@ -1386,11 +1393,16 @@ class Plotter:
   loadQualityBounds();
   recolor();
   updateQualityMarkers();
+  updateGehCurve();
 })();
 </script>
 """
         script = script.replace(
             "__METRIC_SETTINGS__", json.dumps(metric_settings, separators=(",", ":"))
+        )
+        script = script.replace(
+            "__GEH_CURVE_SCRIPT__",
+            Path(__file__).with_name("geh_curve.js").read_text(encoding="utf-8"),
         )
 
         path = Path(path_to_save)
@@ -1668,7 +1680,7 @@ class Plotter:
             "style": {"color": "white", "background-color": "black", "padding": "10px"}
         }
     
-        # Use OpenStreetMap street-style background (Voyager)
+        # Use the original Voyager street-map background.
         r = pdk.Deck(
             layers=layers,
             initial_view_state=view_state,

@@ -166,14 +166,14 @@ def compute_statistics(df, flow_col='flow', simulated_flow_col='simulated_flow',
         flow_obs, flow_sim, return_vector=True,
         directions_represented=directions_represented,
     )
+    geh_within_3 = int(np.sum(geh_values <= 3))
     geh_within_5 = int(np.sum(geh_values <= 5))
+    geh_within_7 = int(np.sum(geh_values <= 7))
     geh_within_10 = int(np.sum(geh_values <= 10))
-    geh_within_15 = int(np.sum(geh_values <= 15))
-    geh_within_25 = int(np.sum(geh_values <= 25))
+    geh_within_3_pct = (geh_within_3 / n_points) * 100
     geh_within_5_pct = (geh_within_5 / n_points) * 100
+    geh_within_7_pct = (geh_within_7 / n_points) * 100
     geh_within_10_pct = (geh_within_10 / n_points) * 100
-    geh_within_15_pct = (geh_within_15 / n_points) * 100
-    geh_within_25_pct = (geh_within_25 / n_points) * 100
     
         
     # scalable quality value (SQV)
@@ -200,14 +200,14 @@ def compute_statistics(df, flow_col='flow', simulated_flow_col='simulated_flow',
         'mean_simulated': mean_sim,
         'underestimation_percent': underestimation,
         'geh': {
+            'within_3': geh_within_3,
+            'within_3_pct': geh_within_3_pct,
             'within_5': geh_within_5,
             'within_5_pct': geh_within_5_pct,
+            'within_7': geh_within_7,
+            'within_7_pct': geh_within_7_pct,
             'within_10': geh_within_10,
             'within_10_pct': geh_within_10_pct,
-            'within_15': geh_within_15,
-            'within_15_pct': geh_within_15_pct,
-            'within_25': geh_within_25,
-            'within_25_pct': geh_within_25_pct,
         },
         'sqv': {
             '0.9': sqv_09_pct,
@@ -260,10 +260,10 @@ def print_detailed_statistics(stats_dict):
         logger.info(f"   • Model OVERESTIMATES flow by {abs(stats_dict['underestimation_percent']):.1f}%")
     
     logger.info(f"\n🚦 GEH Statistic:")
+    logger.info(f"   • GEH ≤ 3: {stats_dict['geh']['within_3']:,} points ({stats_dict['geh']['within_3_pct']:.1f}%)")
     logger.info(f"   • GEH ≤ 5: {stats_dict['geh']['within_5']:,} points ({stats_dict['geh']['within_5_pct']:.1f}%)")
+    logger.info(f"   • GEH ≤ 7: {stats_dict['geh']['within_7']:,} points ({stats_dict['geh']['within_7_pct']:.1f}%)")
     logger.info(f"   • GEH ≤ 10: {stats_dict['geh']['within_10']:,} points ({stats_dict['geh']['within_10_pct']:.1f}%)")
-    logger.info(f"   • GEH ≤ 15: {stats_dict['geh']['within_15']:,} points ({stats_dict['geh']['within_15_pct']:.1f}%)")
-    logger.info(f"   • GEH ≤ 25: {stats_dict['geh']['within_25']:,} points ({stats_dict['geh']['within_25_pct']:.1f}%)")
     logger.info("=" * 60 + "\n")
 
 def create_comprehensive_plot(df, stats_dict, output_path=None):
@@ -347,8 +347,8 @@ Mean Simulated = {stats_dict['mean_simulated']:,.0f}
 Percentage difference = {stats_dict['underestimation_percent']:.1f}%
 
 GEH:
-GEH<=5 : {stats_dict['geh']['within_5_pct']:.1f} % | GEH<=10: {stats_dict['geh']['within_10_pct']:.1f} %
-GEH<=15: {stats_dict['geh']['within_15_pct']:.1f} % | GEH<=25: {stats_dict['geh']['within_25_pct']:.1f} %
+GEH<=3 : {stats_dict['geh']['within_3_pct']:.1f} % | GEH<=5: {stats_dict['geh']['within_5_pct']:.1f} %
+GEH<=7: {stats_dict['geh']['within_7_pct']:.1f} % | GEH<=10: {stats_dict['geh']['within_10_pct']:.1f} %
 
 SQV:
 SQV>=0.9: {stats_dict['sqv']['0.9']} % | SQV>=0.85: {stats_dict['sqv']['0.85']} %
@@ -415,11 +415,13 @@ def create_simple_scatter_plot(df, stats_dict, output_path=None):
     colors = plt.cm.Set1(np.linspace(0, 1, len(cities)))
     
     total_number_of_points = len(df_clean)
+    city_labels = {"ch": "Federal traffic counting stations (ASTRA)", "transcality": "Geneva"}
     for i, city in enumerate(cities):
         city_data = df_clean[df_clean['city'] == city]
         n_city = len(city_data)
+        label = city_labels.get(city, city.capitalize())
         ax.scatter(city_data['flow'], city_data['simulated_flow'],
-                   alpha=0.6, s=50, label=f"{city.capitalize()} ({n_city})",
+                   alpha=0.6, s=50, label=f"{label} ({n_city})",
                    color=colors[i], edgecolors="white")
     
     # Add perfect correlation line (1:1)
@@ -449,7 +451,7 @@ def create_simple_scatter_plot(df, stats_dict, output_path=None):
     
     # Add GEH text
     ax.text(0.7 * max_val, 0.02 * max_val, 
-            f"GEH ≤ 5: {stats_dict['geh']['within_5_pct']:.1f}%\nGEH ≤ 10: {stats_dict['geh']['within_10_pct']:.1f}%\nGEH ≤ 15: {stats_dict['geh']['within_15_pct']:.1f}%\nGEH ≤ 25: {stats_dict['geh']['within_25_pct']:.1f}%",
+            f"GEH ≤ 3: {stats_dict['geh']['within_3_pct']:.1f}%\nGEH ≤ 5: {stats_dict['geh']['within_5_pct']:.1f}%\nGEH ≤ 7: {stats_dict['geh']['within_7_pct']:.1f}%\nGEH ≤ 10: {stats_dict['geh']['within_10_pct']:.1f}%",
             fontsize=14,
             color='steelblue',
             bbox=dict(facecolor='white', edgecolor='gray', boxstyle='round,pad=0.3'))

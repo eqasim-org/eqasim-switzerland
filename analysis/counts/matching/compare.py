@@ -11,6 +11,7 @@ logger = logging.getLogger("synpp")
 
 def configure(context):
     configure_simulation_path(context)
+    context.stage("analysis.counts.matching.detailed_statistics")
     context.config("output_prefix", "switzerland_")
     context.config("analysis.counts.flow_aggregation_window", default= 1)
     context.config("use_link_stats_in_counts_analysis", False)
@@ -52,6 +53,7 @@ def execute(context):
 
     # build the compare object and return it
     cmp = Compare(file)
+    cmp.detailed_statistics = context.stage("analysis.counts.matching.detailed_statistics")
     
     return cmp
     
@@ -69,9 +71,14 @@ class Compare:
     def __init__(self, link_stats_file: Optional[str] = None):
         self.link_stats_file = link_stats_file
         self.link_stats = None
+        self.detailed_statistics = None
 
         if link_stats_file:
             self.link_stats = self.read_link_stats(link_stats_file)
+
+    def get_detailed_statistics(self):
+        """Return shared optional vehicle statistics without reading output files."""
+        return getattr(self, "detailed_statistics", None)
 
     @staticmethod
     def read_link_stats(file_path: str, columns: Union[str, List[str]] = "HRS0-24avg") -> pd.DataFrame:

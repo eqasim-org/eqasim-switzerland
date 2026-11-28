@@ -2,6 +2,7 @@ from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.results import save_count_results
+from ..matching.detailed_statistics import add_point_details
 import os
 from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
 import geopandas as gpd
@@ -16,8 +17,8 @@ def configure(context):
     configure_simulation_path(context)
     context.config("only_weekday", default=True)
 
-def execute(context):        
-    # paths and parameters  
+def execute(context):
+    # paths and parameters
     zurich_counts_data  = context.stage("analysis.counts.cantons.zurich")
     city = "zurich"
     sample_size = context.config("input_downsampling")
@@ -32,7 +33,7 @@ def execute(context):
                 columns_to_keep={'flow':"flow", 'flow_w':"flow_w",
                                  "osm_id":"osm_id", "angle":"angle"},
                 context = context)
-            
+
     # Match the manually identified OSM way and use its angle for direction.
     matcher = TrafficDataMatcher()
     matched = matcher.match(network=network, counts=counts)
@@ -40,13 +41,13 @@ def execute(context):
     if not matches_found(matched, city):
         return None
 
-    # Compare the with simulation    
-    cmp     = context.stage("analysis.counts.matching.compare")    
-    flows   = cmp.compare_flow_total_efficient(counts, matched, network, 
-                                            sample_size = sample_size, 
-                                            get_average=False, 
+    # Compare the with simulation
+    cmp     = context.stage("analysis.counts.matching.compare")
+    flows   = cmp.compare_flow_total_efficient(counts, matched, network,
+                                            sample_size = sample_size,
+                                            get_average=False,
                                             flow_col = 'flow_w' if context.config("only_weekday") else 'flow')
-    
+
     if not matches_found(flows, city, source="simulation flow results"):
         return None
 
@@ -56,7 +57,7 @@ def execute(context):
                             (flows.flow<1000)|
                             (~flows.pdiff.between(-70,200))]["id"].unique()
 
-    # Plot the network and highligh these links in green  
+    # Plot the network and highligh these links in green
     plotter = Plotter()
     matched_links = network.get_link_geometries(matched.link_id.tolist())
 
@@ -67,43 +68,37 @@ def execute(context):
     path_to_results = save_count_results(city, matched, flows, context.path())
 
     # Plot statistics
-    plotter.plot_flow(flows = flows, 
-                    counts = counts, 
-                    distance_to_border = 2000, 
+    plotter.plot_flow(flows = flows,
+                    counts = counts,
+                    distance_to_border = 2000,
                     title = f"Observed vs Simulated Traffic Flows ({city})",
                     output_file = os.path.join(path_to_images, f"flow_comparaison_{city}.png"),
-                    show_range = False)
+                    show_range = False,
+                    show_geh = True,
+                    directions_represented = 1)
 
     plotter.plot_flow_by_road_type(flows, network, matched, counts,
-                                distance_to_border = 0, 
+                                distance_to_border = 0,
                                 title = f"Average Observed vs Simulated Flow by Highway Type ({city})",
                                 output_file = os.path.join(path_to_images, f"flow_by_road_type_{city}.png"))
-    
 
-    border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))  
-    roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary','secondary_link','tertiary']      
+
+    # Add vehicle totals without an observed hourly profile.
+
+    points, detail_fields = add_point_details(
+        Plotter.prepare_flow_map_points(counts.counts, flows, directions_represented=1),
+        cmp.get_detailed_statistics(), sample_size,
+    )
+    border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))
+    roads_to_show = ['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link', 'primary_link', 'secondary','secondary_link','tertiary']
     Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
-                        matched_links.to_crs(epsg=4326)], 
-                        data_to_show=["link_id"], 
+                        matched_links.to_crs(epsg=4326)],
+                        data_to_show=["link_id"],
                         point_gdf=[
-                            Plotter.prepare_flow_map_points(
-                                counts.counts, flows
-                            ).to_crs(epsg=4326)
+                            points.to_crs(epsg=4326)
                         ],
-                        point_data_to_show=Plotter.FLOW_MAP_TOOLTIP_FIELDS,
+                        point_data_to_show=[*Plotter.FLOW_MAP_TOOLTIP_FIELDS, *detail_fields],
                         border = border,
                         cut_network = True,
                         path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
     return path_to_results
-   
-
-
-
-
-
-
-
-
-
-
-

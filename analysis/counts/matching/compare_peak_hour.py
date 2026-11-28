@@ -16,6 +16,7 @@ from ..paths import configure_simulation_path, get_simulation_path
 def configure(context):
     configure_simulation_path(context)
     configure_peak_hours(context)
+    context.stage("analysis.counts.matching.detailed_statistics")
 
 
 def read_peak_linkstats(path, start, end):
@@ -51,4 +52,5 @@ def execute(context):
     logging.getLogger("synpp").info("Using peak-hour linkstats %s (%02d:00–%02d:00)", path, start, end)
     comparison = Compare()
     comparison.link_stats = read_peak_linkstats(path, start, end)
+    comparison.detailed_statistics = context.stage("analysis.counts.matching.detailed_statistics")
     return comparison

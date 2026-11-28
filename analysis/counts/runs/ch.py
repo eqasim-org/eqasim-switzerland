@@ -2,6 +2,7 @@ from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter, GEH
 from ..matching.results import save_count_results
+from ..matching.detailed_statistics import add_point_details
 from ..run_utils import manual_exclusion_mask
 from ..cantons.ch_overrides import STATION_OSM_OVERRIDES
 from pathlib import Path
@@ -130,17 +131,23 @@ def execute(context):
                                 output_file = os.path.join(path_to_images, f"flow_by_road_type_{city}.png"))
     
     
-    # Plot the map in html  
+    # Prepare vehicle statistics once for both maps, preserving scatter filters.
+
+    all_points, detail_fields = add_point_details(
+        Plotter.prepare_flow_map_points(counts.counts, all_flows),
+        cmp.get_detailed_statistics(), sample_size,
+    )
+    map_fields = [*Plotter.FLOW_MAP_TOOLTIP_FIELDS, *detail_fields]
+
+    # Plot the map in html
     border = gpd.GeoDataFrame(context.stage("data.spatial.swiss_border").to_crs(epsg=4326))        
     Plotter.create_map([network.get_ways(road_types = roads_to_show).to_crs(epsg=4326),
                         matched_links.to_crs(epsg=4326)], 
                         data_to_show=["link_id"], 
                         point_gdf=[
-                            Plotter.prepare_flow_map_points(
-                                counts.counts, flows
-                            ).to_crs(epsg=4326)
+                            all_points[all_points.id.isin(flows.id)].to_crs(epsg=4326)
                         ],
-                        point_data_to_show=Plotter.FLOW_MAP_TOOLTIP_FIELDS,
+                        point_data_to_show=map_fields,
                         border = border,
                         path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}.html"))
     
@@ -148,11 +155,9 @@ def execute(context):
                     matched_links.to_crs(epsg=4326)], 
                     data_to_show=["link_id"], 
                     point_gdf=[
-                        Plotter.prepare_flow_map_points(
-                            counts.counts, all_flows
-                        ).to_crs(epsg=4326)
+                        all_points.to_crs(epsg=4326)
                     ],
-                    point_data_to_show=Plotter.FLOW_MAP_TOOLTIP_FIELDS,
+                    point_data_to_show=map_fields,
                     border = border,
                     path_to_save= os.path.join(path_to_images, f"counts_on_network_{city}_unfiltered.html"))
     
@@ -164,6 +169,8 @@ def validate(context):
     digest = hashlib.sha256()
     for name in ("cantons/ch_overrides.py", "matching/station_overrides.py",
                  "matching/matcher.py", "matching/road_matching.py",
-                 "matching/compare.py", "matching/plots.py", "matching/results.py", "run_utils.py"):
+                 "matching/compare.py", "matching/plots.py", "matching/results.py",
+                 "matching/detailed_statistics.py", "matching/geh_curve.js",
+                 "matching/geh_curve.html.template", "run_utils.py"):
         digest.update((root / name).read_bytes())
     return digest.hexdigest()

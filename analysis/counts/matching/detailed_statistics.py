@@ -1,4 +1,4 @@
-"""Read optional hourly vehicle breakdowns for Transcality hover information."""
+"""Read optional hourly vehicle breakdowns for count-station details."""
 
 import logging
 from pathlib import Path
@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from matsim.config.tools import resolve_output_file
+from ..paths import configure_simulation_path, get_simulation_path
 
 
 VEHICLE_COLUMNS = (
@@ -24,21 +25,51 @@ DETAIL_COLOR_LABELS = {
 }
 
 
-def read_detailed_statistics(simulation_path, link_ids):
-    """Stream only matched current link IDs; never mutate simulation outputs.
+def configure(context):
+    configure_simulation_path(context)
+
+
+def execute(context):
+
+    # Load optional vehicle statistics once for daily and peak comparisons.
+
+    return read_detailed_statistics(get_simulation_path(context))
+
+
+def validate(context):
+    """Refresh the shared cache when the optional output appears or changes."""
+    path = statistics_path(get_simulation_path(context))
+    if not path.is_file():
+        return None
+    stat = path.stat()
+    return [str(path), stat.st_mtime_ns, stat.st_size]
+
+
+def statistics_path(simulation_path):
+    return Path(resolve_output_file(
+        Path(simulation_path) / "output_detailed_link_statistics.csv.gz", required=False
+    ))
+
+
+def read_detailed_statistics(simulation_path, link_ids=None):
+    """Read a compact link/hour table; an optional subset is useful for diagnostics.
 
     Missing links remain unavailable, rather than being reported as zero.
     For represented links, absent hourly records are treated as zero passages.
+    A single indexed table avoids creating a separate DataFrame for every link
+    in the full network. The returned table is shared read-only by consumers.
     """
-    path = Path(resolve_output_file(Path(simulation_path) / "output_detailed_link_statistics.csv.gz", required=False))
-    if not path.is_file():
-        logging.getLogger("synpp").warning("No %s; Transcality detailed hover statistics omitted.", path)
-        return {}
-    selected = set(map(str, link_ids))
-    pieces = []
     columns = ["link_id", "hour", *VEHICLE_COLUMNS]
+    empty = pd.DataFrame(columns=columns).set_index(["link_id", "hour"])
+    path = statistics_path(simulation_path)
+    if not path.is_file():
+        logging.getLogger("synpp").info("Optional detailed statistics not found: %s; skipping vehicle breakdowns.", path)
+        return empty
+    selected = None if link_ids is None else set(map(str, link_ids))
+    pieces = []
     for chunk in pd.read_csv(path, usecols=columns, dtype={"link_id": str}, chunksize=250_000):
-        chunk = chunk[chunk.link_id.isin(selected)].copy()
+        if selected is not None:
+            chunk = chunk[chunk.link_id.isin(selected)].copy()
         if chunk.empty:
             continue
         values = chunk[["hour", *VEHICLE_COLUMNS]].to_numpy(dtype=float)
@@ -50,14 +81,30 @@ def read_detailed_statistics(simulation_path, link_ids):
         chunk = chunk[chunk.hour < 24]
         pieces.append(chunk)
     if not pieces:
-        return {}
+        return empty
     data = pd.concat(pieces, ignore_index=True)
     if data.duplicated(["link_id", "hour"]).any():
         raise ValueError("Detailed link statistics has duplicate link/hour rows.")
-    return {
-        link_id: group.set_index("hour")[list(VEHICLE_COLUMNS)].reindex(range(24), fill_value=0)
-        for link_id, group in data.groupby("link_id", sort=False)
-    }
+    data["hour"] = data["hour"].astype("uint8")
+    data["link_id"] = data["link_id"].astype("category")
+    return data.set_index(["link_id", "hour"])[list(VEHICLE_COLUMNS)].sort_index()
+
+
+def add_point_details(points, statistics, sample_size):
+    """Attach available vehicle totals for the shared click-details panel.
+
+    Sum each matched current link once. Missing outputs leave the usual
+    comparison metrics usable, without inventing zero vehicle totals.
+    """
+    result = points.copy()
+    records = [point_details(ids, statistics, sample_size)[0]
+               for ids in result.matched_link_ids]
+    details = pd.DataFrame(records, index=result.index)
+    # These maps have no observed profile to compare with the simulated curve.
+    details = details.drop(columns=[field for field in details if field.startswith("MATSim profile")])
+    for field in details:
+        result[field] = details[field]
+    return result, list(details.columns)
 
 
 def point_details(link_ids, statistics, sample_size, peak_hours=None):
@@ -70,9 +117,9 @@ def point_details(link_ids, statistics, sample_size, peak_hours=None):
     if not np.isfinite(sample_size) or not 0 < sample_size <= 1:
         raise ValueError("input_downsampling must be in (0, 1].")
     ids = list(dict.fromkeys(map(str, link_ids)))
-    if not ids or any(link_id not in statistics for link_id in ids):
+    if statistics is None or statistics.empty or not ids or any(link_id not in statistics.index for link_id in ids):
         return {}, None
-    hourly = sum((statistics[link_id] for link_id in ids[1:]), statistics[ids[0]].copy())
+    hourly = statistics.loc[ids].groupby(level="hour", observed=True).sum().reindex(range(24), fill_value=0)
     start, end = peak_hours or (0, 24)
     totals = hourly.loc[start:end - 1].sum()
     details = {f"MATSim {column.replace('_', ' ')} (raw vehicle passages)": round(float(totals[column]), 2)

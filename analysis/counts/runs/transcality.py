@@ -16,9 +16,9 @@ from ..matching.counts import Counts
 from ..matching.matcher import TrafficDataMatcher
 from ..matching.plots import Plotter
 from ..matching.results import save_count_results
-from ..matching.detailed_statistics import read_detailed_statistics, point_details
+from ..matching.detailed_statistics import point_details
 from ..construction_sites import configure_filter, filter_counts, annotate_counts
-from ..paths import configure_simulation_path, get_simulation_path, get_analysis_output_path, matches_found
+from ..paths import configure_simulation_path, get_analysis_output_path, matches_found
 
 
 logger = logging.getLogger("synpp")
@@ -206,10 +206,7 @@ def save_map(context, counts, flows, network, comparison, sample_size, output_di
     )
     # Enrich only Transcality HTML; comparison metrics and calibration stay unchanged.
 
-    detailed = read_detailed_statistics(
-        get_simulation_path(context),
-        [link_id for ids in points.matched_link_ids for link_id in ids],
-    )
+    detailed = comparison.get_detailed_statistics()
     tooltip_fields = list(Plotter.TRANSCALITY_FLOW_MAP_TOOLTIP_FIELDS)
     profiles = []
     for index, row in points.iterrows():
