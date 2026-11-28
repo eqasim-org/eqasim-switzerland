@@ -330,6 +330,7 @@ def prepare_v1(context, const, roster):
 def prepare_v2(context, const, roster):
     """Preserve continuous/count inputs and the full households used by V2."""
     from .V2.features import prepare_features
+    from .V2.density import add_company_densities
 
     # Reuse V1 cleaning and commute imputation BEFORE day/border filtering.
     # Work on a consumer-owned copy of the shared helper result.
@@ -356,7 +357,8 @@ def prepare_v2(context, const, roster):
     driver_ids = set(trips.loc[trips["mode"].isin(["car", "car_loop"]), "person_id"])
     source["uses_car_driver"] = source["person_id"].isin(driver_ids)
     source = source.rename(columns={"person_id": "mz_id"}).sort_values("mz_id").reset_index(drop=True)
-    work_locations = context.stage("work_locations")[["person_id", "work_location_type", "commute_distance"]].copy()
+    work_anchors = context.stage("work_locations")
+    work_locations = work_anchors[["person_id", "work_location_type", "commute_distance"]].copy()
     # Match on the longer available work/education commute, as in V1.
     education = context.stage("education_locations") if const.census == "statpop" else None
     # V1 holds out the explicit home-only scenario before anchor preparation.
@@ -373,6 +375,7 @@ def prepare_v2(context, const, roster):
         raise ValueError("Employed synthetic persons are missing work locations")
     # Keep the full household roster for feature reconstruction; the stage
     # excludes explicitly home-only residents from prediction, as in V1.
+    source, population = add_company_densities(context, source, population, work_anchors, const)
     source, population = prepare_features(source, population, const)
     relevant_trips = trips.loc[trips["person_id"].isin(source["mz_id"])].sort_values(["person_id", "trip_id"])
     return source, population, relevant_trips

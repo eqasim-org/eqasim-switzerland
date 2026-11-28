@@ -22,6 +22,7 @@ def configure(context):
         "data.constants",
     ):
         context.stage(stage)
+    context.stage("data.statent.density")
     context.stage(
         "synthesis.population.spatial.primary.work.work_locations",
         alias="work_locations",

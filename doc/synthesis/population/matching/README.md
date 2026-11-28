@@ -25,6 +25,7 @@ not import the neural package; its donor search remains independent.
 | `losses.py` | `MatchingLoss`: categorical sequence, masked regression, trip-count, reconstruction, latent-norm/spread losses and optional class weights |
 | `training.py` | `EmbeddingTrainer`: weighted training, optimizer/scheduler, household split, early stopping and restoring the best state |
 | `features.py` | Shared survey/population harmonization, household counts, feature inventory and fitted `FeatureProcessor` |
+| `density.py` | STATENT establishment counts around home and usual work anchors before matching |
 | `targets.py` | `SequenceTargetBuilder`: ordered diary targets, missing-data masks and behavioural scales |
 | `donors.py` | `DonorSelector`: employment/student eligibility, nearest neighbours, survey weighting and optional transport balancing |
 | `wrappers.py` | `DiaryMatcher` public fit/transform/predict API and `MatchingPrediction` result |
@@ -108,6 +109,7 @@ sampled population and their producer code:
 | Age and resources | `age`, `income_class` | Continuous age and original 0–8 income codes; training-only standardization, no recoding into broader groups |
 | Household composition | `household_size`, `N_children_under_3`, `N_children_under_6`, `N_children_under_12`, `N_children_under_18`, `N_adults` | Numeric counts, not presence flags; no household-size clipping |
 | Residential density | `population_density` | `log1p` of residents within 2.5 km of home, computed by the same density pipeline on both sides; it is not residents/km² |
+| Company density at home and work | `home_companies_density`, `work_companies_density` | `log1p` of STATENT establishment counts within the existing `dmc.constants.constants.EMPLOYEES_DENSITY_RADIUS` (500 m). Uses survey home/work addresses and synthetic home/assigned work anchors before matching, with unique coordinates queried once. Missing locations remain missing; work density is undefined for non-employed people. These are continuous model inputs, not donor masks. |
 | Residential context | `ovgk`, `municipality_type`, `canton_id`, `sp_region`, `activity_chain_cluster` | Original PT-quality categories A/B/C/D/none and categorical spatial inputs |
 | Work context | `employed`, `is_student`, `employment_status`, `work_location_type`, `commute_distance`, `job_position` | Categorical status/location type/job; log commute distance; survey job codes mapped using the repository's common classification; job is unknown for non-workers on both sides |
 | Mobility resources | `driving_license`, `car_availability`, `number_of_cars_class` | Harmonized categorical inputs, with no inference mask |
@@ -282,7 +284,7 @@ radius, no additional Gaussian smoothing and a 16% high-activity target.
 
 V1/V3 replace their density preference with `activity_chain_cluster`, retaining
 its priority and relaxation rules. V2 adds this categorical input to geography
-and retains its existing population-density input. The shared workflow
+and retains population and home/work company densities. The shared workflow
 attaches the zone to private copies of donor and recipient frames. Zone labels
 are learned as categories, not numeric intensity ranks or hard donor masks.
 

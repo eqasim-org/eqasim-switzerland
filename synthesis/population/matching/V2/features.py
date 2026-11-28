@@ -20,6 +20,8 @@ CONTINUOUS = [
     "N_children_under_18",
     "N_adults",
     "population_density_log",
+    "home_companies_density_log",
+    "work_companies_density_log",
     "commute_distance_log",
     "dist_home_to_border_log",
 ]
@@ -56,6 +58,8 @@ FEATURE_GROUPS = {
     ],
     "density": [
         "population_density_log",
+        "home_companies_density_log",
+        "work_companies_density_log",
     ],
     "residential_context": CATEGORICAL_GROUPS["geo"],
     "mobility_resources": CATEGORICAL_GROUPS["cars"],
@@ -167,12 +171,18 @@ def prepare_features(source, population, const):
             frame[column] = values.where(values >= 0)
         for column in (
             "population_density",
+            "home_companies_density",
+            "work_companies_density",
             "commute_distance",
             "dist_home_to_border",
         ):
             raw = numeric(frame, column)
             frame[column] = raw.where(raw >= 0)
             frame[column + "_log"] = np.log1p(frame[column])
+        frame.loc[
+            frame["employed"].ne(1),
+            ["work_companies_density", "work_companies_density_log"],
+        ] = np.nan
         # Students without employment can still have a usual education commute.
         frame.loc[
             frame["employed"].ne(1) & frame["is_student"].ne(1),
