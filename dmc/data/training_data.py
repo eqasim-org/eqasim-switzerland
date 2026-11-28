@@ -6,6 +6,7 @@ import dmc.cost.parking as parking_cost
 import dmc.penalties.parking as parking_penalty
 
 from dmc.data.utils import merge_same_trips, adjust_weights
+from dmc.data.validation import drop_missing_required_trip_fields
 from dmc.constants import constants
 from data.utils import coerce_boolean_series
 
@@ -168,7 +169,7 @@ def execute(context):
     df = df[~f_only_car]
 
     ### remove nan rows
-    df = df[df.isna().sum(axis=1)==0].reset_index(drop=True)
+    df = drop_missing_required_trip_fields(df).reset_index(drop=True)
 
     ### remove modes that are selected but not available
     f_remove = np.zeros((len(df),), dtype = bool)
@@ -188,7 +189,7 @@ def execute(context):
     columns = [
         "person_id", "trip_id", "person_weight", "mode", "euclidean_distance_km",
         "home_municipality", "origin_municipality", "destination_municipality", 
-        "destination_work", "origin_home", "destination_home", "destination_education",
+        "destination_work", "origin_home", "passenger_origin_home", "origin_work", "originPtQuality", "destination_home", "destination_education",
         "destination_shopping", "destination_leisure", "destination_other",        
         "elevation_difference", "purpose", 
         'destination_zurich', 'destination_geneva', 'destination_basel', 'destination_lausanne', 'destination_luzern', 'destination_bern',

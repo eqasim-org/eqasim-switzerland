@@ -12,6 +12,7 @@ from dmc.parameters import Parameters
 from dmc.pt_quality import pt_quality_expression
 from mode_choice.routing.eqasim.server import ensure_server_started
 from mode_choice.routing.eqasim.client import RoutingServer
+from mode_choice.model.utilities import validate_for_population
 
 def configure(context):
     context.stage("mode_choice.routing.eqasim.server")
@@ -36,6 +37,7 @@ def execute(context):
 def prepare_data(context):
     # load the parameters
     p = Parameters.from_context(context)
+    validate_for_population(p)
 
     # load the trips and tours, and drop trips not eligible for mode choice
     trips = context.stage("mode_choice.data.trips")
@@ -71,12 +73,15 @@ def prepare_data(context):
     # enrich the trips with spatial features of the destination
     coords = trips.select("destination_x", "destination_y").unique(maintain_order=True)
     trips = trips.join(spatial_features(context, coords), on=["destination_x", "destination_y"], how="left", validate="m:1")
+    trips = trips.join(origin_quality(context, trips), on=['origin_x', 'origin_y'], how='left', validate='m:1')
 
     # remaining attributes
     trips = trips.with_columns(
         ((pl.col("destination_x") - pl.col("origin_x")).pow(2) +
          (pl.col("destination_y") - pl.col("origin_y")).pow(2)).sqrt().truediv(1000).alias("euclidean_distance_km"),
         pl.col("preceding_purpose").is_in(D.HOME_PURPOSES).alias("origin_home"),
+        pl.col("preceding_purpose").is_in(D.HOME_PURPOSES).alias("passenger_origin_home"),
+        pl.col("preceding_purpose").is_in(D.WORK_PURPOSES).alias("origin_work"),
         (pl.col("destination_municipality") == "urban").alias("urban_destination"),
         (pl.col("destination_municipality") == "urbancore").alias("urbancore_destination"),
         pt_quality_expression("destination_ovgk").alias("destinationPtQuality"),
@@ -87,7 +92,20 @@ def prepare_data(context):
         (pl.col("euclidean_distance_km") > p["longDistance_km"]).alias("long_distance"),
         (pl.col("euclidean_distance_km") > p["veryLongDistance_km"]).alias("very_long_distance"),
     )
+    trips = trips.with_columns(((pl.col('origin_x') == pl.col('home_x')) &
+                                (pl.col('origin_y') == pl.col('home_y'))).alias('origin_home'))
     return trips.sort(["person_id", "trip_index"])
+
+
+def origin_quality(context, trips):
+    from data.spatial.ovgk import impute_parallel
+    from dmc.pt_quality import encode_pt_quality
+    coordinates = trips.select('origin_x', 'origin_y').unique(maintain_order=True)
+    frame = gpd.GeoDataFrame(coordinates.to_pandas(),
+                            geometry=gpd.points_from_xy(coordinates['origin_x'], coordinates['origin_y']), crs=2056)
+    frame = impute_parallel(context, frame, output_column='ovgk', n_jobs=min(D.SPATIAL_MAX_THREADS, context.config('threads')))
+    return pl.DataFrame({'origin_x': frame.origin_x.to_numpy(), 'origin_y': frame.origin_y.to_numpy(),
+                         'originPtQuality': encode_pt_quality(frame.ovgk).to_numpy()})
 
 
 def prepare_persons(persons, c, p, cantons):

@@ -357,7 +357,7 @@ def impute_parallel(context, df, x="x", y="y", geometry="geometry", output_colum
         df = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:2056")
 
     
-    df_ovgk = context.stage("data.spatial.ovgk")
+    df_ovgk = context.stage("data.spatial.ovgk").copy()
     df_ovgk.rename(columns={"ovgk": output_column}, inplace=True)
     assert df_ovgk.crs==df.crs, "CRS of df and df_ovgk must match"
 

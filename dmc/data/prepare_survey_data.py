@@ -11,6 +11,7 @@ from data.statent.density import impute as impute_statent
 from data.statpop.density import impute as impute_statpop
 from data.spatial.ovgk import impute_parallel as impute_ovgk
 from dmc.pt_quality import encode_pt_quality
+from dmc.data.validation import drop_missing_required_trip_fields
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def execute(context):
 
     # sort trips by person and by trip
     df_trips = df_trips.sort_values(["person_id","trip_id"])
-    df_trips = df_trips[['person_id', 'trip_id', 'departure_time', 'mode', 'purpose','destination_x',
+    df_trips = df_trips[['person_id', 'trip_id', 'departure_time', 'mode', 'purpose', 'origin_purpose', 'destination_x',
                          'destination_y', 'origin_x', 'origin_y', 'crowfly_distance']].reset_index(drop=True)
     
     # include personal information
@@ -88,6 +89,8 @@ def execute(context):
     # enrich trips with additional information
     df_trips["destination_home"] = df_trips.purpose.isin(["home", "home_secondary"])
     df_trips["origin_home"] = (df_trips.origin_x == df_trips.home_x) & (df_trips.origin_y == df_trips.home_y)    
+    df_trips["passenger_origin_home"] = df_trips.origin_purpose.isin(["home", "home_secondary"])
+    df_trips["origin_work"] = df_trips.origin_purpose.isin(["work", "work_secondary"])
     df_trips["destination_work"] = df_trips.purpose.isin(["work","work_secondary"])
     df_trips["destination_education"] = df_trips.purpose.isin(["education","education_secondary"])
     df_trips["destination_shopping"] = df_trips.purpose.isin(["shop"])
@@ -167,6 +170,12 @@ def execute(context):
     df_dest = impute_ovgk(context, df_dest, geometry="geometry_destination", output_column="ovgk_destination", n_jobs=8)
     df_trips["destinationPtQuality"] = encode_pt_quality(df_dest["ovgk_destination"])
 
+    # Measure PT quality at the actual origin, independently of home/work.
+
+    df_origin = gpd.GeoDataFrame(df_trips[['person_id', 'trip_id', 'geometry_origin']], geometry="geometry_origin", crs="EPSG:2056")
+    df_origin = impute_ovgk(context, df_origin, geometry="geometry_origin", output_column="ovgk_origin", n_jobs=8)
+    df_trips["originPtQuality"] = encode_pt_quality(df_origin["ovgk_origin"])
+
     # tag destinations in zurich, geneva, basel, lausanne, luzern, Bern
     df_trips["destination_zurich"] = df_trips["destination_municipality_id"]==biggest_mun["Zürich"]
     df_trips["destination_geneva"] = df_trips["destination_municipality_id"]==biggest_mun["Genève"]
@@ -186,7 +195,7 @@ def execute(context):
     df_trips = df_trips[df_trips["euclidean_distance_km"]>1e-2] # remove trips with less than 10m
     df_trips = df_trips[~df_trips.person_id.isin(filterout_person_ids)] # persons that need to be removed
     df_trips = df_trips[df_trips["inside_ch"]==True] # only trips within Switzerland
-    df_trips = df_trips[df_trips.isna().sum(axis=1)==0] # remove trips with incomplete data
+    df_trips = drop_missing_required_trip_fields(df_trips)
     df_trips = df_trips.reset_index(drop=True)
 
     logger.info(f"There are {len(df_trips)} trips after cleaning.")
@@ -220,7 +229,7 @@ def execute(context):
             'hasHalbtaxSubscription', 'hasRegionalSubscription', 'ovgk', 'car_ownership_ratio', "homePtQuality", "destinationPtQuality",
             'statedPreferenceRegion', 'person_weight', 'age', 'sex', 'is_retired','is_junior','low_income','high_income','has_car','num_adults',
             'driving_license', 'sp_region', 'ms_region', 'is_car_passenger', 'income', 'income_class',
-            'destination_home', 'origin_home', 'destination_work', 'destination_education',
+            'destination_home', 'origin_home', 'passenger_origin_home', 'origin_work', 'originPtQuality', 'destination_work', 'destination_education',
             'destination_shopping', 'destination_leisure', 'destination_other',
             'euclidean_distance_km', 'is_first', 'is_last',
             'parking_duration_wo_travelTime_min', 'home_municipality',

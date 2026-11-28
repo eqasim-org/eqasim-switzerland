@@ -109,7 +109,6 @@ analysis.network.run.cache/
 
 
 doc/presentations
-analysis/dmc
 
 # Generated selected-link viewer data and native build caches.
 /analysis_spyder/

@@ -121,4 +121,5 @@ Tests remain in the local `tests/` directory and are intentionally excluded from
 - [Secondary](synthesis/population/spatial/primary/education/secondary.md)
 - [Secondary distances](synthesis/population/spatial/primary/education/secondary_distances.md)
 
-- [PT transfer-distance experiment](analysis/dmc/transfer_distance.md)
+- [Current JAX/Biogeme mode-choice model and parameter exports](dmc/models.md)
+- [Fitted mode-choice model: MZ replay, VOT distributions and elasticities](analysis/dmc/README.md)
