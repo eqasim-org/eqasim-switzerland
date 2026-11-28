@@ -26,6 +26,7 @@ class ModeChoice:
         self.sampler = sampler if sampler is not None else TourSampler()
         self.cache_prepared = cache_prepared
         self._prepared = {}
+        self._asc_offsets = ()
         self.last_counts = np.zeros(len(MODES), dtype=np.int64)
 
     def run(self, delta=None, *, canton=None, draw_index=0):
@@ -47,7 +48,11 @@ class ModeChoice:
                     cached[1].close()
                     del self._prepared[key]
                     cached = None
-                prepared = cached[1] if cached else PreparedBatch(trips, self.seed, self.sampler, assume_sorted=True)
+                if cached is None:
+                    inputs = trips.with_columns(self._asc_offsets) if self._asc_offsets else trips
+                    prepared = PreparedBatch(inputs, self.seed, self.sampler, assume_sorted=True)
+                else:
+                    prepared = cached[1]
                 if self.cache_prepared and cached is None:
                     self._prepared[key] = (token, prepared)
                 try:
@@ -64,6 +69,34 @@ class ModeChoice:
         except BaseException:
             self.clear_cache()
             raise
+
+    def set_asc_offsets(self, global_delta=None, *, canton_deltas=None):
+        """Rebase cached utilities in memory for a calibration phase.
+
+        Deltas are relative to the original batch files, never to a previous
+        rebase. Clear prepared arrays when the baseline changes, retaining the
+        sampler's topology cache. Calling without arguments restores the files'
+        original utilities. Subsequent runs reuse the adjusted arrays.
+        """
+        def vector(values):
+            result = np.asarray(values, dtype=float)
+            if result.shape != (len(MODES),) or not np.isfinite(result).all():
+                raise ValueError("Expected one finite ASC offset per mode")
+            return result
+
+        global_delta = vector(global_delta if global_delta is not None else np.zeros(len(MODES)))
+        canton_deltas = {canton: vector(values) for canton, values in (canton_deltas or {}).items()}
+        offsets = []
+        for i, mode in enumerate(MODES):
+            value = pl.lit(float(global_delta[i]))
+            cantons = {canton: float(values[i]) for canton, values in canton_deltas.items() if values[i] != 0.}
+            if cantons:
+                value += pl.col(CALIBRATION_CANTON_COLUMN).replace_strict(cantons, default=0.0, return_dtype=pl.Float64)
+            if global_delta[i] != 0. or cantons:
+                name = f"utility_{mode}"
+                offsets.append((pl.col(name) + value).alias(name))
+        self.clear_cache()
+        self._asc_offsets = tuple(offsets)
 
     def cantons(self):
         """Check residence consistency once before independent canton calibration."""

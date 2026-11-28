@@ -16,20 +16,32 @@ def configure(context):
 
 
 def execute(context):
+
+    # Load the population inputs and the fitted DMC parameters once.
+
     trips = context.stage("mode_choice.data.inputs").sort("person_id", "trip_index")
     if trips.is_empty():
         return []
-    utility_expressions = expressions(Parameters.from_context(context), distance_interaction=context.config("distance_cost_interaction"),
+    parameters = Parameters.from_context(context)
+    utility_expressions = expressions(parameters, distance_interaction=context.config("distance_cost_interaction"),
         income_interaction=context.config("income_cost_interaction") and context.config("use_income_in_dmc"))
+
+    # Cache static utilities and history coefficients in complete-person batches.
+
     paths = []
     for i, batch in enumerate(person_batches(trips, context.config("mode_choice_person_batch_size"))):
-        batch = batch.lazy().with_columns(utility_expressions).collect()
+        batch = batch.lazy().with_columns(utility_expressions).with_columns(
+            pl.lit(parameters['cp.betaPreviousPassenger_u']).alias('passenger_history_beta'),
+            pl.lit(parameters['cp.betaAnyPreviousPassenger_u']).alias('passenger_any_history_beta')).collect()
         for mode in MODES:
             if batch.filter(pl.col(f"{mode}_availability") & ~pl.col(f"utility_{mode}").is_finite().fill_null(False)).height:
                 raise ValueError(f"Non-finite {mode} utilities in tour batch {i}")
         path = Path(context.path()) / TOUR_BATCH_FILENAME.format(i=i)
         batch.select(TOUR_BATCH_COLUMNS).write_parquet(path)
         paths.append(str(path))
+
+    # Return batch paths for repeated selection and ASC calibration.
+
     return paths
 
 

@@ -37,11 +37,11 @@ RUN_DEFAULTS = {
 # Population ASC calibration; independent of MATSim's own calibration.
 CALIBRATION_DEFAULTS = {
     "mode_choice_calibrate_alphas": False,
-    "mode_choice_calibration_level": "global",
+    "mode_choice_calibration_level": "mixed",
     "mode_choice_calibration_max_evaluations": 50,
     "mode_choice_calibration_tolerance": 1e-4,
 }
-CALIBRATION_LEVELS = ("global", "canton")
+CALIBRATION_LEVELS = ("global", "canton", "mixed")
 CALIBRATION_CANTON_COLUMN = "canton_name_en"
 CANTON_ALPHA_KEYS = {mode: f"swissCanton.{'cp' if mode == 'car_passenger' else mode}" for mode in MODES}
 CALIBRATION_REFERENCE_MODE = "pt"
@@ -146,7 +146,8 @@ ROUTING_VARIABLE_STAGES = tuple(f"mode_choice.routing_variables.{mode}" for mode
 COST_STAGES = ("mode_choice.costs.car", "mode_choice.costs.pt")
 AVAILABILITY_COLUMNS = tuple(f"{mode}_availability" for mode in MODES)
 PERSON_AVAILABILITY_COLUMNS = ("car_availability", "bike_availability")
-TOUR_BATCH_COLUMNS = ("trip_id", *CALIBRATION_COLUMNS, CALIBRATION_CANTON_COLUMN)
+PASSENGER_HISTORY_COLUMNS = ("passenger_history_beta", "passenger_any_history_beta")
+TOUR_BATCH_COLUMNS = ("trip_id", *CALIBRATION_COLUMNS, CALIBRATION_CANTON_COLUMN, *PASSENGER_HISTORY_COLUMNS)
 PT_ROUTING_COLUMNS = (
     "pt_total_travel_time_min", "pt_total_distance_km", "pt_in_vehicle_time_min", "pt_in_vehicle_distance_km",
     "pt_access_egress_time_min", "pt_transfer_time_min", "pt_transfers",

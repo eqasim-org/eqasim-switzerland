@@ -28,6 +28,12 @@ def execute(context):
         group_income_classes=context.config("group_income_classes_in_analysis"),
     )
     
+    # Use the common output contract for MATSim and population mode choice.
+
+    return summarize(mode_shares_analyzer, context)
+
+
+def summarize(mode_shares_analyzer, context):
     # Compute mode shares
     mode_shares = dict()
     mode_shares["global"]   = mode_shares_analyzer.compute_mode_shares(consider_external_population = False)

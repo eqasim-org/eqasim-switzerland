@@ -1,6 +1,7 @@
 __pycache__
 tests/
 cache*
+!mode_choice/selection/cache.py
 output*
 !sumo/output.py
 !sumo/output_tools.py

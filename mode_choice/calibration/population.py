@@ -13,6 +13,7 @@ from mode_choice.defaults import (
 from mode_choice.calibration.evaluation import calibrate_model, result_report
 from mode_choice.calibration.shares import load_targets
 from mode_choice.calibration.cantons import calibrate_cantons
+from mode_choice.calibration.mixed import calibrate_mixed
 
 
 def calibration_level(context):
@@ -32,8 +33,10 @@ def run(context, model, parameters):
         result = calibrate_model(context, model, initial, targets)
         calibrated.update({ALPHA_KEYS[mode]: float(alpha) for mode, alpha in zip(MODES, result.alphas)})
         choices, report = result.choices, result_report(result, targets)
-    else:
+    elif level == "canton":
         choices, report = calibrate_cantons(context, model, calibrated, target_paths[1])
+    else:
+        choices, report = calibrate_mixed(context, model, calibrated, target_paths)
     report.update({
         "level": level, "reference_mode": CALIBRATION_REFERENCE_MODE,
         "tolerance": context.config("mode_choice_calibration_tolerance"),

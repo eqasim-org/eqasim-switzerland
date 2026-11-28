@@ -1,4 +1,5 @@
 """Polars implementation of the current DMC export's utility equations."""
+import math
 import polars as pl
 from dmc.parameters import NAMES_CONVERSION
 
@@ -14,7 +15,7 @@ def power(base, exponent):
 
 
 def expressions(p, *, distance_interaction=DISTANCE_COST_INTERACTION, income_interaction=INCOME_COST_INTERACTION):
-    """Current static utilities; conditional history needs a sequence sampler."""
+    """Static DMC terms; the tour sampler adds conditional passenger history."""
     from dmc.models.declarations import define_parameters
     from dmc.models.utility import build
     validate_for_population(p)
@@ -33,7 +34,7 @@ def expressions(p, *, distance_interaction=DISTANCE_COST_INTERACTION, income_int
                     'reference_euclidean_distance_km': p['referenceEuclideanDistance_km'],
                     'reference_income_chf': p['referenceIncome']}[name]
 
-    # These constants are valid only when both fitted history effects are zero.
+    # History terms are evaluated on candidate sequences by the tour sampler.
     columns = Columns(passenger_history=pl.lit(0.), passenger_history_any=pl.lit(0.))
     utility = build(Context(), columns, coefficients, MODES, power=power,
                     maximum=lambda a, b: pl.max_horizontal(a, b), exp=lambda x: x.exp())
@@ -53,6 +54,5 @@ def validate_for_population(p):
     history_names = ('cp.betaPreviousPassenger_u', 'cp.betaAnyPreviousPassenger_u')
     if not all(name in p for name in history_names):
         raise ValueError('The current passenger model requires both previous-trip and any-earlier-trip coefficients; re-estimate the model')
-    if any(p[name] != 0. for name in history_names):
-        raise ValueError('The fitted conditional passenger-history model requires a compatible daily sequence sampler. '
-                         'The current whole-tour sampler cannot use these coefficients; do not substitute observed history or zero it after fitting.')
+    if not all(math.isfinite(p[name]) for name in history_names):
+        raise ValueError('Passenger-history coefficients must be finite')

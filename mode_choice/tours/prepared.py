@@ -2,7 +2,7 @@
 import numpy as np
 import polars as pl
 
-from mode_choice.defaults import MODES, CALIBRATION_MIN_DISTANCE_KM
+from mode_choice.defaults import MODES, CALIBRATION_MIN_DISTANCE_KM, PASSENGER_HISTORY_COLUMNS
 from mode_choice.selection.random import RandomTape, generate
 from mode_choice.tours.build import assign_tours
 
@@ -32,11 +32,20 @@ class PreparedBatch:
         origins = trips.select("origin_x", "origin_y").to_numpy()
         destinations = trips.select("destination_x", "destination_y").to_numpy()
         purposes = trips["preceding_purpose"].to_numpy()
+        history = (0., 0.)
+        present = set(PASSENGER_HISTORY_COLUMNS) & set(trips.columns)
+        if present:
+            if present != set(PASSENGER_HISTORY_COLUMNS):
+                raise ValueError("Both passenger-history coefficients are required")
+            coefficients = trips.select(PASSENGER_HISTORY_COLUMNS).unique()
+            if coefficients.height != 1:
+                raise ValueError("Passenger-history coefficients must be constant within a batch")
+            history = coefficients.row(0)
         self.plans, self.random_keys = [], []
         for start, end in zip(self.boundaries[:-1], self.boundaries[1:]):
             key = (seed, int(persons[start]), int(tours[start]))
             try:
-                self.plans.append(sampler.prepare(origins[start:end], destinations[start:end], purposes[start:end]))
+                self.plans.append(sampler.prepare(origins[start:end], destinations[start:end], purposes[start:end], passenger_history=history))
             except (ValueError, TypeError) as exc:
                 raise ValueError(f"Mode choice failed for person {key[1]}, tour {key[2]}: {exc}") from exc
             self.random_keys.append(key)
@@ -44,7 +53,7 @@ class PreparedBatch:
         if "euclidean_distance_km" in trips.columns:
             distances = trips["euclidean_distance_km"].to_numpy()
             self.eligible = np.flatnonzero(np.isfinite(distances) & (distances > CALIBRATION_MIN_DISTANCE_KM))
-        sizes = np.array([plan.gumbel_values if sampler.method == "gumbel" else plan.num_trips
+        sizes = np.array([plan.gumbel_values if sampler.method == "gumbel" else plan.num_trips + (len(plan.final_targets) > 1)
                           for plan in self.plans], dtype=np.int64)
         self.noise_offsets = np.r_[0, sizes.cumsum()]
         self.cached_tours, self.reserved_values = sampler.random_budget.reserve(self.noise_offsets[1:])

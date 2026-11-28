@@ -361,11 +361,17 @@ treated as proof that a server is alive.
 
 ## Calibration and utility semantics
 
-`mode_choice_calibrate_alphas` enables calibration. With level `global`, it adjusts
-global ASCs against national microcensus mode shares. With level `canton`, it
-adjusts additive residence-canton offsets independently against canton targets,
+`mode_choice_calibrate_alphas` enables calibration. The default level, `mixed`,
+first fits global ASCs against national microcensus mode shares with **all canton
+ASCs set to zero**, including any canton effects in the fitted DMC parameters.
+It then holds those calibrated global constants fixed and fits additive
+residence-canton ASCs independently against canton targets, starting from zero.
+This produces usable national constants without requiring canton additions.
+
+Level `global` remains available to adjust only the global ASCs while retaining
+the fitted canton effects. Level `canton` adjusts only the canton additions while
 leaving global constants unchanged. Targets come from `data.microcensus.shares`.
-PT is the fixed reference in both cases. For evaluation index `i` starting at zero:
+PT is the fixed reference in every fit. For evaluation index `i` starting at zero:
 
 ```text
 beta = min(0.8, 1 - 1 / (0.5 * i + 1))
@@ -377,6 +383,12 @@ The logarithms floor shares at `1e-6`. Convergence requires the maximum absolute
 share error to meet the configured tolerance. If it does not, the best evaluated
 constants and their matching choices are retained, with a warning and diagnostics.
 Calibration calls `ModeChoice.run`; it does not own a second selection loop.
+Mixed calibration cancels the original canton effects and applies phase-specific
+global offsets to prepared utilities in memory; it never rewrites batch files or
+repeats routing. Topology caches remain reusable between phases. Its diagnostics
+include the national fit under `global` and individual fits under `cantons`;
+total evaluations and convergence cover both phases. Final choices use the
+calibrated global constants plus each person's calibrated canton additions.
 
 Final artifacts in `run`'s cache directory are `choices.parquet` (`trip_id`, `mode`)
 and, when calibrating, `calibrated_parameters.yml` and `calibration.json`.
@@ -389,6 +401,16 @@ computational splits; both must return to the original home location. Long tours
 split preferentially at work, otherwise near the middle. Splitting does not
 reset vehicle availability or change the seeded result. Random streams use the
 seed, person ID and original tour index, making choices invariant to batching.
+
+Static utilities call the same current equations as DMC estimation, including
+nonlinear age/income effects, short-distance preferences, PT origin/destination
+quality and transfer penalties. Passenger history is evaluated on candidate mode
+sequences: one coefficient applies when the immediately preceding trip was a
+passenger trip, and another when any preceding trip was a passenger trip. Both
+histories reset at the start of each primary-home tour and persist across
+computational splits. They never use the population's previously observed modes.
+Batch files retain these coefficients alongside the static utilities; repeated
+calibration evaluations reuse the prepared state graphs and random buffers.
 
 `data.availabilities` computes minimum motorized distance and minimum routed time
 over each complete `(person_id, tour_index)` group, before computational splitting.
@@ -422,12 +444,16 @@ mode_choice_cache_max_entries: 1024
 mode_choice_cache_max_edges: 200000
 mode_choice_random_cache_max_values: 2000000  # at most 16 MB of retained draws
 mode_choice_calibrate_alphas: false
-mode_choice_calibration_level: global  # or canton
+mode_choice_calibration_level: mixed  # default; global and canton remain available
 mode_choice_calibration_max_evaluations: 50
 mode_choice_calibration_tolerance: 0.0001
 mode_choice_routing_batch_size: 2048
 mode_choice_server_chunk_size: 65536
 ```
+
+When ASC calibration is enabled, its default fits national ASCs without canton
+effects, followed by canton-specific additions, against `data.microcensus.shares`.
+Calibration itself remains disabled by default.
 
 Graph caches are bounded by entries and edges. Prepared plans retain graph keys
 rather than pinning evicted transition arrays. Random streams that exceed their

@@ -3,6 +3,7 @@
 Forward messages carry weights for BOTH vehicle locations across split points.
 Backward draws are conditioned on returning both vehicles to the tour origin.
 A split therefore neither strands a vehicle nor creates one at a work activity.
+Passenger history starts empty for each tour and persists across its splits.
 """
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -34,13 +35,15 @@ def canonical_locations(origins, destinations):
     return tuple(origin_ids), tuple(destination_ids)
 
 
-def forward(graph, values, initial_weights, keep_layers=False):
+def forward(graph, values, initial_weights, keep_layers=False, passenger_history=(0., 0.)):
     weights = initial_weights
     history = []
     for row, layer in zip(values, graph.layers):
         if keep_layers:
             history.append(weights)
         edge_weights = weights[layer.sources] + row[layer.modes]
+        if layer.history is not None:
+            edge_weights += layer.history @ passenger_history
         weights = np.logaddexp.reduceat(edge_weights, layer.offsets[:-1])
     return weights, history
 
@@ -58,6 +61,8 @@ class TourPlan:
     final_target: int
     num_trips: int
     gumbel_values: int
+    final_targets: tuple = ()
+    passenger_history: tuple = (0., 0.)
 
 
 class TourSampler:
@@ -71,15 +76,18 @@ class TourSampler:
         self.random_budget = RandomBudget(random_cache_max_values)
         self._plans = OrderedDict()
 
-    def prepare(self, origins, destinations, purposes=None):
+    def prepare(self, origins, destinations, purposes=None, *, passenger_history=(0., 0.)):
         """Validate geometry and retain utility-independent segment/group indices."""
+        passenger_history = tuple(float(value) for value in passenger_history)
+        if len(passenger_history) != 2 or not np.isfinite(passenger_history).all():
+            raise ValueError("Expected two finite passenger-history coefficients")
         origins, destinations = canonical_locations(origins, destinations)
         segments = split_tour(len(origins), purposes, self.max_trips)
-        key = (origins, destinations, segments)
+        key = (origins, destinations, segments, passenger_history)
         if key in self._plans:
             self._plans.move_to_end(key)
             return self._plans[key]
-        initial_state = (origins[0], origins[0])
+        initial_state = (origins[0], origins[0], False, False) if any(passenger_history) else (origins[0], origins[0])
         states, plans, noise_size = (initial_state,), [], 0
         for start, end in segments:
             graph_key = (states, origins[start:end], destinations[start:end])
@@ -89,20 +97,23 @@ class TourSampler:
             # availability. One bulk stream preserves legacy sequential draws.
             noise_size += sum(int(np.diff(layer.offsets).max()) for layer in graph.layers)
             states = graph.final_states
-        plan = TourPlan(tuple(plans), states.index(initial_state), len(origins), noise_size)
+        targets = tuple(i for i, state in enumerate(states) if state[:2] == initial_state[:2])
+        if len(targets) > 1:
+            noise_size += len(targets)
+        plan = TourPlan(tuple(plans), targets[0], len(origins), noise_size, targets, passenger_history)
         if self.cache.max_entries and self.cache.max_edges:
             if len(self._plans) >= self.cache.max_entries:
                 self._plans.popitem(last=False)
             self._plans[key] = plan
         return plan
 
-    def sample(self, values, origins, destinations, rng, purposes=None):
+    def sample(self, values, origins, destinations, rng, purposes=None, *, passenger_history=(0., 0.)):
         values = np.asarray(values, dtype=np.float64)
         if len(values) == 0:
             return []
         if values.ndim != 2 or values.shape[1] != len(MODES) or np.isnan(values).any() or np.isposinf(values).any():
             raise ValueError("Expected finite mode utilities or -inf for unavailable modes")
-        plan = self.prepare(origins, destinations, purposes)
+        plan = self.prepare(origins, destinations, purposes, passenger_history=passenger_history)
         if plan.num_trips != len(values):
             raise ValueError("Utility and location counts differ")
         return [MODES[index] for index in self.sample_prepared(values, plan, rng)]
@@ -121,13 +132,14 @@ class TourSampler:
             start, end = segment.start, segment.end
             graph = self.cache.get(*segment.key)
             boundaries.append(weights)
-            weights, history = forward(graph, values[start:end], weights, keep_layers=end == plan.num_trips)
+            weights, history = forward(graph, values[start:end], weights, keep_layers=end == plan.num_trips, passenger_history=plan.passenger_history)
             if end == plan.num_trips:
                 last_history = history
-        if not np.isfinite(weights[plan.final_target]):
+        targets = plan.final_targets or (plan.final_target,)
+        if not np.isfinite(weights[list(targets)]).any():
             raise ValueError("Tour has no feasible mode sequence with vehicles returned to the start")
         last_graph = graph
-        target = plan.final_target
+        target = targets[select(weights[list(targets)], rng, self.method)] if len(targets) > 1 else targets[0]
         choices = np.empty(plan.num_trips, dtype=np.int8) if out is None else out
         for segment, weights in zip(reversed(plan.segments), reversed(boundaries)):
             start, end = segment.start, segment.end
@@ -135,12 +147,14 @@ class TourSampler:
                 graph, history = last_graph, last_history
             else:
                 graph = self.cache.get(*segment.key)
-                _, history = forward(graph, values[start:end], weights, keep_layers=True)
+                _, history = forward(graph, values[start:end], weights, keep_layers=True, passenger_history=plan.passenger_history)
             for offset in range(end - start - 1, -1, -1):
                 layer = graph.layers[offset]
                 left, right = layer.offsets[target:target + 2]
                 sources, modes = layer.sources[left:right], layer.modes[left:right]
                 scores = history[offset][sources] + values[start + offset, modes]
+                if layer.history is not None:
+                    scores += layer.history[left:right] @ plan.passenger_history
                 selected = select(scores, rng, self.method)
                 choices[start + offset] = modes[selected]
                 target = int(sources[selected])

@@ -4,6 +4,24 @@
 `mode_shares/spatial_mode_shares.html` beneath the selected simulation output.
 It replaces the separate municipality-arrivals analysis.
 
+To compare the population's assigned modes before MATSim simulation, set
+`analysis.mode_shares.from_eqasim: true` (default: `false`). The
+`analysis.mode_shares.eqasim` stage reads the production prepared population and
+household tables with population mode choice enabled. It returns the same summary
+dictionary as `simulated`, plus normalized `trips` and a `source` identifier.
+`ModeShareAnalyzer(source="eqasim")` shares the existing aggregation and plotting
+code with the `matsim` and `microcensus` sources. This analysis requires no MATSim
+simulation outputs.
+
+Eqasim figures and the interactive report are written under
+`output_path/output_id/mode_shares_eqasim/`, with eqasim labels. The same cohort,
+airport, purpose and distance filters apply; each retained population trip has
+weight one. Distances come from adjacent prepared activity coordinates in EPSG:2056.
+The trip-distribution stage plots Euclidean distances for this source; it skips
+simulated travel times and routed distances, which are not recorded in these
+pre-simulation tables. With the option disabled, MATSim analysis retains its
+existing input and output locations.
+
 Both `analysis.mode_shares.simulated` and `analysis.mode_shares.target` return
 `spatial_trips`, a dataframe produced by `ModeShareAnalyzer.spatial_trips()`.
 This contains the **same filtered domestic-resident trips as the global

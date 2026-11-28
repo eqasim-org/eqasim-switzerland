@@ -9,8 +9,7 @@ from matplotlib.ticker import PercentFormatter
 import numpy as np
 import pandas as pd
 
-from analysis.counts.paths import get_simulation_path
-from .utils import FRENCH_COHORTS, MODE_LABELS
+from .utils import FRENCH_COHORTS, MODE_LABELS, figures_directory
 
 logger = logging.getLogger("synpp")
 
@@ -37,7 +36,11 @@ plt.rcParams.update(
 def configure(context):
     context.stage("analysis.mode_shares.trip_distributions")
     context.stage("analysis.mode_shares.target")
-    context.stage("analysis.mode_shares.simulated")
+    context.config("analysis.mode_shares.from_eqasim", False)
+    if not isinstance(context.config("analysis.mode_shares.from_eqasim"), bool):
+        raise ValueError("analysis.mode_shares.from_eqasim must be true or false")
+    context.stage("analysis.mode_shares.eqasim" if context.config("analysis.mode_shares.from_eqasim")
+                  else "analysis.mode_shares.simulated", alias="mode_share_results")
     context.stage("data.spatial.cantons")
     context.stage("data.spatial.municipalities")
 
@@ -53,12 +56,13 @@ def execute(context):
 
     # Prepare the output folder and load both analyzers' filtered results.
 
-    figures_dir = os.path.join(get_simulation_path(context), "mode_shares")
+    figures_dir = str(figures_directory(context))
+    dataset_label = "eqasim" if context.config("analysis.mode_shares.from_eqasim") else "MATSim"
     os.makedirs(figures_dir, exist_ok = True)
 
     # load data
     target_mode_shares    = context.stage("analysis.mode_shares.target")
-    simulated_mode_shares = context.stage("analysis.mode_shares.simulated")
+    simulated_mode_shares = context.stage("mode_share_results")
 
     # plot mode shares by distance
     fig, ax       = plt.subplots(figsize = (11, 5))
@@ -85,7 +89,7 @@ def execute(context):
                 marker     = DATASET_STYLES["Simulated"]["marker"],
                 linewidth  = DATASET_STYLES["Simulated"]["linewidth"],
                 markersize = DATASET_STYLES["Simulated"]["markersize"],
-                label      = f"{mode} (MATSim)")
+                label      = f"{mode} ({dataset_label})")
 
     ax.set_ylabel("Mode Share", fontsize = 13)
     ax.set_xlabel("Euclidean distance [m]", fontsize = 13)
@@ -145,7 +149,7 @@ def execute(context):
 
     handles, _ = ax[0].get_legend_handles_labels()
     fig.legend(
-        handles, ["MATSim", "Microcensus"],
+        handles, [dataset_label, "Microcensus"],
         loc = "upper center", bbox_to_anchor = (0.6, 1.04),
         ncol = 2, fontsize = 14, frameon = False
     )
@@ -155,10 +159,10 @@ def execute(context):
 
     # plot global mode shares
     fig, ax = plt.subplots(figsize = (8, 3))
-    shares = pd.DataFrame(dict(
-        Microcensus = target_mode_shares["global"].loc[MODE_ORDER, "mode_share"],
-        MATSim      = simulated_mode_shares["global"].loc[MODE_ORDER, "mode_share"]
-    ))
+    shares = pd.DataFrame({
+        "Microcensus": target_mode_shares["global"].reindex(MODE_ORDER)["mode_share"].fillna(0),
+        dataset_label: simulated_mode_shares["global"].reindex(MODE_ORDER)["mode_share"].fillna(0),
+    })
     shares.plot.bar(ax = ax, width = 0.8, color = [DATASET_STYLES["Target"]["color"], DATASET_STYLES["Simulated"]["color"]])
     plt.xticks(rotation = 0)
     plt.ylabel("Mode Share", fontsize = 12)
@@ -198,7 +202,7 @@ def execute(context):
                 marker     = DATASET_STYLES["Simulated"]["marker"],
                 linewidth  = DATASET_STYLES["Simulated"]["linewidth"],
                 markersize = DATASET_STYLES["Simulated"]["markersize"],
-                label      = f"{mode} (MATSim)")
+                label      = f"{mode} ({dataset_label})")
 
     ax.set_ylabel("Mode Share",  fontsize = 13)
     ax.set_xlabel("Age [years]", fontsize = 13)
@@ -222,7 +226,7 @@ def execute(context):
     for i, mode in enumerate(MODE_ORDER):
         color     = MODE_COLORS[i]
         actual    = target_mode_shares["income"].loc[income_classes, mode]
-        simulated = simulated_mode_shares["income"].loc[income_classes, mode]
+        simulated = simulated_mode_shares["income"].reindex(income_classes)[mode]
 
         ax.plot(income_classes, actual, color = color,
                 linestyle  = DATASET_STYLES["Target"]["linestyle"],
@@ -236,7 +240,7 @@ def execute(context):
                 marker     = DATASET_STYLES["Simulated"]["marker"],
                 linewidth  = DATASET_STYLES["Simulated"]["linewidth"],
                 markersize = DATASET_STYLES["Simulated"]["markersize"],
-                label      = f"{mode} (MATSim)")
+                label      = f"{mode} ({dataset_label})")
 
     ax.set_ylabel("Mode Share",   fontsize = 13)
     ax.set_xlabel("Income Class", fontsize = 13)
@@ -258,7 +262,7 @@ def execute(context):
     for i, mode in enumerate(MODE_ORDER):
         color     = MODE_COLORS[i]
         actual    = target_mode_shares["sex"].loc[sexes, mode]
-        simulated = simulated_mode_shares["sex"].loc[sexes, mode]
+        simulated = simulated_mode_shares["sex"].reindex(sexes)[mode]
 
         ax.plot(sexes, actual, color = color,
                 linestyle  = DATASET_STYLES["Target"]["linestyle"],
@@ -272,7 +276,7 @@ def execute(context):
                 marker     = DATASET_STYLES["Simulated"]["marker"],
                 linewidth  = DATASET_STYLES["Simulated"]["linewidth"],
                 markersize = DATASET_STYLES["Simulated"]["markersize"],
-                label      = f"{mode} (MATSim)")
+                label      = f"{mode} ({dataset_label})")
 
     ax.set_ylabel("Mode Share", fontsize = 13)
     ax.set_xlabel("Sex", fontsize = 13)
@@ -292,7 +296,7 @@ def execute(context):
     for i, mode in enumerate(MODE_ORDER):
         color     = MODE_COLORS[i]
         actual    = target_mode_shares["purpose"].loc[purpose_ids, mode]
-        simulated = simulated_mode_shares["purpose"].loc[purpose_ids, mode]
+        simulated = simulated_mode_shares["purpose"].reindex(purpose_ids)[mode]
 
         ax.plot(purpose_ids, actual, color = color,
                 linestyle  = DATASET_STYLES["Target"]["linestyle"],
@@ -306,7 +310,7 @@ def execute(context):
                 marker     = DATASET_STYLES["Simulated"]["marker"],
                 linewidth  = DATASET_STYLES["Simulated"]["linewidth"],
                 markersize = DATASET_STYLES["Simulated"]["markersize"],
-                label      = f"{mode} (MATSim)")
+                label      = f"{mode} ({dataset_label})")
 
     ax.set_ylabel("Mode Share", fontsize = 13)
     ax.set_xlabel("Purpose", fontsize = 13)
@@ -339,7 +343,7 @@ def execute(context):
         ax[index].hist(simulated_distances, 
                        bins    = distance_bins * f, 
                        alpha   = 0.6, 
-                       label   = "Simulated", 
+                       label   = dataset_label,
                        color   = DATASET_STYLES["Simulated"]["color"], 
                        density = True)
         
@@ -350,17 +354,19 @@ def execute(context):
                        color   = DATASET_STYLES["Target"]["color"], 
                        density = True)
         
-        ax[index].axvline(np.mean(simulated_distances), 
-                          color     = DATASET_STYLES["Simulated"]["color"], 
-                          linestyle = "--", 
-                          linewidth = 2, 
-                          label     = f"Mean (Simulated): {np.mean(simulated_distances):.1f}")
-        
-        ax[index].axvline(np.average(target_distances, weights = target_weights), 
-                          color     = DATASET_STYLES["Target"]["color"], 
-                          linestyle = "--", 
-                          linewidth = 2, 
-                          label     = f"Mean (Microcensus): {np.average(target_distances, weights = target_weights):.1f}")
+        if len(simulated_distances):
+            ax[index].axvline(np.mean(simulated_distances),
+                             color     = DATASET_STYLES["Simulated"]["color"],
+                             linestyle = "--",
+                             linewidth = 2,
+                             label     = f"Mean ({dataset_label}): {np.mean(simulated_distances):.1f}")
+
+        if target_weights.sum() > 0:
+            ax[index].axvline(np.average(target_distances, weights = target_weights),
+                             color     = DATASET_STYLES["Target"]["color"],
+                             linestyle = "--",
+                             linewidth = 2,
+                             label     = f"Mean (Microcensus): {np.average(target_distances, weights = target_weights):.1f}")
 
         ax[index].set_title(mode.replace("_", " ").title())
         ax[index].set_xlabel("Distance [km]")
@@ -376,13 +382,13 @@ def execute(context):
 
     # plot the distribution of distances by mode and purpose
     purposes      = target_mode_shares["distance_by_mode_and_purpose"].keys()
-    fig, ax       = plt.subplots(len(purposes), len(MODE_ORDER), figsize = (20, 4 * len(purposes)), sharey = True)
+    fig, ax       = plt.subplots(len(purposes), len(MODE_ORDER), figsize = (20, 4 * len(purposes)), sharey = True, squeeze = False)
     distance_bins = np.linspace(0, 50, 51)  # 20 bins from 0 to 50 km
 
     for i, purpose in enumerate(purposes):
         for j, mode in enumerate(MODE_ORDER):
             f = factors[mode]
-            simulated_distances = simulated_mode_shares["distance_by_mode_and_purpose"][purpose][mode]
+            simulated_distances = simulated_mode_shares["distance_by_mode_and_purpose"].get(purpose, {}).get(mode, np.array([]))
             target_distances    = target_mode_shares["distance_by_mode_and_purpose"][purpose][mode]["distances"]
             target_weights      = target_mode_shares["distance_by_mode_and_purpose"][purpose][mode]["weights"]
 
@@ -394,7 +400,7 @@ def execute(context):
             ax[i, j].hist(simulated_distances, 
                           bins    = distance_bins * f, 
                           alpha   = 0.6, 
-                          label   = "Simulated", 
+                          label   = dataset_label,
                           color   = DATASET_STYLES["Simulated"]["color"], 
                           density = True)
             
@@ -405,17 +411,19 @@ def execute(context):
                           color   = DATASET_STYLES["Target"]["color"], 
                           density = True)
 
-            ax[i, j].axvline(np.mean(simulated_distances), 
-                             color     = DATASET_STYLES["Simulated"]["color"], 
-                             linestyle = "--", 
-                             linewidth = 2, 
-                             label     = f"Mean (Simulated): {np.mean(simulated_distances):.1f}")
+            if len(simulated_distances):
+                ax[i, j].axvline(np.mean(simulated_distances),
+                                color     = DATASET_STYLES["Simulated"]["color"],
+                                linestyle = "--",
+                                linewidth = 2,
+                                label     = f"Mean ({dataset_label}): {np.mean(simulated_distances):.1f}")
 
-            ax[i, j].axvline(np.average(target_distances, weights = target_weights), 
-                             color     = DATASET_STYLES["Target"]["color"], 
-                             linestyle = "--", 
-                             linewidth = 2, 
-                             label     = f"Mean (Microcensus): {np.average(target_distances, weights = target_weights):.1f}")
+            if target_weights.sum() > 0:
+                ax[i, j].axvline(np.average(target_distances, weights = target_weights),
+                                color     = DATASET_STYLES["Target"]["color"],
+                                linestyle = "--",
+                                linewidth = 2,
+                                label     = f"Mean (Microcensus): {np.average(target_distances, weights = target_weights):.1f}")
 
             if i == 0:
                 ax[i, j].set_title(mode.replace("_", " ").title())
@@ -434,7 +442,7 @@ def execute(context):
 
     if context.config("include_external_population"):
         plot_french_comparison(target_mode_shares["french"], simulated_mode_shares["french"],
-                               Path(figures_dir) / "french")
+                               Path(figures_dir) / "french", dataset_label=dataset_label)
 
     # Build the interactive comparison from the same filtered trip cohorts.
 
@@ -442,7 +450,7 @@ def execute(context):
     municipalities, _ = context.stage("data.spatial.municipalities")
     report = write_report(figures_dir, target_mode_shares["spatial_trips"],
                           simulated_mode_shares["spatial_trips"], municipalities,
-                          context.stage("data.spatial.cantons"))
+                          context.stage("data.spatial.cantons"), dataset_label=dataset_label)
     logger.info("Interactive spatial mode shares: %s", report)
 
     # Return the existing output contract with the HTML path added.
@@ -455,7 +463,7 @@ def validate(context):
     return implementation_token()
 
 
-def plot_distance_panel(axes, data, labels, title):
+def plot_distance_panel(axes, data, labels, title, dataset_label="MATSim"):
     """Show shares and their sample support; leave empty bins undefined."""
     positions = np.arange(len(labels))
     for source, style, marker, offset, colour in [("simulation", "--", "o", -.19, "#7b8c9c"),
@@ -475,7 +483,7 @@ def plot_distance_panel(axes, data, labels, title):
     handles = [Line2D([], [], color=colour, label=MODE_LABELS[mode])
                for mode, colour in zip(MODE_ORDER, MODE_COLORS)]
     handles += [Line2D([], [], color="#333", linestyle=style, marker=marker, label=label)
-                for style, marker, label in [("--", "o", "Simulation"), ("-", "s", "Survey target")]]
+                for style, marker, label in [("--", "o", dataset_label), ("-", "s", "Survey target")]]
     axes[0].legend(handles=handles, ncol=3, fontsize=9, loc="upper right")
     axes[1].legend(fontsize=8, loc="upper right")
     axes[1].set_ylabel("Sample\ntrips", fontsize=9)
@@ -485,14 +493,14 @@ def plot_distance_panel(axes, data, labels, title):
         axis.spines[["top", "right"]].set_visible(False)
 
 
-def plot_overall_shares(data, path):
+def plot_overall_shares(data, path, dataset_label="MATSim"):
     figure, axes = plt.subplots(1, 2, figsize=(16, 5), sharey=True, constrained_layout=True)
     positions = np.arange(len(MODE_ORDER))
     for axis, cohort in zip(axes, FRENCH_COHORTS):
         for source, offset, colour in [("simulation", -.2, "#4c78a8"), ("survey", .2, "#e0a04b")]:
             selected = data.loc[data.cohort.eq(cohort) & data.source.eq(source)].set_index("mode").reindex(MODE_ORDER)
             bars = axis.bar(positions + offset, selected.share, width=.38, color=colour,
-                            label="Simulation" if source == "simulation" else "Survey target")
+                            label=dataset_label if source == "simulation" else "Survey target")
             axis.bar_label(bars, labels=[f"{value:.1%}" for value in selected.share], fontsize=8, padding=3)
         axis.set_xticks(positions, [MODE_LABELS[mode] for mode in MODE_ORDER], rotation=20, ha="right")
         axis.set_title(FRENCH_COHORTS[cohort])
@@ -506,7 +514,7 @@ def plot_overall_shares(data, path):
     plt.close(figure)
 
 
-def plot_french_comparison(target, simulated, output):
+def plot_french_comparison(target, simulated, output, *, dataset_label="MATSim"):
     """Write optional French figures from the target and simulated stage summaries."""
     output.mkdir(parents=True, exist_ok=True)
     labels = target["distance_labels"]
@@ -519,16 +527,16 @@ def plot_french_comparison(target, simulated, output):
     for cohort, title in FRENCH_COHORTS.items():
         figure, axes = plt.subplots(2, 1, figsize=(12, 6.8), sharex=True,
                                    gridspec_kw={"height_ratios": [4, 1]}, constrained_layout=True)
-        plot_distance_panel(axes, binned.loc[binned.cohort.eq(cohort)], labels, title)
+        plot_distance_panel(axes, binned.loc[binned.cohort.eq(cohort)], labels, title, dataset_label)
         figure.savefig(output / f"{cohort}_by_distance.png", dpi=180)
         plt.close(figure)
     figure, axes = plt.subplots(2, 2, figsize=(19, 7), sharex=True,
                                gridspec_kw={"height_ratios": [4, 1]}, constrained_layout=True)
     for column, (cohort, title) in enumerate(FRENCH_COHORTS.items()):
-        plot_distance_panel(axes[:, column], binned.loc[binned.cohort.eq(cohort)], labels, title)
+        plot_distance_panel(axes[:, column], binned.loc[binned.cohort.eq(cohort)], labels, title, dataset_label)
     figure.savefig(output / "french_mode_shares_by_distance.png", dpi=180)
     plt.close(figure)
-    plot_overall_shares(overall, output / "french_mode_shares_overall.png")
+    plot_overall_shares(overall, output / "french_mode_shares_overall.png", dataset_label)
     manifest = {"simulation": simulated["metadata"], "survey_target": target["metadata"],
                 "switzerland_involved": "Origin OR destination in Switzerland, including trips within Switzerland; each trip counted once.",
                 "denominator": "Weighted trips within each cohort or distance bin; empty bins have undefined shares."}

@@ -107,19 +107,19 @@ calibrated ASCs or selecting old default parameter files. With
 are rejected by the production entry points rather than interpreted through
 another utility specification.
 
-This promotion covers **estimation and parameter export**. The production
-population selector currently samples whole feasible tours, whereas the
-history experiment uses sequential conditional MNL. Its normalization and
-likelihood are different. A fitted nonzero value for either passenger-history coefficient is
-therefore explicitly rejected by the current population utility entry point,
-with an explanation, rather than being silently ignored, fed observed history,
-or zeroed after estimation. Using it requires a compatible daily-history
-sampler and likelihood treatment, including vehicle feasibility across tours.
+The production population selector uses these exported utility equations to
+sample whole feasible tours. As an application assumption, both passenger-history
+indicators are scoped to the current primary-home tour, rather than the survey
+day: they reset at each tour boundary, but persist across computational splits.
+The sampler evaluates them on candidate mode sequences, alongside car and bike
+continuity. Estimation still uses observed daily histories and sequential
+conditional MNL; whole-tour logit normalization in population choice differs
+from that estimation likelihood.
 The writer exports the two fitted effects as `cp.betaAnyPreviousPassenger_u`
 and `cp.betaPreviousPassenger_u`, each rounded to four decimals without extra
 multipliers. Older single-indicator fits must be re-estimated.
-The static version-2 utility consumer shares the same equations and is tested
-when both history coefficients are genuinely zero. Java utility support is a separate integration
+Static version-2 utilities share the same equations; the tour sampler adds both
+conditional history effects. Java utility support is a separate integration
 step; this change does not modify the eqasim Java repository.
 
 Use [the fitted-model report](../analysis/dmc/README.md) to replay this model on

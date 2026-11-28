@@ -69,16 +69,16 @@ def pack_trips(frame):
     return gzip.compress(b''.join(blocks), compresslevel=6, mtime=0), metadata
 
 
-def write_report(output, target, simulated, municipalities, cantons=None):
+def write_report(output, target, simulated, municipalities, cantons=None, *, dataset_label="MATSim"):
     """Generate one HTML with embedded trips, boundaries and pinned UI libraries."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     payload = dict(modes=MODES, datasets={}, municipalities=None, cantons=None, tiles=TILES)
     summaries = []
-    for name, frame in [('Microcensus', target), ('MATSim', simulated)]:
+    for name, frame in [('Microcensus', target), (dataset_label, simulated)]:
         compressed, metadata = pack_trips(frame)
         payload['datasets'][name] = dict(**metadata, data=base64.b64encode(compressed).decode())
-        (output / (name.lower()+'_spatial_trips.bin.gz')).write_bytes(compressed)
+        (output / (name.lower().replace(' ', '_')+'_spatial_trips.bin.gz')).write_bytes(compressed)
         total = sum(metadata['weighted_counts'])
         for i, mode in enumerate(MODES):
             summaries.append(dict(dataset=name, mode=mode, observations=metadata['raw_counts'][i],
@@ -113,9 +113,9 @@ def write_report(output, target, simulated, municipalities, cantons=None):
     # Bundle assets beside and inside the report; data selection works via file://.
 
     assets = _assets(output/'assets')
-    template = Path(__file__).with_name('spatial.html.template').read_text()
-    script = Path(__file__).with_name('spatial.js').read_text()
-    worker = Path(__file__).with_name('spatial_worker.js').read_text()
+    template = Path(__file__).with_name('spatial.html.template').read_text().replace('MATSim', dataset_label)
+    script = Path(__file__).with_name('spatial.js').read_text().replace('MATSim', dataset_label)
+    worker = Path(__file__).with_name('spatial_worker.js').read_text().replace('MATSim', dataset_label)
     for key, text in [('__LEAFLET_CSS__',assets['leaflet.css']), ('__DRAW_CSS__',assets['leaflet.draw.css']),
                       ('__LEAFLET_JS__',assets['leaflet.js']), ('__DRAW_JS__',assets['leaflet.draw.js']),
                       ('__WORKER__',worker), ('__APP__',script),
@@ -127,8 +127,8 @@ def write_report(output, target, simulated, municipalities, cantons=None):
                 for name,dataset in payload['datasets'].items()}
     (output/'spatial_mode_shares_manifest.json').write_text(json.dumps(dict(datasets=manifest,
         coordinate_crs='EPSG:4326', coordinate_precision='Integer microdegrees; about 0.1 m',
-        selection='Same domestic-resident trip cohort as global mode shares; survey person_weight per trip, MATSim weight 1.',
-        airport_filter='MATSim trips with airport origin OR destination excluded before all analyzer summaries.',
+        selection=f'Same domestic-resident trip cohort as global mode shares; survey person_weight per trip, {dataset_label} weight 1.',
+        airport_filter=f'{dataset_label} trips with airport origin OR destination excluded before all analyzer summaries.',
         query_modes=['arrivals','departures','either','both','residents'], municipalities=len(geography),
         cantons=canton_count), indent=2))
     return str(destination)

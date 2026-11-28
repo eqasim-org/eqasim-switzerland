@@ -1,4 +1,4 @@
-"""Per-mode distributions from the simulation trip export, without survey weighting."""
+"""Unweighted per-mode trip distributions from MATSim or population mode choice."""
 
 import logging
 from pathlib import Path
@@ -9,6 +9,7 @@ import pandas as pd
 
 from analysis.counts.paths import configure_simulation_path, get_simulation_path
 from matsim.config.tools import find_simulation_output
+from .utils import figures_directory
 
 
 logger = logging.getLogger("synpp")
@@ -22,6 +23,9 @@ METRICS = {
 
 def configure(context):
     configure_simulation_path(context)
+    context.config('analysis.mode_shares.from_eqasim', False)
+    if context.config('analysis.mode_shares.from_eqasim'):
+        context.stage('analysis.mode_shares.eqasim')
     context.config("analysis.mode_shares.travel_time_bin_min", default=1.0)
     context.config("analysis.mode_shares.distance_bin_km", default=1.0)
 
@@ -30,18 +34,22 @@ def execute(context):
 
     # Load only the trip columns needed for these distributions.
 
-    simulation = Path(get_simulation_path(context))
-    path = find_simulation_output(simulation, "output_trips.csv.gz")
-    trips = read_trips(path)
+    if context.config('analysis.mode_shares.from_eqasim'):
+        path = 'mode_choice.run'
+        trips = context.stage('analysis.mode_shares.eqasim')['trips'].rename(columns={'mode':'main_mode'})
+    else:
+        simulation = Path(get_simulation_path(context))
+        path = find_simulation_output(simulation, "output_trips.csv.gz")
+        trips = read_trips(path)
     time_bin = context.config("analysis.mode_shares.travel_time_bin_min")
     distance_bin = context.config("analysis.mode_shares.distance_bin_km")
     for value in (time_bin, distance_bin):
         if not np.isfinite(value) or value <= 0:
             raise ValueError("Trip distribution bin widths must be finite and positive.")
 
-    # Save plots alongside the other mode-share figures from this simulation.
+    # Save plots alongside the mode-share figures for the selected source.
 
-    output = simulation / "mode_shares"
+    output = figures_directory(context)
     output.mkdir(parents=True, exist_ok=True)
     files = []
     for column, (label, unit) in METRICS.items():

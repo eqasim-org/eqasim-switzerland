@@ -39,16 +39,22 @@ class ModeShareAnalyzer:
         ModeShareAnalyzer.age_bins = bins
 
 
-    def __init__(self, context, from_matsim=False, *, group_income_classes=False):
+    def __init__(self, context, from_matsim=False, *, group_income_classes=False, source=None):
         """Load trips, optionally grouping incomes into low/medium/high (1-3).
 
-        Grouping applies to either data source; enable it on both analyzers when
-        comparing survey and simulation data. By default, retain classes 0-8.
+        ``source`` selects microcensus, matsim or eqasim. The legacy from_matsim
+        argument remains supported. Grouping applies to all sources; enable it
+        on both analyzers when comparing results. By default, retain classes 0-8.
         """
-        self.from_matsim = from_matsim
+        self.source = source or ('matsim' if from_matsim else 'microcensus')
+        if self.source not in ('matsim', 'microcensus', 'eqasim'):
+            raise ValueError('Mode-share source must be matsim, microcensus or eqasim')
+        self.from_matsim = self.source != 'microcensus'  # population data use unit weights
         self.ex_cst      = context.stage("data.external_population.constants")
 
-        if from_matsim:
+        if self.source == 'eqasim':
+            self.load_eqasim_data(context)
+        elif self.source == 'matsim':
             self.load_matsim_data(context)
 
         else:
@@ -56,6 +62,14 @@ class ModeShareAnalyzer:
 
         if group_income_classes:
             self.trips["income_class"] = self.trips["income_class"].map(INCOME_CLASSIFICATION)
+
+
+    def load_eqasim_data(self, context):
+        from .inputs import prepared_trips
+        self.trips = prepared_trips(context.stage('analysis_population'),
+                                    context.stage('synthesis.prepared.households'))
+        self.trips['distance_bin'] = self.get_distance_bins(self.trips)
+        self.trips['age_class'] = self.get_age_bins(self.trips)
 
 
     def load_microcensus_data(self, context):
@@ -338,6 +352,7 @@ class ModeShareAnalyzer:
                         .reset_index()                
                         .pivot(index = by, columns = "mode", values = "mode_share")
                         .fillna(0)
+                        .reindex(columns=FRENCH_MODES, fill_value=0)
                         .sort_values(by = by))
                    
         return mode_share
@@ -358,6 +373,7 @@ class ModeShareAnalyzer:
                         .reset_index()                
                         .pivot(index = by, columns = "mode", values = "distribution")
                         .fillna(0)
+                        .reindex(columns=FRENCH_MODES, fill_value=0)
                         .sort_values(by = by))
                             
         return mode_share
@@ -369,10 +385,9 @@ class ModeShareAnalyzer:
         if not consider_external_population:
             df = df[df.canton_id != self.ex_cst.canton_id].reset_index(drop = True)
 
-        modes = df["mode"].unique()
         distance_distribution = dict()
 
-        for mode in modes:
+        for mode in FRENCH_MODES:
             mode_trips = df[df["mode"] == mode]
             if self.from_matsim:
                 distance_distribution[mode] =  mode_trips["euclidean_distance_km"].values
@@ -499,12 +514,19 @@ def simulated_french_mode_shares(analyzer, context):
     destination = endpoint_in_switzerland(trips.destination_x, trips.destination_y, swiss)
     trips["switzerland_involved"] = origin | destination
     metadata = {
-        "simulation": str(get_simulation_path(context)),
+        "simulation": "mode_choice.run" if getattr(analyzer, "source", None) == "eqasim" else str(get_simulation_path(context)),
         "population": "French residents (canton FR), excluding freight and crossborder subpopulations.",
         "sample_trips": len(trips),
         "switzerland_involved_sample_trips": int((origin | destination).sum()),
         "both_endpoints_in_switzerland_sample_trips": int((origin & destination).sum()),
-        "distance": "MATSim Euclidean distance in kilometres; trips greater than one metre.",
+        "distance": "Population Euclidean distance in kilometres; trips greater than one metre.",
         "weight": "One per simulated trip.",
     }
     return french_mode_shares(trips, "simulation", metadata)
+
+
+def figures_directory(context):
+    """Keep pre-simulation choice diagnostics separate from simulation figures."""
+    if context.config('analysis.mode_shares.from_eqasim'):
+        return Path(context.config('output_path')) / context.config('output_id') / 'mode_shares_eqasim'
+    return Path(get_simulation_path(context)) / 'mode_shares'
