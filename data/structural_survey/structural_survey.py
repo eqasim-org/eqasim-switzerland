@@ -81,6 +81,8 @@ def configure(context):
 
     context.config("random_seed")
     context.config("vocational_apprentice_repair_fraction", DEFAULT_REPAIR_FRACTION)
+    if context.config("apprentice_geographic_trial", default=False):
+        context.stage("data.structural_survey.apprentice_targets")
 
 
 def prepare_education_departure(df, df_municipality_mapping, df_quarters, df_zones):
@@ -120,7 +122,7 @@ def prepare_education_departure(df, df_municipality_mapping, df_quarters, df_zon
 
 
 def execute(context):
-    df_se = context.stage("data.structural_survey.raw")
+    df_se = context.stage("data.structural_survey.raw").copy()
 
     df_se["sex"] -= 1
 
@@ -164,6 +166,10 @@ def execute(context):
     df_se = df_se.rename({"municipality_id": "home_municipality_id",
                           "quarter_id": "home_quarter_id"}, axis=1)
     
+    # Use the reported start for workers based away from their employer.
+
+    df_se = resolve_work_start(df_se, df_municipality_mapping, df_quarters)
+
     # Impute the work zone
     df_se = df_se.rename({"work_country": "country_id",
                           "work_municipality": "municipality_id",
@@ -414,8 +420,11 @@ def execute(context):
     # weighted subset of ambiguous records, retaining explicit apprentices and
     # other reported jobs. Both sequential models consume these same labels;
     # student participation itself is never changed by this correction.
+    rates = None
+    if context.config("apprentice_geographic_trial"):
+        rates = context.stage("data.structural_survey.apprentice_targets")[0]
     df_se, apprentice_diagnostics = repair_vocational_apprentices(
-        df_se, context.config("vocational_apprentice_repair_fraction"), random_seed)
+        df_se, context.config("vocational_apprentice_repair_fraction"), random_seed, rates)
     apprentice_diagnostics.to_csv(Path(context.path()) / "apprentice_repair.csv", index=False)
     logger.info("National SS apprentice repair (each survey year separately):\n%s",
                 apprentice_diagnostics.to_string(index=False))
@@ -444,6 +453,25 @@ def execute(context):
         "education_departure_zone_id", "education_departure_zone_level", "education_departure_status",
         "education_departure_differs_from_residence",
     ]]
+
+
+def resolve_work_start(survey, municipalities, quarters):
+    result = survey.copy()
+    different = result["start_work"].isin([4, 5, 6])
+    country = result["STARTWORK_CTRY"]
+    foreign = different & country.gt(0) & country.ne(8100)
+    known_mun = result["STARTWORK_MUN"].isin(municipalities["deprecated_municipality_id"])
+    known_quarter = result["STARTWORK_QUARTER"].isin(quarters["quarter_id"])
+    domestic = different & ~foreign & (known_mun | known_quarter)
+    # Clear employer detail even when only the municipality of the start is known.
+    parent = result["STARTWORK_QUARTER"].map(quarters.set_index("quarter_id").source_municipality_id)
+    municipality = result["STARTWORK_MUN"].where(known_mun, parent)
+    result.loc[domestic, "work_municipality"] = municipality[domestic]
+    result.loc[domestic, "work_quarter"] = result.loc[domestic, "STARTWORK_QUARTER"]
+    result.loc[domestic, "work_country"] = 8100
+    result.loc[foreign, ["work_municipality", "work_quarter"]] = -8
+    result.loc[foreign, "work_country"] = country[foreign]
+    return result
 
 
 def get_filtered_data(context, filter_type = "all"):

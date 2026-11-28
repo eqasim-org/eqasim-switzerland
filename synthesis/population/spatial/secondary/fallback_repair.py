@@ -4,6 +4,7 @@ import copy
 import numpy as np
 from sklearn.neighbors import KDTree
 from synthesis.population.spatial.secondary.opening_hours import eligible_candidates
+from synthesis.population.spatial.secondary.components import facility_purpose
 
 
 class SwissFallbackRepair:
@@ -55,6 +56,7 @@ class SwissFallbackRepair:
                 problem["purposes"], discretization["identifiers"], strict=True)):
             if identifier not in self.restricted.get(purpose, set()):
                 continue
+            purpose = facility_purpose(self.destinations, purpose, len(problem["purposes"]))
             candidates = self.candidates(purpose, discretization["locations"][index])
             data = self.destinations[purpose]
             if "opening_schedule" in data and "activity_start_times" in problem:
@@ -66,6 +68,8 @@ class SwissFallbackRepair:
                 diagnostics["repair_status"] = "no_swiss_candidates"
                 return original, diagnostics
             weights = self.destinations[purpose]["number_employees"][candidates] ** self.alpha_probabilities
+            if "facility_multiplier" in data:
+                weights *= data["facility_multiplier"][candidates]
             total = weights.sum()
             probabilities = weights / total if total > 0 else np.full(len(weights), 1 / len(weights))
             replacements.append((index, purpose, candidates, probabilities))

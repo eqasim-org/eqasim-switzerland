@@ -53,6 +53,7 @@ def execute(context):
                 zone_ids,
                 municipality_ids,
                 quarter_ids,
+                aggregate=pdf_matrix,
             )
             pdf_matrices[key] = seg_pdf
             cdf_matrices[key] = seg_cdf

@@ -4,6 +4,18 @@
 or `matching_algorithm: v2` to select an earlier algorithm. All three share the home activity zones
 described below.
 
+## MZ 2015 travel days
+
+By default, the MZ 2015 cleaner retains travel days without a home stop,
+classifies reported purpose 12 (Anderes) as `other`, and uses reported school
+coordinates to identify a first departure from school. Set
+`mz_correct_diary_cleaning: false` to use the legacy rules.
+With either setting, the trips stage records every
+respondent who reported travel in `diary_cleaning_audit.csv` in its stage
+directory. A traveller who loses their whole diary must have an exclusion
+reason and is removed from the survey donor pool. Respondents with zero
+reported trips stay eligible under the usual day and household rules.
+
 V1 uses an ordered, survey-weighted recursive hot deck with age bands and
 progressive relaxation of categorical matching cells. V2 has a different goal:
 learn which shared characteristics predict behaviour, allowing nearby ages,
@@ -111,7 +123,7 @@ sampled population and their producer code:
 | Residential density | `population_density` | `log1p` of residents within 2.5 km of home, computed by the same density pipeline on both sides; it is not residents/km² |
 | Company density at home and work | `home_companies_density`, `work_companies_density` | `log1p` of STATENT establishment counts within the existing `dmc.constants.constants.EMPLOYEES_DENSITY_RADIUS` (500 m). Uses survey home/work addresses and synthetic home/assigned work anchors before matching, with unique coordinates queried once. Missing locations remain missing; work density is undefined for non-employed people. These are continuous model inputs, not donor masks. |
 | Residential context | `ovgk`, `municipality_type`, `canton_id`, `sp_region`, `activity_chain_cluster` | Original PT-quality categories A/B/C/D/none and categorical spatial inputs |
-| Work context | `employed`, `is_student`, `employment_status`, `work_location_type`, `commute_distance`, `job_position` | Categorical status/location type/job; log commute distance; survey job codes mapped using the repository's common classification; job is unknown for non-workers on both sides |
+| Work context | `employed`, `is_student`, `employment_status`, `work_location_type`, `commute_distance`, `job_position` | Categorical status/location type/job; log commute distance. Synthetic Structural Survey job positions are converted to MZ BSTELL categories (e.g. 43 becomes 33); survey codes already use that classification. Job is unknown for non-workers on both sides. |
 | Mobility resources | `driving_license`, `car_availability`, `number_of_cars_class` | Harmonized categorical inputs, with no inference mask |
 | Personal context | `sex`, `marital_status`, `is_swiss` | Shared categorical definitions; no sex mask |
 | Border proximity | `dist_home_to_border` | `log1p` distance, retaining an explicit missing indicator |

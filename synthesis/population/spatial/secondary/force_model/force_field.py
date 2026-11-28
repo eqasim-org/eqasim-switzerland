@@ -6,16 +6,21 @@ approximating or truncating the French model's long-range attraction.
 """
 import numpy as np
 from numba import njit
+from . import calibration, subtypes
 
 
 def configure(context):
     context.config("threads", volatile=True)
     attractors = context.config("secondary_activities.force_model.attractors", default="uniform")
+    if calibration.mode_name(context.config(calibration.MODE, default="manual")) == "off":
+        attractors = "uniform"
     context.config("secondary_activities.force_model.cell_size", default=250.)
     context.config("secondary_activities.force_model.grid_margin", default=2000.)
-    if attractors != "uniform":
-        raise ValueError("secondary_activities.force_model.attractors currently supports 'uniform' only")
-    context.stage("synthesis.population.spatial.secondary.force_model.attractors.uniform", alias="attractors")
+    if attractors not in ("uniform", "employment_density"):
+        raise ValueError("secondary_activities.force_model.attractors must be 'uniform' or 'employment_density'")
+    context.stage("synthesis.population.spatial.secondary.force_model.attractors." + attractors, alias="attractors")
+    if subtypes.selected_purposes(context.config(subtypes.OPTION, default=False)):
+        context.stage(subtypes.STAGE)
     for key, positive in [("cell_size", True), ("grid_margin", False)]:
         value = context.config("secondary_activities.force_model." + key)
         if (isinstance(value, bool) or not isinstance(value, (int, float, np.number))
@@ -25,7 +30,7 @@ def configure(context):
 
 def execute(context):
 
-    # Construct the same projected grid and uniform attractors as the French model.
+    # Construct the projected grid and weighted attractors as the French model.
 
     attractors = context.stage("attractors").to_crs(2056)
     if attractors.empty:
@@ -45,9 +50,15 @@ def execute(context):
     processes = max(1, min(int(context.config("threads")), grid["nx"], 24))
     edges = np.linspace(0, grid["nx"], min(processes * 4, grid["nx"]) + 1, dtype=int)
     batches = list(zip(edges[:-1], edges[1:]))
+    groups = {p: points[attractors.activity_type.to_numpy() == p] for p in attractors.activity_type.unique()}
+    selected_purposes = subtypes.selected_purposes(context.config(subtypes.OPTION))
+    if selected_purposes:
+        other = groups["other"]
+        weights = subtypes.align_weights(context.stage(subtypes.STAGE)[list(selected_purposes)], other[:, :2])
+        for name in weights:
+            groups[name] = np.column_stack((other[:, :2], other[:, 2] * weights[name].to_numpy()))
     fields = {}
-    for purpose in attractors.activity_type.unique():
-        selected = points[attractors.activity_type.to_numpy() == purpose]
+    for purpose, selected in groups.items():
         field = np.empty((grid["nx"], grid["ny"], 2))
         with context.progress(label="Computing %s force field" % purpose, total=grid["nx"]) as progress:
             with context.parallel(processes=processes, data=dict(grid=grid, attractors=selected)) as parallel:

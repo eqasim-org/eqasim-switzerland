@@ -64,7 +64,13 @@ def model_apprentice_diagnostics(survey, population, include_students=True):
     return pd.DataFrame(rows)
 
 
-def repair_vocational_apprentices(survey, fraction=DEFAULT_REPAIR_FRACTION, seed=0):
+def vocational_candidates(survey):
+    return (survey.age.ge(15) & survey.current_education.eq(6)
+            & survey.is_student.eq(1) & survey.employed.isin([2, 3])
+            & survey.job_position.isin([60, 70]))
+
+
+def repair_vocational_apprentices(survey, fraction=DEFAULT_REPAIR_FRACTION, seed=0, residence_rates=None):
     """Repair a weighted fraction of ambiguous vocational students per survey year.
 
     Programme6 includes school-based training and does not prove employment.
@@ -74,16 +80,14 @@ def repair_vocational_apprentices(survey, fraction=DEFAULT_REPAIR_FRACTION, seed
 
     Randomise the pool, then take the prefix nearest the requested weighted mass.
     This avoids independent Bernoulli noise dominating the national stock test.
-    The residual is at most half the largest eligible survey weight. There are
-    no age/canton targets, and each year gets its own reproducible random stream.
+    The residual is at most half the largest eligible survey weight. The trial uses
+    separate age/canton targets when residence_rates is supplied. Each year gets its own random stream.
     """
     fraction = float(fraction)
     if not np.isfinite(fraction) or not 0 <= fraction <= 1:
         raise ValueError("vocational_apprentice_repair_fraction must be between 0 and 1")
     result = survey.copy()
-    eligible = (survey.age.ge(15) & survey.current_education.eq(6)
-                & survey.is_student.eq(1) & survey.employed.isin([2, 3])
-                & survey.job_position.isin([60, 70]))
+    eligible = vocational_candidates(survey)
     weights = survey.weight.to_numpy(dtype=float)
     if not np.isfinite(weights).all() or (weights <= 0).any():
         raise ValueError("Apprentice repair requires finite, positive survey weights")
@@ -96,23 +100,39 @@ def repair_vocational_apprentices(survey, fraction=DEFAULT_REPAIR_FRACTION, seed
         pool = positions[eligible.to_numpy()[positions]]
         rng = np.random.default_rng(np.random.SeedSequence([int(seed), int(year)]))
         pool = rng.permutation(pool)
-        prefix_weight = np.r_[0., np.cumsum(weights[pool])]
-        target = fraction * prefix_weight[-1]
-        count = int(np.abs(prefix_weight - target).argmin())
-        selected[pool[:count]] = True
+        target = fraction * weights[pool].sum()
+        if residence_rates is None:
+            prefix_weight = np.r_[0., np.cumsum(weights[pool])]
+            count = int(np.abs(prefix_weight - target).argmin())
+            selected[pool[:count]] = True
+        elif len(pool):
+            # Partition after shuffling, then carry rounding error to the next cell.
+            candidates = survey.iloc[pool]
+            groups = candidates.groupby(["canton_id", candidates.age.le(24)], sort=True).indices
+            target = 0.
+            remainder = 0.
+            for (canton, young), offsets in groups.items():
+                cell = pool[offsets]
+                wanted = residence_rates.loc[(year, canton, young)] * weights[cell].sum()
+                target += wanted
+                cumulative = np.r_[0., weights[cell].cumsum()]
+                stop = int(np.abs(cumulative - (wanted + remainder)).argmin())
+                selected[cell[:stop]] = True
+                remainder += wanted - cumulative[stop]
+        repaired = pool[selected[pool]]
         group = survey.iloc[positions]
         explicit = group.job_position.eq(50).to_numpy()
         vocational = group.current_education.eq(6).to_numpy()
         rows.append(dict(
-            survey_year=year, repair_fraction=fraction,
+            survey_year=year, repair_fraction=target / weights[pool].sum() if len(pool) else fraction,
             weighted_persons=float(weights[positions].sum()),
             students=float(weights[positions][group.is_student.eq(1).to_numpy()].sum()),
             raw_employed=float(weights[positions][group.employed.eq(1).to_numpy()].sum()),
             raw_apprentices=float(weights[positions][explicit].sum()),
             legacy_blanket_apprentices=float(weights[positions][explicit | vocational].sum()),
-            eligible_observations=len(pool), eligible_weight=float(prefix_weight[-1]),
+            eligible_observations=len(pool), eligible_weight=float(weights[pool].sum()),
             requested_repair_weight=float(target),
-            repaired_observations=count, repaired_weight=float(weights[pool[:count]].sum()),
+            repaired_observations=len(repaired), repaired_weight=float(weights[repaired].sum()),
         ))
     result.iloc[np.flatnonzero(selected), result.columns.get_loc("employed")] = 1
     result.iloc[np.flatnonzero(selected), result.columns.get_loc("job_position")] = 50

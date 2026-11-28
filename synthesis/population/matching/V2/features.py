@@ -196,12 +196,19 @@ def prepare_features(source, population, const):
             "job_position",
         ):
             frame[column] = numeric(frame, column).fillna(-1).astype(int)
-        if is_source:
+        # Convert Structural Survey positions to the survey's MZ BSTELL categories.
+        # Several owner categories collapse together, so the inverse is ambiguous.
+        if not is_source:
             frame["job_position"] = (
                 frame["job_position"]
                 .map(const.MAP_JOB_POSITIONS_MZ_TO_SURVEY)
                 .fillna(-1)
                 .astype(int)
+            )
+        else:
+            frame["job_position"] = frame["job_position"].where(
+                frame["job_position"].isin(const.MAP_JOB_POSITIONS_MZ_TO_SURVEY.values()),
+                -1,
             )
         # Job status is undefined for non-workers on both sides. Predicted
         # population job codes must not become an artificial domain identifier.

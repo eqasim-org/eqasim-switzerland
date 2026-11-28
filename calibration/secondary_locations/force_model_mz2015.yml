@@ -1,0 +1,21 @@
+# Merge these settings into the pipeline's config section.
+locations_algorithm: rda
+secondary_activities.chain_solver: force_model
+secondary_activities.force_model.calibration_mode: manual  # Set to auto to refit on the configured Microcensus.
+secondary_activities.force_model.attractors: employment_density
+secondary_activities.force_model.canton_ids: [22]
+secondary_activities.force_model.density_beta.other: 0.2
+secondary_activities.force_model.split_other: [5, 9]
+secondary_activities.force_model.child_escort_school_multiplier: [27, 2]
+secondary_activities.force_model.errand_centres:
+  # Lausanne Bel-Air, LV95
+  - {x: 2537879.7981663793, y: 1152652.7305355913, radius_m: 8000, strength_m: 80}
+  # Zürich HB, LV95
+  - {x: 2683189.5012603523, y: 1248065.925561218, radius_m: 8000, strength_m: 200}
+secondary_activities.force_model.shop_centres:
+  # Lausanne Bel-Air
+  - {x: 2537879.7981663793, y: 1152652.7305355913, radius_m: 4000, strength_m: 100}
+secondary_activities.force_model.leisure_centres:
+  # Lausanne Bel-Air and Zürich HB
+  - {x: 2537879.7981663793, y: 1152652.7305355913, radius_m: 8000, strength_m: 100}
+  - {x: 2683189.5012603523, y: 1248065.925561218, radius_m: 8000, strength_m: 100}

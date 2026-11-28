@@ -21,7 +21,7 @@ under GPL-2.0. It uses the upstream settings:
 
 | Setting | Default |
 | --- | --- |
-| `secondary_activities.force_model.attractors` | `uniform` (currently the supported option) |
+| `secondary_activities.force_model.attractors` | `uniform` |
 | `secondary_activities.force_model.cell_size` | 250 m |
 | `secondary_activities.force_model.grid_margin` | 2,000 m |
 | Spring relaxation coefficient | 0.3 |
@@ -32,7 +32,7 @@ under GPL-2.0. It uses the upstream settings:
 The optional stage
 `synthesis.population.spatial.secondary.force_model.force_field` constructs
 purpose-specific fields from `synthesis.population.destinations`, covering its
-Swiss and foreign facilities in EPSG:2056. Each facility contributes one unit
+Swiss and foreign facilities in EPSG:2056. Under uniform weighting, each facility contributes one unit
 of attraction for every offered `shop`, `leisure` or `other` purpose. Other
 purposes receive spring relaxation without a purpose field, as upstream.
 Employee weights are still applied during final destination selection.
@@ -60,6 +60,163 @@ than producing NaNs during normalization, and bilinear interpolation uses
 standard corner weights so a grid node returns its own force. All random
 directions use the existing worker's seeded generator. With the option off,
 the gravity solver parameters and random draws remain unchanged.
+
+### Employment-density calibration
+
+To test the Vaud scenario under the pipeline's `config` section, use:
+
+```yaml
+locations_algorithm: rda
+secondary_activities.chain_solver: force_model
+secondary_activities.force_model.attractors: employment_density
+secondary_activities.force_model.canton_ids: [22]
+secondary_activities.force_model.density_beta.other: 0.2
+```
+
+The exponents for `shop`, `leisure` and `other` default to zero. The region
+defaults to all Swiss cantons. Each selected facility receives a weight
+proportional to `(1 + jobs_per_km2) ** beta`, normalized to mean one across
+the selected region for each purpose. A 2 km Gaussian smooths employment from
+the configured STATENT stage on a 250 m LV95 grid. Density uses total surface
+area, including lake surface. Facilities outside the region keep unit weight.
+The resulting field extends across the region boundary.
+
+Run `synthesis.population.spatial.secondary.locations` to see the effect on
+complete plans. For the local paired calibration trial, run from the repo root:
+
+```bash
+PYTHONPATH=. uv run python "analysis/secondary locations/force_density_trial.py" config_dib_10.yml output/force_density_trial --draws 12
+```
+
+The trial uses weighted MZ 2015 weekday home–other–home tours with home
+within 8 km of Lausanne Bel-Air and observed leg length up to 8 km. It fixes
+the observed radius, uses one relaxation and Swiss facility selection per
+draw, and compares uniform weights with exponents 0.10 and 0.20. The field
+uses a regional catalogue and regional normalization. The trial reports the
+central hexagon share, total variation across five concentric hexagonal bands,
+paired household-bootstrap intervals for the central share change, and mean
+absolute leg-length error. The production run also samples distances and
+checks complete chains, eligibility, detours and retries.
+
+### Testing facilities for errands and escorts
+
+The survey codes available for ordinary MZ arrivals are 5 (errands and services),
+9 (accompanying children) and 10 (accompanying another person). Their MATSim
+activity type is `other`. The 2015 question F520.00 records reasons for escorting.
+Facility evidence comes from comparing trip endpoint coordinates with STATENT
+establishments and GTFS stops. Nearby sectors can overlap and the catalogue
+has no explicit private-home visit alternative.
+
+Two analysis scripts use a completed spatial cache and MZ 2015:
+
+```bash
+PYTHONPATH=. uv run python "analysis/secondary locations/other_facility_trial.py" config_dib_10.yml output/force_density_trial
+PYTHONPATH=. uv run python "analysis/secondary locations/other_facility_snap.py" config_dib_10.yml output/force_density_trial
+```
+
+The first script counts weekday visits and respondents, reports facilities
+within 25 m of the best-quality geocoded destinations, and estimates facility
+preferences using 2015 diaries outside the validation sample. For location-choice
+validation it compares the catalogue point nearest the observed destination
+with distinct catalogue points found at the same trip radius from the origin.
+It reserves Zürich, Vaud and Geneva destinations for validation and excludes
+their respondents from estimation. It writes aggregate results and coefficients.
+The second script tests the incremental subtype preferences on the Lausanne
+return tours, in final facility selection alone and in both the attraction
+field and final selection. The 25 m facility-profile error is total variation
+across single nearby sectors, multiple sectors and unmatched coordinates.
+
+Enable subtype-specific assignment under the pipeline's `config` section with
+
+```yaml
+locations_algorithm: rda
+secondary_activities.chain_solver: force_model
+secondary_activities.force_model.split_other: true
+```
+
+Use `true` for all three subtypes or `[5, 9]` for errands and child escorts.
+Unlisted codes retain pooled preferences. The default is `false`. The option
+works with uniform or employment-density attractors. Run `synthesis.population.spatial.secondary.locations`. The MZ
+reader carries the reported subtype through loop splitting and trip
+renumbering. The assignment joins each recipient to the processed donor trip
+and uses the subtype in the attraction field and final facility choice.
+The broad activity type written to plans stays `other`. Unclassified visits
+and initial activities without an arrival code use pooled preferences. French
+proposal acceptance still applies once per broad purpose in a chain.
+
+Each Swiss candidate receives a multiplier derived from its distance to each
+STATENT sector and to GTFS stops. The features decay exponentially with a 50 m
+scale. The coefficients in
+[the MZ 2015 preference table](../../../../../calibration/secondary_locations/mz2015_facility_preferences.csv)
+are differences from the pooled fit. Sites outside Switzerland have a
+multiplier of one. Pass `--export-preferences <path>` to
+`other_facility_trial.py` to regenerate the table.
+
+### Calibrating city centres and child escorts
+
+The [MZ 2015 parameter settings](../../../../../calibration/secondary_locations/force_model_mz2015.yml)
+can be merged into the `config` section to run
+`synthesis.population.spatial.secondary.locations` with the calibrated force model.
+
+`secondary_activities.force_model.shop_centres`, `leisure_centres` and
+`errand_centres` each accept a list of LV95 coordinates, radii in metres and
+peak inward forces in metres per relaxation step. All three keys use the
+`secondary_activities.force_model.` prefix. For a stop of the specified
+purpose at distance `r` from a centre of radius `R`, the additional
+inward force has magnitude `strength_m * 6.75 * (r/R) * (1 - r/R)^2` inside
+the radius. The force vanishes at the centre and at the boundary. Overlapping
+centres add their vectors before applying the ordinary solver ceiling of 60 m.
+The additional force applies during relaxation between fixed anchors. An empty
+list (the default) switches it off for that purpose. Only `errand_centres`
+requires code 5 in `split_other`. The MZ 2015 settings apply to shopping within
+4 km of Lausanne Bel-Air and leisure within 8 km of Lausanne Bel-Air and
+Zürich HB. The national force grids can be reused when changing these settings.
+
+`secondary_activities.force_model.child_escort_school_multiplier` changes
+facility selection for MZ code 9. It multiplies the existing choice weight
+for eligible Swiss locations within 25 m of a STATENT school or daycare.
+One positive number applies to all chains. A list of two positive numbers
+applies to chains with one secondary stop and chains with two or more,
+respectively. The default is one. Both ordinary facility selection and
+Swiss fallback repair use the same weights. The survey benchmark measures
+proximity to these establishments and cannot identify the establishment the
+respondent entered.
+
+### Switches and automatic Microcensus calibration
+
+Under the scenario's `config` section, select the force solver and set the two independent options:
+
+```yaml
+locations_algorithm: rda
+secondary_activities.chain_solver: force_model
+secondary_activities.force_model.split_other: [5, 9]
+secondary_activities.force_model.calibration_mode: auto
+```
+
+`split_other: false` pools all other activities. The list above separates errands/services and child escort. `calibration_mode: "off"` uses the uniform base field and skips the additional city and school adjustments. The selected subtypes can still have different facility preferences. `manual` (the default) applies the configured employment-density, city and school settings. `auto` compares settings against the configured Microcensus and supplies the winning assignment to downstream stages. With the split disabled, the school and errand-specific adjustments drop out; shopping and leisure can still be calibrated. To re-estimate facility preferences from the current wave in manual or split-only runs, use `secondary_activities.force_model.refit_facility_preferences: true`. Auto enables this for its candidates whenever subtypes are active.
+
+Use the calibration areas, reference strengths, canton selection, density exponents and school multipliers in the force scenario. The search scales these references; a zero reference stays zero. The default candidate scales are `[0, 0.5, 1, 1.5]`. Centre strengths and density exponents are multiplied by the scale. School weights are raised to that power, so zero gives the neutral weight of one. To vary settings independently, supply a list of candidate profiles, for example:
+
+```yaml
+secondary_activities.force_model.calibration_scales:
+  - 0
+  - 1
+  - {shop: 1.5, leisure: [1.0, 0.5], school: [1.0, 1.2]}
+```
+
+In a profile, unspecified axes use scale one. The axes are `shop`, `leisure`, `other_services`, `school` and `density`. Per-centre lists follow the order of that purpose's configured centres. School lists follow single- and multi-stop chains. Density lists follow shopping, leisure and other. The example assumes two leisure centres.
+
+Run the usual secondary-location stage. A one-run override for the existing 3% force scenario is:
+
+```bash
+uv run -m synpp config_dib_force_3pct.yml --config secondary_activities.force_model.calibration_mode auto --run synthesis.population.spatial.secondary.locations
+```
+
+Each distinct candidate runs the production assignment on the scenario sample using the same upstream population, configured random seed and worker count. Allow for one assignment per candidate and a new grid for each distinct density/attractor setting. For a larger production run, the stage exports the selected manual settings for reuse.
+
+The survey benchmark uses weekday respondents aged six and over, their person expansion weights and domestic destinations. One fifth of respondents are reserved deterministically, including during facility-preference fitting. Facility preferences use accurate domestic trips and same-distance alternative sites. The geographic objective averages the errors of supported targets: the total variation of visit shares across nested 1, 2, 4 and 8 km hexagons around each configured centre, and the difference in child-escort school-proximity shares for single- and multi-stop chains. With pooled other activities and density weighting, the configured errand areas supply pooled-other targets. The default minimum is 20 respondents per target per partition (`secondary_activities.force_model.calibration_min_respondents`). The fit partition selects the winner; ties favour the first profile. Holdout error and chain validity are diagnostics. The holdout tests geographic fitting within the same survey wave and synthetic population.
+
+The cache of `synthesis.population.spatial.secondary.force_model.calibration` contains `scores.csv`, `target_shares.csv`, `candidates.json` and `selected_settings.yml`. Target shares are fractions; centre bands 0–3 mean 0–1, 1–2, 2–4 and 4–8 km, and school bands 0/1 mean farther than/within 25 m. Merge the exported settings into the scenario config to reproduce the selection using `manual`. The facility-preferences stage also writes the fitted coefficients and respondent counts. Both the calibration and the assignment use the same data root. When updating the Microcensus, supply the files used by the Swiss MZ reader (`microcensus/wege.csv`, `etappen.csv`, `zielpersonen.csv` and the usual household inputs) and harmonise any changes in field meanings, purpose codes or coordinate systems first. No saved experiment outputs are required.
 
 RDA's `CandidateIndex` normally queries the 20 closest eligible facilities to each
 continuous relaxation point, then samples among them with attractiveness

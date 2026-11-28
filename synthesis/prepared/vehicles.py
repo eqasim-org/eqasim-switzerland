@@ -9,6 +9,8 @@ VEHICLE_FIELDS = ["vehicle_id", "type_id", "age", "euro"]
 
 def configure(context):
     context.stage("synthesis.vehicles.vehicles")
+    if context.config("swiss_cross_border_background_traffic", default=False):
+        context.stage("synthesis.prepared.background_crossings")
     context.config("use_airports", default=True)
     if context.config("use_airports"):
         context.stage("synthesis.prepared.population")
@@ -59,6 +61,8 @@ def execute(context):
                 ~frames[index].owner_id.astype(str).isin(resident_ids)
             ]
         frames.append(population.airport_vehicles)
+    if context.config("swiss_cross_border_background_traffic"):
+        frames.append(context.stage("synthesis.prepared.background_crossings")[1])
     vehicles = pd.concat(frames, ignore_index=True)
 
     # Validate type references and retain optional physical/emission descriptors.

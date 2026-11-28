@@ -18,6 +18,7 @@ BORDER_MATCH_COLUMNS = [
 ]
 ORIGINAL_PURPOSE_COLUMNS = ["original_preceding_purpose", "original_following_purpose"]
 TIME_SHUFFLE_METHODS = ("half_hour", "legacy", "none")
+BACKGROUND_CROSSINGS_FILE = "background_crossings.p"
 
 def configure(context):
     context.stage("synthesis.population.enriched")
@@ -26,6 +27,7 @@ def configure(context):
     context.stage("data.constants")
     context.stage("synthesis.population.spatial.primary.work.work_remotly")
 
+    context.config("swiss_cross_border_background_traffic", default=False)
     context.config("random_seed")
     context.config("specific_day_scenario", default = "workday")
     method = context.config("trip_time_shuffle", default="half_hour")
@@ -133,21 +135,16 @@ def execute(context):
 
     logger.info(f"Removed {initial_length - final_length} ({share}%) trips (people outside of Switzerland)")
 
-    # Adapt trips for agents crossing the border: they get a single trip
-    # (home-border or border-home) instead of their regular
-    # microcensus-derived chain. The destination country, crossing point, and
-    # trip mode are the ones synthesis.population.models.cross_border already
-    # matched this person to (from data.cross_border.swiss_residents_od) --
-    # reading that match here instead of sampling independently keeps it
-    # consistent with matsim/scenario/population.py's crossBorderOD attribute
-    # and with the location synthesis.population.spatial.locations assigns.
+    # Keep resident diaries when a separate agent carries the dedicated crossing.
+
+    background = context.config("swiss_cross_border_background_traffic")
     is_crossing = coerce_boolean_series(
         df_trips["is_crossing_the_border"], name="is_crossing_the_border")
-    df_trips_noncb = df_trips[~is_crossing].copy()
-    df_trips_noncb["destination_country_raw"] = None
-    df_trips_noncb["interview_geometry_point"] = None
-    df_trips_noncb["interview_point_id"]       = None
-    df_trips_noncb["border_crossing_point"]    = None
+    resident_trips = df_trips if background else df_trips.loc[~is_crossing].copy()
+    resident_trips["destination_country_raw"] = None
+    resident_trips["interview_geometry_point"] = None
+    resident_trips["interview_point_id"]       = None
+    resident_trips["border_crossing_point"]    = None
 
     is_cb_person = coerce_boolean_series(
         df_persons["is_crossing_the_border"], name="is_crossing_the_border")
@@ -173,7 +170,9 @@ def execute(context):
     _write_border_trip_audit(context, df_persons, is_cb_person)
 
     if len(df_cb_persons) == 0:
-        return df_trips_noncb[final_columns]
+        if background:
+            resident_trips.iloc[:0][final_columns].to_pickle(f"{context.path()}/{BACKGROUND_CROSSINGS_FILE}")
+        return resident_trips[final_columns]
 
     # Consume the event's assigned direction. Redrawing 50/50 here would
     # discard the entry/exit controls established before population sampling.
@@ -210,7 +209,11 @@ def execute(context):
     for column in ["preceding_purpose", "following_purpose"]:
         df_trips_cb["original_" + column] = df_trips_cb[column]
 
-    df_trips = pd.concat([df_trips_noncb, df_trips_cb], ignore_index=True, sort=False)
+    if background:
+        df_trips_cb[final_columns].to_pickle(f"{context.path()}/{BACKGROUND_CROSSINGS_FILE}")
+        return resident_trips[final_columns]
+
+    df_trips = pd.concat([resident_trips, df_trips_cb], ignore_index=True, sort=False)
 
     return df_trips[final_columns]
 

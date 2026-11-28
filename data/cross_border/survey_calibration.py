@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from data.cross_border.journey_weights import road_journey_class
+
 logger = logging.getLogger("synpp")
 
 # These are support checks, not targets fitted to a particular crossing. Smaller
@@ -47,6 +49,10 @@ def calibrate_demand(reference, observations, car_targets=None):
     result["scaling_factor"] = 1.0
     result["calibration_source"] = "uncontrolled"
     car_targets = car_targets or {}
+    has_mix = any("mix_factors" in value for value in car_targets.values())
+    if has_mix:
+        journey_class = road_journey_class(result)
+        result["mix_factor"] = 1.
     records = []
     for frame in (reference, observations):
         if (~np.isfinite(frame["weight"]) | frame["weight"].lt(0)).any():
@@ -88,7 +94,8 @@ def calibrate_demand(reference, observations, car_targets=None):
         # Manual counts replace this residence population's share of the car
         # control only. Keep the original residual-pool calculation above so an
         # override cannot transfer extra demand to unrelated interview places.
-        override = car_targets.get(group)
+        control = car_targets.get(group, {})
+        override = control if "override_factor" in control else None
         target_entries = wanted
         if override is not None:
             target_entries = wanted * override["override_factor"]
@@ -103,6 +110,18 @@ def calibrate_demand(reference, observations, car_targets=None):
         mask = result["trip_mode"].eq("car") & result["interview_place_id"].eq(group)
         result.loc[mask, "scaling_factor"] = factor
         result.loc[mask, "calibration_source"] = source
+        calibrated_entries = raw * factor if raw else 0.
+        if "mix_factors" in control:
+            mix = journey_class[mask].map(control["mix_factors"]).fillna(1.)
+            result.loc[mask, "mix_factor"] = mix
+            result.loc[mask, "scaling_factor"] *= mix
+            eligible = mask & journey_class.ne("")
+            source = "interview_group_2015_mix"
+            result.loc[eligible, "calibration_source"] = source
+            calibrated_entries = (result.loc[mask, "weight"] * result.loc[mask, "scaling_factor"]).sum()
+            # The mix is a joint target across residences, so this residence has no entry quota.
+            target_entries = np.nan
+            factor = calibrated_entries / raw if raw else 0.
         records.append(dict(interview_place_id = group, observations_2021 = int(count.get(group, 0)),
                             effective_observations_2021 = float(effective.get(group, 0)),
                             entries_2015 = wanted, entries_2021 = raw,
@@ -133,7 +152,7 @@ def calibrate_demand(reference, observations, car_targets=None):
         result["group_weight"] *= result["journey_target_factor"]
         result["scaling_factor"] *= result["journey_target_factor"]
         car = result.trip_mode.eq("car")
-        controlled = result.interview_place_id.isin(car_targets)
+        controlled = result.interview_place_id.isin([k for k, v in car_targets.items() if "override_factor" in v])
         changed = ~np.isclose(result.journey_target_factor, 1., rtol=0, atol=1e-12)
         result.loc[car & (controlled | changed), "calibration_source"] = "manual_journey_vehicle"
         # A single entry-group factor no longer describes all journeys. Keep
@@ -214,7 +233,7 @@ def write_survey_audit(context, reference, observations, ledger, swiss_residents
                "scaling_factor", "calibration_source", "reported_occupancy", "nb_passengers", "occupancy_source",
                "start_x", "start_y", "end_x", "end_y", "origin_place", "destination_place",
                "start_location_source", "end_location_source", "location_usable", "location_issue"]
-    columns += [key for key in ("survey_transport", "reported_group_size", "uncalibrated_group_weight", "journey_target_factor")
+    columns += [key for key in ("survey_transport", "reported_group_size", "uncalibrated_group_weight", "journey_target_factor", "mix_factor")
                 if key in observations]
     audit = observations[columns].copy()
     supported_categories = ["From CH", "To CH"] if swiss_residents else ["From CH", "To CH", "Through CH"]
@@ -229,8 +248,8 @@ def write_survey_audit(context, reference, observations, ledger, swiss_residents
     reference.loc[invalid, ["interview_id", "interview_place_id", "nb_passengers", "weight"]].to_csv(
         folder / "reference_occupancy_flags.csv", index = False)
     unusable = ~observations["location_usable"]
-    if "journey_target_factor" in observations:
-        logger.info("Journey vehicle controls: %.1f calibrated entries; entry-plus-exit targets are audited "
+    if "journey_target_factor" in observations or "mix_factor" in observations:
+        logger.info("Cross-border vehicle controls: %.1f calibrated entries; joint controls are audited "
                     "in car_target_calibration; %d unresolved survey locations (%.1f car entries).",
                     ledger["calibrated_entries"].sum(), int(unusable.sum()),
                     observations.loc[unusable & observations["trip_mode"].eq("car"), "weight"].sum())

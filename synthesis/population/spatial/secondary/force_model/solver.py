@@ -6,6 +6,7 @@ The final Swiss discretization/objective remains responsible for feasibility.
 """
 import numpy as np
 import numpy.linalg as la
+from .errand_centres import CENTRE_KEYS, adjust_field
 
 class ForceField:
     def __init__(self, grid_params, force_field, mean = 1.0, ceiling = 10.0):
@@ -53,6 +54,11 @@ class ForceFieldChainSolver:
         for activity_type in force_fields:
             self.force_fields[activity_type] = ForceField(
                 grid_parameters, force_fields[activity_type], mean = ff_mean, ceiling = ff_ceiling)
+        for purpose, key in CENTRE_KEYS.items():
+            centres = grid_parameters.get(key, ())
+            if centres:
+                field = self.force_fields[purpose]
+                field.field = adjust_field(field.field, grid_parameters, centres, ff_ceiling)
 
     def solve(self, problem, distances):
         origin, destination = problem["origin"], problem["destination"]

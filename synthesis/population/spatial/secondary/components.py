@@ -13,6 +13,7 @@ class DestinationAcceptance:
     def __init__(self, destinations, random):
         self.random = random
         self.probabilities = {}
+        self.purpose_groups = {purpose: data.get("base_purpose", purpose) for purpose, data in destinations.items()}
         for purpose, data in destinations.items():
             values = np.asarray(data.get("proposal_acceptance", np.ones(len(data["identifiers"]))), dtype=float)
             if values.shape != (len(data["identifiers"]),) or not np.all(
@@ -25,6 +26,7 @@ class DestinationAcceptance:
         by_purpose = {}
         for purpose, identifier in zip(problem["purposes"], discretization["identifiers"], strict=True):
             probability = self.probabilities.get(purpose, {}).get(identifier, 1.0)
+            purpose = self.purpose_groups.get(purpose, purpose)
             by_purpose[purpose] = min(by_purpose.get(purpose, 1.0), probability)
         # Stable ordering avoids process-dependent set iteration in products.
         return float(np.prod([by_purpose[purpose] for purpose in sorted(by_purpose)]))
@@ -77,9 +79,15 @@ class CandidateIndex:
 
         for purpose, data in self.data.items():
             logger.info("Constructing spatial index for %s ...", purpose)
-            self.indices[purpose] = sklearn.neighbors.KDTree(data["locations"])
+            # Subtypes share the pooled locations in identical order; only their weights differ.
+            if "base_purpose" in data:
+                self.indices[purpose] = self.indices[data["base_purpose"]]
+            else:
+                self.indices[purpose] = sklearn.neighbors.KDTree(data["locations"])
 
             weights = data["number_employees"] ** self.alpha_probabilities
+            if "facility_multiplier" in data:
+                weights = weights * data["facility_multiplier"]
             self.weights[purpose] = weights
 
             total_weight = np.sum(weights)
@@ -161,6 +169,12 @@ class CandidateIndex:
         location = self.data[purpose]["locations"][chosen]
         return identifier, location
 
+def facility_purpose(destinations, purpose, size):
+    if size > 1:
+        return destinations[purpose].get("multi_stop_purpose", purpose)
+    return purpose
+
+
 class CustomDiscretizationSolver(rda.DiscretizationSolver):
     def __init__(self, index):
         self.index = index
@@ -174,6 +188,7 @@ class CustomDiscretizationSolver(rda.DiscretizationSolver):
 
         for purpose in unique_purposes:
             purpose_indices = np.where(purposes == purpose)[0]
+            purpose = facility_purpose(self.index.data, purpose, problem["size"])
             if "activity_start_times" in problem:
                 identifiers, purpose_locations = self.index.query_open_batch(
                     purpose, locations[purpose_indices], problem["activity_start_times"][purpose_indices],
@@ -199,7 +214,8 @@ class CustomFreeChainSolver(rda.RelaxationSolver):
         self.index = index
 
     def solve(self, problem, distances):
-        identifier, anchor = self.index.sample(problem["purposes"][0], self.random)
+        purpose = facility_purpose(self.index.data, problem["purposes"][0], problem["size"])
+        identifier, anchor = self.index.sample(purpose, self.random)
         locations = rda.sample_tail(self.random, anchor, distances)
         locations = np.vstack((anchor, locations))
 

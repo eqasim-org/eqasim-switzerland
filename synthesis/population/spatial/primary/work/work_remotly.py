@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import data.utils
-from data.structural_survey.structural_survey import get_filtered_data
 
 logger = logging.getLogger("synpp")
 
@@ -15,6 +14,7 @@ def configure(context):
     context.stage("synthesis.population.spatial.primary.work.work_at_different_locations")
     context.stage("synthesis.population.sampled")
     context.config("random_seed")
+    context.config("workplace_reference_year", default=2023)
 
 
 def add_age_bin(df):
@@ -71,7 +71,12 @@ def execute(context):
     c = context.stage("data.constants")
 
     # Load survey and population    
-    df_survey = get_filtered_data(context, "all")[[
+    survey = context.stage("data.structural_survey.structural_survey")
+    year = context.config("workplace_reference_year")
+    survey = survey[survey["employed"].eq(c.EMPLOYED) & survey["survey_year"].eq(year)]
+    if survey.empty:
+        raise ValueError(f"No employed Structural Survey respondents in workplace_reference_year {year}")
+    df_survey = survey[[
         "home_municipality_id", "employed", "job_position", "age", "sex",
         "weight", "nationality", "start_work", "canton_id", "home_zone_id"
     ]].copy()

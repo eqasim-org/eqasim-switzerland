@@ -45,6 +45,7 @@ class Population:
     lcv_vehicles: pd.DataFrame | None = None
     airport_trips: pd.DataFrame | None = None
     airport_vehicles: pd.DataFrame | None = None
+    background_crossings: pd.DataFrame | None = None
 
 
 def implementation_token(stage_file, *helpers):
