@@ -53,7 +53,7 @@ def load(context):
     result, fitted_frame, paths, _, _ = context.stage('dmc_model')
     required = {'transfer_count_power', 'beta_pt_origin_quality'}
     if not context.config('ignore_car_passenger'):
-        required.update({'beta_passenger_history', 'beta_passenger_long_distance'})
+        required.update({'beta_passenger_history', 'beta_passenger_history_any', 'beta_passenger_long_distance'})
     missing_required = required.difference(result.get_beta_values())
     if missing_required:
         raise ValueError(f'The cached fit is missing current DMC coefficients {sorted(missing_required)}. Estimate the current model before generating its report.')

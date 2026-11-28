@@ -7,6 +7,10 @@ fits and does not estimate models or redefine their utilities.
 normalizations; `dmc.models.utility` owns the utility equations. Neither
 production estimator imports experimental utilities.
 
+Both estimator stages validate fingerprints of shared preprocessing, equations,
+declarations, export code and VOT helpers. Changing these sources invalidates
+cached fits even when the estimator's own module has not changed.
+
 ## Specification
 
 - PT transfers use the increasing, concave count transform
@@ -37,10 +41,16 @@ production estimator imports experimental utilities.
   It uses routed passenger kilometres without distance scaling. The threshold
   is fixed at 25 km; the coefficient is estimated with upper bound **-0.01**.
   It contributes zero through 25 km and strictly negative utility beyond it.
-- Passenger utility also includes `beta_passenger_history * passenger_history`.
-  History is one only when the **immediately preceding trip today** was
-  passenger. It excludes the current trip, starts at zero and switches off
-  after a non-passenger trip. All other coefficients are fitted jointly.
+- Passenger utility includes both history effects by default:
+  `beta_passenger_history_any * passenger_history_any + beta_passenger_history * passenger_history`.
+  `passenger_history_any` is one after **any earlier passenger trip today** and
+  remains on until day end. `passenger_history` is one only if the **immediately
+  preceding trip** was passenger and switches off after another mode. Both
+  exclude the current trip and reset to zero at day start. If the previous trip
+  was passenger, both indicators are active. Both coefficients are trainable,
+  initialized at zero and jointly fitted with all other free coefficients.
+  They represent a persistent daily association plus an additional immediate
+  repeat effect; they are not causal habit estimates.
 
 `use_exponents: false` fixes the travel-time exponents to one. The defining
 short-distance and transfer shapes remain part of the model. Turning off
@@ -100,13 +110,16 @@ another utility specification.
 This promotion covers **estimation and parameter export**. The production
 population selector currently samples whole feasible tours, whereas the
 history experiment uses sequential conditional MNL. Its normalization and
-likelihood are different. A fitted nonzero passenger-history coefficient is
+likelihood are different. A fitted nonzero value for either passenger-history coefficient is
 therefore explicitly rejected by the current population utility entry point,
 with an explanation, rather than being silently ignored, fed observed history,
 or zeroed after estimation. Using it requires a compatible daily-history
 sampler and likelihood treatment, including vehicle feasibility across tours.
+The writer exports the two fitted effects as `cp.betaAnyPreviousPassenger_u`
+and `cp.betaPreviousPassenger_u`, each rounded to four decimals without extra
+multipliers. Older single-indicator fits must be re-estimated.
 The static version-2 utility consumer shares the same equations and is tested
-when history is genuinely zero. Java utility support is a separate integration
+when both history coefficients are genuinely zero. Java utility support is a separate integration
 step; this change does not modify the eqasim Java repository.
 
 Use [the fitted-model report](../analysis/dmc/README.md) to replay this model on

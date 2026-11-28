@@ -11,6 +11,7 @@ from biogeme.expressions import Beta, BinaryMax, Variable, exp
 from dmc.models.declarations import define_parameters
 from dmc.models.data import preprocess_data
 from dmc.models.utility import build as build_shared_utilities
+from dmc.models.validation import validate
 import numpy as np
 from biogeme.results_processing import get_pandas_estimated_parameters
 import logging

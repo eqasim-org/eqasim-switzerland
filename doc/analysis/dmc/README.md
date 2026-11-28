@@ -73,8 +73,10 @@ likelihood uses the pipeline's mode-adjusted training weights; an additional
 aggregate table uses these fit weights. The report documents this distinction.
 
 Conditional sequence scoring uses the observed previous choice. Autonomous
-replay uses a two-state forward recursion and generates its own passenger
-history, resetting at each person-day. It never inserts observed previous
+replay uses a three-state forward recursion to track any earlier passenger use
+and immediate previous passenger use. Both histories are generated and reset
+at each person-day; an intervening non-passenger trip switches off only the
+immediate indicator. It never inserts observed previous
 modes into a free-running replay. Computation is linear in trip count; sampling
 runs in bounded batches. Sampling ranges describe choice-draw noise only.
 
@@ -104,7 +106,7 @@ history integration remains a separate task, as documented in
 | --- | --- |
 | `run.py` | Synpp entry point and cached-only CLI. |
 | `data.py` | Completed-stage loading, exact cohort alignment, fitted/exported coefficients and audits. |
-| `replay.py` | Canonical utility evaluation, exact two-state probabilities and seeded sampling. |
+| `replay.py` | Canonical utility evaluation, exact three-state probabilities and seeded sampling. |
 | `elasticities.py` | Explicit attribute interventions, share derivatives and finite changes. |
 | `report.py` | Diagnostic tables, scientific figures and self-contained HTML. |
 

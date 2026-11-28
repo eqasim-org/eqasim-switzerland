@@ -159,6 +159,7 @@ PARAMETERS = [
     ('beta_passenger_destination_home', 0.0, None, None, False),
     ('beta_passenger_destination_work', 0.0, None, None, False),
     ('beta_passenger_history', 0.0, None, None, False),
+    ('beta_passenger_history_any', 0.0, None, None, False),
 ]
 
 

@@ -12,8 +12,18 @@ from dmc.models import model_jax
 class Prediction:
     probabilities: np.ndarray
     conditional: np.ndarray
-    prior_passenger: np.ndarray
+    prior_states: np.ndarray
     passenger_index: int | None
+
+    @property
+    def prior_passenger(self):
+        """Probability that the immediately preceding trip was passenger."""
+        return self.prior_states[:, 2]
+
+    @property
+    def prior_any_passenger(self):
+        """Probability of any earlier passenger trip during the day."""
+        return self.prior_states[:, 1:].sum(axis=1)
 
 
 def layout(keys):
@@ -40,24 +50,30 @@ def predictor(context, coefficients, modes):
 def predict(arrays, evaluate, coefficients, modes, rows):
     inputs = dict(arrays)
     inputs['passenger_history'] = np.zeros(len(inputs['age']))
+    inputs['passenger_history_any'] = np.zeros(len(inputs['age']))
     utility, available = evaluate(inputs)
     utility, available = np.asarray(utility), np.asarray(available)
-    logits = np.repeat(utility[:, None, :], 2, axis=1)
+    # States: never passenger; earlier passenger, last trip another mode; last trip passenger.
+    logits = np.repeat(utility[:, None, :], 3, axis=1)
     cp = modes.index('car_passenger') if 'car_passenger' in modes else None
     if cp is not None:
-        logits[:, 1, cp] += coefficients['beta_passenger_history']
+        logits[:, 1:, cp] += coefficients['beta_passenger_history_any']
+        logits[:, 2, cp] += coefficients['beta_passenger_history']
     log_q = log_softmax(np.where(available[:, None, :] > 0, logits, -np.inf), axis=2)
     conditional = np.exp(log_q)
     probabilities = np.empty_like(utility)
-    prior = np.empty(len(utility))
-    passenger = np.zeros(len(rows))
+    prior = np.empty((len(utility), 3))
+    state = np.zeros((len(rows), 3)); state[:, 0] = 1.
     for step in range(rows.shape[1]):
         active = rows[:, step] >= 0; index = rows[active, step]
-        old = passenger[active]
+        old = state[active].copy()
         prior[index] = old
-        probabilities[index] = ((1 - old[:, None]) * conditional[index, 0, :]
-                                + old[:, None] * conditional[index, 1, :])
-        passenger[active] = probabilities[index, cp] if cp is not None else 0.
+        probabilities[index] = np.einsum('ns,nsm->nm', old, conditional[index])
+        if cp is not None:
+            state[active, 0] = old[:, 0] * (1 - conditional[index, 0, cp])
+            state[active, 1] = (old[:, 1] * (1 - conditional[index, 1, cp])
+                                + old[:, 2] * (1 - conditional[index, 2, cp]))
+            state[active, 2] = probabilities[index, cp]
     if (not np.isfinite(probabilities).all() or not np.allclose(probabilities.sum(axis=1), 1., atol=1e-12)
             or np.any(probabilities[available <= 0] != 0)):
         raise ValueError('Invalid generated-history probabilities or changed availability')
@@ -79,7 +95,7 @@ def sample_many(prediction, rows, draws):
         cumulative[:, :, -1] = 1.
         chosen = (draws[:, index, None] >= cumulative).sum(axis=2).astype(np.int8)
         result[:, index] = chosen
-        state[:, active] = (chosen == cp).astype(np.int8)
+        state[:, active] = np.where(chosen == cp, 2, np.where(state[:, active] > 0, 1, 0)).astype(np.int8)
     return result
 
 

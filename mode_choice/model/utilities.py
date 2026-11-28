@@ -33,8 +33,8 @@ def expressions(p, *, distance_interaction=DISTANCE_COST_INTERACTION, income_int
                     'reference_euclidean_distance_km': p['referenceEuclideanDistance_km'],
                     'reference_income_chf': p['referenceIncome']}[name]
 
-    # This constant is valid only for a model fitted with zero history effect.
-    columns = Columns(passenger_history=pl.lit(0.))
+    # These constants are valid only when both fitted history effects are zero.
+    columns = Columns(passenger_history=pl.lit(0.), passenger_history_any=pl.lit(0.))
     utility = build(Context(), columns, coefficients, MODES, power=power,
                     maximum=lambda a, b: pl.max_horizontal(a, b), exp=lambda x: x.exp())
     result = []
@@ -50,6 +50,9 @@ def expressions(p, *, distance_interaction=DISTANCE_COST_INTERACTION, income_int
 def validate_for_population(p):
     if p.get('utilityModelVersion') != 2:
         raise ValueError('Population mode choice requires parameter files for the current DMC model; re-estimate or provide current fitted artifacts')
-    if p.get('cp.betaPreviousPassenger_u', 0.) != 0.:
+    history_names = ('cp.betaPreviousPassenger_u', 'cp.betaAnyPreviousPassenger_u')
+    if not all(name in p for name in history_names):
+        raise ValueError('The current passenger model requires both previous-trip and any-earlier-trip coefficients; re-estimate the model')
+    if any(p[name] != 0. for name in history_names):
         raise ValueError('The fitted conditional passenger-history model requires a compatible daily sequence sampler. '
-                         'The current whole-tour sampler cannot use this coefficient; do not substitute observed history or zero it after fitting.')
+                         'The current whole-tour sampler cannot use these coefficients; do not substitute observed history or zero it after fitting.')

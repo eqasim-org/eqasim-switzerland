@@ -189,9 +189,15 @@ class writer:
     def write_mode_parameters(self):
         if not {'income_reference_chf', 'transfer_count_power'}.issubset(self.betas):
             raise ValueError('The writer requires declarations for the current DMC model')
+        if 'beta_car_passenger_asc' in self.betas and not {'beta_passenger_history', 'beta_passenger_history_any'}.issubset(self.betas):
+            raise ValueError('Passenger exports require declarations for both history coefficients')
         unknown = self.params.keys() - self.betas.keys()
         if unknown:
             raise ValueError(f'Estimated parameters lack declarations: {sorted(unknown)}')
+        missing = {name for name, declaration in self.betas.items()
+                   if not getattr(declaration, 'fixed', getattr(declaration, 'status', False))}.difference(self.params)
+        if missing:
+            raise ValueError(f'Missing estimated parameters: {sorted(missing)}')
         params_dict = {self.rename(name): float(self.params.get(name, declaration.init_value))
                        for name, declaration in self.betas.items()}
 
@@ -421,4 +427,5 @@ NAMES_CONVERSION = {
     'beta_passenger_destination_home': 'cp.betaDestinationHome_u',
     'beta_passenger_destination_work': 'cp.betaDestinationWork_u',
     'beta_passenger_history': 'cp.betaPreviousPassenger_u',
+    'beta_passenger_history_any': 'cp.betaAnyPreviousPassenger_u',
 }

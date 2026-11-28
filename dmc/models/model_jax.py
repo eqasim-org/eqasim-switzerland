@@ -28,6 +28,7 @@ from dmc.constants import constants
 from dmc.models.declarations import Parameter, define_parameters
 from dmc.models.data import preprocess_data
 from dmc.models.utility import build as build_shared_utilities
+from dmc.models.validation import validate
 from dmc.vot.functions import vot_utils
 from dmc.parameters import writer
 

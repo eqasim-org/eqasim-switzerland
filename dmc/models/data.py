@@ -69,9 +69,12 @@ def prepare_sequences(df, ignore_car_passenger):
         prefix = consecutive.groupby(result.person_id, sort=False).cummin()
         logger.info('Passenger history keeps %d/%d uninterrupted starting-prefix trips', prefix.sum(), len(result))
         result = result.loc[prefix].copy()
-        result['passenger_history'] = result['mode'].eq('car_passenger').groupby(result.person_id).shift(1, fill_value=False).astype(int)
+        passenger = result['mode'].eq('car_passenger')
+        result['passenger_history'] = passenger.groupby(result.person_id).shift(1, fill_value=False).astype(int)
+        result['passenger_history_any'] = (passenger.groupby(result.person_id).cumsum() - passenger.astype(int)).gt(0).astype(int)
     else:
         result['passenger_history'] = 0
+        result['passenger_history_any'] = 0
     if result.empty:
         raise ValueError('No usable DMC training sequences')
     return result.reset_index(drop=True)

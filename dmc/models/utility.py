@@ -54,5 +54,6 @@ def build(context, arrays, beta, modes, *, power, maximum, exp):
                                          ('destination_home', 'destination_home'), ('destination_work', 'destination_work')]:
                     value += beta[f'beta_passenger_{endpoint}'] * arrays[column]
                 value += beta['beta_passenger_history'] * arrays['passenger_history']
+                value += beta['beta_passenger_history_any'] * arrays['passenger_history_any']
         result[mode] = value
     return result
